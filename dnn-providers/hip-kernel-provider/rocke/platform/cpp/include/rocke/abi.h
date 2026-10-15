@@ -77,11 +77,14 @@
 extern "C" {
 #endif
 
-/* Binary ABI of the shared library: struct layout, enum values, signatures. */
-#define ROCKE_ABI_VERSION 1
+/* Binary ABI of the shared library: struct layout, enum values, signatures.
+ * 2: rocke_memory_caps_t gained mid-struct fields; rocke_opcode gained
+ *    mid-enum gfx1250 cluster/prefetch opcodes. */
+#define ROCKE_ABI_VERSION 2
 
-/* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands. */
-#define ROCKE_RECIPE_ABI 1
+/* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
+ * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them. */
+#define ROCKE_RECIPE_ABI 2
 
 /* The values the LOADED library was compiled with. A caller compares these
  * against the ROCKE_* macros it was itself compiled with; they differ exactly

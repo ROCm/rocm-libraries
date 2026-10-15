@@ -121,6 +121,15 @@ jobs:
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
 
+      # setup_test_environment installs only TheRock's common test
+      # requirements. Install TensileLite's requirements explicitly from its
+      # test artifact instead of relying on them to remain in that shared
+      # environment.
+      - name: Install TensileLite test requirements
+        run: |
+          python ./build_tools/install_additional_requirements.py \
+            --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
+
       - name: Run rocjitsu race check
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh

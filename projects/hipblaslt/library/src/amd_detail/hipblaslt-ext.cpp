@@ -27,6 +27,7 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
+#include "utility.hpp"
 #include <Debug.hpp>
 #include <algorithm>
 #include <hip/hip_runtime.h>
@@ -711,64 +712,6 @@ namespace hipblaslt_ext
     // End of pimpl classes
     /////////////////////////////////////////////////////
 
-    bool currentArchSupportsFp8()
-    {
-        using std::begin;
-        using std::end;
-
-        static const std::string fp8Archs[] = {"gfx942", "gfx950"};
-        const auto               archName   = rocblaslt_internal_get_arch_name();
-        return std::find(begin(fp8Archs), end(fp8Archs), archName) != end(fp8Archs);
-    }
-
-    template <typename SrcType, typename DstType, typename ScaleType = float>
-    __global__ void datatypeConversion(const SrcType*   src,
-                                       DstType*         dst,
-                                       const ScaleType* scale,
-                                       std::size_t      numElements)
-    {
-        const auto tId        = threadIdx.x;
-        const auto bId        = blockIdx.x;
-        const auto blockSize  = blockDim.x * blockDim.y * blockDim.z;
-        const auto elemOffset = bId * blockSize + tId;
-        const auto scaleValue = scale ? *scale : 1.f;
-
-        if(elemOffset < numElements)
-        {
-            dst[elemOffset] = DstType(float(src[elemOffset]) * scaleValue);
-        }
-    }
-
-    template <typename SrcType, typename DstType>
-    void datatypeConversionCpu(const SrcType* src, DstType* dst, std::size_t numElements)
-    {
-        for(std::size_t i = 0; i < numElements; ++i)
-        {
-            dst[i] = DstType(src[i]);
-        }
-    }
-
-    auto NullDeleter = [](void*) { return hipSuccess; };
-
-    HipBufferPtr makeHipBuffer(std::size_t numBytes)
-    {
-        if(!numBytes)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        void* ptr = nullptr;
-        auto  err = hipMalloc(&ptr, numBytes);
-
-        if(err != hipSuccess)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        return HipBufferPtr(ptr, &hipFree);
-    }
-
-    ////////////////////////////////////////////////////////////
     // Gemm Instance
     ////////////////////////////////////////////////////////////
 
@@ -1089,6 +1032,34 @@ namespace hipblaslt_ext
                                      GemmInputs&      inputs,
                                      GemmProblemType& problemtype)
     {
+        if(inputs.getScaleAux() != nullptr)
+        {
+            log_error(__func__,
+                      "Gemm: an epilogue aux scale is not supported and is not applied",
+                      "m",
+                      m,
+                      "n",
+                      n,
+                      "k",
+                      k,
+                      "batch_count",
+                      batch_count,
+                      "op_a",
+                      hipblasOperation_to_string(problemtype.getOpA()),
+                      "op_b",
+                      hipblasOperation_to_string(problemtype.getOpB()),
+                      "type_a",
+                      hipDataType_to_bench_string(problemtype.getTypeA()),
+                      "type_b",
+                      hipDataType_to_bench_string(problemtype.getTypeB()),
+                      "type_c",
+                      hipDataType_to_bench_string(problemtype.getTypeC()),
+                      "type_d",
+                      hipDataType_to_bench_string(problemtype.getTypeD()),
+                      "scale_aux",
+                      inputs.getScaleAux());
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
         auto rocepilogue = reinterpret_cast<rocblaslt::RocGemmEpilogueV2*>(epilogue.pimpl.get());
         auto rocepinputs = reinterpret_cast<rocblaslt::RocGemmInputsV2*>(inputs.pimpl.get());
@@ -1276,6 +1247,33 @@ namespace hipblaslt_ext
                                             std::vector<GemmInputs>&   inputs,
                                             GemmProblemType&           problemtype)
     {
+        for(size_t idx = 0; idx < inputs.size(); idx++)
+        {
+            if(inputs[idx].getScaleAux() != nullptr)
+            {
+                log_error(__func__,
+                          "GroupedGemm: an epilogue aux scale is not supported and is not applied",
+                          "gemm_index",
+                          idx,
+                          "gemm_count",
+                          inputs.size(),
+                          "op_a",
+                          hipblasOperation_to_string(problemtype.getOpA()),
+                          "op_b",
+                          hipblasOperation_to_string(problemtype.getOpB()),
+                          "type_a",
+                          hipDataType_to_bench_string(problemtype.getTypeA()),
+                          "type_b",
+                          hipDataType_to_bench_string(problemtype.getTypeB()),
+                          "type_c",
+                          hipDataType_to_bench_string(problemtype.getTypeC()),
+                          "type_d",
+                          hipDataType_to_bench_string(problemtype.getTypeD()),
+                          "scale_aux",
+                          inputs[idx].getScaleAux());
+                return HIPBLAS_STATUS_NOT_SUPPORTED;
+            }
+        }
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
         std::vector<rocblaslt::RocGemmEpilogueV2> rocepilogue;
         for(auto& e : epilogue)

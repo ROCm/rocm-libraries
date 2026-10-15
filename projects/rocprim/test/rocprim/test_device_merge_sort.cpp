@@ -333,6 +333,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+
             // Copy output to host
             MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             const auto output = d_output.load();
@@ -518,6 +523,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
+
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
 
             // Check if output values are as expected
             MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, expected.size())

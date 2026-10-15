@@ -23,6 +23,7 @@
 
 #include "../../../shared/rocfft_hip.h"
 #include "../device/kernels/callback.h"
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <hip/linker_types.h>
 #include <optional>
@@ -76,7 +77,7 @@ private:
         static constexpr auto legal_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
         constexpr auto legal_chars_end = legal_chars + std::char_traits<char>::length(legal_chars);
 
-        const char* end = name + strlen(name);
+        const char* end = name + std::strlen(name);
         if(!std::all_of(name, end, [=](unsigned char c) {
                return std::isdigit(c)
                       || std::find(legal_chars, legal_chars_end, c) != legal_chars_end;
@@ -283,6 +284,25 @@ struct StoreOps
     {
         if(scale_factor != 1.0)
             os << indent << "scale factor: " << scale_factor << "\n";
+    }
+
+    // copy the parts of provided store op that must run on a specific device (i.e. callbacks)
+    static std::optional<StoreOps> copy_device_specific(const std::optional<StoreOps>& op)
+    {
+        if(!op.has_value() || !op->has_spirv())
+            return std::nullopt;
+        auto ret      = std::make_optional<StoreOps>();
+        ret->spirv_cb = op->spirv_cb;
+        return ret;
+    }
+    // copy the parts of provided store op that could be run on any device (i.e. result scaling)
+    static std::optional<StoreOps> copy_device_independent(const std::optional<StoreOps>& op)
+    {
+        if(!op.has_value() || op->scale_factor == 1.0)
+            return std::nullopt;
+        auto ret          = std::make_optional<StoreOps>();
+        ret->scale_factor = op->scale_factor;
+        return ret;
     }
 };
 

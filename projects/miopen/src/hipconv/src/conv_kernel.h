@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kv_descriptor.h"
 #include "tolerance.h"
 
 #include <algorithm>
@@ -52,7 +53,7 @@ class ConvKernel
 {
 public:
     using LaunchFn = void (*)(const LaunchParams&,
-                              const hipconv::Conv2dParams&,
+                              const hipconv::ConvParams&,
                               const void*,
                               const void*,
                               void*,
@@ -72,62 +73,64 @@ public:
     // The algorithm this kernel's family belongs to. Set by the family base.
     virtual hipconv::Algorithm algorithm() const = 0;
 
-    // Just the config field list (key=value,...), with no family name or brackets:
-    // the bare form that matches_descriptor()/--config accepts.
+    // The kernel's configuration as key=value fields; empty for a family without any.
     //
-    // The default is empty (a family with no descriptor fields has no per-config
-    // selector). Descriptor families override it.
-    virtual std::string describe_config() const { return {}; }
+    // describe_config and matches_descriptor are built on it.
+    virtual KVDescriptor config_descriptor() const { return {}; }
 
-    // Does this configuration satisfy a descriptor constraint string?
+    // Return a specification of the kernel's configuration.
     //
-    // The string form is the ONLY general interface; each family encapsulates how
-    // a token maps to its own tuning fields. The default understands no fields, so
-    // it matches only the empty spec and rejects any non-empty token. Override to
-    // participate. On a malformed/unknown token, return false and set *error.
-    virtual bool matches_descriptor(std::string_view spec, std::string* error) const
+    // The spec string is a comma-separated list of key=value pairs. `full` renders
+    // every field; otherwise default values are omitted. No default argument: on a
+    // virtual it would bind statically.
+    virtual std::string describe_config(bool full) const
     {
-        for(char c : spec)
-            if(c != ' ' && c != '\t' && c != ',')
-            {
-                if(error)
-                    *error = "kernel '" + std::string(name()) + "' has no descriptor fields";
-                return false;
-            }
-        return true;
+        return config_descriptor().describe(full);
     }
 
-    // Family-level applicability: does this kernel family support these
-    // parameters at all? Must depend only on `par`, never on per-config
-    // tuning state. The dispatcher relies on this: it calls is_applicable
-    // on the first kernel in each ConvKernelSpan and assumes the answer
-    // speaks for every kernel in the span. Because each span contains
-    // instances of a single concrete leaf class, the contract reduces to:
-    // is_applicable must not read cfg_. Override in family base classes
-    // or in concrete leaf classes (to add group-wide checks); never read
-    // per-instance config state.
-    virtual bool is_applicable(const hipconv::Conv2dParams& par) const = 0;
+    // Does this kernel's configuration satisfy the given spec?
+    //
+    // True if the configuration matches every key-value pair in the spec.
+    // Set *error and return false on bad syntax or an unknown key.
+    virtual bool matches_descriptor(std::string_view spec, std::string* error) const;
 
-    // Per-config validity: given that the family is applicable, does this
-    // specific tuning configuration match the parameters? May depend on
-    // both `par` and the leaf kernel's stored cfg_.
-    virtual bool is_valid_config(const hipconv::Conv2dParams& par) const = 0;
+    // Does this kernel family support the given parameters?
+    //
+    // Must read `par` alone, never cfg_: the dispatcher asks the first kernel in
+    // a span and takes the answer for the whole span.
+    virtual bool is_applicable(const hipconv::ConvParams& par) const = 0;
 
-    virtual LaunchParams get_launch_params(const hipconv::Conv2dParams& par) const = 0;
+    // Does this kernel family support the given number of dimensions?
+    //
+    // Every kernel in the tree today is two-dimensional; a conv3d or conv1d
+    // family overrides this. Same span contract as is_applicable.
+    virtual bool supports_dims(int dims) const { return dims == 2; }
+
+    // Does this specific kernel configuration support the given parameters?
+    virtual bool is_valid_config(const hipconv::ConvParams& par) const = 0;
+
+    // Can the current device run this kernel on the given parameters?
+    //
+    // Asked when binding a launch, never during selection, which stays a function of `par`
+    // and the architecture. True unless the kernel launches through a runtime library that
+    // may have no algorithm for `par` on this device.
+    virtual bool runs_on_current_device(const hipconv::ConvParams& /*par*/) const { return true; }
+
+    virtual LaunchParams get_launch_params(const hipconv::ConvParams& par) const = 0;
 
     // Enqueue the kernel; throw on a launch-time failure.
     //
     // Defined out-of-line in conv_kernel.cpp so this header stays free of HIP
     // headers, since every kernel translation unit includes it.
     void launch(const LaunchParams& lp,
-                const hipconv::Conv2dParams& par,
+                const hipconv::ConvParams& par,
                 const void* in,
                 const void* wei,
                 void* out,
                 void* workspace,
                 hipStream_t stream) const;
 
-    virtual size_t get_workspace_size(const hipconv::Conv2dParams& /*par*/) const { return 0; }
+    virtual size_t get_workspace_size(const hipconv::ConvParams& /*par*/) const { return 0; }
 
     // Weighted throughput index for `par`; larger is better.
     //
@@ -135,11 +138,11 @@ public:
     // host uses to rank providers without benchmarking). Queried only on a kernel
     // already selected for `par`, so it need not report inapplicability; each
     // family answers for its own tuning story.
-    virtual float get_weighted_throughput_index(const hipconv::Conv2dParams& par) const = 0;
+    virtual float get_weighted_throughput_index(const hipconv::ConvParams& par) const = 0;
 
     // The error bound this kernel admits on `par`, or TOLERANCE_UNAVAILABLE when none applies.
     // A family whose accumulation is blocked overrides this to pass its own depth.
-    virtual void get_tolerance(const hipconv::Conv2dParams& par, float& atol, float& rtol) const
+    virtual void get_tolerance(const hipconv::ConvParams& par, float& atol, float& rtol) const
     {
         hipconv::get_mixed_precision_tolerance(par, atol, rtol);
     }

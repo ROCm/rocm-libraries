@@ -33,7 +33,7 @@
 // both libhipblaslt.so and the test binary.
 extern "C" void hipblaslt_debug_reload();
 
-#ifdef WIN32
+#ifdef _WIN32
 int setenv(const char* name, const char* value, int overwrite)
 {
     return _putenv_s(name, value);
