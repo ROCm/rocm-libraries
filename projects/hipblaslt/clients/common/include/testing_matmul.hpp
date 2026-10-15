@@ -6321,13 +6321,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 #endif
         };
 
-        if(arg.flush)
-            hipblaslt_bench::flush_cost_us<ClientBenchmarkHooks>(arg.use_gpu_timer,
-                                                                 deviceProps,
-                                                                 event_gpu_time_start,
-                                                                 event_gpu_time_end,
-                                                                 stream,
-                                                                 timingCfg.flush_us);
+        const bool flushCalibrated
+            = !arg.flush
+              || hipblaslt_bench::flush_cost_us<ClientBenchmarkHooks>(arg.use_gpu_timer,
+                                                                      deviceProps,
+                                                                      event_gpu_time_start,
+                                                                      event_gpu_time_end,
+                                                                      stream,
+                                                                      timingCfg.flush_us);
 
         hipblaslt_bench::SearchConfig searchCfg;
         searchCfg.cold_calls      = number_cold_calls;
@@ -6596,8 +6597,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             = hipblaslt_bench::search_callbacks().skipped(skipped).measuring(measuring).measured(
                 measured);
 
+        // A calibration that failed has already failed the test or exited, through
+        // ClientBenchmarkHooks; without it nothing can be timed.
         hipblaslt_bench::SearchResult search;
-        if(!do_grouped_gemm)
+        if(!flushCalibrated)
+            search.aborted = true;
+        else if(!do_grouped_gemm)
         {
             searchCfg.flush = arg.flush;
             if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)

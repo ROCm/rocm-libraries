@@ -631,10 +631,11 @@ int main(int argc, char** argv)
         timing.samples   = 1;
         timing.hot_iters = iters;
     }
-    else
+    else if(!hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
+                launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing))
     {
-        hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
-            launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
+        hipblaslt_cerr << "error: the layer sequence could not be timed" << std::endl;
+        return 1;
     }
 
     std::cout << "Time: " << timing.median_us << std::endl;
