@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import logging
+import sys
 import argparse
 import numpy as np
 from dataclasses import dataclass
@@ -118,3 +120,50 @@ TYPE_CONFIGS = {
     # so numpy_type is a 1-byte stand-in.
     "rocprim::empty_type": TypeInfo("rocprim::empty_type", 1, np.int8),
 }
+
+class _Formatter(logging.Formatter):
+    def __init__(self):
+        super().__init__('%(levelname)-8s:%(name)s: %(message)s')
+        self.color = sys.stdout.isatty()
+
+    def format(self, record: logging.LogRecord):
+        clear_color = '\x1b[0m'
+        message_color = clear_color
+
+        # https://talyian.github.io/ansicolors/
+        match record.levelname:
+            case 'DEBUG':
+                message_color = '\x1b[38;5;241m'
+            case 'INFO':
+                message_color = clear_color
+            case 'WARNING':
+                message_color = '\x1b[33m'
+            case 'ERROR':
+                message_color = '\x1b[38;5;9m'
+            case 'CRITICAL':
+                message_color = '\x1b[38;5;205m'
+                                            
+        if not self.color:
+            message_color = ''
+            clear_color = ''
+        return f'{message_color}{super().format(record)}{clear_color}'
+
+
+def create_logger(name: Optional[str] = None, level = logging.DEBUG) -> logging.Logger:
+    # Gets the name of the caller.
+    caller_name = sys._getframe(1).f_globals['__name__']
+    logger = logging.getLogger(name if name else caller_name)
+
+    # If we've already configured a logger for this name, we just return it.
+    if logger.handlers:
+        return logger
+
+    formatter = _Formatter()
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+
+    logger.addHandler(handler)
+    logger.setLevel(level)
+
+    return logger
