@@ -81,6 +81,29 @@ class TestMinReaderDerivation(unittest.TestCase):
         with self.assertRaises(abi.AbiError):
             abi.stamp(recipe_toy.make_recipe(), min_reader=abi.RECIPE_ABI + 1)
 
+    def test_list_kernel_attr_needs_level_two(self):
+        """A level-1 engine drops a list-tagged kernel attr without complaint,
+        so a cluster_dims kernel would launch unclustered there."""
+        r = recipe_toy.make_recipe()
+        r["attrs"] = dict(
+            r.get("attrs") or {},
+            cluster_dims={
+                "t": "l",
+                "v": [{"_": {"t": "i", "v": n}} for n in (2, 1, 1)],
+            },
+        )
+        self.assertEqual(abi.recipe_min_reader(r), 2)
+        self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 2)
+
+    def test_scalar_kernel_attrs_stay_level_one(self):
+        r = recipe_toy.make_recipe()
+        r["attrs"] = dict(
+            r.get("attrs") or {},
+            agpr_alloc={"t": "s", "v": "0,0"},
+            uniform_wg={"t": "b", "v": True},
+        )
+        self.assertEqual(abi.recipe_min_reader(r), 1)
+
     def test_finds_constructs_nested_in_compile_time_bodies(self):
         """static_for bodies are where most of a rolled recipe lives, so a walk
         that only looked at the top level would report the floor for almost
@@ -201,6 +224,7 @@ class TestCEngineAgrees(unittest.TestCase):
         want = {
             "rocke_bundle_contains": ctypes.c_bool,
             "rocke_launch_plan_geometry": ctypes.c_bool,
+            "rocke_launch_plan_cluster": ctypes.c_bool,
             "rocke_launch_plan_kernel_name": ctypes.c_char_p,
             "rocke_launch_plan_kernarg_size": ctypes.c_uint,
             "rocke_engine_version": ctypes.c_char_p,

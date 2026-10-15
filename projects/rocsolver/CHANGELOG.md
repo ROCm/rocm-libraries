@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
@@ -14,6 +15,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
@@ -22,6 +26,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed memory access faults for matrices with more than 2^31 elements (for example in GEQLF and ORGQL/UNGQL), caused by 32-bit internal matrix offsets.
+* Improved kernel launches to detect invalid launch configuration.
+
+* Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues
 ### Upcoming changes

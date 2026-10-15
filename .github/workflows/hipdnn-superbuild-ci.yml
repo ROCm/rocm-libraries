@@ -226,7 +226,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
@@ -245,8 +246,25 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
+      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        id: run-tests
+        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+
+      # ctest counts a disabled or not-run test as success. Read the junit
+      # "Run tests" wrote and fail if a declared packaging probe (listed in the
+      # manifest configure wrote) did not run or failed. Runs whenever "Run
+      # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
+      - name: Check packaging probes ran
+        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/ctest-junit.xml \
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -470,7 +488,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
-            -DPython3_EXECUTABLE="$VENV_PYTHON"
+            -DPython3_EXECUTABLE="$VENV_PYTHON" \
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
 
       - name: Build
         run: cmake --build build
@@ -485,11 +504,28 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
+      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
       - name: Run tests
+        id: run-tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
+
+      # ctest counts a disabled or not-run test as success. Read the junit
+      # "Run tests" wrote and fail if a declared packaging probe (listed in the
+      # manifest configure wrote) did not run or failed. Runs whenever "Run
+      # tests" ran, pass or fail, so a probe failure is reported by name.
+      # --min-probes 1: this lane never builds every architecture the descriptors
+      # name, so a manifest with no probe means discovery broke. Drop the flag if
+      # the lane starts building them all.
+      - name: Check packaging probes ran
+        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        run: |
+          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
+            --junit build/ctest-junit.xml \
+            --manifest build/hkp-probes/manifest.txt \
+            --min-probes 1
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.
