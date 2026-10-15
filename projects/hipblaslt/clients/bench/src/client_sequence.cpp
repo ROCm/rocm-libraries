@@ -633,7 +633,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        hipblaslt_bench::run_measurement(
+        hipblaslt_bench::run_measurement<ClientBenchmarkHooks>(
             launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
     }
 
