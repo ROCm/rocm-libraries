@@ -267,6 +267,8 @@ class TestArchCaps:
         assert arch["MaxSgprPreload"] == 32
         assert arch["LDSBankCount"] == 64
         assert arch["WmmaArbStallBitOffset"] == 2
+        assert arch["HasF32XEmulation"] == 1
+        assert arch["F32XEmulationInfSupport"] == 1
 
 
 class TestRegCaps:
