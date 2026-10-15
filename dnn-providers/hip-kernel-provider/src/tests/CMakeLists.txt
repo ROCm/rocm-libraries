@@ -280,6 +280,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
             "gfx950, so its census is not registered.")
     endif()
+
+    # Census for the gfx1151 WMMA-attention production pack, gated like gfx950 above.
+    hkp_product_ships_engine_for_arch(
+        _hkp_gfx1151_wmma_attention "hipkernel:Gfx1151WmmaAttention" gfx1151)
+    if(_hkp_gfx1151_wmma_attention)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1151
+            SUITES TestGfx1151WmmaAttentionPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
+            "gfx1151, so its census is not registered.")
+    endif()
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
