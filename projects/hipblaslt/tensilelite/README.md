@@ -1,6 +1,6 @@
 # Tensilelite
 
-For race-detection workloads, [regular GEMM generation](tensilelite/Utilities/regular_gemm.md)
+For race-detection workloads, [regular GEMM generation](tensilelite/Utilities/gemm_problem_for_solution.md)
 constructs one full-tile problem per ordinary fixed-split solution index.
 
 ## Building and Running Tests
