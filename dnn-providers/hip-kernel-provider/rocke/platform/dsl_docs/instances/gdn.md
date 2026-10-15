@@ -49,7 +49,7 @@ instance needs.
 
 ## Tensor contract
 
-All tensors are contiguous row-major. `gate_kind` changes only the gate input:
+All tensors below are contiguous row-major. `gate_kind` changes only the gate input:
 
 | Tensor | GDN shape/type | KDA shape/type |
 |---|---|---|
@@ -64,7 +64,14 @@ All tensors are contiguous row-major. `gate_kind` changes only the gate input:
 
 The sequence length is one. `read_indices` and `write_indices` address the
 state pool; `-1` marks an idle batch entry. The kernel writes `out` and updates
-`state` in place.
+`state` in place. `dtype` (I/O) is `bf16` or `f16`; `state_dtype` is `bf16`,
+`f16` or `f32`.
+
+The optional fusions replace or add tensors: `fuse_conv` takes one packed
+`mixed_qkv` row (instead of `query`/`key`/`value`) plus `conv_state` and
+`conv_weight`; `fuse_out_norm` adds `out_gate`, `norm_weight` and a runtime
+`norm_eps`. Their shapes, strides and rules are owned by
+[`ALGORITHM.md` §4.9](../../../library/builders/gfx950/gdn/ALGORITHM.md).
 
 ## Spec and validation
 
@@ -73,23 +80,33 @@ dispatched production mode; `fuse_gate=False` accepts precomputed natural-log
 decay and exists only to benchmark the recurrence at an identical work
 boundary. `lower_bound` controls the fused KDA sigmoid gate.
 
-The remaining spec fields carry head geometry, dtypes, `use_qk_l2norm`, and
+The remaining spec fields carry head geometry, `dtype`, `state_dtype`,
+`use_qk_l2norm`, the two fusion flags `fuse_conv` and `fuse_out_norm`, and
 three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
 `simple=True` selects the one-thread-per-state-row reference body.
 
 `is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
-construction and is the final authority for dispatch. The host `prepare()`
-also validates the state pool, index values, and the gate-kind-dependent KDA
-buffers:
+construction and is the final authority for dispatch. It also rejects a flag
+that is not a real `bool`, and (as `NOT_YET_IMPLEMENTED`) a fusion on the
+`simple` path, with `blocks_per_v_dim != 1`, or `fuse_conv` with
+`num_k_heads != num_v_heads`. The host `prepare()` also validates the state
+pool, index values, the gate-kind-dependent KDA buffers, the fused-mode
+tensors, and every pointer's device and base alignment:
 
 ```text
 a        [B,1,HV,DK]  dtype, contiguous
 dt_bias  [HV,DK]      f32, contiguous
 ```
 
-Those buffers must share `query`'s device. The full validator rules and reasons
-live once in
+Every kernel tensor must share the device of `query` (`mixed_qkv` under
+`fuse_conv`). The full validator rules and reasons live once in
 [`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md).
+
+Dispatch does not see `state_dtype="f32"` or the fusion flags. The request and
+dispatch fields for them are not in the PR that added these spec fields; they
+come in a follow-up PR. Until then a request with an f32 state is rejected
+(`unsupported state_dtype`), the request has no fusion fields, and no
+dispatched spec sets them. Specs that use them are built directly.
 
 `kernel_name()` encodes every field that changes emitted code. Default GDN
 fields add no suffix, so its existing names remain stable while KDA gets a
@@ -142,10 +159,11 @@ An explicit `spec_id` selects one legal candidate of the requested gate kind.
 Candidate admission ends in `is_valid_spec()`, so dispatch cannot offer a tile
 that the kernel rejects.
 
-gfx950 only. `bf16` and `f16` activation/state dtypes are supported and need
-not match. Head geometry is constrained by the validator. KDA's production
-fused mode and benchmark-only precomputed-log-decay mode are both numerically
-covered.
+gfx950 only. Through dispatch, `bf16` and `f16` activation/state dtypes are
+supported and need not match; the kernel also accepts an `f32` state, which
+dispatch does not route yet. Head geometry is constrained by the validator.
+KDA's production fused mode and benchmark-only precomputed-log-decay mode are
+both numerically covered.
 
 Run from `dnn-providers/hip-kernel-provider/rocke`:
 
@@ -153,12 +171,17 @@ Run from `dnn-providers/hip-kernel-provider/rocke`:
 PYTHONPATH=library:platform/python python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
   library/tests/test_gdn_decode_golden.py \
+  library/tests/test_gdn_decode_ir_cpp_parity.py \
+  library/tests/test_gdn_decode_prepare.py \
+  library/tests/test_gdn_decode_fused.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py
 ```
 
 The on-device output and recurrent-state checks are in
-`library/tests/test_gdn_decode_gfx950_numeric.py`.
+`library/tests/test_gdn_decode_gfx950_numeric.py` and
+`library/tests/test_kda_decode_gfx950_numeric.py`; the fused modes' in
+`library/tests/test_gdn_decode_fused_gfx950_numeric.py`.
 
 - **Spec rejected at dispatch.** The message names the failing rule; most often
   a head dim or `blocks_per_v_dim` that does not divide.
