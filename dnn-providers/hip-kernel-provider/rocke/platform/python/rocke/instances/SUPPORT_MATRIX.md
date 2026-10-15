@@ -97,6 +97,7 @@ and [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
 | `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog; fp16 and bf16 (`_1k` atom) |
 | `direct_conv_4c` dgrad (`direct_grouped_dgrad_4c`) | ✅ | ✅ | ❌ | `cpg=kpg=4`, 1x1/3x3 "same" padding, stride 1, fused weights (no pre-pass); LDS-staged weights and `stage_rows` need `ds_read_b64_tr_b16` (gfx950). In the AOT direct cache; not yet wired into dispatch |
+| `direct_conv` (generic) dgrad, fused weights (`direct_grouped_dgrad_fused`) | ✅ | ✅ | ❌ | stride 1, "same" padding, 1x1..7x7, `cpg`/`kpg` multiples of 4 up to 32 (`cpg != kpg` too), single kernel (no pre-pass); LDS-staged weights need `ds_read_b64_tr_b16` (gfx950), `fold_k32` the 16x16x32 atom. In the AOT direct cache; not yet wired into dispatch |
 | `conv_implicit_gemm_wgrad` | ✅ | ✅ | ✅ | gfx1151/gfx1201/gfx1250: WMMA, `default` epilogue, `split_k=1` |
 | `conv_implicit_gemm_wgrad` stream-K | ✅ | ✅ | ❌ | CK iteration-balanced partition; `linear`/`tree` deterministic fixups need the cross-workgroup flag ops |
 | `conv_direct_nongrouped` | ✅ | ✅ | ❌ | `groups=1`; gfx942 uses 32x32x8 / 16x16x16 atoms, gfx950 also 32x32x16 / 16x16x32; MFMA-only; the only direct kernel with dilation. Built from `library/kernels`; not yet wired into dispatch |

@@ -49,7 +49,7 @@ DIRECT_DGRAD_REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
 DIRECT_MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
 # Single-kernel dgrad variants that run a forward kernel on the transposed
 # problem (fused weights, no pre-pass): one step with the forward ABI.
-DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c",)
+DIRECT_DGRAD_FPROP_SINGLE = ("direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused")
 # Grouped forward through the non-grouped kernel's LDS-halo pipeline (runtime
 # groups/channels, small cpg merged into one MFMA problem).
 DIRECT_GROUPED_HALO = "direct_grouped_halo"
@@ -153,6 +153,19 @@ def make_direct_spec(variant: str, problem, knobs: dict):
             stage_rows=stage_rows,
             waves_q=knobs["block_q"] // 4 if stage_rows else 1,
         )
+    if variant == "direct_grouped_dgrad_fused":
+        # The generic forward kernel on the transposed problem, reading the
+        # original weights (no problem check here: plan_for re-validates the
+        # spec on the real shape). Every tile carries the row guard: a tile
+        # may reach past the image on any problem whose height it does not
+        # divide.
+        spec = dc.make_dgrad_fprop_spec(
+            problem,
+            dgrad_fused_weights=True,
+            row_guard=True,
+            **knobs,
+        )
+        return replace(spec, name="rocke_direct_dgrad_fused")
     if variant == "direct_grouped_dgrad_mfma":
         fold_k32 = knobs["fold_k32"]
         spec = dc.make_dgrad_fprop_spec(
@@ -312,7 +325,10 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
     try:
         if variant in DIRECT_HALO_VARIANTS:
             return dn.is_valid_nongrouped_spec(spec, arch=arch)
-        if variant in ("direct_grouped",) + DIRECT_MFMA_DGRAD:
+        if (
+            variant
+            in ("direct_grouped", "direct_grouped_dgrad_fused") + DIRECT_MFMA_DGRAD
+        ):
             spec.validate()
             return dc.is_valid_spec(spec, arch=arch)
         if variant == "direct_depthwise":
@@ -398,6 +414,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_depthwise_dgrad_win": dc.build_direct_depthwise_dgrad_windowed,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
         "direct_grouped_dgrad_4c": dc.build_direct_conv_4c,
+        "direct_grouped_dgrad_fused": dc.build_direct_conv,
         "direct_wgrad": dc.build_direct_conv_wgrad,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE: dc.build_direct_reorganize_weights,

@@ -146,6 +146,28 @@ DGRAD_4C_BLOCK_GROUPS = (16, 32, 64)
 # (dgrad_weights_lds, stage_rows); the validator drops the LDS forms on
 # targets without transpose LDS reads.
 DGRAD_4C_FORMS = ((False, False), (True, False), (True, True))
+# Fused-weight generic dgrad (direct_grouped_dgrad_fused): the generic
+# forward row stream on the transposed problem reading the original weights
+# in its prologue (gathered, or LDS-staged transpose reads on gfx950). The
+# cache carries the image of the generic direct dgrad policy per capability
+# (see _dgrad_fused_policy_reason) rather than a product: 16-column strips
+# (32 on H-tiled images with wide channel groups), block_groups at or below
+# the policy's per-channel row (halved for 5x5/7x7), and the tile heights a
+# tiled or whole-image pick maps to -- a pick that streamed the whole image
+# takes the smallest tile at least as tall, and the row guard skips the MFMA
+# work of the rows past it.
+DGRAD_FUSED_FILTERS = (1, 3, 5, 7)
+DGRAD_FUSED_CHANNELS = (4, 8, 12, 16, 20, 24, 28, 32)
+DGRAD_FUSED_BLOCK_Q = (16, 32)
+DGRAD_FUSED_BLOCK_GROUPS = (1, 2, 4)
+DGRAD_FUSED_BLOCK_H = (4, 8, 16, 32)
+# Tile heights of 5x5 / 7x7 filters: the policy always tiles them by 4 rows
+# (8 covers a whole image of up to 8 rows).
+DGRAD_FUSED_BLOCK_H_LARGE = (4, 8)
+# Preloaded weight registers up to which the policy adds the waves_per_eu
+# hint (16-wide atoms only).
+DGRAD_FUSED_WPE = 4
+DGRAD_FUSED_WPE_MAX_VGPRS = 36
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -327,6 +349,19 @@ def _same_pad(kh: int) -> int:
     return (kh - 1) // 2
 
 
+def _dgrad_fused_weights_fit(kh: int, cpg: int, kpg: int) -> bool:
+    """Do the fused dgrad's preloaded weights fit their register budget?
+
+    The kernel runs the transposed problem: its K-atoms cover the dgrad's
+    ``kpg`` and its 16-row M-tiles the dgrad's ``cpg``; each (tap, atom,
+    M-tile) fragment holds 2 VGPRs per 16-wide atom (4 per 32-wide one, at
+    half the atoms), so the count does not depend on fold_k32.
+    """
+    from kernels.common.conv_direct_grouped import PRELOAD_WEIGHT_VGPR_BUDGET
+
+    return kh * kh * -(-kpg // 16) * -(-cpg // 16) * 2 <= PRELOAD_WEIGHT_VGPR_BUDGET
+
+
 def _large_depthwise_fwd_caps(max_kh: int = 31) -> Tuple["DirectCaps", ...]:
     return tuple(
         DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
@@ -482,6 +517,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         "dgrad",
         tuple(
             DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=4, kpg=4) for k in (1, 3)
+        ),
+    ),
+    # Generic dgrad with the weight transform fused into the kernel (one
+    # forward-ABI kernel over the transposed problem, no pre-pass): stride 1,
+    # "same"-padded square filters up to 7x7 and per-group channel counts in
+    # 4-channel steps up to 32 on either side, including cpg != kpg.
+    # (A 5x5 / 7x7 filter whose fused weights do not fit the preload register
+    # budget at any knob has no row: the pre-pass pipeline serves it.)
+    "direct_grouped_dgrad_fused": (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=c, kpg=kk)
+            for k in DGRAD_FUSED_FILTERS
+            for c in DGRAD_FUSED_CHANNELS
+            for kk in DGRAD_FUSED_CHANNELS
+            if _dgrad_fused_weights_fit(k, c, kk)
         ),
     ),
     # The same pipeline with runtime channels: dense (groups == 1) and any
@@ -653,6 +704,24 @@ def _knob_grid(
                 "dgrad_weights_lds": lds,
                 "stage_rows": sr,
             }
+    elif variant == "direct_grouped_dgrad_fused":
+        # Filtered per capability by _dgrad_fused_policy_reason.
+        for bq, bg, bh, k32, lds, wpe in itertools.product(
+            DGRAD_FUSED_BLOCK_Q,
+            DGRAD_FUSED_BLOCK_GROUPS,
+            DGRAD_FUSED_BLOCK_H,
+            (False, True),
+            (False, True),
+            (0, DGRAD_FUSED_WPE),
+        ):
+            yield {
+                "block_q": bq,
+                "block_groups": bg,
+                "block_h": bh,
+                "fold_k32": k32,
+                "dgrad_weights_lds": lds,
+                "waves_per_eu": wpe,
+            }
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
             BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
@@ -786,6 +855,68 @@ def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[
     )
     if fmas > DW_WIN_UNROLL_BUDGET:
         return f"{fmas} unrolled FMAs exceed the cache budget {DW_WIN_UNROLL_BUDGET}"
+    return None
+
+
+def _dgrad_fused_rule_block_groups(caps: DirectCaps) -> int:
+    """block_groups of the generic direct dgrad policy's per-channel row:
+    the wider channel count times block_groups stays near a 32..64-channel
+    slice (1 from 32 channels, 2 from 16, else 4), halved for 5x5 / 7x7
+    filters (their accumulator ring is KH deep)."""
+    chans = max(caps.cpg, caps.kpg)
+    bg = 1 if chans >= 32 else 2 if chans >= 16 else 4
+    return max(1, bg // 2) if caps.KH >= 5 else bg
+
+
+def _dgrad_fused_policy_reason(
+    caps: DirectCaps, knobs: dict, arch: str, dtype: str = DIRECT_DTYPE
+) -> str | None:
+    """Why the cache does not build this fused generic dgrad knob for ``caps``
+    (``None`` when it does). Cache-scope rules of the policy image (see
+    :data:`DGRAD_FUSED_FILTERS`), not kernel limits: the validator still
+    accepts what they skip, so a JIT sweep can try it."""
+    from kernels.common import conv_direct_grouped as dc
+
+    rule_bg = _dgrad_fused_rule_block_groups(caps)
+    if knobs["block_groups"] > rule_bg:
+        return f"block_groups above the policy's {rule_bg} for these channels"
+    large = caps.KH >= 5
+    if large and knobs["block_h"] not in DGRAD_FUSED_BLOCK_H_LARGE:
+        return f"5x5/7x7 filters are cached at tiles {DGRAD_FUSED_BLOCK_H_LARGE}"
+    if knobs["block_q"] != 16:
+        chans = max(caps.cpg, caps.kpg)
+        if knobs["block_h"] not in (4, 8):
+            return "32-column strips are cached on 4- and 8-row tiles only"
+        if not (chans >= 16 or (large and chans >= 8)):
+            return "32-column strips are cached for wide channel groups only"
+    if knobs["fold_k32"] and caps.kpg % 32:
+        return "fold_k32 needs kpg % 32 == 0"
+    probe = probe_problem(caps, dtype, "direct_grouped_dgrad_fused")
+    if not knobs["fold_k32"] and caps.kpg % 32 == 0:
+        # 16-wide atoms are the fallback where the 32-wide one is not valid
+        # (no 16x16x32 atom on the target).
+        k32 = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "fold_k32": True}
+        )
+        if validate_spec("direct_grouped_dgrad_fused", k32, arch)[0]:
+            return "16-wide atoms are cached where fold_k32 is invalid"
+    want_wpe = 0
+    if not knobs["fold_k32"]:
+        base = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "waves_per_eu": 0}
+        )
+        if dc.preload_weight_vgprs(base) <= DGRAD_FUSED_WPE_MAX_VGPRS:
+            want_wpe = DGRAD_FUSED_WPE
+    if knobs["waves_per_eu"] != want_wpe:
+        return f"waves_per_eu is cached at the policy's {want_wpe} for these knobs"
+    if not knobs["dgrad_weights_lds"]:
+        # Gathered weights are the fallback where the LDS-staged form is not
+        # valid (no transpose reads, or the staged slice does not fit).
+        lds = make_spec(
+            "direct_grouped_dgrad_fused", probe, {**knobs, "dgrad_weights_lds": True}
+        )
+        if validate_spec("direct_grouped_dgrad_fused", lds, arch)[0]:
+            return "gathered weights are cached where the LDS-staged form is invalid"
     return None
 
 
@@ -1057,6 +1188,10 @@ def probe_problem(
         )
     if variant == "direct_depthwise_spatial":
         groups = 8
+    elif variant == "direct_grouped_dgrad_fused":
+        # Its rows share channel counts with the dense MFMA dgrad rows but
+        # serve grouped problems: every block_groups must divide the probe.
+        groups = 64
     elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
         # Dense channel counts serve groups == 1: one group per block. Wider
         # blocks would only build kernels no problem with these counts can
@@ -1129,6 +1264,10 @@ def _caps_jobs(
             continue
         if variant == "direct_depthwise_dgrad_win" and _dw_win_policy_reason(
             caps, knobs, arch
+        ):
+            continue
+        if variant == "direct_grouped_dgrad_fused" and _dgrad_fused_policy_reason(
+            caps, knobs, arch, dtype
         ):
             continue
         spec = make_spec(variant, probe, knobs)
