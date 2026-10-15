@@ -83,15 +83,6 @@ def pytest_configure(config):
     ensure_production_comgr()
 
 
-def pytest_collection_modifyitems(config, items):
-    """``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
-    ``tests/run_device_shards.py``; unset: every item)."""
-    if os.environ.get("ROCKE_TEST_SHARD", "").strip():
-        from tests.run_device_shards import select_items
-
-        select_items(config, items)
-
-
 def pytest_collection_finish(session):
     """``ROCKE_BWD_PREBUILD=1``: compile the selected backward tests' kernels
     once into ``ROCKE_BWD_HSACO_CACHE`` (``tests/_attention_bwd_prebuild.py``)."""
@@ -159,6 +150,13 @@ def pytest_sessionstart(session):
 
 
 def pytest_collection_modifyitems(config, items):
+    """``--rocke-reference-arch``: keep that arch's reference cases; then
+    ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
+    ``tests/run_device_shards.py``; unset: every item)."""
     from reference_common.pytest_support import select_reference_items
 
     select_reference_items(config, items)
+    if os.environ.get("ROCKE_TEST_SHARD", "").strip():
+        from tests.run_device_shards import select_items
+
+        select_items(config, items)

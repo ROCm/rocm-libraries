@@ -9,7 +9,7 @@ wheel: finding its library and its ROCm vintage must never run it.
 * ``attention_bwd_comgr`` finds ``<torch>/lib`` comgr and pins it as
   ``ROCKE_COMGR_LIB`` (an explicit setting wins, ``ROCKE_BWD_NO_COMGR_PIN``
   opts out); the platform names that library's ROCm vintage from the
-  package's ``version.py`` without importing it, so the flavor autodetect
+  package's ``version.py`` without importing it, so the toolchain identity
   follows it; and it gives comgr's own cache a directory of the process tree
   (made by the first process, inherited by its children, removed at its
   exit) unless one is set or the cache is off.
@@ -51,6 +51,7 @@ def fake_torch(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(site))
     monkeypatch.delitem(sys.modules, "torch", raising=False)
     monkeypatch.delenv(pc.COMGR_LIB_ENV, raising=False)
+    monkeypatch.delenv(pc.HIP_LIB_ENV, raising=False)
     monkeypatch.delenv(pc.NO_PIN_ENV, raising=False)
     pc.torch_package_dir.cache_clear()
     yield pkg
@@ -84,6 +85,31 @@ def test_pin_exports_the_library_and_keeps_an_explicit_one(fake_torch):
     (fake_torch / "lib" / "amd_comgr0702.dll").unlink()
     env = {}
     assert pc.pin_production_comgr(env) is None and env == {}
+    assert "torch" not in sys.modules
+
+
+def test_hip_runtime_pin_pairs_with_the_bundled_comgr(fake_torch):
+    """The HIP runtime beside the pinned torch comgr is pinned with it, so a
+    torch-free process maps the comgr it compiles with (Linux only)."""
+    hip = os.path.join(str(fake_torch), "lib", "libamdhip64.so")
+    with open(hip, "wb") as fh:
+        fh.write(b"ELF")
+    env = {}
+    pc.pin_production_comgr(env)
+    got = pc.pin_production_hip(env)
+    if sys.platform == "win32":
+        assert got is None and pc.HIP_LIB_ENV not in env
+        return
+    assert got == hip and env[pc.HIP_LIB_ENV] == hip
+    env = {pc.COMGR_LIB_ENV: _lib(fake_torch), pc.HIP_LIB_ENV: "/explicit/hip.so"}
+    assert pc.pin_production_hip(env) == "/explicit/hip.so"  # explicit wins
+    env = {pc.COMGR_LIB_ENV: "/elsewhere/libamd_comgr.so"}  # not torch's: no pair
+    assert pc.pin_production_hip(env) is None and pc.HIP_LIB_ENV not in env
+    env = {pc.COMGR_LIB_ENV: _lib(fake_torch), pc.NO_PIN_ENV: "1"}
+    assert pc.pin_production_hip(env) is None and pc.HIP_LIB_ENV not in env
+    os.unlink(hip)  # a torch package without a HIP runtime: nothing to pin
+    env = {pc.COMGR_LIB_ENV: _lib(fake_torch)}
+    assert pc.pin_production_hip(env) is None and pc.HIP_LIB_ENV not in env
     assert "torch" not in sys.modules
 
 
@@ -152,17 +178,15 @@ def test_each_process_tree_gets_its_own_comgr_cache_removed_at_exit(tmp_path):
     assert out.stdout.split()[-2] == str(tmp_path / "inherited")  # a child keeps it
 
 
-def test_torch_free_flavor_follows_the_pinned_torch_library(fake_torch, monkeypatch):
+def test_torch_free_vintage_follows_the_pinned_torch_library(fake_torch, monkeypatch):
     """The platform dates a library in a torch package's ``lib`` directory by
-    that package's ``version.py`` while torch is not imported, so the flavor
-    autodetect of a torch-free process follows the pinned library."""
-    from rocke.core.lower_llvm import _detect_llvm_flavor
+    that package's ``version.py`` while torch is not imported, so the
+    toolchain identity of a torch-free process names the pinned library's
+    vintage (the LLVM flavor itself follows the loaded compiler)."""
     from rocke.runtime import comgr
 
     monkeypatch.setattr(comgr, "resolved_lib_path", lambda: _lib(fake_torch))
-    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
     assert comgr.resolved_lib_rocm_version() == (7, 2)
-    assert _detect_llvm_flavor() == "llvm22"
     (fake_torch / "version.py").write_text(_VERSION_PY.format(hip="7.13.0"))
     assert comgr.resolved_lib_rocm_version() == (7, 13)
     assert "torch" not in sys.modules
@@ -216,6 +240,7 @@ def test_compile_only_paths_do_not_import_torch(tmp_path):
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
     for k in (
         pc.COMGR_LIB_ENV,
+        pc.HIP_LIB_ENV,
         pc.COMGR_CACHE_DIR_ENV,
         pc.COMGR_CACHE_ENV,
         pc.NO_PIN_ENV,

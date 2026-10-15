@@ -21,10 +21,19 @@ take the same library here instead:
   explicit ``ROCKE_COMGR_LIB`` is kept; ``ROCKE_BWD_NO_COMGR_PIN=1`` opts out.
   The platform names the ROCm vintage of a library in a torch package's
   ``lib`` directory from that package's ``version.py`` without importing
-  torch (``rocke.runtime.comgr.resolved_lib_rocm_version``), so the flavor
-  autodetect, the flavor / comgr guard and the toolchain identity of a
-  torch-free process follow the pinned library, in this process and in the
-  fresh compile processes it starts (which inherit ``ROCKE_COMGR_LIB``).
+  torch (``rocke.runtime.comgr.resolved_lib_rocm_version``), so the toolchain
+  identity of a torch-free process names the pinned library; the flavor
+  autodetect and the flavor / comgr guard query the compiler that library
+  loads. Both hold in this process and in the fresh compile processes it
+  starts (which inherit ``ROCKE_COMGR_LIB``).
+* :func:`pin_production_hip` exports the HIP runtime of the same torch
+  package as ``ROCKE_HIP_LIB`` when the comgr in effect is torch's bundled
+  one (Linux; an explicit ``ROCKE_HIP_LIB`` is kept). A torch-free process
+  otherwise loads a ROCm install's HIP runtime, which maps that install's
+  comgr, and the platform refuses a pinned comgr that differs from the one
+  already mapped (two comgrs in a process can abort LLVM). With the pair
+  pinned, the process maps the one comgr it compiles with, as a process that
+  imported torch does.
 * :func:`pin_comgr_cache` gives comgr's own code-object cache a directory of
   this process tree. comgr caches every compile action by default under
   ``$XDG_CACHE_HOME/comgr`` (else ``~/.cache/comgr``); on a network home that
@@ -38,7 +47,7 @@ take the same library here instead:
   inherited by its children (pool workers, shards) through the environment
   and removed when that process exits. An explicit ``AMD_COMGR_CACHE_DIR``
   and a disabled cache (``AMD_COMGR_CACHE=0``) are kept.
-* :func:`ensure_production_comgr` does both; it is idempotent and cheap.
+* :func:`ensure_production_comgr` does all three; it is idempotent and cheap.
 
 With the pin the comgr identity (path, vintage, content digest) of a
 torch-free process equals that of a process that imported torch, so both
@@ -64,15 +73,18 @@ __all__ = [
     "COMGR_CACHE_ENV",
     "COMGR_LIB_ENV",
     "NO_PIN_ENV",
+    "HIP_LIB_ENV",
     "ensure_production_comgr",
     "pin_comgr_cache",
     "pin_production_comgr",
+    "pin_production_hip",
     "process_comgr_cache",
     "torch_bundled_comgr",
     "torch_package_dir",
 ]
 
 COMGR_LIB_ENV = "ROCKE_COMGR_LIB"
+HIP_LIB_ENV = "ROCKE_HIP_LIB"
 COMGR_CACHE_ENV = "AMD_COMGR_CACHE"
 COMGR_CACHE_DIR_ENV = "AMD_COMGR_CACHE_DIR"
 NO_PIN_ENV = "ROCKE_BWD_NO_COMGR_PIN"
@@ -127,6 +139,38 @@ def pin_production_comgr(environ: dict | None = None) -> str | None:
     return lib
 
 
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def pin_production_hip(environ: dict | None = None) -> str | None:
+    """Export the HIP runtime beside torch's bundled comgr as
+    ``ROCKE_HIP_LIB`` when the ``ROCKE_COMGR_LIB`` in effect is that comgr
+    (see the module doc); returns the HIP library in effect (an explicit
+    setting wins), or None when there is nothing to pin, on Windows (the
+    platform's mapped-comgr check is Linux-only) or with
+    ``ROCKE_BWD_NO_COMGR_PIN``."""
+    env = os.environ if environ is None else environ
+    if env.get(NO_PIN_ENV, "").strip() not in ("", "0"):
+        return None
+    if env.get(HIP_LIB_ENV):
+        return env[HIP_LIB_ENV]
+    if _IS_WINDOWS:
+        return None
+    comgr = env.get(COMGR_LIB_ENV)
+    bundled = torch_bundled_comgr()
+    if not comgr or bundled is None or not _same_file(comgr, bundled):
+        return None
+    hip = os.path.join(os.path.dirname(bundled), "libamdhip64.so")
+    if not os.path.exists(hip):
+        return None
+    env[HIP_LIB_ENV] = hip
+    return hip
+
+
 def _user() -> str:
     try:
         return getpass.getuser()
@@ -162,8 +206,9 @@ def pin_comgr_cache(environ: dict | None = None) -> str | None:
 
 
 def ensure_production_comgr() -> str | None:
-    """:func:`pin_production_comgr` and :func:`pin_comgr_cache`; returns the
-    pinned library."""
+    """:func:`pin_production_comgr`, :func:`pin_production_hip` and
+    :func:`pin_comgr_cache`; returns the pinned comgr library."""
     lib = pin_production_comgr()
+    pin_production_hip()
     pin_comgr_cache()
     return lib

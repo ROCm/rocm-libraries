@@ -180,7 +180,9 @@ def test_gemm_ir(arch, grid, atom_k, flavor):
         ("wmma", 16): "wmma.f32.16x16x16.f16",
     }[(path, atom_k)]
     assert ir.count(f"@llvm.amdgcn.{tag}") >= n_mma
-    assert f'"amdgpu-flat-work-group-size"="64,{max(64, g.threads)}"' in ir
+    hi = max(64, g.threads)
+    # The lowering's minimum is the wave size, capped at the block.
+    assert f'"amdgpu-flat-work-group-size"="{min(g.wave_size, hi)},{hi}"' in ir
 
 
 @pytest.mark.parametrize("b_storage", ["k_inner", "k_outer"])

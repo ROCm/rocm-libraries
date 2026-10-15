@@ -97,8 +97,8 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 The backward modules are Python-only family glue: their selectors, specs,
 plans, knob registries and routing exist in Python only, and their kernels
 are lowered and compiled with the Python lowering backend. The change adds
-three things to the C++ engine, each the mirror of a Python change that other
-families or the toolchain share:
+one thing to the C++ engine, the mirror of a Python change that other families
+share, and relies on two that the platform now carries itself:
 
 * **The barrier `fence` attribute** of `tile.sync`, `tile.sync_lds_only` and
   `tile.s_barrier_bare` (every backward barrier carries `fence="compiler"`,
@@ -114,13 +114,14 @@ families or the toolchain share:
   the parity emitter `library/tests/parity/barrier_fence_emit.py` (the C++
   engine lowers its serialized probe and backward kernels to the Python
   bytes, `tests/test_barrier_fence_parity_emit.py`).
-* **The torch-package ROCm version reader** in
-  `platform/cpp/core/lower_llvm/core.cpp` (`ll_torch_hip_version_text`,
-  `ll_torch_package_rocm_version`): a comgr library inside a torch package
-  (`<site>/torch/lib`) is dated by that package's `version.py`, as the Python
-  `runtime/comgr.py` does, so both engines resolve the same LLVM flavor when
-  `ROCKE_COMGR_LIB` pins torch's bundled comgr (`platform/tests/test_rocke.py`,
-  `TestCrossEngineFlavorAutoResolution`).
+* **The LLVM flavor of a pinned torch comgr**: both engines resolve an AUTO
+  flavor from the LLVM version of the comgr they load (`platform/cpp/core/
+  lower_llvm/core.cpp`, `ll_resolve_flavor`; `core/lower_llvm.py`,
+  `_detect_llvm_flavor`), so a `ROCKE_COMGR_LIB` naming torch's bundled comgr
+  gives one flavor in both (`platform/tests/test_rocke.py`,
+  `TestCrossEngineFlavorAutoResolution`). The package's `version.py` still
+  dates the library for the toolchain identity
+  (`runtime/comgr.py::resolved_lib_rocm_version`, Python only).
 * **The gfx942 3-D tiled attention kernel name**: the C++ glue
   (`platform/cpp/instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_public_glue.cpp`)
   adds the `fnuz` name token of an fp8 KV cache that the Python builder

@@ -2040,10 +2040,24 @@ class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
         self._assert_agree({"ROCM_PATH": root})
 
     def test_agree_when_comgr_lib_is_pinned_in_a_torch_package(self):
-        """``$ROCKE_COMGR_LIB`` naming torch's bundled comgr, torch not
-        imported: both engines date it by the package's ``version.py``
-        (ROCm 7.0 here -> llvm20), not by the host's ROCm."""
-        lib = _fake_torch_comgr(self, "7.0.51831-a3e329ad8")
+        """``$ROCKE_COMGR_LIB`` naming a comgr in a torch package, torch not
+        imported: both engines follow the loaded compiler (LLVM 20 here), not
+        the package's ``version.py`` (ROCm 7.13 here)."""
+        import os
+        import shutil
+        import subprocess
+        import sys
+
+        if sys.platform != "linux" or not shutil.which("cc"):
+            self.skipTest("ELF compiler fixture requires a Linux C compiler")
+        lib = _fake_torch_comgr(self, "7.13.0")
+        source = os.path.join(os.path.dirname(lib), "compiler.c")
+        with open(source, "w") as fh:
+            fh.write(
+                "void LLVMGetVersion(unsigned *a, unsigned *b, unsigned *c) "
+                "{ *a=20; *b=0; *c=0; }\n"
+            )
+        subprocess.run(["cc", "-shared", "-fPIC", source, "-o", lib], check=True)
         dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
         self.assertIn("-p8:128:128-", dl)
 
@@ -2081,9 +2095,9 @@ class TestTorchPackageComgrVersion(unittest.TestCase):
     """``comgr.resolved_lib_rocm_version`` of a comgr inside a torch package
     when torch is not imported (an explicit ``ROCKE_COMGR_LIB``): the
     package's ``version.py`` names the vintage, read without importing torch.
-    Without it the version came from ``/opt/rocm``, so a host whose ROCm is
-    older than the pinned library refused every compile of the library's own
-    flavor."""
+    Without it the version came from ``/opt/rocm``: the host's ROCm, not the
+    library's. This is package metadata (the attention backward's toolchain
+    identity); the LLVM flavor follows the loaded compiler."""
 
     def _version(self, lib):
         import os

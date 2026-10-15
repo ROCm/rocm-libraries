@@ -138,10 +138,10 @@ def test_q_clamp_subtracts_the_overshoot_of_the_in_sequence_row():
     assert "@llvm.smax.i32" in folded
 
 
-def test_legacy_four_arg_score_hook_runs_before_the_new_hook():
+def test_legacy_score_transform_runs_before_the_new_hook():
     order = []
 
-    def legacy(b, s, kt, r):
+    def legacy(b, s, kt, r, query_pos, key_pos):
         order.append(("legacy", r))
         return s
 
@@ -220,6 +220,73 @@ def test_ext_with_fp8_kv_is_rejected_before_any_emission(kv_dtype):
             kv_dtype=kv_dtype,
             arch="gfx942",
             ext=AttnFwdExt(guard_seqlen_k=True),
+        )
+    if n_ops is not None:
+        assert len(b.kernel.body.ops) == n_ops
+
+
+@pytest.mark.parametrize(
+    "ext_kw, body_kw, match",
+    [
+        ({"seqlen_q": "i"}, {"wmma_seqlen_q": "i"}, "wmma_seqlen_q"),
+        ({"epilogue_hook": lambda b, e: None}, {"wmma_seqlen_q": "i"}, "wmma_seqlen_q"),
+        (
+            {"epilogue_hook": lambda b, e: None},
+            {
+                "lse": "lse",
+                "write_lse": "i",
+                "stride_lse_token": "i",
+                "stride_lse_head": "i",
+            },
+            "lse",
+        ),
+        ({"guard_seqlen_k": True}, {"wmma_kv_tail": True}, "wmma_kv_tail"),
+    ],
+)
+def test_ext_overlapping_wmma_options_are_rejected_before_any_emission(
+    ext_kw, body_kw, match
+):
+    """The WMMA body's own query bound, key tail and LSE output overlap the
+    ext epilogue / key guard; a build asking for both is refused, not silently
+    narrowed to one of them."""
+    from rocke.core.ir import F16, F32, I32, PtrType
+    from rocke.helpers.mfma_attention import mfma_attention_fwd_inner_body
+
+    b = IRBuilder("wmma_overlap_reject")
+    p = [b.param(n, PtrType(F16, "global"), align=16) for n in "QKVO"]
+    vals = {"i": b.param("i", I32), "lse": b.param("lse", PtrType(F32, "global"))}
+    sc = b.param("sc", F32)
+    i = vals["i"]
+    resolve = {
+        k: vals.get(v, v) if isinstance(v, str) else v for k, v in ext_kw.items()
+    }
+    body = {k: vals.get(v, v) if isinstance(v, str) else v for k, v in body_kw.items()}
+    n_ops = len(b.kernel.body.ops) if hasattr(b.kernel, "body") else None
+    with pytest.raises(ValueError, match=match):
+        mfma_attention_fwd_inner_body(
+            b,
+            Q=p[0],
+            K=p[1],
+            V=p[2],
+            O=p[3],
+            head_size=64,
+            seqlen_k=i,
+            q_tile_base=i,
+            head_idx=i,
+            kv_head_idx=i,
+            stride_q_token=i,
+            stride_q_head=i,
+            stride_k_token=i,
+            stride_k_head=i,
+            stride_v_token=i,
+            stride_v_head=i,
+            stride_o_token=i,
+            stride_o_head=i,
+            scale_log2=sc,
+            dtype="f16",
+            arch="gfx1151",
+            ext=AttnFwdExt(**resolve),
+            **body,
         )
     if n_ops is not None:
         assert len(b.kernel.body.ops) == n_ops

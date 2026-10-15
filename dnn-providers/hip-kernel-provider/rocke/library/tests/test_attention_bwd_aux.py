@@ -248,11 +248,15 @@ def test_launch_geometry(arch):
 @pytest.mark.parametrize("arch", ARCHS)
 @pytest.mark.parametrize("stage", X.AUX_STAGES)
 def test_lowers_at_every_flavor(stage, arch, flavor):
+    from rocke.core.arch import ArchTarget
+
+    # The lowering's minimum is the wave size, capped at the block (64 lanes).
+    lo = min(ArchTarget.from_gfx(arch).wave_size, 64)
     for seq_mode, stage_vec in (("batched", 8), ("thd", 1)):
         spec = _spec_for(stage, head_size=64, seq_mode=seq_mode, stage_vec=stage_vec)
         ir = lower(BUILDERS[stage](spec, arch=arch), arch=arch, llvm_flavor=flavor)
         assert "alloca" not in ir
-        assert '"amdgpu-flat-work-group-size"="64,64"' in ir
+        assert f'"amdgpu-flat-work-group-size"="{lo},64"' in ir
 
 
 def _user_accesses(ir, names):
