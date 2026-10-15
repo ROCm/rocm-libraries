@@ -571,6 +571,9 @@ class ElementwiseLowerer:
         op = graph.ops[region.op_names[0]]
         if op.kind not in (self._UNARY | self._BINARY):
             return LegalResult.failure(f"{self.name}: unsupported op {op.kind!r}")
+        dtype = _dtype_str_for_tensor(graph, op.inputs[0])
+        if dtype not in ("fp16", "bf16"):
+            return LegalResult.failure(f"{self.name}: unsupported dtype {dtype!r}")
         return LegalResult.success()
 
     def candidates(
@@ -672,6 +675,9 @@ class ReductionLowerer:
         in_t = graph.tensors[op.inputs[0]]
         if len(in_t.shape) != 2:
             return LegalResult.failure(f"{self.name}: input must be 2D")
+        dtype = _dtype_str_for_tensor(graph, op.inputs[0])
+        if dtype not in ("fp16", "bf16"):
+            return LegalResult.failure(f"{self.name}: unsupported dtype {dtype!r}")
         return LegalResult.success()
 
     def candidates(

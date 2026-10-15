@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
 
@@ -620,6 +621,8 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "f32") == 0)
             return "float";
+        if(strcmp(n, "f64") == 0)
+            return "double";
     }
     rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
 }
@@ -718,8 +721,16 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp32_hex / _fp16_hex)                        */
+/* FP hex constants (Python _fp64_hex / _fp32_hex / _fp16_hex)            */
 /* ====================================================================== */
+
+const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)
+{
+    /* LLVM textual IR spells `double` hex constants as the raw IEEE-754 bits. */
+    uint64_t bits;
+    memcpy(&bits, &x, sizeof bits);
+    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
+}
 
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 {
@@ -881,6 +892,12 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
         if(ity == NULL)
         {
             ity = "i32";
+        }
+        if(strcmp(ity, "f64") == 0)
+        {
+            double fv = 0.0;
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp64_hex(L, fv);
         }
         if(strcmp(ity, "f32") == 0)
         {
@@ -1203,7 +1220,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 2;
     else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
-    else if(strcmp(n, "i64") == 0)
+    else if(strcmp(n, "i64") == 0 || strcmp(n, "f64") == 0)
         eb = 8;
     else
         eb = 2; /* default */
@@ -1219,6 +1236,8 @@ static int ll_smem_align(const rocke_type_t* stype)
     if(!stype || !stype->elem || !stype->elem->name)
         return 4;
     const char* n = stype->elem->name;
+    if(strcmp(n, "f64") == 0)
+        return 8;
     if(strcmp(n, "i8") == 0 || strcmp(n, "fp8e4m3") == 0 || strcmp(n, "bf8e5m2") == 0)
         return 16;
     return 4;
@@ -1775,9 +1794,7 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
     }
     const char* strategy = v->u.s;
-    if(strcmp(strategy, "max-ilp") != 0 && strcmp(strategy, "max-memory-clause") != 0
-       && strcmp(strategy, "iterative-ilp") != 0 && strcmp(strategy, "iterative-minreg") != 0
-       && strcmp(strategy, "iterative-maxocc") != 0)
+    if(!rocke_scheduler_strategy_is_valid(strategy))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
@@ -1858,6 +1875,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             any_need = true;
         }
     }
+    /* dict.update appends override-only keys after the base keys. */
+    for(int i = 0; i < novr; ++i)
+    {
+        bool in_base = false;
+        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
+            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
+        if(!in_base && ll_need_has(L, ovr[i].key))
+        {
+            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            any_need = true;
+        }
+    }
     /* Dynamic decls not in either static table. */
     for(size_t i = 0; i < L->dyn_decls.len; i++)
     {
@@ -1924,9 +1953,13 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 
     /* attributes #0. */
     int max_wg = L->kernel ? rocke_kernel_max_workgroup_size(L->kernel) : 256;
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    int min_wg = target->wave_size < max_wg ? target->wave_size : max_wg;
     rocke_strbuf_append(out, "attributes #0 = { ");
     rocke_strbuf_append(out, "\"uniform-work-group-size\"=\"true\" ");
-    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"64,%d\"", max_wg);
+    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"%d,%d\"", min_wg, max_wg);
 
     if(L->kernel)
     {
