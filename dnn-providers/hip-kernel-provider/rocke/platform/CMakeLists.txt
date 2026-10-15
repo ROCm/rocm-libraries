@@ -549,6 +549,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attn_bf16_d128_ring.py"
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
+        "tests/library/tests/test_gdn_decode_fused_gfx950_numeric.py"
+        "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
