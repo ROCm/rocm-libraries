@@ -1,10 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""LibraryIO MessagePack writes go through the C++ writer when it was built."""
+"""The C++ writer module, when it has been built."""
 
 import gzip
-import importlib.util
 import zlib
 from pathlib import Path
 
@@ -15,11 +14,7 @@ from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
 
 
 def _writer():
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
-        pytest.skip("tensilelite_write extension was not built")
-    from tensilelite import tensilelite_write
-
-    return tensilelite_write
+    return pytest.importorskip("tensilelite_write")
 
 
 def _kernels_lite_state():
@@ -240,3 +235,69 @@ def test_problem_type_index_layout_keeps_summation_order():
     assert built.boundIndices[1].bMirror is True
     assert built.batchIndices[0] is built.indices[2]
     assert built.batchIndices[0].d == 2
+
+
+# Keys the C++ loader does not read. They are absent from the rewritten solution.
+_DROPPED_KEYS = {"pythonOnlyMarker", "streamK", "CustomKernelName"}
+
+
+def _compare_solution(before, after, path=""):
+    """Fields present on both sides must match.
+
+    Omitted fields come back as C++ defaults, so keys that exist only on the
+    written solution are not errors. Keys in _DROPPED_KEYS are not written.
+    threadTile may gain a trailing 0, and a TypesEqual list may gain "Float".
+    """
+    errors = []
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key, value in before.items():
+            if key in _DROPPED_KEYS:
+                if key in after:
+                    errors.append(f"{path}.{key} was written")
+                continue
+            if key not in after:
+                errors.append(f"dropped {path}.{key}")
+                continue
+            errors.extend(_compare_solution(value, after[key], f"{path}.{key}"))
+        return errors
+    if isinstance(before, list) and isinstance(after, list):
+        if path.endswith(".threadTile") and after == before + [0]:
+            return errors
+        if (
+            before
+            and isinstance(before[0], str)
+            and after == before + ["Float"]
+        ):
+            return errors
+        if len(before) != len(after):
+            errors.append(f"{path}: length {len(before)} -> {len(after)}")
+            return errors
+        for index, (left, right) in enumerate(zip(before, after)):
+            errors.extend(_compare_solution(left, right, f"{path}[{index}]"))
+        return errors
+    if before != after:
+        errors.append(f"{path}: {before!r} -> {after!r}")
+    return errors
+
+
+def test_write_compares_solution_fields_and_drops_unknown_keys(tmp_path):
+    """Each solution is compared with the input. A Python-only field is not written."""
+    writer = _writer()
+    state = _kernels_lite_state()
+    state["solutions"][0]["pythonOnlyMarker"] = {"from": "python"}
+
+    written = msgpack.unpackb(
+        writer.write_library(msgpack.packb(state)), raw=False, strict_map_key=False
+    )
+
+    by_index = {solution["index"]: solution for solution in written["solutions"]}
+    assert set(by_index) == {solution["index"] for solution in state["solutions"]}
+    errors = []
+    for solution in state["solutions"]:
+        errors.extend(_compare_solution(solution, by_index[solution["index"]]))
+    assert errors == []
+    written_solution = by_index[state["solutions"][0]["index"]]
+    assert "pythonOnlyMarker" not in written_solution
+    assert "CustomKernelName" not in written_solution["sizeMapping"]
+    assert "streamK" not in written_solution["sizeMapping"]
+    assert written_solution["kernelName"] == state["solutions"][0]["kernelName"]
