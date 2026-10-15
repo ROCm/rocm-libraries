@@ -7,6 +7,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Fixed
 
 * Memory leak in device_reduce unit test.
+* Incorrect benchmark measurements for block_run_length_encode and block_histogram.
 
 ### Upcoming changes
 
