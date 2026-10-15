@@ -13,7 +13,7 @@ emit harness:
 
 Target: that the pre-shuffled arms read the per-tensor flag rather than assuming
 B. Every marker the emitters write is formatted with the tensor char -- for
-instance ``"%s: rowId * depthUBytes" % tc`` and
+instance ``"%s: rowId * subIterKBytes" % tc`` and
 ``"pre-shuffled %s GR[%u] correction" % (tc, i)`` -- so an arm that hardcoded B
 would still satisfy the swizzled-B tests while emitting nothing here, and an arm
 that applied the layout per kernel rather than per tensor would wrongly rewrite
@@ -162,8 +162,8 @@ def test_pre_shuffle_applies_per_tensor():
     swizzled = _asm(_SWIZZLED)
     control = _asm(_CONTROL)
 
-    assert "A: rowId * depthUBytes" in swizzled, (
-        "pre-shuffled A should address rows by DepthU, not by StrideA0I"
+    assert "A: rowId * subIterKBytes" in swizzled, (
+        "pre-shuffled A should address rows by the K-subtile, not by StrideA0I"
     )
     assert "A: rowId * stride" not in swizzled, (
         "pre-shuffled A still carries the stride-scaled row offset"
@@ -172,13 +172,13 @@ def test_pre_shuffle_applies_per_tensor():
         "B is not pre-shuffled and must keep its stride-scaled row offset, but the "
         "pre-shuffled arm was applied to it too"
     )
-    assert "B: rowId * depthUBytes" not in swizzled, (
+    assert "B: rowId * subIterKBytes" not in swizzled, (
         "B is not pre-shuffled but took the pre-shuffled row addressing"
     )
 
     # The control pins that A's ordinary form is what changed, not something else.
     assert "A: rowId * stride" in control
-    assert "A: rowId * depthUBytes" not in control
+    assert "A: rowId * subIterKBytes" not in control
 
 
 def test_gr_pointer_advance_scales_by_row_block():

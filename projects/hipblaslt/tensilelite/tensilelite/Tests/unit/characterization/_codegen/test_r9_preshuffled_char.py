@@ -241,21 +241,68 @@ def _compute_offset(kernel, tc="B"):
     return str(module)
 
 
-def test_r9_pre_shuffled_rows_are_addressed_by_depth_u_not_stride():
-    """Pre-shuffled rows are DepthU apart in memory, so StrideB1J does not apply.
+def test_r9_pre_shuffled_rows_are_addressed_by_k_subtile_not_stride():
+    """Pre-shuffled rows are one K-subtile apart, so StrideB1J does not apply.
 
-    In the shuffled layout consecutive rows of an MFMA tile are packed one K
-    window apart, independent of the tensor's leading dimension.
+    In the shuffled layout consecutive rows of an MFMA tile are packed one
+    K-subtile apart, independent of the tensor's leading dimension.
     """
     shuffled = _compute_offset(_kernel(swizzleB=True))
-    assert "rowId * depthUBytes" in shuffled
+    assert "rowId * subIterKBytes" in shuffled
     assert "rowId * stride" not in shuffled
     # The multiply against the stride SGPR is what the shift replaces.
     assert "v_mul_lo_u32" not in shuffled
 
     ordinary = _compute_offset(_kernel())
     assert "rowId * stride" in ordinary
-    assert "rowId * depthUBytes" not in ordinary
+    assert "rowId * subIterKBytes" not in ordinary
+
+
+def test_r9_pre_shuffled_k_step_rejects_unsupported_depth_u():
+    """DepthU past the validated range raises instead of emitting a wrong K step.
+
+    Nothing in rocisa range-checks the DTL immediate, and the LDS budget only
+    keeps DepthU 1024 out of the swizzled path by accident, so the refusal is
+    made explicit here.
+    """
+    import Tensile.Components.Subtile.SubtileGREmit as GR
+
+    ti = _tile("B", _kernel(swizzleB=True, depthU=1024))
+    with pytest.raises(RuntimeError, match=r"DepthU 1024 is not supported"):
+        GR._preShuffledKStepBytes(ti, 128)
+
+
+def test_r9_pre_shuffled_k_step_rejects_unencodable_immediate():
+    """A step past the 12-bit DTL immediate raises rather than being truncated."""
+    import Tensile.Components.Subtile.SubtileGREmit as GR
+
+    ti = _tile("B", _kernel(swizzleB=True, depthU=512))
+    # 16 rows per block, so anything above 4095/16 cannot be encoded.
+    assert GR._preShuffledKStepBytes(ti, 128) == 2048
+    with pytest.raises(RuntimeError, match=r"does not fit the 4095 byte DTL immediate"):
+        GR._preShuffledKStepBytes(ti, 384)
+
+
+def test_r9_pre_shuffled_row_stride_does_not_scale_with_depth_u():
+    """The pre-shuffled row step is the swizzle sub-block, not the DepthU window.
+
+    The host packs a fixed sub-block of ``mmaTileShape[0]`` rows per K granule,
+    so the distance between rows is a property of the data type alone. Scaling it
+    by DepthU happens to be correct at DepthU 256 for FP4 and silently reads every
+    other sub-block at DepthU 512, which produced wrong results rather than a
+    fault. Both DepthUs must emit the same shift.
+    """
+    import re
+
+    def _shift(depthU):
+        asm = _compute_offset(_kernel(swizzleB=True, depthU=depthU))
+        m = re.search(r"v_lshlrev_b32 \S+ (\S+), \S+\s+// B: rowId \* subIterKBytes", asm)
+        if m is None:
+            m = re.search(r"v_lshlrev_b32[^/]*?(0x[0-9a-f]+)[^/]*// B: rowId \* subIterKBytes", asm)
+        assert m is not None, asm
+        return m.group(1)
+
+    assert _shift(256) == _shift(512)
 
 
 def test_r9_padding_correction_folds_aligned_rows_and_narrows_for_fp4():

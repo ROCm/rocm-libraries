@@ -565,6 +565,15 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
 
+# Largest DepthU the pre-swizzled global read supports.  Its K-window step rides
+# in the 12-bit MUBUF immediate, scaled by the rows in a swizzle block, and runs
+# out past this.  Enforced both when deriving a solution and when emitting one.
+SWIZZLE_MAX_DEPTHU = 512
+
+# MUBUF offset12 is a 12-bit unsigned field.  rocisa does not range-check it, so
+# an oversized step would be emitted verbatim rather than rejected.
+SWIZZLE_DTL_OFFSET12_MAX = 4095
+
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
 

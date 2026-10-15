@@ -172,8 +172,8 @@ def test_pre_shuffle_applies_per_tensor():
     swizzled = _asm(_SWIZZLED)
     control = _asm(_CONTROL)
 
-    assert "B: rowId * depthUBytes" in swizzled, (
-        "pre-shuffled B should address rows by DepthU, not by StrideB1J"
+    assert "B: rowId * subIterKBytes" in swizzled, (
+        "pre-shuffled B should address rows by the K-subtile, not by StrideB1J"
     )
     assert "B: rowId * stride" not in swizzled, (
         "pre-shuffled B still carries the stride-scaled row offset"
@@ -182,13 +182,13 @@ def test_pre_shuffle_applies_per_tensor():
         "A is not pre-shuffled and must keep its stride-scaled row offset, but the "
         "pre-shuffled arm was applied to it too"
     )
-    assert "A: rowId * depthUBytes" not in swizzled, (
+    assert "A: rowId * subIterKBytes" not in swizzled, (
         "A is not pre-shuffled but took the pre-shuffled row addressing"
     )
 
     # The control pins that B's ordinary form is what changed, not something else.
     assert "B: rowId * stride" in control
-    assert "B: rowId * depthUBytes" not in control
+    assert "B: rowId * subIterKBytes" not in control
 
 
 def test_gr_pointer_advance_scales_by_row_block():

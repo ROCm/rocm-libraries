@@ -18,6 +18,7 @@
 
 import contextlib
 from ...ExecutionPolicy import isPersistentDataParallel
+from ...Common.Utilities import SWIZZLE_DTL_OFFSET12_MAX, SWIZZLE_MAX_DEPTHU
 import math
 from functools import singledispatch
 
@@ -313,6 +314,8 @@ def _emitGR_TLU0(tag, tile, ti, writer, kernel):
 
       rl = ti.localSubtilesRegister[min(reg_idx, perpDimSize - 1)]
       offsetK = j * int(ti.mmaTileShape[1] * ti.subtileShape[1] * ti.bpe)
+      if ti.isPreShuffled:
+        offsetK = _preShuffledKStepBytes(ti, offsetK)
 
       module.addComment0(f"GR load {tc} subtile [{i},{j}]")
 
@@ -567,6 +570,31 @@ def graTileAssignment(writer, kernel, useSwizzling=True):
 
 # --- Legacy interleaved A+B GR offset (temporary, matches reference exactly) ---
 
+def _preShuffledKStepBytes(tileInfo, offsetK):
+  """Scale a K-subtile step for pre-shuffled data, refusing steps that cannot be encoded.
+
+  A K step consumes a K-extent on every row of the block, so the global step is
+  ``mmaTileShape[0]`` times the unit-stride byte count.  That product rides in the
+  DTL immediate, so it has a hard ceiling; past it the step has to move into
+  soffset the way the TLU=1 K-window path already does.
+  """
+  depthU = int(tileInfo.depthUBytes / tileInfo.bpe)
+  if depthU > SWIZZLE_MAX_DEPTHU:
+    raise RuntimeError(
+        "SwizzleTensor%s with DepthU %u is not supported: the pre-shuffled global "
+        "read is only validated up to DepthU %u.  Emitting it would read the wrong "
+        "K positions instead of failing."
+        % (tileInfo.tc, depthU, SWIZZLE_MAX_DEPTHU))
+  scaled = offsetK * int(tileInfo.mmaTileShape[0])
+  if scaled > SWIZZLE_DTL_OFFSET12_MAX:
+    raise RuntimeError(
+        "SwizzleTensor%s: pre-shuffled K-window step is %u bytes (DepthU %u, %u "
+        "rows per block), which does not fit the %u byte DTL immediate.  Fold the "
+        "step into soffset instead."
+        % (tileInfo.tc, scaled, depthU, int(tileInfo.mmaTileShape[0]), SWIZZLE_DTL_OFFSET12_MAX))
+  return scaled
+
+
 def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   tc = tileInfo.tc
   bpeBits = int(8*tileInfo.bpe)
@@ -575,9 +603,12 @@ def _grComputeOffset_legacy(module, writer, tileInfo, colId, rowId, output):
   loadWidth = tileInfo.loadWidthGR
   module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
   if tileInfo.isPreShuffled:
-    depthUBytes = tileInfo.depthUBytes
-    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(depthUBytes.bit_length()-1),
-                              src=vgpr(rowId), comment="%s: rowId * depthUBytes"%tc))
+    # The GR enumeration covers one K-subtile at a time, so a row step is that
+    # subtile's K-extent, not the whole DepthU window.  They are equal only when
+    # localSubtileGrid[1] == 1.
+    subIterKBytes = tileInfo.subIterKBytes
+    module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(subIterKBytes.bit_length()-1),
+                              src=vgpr(rowId), comment="%s: rowId * subIterKBytes"%tc))
   else:
     strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
     module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
@@ -1397,7 +1428,7 @@ def _addPreShuffleCorrectionToGROffsets(module, writer, kernel, tile, rowOffset)
   """Fold aligned 16-row HBM padding into pre-shuffled GR offsets."""
   tc = tile.tc
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
-  depthU = kernel["_DepthU%s" % tc]
+  depthU = int(tile.subIterKBytes / tile.bpe)
   nTileRows = tile.mmaTileShape[0]
   corrVgpr = writer.vgprPool.checkOut(
       1, tag="_addPreShuffleCorrectionToGROffsets_corrVgpr")
@@ -1479,6 +1510,8 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   useSgpr = regList.is_sgpr
 
   offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
+  if tileInfo.isPreShuffled:
+    offsetK = _preShuffledKStepBytes(tileInfo, offsetK)
 
   subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
   # loadRatioGR folds in grLoadWaves, so subtileOffset is the bytes one
