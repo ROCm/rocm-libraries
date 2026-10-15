@@ -323,11 +323,12 @@ jobs:
           RUNNERS_PER_HOST: "4"
         run: |
           set -o pipefail
-          # The CPU reference uses OpenMP, one thread per host core by default: with every
-          # runner busy that oversubscribes the CPU about 16x and the step runs ~7x slower.
-          # Split the cores between all shards on the host instead.
-          export OMP_NUM_THREADS=$(( $(nproc) / (RUNNERS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
-          [ "$OMP_NUM_THREADS" -ge 1 ] || OMP_NUM_THREADS=1
+          # The CPU reference (OpenMP, BLIS, OpenBLAS) starts one thread per host CPU in
+          # each pool by default: with every runner busy that oversubscribes the CPU
+          # ~16x and the step runs ~7x slower. Split the CPUs between all shards instead.
+          T=$(( $(nproc) / (RUNNERS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
+          [ "$T" -ge 1 ] || T=1
+          export OMP_NUM_THREADS=$T BLIS_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T
           cd projects/hipblaslt
           INSTALL="$PWD/hipblaslt-install"
           export LD_LIBRARY_PATH="$INSTALL/lib:$LD_LIBRARY_PATH"
