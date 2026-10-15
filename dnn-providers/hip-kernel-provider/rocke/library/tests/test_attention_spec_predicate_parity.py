@@ -15,7 +15,9 @@ spec field, so that builder is intentionally not aliased in ``hkp_pack``.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
+import inspect
 import itertools
 
 import pytest
@@ -71,3 +73,44 @@ def test_2d_spec_wrapper_matches_dispatcher_gate(arch, monkeypatch):
         )
         checked += 1
     assert checked, "no problem in the grid produced a comparable spec"
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_2d_wrapper_forwards_all_predicate_params(arch):
+    """Every parameter of ``supports_tiled_2d`` that has a matching spec field
+    must be forwarded by ``_supports_tiled_2d_spec``.
+
+    This is a structural guard against parameter drift: if someone adds a new
+    field to the spec and a matching parameter to ``supports_tiled_2d`` without
+    updating the wrapper, this test fails immediately rather than silently
+    shipping a kernel the predicate did not validate.
+
+    ``use_d256_fast`` is excluded because it is derived from the builder alias,
+    not carried by the spec.
+    """
+    mod = importlib.import_module(f"kernels.{arch}.attention_tiled_2d")
+    predicate = mod.supports_tiled_2d
+    # gfx942 delegates through an internal _supports_tiled_2d_spec; gfx950
+    # has no such indirection.  Inspect the implementation that contains the
+    # actual forwarding calls in either case.
+    wrapper_impl = getattr(mod, "_supports_tiled_2d_spec", mod.supports_tiled_2d_spec)
+
+    predicate_params = set(inspect.signature(predicate).parameters)
+    predicate_params -= {"use_d256_fast"}  # builder-derived, not a spec field
+
+    # Resolve the spec type — the annotation may be a string (forward ref) so
+    # use typing.get_type_hints to get the actual class.
+    import typing
+
+    hints = typing.get_type_hints(mod.supports_tiled_2d_spec)
+    spec_cls = hints["spec"]
+    spec_fields = {f.name for f in dataclasses.fields(spec_cls)}
+
+    wrapper_src = inspect.getsource(wrapper_impl)
+    for param in predicate_params:
+        if param in spec_fields:
+            assert param in wrapper_src, (
+                f"{arch}: supports_tiled_2d parameter {param!r} has a matching "
+                f"spec field on {spec_cls.__name__} but does not appear in "
+                f"_supports_tiled_2d_spec — add it to the wrapper"
+            )
