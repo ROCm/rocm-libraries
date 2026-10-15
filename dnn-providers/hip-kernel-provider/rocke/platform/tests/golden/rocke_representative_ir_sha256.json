@@ -1151,7 +1151,7 @@
           "bytes": 1571,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "115eda75a10d675561a1344e3f027817a0dab0501300956b5b8e10913f5717db",
+          "sha256": "4d288e2719ecced978c860ae52a2f0426d6b4a6342bf24f48e8587682df3b8c8",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
@@ -2768,7 +2768,7 @@
           "bytes": 1578,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "29d179f2e0f445df22804d64bd5e660f35012d3c04f6ca024248f217b14e9a59",
+          "sha256": "c537f808c7b016859e77bc2a89ceb19f97bb54a8b55502c05ba3e5ffdfe8aa9f",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
@@ -4385,7 +4385,7 @@
           "bytes": 1642,
           "family": "crosslane",
           "kernel_name": "irhash_warp_shuffle_xor_dpp_reduce_gfx1201",
-          "sha256": "6e69bb83a1c8f07bc9c57121e5f5758fe340d6df1d364b14894d9b01b483dcb6",
+          "sha256": "759d8028dd3fa1e6d8726fcf6676a894ea90a8151c26814188dbd1886319ed63",
           "status": "ok"
         },
         "crosslane/gfx942/warp_shuffle_xor_dpp_masks_f32": {
