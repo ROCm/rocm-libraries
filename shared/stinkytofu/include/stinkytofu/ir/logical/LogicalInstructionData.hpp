@@ -200,9 +200,14 @@ struct SBarrierLogicalData {
     bool separate;
     bool wait;
     bool clusterBarrier;
+    int tensorcnt;
 
-    SBarrierLogicalData(bool separate_ = false, bool wait_ = false, bool clusterBarrier_ = false)
-        : separate(separate_), wait(wait_), clusterBarrier(clusterBarrier_) {}
+    SBarrierLogicalData(bool separate_ = false, bool wait_ = false, bool clusterBarrier_ = false,
+                        int tensorcnt_ = -1)
+        : separate(separate_),
+          wait(wait_),
+          clusterBarrier(clusterBarrier_),
+          tensorcnt(tensorcnt_) {}
 };
 
 /**
