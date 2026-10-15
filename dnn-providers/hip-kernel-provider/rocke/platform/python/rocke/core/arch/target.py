@@ -30,6 +30,148 @@ from ..dtypes import normalize_dtype
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
+# A bounded family declaration, rather than a general catalog templating DSL.
+# Version 1 freezes the shipped axes and historical enumeration order.
+_GFX1250_SCALED_FAMILY = {
+    "generate": "gfx1250_wmma_scaled_v1",
+    "family": "wmma_scaled",
+    "input_dtypes": ["fp8", "bf8", "fp6", "bf6", "fp4"],
+    "scale_dtypes": ["e8m0", "e5m3", "e4m3"],
+    "block_k": [32, 16],
+    "shape": [16, 16, 128],
+    "c": "fp32",
+}
+
+
+def _gfx1250_scale_combination_valid(a: str, b: str, sa: str, sb: str) -> bool:
+    """Supported matrix/scale combinations, independent of compiler version.
+
+    Mirrors LLVM's isValidWMMAScaleFmtCombination:
+    https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+    """
+    a, b = normalize_dtype(a), normalize_dtype(b)
+    return (
+        (a == "fp4e2m1" or sa == "e8m0")
+        and (b == "fp4e2m1" or sb == "e8m0")
+        and (a != "fp4e2m1" or b != "fp4e2m1" or sa == sb)
+    )
+
+
+def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
+    """Expand supported families to ordinary rows; reject duplicate identities."""
+    if not isinstance(declarations, list):
+        raise ValueError(f"MMA declarations for {gfx} must be a list")
+    out = []
+    ids = set()
+    for declaration in declarations:
+        if not isinstance(declaration, dict) or (
+            "generate" not in declaration and "op_id" not in declaration
+        ):
+            raise ValueError(f"invalid MMA declaration for {gfx}: {declaration!r}")
+        if "generate" not in declaration:
+            rows = [declaration]
+        else:
+            # JSON text comparison also rejects bools masquerading as integers.
+            if gfx != "gfx1250" or json.dumps(
+                declaration, sort_keys=True
+            ) != json.dumps(_GFX1250_SCALED_FAMILY, sort_keys=True):
+                raise ValueError(
+                    f"unsupported MMA family declaration for {gfx}: {declaration!r}"
+                )
+            rows = _gfx1250_scaled_rows(declaration)
+        for row in rows:
+            if row["op_id"] in ids:
+                raise ValueError(f"duplicate MMA op_id for {gfx}: {row['op_id']}")
+            ids.add(row["op_id"])
+            out.append(row)
+    return out
+
+
+def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
+    inputs = declaration["input_dtypes"]
+    scales = declaration["scale_dtypes"]
+    blocks = declaration["block_k"]
+    # Original homogeneous E8M0 atoms precede mixed E8M0 and supported FP4
+    # alternative encodings.
+    homogeneous = [
+        (0, 32),
+        (2, 32),
+        (3, 32),
+        (1, 32),
+        (0, 16),
+        (2, 16),
+        (3, 16),
+        (4, 32),
+        (4, 16),
+        (1, 16),
+    ]
+    keys = [(inputs[i], inputs[i], scales[0], scales[0], k) for i, k in homogeneous]
+    keys.extend(
+        (a, b, scales[0], scales[0], k)
+        for k in blocks
+        for a in inputs
+        for b in inputs
+        if a != b
+    )
+    for k in blocks:
+        keys.extend(
+            (a, inputs[4], scales[0], sb, k) for a in inputs[:4] for sb in scales[1:]
+        )
+        keys.extend(
+            (inputs[4], b, sa, scales[0], k) for b in inputs[:4] for sa in scales[1:]
+        )
+        keys.extend((inputs[4], inputs[4], scale, scale, k) for scale in scales[1:])
+    rows = []
+    # Preserve the supported atoms' historical order and reject unsupported pairs.
+    for a, b, sa, sb, block_k in dict.fromkeys(keys):
+        if not _gfx1250_scale_combination_valid(a, b, sa, sb):
+            continue
+        m, n, k = declaration["shape"]
+        rows.append(
+            {
+                "family": declaration["family"],
+                "a": a,
+                "b": b,
+                "c": declaration["c"],
+                "a_scale_dtype": sa,
+                "b_scale_dtype": sb,
+                "scale_block_k": block_k,
+                "m": m,
+                "n": n,
+                "k": k,
+                "op_id": f"wmma_gfx1250_f32_{m}x{n}x{k}_{a}_{b}_scale_{sa}_{sb}_k{block_k}",
+            }
+        )
+    return rows
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> Dict[str, dict]:
+    # Pin UTF-8 for embedded interpreters whose default codec is ASCII.
+    with open(_DATA_FILE, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    for gfx, spec in doc["arches"].items():
+        spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
+    return doc["arches"]
+
+
+# LLVM defines generic-processor membership explicitly; it is not a naming
+# wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
+# https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+_GFX11_GENERIC_PROCESSORS = frozenset(
+    {
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+    }
+)
+
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
 # index arithmetic for the two tile coordinates of that fragment element and
@@ -859,141 +1001,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    # Native gfx1250 scaled WMMA. FP8/BF8 use 64 bytes per lane. FP6 uses
-    # 48 packed bytes plus four zero words; FP4 uses 32 bytes plus eight zero
-    # words. All share the same <16 x i32> ABI.
-    # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
-    # bytes in i64. Both share the gfx12 column-distributed accumulator.
-    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k32": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=4,
-        b_scale_frag_len=4,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_fp6_fp6_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf6_bf6_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
-    "wmma_gfx1250_f32_16x16x128_bf8_bf8_scale_e8m0_e8m0_k16": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-        a_scale_frag_len=8,
-        b_scale_frag_len=8,
-        a_scale_fn=_wmma_gfx1250_a_scale,
-        b_scale_fn=_wmma_gfx1250_b_scale,
-    ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
         16,
@@ -1006,16 +1013,83 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 }
 
 
-# Mixed operands keep the same padded ABI and scale-coordinate maps.
+# Scaled operands share the padded <16 x i32> ABI, byte-carrier scales,
+# and gfx12 accumulator map. Derive every ID from the expanded catalog.
+for _row in _load_specs()["gfx1250"]["mma"]:
+    if _row["family"] == "wmma_scaled":
+        _scale_frag_len = 128 // _row["scale_block_k"]
+        _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
+            16,
+            16,
+            8,
+            32,
+            None,
+            None,
+            _wmma_gfx12_acc_16x16,
+            a_scale_frag_len=_scale_frag_len,
+            b_scale_frag_len=_scale_frag_len,
+            a_scale_fn=_wmma_gfx1250_a_scale,
+            b_scale_fn=_wmma_gfx1250_b_scale,
+        )
+del _row, _scale_frag_len
+
+
+def _mfma_scaled_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(32)),
+        builder.const_i32(slot),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(16)),
+        builder.const_i32((slot // 16) * 32 + slot % 16),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_b(builder, lane, slot):
+    row, k = _mfma_scaled_f8_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_b(builder, lane, slot):
+    row, k = _mfma_scaled_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_scale_a(builder, lane, slot):
+    return builder.mod(lane, builder.const_i32(32)), builder.div(
+        lane, builder.const_i32(32)
+    )
+
+
+def _mfma_scaled_scale_b(builder, lane, slot):
+    row, k = _mfma_scaled_scale_a(builder, lane, slot)
+    return k, row
+
+
 _MMA_FRAGMENT_INFO.update(
     {
-        f"wmma_gfx1250_f32_16x16x128_{a}_{b}_scale_e8m0_e8m0_k{block_k}": _MMA_FRAGMENT_INFO[
-            f"wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k{block_k}"
-        ]
-        for block_k in (32, 16)
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+            32,
+            32,
+            16,
+            64,
+            _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
+            _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
+            _mfma_acc_32x32,
+            1,
+            1,
+            _mfma_scaled_scale_a,
+            _mfma_scaled_scale_b,
+        )
         for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
         for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
-        if a != b
     }
 )
 
@@ -1041,6 +1115,12 @@ class MemoryCapabilities:
     # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
     # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
     async_lds_max_dwords: int
+    # gfx1250 feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the ops themselves are gated separately.
+    has_scalar_data_prefetch: bool = False
+    has_global_prefetch: bool = False
+    has_cluster_launch: bool = False
+    has_multicast_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -1253,6 +1333,16 @@ class ArchTarget:
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
 
+    @property
+    def has_dpp_row_xmask(self) -> bool:
+        """Whether DPP has ``row_xmask`` (an XOR with any mask 1..15 inside a
+        16-lane row). It is a gfx10+ encoding: gfx11, gfx12 and gfx1250 have
+        it; the gfx9 CDNA targets (``gfx9_mfma``, ``gfx950``) do not. An
+        allow-list, so a new family gets the base-DPP encodings (valid on
+        every target) until someone adds it here. Mirrored by
+        ``rocke_arch_has_dpp_row_xmask`` in the C++ engine."""
+        return self.target_family in ("gfx11_rdna", "gfx12_rdna", "gfx12_cdna")
+
     @staticmethod
     def from_gfx(gfx: str) -> "ArchTarget":
         return _build_target(gfx)
@@ -1261,15 +1351,6 @@ class ArchTarget:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
-
-
-@lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
-    # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
-    # arch_specs.json contains non-ASCII bytes.
-    with open(_DATA_FILE, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    return doc["arches"]
 
 
 @lru_cache(maxsize=1)
@@ -1393,6 +1474,10 @@ def _build_target(gfx: str) -> ArchTarget:
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
             async_lds_max_dwords=mem["async_lds_max_dwords"],
+            has_scalar_data_prefetch=mem.get("has_scalar_data_prefetch", False),
+            has_global_prefetch=mem.get("has_global_prefetch", False),
+            has_cluster_launch=mem.get("has_cluster_launch", False),
+            has_multicast_load=mem.get("has_multicast_load", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],
@@ -1439,18 +1524,8 @@ def target_id_from_isa(isa: str) -> str:
     return isa[start:] if start >= 0 else isa
 
 
-def base_arch_from_target_id(target_id: str) -> str:
-    """Derive the architecture name used for rocKE catalog lookup and lowering.
-
-    Removes features after ``:`` and profile suffixes such as ``-strict``:
-    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
-    ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved.
-
-    An unknown name is reduced to its leading ``gfx`` token when possible.
-    This does not check support; :meth:`ArchTarget.from_gfx` requires a
-    matching catalog entry.
-    """
+def _processor_from_target_id(target_id: str) -> str:
+    """Extract the processor token before any profile or feature suffix."""
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -1459,26 +1534,59 @@ def base_arch_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
+    for processor in _GFX11_GENERIC_PROCESSORS:
+        if target_without_features == processor or target_without_features.startswith(
+            f"{processor}-"
+        ):
+            return processor
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved. A concrete processor in LLVM's documented
+    ``gfx11-generic`` compatibility domain uses that generic rocKE catalog row
+    unless rocKE has a more-specific row; exact rows therefore take precedence.
+
+    Any other unknown name is reduced to its leading ``gfx`` token when
+    possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
+    a matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    processor = _processor_from_target_id(target_id)
+    if processor in known_arches():
+        return processor
+    if processor in _GFX11_GENERIC_PROCESSORS and (
+        target_without_features == processor
+        or target_without_features.startswith(f"{processor}-")
+    ):
+        return "gfx11-generic"
+    return processor
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
     """Derive the target name that the compile helpers pass to COMGR or hipcc.
 
-    Removes profile suffixes such as ``-strict`` using
-    :func:`base_arch_from_target_id`, but keeps features after ``:``.
-    For example, ``gfx1250-strict`` becomes ``gfx1250``, while
-    ``gfx942:sramecc+:xnack-`` stays unchanged.
+    Removes profile suffixes such as ``-strict`` from the processor token, but
+    keeps features after ``:``. Catalog selection remains independent, so a
+    concrete processor may compile for itself while lowering through a generic
+    rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
+    while ``gfx942:sramecc+:xnack-`` stays unchanged.
 
     This only converts the string. COMGR or hipcc checks whether the target
     and its features are supported when compilation runs.
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    base_arch = base_arch_from_target_id(target_id)
-    if target_without_features.startswith(f"{base_arch}-"):
-        target_without_features = base_arch
+    processor = _processor_from_target_id(target_id)
+    if target_without_features.startswith(f"{processor}-"):
+        target_without_features = processor
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features

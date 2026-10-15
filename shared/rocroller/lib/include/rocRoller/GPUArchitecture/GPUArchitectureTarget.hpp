@@ -42,6 +42,8 @@ namespace rocRoller
         GFX1011,
         GFX1012,
         GFX1030,
+        GFX1170,
+        GFX1171,
         GFX1200,
         GFX1201,
         GFX1250,
