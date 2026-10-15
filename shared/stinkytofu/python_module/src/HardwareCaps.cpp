@@ -329,6 +329,11 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
     rv["HasWmmaArbStallBit"] = v[0] == 12 && v[1] == 5;
     rv["WmmaArbStallBitOffset"] = arbStallBitOffset(archID);
     rv["HasF32XEmulation"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
+    // F32X emulation Inf guard (v_cmp_class). The 3xBF16 split turns Inf into
+    // Inf - Inf = NaN unless the pack path substitutes a finite high part.
+    // gfx950 leaves it off: the extra VALU in the MFMA pack path regresses perf.
+    // Keep in lock-step with rocisa hardware_caps.hpp.
+    rv["F32XEmulationInfSupport"] = checkInList(v, {{12, 5, 0}});
     rv["MaxSgprPreload"] = checkInList(v, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"] =
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
