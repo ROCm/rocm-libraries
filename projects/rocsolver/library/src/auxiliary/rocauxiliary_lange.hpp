@@ -61,29 +61,24 @@ ROCSOLVER_BEGIN_NAMESPACE
  * (scaled), as it could otherwise overflow while the norm is representable.
  *************************************************************/
 
-#define LANGE_NORM_SUM 0
-#define LANGE_NORM_MAX 1
-#define LANGE_NORM_FRO 2
+static constexpr int LANGE_NORM_SUM = 0;
+static constexpr int LANGE_NORM_MAX = 1;
+static constexpr int LANGE_NORM_FRO = 2;
 
-#ifndef LANGE_THDS
-#define LANGE_THDS 256 // threads per block of the column and row kernels
-#endif
-#ifndef LANGE_BX
-#define LANGE_BX 64 // threads per column of the column kernel (when m >= 2 * LANGE_BX)
-#endif
+// threads per block of the column and row kernels
+static constexpr int LANGE_THDS = 256;
+// threads per column of the column kernel (when m >= 2 * LANGE_BX)
+static constexpr int LANGE_BX = 64;
 // maximum size of the first dimension of the grids of the column and row kernels
-#ifndef LANGE_MAX_BLOCKS
-#define LANGE_MAX_BLOCKS 8192
-#endif
-#ifndef LANGE_TARGET_BLOCKS
-#define LANGE_TARGET_BLOCKS 2048
-#endif
-#ifndef LANGE_MIN_CHUNK
-#define LANGE_MIN_CHUNK 1024 // minimum length of the chunks of rows of lange_cols_kernel
-#endif
-#ifndef LANGE_FINAL_THDS
-#define LANGE_FINAL_THDS 1024
-#endif
+static constexpr int LANGE_MAX_BLOCKS = 8192;
+static constexpr int LANGE_TARGET_BLOCKS = 2048;
+// minimum length of the chunks of rows of lange_cols_kernel
+static constexpr int LANGE_MIN_CHUNK = 1024;
+static constexpr int LANGE_FINAL_THDS = 1024;
+// elements loaded together by each thread before they are added (see lange_col_rows)
+static constexpr int LANGE_UNROLL = 4;
+// maximum size of the third dimension of the grids (larger batches are launched in chunks)
+static constexpr int LANGE_MAX_BATCH_BLOCKS = 65535;
 
 /** Thresholds and scaling constants of Blue's algorithm (LAPACK's la_constants). **/
 template <typename S>
@@ -245,25 +240,26 @@ template <int NORM, int BX, typename T, typename S>
 __device__ __forceinline__ void
     lange_col_rows(const T* ac, const int64_t r0, const int64_t re, S& acc, S& abig, S& asml)
 {
-    // four independent loads per iteration, then the remaining rows
+    // the LANGE_UNROLL loads are issued before the elements are added, so that they are in flight
+    // together (the compiler does not move them ahead of the computation of the absolute value of
+    // a complex element, whose code is long), then the remaining rows
     int64_t r = r0;
-    for(; r + 3 * BX < re; r += 4 * BX)
+    for(; r + (LANGE_UNROLL - 1) * BX < re; r += LANGE_UNROLL * BX)
     {
-        const T x0 = ac[r];
-        const T x1 = ac[r + BX];
-        const T x2 = ac[r + 2 * BX];
-        const T x3 = ac[r + 3 * BX];
-        lange_col_add<NORM, T, S>(x0, acc, abig, asml);
-        lange_col_add<NORM, T, S>(x1, acc, abig, asml);
-        lange_col_add<NORM, T, S>(x2, acc, abig, asml);
-        lange_col_add<NORM, T, S>(x3, acc, abig, asml);
+        T x[LANGE_UNROLL];
+#pragma unroll
+        for(int u = 0; u < LANGE_UNROLL; u++)
+            x[u] = ac[r + u * BX];
+#pragma unroll
+        for(int u = 0; u < LANGE_UNROLL; u++)
+            lange_col_add<NORM, T, S>(x[u], acc, abig, asml);
     }
     for(; r < re; r += BX)
         lange_col_add<NORM, T, S>(ac[r], acc, abig, asml);
 }
 
 /** Sum, maximum or scaled sums of squares of the elements of the columns, by chunks of rows. Grid
-    (gx, nrch, batch_count), block (BX, BY) with BY = LANGE_THDS / BX: thread (tx, ty) visits rows
+    (gx, nrch, nb), block (BX, BY) with BY = LANGE_THDS / BX: thread (tx, ty) visits rows
     tx, tx + BX, ... of the columns cb * BY + ty within the chunk blockIdx.y, for cb = blockIdx.x,
     blockIdx.x + gx, ... For the 1-norm, the sum of each column is computed; with several chunks
     of rows (nrch > 1), the result for column c and chunk h is part[(b * nrch + h) * n + c], and
@@ -281,14 +277,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_cols_kernel(const I m,
                                                                       const I rchunk,
                                                                       const I nrch,
                                                                       S* part,
-                                                                      const rocblas_stride psize)
+                                                                      const rocblas_stride psize,
+                                                                      const I b0)
 {
     constexpr int BY = LANGE_THDS / BX;
-    const I b = blockIdx.z;
+    const I b = b0 + blockIdx.z;
     const I h = blockIdx.y;
     const I tx = threadIdx.x;
     const I ty = threadIdx.y;
-    const int64_t ncb = (int64_t(n) - 1) / BY + 1;
+    const int64_t ncb = ceildiv(int64_t(n), BY);
     const bool percol = (NORM == LANGE_NORM_SUM && nrch > 1);
 
     T* a = load_ptr_batch<T>(A, b, shiftA, strideA);
@@ -379,7 +376,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_cols_kernel(const I m,
 }
 
 /** Sums of the absolute values of the elements of each row, by chunks of columns. Grid
-    (gx, ncch, batch_count), block (BX, BY) with BY = LANGE_THDS / BX: thread (tx, ty) takes the
+    (gx, ncch, nb), block (BX, BY) with BY = LANGE_THDS / BX: thread (tx, ty) takes the
     rows rb * BX + tx, for rb = blockIdx.x, blockIdx.x + gx, ..., and the columns ty, ty + BY, ...
     of the chunk blockIdx.y. With several chunks of columns (ncch > 1), the result for row r and
     chunk h is part[(b * ncch + h) * m + r]; otherwise the maximum of the row sums of the block is
@@ -393,14 +390,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_rows_kernel(const I m,
                                                                       const rocblas_stride strideA,
                                                                       const I cchunk,
                                                                       const I ncch,
-                                                                      S* part)
+                                                                      S* part,
+                                                                      const I b0)
 {
     constexpr int BY = LANGE_THDS / BX;
-    const I b = blockIdx.z;
+    const I b = b0 + blockIdx.z;
     const I h = blockIdx.y;
     const I tx = threadIdx.x;
     const I ty = threadIdx.y;
-    const int64_t nrb = (int64_t(m) - 1) / BX + 1;
+    const int64_t nrb = ceildiv(int64_t(m), BX);
 
     T* a = load_ptr_batch<T>(A, b, shiftA, strideA);
 
@@ -417,17 +415,32 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_rows_kernel(const I m,
     {
         const int64_t r = rb * BX + tx;
 
-        // four columns per iteration, then the remaining columns
         S sum = 0;
         if(r < m)
         {
+            // LANGE_UNROLL columns per iteration, then the remaining columns. For elements of up
+            // to 8 bytes, the loads are issued before the elements are added, so that they are in
+            // flight together (see lange_col_rows); for elements of 16 bytes, adding each element
+            // after its load is faster.
             int64_t c = cs + ty;
-            for(; c + 3 * BY < ce; c += 4 * BY)
+            for(; c + (LANGE_UNROLL - 1) * BY < ce; c += LANGE_UNROLL * BY)
             {
-                sum += lange_abs(a[idx2D(r, c, lda)]);
-                sum += lange_abs(a[idx2D(r, c + BY, lda)]);
-                sum += lange_abs(a[idx2D(r, c + 2 * BY, lda)]);
-                sum += lange_abs(a[idx2D(r, c + 3 * BY, lda)]);
+                if constexpr(sizeof(T) > 8)
+                {
+#pragma unroll
+                    for(int u = 0; u < LANGE_UNROLL; u++)
+                        sum += lange_abs(a[idx2D(r, c + u * BY, lda)]);
+                }
+                else
+                {
+                    T x[LANGE_UNROLL];
+#pragma unroll
+                    for(int u = 0; u < LANGE_UNROLL; u++)
+                        x[u] = a[idx2D(r, c + u * BY, lda)];
+#pragma unroll
+                    for(int u = 0; u < LANGE_UNROLL; u++)
+                        sum += lange_abs(x[u]);
+                }
             }
             for(; c < ce; c += BY)
                 sum += lange_abs(a[idx2D(r, c, lda)]);
@@ -471,12 +484,19 @@ ROCSOLVER_KERNEL void __launch_bounds__(LANGE_THDS) lange_rows_kernel(const I m,
 
 /** Combines the partial results part[(b * nch + h) * len + k] (h < nch, k < len) into the norm of
     each matrix: the maximum over k of the sums over h (1- and infinity-norms), or the maximum or
-    the scaled sum of squares of all of them. Grid (1, 1, batch_count), block LANGE_FINAL_THDS. **/
+    the scaled sum of squares of all of them. Grid (1, 1, nb), block LANGE_FINAL_THDS. The
+    matrices of a launch are b0, b0 + 1, ..., b0 + nb - 1 (nb <= LANGE_MAX_BATCH_BLOCKS), in all the
+    kernels. **/
 template <int NORM, typename I, typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(LANGE_FINAL_THDS)
-    lange_final_kernel(const I len, const I nch, const S* part, const rocblas_stride psize, S* norms)
+    lange_final_kernel(const I len,
+                       const I nch,
+                       const S* part,
+                       const rocblas_stride psize,
+                       S* norms,
+                       const I b0)
 {
-    const I b = blockIdx.z;
+    const I b = b0 + blockIdx.z;
     const I tid = threadIdx.x;
 
     __shared__ S sacc[3][LANGE_FINAL_THDS];
@@ -545,21 +565,21 @@ void rocsolver_lange_chunks(const I m, const I n, I* rchunk, I* nrch, I* ncb, I*
 
     // column kernel: ceil(n / by) blocks of columns per chunk of rows, at most LANGE_MAX_BLOCKS of
     // them in the grid
-    const int64_t nc = (int64_t(n) - 1) / by + 1;
-    int64_t nch
-        = std::min((LANGE_TARGET_BLOCKS - 1) / nc + 1, (int64_t(m) - 1) / LANGE_MIN_CHUNK + 1);
-    int64_t len = ((int64_t(m) - 1) / nch / LANGE_BX + 1) * LANGE_BX;
+    const int64_t nc = ceildiv(int64_t(n), by);
+    int64_t nch = std::min(ceildiv(int64_t(LANGE_TARGET_BLOCKS), nc),
+                           ceildiv(int64_t(m), int64_t(LANGE_MIN_CHUNK)));
+    int64_t len = ceildiv(int64_t(m), nch * LANGE_BX) * LANGE_BX;
     *rchunk = I(len);
-    *nrch = I((int64_t(m) - 1) / len + 1);
+    *nrch = I(ceildiv(int64_t(m), len));
     *ncb = I(std::min<int64_t>(nc, LANGE_MAX_BLOCKS));
 
     // row kernel: ceil(m / bx) blocks of rows per chunk of columns, at most LANGE_MAX_BLOCKS of
     // them in the grid
-    const int64_t nr = (int64_t(m) - 1) / bx + 1;
-    nch = std::min((LANGE_TARGET_BLOCKS - 1) / nr + 1, (int64_t(n) - 1) / LANGE_BX + 1);
-    len = ((int64_t(n) - 1) / nch / LANGE_BX + 1) * LANGE_BX;
+    const int64_t nr = ceildiv(int64_t(m), bx);
+    nch = std::min(ceildiv(int64_t(LANGE_TARGET_BLOCKS), nr), ceildiv(int64_t(n), int64_t(LANGE_BX)));
+    len = ceildiv(int64_t(n), nch * LANGE_BX) * LANGE_BX;
     *cchunk = I(len);
-    *ncch = I((int64_t(n) - 1) / len + 1);
+    *ncch = I(ceildiv(int64_t(n), len));
     *nrb = I(std::min<int64_t>(nr, LANGE_MAX_BLOCKS));
 }
 
@@ -609,30 +629,31 @@ void rocsolver_lange_cols(rocblas_handle handle,
                           const I rchunk,
                           const I nrch,
                           S* part,
-                          const rocblas_stride psize)
+                          const rocblas_stride psize,
+                          const I b0)
 {
     const dim3 threads(bx, LANGE_THDS / bx, 1);
     switch(bx)
     {
     case 1:
         ROCSOLVER_LAUNCH_KERNEL((lange_cols_kernel<NORM, 1, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, rchunk, nrch, part, psize);
+                                shiftA, lda, strideA, rchunk, nrch, part, psize, b0);
         break;
     case 4:
         ROCSOLVER_LAUNCH_KERNEL((lange_cols_kernel<NORM, 4, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, rchunk, nrch, part, psize);
+                                shiftA, lda, strideA, rchunk, nrch, part, psize, b0);
         break;
     case 16:
         ROCSOLVER_LAUNCH_KERNEL((lange_cols_kernel<NORM, 16, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, rchunk, nrch, part, psize);
+                                shiftA, lda, strideA, rchunk, nrch, part, psize, b0);
         break;
     case LANGE_THDS:
         ROCSOLVER_LAUNCH_KERNEL((lange_cols_kernel<NORM, LANGE_THDS, T>), grid, threads, 0, stream,
-                                m, n, A, shiftA, lda, strideA, rchunk, nrch, part, psize);
+                                m, n, A, shiftA, lda, strideA, rchunk, nrch, part, psize, b0);
         break;
     default:
         ROCSOLVER_LAUNCH_KERNEL((lange_cols_kernel<NORM, LANGE_BX, T>), grid, threads, 0, stream, m,
-                                n, A, shiftA, lda, strideA, rchunk, nrch, part, psize);
+                                n, A, shiftA, lda, strideA, rchunk, nrch, part, psize, b0);
     }
 }
 
@@ -650,30 +671,31 @@ void rocsolver_lange_rows(rocblas_handle handle,
                           const rocblas_stride strideA,
                           const I cchunk,
                           const I ncch,
-                          S* part)
+                          S* part,
+                          const I b0)
 {
     const dim3 threads(bx, LANGE_THDS / bx, 1);
     switch(bx)
     {
     case 1:
         ROCSOLVER_LAUNCH_KERNEL((lange_rows_kernel<1, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, cchunk, ncch, part);
+                                shiftA, lda, strideA, cchunk, ncch, part, b0);
         break;
     case 4:
         ROCSOLVER_LAUNCH_KERNEL((lange_rows_kernel<4, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, cchunk, ncch, part);
+                                shiftA, lda, strideA, cchunk, ncch, part, b0);
         break;
     case 16:
         ROCSOLVER_LAUNCH_KERNEL((lange_rows_kernel<16, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, cchunk, ncch, part);
+                                shiftA, lda, strideA, cchunk, ncch, part, b0);
         break;
     case LANGE_THDS:
         ROCSOLVER_LAUNCH_KERNEL((lange_rows_kernel<LANGE_THDS, T>), grid, threads, 0, stream, m, n,
-                                A, shiftA, lda, strideA, cchunk, ncch, part);
+                                A, shiftA, lda, strideA, cchunk, ncch, part, b0);
         break;
     default:
         ROCSOLVER_LAUNCH_KERNEL((lange_rows_kernel<LANGE_BX, T>), grid, threads, 0, stream, m, n, A,
-                                shiftA, lda, strideA, cchunk, ncch, part);
+                                shiftA, lda, strideA, cchunk, ncch, part, b0);
     }
 }
 
@@ -736,7 +758,7 @@ rocblas_status rocsolver_lange_template(rocblas_handle handle,
     {
         if(norms)
         {
-            const I blocks = (batch_count - 1) / BS1 + 1;
+            const I blocks = ceildiv(batch_count, BS1);
             ROCSOLVER_LAUNCH_KERNEL((reset_info<S, I, S>), dim3(blocks), dim3(BS1), 0, stream,
                                     norms, batch_count, S(0));
         }
@@ -758,38 +780,44 @@ rocblas_status rocsolver_lange_template(rocblas_handle handle,
     // block otherwise
     const I rlen = (ncch > 1) ? m : nrb;
 
-    dim3 gridc(ncb, nrch, batch_count);
-    dim3 gridr(nrb, ncch, batch_count);
-    dim3 gridf(1, 1, batch_count);
-    dim3 threadsf(LANGE_FINAL_THDS);
-
-    switch(norm_type)
+    // (the third dimension of a grid is limited: larger batches are launched in chunks of
+    // matrices b0, b0 + 1, ...)
+    const dim3 threadsf(LANGE_FINAL_THDS);
+    for(I b0 = 0; b0 < batch_count; b0 += LANGE_MAX_BATCH_BLOCKS)
     {
-    case rocsolver_norm_type_one:
-        rocsolver_lange_cols<LANGE_NORM_SUM, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
-                                                strideA, rchunk, nrch, work, psize);
-        ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_SUM, I, S>), gridf, threadsf, 0,
-                                stream, clen, nrch, work, psize, norms);
-        break;
-    case rocsolver_norm_type_infinity:
-        rocsolver_lange_rows<T>(handle, stream, bx, gridr, m, n, A, shiftA, lda, strideA, cchunk,
-                                ncch, work);
-        ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_SUM, I, S>), gridf, threadsf, 0,
-                                stream, rlen, ncch, work, psize, norms);
-        break;
-    case rocsolver_norm_type_max:
-        rocsolver_lange_cols<LANGE_NORM_MAX, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
-                                                strideA, rchunk, nrch, work, psize);
-        ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_MAX, I, S>), gridf, threadsf, 0,
-                                stream, clen, nrch, work, psize, norms);
-        break;
-    case rocsolver_norm_type_frobenius:
-        rocsolver_lange_cols<LANGE_NORM_FRO, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
-                                                strideA, rchunk, nrch, work, psize);
-        ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_FRO, I, S>), gridf, threadsf, 0,
-                                stream, clen, nrch, work, psize, norms);
-        break;
-    default: return rocblas_status_invalid_value;
+        const I nb = std::min(batch_count - b0, I(LANGE_MAX_BATCH_BLOCKS));
+        const dim3 gridc(ncb, nrch, nb);
+        const dim3 gridr(nrb, ncch, nb);
+        const dim3 gridf(1, 1, nb);
+
+        switch(norm_type)
+        {
+        case rocsolver_norm_type_one:
+            rocsolver_lange_cols<LANGE_NORM_SUM, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
+                                                    strideA, rchunk, nrch, work, psize, b0);
+            ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_SUM, I, S>), gridf, threadsf, 0,
+                                    stream, clen, nrch, work, psize, norms, b0);
+            break;
+        case rocsolver_norm_type_infinity:
+            rocsolver_lange_rows<T>(handle, stream, bx, gridr, m, n, A, shiftA, lda, strideA,
+                                    cchunk, ncch, work, b0);
+            ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_SUM, I, S>), gridf, threadsf, 0,
+                                    stream, rlen, ncch, work, psize, norms, b0);
+            break;
+        case rocsolver_norm_type_max:
+            rocsolver_lange_cols<LANGE_NORM_MAX, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
+                                                    strideA, rchunk, nrch, work, psize, b0);
+            ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_MAX, I, S>), gridf, threadsf, 0,
+                                    stream, clen, nrch, work, psize, norms, b0);
+            break;
+        case rocsolver_norm_type_frobenius:
+            rocsolver_lange_cols<LANGE_NORM_FRO, T>(handle, stream, bx, gridc, m, n, A, shiftA, lda,
+                                                    strideA, rchunk, nrch, work, psize, b0);
+            ROCSOLVER_LAUNCH_KERNEL((lange_final_kernel<LANGE_NORM_FRO, I, S>), gridf, threadsf, 0,
+                                    stream, clen, nrch, work, psize, norms, b0);
+            break;
+        default: return rocblas_status_invalid_value;
+        }
     }
 
     return rocblas_status_success;
