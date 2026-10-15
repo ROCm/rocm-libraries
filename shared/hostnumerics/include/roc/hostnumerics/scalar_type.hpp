@@ -300,12 +300,30 @@ struct ScalarTag {
 };
 }  // namespace detail
 
-// Dispatch to visitor.template operator()<Tag>(args...), where Tag exposes type,
-// storageBits and Storage. Encodings sharing Storage still have distinct tags.
-// The visitor must accept every tag and return the same type for each, including
-// void or a reference. Visitor and arguments retain their value categories.
-// Count and unnamed enum values throw std::invalid_argument without invoking the
-// visitor. Dispatch once when preparing a typed operation for an element loop.
+// Calls visitor.template operator()<Tag>(args...) with the tag for a runtime
+// ScalarType. Tag::type is the encoding, Tag::storageBits its width in bits, and
+// Tag::Storage the C++ type holding its encoded bits (void for sub-byte encodings).
+// Encodings that share Storage, such as Float16 and BFloat16, have distinct tags.
+//
+// Tag cannot be deduced from the arguments, so the visitor names it explicitly,
+// as in a lambda written []<typename Tag>(). Every tag must produce the same
+// return type; an explicit return type on the visitor gives clearer errors.
+// The visitor and arguments keep their value categories, and reference and void
+// returns are preserved. ScalarType::Count and values outside the enum throw
+// std::invalid_argument before the visitor is called.
+//
+// Dispatch once per operation and run the element loop inside the typed code:
+//
+//   visitScalarType(type, [&]<typename Tag>() {
+//       if constexpr (std::is_void_v<typename Tag::Storage>) {
+//           // Sub-byte encoding: read and write packed bits.
+//       } else {
+//           // Whole-byte encoding: access elements as typename Tag::Storage.
+//       }
+//   });
+//
+// To prepare an operation and run it later, return a pointer to a function
+// template specialized for the tag instead, such as `return &copyElements<Tag>;`.
 template <typename Visitor, typename... Args>
 decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
     auto dispatch = [&]<ScalarType TypeValue>() -> decltype(auto) {
