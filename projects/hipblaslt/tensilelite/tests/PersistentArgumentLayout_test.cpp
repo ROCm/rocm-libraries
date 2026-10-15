@@ -410,6 +410,34 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
     }
 }
 
+// The probe tail args are packed from internalArgsSupport alone, so a
+// DataParallel fixture with the probe bit set exercises the SK5 packing.
+TEST(PersistentArgumentLayout, OccupancyProbeAbsentWithoutSupportOrForGroupedGemm)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+    problem.setParams().setOccupancyProbe(&probe, 41, 256);
+
+    ContractionSolution plain;
+    configurePersistentSolution(plain, 3, 1);
+    ContractionSolution grouped;
+    configurePersistentSolution(grouped, 3, 1);
+    grouped.problemType.groupedGemm            = true;
+    grouped.internalArgsSupport.occupancyProbe = true;
+    for(auto* solution : {&plain, &grouped})
+    {
+        SCOPED_TRACE(solution == &plain ? "no probe support" : "grouped gemm");
+        auto launch = solution->resolvePersistentSettings(problem, device);
+        auto call   = solution->generateSingleCall<true>(
+            problem, persistentInputs(), device, launch, GSUSettings{});
+        EXPECT_FALSE(hasArgument(call.args, "ProbeAddr"));
+        EXPECT_FALSE(hasArgument(call.args, "ProbeEpoch"));
+        EXPECT_FALSE(hasArgument(call.args, "ProbeGrid"));
+        EXPECT_EQ(call.numWorkGroups.x, 7u);
+    }
+}
+
 TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
 {
     auto problem = persistentProblem();
@@ -424,9 +452,6 @@ TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
                                          device,
                                          plain.resolvePersistentSettings(problem, device),
                                          GSUSettings{});
-    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeAddr"));
-    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeEpoch"));
-    EXPECT_FALSE(hasArgument(plainCall.args, "ProbeGrid"));
 
     ContractionSolution solution;
     configurePersistentSolution(solution, 3, 1);
@@ -440,7 +465,8 @@ TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
     for(auto c :
         std::vector<Case>{{&probe, 0, 7}, {&probe, 7, 7}, {&probe, 256, 256}, {nullptr, 256, 7}})
     {
-        SCOPED_TRACE(::testing::Message() << c.addr << " " << c.minGrid);
+        SCOPED_TRACE(::testing::Message() << "addr=" << (c.addr ? "set" : "null")
+                                          << " minGrid=" << c.minGrid);
         problem.setParams().setOccupancyProbe(c.addr, 41 + c.minGrid, c.minGrid);
         auto launch = solution.resolvePersistentSettings(problem, device);
         auto call   = solution.generateSingleCall<true>(
@@ -467,8 +493,14 @@ TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
         EXPECT_EQ(bytes(args, 0, plainCall.args.size()),
                   bytes(plainCall.args, 0, plainCall.args.size()));
     }
+}
 
-    // A grid that is not 1-D below minGrid is not padded and gets no probe address.
+TEST(PersistentArgumentLayout, OccupancyProbeDisabledForMultiDimGridBelowMinGrid)
+{
+    auto problem = persistentProblem();
+    auto device  = persistentDevice(7);
+    int  probe   = 0;
+
     ContractionSolution cluster;
     configurePersistentSolution(cluster, 3, 1);
     cluster.sizeMapping.clusterDim             = TensileLite::dim3(2, 2, 1);
