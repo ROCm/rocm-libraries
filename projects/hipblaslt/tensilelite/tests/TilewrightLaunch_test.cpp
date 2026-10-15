@@ -413,12 +413,19 @@ TEST(TilewrightLaunchTest, PlansFromRecordsOnlyUnderDefaultLaunchSettings)
     fewerCus->computeUnitCount = 240;
     EXPECT_FALSE(samePlans(checkedPlans(kernels, fewerCus, true), defaults));
 
-    // The launch reads the force mode of the library's Debug, which
-    // reloadDebugBitsForTest() here does not reach, so it leaves the plans as
-    // they are.
-    for(auto const* value : {"0", "1", "-1"})
+    // reloadDebugBitsForTest() refreshes the one Debug that TensileLite reads,
+    // so a forced Hybrid sub-mode reaches the launch: it is a debug setting of
+    // defaultPersistentLaunchDebug(), and the plans come from
+    // resolvePersistentSettings().
+    for(auto const* value : {"0", "1"})
     {
         ScopedDebugEnv const env("TENSILE_STREAMK5_FORCE_MODE", value);
+        EXPECT_FALSE(samePlans(
+            checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), false), defaults))
+            << value;
+    }
+    {
+        ScopedDebugEnv const env("TENSILE_STREAMK5_FORCE_MODE", "-1");
         EXPECT_TRUE(samePlans(
             checkedPlans(kernels, makeDevice(AMDGPU::Processor::gfx950, 256), true), defaults));
     }

@@ -590,8 +590,8 @@ namespace TensileLite
 
     TENSILELITEHOST_EXPORT bool hasDefaultPersistentSettings(Hardware const& hardware);
 
-    // The settings of this library's Debug, the ones resolvePersistentSettings()
-    // passes: every binary that includes Debug.hpp holds its own Debug.
+    // The settings of Debug::Instance(), the ones resolvePersistentSettings()
+    // passes.
     TENSILELITEHOST_EXPORT DefaultPersistentLaunchDebug defaultPersistentLaunchDebug();
 
     struct GSUSettings
