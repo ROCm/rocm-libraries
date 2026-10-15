@@ -24,6 +24,14 @@ set_target_properties(tensilelite_write PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${_tensilelite_write_output}"
     RUNTIME_OUTPUT_DIRECTORY "${_tensilelite_write_output}"
 )
+# The tensilelite project root is already on sys.path for tests and for
+# tensilelite/bin. Copying the module there makes `import tensilelite_write`
+# succeed after a client or library build, with no separate step.
+add_custom_command(TARGET tensilelite_write POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:tensilelite_write>
+        "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
 
 set_property(TARGET tensilelite_write PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
     "${_tensilelite_write_install}")
@@ -44,6 +52,9 @@ if(_link_msgpack_host)
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_FILE:tensilelite-host>
                     $<TARGET_FILE_DIR:tensilelite_write>
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:tensilelite-host>
+                    "${CMAKE_CURRENT_SOURCE_DIR}/.."
             )
             install(FILES $<TARGET_FILE:tensilelite-host>
                 DESTINATION "${_tensilelite_write_install}"
