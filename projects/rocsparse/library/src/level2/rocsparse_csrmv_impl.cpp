@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -126,13 +126,12 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
             may_retarget_default ? &retarget_to_nnzsplit : nullptr));
         if(retarget_to_nnzsplit)
         {
-            delete p_csrmv_info[0];
-            p_csrmv_info[0] = nullptr;
+            // Adaptive analysis returns without an info object when it asks to leave.
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
                 handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
             p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_nnzsplit);
         }
-        else if(p_csrmv_info[0] != nullptr)
+        else if(may_retarget_default && p_csrmv_info[0] != nullptr)
         {
             p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_adaptive);
         }

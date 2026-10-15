@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Changed
+* `rocsparse_spmv` with the default algorithm (`rocsparse_spmv_alg_default`), for non-transposed CSR and for transposed CSC, now selects the nnz-split algorithm when the CSR-adaptive row-block partition is a poor fit. That is when row blocks covering mostly empty rows span a substantial share of the matrix, or when many row blocks are closed by a long-row to short-row transition before they contain a full block of non-zeros. An empty prefix or suffix that the adaptive algorithm already skips does not cause the switch. Explicit algorithm selections, including `rocsparse_spmv_alg_csr_adaptive`, are unchanged, as are the transpose and conjugate-transpose defaults.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
