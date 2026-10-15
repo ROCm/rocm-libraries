@@ -95,7 +95,7 @@ scales. Output scaling is not forwarded by the 3D adapter and must be numeric
 unit scaling. Unit values exclude booleans, including on default P1 launches.
 Gather-only address and workspace bounds do not restrict page-contained loaders.
 
-The whole-page DMA work in PR #13492 can add a loader kind with separate
+The planned whole-page DMA work can add a loader kind with separate
 cooperative-transfer geometry checks. Current gather restrictions remain in
 place, including rejection of P16/T64. Page-ID caching must preserve safe table
 reads, and page-ID substitution alone does not guarantee zero invalid K/V data.
