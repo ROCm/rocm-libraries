@@ -31,7 +31,6 @@
 #include <type_traits>
 
 #include <cassert>
-#include <cstring>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -287,19 +286,22 @@ constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
 };
 
 /**
- * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
+ * \brief Checks if the first `n` characters of `rhs` are equivalent to `lhs`
  * 
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
- * \return true if the `n` character long prefix of `rhs` is equal to `lhs`
+ * \return true if the `n` character long prefix of `rhs` is equivalent to `lhs`,
+ *         with '-' in `rhs` treated as equivalent to '_' in `lhs`.
  */
 constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
 {
     std::size_t i = 0;
     for(; i < n; ++i)
     {
-        if(*lhs != *rhs || *lhs == '\0')
+        // Treat '-' in rhs as equivalent to '_' in lhs
+        const bool same = *lhs == *rhs || (*lhs == '_' && *rhs == '-');
+        if(!same || *lhs == '\0')
         {
             break;
         }
@@ -384,14 +386,7 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
         return result;
     }
 
-    // `gfx1250-strict` isn't valid C++ syntax, so if gcnArchName is `gfx1250-strict`, it will be converted to `gfx1250_strict` in parse_gcn_arch.
-    char* arch_name = device_props.gcnArchName;
-    char hyphen = '-';
-    char underscore = '_';
-    char* arch_name_end = arch_name + std::strlen(arch_name);
-    std::replace(arch_name, arch_name_end, hyphen, underscore);
-
-    arch = parse_gcn_arch(arch_name);
+    arch = parse_gcn_arch(device_props.gcnArchName);
     arch_cache[device_id].exchange(arch, std::memory_order_relaxed);
 
     return hipSuccess;
