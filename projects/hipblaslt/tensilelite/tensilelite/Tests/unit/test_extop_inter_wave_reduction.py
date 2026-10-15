@@ -1,7 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Synchronization contracts for generated multi-wave extension reductions."""
+"""Synchronization contracts for generated multi-wave extension reductions.
+
+Both generators below target gfx90a. When this process imported stinkytofu,
+the reduction text is rendered in a native-rocisa worker.
+"""
 
 import os
 import sys
@@ -13,6 +17,7 @@ TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 if TENSILE_ROOT not in sys.path:
     sys.path.insert(0, TENSILE_ROOT)
 
+from codegen_harness import run_where_backend_matches_isa  # noqa: E402
 from gpu_test_helpers import init_rocisa  # noqa: E402
 
 from Tensile.Common.Architectures import gfxToIsa  # noqa: E402
@@ -61,10 +66,17 @@ def _between(text: str, start: str, end: str) -> str:
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
+def _inter_wave_reduction_text(make_generator):
+    return str(make_generator().inter_wave_reduction())
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("make_generator", [_amax_generator, _layer_norm_generator])
 def test_inter_wave_reduction_synchronizes_before_lds_reuse(make_generator):
-    text = str(make_generator().inter_wave_reduction())
+    # Both generators hardcode gfx90a, so the worker split follows that ISA.
+    text = run_where_backend_matches_isa(
+        gfxToIsa("gfx90a"), _inter_wave_reduction_text, make_generator
+    )
 
     upper = _between(text, "label_upper:", "label_lower:")
     lower = _between(text, "label_lower:", "label_empty:")
