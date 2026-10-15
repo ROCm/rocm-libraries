@@ -1,27 +1,38 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "candidate_search.hpp"
+#include <hipblaslt_benchmark/candidate_search.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <functional>
 #include <gtest/gtest.h>
+#include <limits>
 #include <string>
 #include <vector>
 
 namespace
 {
-    // Holds the host for about `us` microseconds. These cases time on the CPU, so a
-    // launch that spins is measured at roughly its spin.
-    void spin_us(double us)
+    // A hooks policy whose clock moves only when a launch below moves it, so every time
+    // is exact and no GPU is involved. One read of the clock can be made to fail.
+    struct FakeClock
     {
-        const auto end
-            = std::chrono::steady_clock::now() + std::chrono::duration<double, std::micro>(us);
-        while(std::chrono::steady_clock::now() < end)
+        static inline double now_us    = 0.0;
+        static inline int    reads     = 0;
+        static inline int    fail_read = -1; // the read that fails, counting from 0
+
+        static bool check(hipError_t status, const char*, const char*, int)
         {
+            return status == hipSuccess;
         }
-    }
+
+        static bool time_us_sync(hipStream_t, double& us)
+        {
+            if(reads++ == fail_read)
+                return false;
+            us = now_us;
+            return true;
+        }
+    };
 
     std::string entry(const char* what, size_t sol)
     {
@@ -33,48 +44,68 @@ namespace
         return entry(what, sol) + " " + std::to_string(i);
     }
 
-    // A search over host-only candidates, each launch spinning for its candidate's
-    // time, that records every callback.
+    // A search over host-only candidates, each launch moving the clock on by its
+    // candidate's time, that records every callback.
     struct HostSearch
     {
-        std::vector<double>         cold_us;
-        std::vector<double>         launch_us;
-        std::vector<std::string>    log;
-        std::function<bool()>       should_abort;
-        std::function<void(size_t)> on_prepare;
+        std::vector<double>                  cold_us;
+        std::vector<double>                  launch_us;
+        std::vector<std::string>             log;
+        std::function<bool()>                should_abort;
+        std::function<void(size_t)>          on_prepare;
+        std::function<void(size_t, int32_t)> on_cold;
+        std::vector<bool>                    runnable; // prepare's answers, empty for all yes
+        std::vector<bool>                    eligible; // measured's answers, empty for all yes
+        std::function<bool()>                should_stop;
+
+        HostSearch()
+        {
+            FakeClock::now_us    = 0.0;
+            FakeClock::reads     = 0;
+            FakeClock::fail_read = -1;
+        }
 
         hipblaslt_bench::SearchResult run(const hipblaslt_bench::SearchConfig& search,
                                           const hipblaslt_bench::TimingConfig& timing)
         {
-            hipEvent_t  start  = nullptr;
-            hipEvent_t  stop   = nullptr;
-            hipStream_t stream = nullptr;
-            return hipblaslt_bench::search_candidates(
+            return hipblaslt_bench::search_candidates<FakeClock>(
                 launch_us.size(),
                 search,
                 timing,
-                start,
-                stop,
-                stream,
-                [&](size_t sol) {
-                    log.push_back(entry("prepare", sol));
-                    if(on_prepare)
-                        on_prepare(sol);
-                },
-                [&](size_t sol, int32_t i) {
-                    log.push_back(entry("cold", sol, i));
-                    spin_us(cold_us.empty() ? 0.0 : cold_us[sol]);
-                },
-                [&](size_t sol, int64_t i) {
-                    log.push_back(entry("launch", sol, i));
-                    spin_us(launch_us[sol]);
-                },
-                [&](size_t sol, double, double) { log.push_back(entry("skipped", sol)); },
-                [&](size_t sol) { log.push_back(entry("measuring", sol)); },
-                [&](size_t sol, hipblaslt_bench::TimingResult&) {
-                    log.push_back(entry("measured", sol));
-                },
+                nullptr,
+                nullptr,
+                nullptr,
+                hipblaslt_bench::search_callbacks()
+                    .prepare([&](size_t sol) {
+                        log.push_back(entry("prepare", sol));
+                        if(on_prepare)
+                            on_prepare(sol);
+                        return runnable.empty() || runnable[sol];
+                    })
+                    .cold([&](size_t sol, int32_t i) {
+                        log.push_back(entry("cold", sol, i));
+                        FakeClock::now_us += cold_us.empty() ? 0.0 : cold_us[sol];
+                        if(on_cold)
+                            on_cold(sol, i);
+                    })
+                    .launch([&](size_t sol, int64_t i) {
+                        log.push_back(entry("launch", sol, i));
+                        FakeClock::now_us += launch_us[sol];
+                    })
+                    .skipped(
+                        [&](size_t sol, double, double) { log.push_back(entry("skipped", sol)); })
+                    .measuring([&](size_t sol) { log.push_back(entry("measuring", sol)); })
+                    .measured([&](size_t sol, hipblaslt_bench::TimingResult&) {
+                        log.push_back(entry("measured", sol));
+                        return eligible.empty() || eligible[sol];
+                    })
+                    .should_stop([&] { return should_stop && should_stop(); }),
                 should_abort);
+        }
+
+        long count(const std::string& line) const
+        {
+            return std::count(log.begin(), log.end(), line);
         }
     };
 
@@ -100,7 +131,7 @@ TEST(CandidateSearch_pre_checkin, RunsEachCandidateInOrderAndPicksTheFastest)
     const auto result = host.run(search, cpu_timing(3));
     EXPECT_FALSE(result.aborted);
     EXPECT_EQ(result.best, 1u);
-    EXPECT_GT(result.best_timing.median_us, 0.0);
+    EXPECT_EQ(result.best_timing.median_us, 100.0);
 
     std::vector<std::string> expected;
     for(size_t sol = 0; sol < host.launch_us.size(); sol++)
@@ -130,16 +161,12 @@ TEST(CandidateSearch_pre_checkin, SkipSlowDropsOnlyACandidateWithSlowColdLaunche
 
     const auto result = host.run(search, cpu_timing(2));
     EXPECT_EQ(result.best, 2u) << "the fastest launch belongs to the skipped candidate";
-
-    auto count = [&](const std::string& line) {
-        return std::count(host.log.begin(), host.log.end(), line);
-    };
-    EXPECT_EQ(count(entry("skipped", 0)), 0);
-    EXPECT_EQ(count(entry("skipped", 1)), 1);
-    EXPECT_EQ(count(entry("skipped", 2)), 0);
-    EXPECT_EQ(count(entry("measuring", 1)), 0);
-    EXPECT_EQ(count(entry("measured", 0)), 1);
-    EXPECT_EQ(count(entry("measured", 2)), 1);
+    EXPECT_EQ(host.count(entry("skipped", 0)), 0);
+    EXPECT_EQ(host.count(entry("skipped", 1)), 1);
+    EXPECT_EQ(host.count(entry("skipped", 2)), 0);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 0);
+    EXPECT_EQ(host.count(entry("measured", 0)), 1);
+    EXPECT_EQ(host.count(entry("measured", 2)), 1);
 }
 
 // A fatal failure while a candidate is prepared ends the search there.
@@ -159,82 +186,119 @@ TEST(CandidateSearch_pre_checkin, AFailureWhilePreparingEndsTheSearch)
     EXPECT_EQ(host.log.back(), entry("prepare", 1));
 }
 
-namespace
+// A fatal failure in a cold launch ends the search at that launch, whether or not the
+// cold launches are being timed.
+TEST(CandidateSearch_pre_checkin, AFailureDuringAColdLaunchEndsTheSearch)
 {
-    // A search over host-only candidates whose prepare and measured hooks answer
-    // whether a candidate may run and may win, and which can be stopped.
-    struct FilteredSearch
+    for(float ratio : {0.0f, 0.5f})
     {
-        std::vector<double>      launch_us;
-        std::vector<bool>        runnable;
-        std::vector<bool>        eligible;
-        std::function<bool()>    should_stop;
-        std::vector<std::string> log;
+        SCOPED_TRACE(ratio);
+        HostSearch host;
+        host.launch_us = {50, 50};
 
-        hipblaslt_bench::SearchResult run()
-        {
-            hipEvent_t  start  = nullptr;
-            hipEvent_t  stop   = nullptr;
-            hipStream_t stream = nullptr;
-            return hipblaslt_bench::search_candidates(
-                launch_us.size(),
-                hipblaslt_bench::SearchConfig{},
-                cpu_timing(2),
-                start,
-                stop,
-                stream,
-                [&](size_t sol) {
-                    log.push_back(entry("prepare", sol));
-                    return runnable.empty() || runnable[sol];
-                },
-                [&](size_t sol, int32_t) { log.push_back(entry("cold", sol)); },
-                [&](size_t sol, int64_t) { spin_us(launch_us[sol]); },
-                [&](size_t, double, double) {},
-                [&](size_t sol) { log.push_back(entry("measuring", sol)); },
-                [&](size_t sol, hipblaslt_bench::TimingResult&) {
-                    return eligible.empty() || eligible[sol];
-                },
-                {},
-                should_stop);
-        }
-    };
-} // namespace
+        bool failed       = false;
+        host.should_abort = [&] { return failed; };
+        host.on_cold      = [&](size_t, int32_t) { failed = true; };
+
+        hipblaslt_bench::SearchConfig search;
+        search.cold_calls      = 3;
+        search.skip_slow_ratio = ratio;
+        const auto result      = host.run(search, cpu_timing(2));
+        EXPECT_TRUE(result.aborted);
+        EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
+        EXPECT_EQ(host.log, (std::vector<std::string>{entry("prepare", 0), entry("cold", 0, 0)}));
+    }
+}
+
+// A candidate whose timed launches could not be timed is passed over, rather than
+// winning with the zero it was never measured at.
+TEST(CandidateSearch_pre_checkin, ACandidateThatCouldNotBeTimedCannotWin)
+{
+    HostSearch host;
+    host.launch_us       = {10, 300, 200};
+    FakeClock::fail_read = 1; // the read ending candidate 0's timed launches
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(result.best_timing.median_us, 200.0);
+    EXPECT_EQ(host.count(entry("measured", 0)), 0);
+}
+
+// A candidate whose cold launches could not be timed is passed over without setting
+// the best cold time, which would otherwise get every later candidate skipped.
+TEST(CandidateSearch_pre_checkin, AFailedColdTimingSkipsNoOtherCandidate)
+{
+    HostSearch host;
+    host.cold_us         = {100, 100, 100};
+    host.launch_us       = {300, 200, 100};
+    FakeClock::fail_read = 1; // the read ending candidate 0's cold launches
+
+    hipblaslt_bench::SearchConfig search;
+    search.cold_calls      = 1;
+    search.skip_slow_ratio = 0.5f;
+
+    const auto result = host.run(search, cpu_timing(1));
+    EXPECT_EQ(result.best, 2u);
+    EXPECT_EQ(host.count(entry("measuring", 0)), 0);
+    EXPECT_EQ(host.count(entry("skipped", 1)), 0);
+    EXPECT_EQ(host.count(entry("skipped", 2)), 0);
+    EXPECT_EQ(host.count(entry("measured", 1)), 1);
+    EXPECT_EQ(host.count(entry("measured", 2)), 1);
+}
+
+// An adaptive configuration that run_measurement would reject searches nothing.
+TEST(CandidateSearch_pre_checkin, AnInvalidAdaptiveConfigurationSearchesNothing)
+{
+    HostSearch host;
+    host.launch_us = {100, 200};
+
+    hipblaslt_bench::TimingConfig timing = cpu_timing(1);
+    timing.adaptive                      = true;
+    timing.min_iters                     = -1;
+    ASSERT_FALSE(hipblaslt_bench::validate_adaptive_config(timing).empty());
+
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, timing);
+    EXPECT_FALSE(result.aborted);
+    EXPECT_EQ(result.best, std::numeric_limits<size_t>::max());
+    EXPECT_TRUE(host.log.empty());
+}
 
 // A candidate whose preparation says it cannot run is neither launched nor timed.
 TEST(CandidateSearch_pre_checkin, PrepareCanSkipACandidate)
 {
-    FilteredSearch host;
+    HostSearch host;
     host.launch_us = {300, 50, 200};
     host.runnable  = {true, false, true};
 
-    const auto result = host.run();
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
     EXPECT_EQ(result.best, 2u);
-    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("measuring", 1)), 0);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 0);
 }
 
 // A candidate measured but ruled out afterwards cannot win, however fast it was.
 TEST(CandidateSearch_pre_checkin, MeasuredCanRuleOutACandidate)
 {
-    FilteredSearch host;
+    HostSearch host;
     host.launch_us = {300, 50, 200};
     host.eligible  = {true, false, true};
 
-    const auto result = host.run();
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
     EXPECT_EQ(result.best, 2u);
-    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("measuring", 1)), 1);
+    EXPECT_EQ(host.count(entry("measuring", 1)), 1);
 }
 
 // should_stop is asked before each candidate; the search ends at the first yes and
 // reports so, keeping the best of the candidates it reached.
 TEST(CandidateSearch_pre_checkin, ShouldStopEndsTheSearchBetweenCandidates)
 {
-    FilteredSearch host;
+    HostSearch host;
     host.launch_us   = {300, 200, 50};
     size_t asked     = 0;
     host.should_stop = [&] { return asked++ == 2; };
 
-    const auto result = host.run();
+    const auto result = host.run(hipblaslt_bench::SearchConfig{}, cpu_timing(2));
     EXPECT_TRUE(result.stopped);
     EXPECT_EQ(result.best, 1u);
-    EXPECT_EQ(std::count(host.log.begin(), host.log.end(), entry("prepare", 2)), 0);
+    EXPECT_EQ(host.count(entry("prepare", 2)), 0);
 }

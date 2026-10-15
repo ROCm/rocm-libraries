@@ -109,6 +109,7 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
         "gfx1100",
         "gfx1101",
         "gfx1102",
+        "gfx1151",
         "gfx1200",
         "gfx1201",
         "gfx1250",

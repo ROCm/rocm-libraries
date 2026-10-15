@@ -85,22 +85,6 @@
 #include <unordered_map>
 #include <vector>
 
-// Tune mode times candidates with hipblaslt-bench's own measurement code. A HIP call
-// that fails inside it sets this flag, so a candidate is not credited with a time
-// its timer never recorded.
-namespace
-{
-    thread_local bool gTuningMeasurementFailed = false;
-}
-#define HIPBLASLT_BENCHMARK_CHECK_HIP(expr)  \
-    do                                       \
-    {                                        \
-        if((expr) != hipSuccess)             \
-        {                                    \
-            gTuningMeasurementFailed = true; \
-            return;                          \
-        }                                    \
-    } while(0)
 #include <hipblaslt_benchmark/candidate_search.hpp>
 
 #define HIPBLASLT_LIB_PATH "/opt/rocm/lib"
@@ -4644,8 +4628,7 @@ namespace
         search.cold_calls = TuningPolicy::coldIterations();
         search.flush      = TuningPolicy::flushICache();
 
-        hipStream_t stream       = prob.stream;
-        gTuningMeasurementFailed = false;
+        hipStream_t stream = prob.stream;
         if(search.flush)
         {
             int             device = 0;
@@ -4655,9 +4638,8 @@ namespace
                 return TuningAttempt::FallbackSetup;
 
             search.flush_grid = hipblaslt_bench::flush_icache_grid(props);
-            timing.flush_us   = hipblaslt_bench::flush_cost_us(
-                timing.use_gpu_timer, props, events.start, events.stop, stream);
-            if(gTuningMeasurementFailed)
+            if(!hipblaslt_bench::flush_cost_us(
+                   timing.use_gpu_timer, props, events.start, events.stop, stream, timing.flush_us))
             {
                 static_cast<void>(hipGetLastError());
                 return TuningAttempt::FallbackSetup;
@@ -4694,7 +4676,20 @@ namespace
             static_cast<void>(hipGetLastError());
         };
 
+        // Opened as a candidate's timed phase starts and closed by recordMeasurement.
+        // One still open later could not be timed, and the search passed it over
+        // without recording it.
+        bool timedPhaseOpen      = false;
+        auto discardUntimedPhase = [&] {
+            if(timedPhaseOpen)
+            {
+                timedPhaseOpen = false;
+                discardCandidate();
+            }
+        };
+
         auto prepare = [&](size_t c) -> bool {
+            discardUntimedPhase();
             attempted++;
             perBlock.clear();
             required     = 0;
@@ -4762,9 +4757,9 @@ namespace
         };
 
         auto recordMeasurement = [&](size_t c, hipblaslt_bench::TimingResult& result) -> bool {
-            if(launchFailed || gTuningMeasurementFailed)
+            timedPhaseOpen = false;
+            if(launchFailed)
             {
-                gTuningMeasurementFailed = false;
                 discardCandidate();
                 return false;
             }
@@ -4818,14 +4813,14 @@ namespace
             events.start,
             events.stop,
             stream,
-            prepare,
-            [&](size_t, int32_t i) { launchBlock(i); },
-            [&](size_t, int64_t i) { launchBlock(i); },
-            [](size_t, double, double) {},
-            [](size_t) {},
-            recordMeasurement,
-            {},
-            shouldStop);
+            hipblaslt_bench::search_callbacks()
+                .prepare(prepare)
+                .cold([&](size_t, int32_t i) { launchBlock(i); })
+                .launch([&](size_t, int64_t i) { launchBlock(i); })
+                .measuring([&](size_t) { timedPhaseOpen = true; })
+                .measured(recordMeasurement)
+                .should_stop(shouldStop));
+        discardUntimedPhase();
 
         if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
         {

@@ -19,6 +19,52 @@ namespace hipdnn_integration_tests::test_utils
 // Use the canonical implementation from data_sdk.
 using hipdnn_data_sdk::utilities::generateStrides;
 
+// How a FLOAT operand (attention scale, fp8 descale) is stored.
+enum class OperandStorage
+{
+    DEVICE, // device pointer in the variant pack
+    BAKED, // value lives in the graph; the variant pack may omit it
+    RUNTIME_PASS_BY_VALUE, // host pointer in the variant pack
+};
+
+// BAKED and RUNTIME_PASS_BY_VALUE operands must be scalars ([1]). DEVICE operands may be larger,
+// e.g. per-KV-head descales [B, H_kv, 1, 1].
+struct FloatOperandSpec
+{
+    int64_t uid = 0;
+    OperandStorage storage = OperandStorage::DEVICE;
+    float bakedValue = 0.0f; // BAKED only
+    std::vector<int64_t> dims = {1};
+};
+
+// Appends a FLOAT operand tensor in the storage mode its spec asks for.
+inline void addFloatOperandTensor(
+    flatbuffers::FlatBufferBuilder& builder,
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>&
+        tensors,
+    const FloatOperandSpec& spec,
+    const char* name)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto strides = generateStrides(spec.dims);
+    const bool baked = spec.storage == OperandStorage::BAKED;
+    const Float32Value bakedValue(spec.bakedValue);
+    const flatbuffers::Offset<void> value
+        = baked ? builder.CreateStruct(bakedValue).Union() : flatbuffers::Offset<void>();
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder,
+        spec.uid,
+        name,
+        DataType::FLOAT,
+        &strides,
+        &spec.dims,
+        /*virtual_=*/false,
+        baked ? TensorValue::Float32Value : TensorValue::NONE,
+        value,
+        /*is_runtime_pass_by_value=*/spec.storage == OperandStorage::RUNTIME_PASS_BY_VALUE));
+}
+
 // Creates a minimal single-node SDPA-forward flatbuffer graph with packed Q/K/V/O tensors.
 // The q/k/v/o tensor uids are written into `attrs`, so callers only need to set behavior
 // fields (attn_scale_value, bounds, causal flags, attn_mask_tensor_uid, or any unsupported-mode
@@ -38,7 +84,8 @@ inline flatbuffers::FlatBufferBuilder
                        const std::vector<int64_t>& oDims,
                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                        hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
-                       std::optional<int64_t> statsUid = std::nullopt)
+                       std::optional<int64_t> statsUid = std::nullopt,
+                       std::optional<FloatOperandSpec> scale = std::nullopt)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -49,6 +96,10 @@ inline flatbuffers::FlatBufferBuilder
     if(statsUid.has_value())
     {
         attrs.stats_tensor_uid = statsUid;
+    }
+    if(scale.has_value())
+    {
+        attrs.scale_tensor_uid = scale->uid;
     }
 
     flatbuffers::FlatBufferBuilder builder;
@@ -79,6 +130,11 @@ inline flatbuffers::FlatBufferBuilder
             builder, statsUid.value(), "Stats", DataType::FLOAT, &statsStrides, &statsDims));
     }
 
+    if(scale.has_value())
+    {
+        addFloatOperandTensor(builder, tensors, scale.value(), "Scale");
+    }
+
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -103,24 +159,6 @@ enum class RaggedStatsLayout
     DENSE,
     // [B, H, Sq_max, 1], packed by token (seq stride = H) with its own ragged_offset.
     PACKED,
-};
-
-// How a FLOAT operand (attention scale, fp8 descale) is stored.
-enum class OperandStorage
-{
-    DEVICE, // device pointer in the variant pack
-    BAKED, // value lives in the graph; the variant pack may omit it
-    RUNTIME_PASS_BY_VALUE, // host pointer in the variant pack
-};
-
-// BAKED and RUNTIME_PASS_BY_VALUE operands must be scalars ([1]). DEVICE operands may be larger,
-// e.g. per-KV-head descales [B, H_kv, 1, 1].
-struct FloatOperandSpec
-{
-    int64_t uid = 0;
-    OperandStorage storage = OperandStorage::DEVICE;
-    float bakedValue = 0.0f; // BAKED only
-    std::vector<int64_t> dims = {1};
 };
 
 // Optional parts of a ragged SDPA graph. Defaults leave each one out.
@@ -340,26 +378,6 @@ inline flatbuffers::FlatBufferBuilder
         }
     }
 
-    // Adds a FLOAT operand in the storage mode its spec asks for.
-    const auto addFloatOperand = [&](const FloatOperandSpec& spec, const char* name) {
-        const auto strides = generateStrides(spec.dims);
-        const bool baked = spec.storage == OperandStorage::BAKED;
-        const Float32Value bakedValue(spec.bakedValue);
-        const flatbuffers::Offset<void> value
-            = baked ? builder.CreateStruct(bakedValue).Union() : flatbuffers::Offset<void>();
-        tensors.push_back(CreateTensorAttributesDirect(
-            builder,
-            spec.uid,
-            name,
-            DataType::FLOAT,
-            &strides,
-            &spec.dims,
-            /*virtual_=*/false,
-            baked ? TensorValue::Float32Value : TensorValue::NONE,
-            value,
-            /*is_runtime_pass_by_value=*/spec.storage == OperandStorage::RUNTIME_PASS_BY_VALUE));
-    };
-
     for(const auto& [spec, name] : {std::pair{&options.scale, "Scale"},
                                     std::pair{&options.descaleQ, "DescaleQ"},
                                     std::pair{&options.descaleK, "DescaleK"},
@@ -367,7 +385,7 @@ inline flatbuffers::FlatBufferBuilder
     {
         if(spec->has_value())
         {
-            addFloatOperand(spec->value(), name);
+            addFloatOperandTensor(builder, tensors, spec->value(), name);
         }
     }
 
