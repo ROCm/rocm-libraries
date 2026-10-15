@@ -1464,8 +1464,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
             args.o_ptr    = o_buf.GetDeviceBuffer();
 
             // Batch: per-sequence K; group: total physical K, a sched selector hint.
-            args.seqlen_k     = shape_seqlen_k;
-            args.max_seqlen_q = pack_gqa_seqlen_q_; // use packed seqlen for grid size
+            args.seqlen_k = shape_seqlen_k;
+            // Packed seqlen for the Pack-GQA grid (batch mode only); otherwise the longest
+            // sequence, not the group-mode total, sizes the grid.
+            args.max_seqlen_q = pack_gqa_nhead_ != nhead ? pack_gqa_seqlen_q_ : max_seqlen_q;
 
             args.scale_s = scale_s;
 
