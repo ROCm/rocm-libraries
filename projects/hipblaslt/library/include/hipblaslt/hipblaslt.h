@@ -356,7 +356,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER = 7,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix C. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER = 8,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix D. Default value: NULL. Data type: ``void*`` / ``const void*``. */
-  HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix AUX. Default value: NULL. Data type: ``void*`` / ``const void*``. */
+  HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Not supported: no kernel applies a scale to the AUX output. Setting a non-NULL pointer returns ``HIPBLAS_STATUS_NOT_SUPPORTED``; setting NULL succeeds. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER = 10,      /**<Epilogue auxiliary buffer pointer in the device memory. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD = 11,           /**<The leading dimension of the epilogue auxiliary buffer pointer in the device memory. Data type: ``int64_t``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE = 12, /**<The batch stride of the epilogue auxiliary buffer pointer in the device memory. Data type: ``int64_t``. */
