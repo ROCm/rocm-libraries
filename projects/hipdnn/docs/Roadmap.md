@@ -89,6 +89,9 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 **Focus:** SDPA, GEMM with MX low-precision data types, better heuristics & improved kernel provider selection
 
+> [!NOTE]
+> Q3 2026 ended on 2026-09-30. Items below that are not marked ✅ were not complete when the quarter ended. They stay listed here until the team reschedules them.
+
 ### SDPA
 - Wider SDPA coverage: FP16 and FP8 forward, head dims up to 256, broader GQA configurations ⏳
 - Production-quality backward pass, plus a forward GPU reference ⏳
