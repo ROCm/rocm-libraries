@@ -119,7 +119,7 @@ struct HandleImpl {
     struct RocfftPlanEntry {
         rocfft_plan plan = nullptr;
         rocfft_plan_description desc = nullptr;
-        size_t planBatch = 0;      // batch count baked into the plan at creation
+        size_t planBatch = 0;        // batch count baked into the plan at creation
         void* workBuffer = nullptr;  // sized for this plan; owned here, not by the caller
         size_t workBufferSize = 0;
     };
@@ -475,8 +475,7 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_pl
     }
 
     void* newWorkBuffer = nullptr;
-    if (newWorkBufferSize > 0 &&
-        hipMalloc(&newWorkBuffer, newWorkBufferSize) != hipSuccess) {
+    if (newWorkBufferSize > 0 && hipMalloc(&newWorkBuffer, newWorkBufferSize) != hipSuccess) {
         rocfft_plan_destroy(new_plan);
         rocfft_plan_description_destroy(new_desc);
         return RPP_ERROR_NOT_ENOUGH_MEMORY;

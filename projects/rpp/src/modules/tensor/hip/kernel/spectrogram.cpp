@@ -241,9 +241,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         return RPP_ERROR_HIP_RUNTIME;
 
     // The work buffer is owned by the plan cache and lives as long as the plan does
-    if (workBufferSize > 0 &&
-        rocfft_execution_info_set_work_buffer(execInfo, workBuffer, workBufferSize) !=
-            rocfft_status_success)
+    if (workBufferSize > 0 && rocfft_execution_info_set_work_buffer(
+                                  execInfo, workBuffer, workBufferSize) != rocfft_status_success)
         return RPP_ERROR_NOT_ENOUGH_MEMORY;
 
     size_t windowOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(nfft);
@@ -293,8 +292,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     // Allocate window output buffer (after d_windowFn). Zeroed across the plan's whole batch, not
     // just this call's, so that any surplus transforms see zeros.
     Rpp32f* windowOutput = d_windowFn + windowLength;
-    RPP_HIP_RETURN_IF_ERROR(hipMemsetAsync(windowOutput, 0, windowOutputFloats * sizeof(Rpp32f),
-                                           handle.GetStream()));
+    RPP_HIP_RETURN_IF_ERROR(
+        hipMemsetAsync(windowOutput, 0, windowOutputFloats * sizeof(Rpp32f), handle.GetStream()));
 
     // Compute the windowOutput for all samples in a batch. Each sample will be of shape
     // (numWindows, nfft)
