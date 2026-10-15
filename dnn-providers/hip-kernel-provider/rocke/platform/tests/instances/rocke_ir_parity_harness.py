@@ -4005,6 +4005,63 @@ def cases():
             block_groups=1,
         ),
     )
+    # The row-stream knobs: the policy's stack (two-row prefetch, LDS-only
+    # row barrier, XCD row-band order, column pad, staged output) on a
+    # whole-image tile with the early exit, and the split-M stack with
+    # 32-wide atoms.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c16_stream_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c16_stream",
+            "gfx950",
+            N=8,
+            H=7,
+            W=13,
+            groups=32,
+            cpg=16,
+            kpg=16,
+            dtype="bf16",
+            fold_k32=False,
+            weights_lds=True,
+            block_h=16,
+            knobs={
+                "row_exit": True,
+                "waves_per_eu": 4,
+                "prefetch_rows": 2,
+                "lds_only_sync": True,
+                "xcd_tiles": True,
+                "lds_pad": 8,
+                "stage_out": True,
+            },
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/mfma_dgrad_fwl_c32_k32_wm2_bf16",
+        "gfx950",
+        build_direct_mfma_dgrad_fused(
+            "irhash_mfma_dgrad_950_fwl_c32k32_wm2",
+            "gfx950",
+            N=8,
+            H=7,
+            W=13,
+            groups=16,
+            cpg=32,
+            kpg=32,
+            dtype="bf16",
+            fold_k32=True,
+            weights_lds=True,
+            block_groups=1,
+            knobs={
+                "prefetch_rows": 2,
+                "lds_only_sync": True,
+                "waves_m": 2,
+                "xcd_tiles": True,
+            },
+        ),
+    )
     add(
         "conv_direct_dgrad",
         "conv_direct_dgrad/gfx942/mfma_dgrad_fw_c12_fp16",

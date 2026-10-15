@@ -654,6 +654,66 @@ def _direct_builders():
                 arch=_ARCH,
             ),
         ),
+        # The row-stream knobs: the policy's stack on the LDS-staged fused
+        # form with the early exit (4-row tiles so every shape here has the
+        # row bands xcd_tiles needs), the split-M stack with 32-wide atoms, and the deeper
+        # prefetch with the column pad and staged output on the pre-pass
+        # weights.
+        (
+            "generic_stream",
+            {"cpg": 16, "kpg": 16, "groups": 8, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(
+                    pr,
+                    block_groups=2,
+                    block_h=4,
+                    dgrad_fused_weights=True,
+                    dgrad_weights_lds=True,
+                    waves_per_eu=4,
+                    row_guard=True,
+                    prefetch_rows=2,
+                    lds_only_sync=True,
+                    xcd_tiles=True,
+                    lds_pad=8,
+                    stage_out=True,
+                    row_exit=True,
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "generic_wm2",
+            {"cpg": 32, "kpg": 32, "groups": 4, "dtype": "bf16"},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(
+                    pr,
+                    block_h=4,
+                    fold_k32=True,
+                    dgrad_fused_weights=True,
+                    dgrad_weights_lds=True,
+                    row_guard=True,
+                    prefetch_rows=2,
+                    lds_only_sync=True,
+                    waves_m=2,
+                    xcd_tiles=True,
+                    stage_out=True,
+                ),
+                arch=_ARCH,
+            ),
+        ),
+        (
+            "generic_pf3_lp8_so",
+            {"cpg": 16, "kpg": 16, "groups": 8},
+            "fwd",
+            lambda pr: dc.build_direct_conv(
+                dc.make_dgrad_fprop_spec(
+                    pr, block_h=8, prefetch_rows=3, lds_pad=8, stage_out=True
+                ),
+                arch=_ARCH,
+            ),
+        ),
     ]
 
 

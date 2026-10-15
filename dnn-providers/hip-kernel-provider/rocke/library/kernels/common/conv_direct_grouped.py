@@ -85,6 +85,7 @@ from rocke.core.ir import (
 )
 from kernels.common.conv_abi import conv_direct_arg_names
 from rocke.helpers.fuse import dtype_to_ir
+from rocke.helpers.grid import chiplet_transform_chunked_runtime
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -2884,7 +2885,8 @@ def preload_weight_vgprs(spec: DirectConvSpec) -> int:
     p = spec.problem
     k_atom = 32 if spec.fold_k32 else 16
     n_k_atoms = p.cpg // k_atom if spec.fold_k32 else -(-p.cpg // k_atom)
-    n_m_tiles = -(-p.kpg // 16)
+    # Each of the ``waves_m`` waves of a group keeps only its own M-tiles.
+    n_m_tiles = -(-p.kpg // 16) // spec.waves_m
     return p.KH * p.KW * n_k_atoms * n_m_tiles * (k_atom // 4) // 2
 
 
@@ -2935,6 +2937,58 @@ def _direct_conv_weight_knobs_reason(spec: DirectConvSpec) -> str | None:
         )
     if spec.row_guard and spec.persistent_grid:
         return "row_guard needs persistent_grid=False"
+    return None
+
+
+def _direct_conv_row_stream_reason(spec: DirectConvSpec) -> str | None:
+    """Why the row-stream knobs of ``spec`` do not combine (``None`` when they
+    do). Knob and capability rules only; the ``xcd_tiles`` row-band count is
+    the one extent rule, checked in :meth:`DirectConvSpec.validate`."""
+    p = spec.problem
+    if spec.waves_m < 1:
+        return f"waves_m must be >= 1 (got {spec.waves_m})"
+    if not 0 <= spec.prefetch_rows <= 3:
+        return f"prefetch_rows must be in 0..3 (got {spec.prefetch_rows})"
+    if spec.lds_pad < 0 or spec.lds_pad % 8 != 0:
+        return f"lds_pad must be a multiple of 8 >= 0 (got {spec.lds_pad})"
+    if spec.lds_pad and spec.runtime_channels:
+        return "lds_pad needs baked channels"
+    if spec.stage_out and (
+        p.kpg % 16 != 0
+        or spec.waves_q != 1
+        or spec.waves_k != 1
+        or spec.persistent_grid
+        or spec.runtime_channels
+    ):
+        return (
+            "stage_out needs kpg % 16 == 0, waves_q == waves_k == 1, baked "
+            "channels and no persistent grid"
+        )
+    if spec.waves_m > 1 and (
+        p.kpg % (16 * spec.waves_m) != 0
+        or spec.waves_q != 1
+        or spec.waves_k != 1
+        or spec.runtime_k_loop
+        or spec.persistent_grid
+        or spec.runtime_channels
+        or not (spec.preload_weights or spec.dgrad_fused_weights)
+    ):
+        return (
+            "waves_m > 1 needs kpg % (16*waves_m) == 0, waves_q == waves_k == "
+            "1, preloaded or fused weights, baked channels and no runtime K "
+            "loop / persistent grid"
+        )
+    if (spec.prefetch_rows > 1 or spec.lds_only_sync) and (
+        not spec.double_buffer or spec.persistent_grid
+    ):
+        return (
+            "prefetch_rows > 1 / lds_only_sync need double_buffer=True and "
+            "persistent_grid=False"
+        )
+    if spec.xcd_tiles and spec.persistent_grid:
+        return "xcd_tiles needs persistent_grid=False"
+    if spec.row_exit and spec.persistent_grid:
+        return "row_exit needs persistent_grid=False"
     return None
 
 
@@ -3034,10 +3088,47 @@ class DirectConvSpec:
     # (a one-trip loop carrying the accumulators it touches); the row's LDS
     # staging, barrier and flush are unchanged. Preloaded weights only.
     row_guard: bool = False
+    # Row-stream knobs (all default off). Input-row prefetch distance:
+    # row ``y + prefetch_rows`` is loaded into registers while row ``y`` is
+    # computed and published to LDS at the end of row ``y + prefetch_rows -
+    # 1``. 0 and 1 are the one-row-ahead schedule.
+    prefetch_rows: int = 0
+    # The row barrier drains LDS only (no vmcnt(0)): prefetched loads and the
+    # row's output stores stay in flight across it. Each load is still waited
+    # on before its LDS commit.
+    lds_only_sync: bool = False
+    # Waves per group along the output-channel M-tiles: each wave keeps only
+    # its ``ceil(kpg/16) / waves_m`` M-tiles' weights and accumulators, and
+    # all of them share the staged input row. Preloaded weights only.
+    waves_m: int = 1
+    # Remap the launch-order workgroup id (q tile fastest, then group tile,
+    # then image row band) so the q_tiles * group_tiles workgroups of one
+    # image row band run on one XCD and share its L2 (neighbouring group
+    # tiles of one pixel, halo columns). The grid and the chunk follow the
+    # runtime extents (chiplet_transform_chunked_runtime); only the XCD count
+    # is baked, so the knob is limited to the targets in _XCD_TILES_ARCHES.
+    xcd_tiles: bool = False
+    # Extra elements per staged input column of the LDS row buffer (column
+    # stride block_groups * cpg + lds_pad): a stride of an odd multiple of
+    # four dwords spreads the 16 q-lanes of a fragment read over the banks.
+    lds_pad: int = 0
+    # Stage each finished output row through a double-buffered LDS tile and
+    # store it with 16-byte lanes over the workgroup's contiguous channel span
+    # (instead of 8-byte MFMA-layout stores). Offsets come from the output
+    # stride kernargs.
+    stage_out: bool = False
+    # Leave the workgroup once the next output row to flush is past the
+    # image: a tile taller than the image (a whole-image pick mapped to a
+    # cached tile height) then skips every remaining row -- loads, LDS
+    # staging, barriers and masked flushes -- not just its MFMAs. One
+    # block-uniform scalar check per row from the first flush on.
+    row_exit: bool = False
 
     @property
     def threads_per_block(self) -> int:
-        return self.block_groups * self.waves_q * self.waves_k * self.wave_size
+        return (
+            self.block_groups * self.waves_q * self.waves_k * self.waves_m
+        ) * self.wave_size
 
     @property
     def preloads_weights(self) -> bool:
@@ -3098,7 +3189,14 @@ class DirectConvSpec:
             pw_flag,
             fw_flag,
             f"we{self.waves_per_eu}" if self.waves_per_eu > 0 else "",
+            f"pf{self.prefetch_rows}" if self.prefetch_rows > 1 else "",
+            "lso" if self.lds_only_sync else "",
+            f"wm{self.waves_m}" if self.waves_m > 1 else "",
+            "xc" if self.xcd_tiles else "",
+            f"lp{self.lds_pad}" if self.lds_pad > 0 else "",
+            "so" if self.stage_out else "",
             "rg" if self.row_guard else "",
+            "rx" if self.row_exit else "",
         )
 
     def validate(self) -> None:
@@ -3149,6 +3247,19 @@ class DirectConvSpec:
         why = _direct_conv_weight_knobs_reason(self)
         if why is not None:
             raise ValueError(f"DirectConvSpec {why}")
+        why = _direct_conv_row_stream_reason(self)
+        if why is not None:
+            raise ValueError(f"DirectConvSpec {why}")
+        if self.xcd_tiles:
+            # The one extent rule of the row-stream knobs: it does not change
+            # the IR, and plan_for re-validates the spec on the real problem.
+            gz = direct_conv_grid(self)[2]
+            if gz < XCD_TILES_MIN_ROW_BANDS:
+                raise ValueError(
+                    f"DirectConvSpec xcd_tiles needs at least "
+                    f"{XCD_TILES_MIN_ROW_BANDS} image row bands (got {gz}); the "
+                    f"remap would be the identity"
+                )
         if not self.runtime_channels:
             if self.k_atoms or self.m_tiles:
                 raise ValueError(
@@ -3231,6 +3342,13 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
         return False, why
     if spec.dgrad_weights_lds and not target.memory.has_ds_read_tr:
         return False, f"dgrad_weights_lds needs ds_read_b64_tr_b16 (absent on {arch})"
+    why = _direct_conv_row_stream_reason(spec)
+    if why is not None:
+        return False, why
+    if spec.xcd_tiles and arch not in _XCD_TILES_ARCHES:
+        return False, (
+            f"xcd_tiles is built for {sorted(_XCD_TILES_ARCHES)} only (got {arch})"
+        )
     if p.groups % spec.block_groups != 0:
         return (
             False,
@@ -3274,14 +3392,15 @@ def is_valid_spec(spec: "DirectConvSpec", arch: str = "gfx950") -> Tuple[bool, s
             f"(A/B={'x2 ' if spec.double_buffer else ''}{_lds_total_fp16 * 2}, "
             f"red={_red_bytes}) > {target.lds_capacity_bytes} cap on {arch}"
         )
-    if spec.dgrad_weights_lds:
+    if spec.dgrad_weights_lds or spec.lds_pad or spec.stage_out:
         # The staged weight slice shares a pool slot with the first row
-        # buffer; see direct_conv_lds_bytes.
+        # buffer; the column pad and the output tiles add to the footprint.
+        # See direct_conv_lds_bytes.
         lds = direct_conv_lds_bytes(spec)
         if not target.fits_lds(lds):
             return False, (
-                f"LDS footprint {lds} B (row buffers, staged weights) exceeds "
-                f"{target.lds_capacity_bytes} cap on {arch}"
+                f"LDS footprint {lds} B (row buffers, staged weights, output "
+                f"tiles) exceeds {target.lds_capacity_bytes} cap on {arch}"
             )
     return True, "ok"
 
@@ -3305,6 +3424,9 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
     num_chunks = lds_w * spec.block_groups * (p.cpg // load_vec)
     passes = (num_chunks + threads - 1) // threads
     stage = passes * threads * load_vec * 2
+    if spec.lds_pad:
+        cols = -(-(passes * threads) // (spec.block_groups * (p.cpg // load_vec))) + 1
+        stage += cols * spec.lds_pad * 2
     if spec.dgrad_weights_lds:
         wl_vecs = dgrad_weights_lds_bytes(spec) // 16
         wl_passes = (wl_vecs + threads - 1) // threads
@@ -3315,7 +3437,39 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
         total = stage * (2 if spec.double_buffer else 1)
     if spec.waves_k > 1:
         total += spec.waves_q * spec.waves_k * spec.wave_size * 4 * 4
+    if spec.stage_out:
+        # Two output-row tiles (double-buffered), live across the whole row
+        # loop: block_q columns of the workgroup's block_groups * kpg
+        # channels plus the 16-byte column pad.
+        total += 2 * spec.block_q * direct_conv_stage_out_stride(spec) * 2
     return total
+
+
+#: XCD count the ``xcd_tiles`` remap is built for, per target. The remap
+#: groups one image row band per XCD; it is only built where the count is
+#: known (gfx950).
+_XCD_TILES_ARCHES = {"gfx950": 8}
+#: Fewest image row bands (``N * ceil(H / block_h)``) an ``xcd_tiles`` launch
+#: needs: with fewer, no full block of row bands exists and the remap is the
+#: identity.
+XCD_TILES_MIN_ROW_BANDS = 8
+
+
+def direct_conv_grid(spec: DirectConvSpec) -> tuple[int, int, int]:
+    """Launch grid ``(q_tiles, group_tiles, N * h_tiles)`` of a non-persistent
+    spec over ``spec.problem`` (the kernel derives the same counts from its
+    kernargs)."""
+    p = spec.problem
+    return (
+        -(-p.Wo // spec.block_q),
+        p.groups // spec.block_groups,
+        p.N * -(-p.H // spec.block_h),
+    )
+
+
+def direct_conv_stage_out_stride(spec: DirectConvSpec) -> int:
+    """Elements per column of the ``stage_out`` LDS tile (channels + 16 B pad)."""
+    return spec.block_groups * spec.problem.kpg + 8
 
 
 def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef:
@@ -3380,6 +3534,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         ) // K_ATOM_SIZE  # ceil — restores original behaviour
     N_K_LOCAL = N_K_ATOMS // WAVES_K  # K-atoms per wave (each wave preloads this slice)
     N_M_TILES = spec.m_tiles if RTC else (p.kpg + 15) // 16  # M-tiles per q_subtile
+    WAVES_M = spec.waves_m
+    M_LOCAL = N_M_TILES // WAVES_M  # M-tiles owned by one wave
     CPG_LDS = N_K_ATOMS * K_ATOM_SIZE if RTC else p.cpg
     # A partial last K-atom reads past the group's channels in LDS (and in B
     # on the plain-weight path), so those lanes are zeroed. With runtime
@@ -3403,6 +3559,14 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     NUM_CHUNKS = LDS_W * BLOCK_GROUPS * N_VECS
     PASSES = (NUM_CHUNKS + THREADS - 1) // THREADS
     lds_total_fp16 = PASSES * THREADS * LOAD_VEC
+    # lds_pad: LDS_PAD extra elements after every staged input column (the
+    # loader's chunks are column-major, so column W_lds starts LDS_PAD *
+    # W_lds elements later); room for every column the passes can touch.
+    LDS_PAD = spec.lds_pad
+    if LDS_PAD:
+        lds_total_fp16 += (
+            -(-(PASSES * THREADS) // (BLOCK_GROUPS * N_VECS)) + 1
+        ) * LDS_PAD
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
@@ -3444,7 +3608,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     if RTC:
         c_BG_cpg = b.mul(c_cpg, b.const_i32(BLOCK_GROUPS))
     else:
-        c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg)
+        c_BG_cpg = b.const_i32(BLOCK_GROUPS * p.cpg + LDS_PAD)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
@@ -3463,6 +3627,16 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     # Q-wave index and K-wave index within the group's wave block.
     wave_id_q = b.div(wave_id_in_group, b.const_i32(WAVES_K))
     wave_id_k = b.mod(wave_id_in_group, b.const_i32(WAVES_K))
+    wm_base16 = None
+    if WAVES_M > 1:
+        # waves_q == waves_k == 1 (validated): the in-group wave index is the
+        # M-wave, which owns output channels [wave_id_m * M_LOCAL * 16, +16 *
+        # M_LOCAL) of its group.
+        wave_group_idx = b.div(wave_id_full, b.const_i32(WAVES_M))
+        wave_id_m = b.mod(wave_id_full, b.const_i32(WAVES_M))
+        wave_id_q = c0
+        wave_id_k = c0
+        wm_base16 = b.mul(wave_id_m, b.const_i32(M_LOCAL * 16))
     # K-atom base for this wave's slice: wave_id_k * N_K_LOCAL K-atoms.
     k_atom_base = b.mul(wave_id_k, b.const_i32(N_K_LOCAL))
 
@@ -3526,6 +3700,25 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         # CTA, outside the row loop.
         c_block_h = b.const_i32(BLOCK_H)
         c_n_h_tiles = b.div(b.add(p_Hi, b.const_i32(BLOCK_H - 1)), c_block_h)
+        if spec.xcd_tiles:
+            # Launch order is q tile fastest, then group tile, then image row
+            # band (n, h_tile). Remap it so each run of q_tiles * group_tiles
+            # workgroups -- one row band -- lands on one XCD. Grid and chunk
+            # come from the kernargs; only the XCD count is baked.
+            xc_gx = b.div(b.add(p_Wo, b.const_i32(BLOCK_Q - 1)), c_BQ)
+            xc_gy = b.div(params["p_groups"], c_BG)
+            xc_gxy = b.mul(xc_gx, xc_gy)
+            xc_lin = b.add(bx, b.add(b.mul(by, xc_gx), b.mul(bz, xc_gxy)))
+            xc_lin = chiplet_transform_chunked_runtime(
+                b,
+                xc_lin,
+                num_wgs=b.mul(xc_gxy, b.mul(params["p_N"], c_n_h_tiles)),
+                num_xcds=_XCD_TILES_ARCHES[arch],
+                chunk_size=xc_gxy,
+            )
+            bx = b.mod(xc_lin, xc_gx)
+            by = b.mod(b.div(xc_lin, xc_gx), xc_gy)
+            bz = b.div(xc_lin, xc_gxy)
         n = b.div(bz, c_n_h_tiles)
         h_tile_idx = b.mod(bz, c_n_h_tiles)
         h_tile_start = b.mul(h_tile_idx, c_block_h)
@@ -3674,6 +3867,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
             _zero_vec = b.zero_vec(io_type, LOAD_VEC)
             a_vec = b.select(valid, a_vec, _zero_vec)
             lds_idx = b.mul(cm["chunk_idx"], b.const_i32(LOAD_VEC))
+            if LDS_PAD:
+                lds_idx = b.add(lds_idx, b.mul(cm["W_lds"], b.const_i32(LDS_PAD)))
             out.append((a_vec, lds_idx))
         return out
 
@@ -3769,7 +3964,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
 
     # acc_tiles[qt][m][slot]: <4 x f32> per (q_subtile, M-tile, pipeline slot).
     acc_tiles: List[List[List[Value]]] = [
-        [[zero_acc] * p.KH for _ in range(N_M_TILES)] for _ in range(q_subtiles)
+        [[zero_acc] * p.KH for _ in range(M_LOCAL)] for _ in range(q_subtiles)
     ]
 
     # ---- Weight preloading (WAVES_K > 1 path) --------------------------------
@@ -3867,7 +4062,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                             b.mul(c4, b.const_i32(_c4_step_pl)),
                         ),
                     )
-                    for m in range(N_M_TILES):
+                    for m in range(M_LOCAL):
                         if m * 16 >= p.kpg:
                             preloaded_w[(r_const, s_const, local_atom, m)] = None
                             continue
@@ -3892,6 +4087,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     wl_lane_col,
                                 ),
                             )
+                            if wm_base16 is not None:
+                                wl_idx = b.add(wl_idx, wm_base16)
                             w_frag_pl = b.ds_read_tr16_b64(
                                 wl_lds, c0, wl_idx, dtype=io_type
                             )
@@ -3931,6 +4128,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                     q_in_lane,
                                 ),
                             )
+                            if wm_base16 is not None:
+                                fw_off = b.add(fw_off, wm_base16)
                             elems = []
                             for e in range(LOAD_VEC):
                                 e_off = b.mul(
@@ -3953,6 +4152,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 b.mul(g, c_kpg),
                                 b.add(b.const_i32(m * 16), q_in_lane),
                             )
+                            if wm_base16 is not None:
+                                k_out_pl = b.add(k_out_pl, wm_base16)
                             w_off_pl, _ = b_desc.offset(
                                 b,
                                 k_out=k_out_pl,
@@ -3988,6 +4189,52 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     # With H-tiling: iterate BLOCK_H+KH-1 rows for this tile (OOB → embed zeros).
     n_iters = (BLOCK_H + p.KH - 1) if BLOCK_H > 0 else (p.H + p.KH - 1)
 
+    PF = max(1, spec.prefetch_rows)
+    if spec.stage_out:
+        # Two LDS output-row tiles [BLOCK_Q, SO_CH + 8]: a finished row is
+        # written in the MFMA layout before the row barrier, then read back
+        # as 16-byte vectors over the workgroup's contiguous channel span
+        # and stored after it. The global offsets come from the output
+        # stride kernargs (n * stride_n + q * stride_wo + channel, plus the
+        # row's ho * stride_ho at the flush).
+        SO_CH = BLOCK_GROUPS * p.kpg  # output channels per workgroup
+        SO_STRIDE = direct_conv_stage_out_stride(spec)
+        SO_VPC = SO_CH // 8
+        SO_VECS = BLOCK_Q * SO_VPC
+        so_bufs = [
+            b.smem_alloc(io_type, [1, BLOCK_Q * SO_STRIDE], name_hint=f"lds_out{i}")
+            for i in range(2)
+        ]
+        c_so_stride = b.const_i32(SO_STRIDE)
+        so_n_base = b.mul(n, params["p_D_stride_n"])
+        so_meta = []
+        for _pi in range((SO_VECS + THREADS - 1) // THREADS):
+            _t = b.add(tid, b.const_i32(_pi * THREADS))
+            _q = b.div(_t, b.const_i32(SO_VPC))
+            _v = b.mod(_t, b.const_i32(SO_VPC))
+            _qg = b.add(block_q_start, _q)
+            _ok = b.cmp_lt(_qg, c_W)
+            if (_pi + 1) * THREADS > SO_VECS:
+                _ok = b.land(_ok, b.cmp_lt(_t, b.const_i32(SO_VECS)))
+            _gel = b.add(
+                b.add(so_n_base, b.mul(_qg, params["p_D_stride_wo"])),
+                b.add(b.mul(g_tile, b.const_i32(SO_CH)), b.mul(_v, b.const_i32(8))),
+            )
+            so_meta.append(
+                (_ok, _gel, b.add(b.mul(_q, c_so_stride), b.mul(_v, b.const_i32(8))))
+            )
+
+    def _row_y(y_l: int) -> Value:
+        return b.add(h_tile_start, b.const_i32(y_l))
+
+    # prefetch_rows > 1: rows 1 .. PF-1 are in flight before the loop; row
+    # y + PF is issued at row y and committed to LDS at the end of row
+    # y + PF - 1.
+    pending_rows = {
+        y_l: issue_dram_load(_row_y(y_l), g_tile_val=_load_g_tile)
+        for y_l in range(1, min(PF, n_iters))
+    }
+
     for y_local in range(n_iters):
         # Global y index for this iteration.
         if BLOCK_H > 0:
@@ -4000,7 +4247,13 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
         nxt = B_smem if (y_local % 2 == 0 or not spec.double_buffer) else A_smem
 
         loads_next = None
-        if y_local + 1 < n_iters:
+        if PF > 1:
+            if y_local + PF < n_iters:
+                pending_rows[y_local + PF] = issue_dram_load(
+                    _row_y(y_local + PF), g_tile_val=_load_g_tile
+                )
+            loads_next = pending_rows.pop(y_local + 1, None)
+        elif y_local + 1 < n_iters:
             if BLOCK_H > 0:
                 next_y = b.add(h_tile_start, b.const_i32(y_local + 1))
             else:
@@ -4016,7 +4269,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
             guard_keys = [
                 (qt, m, slot)
                 for qt in range(q_subtiles)
-                for m in range(N_M_TILES)
+                for m in range(M_LOCAL)
                 if m * 16 < p.kpg
                 for slot in range(p.KH)
             ]
@@ -4090,7 +4343,7 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 _zero_pw = b.zero_vec(io_type, LOAD_VEC)
                                 x_frag_pw = b.select(c4_oob_pw, _zero_pw, x_frag_pw)
 
-                            for m in range(N_M_TILES):
+                            for m in range(M_LOCAL):
                                 if m * 16 >= p.kpg:
                                     continue
                                 w_frag_pw = preloaded_w[
@@ -4345,7 +4598,33 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                 # that slower waves are still reading.
                 b.sync()
             store_to_lds(loads_next, nxt)
-        b.sync()
+        # Tile-local index of the output row that completes at this y_local.
+        _so_row = y_local - (p.KH - 1)
+        if spec.stage_out and 0 <= _so_row < BLOCK_H:
+            # Publish the finished row to LDS before the row barrier (rows of
+            # a tile past the image are published too; the flush guard masks
+            # their global stores).
+            _so_buf = so_bufs[y_local % 2]
+            _so_slot = _so_row % p.KH
+            for qt in range(q_subtiles):
+                _col = b.add(q_in_lane, b.const_i32(qt * 16))
+                for m in range(M_LOCAL):
+                    _ch = b.add(
+                        b.mul(wave_group_idx, c_kpg),
+                        b.add(b.const_i32(m * 16), b.mul(c4, b.const_i32(4))),
+                    )
+                    if wm_base16 is not None:
+                        _ch = b.add(_ch, wm_base16)
+                    b.smem_store_vN(
+                        _so_buf,
+                        [c0, b.add(b.mul(_col, c_so_stride), _ch)],
+                        _trunc_f32(b, p.dtype, acc_tiles[qt][m][_so_slot]),
+                        4,
+                    )
+        if spec.lds_only_sync:
+            b.sync_lds_only()
+        else:
+            b.sync()
 
         # Flush accumulator for the output row that completes at this y_local.
         # p_flush_local is a Python int (tile-local offset from h_tile_start).
@@ -4383,13 +4662,23 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                 ho_row_val = b.const_i32(p_flush_val // c_stride_gen)
                 in_h_range = None  # no runtime guard needed
 
-        if should_flush:
+        if should_flush and spec.stage_out:
+            _so_buf = so_bufs[y_local % 2]
+            _row_off = b.mul(ho_row_val, params["p_D_stride_ho"])
+            for _ok, _gel, _lidx in so_meta:
+                _ok = b.land(_ok, in_h_range)
+                _vec = b.smem_load_vN(_so_buf, c0, _lidx, dtype=io_type, n=8)
+                _off = b.select(
+                    _ok, b.mul(b.add(_gel, _row_off), c_half_bytes), oob_sentinel
+                )
+                _buf_store_vN(b, p.dtype, d_rsrc, _off, c0, _vec, 4)
+        elif should_flush:
             for qt in range(q_subtiles):
                 qt_w_base = qt * 16
                 out_q = b.add(b.add(q_tile_start, b.const_i32(qt_w_base)), q_in_lane)
                 out_q_ok = b.cmp_lt(out_q, c_W)
 
-                for m in range(N_M_TILES):
+                for m in range(M_LOCAL):
                     if m * 16 >= p.kpg:
                         continue
 
@@ -4398,6 +4687,8 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                         b.mul(g, c_kpg),
                         b.add(b.const_i32(m * 16), b.mul(c4, b.const_i32(4))),
                     )
+                    if wm_base16 is not None:
+                        k_val = b.add(k_val, wm_base16)
                     if RTC:
                         # Only the last M-tile can be partial; its row count
                         # follows the runtime kpg.
@@ -4470,8 +4761,17 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                         _buf_store_vN(b, p.dtype, d_rsrc, safe_d, c0, acc_h, 2)
 
         for qt in range(q_subtiles):
-            for m in range(N_M_TILES):
+            for m in range(M_LOCAL):
                 acc_tiles[qt][m][P_FLUSH] = zero_acc
+
+        if spec.row_exit and p.KH - 1 <= y_local < n_iters - 1:
+            # The next flush is past the image: every remaining row of the
+            # tile is dead (its MFMAs only feed output rows >= p_Hi and its
+            # flush is masked), so the workgroup leaves. The condition is
+            # block-uniform, so no wave is left waiting at a barrier.
+            _next_flush = b.add(h_tile_start, b.const_i32(y_local + 2 - p.KH))
+            with b.scf_if(b.cmp_ge(_next_flush, p_Hi)):
+                b.ret()
 
     # Close the persistent cell loop if open.
     if PERSISTENT:
@@ -5993,6 +6293,13 @@ def make_dgrad_fprop_spec(
     dgrad_weights_lds: bool = False,
     waves_per_eu: int = 0,
     row_guard: bool = False,
+    prefetch_rows: int = 0,
+    lds_only_sync: bool = False,
+    waves_m: int = 1,
+    lds_pad: int = 0,
+    stage_out: bool = False,
+    xcd_tiles: bool = False,
+    row_exit: bool = False,
 ) -> "DirectConvSpec":
     """Build the ``DirectConvSpec`` for the transposed-fprop pass of dgrad.
 
@@ -6023,7 +6330,9 @@ def make_dgrad_fprop_spec(
     (``dgrad_weights_lds`` stages it through LDS transpose reads).
     ``preload_weights=True`` keeps the pre-pass but loads ``W_T`` once per
     wave instead of once per row (``waves_k == 1`` only). ``fold_k32``,
-    ``waves_per_eu`` and ``row_guard`` pass through to the spec.
+    ``waves_per_eu`` and ``row_guard`` pass through to the spec, as do the
+    row-stream knobs ``prefetch_rows`` / ``lds_only_sync`` / ``waves_m`` /
+    ``lds_pad`` / ``stage_out`` / ``xcd_tiles``.
     """
     p = problem
     assert p.stride == 1, "make_dgrad_fprop_spec requires stride=1"
@@ -6062,6 +6371,13 @@ def make_dgrad_fprop_spec(
         dgrad_weights_lds=dgrad_weights_lds,
         waves_per_eu=waves_per_eu,
         row_guard=row_guard,
+        prefetch_rows=prefetch_rows,
+        lds_only_sync=lds_only_sync,
+        waves_m=waves_m,
+        lds_pad=lds_pad,
+        stage_out=stage_out,
+        xcd_tiles=xcd_tiles,
+        row_exit=row_exit,
     )
 
 
@@ -10096,12 +10412,9 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         if spec.persistent_grid:
             grid = (DIRECT_PERSISTENT_BLOCKS, 1, 1)
         else:
-            # The kernel derives the tile count from p_Hi (see build_direct_conv).
-            grid = (
-                _ceil_div(p.Wo, spec.block_q),
-                p.groups // spec.block_groups,
-                p.N * _ceil_div(p.H, spec.block_h),
-            )
+            # The kernel derives the tile count from p_Hi (see build_direct_conv);
+            # an xcd_tiles kernel remaps the same grid in place.
+            grid = direct_conv_grid(spec)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectConv4cSpec):
         # bx = output-column tile, by = group block, bz = image; every row is

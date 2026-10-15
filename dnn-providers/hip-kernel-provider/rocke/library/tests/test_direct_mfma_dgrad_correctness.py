@@ -8,8 +8,9 @@ Two layers:
 * ``TestDirectMfmaDgradValidation`` (CPU only): the spec validator's geometry
   rules that used to let silently-wrong kernels through (a transposed ``kpg``
   that is not a multiple of the 4-channel store vector, non-"same" padding),
-  the LDS footprint check, and ``direct_conv_lds_bytes`` against the LDS pool
-  the lowering actually allocates.
+  the LDS footprint check, ``direct_conv_lds_bytes`` against the LDS pool
+  the lowering actually allocates, and the row-stream knobs' validation,
+  names and register split.
 * ``TestDirectMfmaDgradCachedNumeric`` (GPU): builds the
   ``direct_grouped_dgrad_fused`` binaries of a capability exactly as
   ``--compile-all`` does (on the probe problem), puts them in a private
@@ -129,6 +130,10 @@ class TestDirectMfmaDgradValidation(unittest.TestCase):
             (_problem(8, 128, 128, 11, 19, 32), {"block_q": 32, "block_groups": 4, "block_h": 8, **fwl}),
             (_problem(3, 256, 256, 7, 9, 8), {"block_groups": 1, "fold_k32": True, **fwl}),
             (_problem(3, 32, 32, 7, 9, 2, KH=5, PAD=2), {"block_groups": 2, "block_h": 4, **fwl}),
+            (_problem(9, 256, 256, 10, 13, 16), {"block_groups": 2, "lds_pad": 8, "stage_out": True, **fwl}),
+            (_problem(8, 256, 256, 7, 15, 8), {"block_groups": 1, "fold_k32": True, "waves_m": 2, "lds_pad": 8, "stage_out": True, **fwl}),
+            (_problem(2, 32, 32, 9, 17, 4, dtype="fp16"), {"block_groups": 2, "double_buffer": False, "lds_pad": 8}),
+            (_problem(8, 128, 128, 11, 19, 32), {"block_q": 32, "block_groups": 4, "block_h": 8, "lds_pad": 8, **fwl}),
         ]  # fmt: skip
         for p, kw in cases:
             spec = _fprop(p, **kw)
@@ -137,6 +142,94 @@ class TestDirectMfmaDgradValidation(unittest.TestCase):
                 m = re.search(r"@smem_pool\.\S+ = .*global \[(\d+) x i8\]", ll)
                 self.assertIsNotNone(m)
                 self.assertEqual(direct_conv_lds_bytes(spec), int(m.group(1)))
+
+    def test_row_stream_knobs_validate_and_name(self):
+        from dataclasses import replace
+
+        from kernels.common.conv_direct_grouped import (
+            direct_conv_grid,
+            direct_launch_geometry,
+            is_valid_spec,
+        )
+
+        p = _problem(9, 256, 256, 10, 13, 16)
+        base = _fprop(
+            p, block_groups=2, dgrad_fused_weights=True, dgrad_weights_lds=True
+        )
+        tags = {
+            "prefetch_rows": (3, "_pf3"),
+            "lds_only_sync": (True, "_lso"),
+            "lds_pad": (8, "_lp8"),
+            "stage_out": (True, "_so"),
+            "xcd_tiles": (True, "_xc"),
+        }
+        for field, (value, tag) in tags.items():
+            with self.subTest(field=field):
+                spec = replace(base, **{field: value})
+                ok, why = is_valid_spec(spec)
+                self.assertTrue(ok, why)
+                self.assertIn(tag, spec.kernel_name())
+                self.assertNotIn(tag, base.kernel_name())
+        # prefetch_rows 0 and 1 are the same one-row-ahead kernel: one name.
+        self.assertEqual(
+            replace(base, prefetch_rows=1).kernel_name(), base.kernel_name()
+        )
+        # The launch grid is the same with or without the XCD order: the
+        # kernel remaps its workgroup id in place.
+        xc = replace(base, xcd_tiles=True)
+        self.assertEqual(direct_launch_geometry(xc), direct_launch_geometry(base))
+        self.assertEqual(direct_conv_grid(xc), (1, 8, 9))
+        rejects = {
+            "prefetch_rows must be in 0..3": replace(base, prefetch_rows=4),
+            "stage_out needs kpg % 16": replace(
+                base, stage_out=True, problem=replace(base.problem, kpg=8)
+            ),
+            "lds_pad must be a multiple of 8": replace(base, lds_pad=12),
+            "waves_m > 1 needs": replace(base, waves_m=2),
+            "need double_buffer=True": replace(
+                base, lds_only_sync=True, double_buffer=False
+            ),
+            "xcd_tiles needs at least 8 image row bands": replace(
+                base, xcd_tiles=True, problem=replace(base.problem, N=4)
+            ),
+        }  # fmt: skip
+        for frag, spec in rejects.items():
+            with self.subTest(reject=frag):
+                try:
+                    spec.validate()
+                    ok, why = is_valid_spec(spec)
+                except ValueError as e:
+                    ok, why = False, str(e)
+                self.assertFalse(ok)
+                self.assertIn(frag, why)
+        # The XCD order bakes the XCD count, so it is built for gfx950 only.
+        gather = replace(xc, dgrad_weights_lds=False)
+        self.assertTrue(is_valid_spec(gather, arch="gfx950")[0])
+        ok, why = is_valid_spec(gather, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("xcd_tiles", why)
+
+    def test_waves_m_splits_the_weight_register_budget(self):
+        # Each of the waves_m waves keeps only its share of the output tiles'
+        # weight fragments, so a 64-channel output (4 tiles) fits the preload
+        # budget with waves_m = 4 and not with one wave.
+        from dataclasses import replace
+
+        from kernels.common.conv_direct_grouped import (
+            PRELOAD_WEIGHT_VGPR_BUDGET,
+            is_valid_spec,
+            preload_weight_vgprs,
+        )
+
+        p = _problem(2, 256, 128, 9, 9, 4)  # transposed: cpg' 32, kpg' 64
+        one = _fprop(p, block_groups=1, fold_k32=True, dgrad_fused_weights=True)
+        four = replace(one, waves_m=4)
+        self.assertGreater(preload_weight_vgprs(one), PRELOAD_WEIGHT_VGPR_BUDGET)
+        self.assertEqual(preload_weight_vgprs(four), preload_weight_vgprs(one) // 4)
+        self.assertFalse(is_valid_spec(one)[0])
+        ok, why = is_valid_spec(four)
+        self.assertTrue(ok, why)
+        self.assertEqual(four.threads_per_block, 4 * 64)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +364,9 @@ _SHAPES = [
     ("5x5_c16_g2_fp16", (2, 32, 32, 13, 13, 2, 5, "fp16")),
     ("7x7_c8_k12_g4", (1, 32, 48, 11, 10, 4, 7, "bf16")),
     ("tallH_c8", (1, 32, 32, 70, 20, 4, 3, "bf16")),
+    # Enough row bands for the row-stream stack (XCD order) at every tile.
+    ("c16_N8_stream", (8, 64, 64, 13, 15, 4, 3, "bf16")),
+    ("c8_N9_stream_fp16", (9, 64, 64, 11, 21, 8, 3, "fp16")),
     ("1x1_c12_k24_H1", (2, 48, 96, 1, 11, 4, 1, "bf16")),
 ]
 

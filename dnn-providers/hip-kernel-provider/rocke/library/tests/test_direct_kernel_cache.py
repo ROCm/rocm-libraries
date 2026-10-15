@@ -508,17 +508,34 @@ def test_dgrad_fused_cached_scope(jobs):
             assert knobs["block_h"] in dks.DGRAD_FUSED_BLOCK_H
         if knobs["block_q"] == 32:
             assert knobs["block_h"] in (4, 8)
+        # Whole-image tiles leave the workgroup once the image is done.
+        assert knobs.get("row_exit", False) == (
+            knobs["block_h"] in dks.DGRAD_FUSED_EXIT_BLOCK_H
+        )
         assert knobs["fold_k32"] == (i.kpg % 32 == 0)
         assert knobs["dgrad_weights_lds"]
         if knobs["fold_k32"]:
             assert knobs["waves_per_eu"] == 0
+        if "prefetch_rows" in knobs:
+            # The row-stream stack: square groups on 16-column strips, the
+            # two-row prefetch, LDS-only barrier and XCD order, with the
+            # column pad the staged row's width calls for (or none).
+            assert i.cpg == i.kpg and knobs["block_q"] == 16
+            assert knobs["prefetch_rows"] == 2
+            assert knobs["lds_only_sync"] and knobs["xcd_tiles"]
+            assert knobs["lds_pad"] in (0, dks.DGRAD_FUSED_LDS_PAD)
+            assert not (knobs["stage_out"] and knobs["lds_pad"] == 0) or (
+                knobs["block_groups"] * i.kpg * 2 % 32 != 0
+            )
+    assert any("prefetch_rows" in j.spec_kwargs for j in fused)
     # Low thousands per arch and dtype, not a product of every knob.
     assert len(fused) < 4000
 
 
 def test_dgrad_fused_cached_scope_gfx942():
     """gfx942 has neither transpose LDS reads nor the 16x16x32 atom: its
-    fused cache takes the gathered weights and 16-wide atoms throughout."""
+    fused cache takes the gathered weights and 16-wide atoms throughout, and
+    no row-stream stack (the XCD order is gfx950-only)."""
     target = ArchTarget.from_gfx("gfx942")
     for caps in dks.DIRECT_CAPABILITIES[_FUSED][1]:
         cell = dks._caps_jobs(
@@ -528,6 +545,9 @@ def test_dgrad_fused_cached_scope_gfx942():
         for _, j in cell:
             assert not j.spec_kwargs["dgrad_weights_lds"]
             assert not j.spec_kwargs["fold_k32"]
+            # The XCD row-band order is built for gfx950 only, and the
+            # row-stream stack needs it.
+            assert "prefetch_rows" not in j.spec_kwargs
 
 
 def test_dgrad_fused_rows_fit_the_weight_register_budget():
@@ -635,11 +655,55 @@ def _generic_dgrad_policy_knobs(p: DirectConvProblem) -> dict:
         "dgrad_weights_lds": True,
         "waves_per_eu": 0,
     }
+    if knobs["block_h"] in dks.DGRAD_FUSED_EXIT_BLOCK_H:
+        knobs["row_exit"] = True
     if not k32:
         main = dks.make_spec(_FUSED, p, knobs)
         if dc.preload_weight_vgprs(main) <= dks.DGRAD_FUSED_WPE_MAX_VGPRS:
             knobs["waves_per_eu"] = dks.DGRAD_FUSED_WPE
-    return knobs
+    return _generic_dgrad_stream_knobs(p, knobs, untiled=bh == 0)
+
+
+def _fused_valid(p: DirectConvProblem, knobs: dict) -> bool:
+    return dks.validate_spec(_FUSED, dks.make_spec(_FUSED, p, knobs), _ARCH)[0]
+
+
+def _generic_dgrad_stream_knobs(p: DirectConvProblem, knobs: dict, untiled: bool):
+    """The policy's row-stream stack on top of ``knobs`` (see
+    _generic_dgrad_policy_knobs): square channel groups on 16-column strips
+    in its measured box, not where waves_m = 2 is valid, only with the XCD
+    row-band order valid; then the first of (pad, staged output), (pad,
+    unstaged), (no pad, unstaged) that adds no launch rounds."""
+    from kernels.common import conv_direct_grouped as dc
+
+    if p.cpg != p.kpg or knobs["block_q"] != 16:
+        return knobs
+    if (p.Wo > 64) if untiled else (p.KH == 1 and p.cpg < 12):
+        return knobs
+    base = {**knobs, "prefetch_rows": 2, "lds_only_sync": True}
+    if not _fused_valid(p, base) or _fused_valid(p, {**base, "waves_m": 2}):
+        return knobs
+
+    def rounds(kn):
+        spec = dks.make_spec(_FUSED, p, kn)
+        target = ArchTarget.from_gfx(_ARCH)
+        per_cu = min(
+            target.lds_capacity_bytes // dc.direct_conv_lds_bytes(spec),
+            32 // (spec.threads_per_block // target.wave_size),
+        )
+        gx, gy, gz = dc.direct_conv_grid(spec)
+        return -(-(gx * gy * gz) // (max(per_cu, 1) * 256))
+
+    floor = rounds(base)
+    stack = {**base, "xcd_tiles": True, "lds_pad": 0, "stage_out": False}
+    if not _fused_valid(p, stack):
+        return knobs
+    pad = 8 if knobs["block_groups"] * p.kpg * 2 % 32 == 0 else 0
+    for lds_pad, stage_out in ((pad, True), (pad, False)):
+        cand = {**stack, "lds_pad": lds_pad, "stage_out": stage_out}
+        if cand != stack and _fused_valid(p, cand) and rounds(cand) <= floor:
+            return cand
+    return stack
 
 
 def test_dgrad_fused_policy_image_is_enumerated():
@@ -653,7 +717,7 @@ def test_dgrad_fused_policy_image_is_enumerated():
     rows = set(dks.DIRECT_CAPABILITIES[_FUSED][1])
     cached: dict = {}
     rng = random.Random(1)
-    checked = 0
+    checked = streamed = 0
     for _ in range(300):
         KH = rng.choice((1, 3, 5, 7))
         p = _problem(
@@ -678,11 +742,13 @@ def test_dgrad_fused_policy_image_is_enumerated():
                 )[1]
             ]
         knobs = _generic_dgrad_policy_knobs(p)
+        streamed += "prefetch_rows" in knobs
         assert knobs in cached[caps], (p, knobs)
         spec = dks.make_spec(_FUSED, p, knobs)
         assert dks.validate_spec(_FUSED, spec, _ARCH)[0], (p, knobs)
         checked += 1
     assert checked > 100
+    assert streamed > 10
 
 
 def _nongrouped(plans):

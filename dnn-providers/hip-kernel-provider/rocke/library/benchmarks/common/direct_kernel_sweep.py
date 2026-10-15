@@ -172,6 +172,27 @@ DGRAD_FUSED_BLOCK_H_LARGE = (4, 8)
 # hint (16-wide atoms only).
 DGRAD_FUSED_WPE = 4
 DGRAD_FUSED_WPE_MAX_VGPRS = 36
+# The policy's row-stream stack (square channel groups, 16-column strips,
+# waves_m = 2 not valid): the two-row prefetch with the LDS-only row barrier
+# and the XCD row-band order, plus (lds_pad, stage_out) -- the policy tries
+# (pad, staged), (pad, unstaged), (0, unstaged) and keeps the first that
+# does not add launch rounds, a shape-dependent choice, so all three are
+# cached. ``pad`` is DGRAD_FUSED_LDS_PAD when a staged input column is an
+# even number of 16-byte units, else 0. None is the spec without the stack.
+DGRAD_FUSED_PREFETCH_ROWS = 2
+# Tile heights the policy only reaches through whole-image picks (it tiles
+# with 4 and 8 rows): those entries also leave the workgroup once the image
+# is done (row_exit), so a short image skips the tile's dead rows.
+DGRAD_FUSED_EXIT_BLOCK_H = (16, 32)
+DGRAD_FUSED_LDS_PAD = 8
+DGRAD_FUSED_STREAM = (None, (0, False), (0, True), (8, False), (8, True))
+_DGRAD_FUSED_STREAM_KEYS = (
+    "prefetch_rows",
+    "lds_only_sync",
+    "xcd_tiles",
+    "lds_pad",
+    "stage_out",
+)
 # Grouped scalar-FMA dgrad.
 DGRAD_BLOCK_Q = (4, 8, 16, 32)
 # MFMA dgrad fprop pass: output rows per block, then
@@ -630,15 +651,16 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
             }
     elif variant == "direct_grouped_dgrad_fused":
         # Filtered per capability by _dgrad_fused_policy_reason.
-        for bq, bg, bh, k32, lds, wpe in itertools.product(
+        for bq, bg, bh, k32, lds, wpe, stream in itertools.product(
             DGRAD_FUSED_BLOCK_Q,
             DGRAD_FUSED_BLOCK_GROUPS,
             DGRAD_FUSED_BLOCK_H,
             (False, True),
             (False, True),
             (0, DGRAD_FUSED_WPE),
+            DGRAD_FUSED_STREAM,
         ):
-            yield {
+            knobs = {
                 "block_q": bq,
                 "block_groups": bg,
                 "block_h": bh,
@@ -646,6 +668,17 @@ def _knob_grid(variant: str, arch: str, dtype: str) -> Iterator[dict]:
                 "dgrad_weights_lds": lds,
                 "waves_per_eu": wpe,
             }
+            if bh in DGRAD_FUSED_EXIT_BLOCK_H:
+                knobs["row_exit"] = True
+            if stream is not None:
+                knobs.update(
+                    prefetch_rows=DGRAD_FUSED_PREFETCH_ROWS,
+                    lds_only_sync=True,
+                    xcd_tiles=True,
+                    lds_pad=stream[0],
+                    stage_out=stream[1],
+                )
+            yield knobs
     elif variant == "direct_grouped_dgrad_mfma":
         for bq, bg, bh, (wq, wk, rk, pg, k32) in itertools.product(
             BLOCK_Q, BLOCK_GROUPS, DGRAD_BLOCK_H, DGRAD_WAVES
@@ -874,6 +907,25 @@ def _dgrad_fused_policy_reason(
     accepts what they skip, so a JIT sweep can try it."""
     from kernels.common import conv_direct_grouped as dc
 
+    stream = "prefetch_rows" in knobs
+    if stream:
+        # Cheap rules of the row-stream stack first; the base knobs below are
+        # decided without it, as the policy does.
+        if caps.cpg != caps.kpg:
+            return "the row-stream stack is cached for square channel groups only"
+        if knobs["block_q"] != 16:
+            return "the row-stream stack is cached on 16-column strips only"
+        # The staged input column is block_groups * (dgrad kpg) channels.
+        row_bytes = knobs["block_groups"] * caps.kpg * 2
+        pad = DGRAD_FUSED_LDS_PAD if row_bytes % 32 == 0 else 0
+        if (knobs["lds_pad"], knobs["stage_out"]) not in (
+            (pad, True),
+            (pad, False),
+            (0, False),
+        ):
+            return f"the row-stream stack is cached with lds_pad {pad} or 0"
+        knobs = {k: v for k, v in knobs.items() if k not in _DGRAD_FUSED_STREAM_KEYS}
+
     rule_bg = _dgrad_fused_rule_block_groups(caps)
     if knobs["block_groups"] > rule_bg:
         return f"block_groups above the policy's {rule_bg} for these channels"
@@ -914,6 +966,21 @@ def _dgrad_fused_policy_reason(
         )
         if validate_spec("direct_grouped_dgrad_fused", lds, arch)[0]:
             return "gathered weights are cached where the LDS-staged form is invalid"
+    if stream:
+        # The policy keeps the spec without the stack where waves_m = 2 is
+        # valid (its split-M stack is opt-in, not cached).
+        split_m = make_spec(
+            "direct_grouped_dgrad_fused",
+            probe,
+            {
+                **knobs,
+                "prefetch_rows": DGRAD_FUSED_PREFETCH_ROWS,
+                "lds_only_sync": True,
+                "waves_m": 2,
+            },
+        )
+        if validate_spec("direct_grouped_dgrad_fused", split_m, arch)[0]:
+            return "the row-stream stack is not cached where waves_m = 2 is valid"
     return None
 
 
@@ -1153,12 +1220,16 @@ def probe_problem(
             dil_h=caps.dil_h,
             dil_w=caps.dil_w,
         )
+    n_images = 1
     if variant == "direct_depthwise_spatial":
         groups = 8
     elif variant == "direct_grouped_dgrad_fused":
         # Its rows share channel counts with the dense MFMA dgrad rows but
-        # serve grouped problems: every block_groups must divide the probe.
+        # serve grouped problems: every block_groups must divide the probe,
+        # and eight images give every tile height the row bands xcd_tiles
+        # needs.
         groups = 64
+        n_images = 8
     elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
         # Dense channel counts serve groups == 1: one group per block. Wider
         # blocks would only build kernels no problem with these counts can
@@ -1167,7 +1238,7 @@ def probe_problem(
     else:
         groups = 256 if caps.cpg == 1 else 64
     return DirectConvProblem(
-        N=1,
+        N=n_images,
         H=64,
         W=64,
         groups=groups,
