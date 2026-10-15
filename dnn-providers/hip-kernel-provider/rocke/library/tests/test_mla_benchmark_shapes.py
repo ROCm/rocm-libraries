@@ -172,6 +172,51 @@ class TestDriver(unittest.TestCase):
         # raising. On a non-gfx942 arch every shape is unsupported.
         self.assertEqual(drv.main(["--arch", "gfx950", "--limit", "1"]), 1)
 
+    def test_request_carries_the_allocated_pool(self):
+        # The driver allocates shape.num_kv_blocks pages; dispatch refuses 0.
+        for shape in load_mla_shapes(_PREFILL_SHAPES):
+            with self.subTest(shape=shape.signature):
+                req = shape.to_request(arch="gfx942")
+                pages = -(-shape.seqlen_k // shape.block_size)
+                self.assertEqual(req.num_kv_blocks, shape.batch * pages)
+                self.assertEqual(
+                    shape.to_request(arch="gfx942", num_kv_blocks=7).num_kv_blocks, 7
+                )
+
+    def test_gate_heads_cover_both_waves_of_a_workgroup(self):
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        for h in (5, 6, 16, 64, 128):
+            with self.subTest(num_heads=h):
+                heads = drv._gate_heads(h)
+                self.assertEqual(heads, sorted(set(heads)))
+                self.assertTrue(all(0 <= x < h for x in heads))
+                self.assertIn(h - 1, heads)
+                for x in heads:
+                    if x % 2 == 0 and x + 1 < h:
+                        self.assertIn(x + 1, heads)
+        self.assertEqual(drv._gate_heads(128), [0, 1, 32, 33, 64, 65, 96, 97, 127])
+
+    def test_overridden_spec_is_readmitted(self):
+        # --spec-override swaps the dispatched spec; admission must run again
+        # and refuse as a status, not build a spec dispatch would never ship.
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        shape = load_mla_shapes(_PREFILL_SHAPES)[0]
+        with self.assertRaises(drv.SpecRefused) as ctx:
+            drv._build_rocke_kernel(
+                shape, arch="gfx942", spec_overrides={"binary_search_iters": 16}
+            )
+        self.assertIn("binary_search_iters", str(ctx.exception))
+        with self.assertRaises(drv.SpecRefused):
+            drv._build_rocke_kernel(
+                shape, arch="gfx942", spec_overrides={"block_q": 24}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

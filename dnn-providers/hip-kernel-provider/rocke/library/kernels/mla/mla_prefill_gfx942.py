@@ -105,7 +105,11 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.grid import chiplet_transform_chunked_dynamic as _chiplet_chunked
+from rocke.helpers.schedule import DS_READ as _SGB_DS_READ
+from rocke.helpers.schedule import MFMA as _SGB_MFMA
 from rocke.helpers.spec import SignatureBuilder
+
+from kernels.common.attention_dense_spec import INT32_LIMIT
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
     "MlaPrefillSpec",
@@ -176,10 +180,6 @@ C_STAGE_W = 4
 
 # LDS available to one workgroup on gfx942, in bytes.
 LDS_BYTES_PER_WORKGROUP = 64 * 1024
-
-# AMDGPU ``sched.group.barrier`` instruction-class mask bits.
-_SGB_MFMA = 0x008  # MFMA / WMMA
-_SGB_DS_READ = 0x100  # ds_read (LDS load)
 
 # k-steps per scheduler-ordered block in the score GEMM.
 #
@@ -273,9 +273,9 @@ MLA_BINARY_SEARCH_ITERS = 12
 MLA_MAX_NUM_SEQS = 2**MLA_BINARY_SEARCH_ITERS - 1
 
 # Offsets are i32 ``mul nsw`` / ``add nsw`` chains: signed overflow is UB, so
-# every extent the kernel indexes has to stay below 2**31 (in elements for the
-# global loads and stores, in bytes for the paged buffer loads).
-INT32_LIMIT = 2**31
+# every extent the kernel indexes has to stay below INT32_LIMIT (2**31; in
+# elements for the global loads and stores, in bytes for the paged buffer
+# loads).
 # ``num_records`` of the paged c_kv / k_rope buffer resources.
 KV_RSRC_BYTES = 0x7FFF0000
 
@@ -380,7 +380,7 @@ class MlaPrefillSpec:
     page_block_size: int = 16
     dtype: str = "bf16"
     # Fixed at MLA_BINARY_SEARCH_ITERS, which serves up to MLA_MAX_NUM_SEQS
-    # sequences; admission refuses fewer.
+    # sequences; admission refuses any other value (it is not in the name).
     binary_search_iters: int = MLA_BINARY_SEARCH_ITERS
     # Heads packed into one workgroup, one wave per head. At 1 (the default) a
     # workgroup owns one head and its waves split that head's work. Above 1 a
@@ -596,13 +596,16 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     if not arch.startswith("gfx942"):
         return False, f"MLA prefill is gfx942-only for now, got arch={arch!r}"
     # Dispatch admits up to MLA_MAX_NUM_SEQS sequences without knowing which
-    # spec will serve them, so every admitted spec must search that far.
-    if spec.binary_search_iters < MLA_BINARY_SEARCH_ITERS:
+    # spec will serve them, so every admitted spec must search that far. Exactly
+    # that far: the iteration count is not part of the kernel name, so a second
+    # value would compile under the default spec's name and collide in any
+    # name-keyed cache.
+    if spec.binary_search_iters != MLA_BINARY_SEARCH_ITERS:
         return False, (
-            f"binary_search_iters={spec.binary_search_iters} resolves only "
-            f"{2**spec.binary_search_iters - 1} sequences; at least "
-            f"{MLA_BINARY_SEARCH_ITERS} are needed for num_seqs up to "
-            f"{MLA_MAX_NUM_SEQS}"
+            f"binary_search_iters={spec.binary_search_iters}, but exactly "
+            f"{MLA_BINARY_SEARCH_ITERS} is supported: fewer cannot resolve "
+            f"num_seqs up to {MLA_MAX_NUM_SEQS}, and the count is not in the "
+            "kernel name, so any other value would collide with the default's"
         )
     # Register blocking: the kernel body is written over M_TILES = block_q /
     # MFMA_M and K_TILES = block_k / MFMA_N, so any multiple of the atom is
@@ -845,7 +848,8 @@ def check_mla_prefill_extents(
       resource is built with ``num_records`` = KV_RSRC_BYTES (0x7FFF0000, just
       under 2**31). The pool must fit the resource range, which also keeps the
       product clear of overflow. ``k_rope``'s page stride is smaller and never
-      binds. Skipped when ``num_kv_blocks`` is 0 (pool size unknown).
+      binds. Skipped when ``num_kv_blocks`` is 0 (pool size unknown); the
+      dispatcher refuses 0, so only a direct caller can skip it.
 
     The LSE (``token * H + head``) is below every one of these.
     """

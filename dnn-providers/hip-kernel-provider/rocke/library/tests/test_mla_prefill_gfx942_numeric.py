@@ -6,9 +6,13 @@
 Runs :mod:`builders.mla.verify_score_probe_gfx942` in ``--mode full`` for its
 scenario table and checks ``(out, lse)`` against the fp32 numpy oracle
 (:func:`builders.mla.ref_mla_attn.ref_mla_prefill`, bottom-right causal). The
-bar is ``max_abs <= 4e-2`` (:data:`~builders.mla.verify_score_probe_gfx942.BF16_ATTN_ATOL`),
-the bf16 bar the other rocKE attention kernels use; fully masked rows are held
-to ``out == 0`` / ``lse == -inf`` exactly.
+bars, per live sequence, are ``out`` ``max_abs <= 4e-2``
+(:data:`~builders.mla.verify_score_probe_gfx942.BF16_ATTN_ATOL`, the bf16 bar
+the other rocKE attention kernels use) *and* ``max_abs / peak(|ref|) <= 2e-2``
+(``OUT_REL_PEAK_TOL``), and ``lse`` ``max_abs <= 1.7e-2`` (``LSE_ATOL``). The
+peak-relative bar exists because ``out`` shrinks as S_k grows, so a lost key
+tile can stay under 4e-2 absolute; ``test_negative_control_*`` pins that. Fully
+masked rows are held to ``out == 0`` / ``lse == -inf`` exactly.
 
 Specs come from the MLA dispatcher, so each case compiles the layout that ships
 for it: two heads per workgroup for even head counts, the single-head layout for
@@ -149,10 +153,44 @@ def test_mla_prefill_numeric_absorbed_query(name):
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
+def test_negative_control_one_zeroed_page_fails_the_bars():
+    """A kernel that loses one 16-key tile must fail the verifier.
+
+    ragged_long_h64's sequence 2 (S_q=40, S_k=2048) is launched with its first
+    page zeroed in ``c_kv`` / ``k_rope`` while the oracle reads the intact
+    inputs (input-side only, no kernel change). Measured on 304-CU gfx942:
+    out max_abs 3.9e-2 -- under the 4e-2 absolute bar alone -- but
+    max_abs / peak 1.5e-1 and lse max_abs 2.0e-2, so each new bar catches it.
+    """
+    probe = _probe()
+    sc = probe.SCENARIOS["ragged_long_h64"]
+
+    def run(**bars):
+        return probe.run_case(
+            "ragged_long_h64",
+            sc.heads,
+            sc.q_lens,
+            sc.k_lens,
+            arch=_arch(),
+            mode="full",
+            seed=0,
+            dry_run=False,
+            corrupt=(2, 0),
+            **bars,
+        )
+
+    assert run(tol=probe.BF16_ATTN_ATOL) is False
+    # Each new bar alone, with the other two opened up.
+    assert run(tol=1.0, lse_tol=1.0) is False, "peak-relative out bar missed it"
+    assert run(tol=1.0, rel_tol=1.0) is False, "lse bar missed it"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
 def test_long_keys_dispatch_agpr_and_odd_heads_single_head():
     """The numeric cases above exercise the layouts they claim to.
 
-    sk4096_h128 is 512 workgroups at key length 4096, which dispatch serves with
+    sk4096_h128 is 576 workgroups at key length 4096, which dispatch serves with
     agpr_acc on any CDNA3 part (<= 304 CUs); single_head_h5 has an odd head
     count, which dispatch cannot pack two to a workgroup.
     """

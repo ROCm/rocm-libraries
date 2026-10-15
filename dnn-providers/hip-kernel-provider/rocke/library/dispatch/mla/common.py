@@ -90,9 +90,11 @@ class MLARequest(OperatorRequest):
     # requested arch (see ``dispatch.mla.gfx942._resolve_num_cus``). It only
     # picks the XCD-aware workgroup order, so a wrong value costs speed.
     num_cus: int = 0
-    # Blocks in the paged KV pool (``c_kv`` / ``k_rope`` first dimension); 0
-    # when unknown. It only feeds the 32-bit extent admission
-    # (``check_mla_prefill_extents``), which skips the paged check at 0.
+    # Blocks in the paged KV pool (``c_kv`` / ``k_rope`` first dimension).
+    # Required: the candidate refuses 0 rather than skip the 32-bit paged
+    # extent admission (``check_mla_prefill_extents``). Callers holding the
+    # tensors pass ``c_kv.shape[0]``; callers without tensors pass the pool
+    # size they would allocate. Negative is malformed.
     num_kv_blocks: int = 0
     op: str = "mla_prefill_fwd"
     dtype: str = "bf16"

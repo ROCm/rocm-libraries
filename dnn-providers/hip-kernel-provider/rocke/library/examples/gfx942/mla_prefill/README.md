@@ -35,7 +35,7 @@
   - [Kept — the smaller VALU levers](#kept--the-smaller-valu-levers)
 - [Fourth pass — parallel lanes](#fourth-pass--parallel-lanes)
   - [Diagnosis](#diagnosis)
-  - [Kept — four heads per workgroup](#kept--four-heads-per-workgroup)
+  - [Kept, then superseded — four heads per workgroup](#kept-then-superseded--four-heads-per-workgroup)
   - [Measured and not stacked](#measured-and-not-stacked)
 - [Fifth pass — porting aiter's loop techniques](#fifth-pass--porting-aiters-loop-techniques)
   - [Diagnosis against aiter](#diagnosis-against-aiter)
@@ -198,7 +198,7 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 28 | Unmasked main loop, masked tail loop | **Kept** | per-element masks only on the last tile or two; small gain, none clearly slower |
 | 29 | `block_q` 16 → 32, prologue and epilogue staged by column window | **Kept** | each staged key tile feeds two query tiles; pool shrank, VGPR under 256, no spill: still two workgroups per CU; large gain, none slower |
 | 30 | Block-table lookup one tile ahead | **Kept** | the page index is in a register before its tile's loads issue; small gain, none clearly slower |
-| 31 | Four heads per workgroup, one wave per head (`heads_per_wg = 4`, `block_q = 16`), selected by dispatch | **Kept** | each staged key tile feeds four heads; no score split or partial combine; absorbed query never touches LDS; still two workgroups per CU; large gain on every shape |
+| 31 | Four heads per workgroup, one wave per head (`heads_per_wg = 4`, `block_q = 16`), selected by dispatch until lever 42 | **Kept, superseded by 42** | each staged key tile feeds four heads; no score split or partial combine; absorbed query never touches LDS; still two workgroups per CU; large gain on every shape |
 | 32 | Permuted-row PV gather on the four-heads path | **Kept** | one `ds_read_b64` of a key row feeds four PV tiles instead of sixteen scalar reads; large gain on every shape |
 | 33 | Occupancy guard tests | **Kept** | CPU tests fail if the shipped or the fallback layout leaves two workgroups per CU |
 | 34 | Score reads software-pipelined eight k-steps ahead, fenced every four (`HPW_SCORE_PREFETCH`, `HPW_SCORE_FENCE_EVERY`) | **Kept** | `lgkmcnt` waits, the loop's largest stall class, shrank on the trace; VGPR stays at the two-workgroup line, no spill; gain on every long shape |
@@ -673,7 +673,15 @@ two timings overlapped. Kept lanes were then stacked one at a time and re-timed.
   re-timed with the gate on a 304-CU gfx942, every shape stayed on the same
   side of aiter.
 
-### Kept — four heads per workgroup
+### Kept, then superseded — four heads per workgroup
+
+> **Superseded.** Dispatch no longer selects this layout. The sixth pass
+> replaced it with two heads x two query tiles per workgroup
+> (`_HEADS_PER_WG = 2`, `_Q_TILES_PER_WG = 2` in
+> [`dispatch/mla/gfx942.py`](../../../dispatch/mla/gfx942.py)); see
+> [Kept — two heads x two query tiles per workgroup](#kept--two-heads-x-two-query-tiles-per-workgroup).
+> The one-wave-per-head mechanics below (prologue, epilogue, PV gather) carry
+> over unchanged to that layout. `heads_per_wg = 4` stays admissible.
 
 Every head of a workgroup reads the same `c_kv` and `k_rope`, so staging a key tile
 once for four heads quadruples its reuse. Each wave owns one head outright: it
@@ -691,8 +699,9 @@ barrier), runs its own softmax, and accumulates all 32 latent tiles.
 
 The four-heads layout needs `block_q = 16` (at 32 the accumulators spill) and no
 AGPRs (with AGPRs it falls to one workgroup per CU and the rescale copies
-return). Dispatch selects it whenever the head count divides by four and
-admission passes; otherwise it falls back to the single-head spec defaults,
+return). In the fourth pass dispatch selected it whenever the head count
+divided by four; dispatch now packs two heads x two query tiles whenever the
+head count is even, and otherwise falls back to the single-head spec defaults,
 which the `fwd_*` golden cases pin. The verifier's full mode runs whatever
 dispatch selects.
 
@@ -929,7 +938,9 @@ becomes rare. It also helps the 16-row layout.
 ### When dispatch picks it
 
 Only when (a) the flavor is llvm22 or llvm23, (b) the key range is at least
-4096, and (c) the workgroups at least fill every CU. Shorter ranges are
+4096, and (c) the agpr_acc launch grid -- packed varlen q-blocks
+(`total_q // block_q + num_seqs`, as `num_q_blocks_for` counts them) times
+head pairs -- at least fills every CU. Shorter ranges are
 dominated by the per-workgroup absorb and `W_UV`, which a second workgroup
 per CU hides; fewer workgroups than CUs leave CUs idle that the 16-row layout,
 with twice the workgroups, uses; and a grid just over one round pays a whole

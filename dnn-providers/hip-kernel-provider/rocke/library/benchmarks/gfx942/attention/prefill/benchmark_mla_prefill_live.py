@@ -41,9 +41,11 @@ Three modes:
     ``lse``; aiter's latent output projected through ``W_UV`` (its gfx942 ASM
     prefill kernel leaves the LSE buffer unwritten) -- with the bf16 attention bar,
     ``max|got - ref| <= --tol`` (default 4e-2). The oracle runs on a subset: up
-    to eight evenly spaced heads and the first and last ``_GATE_ROWS`` query
-    rows of each sequence. No ratio is reported for a shape unless both arms
-    pass, and any failure makes the run exit non-zero.
+    to four evenly spaced head pairs ``(h, h + 1)`` -- both waves of a two-head
+    workgroup -- plus the last head, and the first and last ``_GATE_ROWS``
+    query rows of each sequence. No ratio is reported for a shape unless both
+    arms pass, and any failure -- including an oracle, projection or gate that
+    raises after timing -- makes the run exit non-zero.
 
 Run, from ``rocke/library``:
 
@@ -166,7 +168,8 @@ def _make_rocke_inputs(shape: MLAShape, *, seed: int = 0) -> dict[str, Any]:
     page = shape.block_size
     total_q = shape.total_q
     max_k = shape.seqlen_k
-    num_pages = (max_k + page - 1) // page * shape.batch
+    # The pool to_request reports to dispatch's paged extent admission.
+    num_pages = shape.num_kv_blocks
     max_bt_cols = (max_k + page - 1) // page
 
     dtype = torch.bfloat16 if shape.dtype == "bf16" else torch.float16
@@ -403,6 +406,10 @@ def _run_aiter_live(
 # ---------------------------------------------------------------------------
 
 
+class SpecRefused(ValueError):
+    """The ``--absorbed-query`` / ``--spec-override`` spec failed admission."""
+
+
 def _build_rocke_kernel(
     shape: MLAShape,
     *,
@@ -416,26 +423,43 @@ def _build_rocke_kernel(
     and ``.kernel_name`` attributes. ``absorbed_query`` swaps the dispatched
     spec for its unfused twin (see ``MlaPrefillSpec.absorbed_query``) and
     ``spec_overrides`` replaces further spec fields; the dispatcher itself
-    selects neither, so the result carries the swapped spec and its own
-    signature.
+    selects neither, so the swapped spec is re-admitted here -- the kernel's
+    admission and the request's 32-bit extents -- and the result carries its
+    own signature and grid. A refusal raises :class:`SpecRefused`.
     """
     import dataclasses
 
     from dispatch.mla import dispatch_mla
     from kernels.mla.mla_prefill_gfx942 import (
         build_mla_prefill_fwd,
+        check_mla_prefill_extents,
         mla_prefill_fwd_signature,
+        supports_mla_prefill,
     )
     from rocke import compile_kernel
 
     req = shape.to_request(arch=arch)
     result = dispatch_mla(req)
     if absorbed_query or spec_overrides:
-        spec = dataclasses.replace(
-            result.spec, absorbed_query=absorbed_query, **(spec_overrides or {})
-        )
+        try:
+            spec = dataclasses.replace(
+                result.spec, absorbed_query=absorbed_query, **(spec_overrides or {})
+            )
+        except ValueError as exc:
+            raise SpecRefused(f"spec rejected: {exc}") from None
+        ok, why = supports_mla_prefill(spec, arch=arch)
+        if ok:
+            ok, why = check_mla_prefill_extents(
+                spec, total_q=req.total_q, num_kv_blocks=req.num_kv_blocks
+            )
+        if not ok:
+            raise SpecRefused(why)
         result = dataclasses.replace(
-            result, spec=spec, signature=mla_prefill_fwd_signature(spec)
+            result,
+            spec=spec,
+            signature=tuple(mla_prefill_fwd_signature(spec)),
+            grid=result.candidate.grid(spec, req),
+            block=result.candidate.block(spec),
         )
         kernel_def = build_mla_prefill_fwd(spec, arch=arch)
     else:
@@ -597,8 +621,19 @@ _UNFUSED_SPLIT: dict[str, float] = {}
 
 
 def _gate_heads(num_heads: int) -> list[int]:
-    """Up to ``_GATE_HEADS`` evenly spaced heads."""
-    return list(range(0, num_heads, max(1, num_heads // _GATE_HEADS)))[:_GATE_HEADS]
+    """Evenly spaced head pairs ``(h, h + 1)``, plus the last head.
+
+    The shipped layout packs two heads per workgroup, one wave each, so a pair
+    starting on an even head gates both waves of one workgroup. ``h`` steps by
+    an even stride giving at most ``_GATE_HEADS // 2`` pairs; ``H - 1`` is
+    always gated so the tail workgroup is covered too.
+    """
+    pairs = max(1, _GATE_HEADS // 2)
+    step = max(2, (num_heads // pairs) // 2 * 2)
+    heads = {num_heads - 1}
+    for h in range(0, num_heads, step):
+        heads.update(x for x in (h, h + 1) if x < num_heads)
+    return sorted(heads)
 
 
 def _gate_windows(shape: MLAShape) -> list[tuple[int, int, int, int]]:
@@ -700,9 +735,26 @@ def _gate(out, lse, refs, *, tol: float) -> dict:
     }
 
 
+def _gate_error(exc: BaseException) -> dict:
+    """A gate verdict for an arm whose oracle, projection or gate raised.
+
+    The arm was timed but never checked, so it counts as a gate failure rather
+    than as a missing gate a caller could read as "not applicable".
+    """
+    return {
+        "ok": False,
+        "finite": False,
+        "max_abs_out": None,
+        "max_abs_lse": None,
+        "error": repr(exc),
+    }
+
+
 def _gate_str(name: str, gate: dict | None) -> str:
     if gate is None:
         return ""
+    if gate.get("error"):
+        return f" {name}_gate=FAIL(error)"
     if not gate["finite"]:
         return f" {name}_gate=FAIL(non-finite)"
     verdict = "ok" if gate["ok"] else "FAIL"
@@ -875,6 +927,17 @@ def main(argv=None) -> int:
                 absorbed_query=args.absorbed_query,
                 spec_overrides=spec_overrides,
             )
+        except SpecRefused as exc:
+            print(f"{tag}  ROCKE SPEC REFUSED: {exc}")
+            results.append(
+                {
+                    "signature": shape.signature,
+                    "regime": shape.regime,
+                    "status": "unsupported",
+                    "detail": str(exc),
+                }
+            )
+            continue
         except Exception as exc:  # noqa: BLE001
             print(f"{tag}  ROCKE BUILD FAIL: {exc!r}")
             traceback.print_exc()
@@ -914,6 +977,10 @@ def main(argv=None) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"{tag}  ROCKE TIME/GATE FAIL: {exc!r}")
             traceback.print_exc()
+            if rocke_ms is not None:
+                # Timed but never checked: a gate failure, not a missing gate.
+                rocke_gate = _gate_error(exc)
+                n_gate_fail += 1
 
         rocke_tflops = (
             tflop / (rocke_ms * 1e-3) if (rocke_ms and rocke_ms > 0) else None
@@ -946,6 +1013,10 @@ def main(argv=None) -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"{tag}  AITER FAIL: {exc!r}")
                 traceback.print_exc()
+                if aiter_ms is not None and aiter_gate is None:
+                    # Timed, but the W_UV projection or the gate raised.
+                    aiter_gate = _gate_error(exc)
+                    n_gate_fail += 1
         del rocke_data, refs
 
         aiter_tflops = (
@@ -963,7 +1034,9 @@ def main(argv=None) -> int:
 
         if rocke_ms is None:
             status = "fail"
-        elif not (rocke_gate and rocke_gate["ok"]):
+        elif not (rocke_gate and rocke_gate["ok"]) or (
+            aiter_gate is not None and not aiter_gate["ok"]
+        ):
             status = "gate_fail"
         else:
             status = "ok"
@@ -1019,7 +1092,8 @@ def main(argv=None) -> int:
 
     # summary
     print(f"\n=== SUMMARY (arch={args.arch}, gate tol {args.tol:g}) ===")
-    ok_recs = [r for r in results if r.get("rocke_ms")]
+    # Gated shapes only: a gate_fail shape's timing is not a result.
+    ok_recs = [r for r in results if r.get("status") == "ok"]
     if ok_recs:
         by_regime: dict[str, list] = {}
         for r in ok_recs:

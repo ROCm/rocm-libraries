@@ -59,6 +59,8 @@ _CUS_PER_XCD = 38
 # and W_UV, which a second workgroup per CU hides; fewer workgroups than CUs
 # leave CUs idle that the 16-row layout, with twice the workgroups, uses.
 _AGPR_MIN_KEYS = 4096
+# Query rows per wave in the agpr_acc layout (16 in the default layout).
+_AGPR_ROWS_PER_WAVE = 32
 # Test hook: True / False forces the agpr_acc choice, None applies the rule.
 _AGPR_FORCE = None
 
@@ -101,7 +103,11 @@ def _use_agpr_layout(req: MLARequest, num_cus: int) -> bool:
         return _AGPR_FORCE
     if num_cus <= 0 or req.max_seqlen_k < _AGPR_MIN_KEYS:
         return False
-    wgs = (req.total_q // (32 * _Q_TILES_PER_WG)) * (req.num_heads // _HEADS_PER_WG)
+    # The agpr layout's real launch: num_q_blocks_for counts the packed varlen
+    # blocks (total_q // block_q + num_seqs), so ragged batches are not
+    # under-counted against the CU count.
+    q_blocks = num_q_blocks_for(req, _AGPR_ROWS_PER_WAVE * _Q_TILES_PER_WG)
+    wgs = q_blocks * (req.num_heads // _HEADS_PER_WG)
     return wgs >= num_cus
 
 
@@ -148,7 +154,7 @@ def _spec_for(req: MLARequest) -> tuple[MlaPrefillSpec, tuple[bool, str]]:
             heads_per_wg=_HEADS_PER_WG,
             q_tiles_per_wg=_Q_TILES_PER_WG,
             num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
-            block_q=(32 if agpr else 16) * _Q_TILES_PER_WG,
+            block_q=(_AGPR_ROWS_PER_WAVE if agpr else 16) * _Q_TILES_PER_WG,
             agpr_acc=agpr,
             num_xcds=_num_xcds(num_cus),
         )
@@ -181,6 +187,14 @@ def _make_gfx942_mla_prefill_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
+        if int(req.num_kv_blocks) == 0:
+            # Refused rather than skipped: without the pool size the paged
+            # c_kv extent admission cannot run, and an over-2 GiB pool would
+            # wrap the kernel's 32-bit page offsets silently.
+            return False, (
+                "num_kv_blocks is required (pass c_kv.shape[0], the paged KV "
+                "pool size); 0 leaves the paged c_kv extent unchecked"
+            )
         try:
             spec, (ok, why) = _spec_for(req)
         except ValueError as exc:

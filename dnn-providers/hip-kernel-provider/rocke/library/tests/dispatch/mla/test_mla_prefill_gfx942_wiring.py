@@ -43,6 +43,8 @@ def _req(**overrides) -> MLARequest:
         arch="gfx942",
         # Pinned so the XCD-aware order does not depend on the test host.
         num_cus=228,
+        # Two sequences of ceil(96 / 16) = 6 pages each.
+        num_kv_blocks=12,
     )
     base.update(overrides)
     return MLARequest(**base)
@@ -288,6 +290,25 @@ class TestNumSeqsCap(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("binary_search_iters", why)
 
+    def test_spec_with_more_iterations_is_refused(self):
+        # The count is not in the kernel name, so a second admitted value
+        # would compile under the default spec's name.
+        from kernels.mla.mla_prefill_gfx942 import (
+            MLA_BINARY_SEARCH_ITERS,
+            MlaPrefillSpec,
+            supports_mla_prefill,
+        )
+
+        default = MlaPrefillSpec(num_heads=128)
+        longer = MlaPrefillSpec(
+            num_heads=128, binary_search_iters=MLA_BINARY_SEARCH_ITERS + 4
+        )
+        self.assertEqual(default.fwd_kernel_name(), longer.fwd_kernel_name())
+        self.assertTrue(supports_mla_prefill(default, arch="gfx942")[0])
+        ok, why = supports_mla_prefill(longer, arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("binary_search_iters", why)
+
 
 class TestExtentAdmission(unittest.TestCase):
     """i32 offset admission: refused at the first total_q / pool size whose
@@ -373,8 +394,22 @@ class TestExtentAdmission(unittest.TestCase):
             )[0]
         )
 
-    def test_unknown_pool_skips_the_paged_check(self):
-        self.assertTrue(MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=0))[0])
+    def test_unknown_pool_is_refused(self):
+        ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=0))
+        self.assertFalse(ok)
+        self.assertIn("num_kv_blocks is required", why)
+
+    def test_unknown_pool_is_refused_by_default(self):
+        req = _req()
+        req = MLARequest(
+            **{k: v for k, v in req.__dict__.items() if k != "num_kv_blocks"}
+        )
+        self.assertEqual(req.num_kv_blocks, 0)
+        self.assertFalse(MLA_REGISTRY.get(_NAME).admits(req)[0])
+        self.assertEqual(mla_sweep_space(req), ())
+        self.assertEqual(registered_mla_combos(req), ())
+        with self.assertRaises(ValueError):
+            dispatch_mla(req)
 
     def test_negative_pool_is_malformed(self):
         ok, why = MLA_REGISTRY.get(_NAME).admits(_req(num_kv_blocks=-1))
@@ -463,9 +498,12 @@ class TestDispatchResult(unittest.TestCase):
             long_full = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
             self.assertTrue(long_full.agpr_acc)
             self.assertEqual(long_full.block_q, 64)
-            # Too few workgroups to fill 228 CUs, or too short a key range.
+            # Too few workgroups to fill 228 CUs -- (128 // 64 + 2) x 32 = 128
+            # at 64 heads -- or too short a key range.
             self.assertFalse(
-                dispatch_mla(_req(total_q=128, max_seqlen_k=32768)).spec.agpr_acc
+                dispatch_mla(
+                    _req(num_heads=64, total_q=128, max_seqlen_k=32768)
+                ).spec.agpr_acc
             )
             self.assertFalse(
                 dispatch_mla(_req(total_q=8192, max_seqlen_k=2048)).spec.agpr_acc
@@ -475,6 +513,27 @@ class TestDispatchResult(unittest.TestCase):
             fallback = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
             self.assertFalse(fallback.agpr_acc)
             self.assertEqual(fallback.block_q, 32)
+        finally:
+            if old is None:
+                os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+            else:
+                os.environ["ROCKE_LLVM_FLAVOR"] = old
+
+    def test_agpr_fill_test_counts_the_packed_varlen_grid(self):
+        # Two sequences of 64 queries x 128 heads on 228 CUs. Ignoring the
+        # + num_seqs term gives (128 // 64) * 64 = 128 workgroups, under the CU
+        # count; the real launch is (128 // 64 + 2) * 64 = 256, which fills it.
+        import os
+
+        old = os.environ.get("ROCKE_LLVM_FLAVOR")
+        try:
+            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm22"
+            req = _req(total_q=128, num_seqs=2, max_seqlen_k=4096, num_kv_blocks=512)
+            self.assertLess((128 // 64) * (128 // 2), req.num_cus)
+            result = dispatch_mla(req)
+            self.assertTrue(result.spec.agpr_acc)
+            self.assertEqual(result.grid[0] * result.grid[1], 256)
+            self.assertGreaterEqual(result.grid[0] * result.grid[1], req.num_cus)
         finally:
             if old is None:
                 os.environ.pop("ROCKE_LLVM_FLAVOR", None)
