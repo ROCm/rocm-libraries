@@ -2344,6 +2344,42 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
 
+    def test_gfx942_3d_wide_kv_load_up_to_head_size_128(self):
+        """The gfx942 3D wide K/V feed is on for fp16/bf16 up to head size 128;
+        head size 256 keeps the async DMA (the wide feed relies on the
+        compiler to overlap its copies). ``HIPDNN_GFX942_3D_WKV=0`` and fp8 K/V
+        turn it off."""
+        import os
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        def problem(head_size, **kw):
+            return UnifiedAttentionProblem(
+                total_q=4,
+                num_seqs=4,
+                num_query_heads=8,
+                num_kv_heads=1,
+                head_size=head_size,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=4096,
+                dtype="bf16",
+                **kw,
+            )
+
+        with _patch_resolved_arch("gfx942"):
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("HIPDNN_GFX942_3D_WKV", None)
+                self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(64)))
+                self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(128)))
+                self.assertFalse(au._enable_gfx942_3d_wide_kv_load(problem(256)))
+                self.assertFalse(
+                    au._enable_gfx942_3d_wide_kv_load(problem(128, use_fp8=True))
+                )
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX942_3D_WKV": "0"}):
+                self.assertFalse(au._enable_gfx942_3d_wide_kv_load(problem(128)))
+
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
 

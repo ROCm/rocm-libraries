@@ -3046,10 +3046,8 @@ def _enable_gfx942_3d_invariant_hoist(
 
 def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     """Wide 128-bit direct global->register->LDS KV feed for the 3D decode
-    segment kernel (replaces the gfx942 1-DWORD async DMA). fp16/bf16 only.
-
-    Opt-in via HIPDNN_GFX942_3D_WKV while it is A/B'd against the async path;
-    promoted to default once the win is confirmed.
+    segment kernel (instead of the gfx942 1-DWORD async DMA). fp16/bf16, head
+    size up to 128; ``HIPDNN_GFX942_3D_WKV=0`` turns it off.
     """
     if _resolve_attention_arch() != "gfx942":
         return False
@@ -3058,10 +3056,16 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     env = __import__("os").environ.get("HIPDNN_GFX942_3D_WKV", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
         return False
-    # Default ON: validated bit-identical and ~8% faster on D128 decode, neutral
-    # on D64, never slower (decode_ab.py A/B). Strict improvement over the 1-DWORD
-    # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
-    # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
+    # The wide feed loads each 16-byte chunk into registers and stores it to LDS
+    # right away, so its copies overlap only if the compiler schedules the loads
+    # ahead of the stores. LLVM 22 does; at head size 256 (more chunks, high
+    # register pressure) LLVM 23 serializes them (each load waits before its
+    # store), which makes the kernel several times slower. The async DMA does
+    # not depend on that schedule.
+    if problem.head_size > 128:
+        return False
+    # Default on up to head size 128: bit-identical to the async DMA and faster
+    # there.
     return True
 
 
