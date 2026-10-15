@@ -22,6 +22,7 @@ nanobind_add_module(tensilelite_write NB_SUPPRESS_WARNINGS
 
 set_target_properties(tensilelite_write PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${_tensilelite_write_output}"
+    RUNTIME_OUTPUT_DIRECTORY "${_tensilelite_write_output}"
 )
 
 set_property(TARGET tensilelite_write PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
@@ -35,6 +36,20 @@ if(_link_msgpack_host)
         BUILD_RPATH "$<TARGET_FILE_DIR:tensilelite-host>"
         INSTALL_RPATH "$ORIGIN/../.."
     )
+    # Windows resolves a module's DLLs from the module directory, not from PATH.
+    if(WIN32)
+        get_target_property(_tensilelite_host_type tensilelite-host TYPE)
+        if(_tensilelite_host_type STREQUAL "SHARED_LIBRARY")
+            add_custom_command(TARGET tensilelite_write POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:tensilelite-host>
+                    $<TARGET_FILE_DIR:tensilelite_write>
+            )
+            install(FILES $<TARGET_FILE:tensilelite-host>
+                DESTINATION "${_tensilelite_write_install}"
+                COMPONENT devel)
+        endif()
+    endif()
 else()
     # Host library is absent (gemm-libs) or compiled for YAML, which does not
     # build src/msgpack. Compile the writer and the serialization sources it

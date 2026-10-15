@@ -229,6 +229,9 @@ function(create_device_library)
     elseif(TARGET roc::tensilelite-host)
         set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
         list(APPEND _python_path_dirs "${_installed_python_root}")
+        # tensilelite_write is installed here as a top-level module. The runtime
+        # path already names this directory; Python only imports from PYTHONPATH.
+        list(APPEND _python_path_dirs "${_installed_python_root}/tensilelite")
         list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
         list(APPEND _runtime_lib_dirs "${_installed_python_root}/tensilelite")
         list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
