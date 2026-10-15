@@ -460,7 +460,14 @@ def _run_result(req, result, args, index: int) -> dict:
             )
             return row
         stream = torch.cuda.current_stream().cuda_stream
-        binding = result.bind_torch(tensors, stream=stream)
+        bind_kwargs = {"stream": stream}
+        if bool(getattr(req, "use_fp8", False)):
+            # KV was cast to fp8 at unit scale above, so the dequant scale is 1.0.
+            # Pass it explicitly: the fp8 bindings reject a missing scale rather
+            # than silently defaulting to 1.0.
+            bind_kwargs["k_scale"] = 1.0
+            bind_kwargs["v_scale"] = 1.0
+        binding = result.bind_torch(tensors, **bind_kwargs)
 
         def call():
             binding.launch(stream=stream)
