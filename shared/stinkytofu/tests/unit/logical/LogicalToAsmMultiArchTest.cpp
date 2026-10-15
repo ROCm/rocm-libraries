@@ -1273,34 +1273,43 @@ TEST(LogicalToAsmComprehensive, SBarrierPreservesExplicitSemantics) {
         {true, true, true, {GFX::s_barrier_wait}, -3},
     };
 
-    for (const BarrierCase& testCase : cases) {
-        Function func("kernel");
-        BasicBlock* bb = func.createBasicBlock("test");
-        bb->appendIR(static_cast<IRBase*>(
-            SBarrier(testCase.separate, testCase.wait, testCase.clusterBarrier, "barrier")));
+    for (int tensorcnt : {-1, 0, 2, 63}) {
+        for (const BarrierCase& testCase : cases) {
+            Function func("kernel");
+            BasicBlock* bb = func.createBasicBlock("test");
+            bb->appendIR(static_cast<IRBase*>(SBarrier(
+                testCase.separate, testCase.wait, testCase.clusterBarrier, "barrier", tensorcnt)));
 
-        PassManager pm;
-        GemmTileConfig config;
-        config.arch = {12, 5, 0};
-        pm.setGemmTileConfig(config);
-        pm.addPass(createToStinkyAsmPass());
-        pm.run(func);
+            PassManager pm;
+            GemmTileConfig config;
+            config.arch = {12, 5, 0};
+            pm.setGemmTileConfig(config);
+            pm.addPass(createToStinkyAsmPass());
+            pm.run(func);
 
-        std::vector<StinkyInstruction*> lowered;
-        for (BasicBlock& block : func)
-            for (IRBase& ir : block)
-                if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) lowered.push_back(inst);
+            std::vector<StinkyInstruction*> lowered;
+            for (BasicBlock& block : func)
+                for (IRBase& ir : block)
+                    if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) lowered.push_back(inst);
 
-        ASSERT_EQ(lowered.size(), testCase.expectedOpcodes.size());
-        for (size_t i = 0; i < lowered.size(); ++i) {
-            EXPECT_EQ(lowered[i]->getUnifiedOpcode(), testCase.expectedOpcodes[i]);
-            ASSERT_EQ(lowered[i]->getSrcRegs().size(), size_t{1});
-            const StinkyRegister& src = lowered[i]->getSrcRegs()[0];
-            ASSERT_EQ(src.dataType, StinkyRegister::Type::LiteralInt);
-            EXPECT_EQ(src.getLiteralInt(), testCase.expectedId);
+            ASSERT_EQ(lowered.size(), testCase.expectedOpcodes.size());
+            for (size_t i = 0; i < lowered.size(); ++i) {
+                EXPECT_EQ(lowered[i]->getUnifiedOpcode(), testCase.expectedOpcodes[i]);
+                ASSERT_EQ(lowered[i]->getSrcRegs().size(), size_t{1});
+                const StinkyRegister& src = lowered[i]->getSrcRegs()[0];
+                ASSERT_EQ(src.dataType, StinkyRegister::Type::LiteralInt);
+                EXPECT_EQ(src.getLiteralInt(), testCase.expectedId);
+                const auto* count = lowered[i]->getModifier<SWaitTensorCntData>();
+                if (i == 0 && tensorcnt >= 0) {
+                    ASSERT_NE(count, nullptr);
+                    EXPECT_EQ(count->tlcnt, tensorcnt);
+                } else {
+                    EXPECT_EQ(count, nullptr);
+                }
+            }
+            ASSERT_NE(lowered.back()->getModifier<CommentData>(), nullptr);
+            EXPECT_EQ(lowered.back()->getModifier<CommentData>()->comment, "barrier");
         }
-        ASSERT_NE(lowered.back()->getModifier<CommentData>(), nullptr);
-        EXPECT_EQ(lowered.back()->getModifier<CommentData>()->comment, "barrier");
     }
 }
 
