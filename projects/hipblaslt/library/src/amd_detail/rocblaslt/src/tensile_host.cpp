@@ -8325,6 +8325,40 @@ namespace
     using LocalKernelLibrary = TensileLite::LocalKernelLibrary<TensileLite::ContractionProblemGemm,
                                                                TensileLite::ContractionSolution>;
 
+    // Makes the handle's device current and restores the caller's on exit.
+    // The adapter is the handle's device's, and hipModuleLoad, including the
+    // adapter's own setup, loads onto the current device.
+    class HandleDeviceScope
+    {
+    public:
+        explicit HandleDeviceScope(int device)
+        {
+            if(hipGetDevice(&m_previous) != hipSuccess)
+                m_previous = -1;
+            if(m_previous == device)
+                m_current = true;
+            else
+                m_current = m_changed = hipSetDevice(device) == hipSuccess;
+        }
+        ~HandleDeviceScope()
+        {
+            if(m_changed && m_previous >= 0)
+                static_cast<void>(hipSetDevice(m_previous));
+        }
+        HandleDeviceScope(HandleDeviceScope const&)            = delete;
+        HandleDeviceScope& operator=(HandleDeviceScope const&) = delete;
+
+        bool current() const
+        {
+            return m_current;
+        }
+
+    private:
+        int  m_previous = -1;
+        bool m_current  = false;
+        bool m_changed  = false;
+    };
+
     // Initializes the library for the handle's device if needed.
     rocblaslt_status getLocalKernelLibrary(rocblaslt_handle                     handle,
                                            std::shared_ptr<LocalKernelLibrary>* localLibrary,
@@ -8357,6 +8391,10 @@ try
         return rocblaslt_status_invalid_handle;
     if(!libraryPath || !codeObjectPath)
         return rocblaslt_status_invalid_pointer;
+
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
 
     std::shared_ptr<LocalKernelLibrary> localLibrary;
     TensileLite::hip::SolutionAdapter*  adapter = nullptr;
@@ -8461,6 +8499,10 @@ try
     if(!TensileLite::isLocalKernelIndex(kernelIndex))
         return rocblaslt_status_invalid_value;
 
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
+
     std::shared_ptr<LocalKernelLibrary> localLibrary;
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, nullptr);
        st != rocblaslt_status_success)
@@ -8486,6 +8528,10 @@ try
 {
     if(!handle)
         return rocblaslt_status_invalid_handle;
+
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
 
     std::shared_ptr<LocalKernelLibrary> localLibrary;
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, nullptr);

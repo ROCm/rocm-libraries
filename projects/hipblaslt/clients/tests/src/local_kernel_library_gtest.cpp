@@ -742,3 +742,24 @@ TEST(LocalKernelMaster, smoke_ResolveLocalIndex)
     EXPECT_EQ(f.master.resolveSolutionByIndex(local->index), local);
     EXPECT_EQ(f.master.resolveSolutionByIndex(local->index + 1), nullptr);
 }
+
+// The index-based calls, hipblasLtMatmul among them, find a local kernel only on
+// the processor it is pinned to, as selection does.
+TEST(LocalKernelMaster, smoke_IndexServesOnlyItsProcessor)
+{
+    auto          problem = makeProblem();
+    auto          gfx950  = makeGpu();
+    AMDGPU        gfx942(AMDGPU::Processor::gfx942, 304, "gfx942");
+    MasterFixture f(problem);
+
+    auto solution = makeSolution(problem);
+    ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+
+    int index = f.local->addSolutions({solution}).at(0);
+
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx950, index), solution);
+    EXPECT_EQ(f.master.getSolutionByIndex(problem, gfx942, index), nullptr);
+    EXPECT_EQ(f.master.getSolutionByIndex(gfx942, index), nullptr);
+}
