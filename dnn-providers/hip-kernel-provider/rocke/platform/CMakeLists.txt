@@ -459,28 +459,46 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
+    # Library attention CPU tests (no GPU required): gfx950 LDS budget model and
+    # spec-wrapper parity gate. File-list style (same pattern as conv_pytest) so
+    # PYTHONPATH resolves rocke/ correctly from the installed tree.
+    set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_spec_predicate_parity.py")
+    set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
+    foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cpu_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+
     # Library attention dispatch CPU tests (no GPU required; dispatcher selection and
     # signature guards). Pointed at the DIRECTORY, not a file list, so a new file
-    # in tests/dispatch/attention/ runs automatically. WORKING_DIRECTORY is the
-    # library root so that tests/dispatch/attention/ does not shadow the real
-    # dispatch.attention package -- running from tests/ would make the local
-    # subdirectory win on sys.path, silently importing the wrong module.
+    # in tests/dispatch/attention/ runs automatically.
     #
-    # CTest resolves WORKING_DIRECTORY against the CTestTestfile's directory; the
-    # pytest path argument and PYTHONPATH must then be relative to that working
-    # directory (not to the CTestTestfile). Use "." for PYTHONPATH (the library
-    # root is already the working directory) and "tests/dispatch/attention" for
-    # the pytest path. An absolute path would also work but cannot be written
-    # here since the install prefix is only known at install time.
+    # PYTHONPATH must resolve the installed rocke/ package, which lives two levels
+    # above tests/dispatch/attention/ in the install tree. Using
+    # PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library (the library root, same as
+    # every other library target) puts rocke/ on the path correctly.
+    #
+    # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
+    # because tests/__init__.py exists while rocke/library/__init__.py does not,
+    # so pytest's prepend-mode basedir is already tests/library regardless of CWD
+    # (confirmed by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"tests/dispatch/attention\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
            "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
-           "  WORKING_DIRECTORY \"${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
