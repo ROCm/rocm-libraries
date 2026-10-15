@@ -185,6 +185,12 @@ claiming a parity that is not yet there.
   Both engines' output is evaluated, not only the Python one: the C++ engine's
   through the `rocke_engine` module (that lane skips where only the archive is
   built). Against the uncapped split it fails with `big = +inf` and `small = -inf`.
+  The folded parts are read as integers, never as printed `bfloat` constants: the
+  test bitcasts the four operands the first two MMAs consume to `<N x i16>` and hands
+  them to an opaque sink call, so what it compares is the bit pattern, which every
+  LLVM generation prints the same way. The spelling of a folded `bfloat` constant
+  differs between generations (a hex literal, a decimal, `+inf`), and a pattern
+  written for one of them reads nothing on another.
   It needs no GPU and skips without an `opt`.
 - [`tests/core/test_xf32_bf16x3_lowering.cpp`](../../../tests/core/test_xf32_bf16x3_lowering.cpp)
   — the same properties pinned directly on the C engine, by parsing serialized
