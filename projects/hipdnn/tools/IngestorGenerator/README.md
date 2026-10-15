@@ -69,8 +69,9 @@ a request to run the class. See the
     --force
 ```
 
-Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
-`2` from argparse itself on a bad flag.
+Exit codes: `0` success; `1` on a `ConfigError`, a template-rendering failure, or, with
+`--strict`, a pack arch over `reduction.aot_budget_per_arch` (checked before anything is
+written); `2` from argparse itself on a bad flag.
 
 ## Output
 
@@ -342,11 +343,11 @@ on the verifying machine.
 | `tools/verify_variant_sets.py` | Structural nesting/runtime tuple identity, sentinels and vocabulary; artifact-bound compiler agreement is the distinct, stronger mode | `verify_variant_sets.py --mode {full,structural} [--provenance-root LABEL=DIR]... [--arch A] [--manifest MANIFEST] [--kpack-python-dir D] LABEL ROOT...`. `--mode` is required and has no default: `structural` reports compiled specialization agreement as NOT CHECKED by name and still exits 0 on the rest; `full` fails on a missing, unsupported or mismatched producing-build record **and** on any check that could not run (`GATE FAILED (N check(s) NOT RUN: ...)`). `--manifest` takes the engine manifest: the slug of its `engine.name` is the bundle to gate (`<slug>.kdp.json`), and its `specialization.vocabulary` is the matcher vocabulary, which full mode requires over string fields no declaration spells out. `--provenance-root` names the sidecar tree mirroring that label's ROOT, needed for an installed tree, which ships no sidecars; an unknown LABEL or a malformed `LABEL=DIR` exits 2 |
 | `tools/launch_surface.py` | Is every surface the C++ restates from the kernel's Python declared, guarded and tested? It never compares what the two halves compute | `launch_surface.py MANIFEST --check [--allow-unguarded]` |
 | `tools/coverage_gate.py` | Structural, loading and serving obligations, reported separately; an unmet required obligation cannot pass | `coverage_gate.py --tree T --mode {full,structural} [--provenance-root DIR] [--arch A] [--manifest MANIFEST] [--validator V] [--expect-engine E] [--min-served N]`; `--mode` is required and governs what rung 1 may claim. `--manifest` is forwarded to rung 1 as above. A missing `--validator` makes rung 2 `loads-not-run`, a failure rather than a skip; an offline result is not serving evidence. `--provenance-root` mirrors `--tree`, for an installed tree, and is forwarded to rung 1 |
-| `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells; prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S]`, or `--manifest M --plan-space` |
+| `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells; prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]`. Exit 2 is unusable input; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
 | `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
 | `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids`; `--subset` requires only that every shipped kernel is present | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
 | `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules R1,R3]` |
-| `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6 |
+| `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6. `compare` exits 0 whatever it finds (the report is for review; an accepted exception is a normal outcome); `compare --strict` exits 1 unless every row is within `--margin` and has a passing correctness verdict (a timing-only sweep, or a row with no usable reference, refuses) |
 | `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
 
@@ -579,13 +580,14 @@ reduction:                        # copied into the selection; read by tools/var
       - {name: block_m, divides: seqlen_q}   # applicable when seqlen_q % block_m == 0
       - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}  # resolves a None knob
     ignored: []                   # held at the registry default, no warning
-  aot_budget_per_arch: 1000       # optional, default 1000; generate.py warns above it
+  aot_budget_per_arch: 1000       # optional, default 1000; generate.py and registry_enumerator.py warn above it, --strict fails
 
 ground_truth:                     # optional; read by tools/ground_truth.py graphs
   graph_template: templates/attention_sdpa_fwd.graph.json   # manifest-relative; "stride_order" orders packed strides
-  value_map:                      # request value -> template scalar, or JSON-pointer patches
+  value_map:                      # request value -> template scalar, or patches
     dtype: {bf16: bfloat16, fp16: half}
-    mask_type: {NO_MASK: {/nodes/0/attributes/causal_mask: false}}
+    # A patch pointer's list segments are element names, not indices.
+    mask_type: {NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}}
 ```
 
 Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. Metadata

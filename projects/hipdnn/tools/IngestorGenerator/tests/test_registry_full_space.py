@@ -119,6 +119,11 @@ def test_a_budget_overrun_warns_and_exits_0(manifest, tmp_path, capsys):
     assert (
         f"WARN: {count} instances for gfx950 exceed the AOT budget 10" in captured.err
     )
+    # The same overrun is a gate failure under --strict, and nothing is written.
+    out = tmp_path / "strict" / "c.yaml"
+    assert re_.main(["--manifest", str(path), "--out", str(out), "--strict"]) == 1
+    assert "FAIL: --strict:" in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_plan_space_lists_each_varying_field(manifest):
@@ -128,6 +133,11 @@ def test_plan_space_lists_each_varying_field(manifest):
         if knob["name"] == "exp_per_pv_step":
             del knob["unset_resolves_by"]
     assert re_.plan_space(held, out=out) == 0
+    assert re_.plan_space(held, out=io.StringIO(), strict=True) == 0
+    tight = copy.deepcopy(held)
+    tight["reduction"]["aot_budget_per_arch"] = 1
+    assert re_.plan_space(tight, out=io.StringIO()) == 0
+    assert re_.plan_space(tight, out=io.StringIO(), strict=True) == 1
     text = out.getvalue()
     assert re.search(r"^    waves_per_eu: .*; unclassified-held$", text, re.M), text
     assert re.search(r"^    block_n: .*; covered \(performance\)$", text, re.M), text
@@ -162,3 +172,32 @@ def test_generate_warns_over_its_per_arch_budget(capsys, count, budget, warns):
         f"WARN: {count} instances for gfx950 exceed the AOT budget {budget or 1000}"
         in err
     ) is warns
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_generate_strict_fails_an_over_budget_run(
+    monkeypatch, tmp_path, capsys, strict
+):
+    sys.path.insert(0, str(_ROOT))
+    import generate
+    from tests.helpers import make_kernel, make_minimal_config, make_pack
+
+    pack = make_pack(
+        arch=["gfx950"], kernels=[make_kernel(name=f"k{i}") for i in range(11)]
+    )
+    config = make_minimal_config(packs=[pack], reduction={"aot_budget_per_arch": 10})
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("")
+    monkeypatch.setattr(generate, "load_config", lambda path: config)
+    argv = ["generate.py", "--config", str(config_path), "--dry-run"]
+    argv += ["--output-dir", str(tmp_path / "out")]
+    if strict:
+        argv.append("--strict")
+    monkeypatch.setattr(sys, "argv", argv)
+    if strict:
+        with pytest.raises(SystemExit) as stop:
+            generate.main()
+        assert stop.value.code == 1
+    else:
+        generate.main()
+    assert "exceed the AOT budget 10" in capsys.readouterr().err

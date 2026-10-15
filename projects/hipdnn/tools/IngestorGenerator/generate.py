@@ -13,25 +13,29 @@ import yaml
 
 from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH, ConfigError, load_config
 from codegen.generator import IngestorGenerator
+from codegen.models import EVERY_ARCH
 
 
-def warn_over_budget(config) -> None:
+def warn_over_budget(config) -> int:
     """WARN on stderr for each pack arch over ``reduction.aot_budget_per_arch``
-    (default `DEFAULT_AOT_BUDGET_PER_ARCH`) kernels."""
+    (default `DEFAULT_AOT_BUDGET_PER_ARCH`) kernels; returns how many are over."""
     budget = config.reduction.get("aot_budget_per_arch", DEFAULT_AOT_BUDGET_PER_ARCH)
+    over = 0
     for pack in config.packs:
         per_arch = Counter(
             arch
             for kernel in pack.kernels
-            for arch in (kernel.arch or pack.arch or ["every arch"])
+            for arch in (kernel.arch or pack.arch or [EVERY_ARCH])
         )
         for arch, count in per_arch.items():
             if count > budget:
+                over += 1
                 print(
                     f"WARN: {count} instances for {arch} exceed the AOT budget "
                     f"{budget} (red flag)",
                     file=sys.stderr,
                 )
+    return over
 
 
 def main() -> None:
@@ -65,6 +69,13 @@ def main() -> None:
         "extend flow points this tool at a live descriptor directory, and an "
         "unconditional overwrite would silently clobber hand-filled content "
         "(e.g. a completed graph_match body).",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 before generating when any pack arch exceeds "
+        "reduction.aot_budget_per_arch, instead of only warning. Use it in a "
+        "non-exploratory run or a CI step.",
     )
     parser.add_argument(
         "--check-placeholders",
@@ -103,7 +114,13 @@ def main() -> None:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    warn_over_budget(config)
+    over_budget = warn_over_budget(config)
+    if over_budget and args.strict:
+        print(
+            f"Error: {over_budget} arch(es) exceed the AOT budget and --strict is set.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print(f"Loaded config for engine: {config.engine.name}")
     print(f"  Packs: {[p.name for p in config.packs]}")

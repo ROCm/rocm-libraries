@@ -16,6 +16,10 @@ in ``reduction.fields.feature``, projects varying ``performance`` knobs into the
 spec, KMD, metadata, bindings and name, and holds any other varying field at the
 registry default (with a WARN unless ``ignored``). The default spec carries
 ``default: true``.
+
+Exit 0 on success; 2 on unusable input. ``--strict`` makes exit 1 mean a gate refusal:
+kernels over ``aot_budget_per_arch`` (``--plan-space``: the current classification) or a
+``--shapes`` GAP.
 """
 
 from __future__ import annotations
@@ -53,6 +57,10 @@ _LAST_SLOT = re.compile(r"(?<!\{)\{[^{}]+\}(?!\})")
 
 class EnumerationError(RuntimeError):
     """The registry could not be reached, or disagrees with the manifest."""
+
+
+class OverBudget(EnumerationError):
+    """``build_config(strict=True)`` found more kernels than the AOT budget allows."""
 
 
 def load_manifest(path: str) -> dict:
@@ -212,7 +220,13 @@ class Registry:
         self.pin = {k: self.coerce(k, v, strict=True) for k, v in self.pin.items()}
         self.fixed = {k: self.coerce(k, v, strict=True) for k, v in self.fixed.items()}
 
-        candidates = list(candidates_fn())
+        try:
+            candidates = list(candidates_fn())
+        except Exception as exc:  # the registry's own failure, not ours to classify
+            raise EnumerationError(
+                f"the registry's candidate list could not be built "
+                f"({type(exc).__name__}): {exc}"
+            ) from exc
         matched = [
             c
             for c in candidates
@@ -230,7 +244,12 @@ class Registry:
             )
         self.candidate = matched[0]
 
-        from rocke.dispatch.tuning import walk
+        try:
+            from rocke.dispatch.tuning import walk
+        except ImportError as exc:
+            raise EnumerationError(
+                f"rocKE dispatch is not importable (is the provider root bound?): {exc}"
+            ) from exc
 
         self._sweep_level = walk.sweep_level
 
@@ -327,9 +346,10 @@ class Registry:
         request = self.request(cell)
         try:
             ok, why = self.candidate.admits(request)
-        except ValueError as exc:
+        except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
-                f"the registry cannot judge cell {_show(cell)}: {exc}"
+                f"the registry cannot judge cell {_show(cell)} "
+                f"({type(exc).__name__}): {exc}"
             ) from exc
         if not ok:
             raise EnumerationError(
@@ -338,13 +358,18 @@ class Registry:
             )
         try:
             base = _unwrap(self.candidate.select_spec(request))
-        except ValueError as exc:
+            with self._sweep_level(self.decl["sweep_level"]):
+                specs = [_unwrap(s) for s in self.candidate.sweep_space(request)]
+        except (ValueError, TypeError, AttributeError) as exc:
             raise EnumerationError(
                 f"the registry rejects cell {_show(cell)}, which the manifest's cells "
-                f"promise: {exc}"
+                f"promise ({type(exc).__name__}): {exc}"
             ) from exc
-        with self._sweep_level(self.decl["sweep_level"]):
-            specs = [_unwrap(s) for s in self.candidate.sweep_space(request)]
+        if base is None or any(spec is None for spec in specs):
+            raise EnumerationError(
+                f"the registry routes cell {_show(cell)} without a kernel_spec; the "
+                f"pinned candidate must resolve to a kernel."
+            )
         return base, specs
 
     def slice_of(self, base, specs: list) -> list:
@@ -629,9 +654,12 @@ def _template_slots(template: str) -> set:
     }
 
 
-def build_config(manifest: dict, registry: Registry | None = None, warn=None) -> dict:
+def build_config(
+    manifest: dict, registry: Registry | None = None, warn=None, strict: bool = False
+) -> dict:
     """The generator config for ``manifest``. Holds and a budget overrun are
-    reported through ``warn`` (stderr by default)."""
+    reported through ``warn`` (stderr by default); with ``strict`` an overrun raises
+    `OverBudget` instead."""
     warn = warn or (lambda message: print(message, file=sys.stderr))
     template = manifest.get("kernel_name_template")
     if not template:
@@ -742,10 +770,13 @@ def build_config(manifest: dict, registry: Registry | None = None, warn=None) ->
             )
     budget = enumeration.classification.budget
     if len(kernels) > budget:
-        warn(
-            f"WARN: {len(kernels)} instances for {manifest['arch']} exceed the AOT "
+        message = (
+            f"{len(kernels)} instances for {manifest['arch']} exceed the AOT "
             f"budget {budget} (red flag)"
         )
+        if strict:
+            raise OverBudget(message)
+        warn(f"WARN: {message}")
 
     slug = manifest.get("pack") or Path(manifest["authored_subpath"]).name
     config = {
@@ -787,8 +818,9 @@ def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) ->
     return metadata
 
 
-def plan_space(manifest: dict, out=None) -> int:
-    """Print the full space's varying fields and exact instance counts."""
+def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
+    """Print the full space's varying fields and exact instance counts. With
+    ``strict``, return 1 when the current classification is over budget."""
     out = out or sys.stdout
     registry = Registry(manifest)
     classification = Classification.from_manifest(manifest, required=True)
@@ -844,9 +876,8 @@ def plan_space(manifest: dict, out=None) -> int:
     for name in values:
         shown, default = listed(values[name]), listed(defaults[name])
         print(f"    {name}: {{{shown}}}; default {default}; {label(name)}", file=out)
-    print(
-        f"  instances (current classification): {against(count(performance))}", file=out
-    )
+    current = count(performance)
+    print(f"  instances (current classification): {against(current)}", file=out)
     unclassified = [n for n in values if n not in performance and n not in ignored]
     held_ignored = [n for n in values if n in ignored]
     if held_ignored:
@@ -858,7 +889,7 @@ def plan_space(manifest: dict, out=None) -> int:
     for name in [n for n in performance if n in values]:
         dropped = OrderedDict((k, v) for k, v in performance.items() if k != name)
         print(f"  if dropped {name}: {against(count(dropped))}", file=out)
-    return 0
+    return 1 if strict and current > budget else 0
 
 
 def load_shapes(path: str) -> list:
@@ -872,6 +903,10 @@ def load_shapes(path: str) -> list:
         raise EnumerationError(
             f"shapes file {path} must be a JSON list of request-field mappings."
         )
+    if not loaded:
+        raise EnumerationError(
+            f"shapes file {path} lists no shapes; an empty corpus covers nothing."
+        )
     return loaded
 
 
@@ -883,9 +918,10 @@ def _field_default(field: dataclasses.Field):
     return dataclasses.MISSING
 
 
-def shapes_report(registry: Registry, shapes: list) -> list:
-    """The ``--shapes`` report lines: each shape in its first matching category
-    of outside cell axes, declined by registry, covered, GAP."""
+def shapes_report(registry: Registry, shapes: list) -> tuple:
+    """``(report lines, GAP shape count, covered shape count)``: each shape in its
+    first matching category of outside cell axes, declined by registry, covered,
+    GAP."""
     listed = {registry.cell_key(cell) for cell in registry.cells()}
     controlled = set(registry.fixed) | set(registry.cell_fields)
     categories = OrderedDict(
@@ -913,12 +949,25 @@ def shapes_report(registry: Registry, shapes: list) -> list:
                 name: registry.coerce(name, value) for name, value in shape.items()
             }
             # The shape's own values win; `fixed` fills only the fields it omits.
+            # The registry rejects bad shape data with ValueError, and a request the
+            # shape cannot form is no better: both are that shape's decline. A
+            # TypeError or AttributeError while judging is the registry breaking.
             try:
-                ok, why = registry.candidate.admits(
-                    registry.request_cls(**{**registry.fixed, **kwargs, **registry.pin})
+                request = registry.request_cls(
+                    **{**registry.fixed, **kwargs, **registry.pin}
                 )
             except (TypeError, ValueError) as exc:
                 ok, why = False, f"request rejected: {exc}"
+            else:
+                try:
+                    ok, why = registry.candidate.admits(request)
+                except ValueError as exc:
+                    ok, why = False, f"request rejected: {exc}"
+                except (TypeError, AttributeError) as exc:
+                    raise EnumerationError(
+                        f"the registry cannot judge shape {shape!r} "
+                        f"({type(exc).__name__}): {exc}"
+                    ) from exc
             cell_text = _show(dict(zip(registry.cell_fields, key)))
             if not ok:
                 category, detail = "declined by registry", f"{cell_text}: {why}"
@@ -936,7 +985,7 @@ def shapes_report(registry: Registry, shapes: list) -> list:
         lines.append(f"  {name}: {entry['shapes']} shapes, {len(entry['cells'])} cells")
         for detail, n in sorted(entry["detail"].items()):
             lines.append(f"    {n} x {detail}")
-    return lines
+    return lines, categories["GAP"]["shapes"], categories["covered"]["shapes"]
 
 
 def main(argv=None) -> int:
@@ -956,6 +1005,13 @@ def main(argv=None) -> int:
         help="Print the full space's varying fields and exact instance counts per "
         "classification change; builds and writes nothing.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 when the run finds what a gate must refuse: an instance count "
+        "over reduction.aot_budget_per_arch (the build, or --plan-space's current "
+        "classification) or a --shapes GAP. Exit 2 stays for unusable input.",
+    )
     args = parser.parse_args(argv)
     if not args.plan_space and not args.out:
         parser.error("--out is required unless --plan-space is given")
@@ -965,20 +1021,34 @@ def main(argv=None) -> int:
         manifest = load_manifest(args.manifest)
         bind_provider(manifest.get("provider_root"))
         if args.plan_space:
-            return plan_space(manifest)
+            return plan_space(manifest, strict=args.strict)
         shapes = load_shapes(args.shapes) if args.shapes else None
         registry = Registry(manifest)
-        config = build_config(manifest, registry)
-        report = shapes_report(registry, shapes) if shapes is not None else []
+        config = build_config(manifest, registry, strict=args.strict)
+        report, gaps, covered = (
+            shapes_report(registry, shapes) if shapes is not None else ([], 0, 0)
+        )
+        out = Path(args.out)
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(
+                yaml.safe_dump(config, sort_keys=False, width=1000), encoding="utf-8"
+            )
+        except OSError as exc:
+            raise EnumerationError(f"cannot write {out}: {exc}") from exc
+    except OverBudget as exc:
+        print(f"FAIL: --strict: {exc}", file=sys.stderr)
+        return 1
     except EnumerationError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
-    Path(args.out).write_text(
-        yaml.safe_dump(config, sort_keys=False, width=1000), encoding="utf-8"
-    )
     print(f"{len(config['packs'][0]['kernels'])} kernels -> {args.out}")
     for line in report:
         print(line)
+    if args.strict and shapes is not None and (gaps or not covered):
+        why = f"{gaps} GAP shapes" if gaps else "no shape is covered (a wrong pin?)"
+        print(f"FAIL: --strict: {why}", file=sys.stderr)
+        return 1
     return 0
 
 

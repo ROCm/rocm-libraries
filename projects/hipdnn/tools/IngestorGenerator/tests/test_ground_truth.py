@@ -148,6 +148,10 @@ def test_compare_reports_margin_correctness_and_missing(tmp_path, capsys):
     assert gt.main(argv) == 0
     summary = "4 rows, 2 within margin, 1 outside, 1 failing correctness, 1 missing"
     assert summary in capsys.readouterr().out
+    # Only row 1 is within the margin with a passing verdict. Row 2 is outside and
+    # fails, 3 is missing, and 4 is on time but has no usable reference.
+    assert gt.main(argv + ["--strict"]) == 1
+    assert "rows [2, 3, 4] are refused" in capsys.readouterr().err
     text = report.read_text()
     assert "declined: no kernel" in text
     assert "## Rows with no usable reference\n\n- row 4 " in text
@@ -156,3 +160,32 @@ def test_compare_reports_margin_correctness_and_missing(tmp_path, capsys):
     identities.write_text(json.dumps({"device": {"arch": "gfx942"}}))
     assert gt.main(argv) == 2
     assert "['gfx950']" in capsys.readouterr().err and not report.exists()
+
+
+@pytest.mark.parametrize("checked, rc", [(True, 0), (False, 1)])
+def test_strict_compare_wants_a_passing_correctness_verdict(tmp_path, checked, rc):
+    assert _graphs(tmp_path, [_row(1, time_ms=0.1)])[0] == 0
+    sweep = tmp_path / "sweep"
+    _phase(sweep, "timing", _entry(1, mean_ms=0.104))
+    if checked:
+        ok = {"passed": True, "execution_success": True, "tolerance_match": True}
+        _phase(
+            sweep, "correctness", _entry(1, correctness=ok, reference={"usable": True})
+        )
+    (sweep / "input-identities.json").write_text(
+        json.dumps({"device": {"arch": "gfx950"}})
+    )
+    argv = f"compare --gt {tmp_path / 'GT.json'} --sweep-output {sweep} --margin 0.05 "
+    argv += f"--report {tmp_path / 'report.md'}"
+    assert gt.main(argv.split()) == 0
+    assert gt.main(argv.split() + ["--strict"]) == rc
+
+
+def test_patch_pointers_name_their_node_not_an_index():
+    graph = {"nodes": [{"name": "a", "x": 0}, {"name": "b", "x": 0}]}
+    container, key = gt._pointer_parent(graph, "/nodes/b/x")
+    container[key] = 1
+    assert graph["nodes"] == [{"name": "a", "x": 0}, {"name": "b", "x": 1}]
+    for pointer in ("/nodes/0/x", "/nodes/c/x"):
+        with pytest.raises(gt.GroundTruthError, match="names no template location"):
+            gt._pointer_parent(graph, pointer)

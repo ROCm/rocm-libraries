@@ -163,6 +163,12 @@ def test_applied_rules_replace_the_eps_keep_set(tmp_path, capsys):
     kept = load_config(tmp_path / "reduced.yaml").packs[0].kernels
     every = {kname(d, t, u) for d, t, u, _ in KERNELS}
     assert {k.name for k in kept} == every - {kname("fp32", 128, 1)}
+    # The report is what the user accepts, so it must describe the written set.
+    report = (tmp_path / "report.md").read_text()
+    assert f"- kept {len(every) - 1} of {len(every)} " in report
+    assert f"| {kname('fp32', 128, 1)} | no | removed by {rule.id} |" in report
+    assert f"chosen: rules {rule.id} (the eps search chose" in report
+    assert "chosen eps:" not in report and "(chosen)" not in report
 
 
 def test_combined_rules_keep_a_kernel_for_every_ranked_graph(tmp_path):

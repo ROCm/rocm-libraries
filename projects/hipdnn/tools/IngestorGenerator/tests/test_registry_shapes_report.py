@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "tools"))
@@ -67,7 +69,9 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
         {**_COVERED, "arch": "gfx942"},
         {**_COVERED, "seqlen_q": 100, "seqlen_k": 77},
     ]
-    text = "\n".join(re_.shapes_report(re_.Registry(one), shapes))
+    lines, gaps, covered = re_.shapes_report(re_.Registry(one), shapes)
+    text = "\n".join(lines)
+    assert (gaps, covered) == (1, 1)
     counts = {
         name: _category(text, name)
         for name in ("covered", "outside cell axes", "declined by registry", "GAP")
@@ -87,7 +91,7 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
     assert re.search(r"1 x \{hdim_q: 128, .*nhead_q: 64", text), text
 
 
-@pytest.mark.parametrize("payload", ['{"hdim_q": 64}', "[1, 2]", "not json"])
+@pytest.mark.parametrize("payload", ['{"hdim_q": 64}', "[1, 2]", "not json", "[]"])
 def test_a_malformed_shapes_file_is_exit_2(manifest, tmp_path, capsys, payload):
     bad = tmp_path / "shapes.json"
     bad.write_text(payload)
@@ -96,3 +100,58 @@ def test_a_malformed_shapes_file_is_exit_2(manifest, tmp_path, capsys, payload):
     assert re_.main(argv) == 2
     assert "shapes file" in capsys.readouterr().err
     assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    "extra_shapes, strict_rc",
+    [([], 0), ([{**_COVERED, "nhead_q": 64}], 1)],
+    ids=["all-covered", "one-gap"],
+)
+def test_strict_fails_only_a_shapes_gap(
+    manifest, tmp_path, capsys, extra_shapes, strict_rc
+):
+    one = copy.deepcopy(manifest)
+    one["enumerate"]["cells"][0]["values"] = [[128, 128, 128, 8]]
+    path = tmp_path / "one.engine.yaml"
+    path.write_text(yaml.safe_dump(one))
+    shapes = tmp_path / "shapes.json"
+    shapes.write_text(json.dumps([_COVERED, *extra_shapes]))
+    out = tmp_path / "missing" / "dir" / "c.yaml"
+    argv = ["--manifest", str(path), "--out", str(out), "--shapes", str(shapes)]
+    assert re_.main(argv) == 0
+    assert out.is_file()
+    assert re_.main(argv + ["--strict"]) == strict_rc
+    assert ("GAP shapes" in capsys.readouterr().err) is bool(strict_rc)
+
+
+def test_strict_fails_a_corpus_in_which_nothing_is_covered(manifest, tmp_path, capsys):
+    """A wrong pin or arch declines every shape; zero GAPs there is not a pass."""
+    one = copy.deepcopy(manifest)
+    one["enumerate"]["cells"][0]["values"] = [[128, 128, 128, 8]]
+    path = tmp_path / "one.engine.yaml"
+    path.write_text(yaml.safe_dump(one))
+    shapes = tmp_path / "shapes.json"
+    shapes.write_text(json.dumps([{**_COVERED, "arch": "gfx942"}]))
+    argv = ["--manifest", str(path), "--out", str(tmp_path / "c.yaml")]
+    argv += ["--shapes", str(shapes)]
+    assert re_.main(argv) == 0
+    assert re_.main(argv + ["--strict"]) == 1
+    assert "no shape is covered" in capsys.readouterr().err
+
+
+def test_a_registry_that_raises_judging_a_shape_is_not_a_decline(manifest):
+    one = copy.deepcopy(manifest)
+    one["enumerate"]["cells"][0]["values"] = [[128, 128, 128, 8]]
+    registry = re_.Registry(one)
+    real = registry.candidate
+
+    class Broken:
+        def admits(self, request):
+            raise TypeError("drifted signature")
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    registry.candidate = Broken()
+    with pytest.raises(re_.EnumerationError, match=r"cannot judge shape.*TypeError"):
+        re_.shapes_report(registry, [_COVERED])

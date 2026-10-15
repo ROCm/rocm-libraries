@@ -93,6 +93,11 @@ PATH_STEM_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 #: (``gfx94``) passes this shape check and only trips pre-mint check #5.
 ARCH_BASE_ID_PATTERN = re.compile(r"^gfx[a-z0-9_-]+$")
 
+#: Arch bucket for a kernel that names no architecture and sits in a pack that names
+#: none: it ships on every arch its pack target carries. One spelling, so the budget
+#: and reduction accounting cannot split across two.
+EVERY_ARCH = "every arch"
+
 #: Known real base target ids, for pre-mint check #5's warning. Unrecognized
 #: is a warning, never an error, so a missing entry cannot block a new arch.
 KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(

@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 import typing
 from collections import OrderedDict
 from pathlib import Path
@@ -128,6 +129,61 @@ def test_a_manifest_the_registry_contradicts_is_exit_2(
     assert rc == 2
     assert re.search(message, err), err
     assert not (tmp_path / "c.yaml").exists()
+
+
+def _raises(exc):
+    def fail(*args, **kwargs):
+        raise exc
+
+    return fail
+
+
+@pytest.mark.parametrize(
+    "attr, replacement, message",
+    [
+        ("admits", _raises(TypeError("bad")), r"cannot judge cell .*\(TypeError\)"),
+        (
+            "select_spec",
+            _raises(AttributeError("nope")),
+            r"rejects cell .*\(AttributeError\)",
+        ),
+        (
+            "select_spec",
+            lambda r: types.SimpleNamespace(kernel_spec=None),
+            "without a kernel_spec",
+        ),
+    ],
+    ids=["admits-raises", "select_spec-raises", "route-without-kernel"],
+)
+def test_a_registry_that_breaks_judging_a_cell_is_an_enumeration_error(
+    manifest, registry, attr, replacement, message
+):
+    """Not a traceback, and not a decline: the registry itself is unusable."""
+    reg = re_.Registry(_one_head_config(manifest))
+    real = reg.candidate
+
+    class Broken:
+        def __getattr__(self, name):
+            return replacement if name == attr else getattr(real, name)
+
+    reg.candidate = Broken()
+    with pytest.raises(re_.EnumerationError, match=message):
+        reg.space(reg.cells()[0])
+
+
+def test_a_candidate_list_that_cannot_be_built_is_an_enumeration_error(
+    manifest, registry, monkeypatch
+):
+    real = re_._load_callable
+    monkeypatch.setattr(
+        re_,
+        "_load_callable",
+        lambda ref, what: (
+            _raises(RuntimeError("boom")) if what == "candidates" else real(ref, what)
+        ),
+    )
+    with pytest.raises(re_.EnumerationError, match=r"candidate list.*RuntimeError"):
+        re_.Registry(_one_head_config(manifest))
 
 
 @pytest.mark.parametrize("text", [None, "a: [\n"])

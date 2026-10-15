@@ -30,6 +30,7 @@ sys.path.insert(0, str(_GENERATOR_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH  # noqa: E402
+from codegen.models import EVERY_ARCH  # noqa: E402
 
 # WinnerCacheFile.hpp detail::WINNER_LINE_*: line, device and entry fields; version.
 _LINE_FIELDS = frozenset({"v", "graph", "device", "entries"})
@@ -284,7 +285,7 @@ def build_variants(config, kdp: dict, classification: Classification) -> dict:
 
         cell = tuple(lookup(f) for f in classification.feature)
         knobs = {k: lookup(k) for k in classification.performance}
-        arches = tuple(kernel.arch or pack.arch or ["every arch"])
+        arches = tuple(kernel.arch or pack.arch or [EVERY_ARCH])
         variants[name] = Variant(name, cell, knobs, kernel.default, arches)
     return variants
 
@@ -763,7 +764,12 @@ def _keep_reason(reduction: Reduction, name: str, epsilon: float) -> str:
     if name in reduction.coverage:
         r = reduction.coverage[name]
         return f"coverage: only kept kernel of graph {r.label} (r{r.round} {r.corpus})"
-    step = next(s for s in reduction.steps if s.name == name and s.gain > epsilon)
+    step = next(
+        (s for s in reduction.steps if s.name == name and s.gain > epsilon), None
+    )
+    if step is None:
+        # Only an applied rule set keeps a kernel the eps search would not.
+        return "no applied rule removes it"
     r = step.ranking
     return f"perf: graph {r.label} (r{r.round} {r.corpus}) gain {step.gain:.4f}"
 
@@ -786,16 +792,23 @@ def _correctness_warning(r: Reduction) -> str | None:
     )
 
 
-def render_report(r: Reduction, selection, output_note: str) -> str:
+def render_report(r: Reduction, selection, output_note: str, names, applied=()) -> str:
+    """The report for the kernel set ``names`` that ``main`` writes, not whichever
+    set eps alone would keep. ``applied`` are the ``--apply-rules`` rules behind it."""
     eps = r.epsilon if r.epsilon is not None else math.inf
-    kept = r.keep(eps)
+    kept = set(names)
     noise = r.noise
-    chosen = _eps(eps) if r.epsilon is not None else "none (over budget)"
+    search = _eps(eps) if r.epsilon is not None else "none (over budget)"
+    if applied:
+        ids = ",".join(rule.id for rule in applied)
+        chosen = f"chosen: rules {ids} (the eps search chose {search}; not used)"
+    else:
+        chosen = f"chosen eps: {search}"
     lines = [
         "# variant_reduce report",
         "",
         f"- selection `{selection}`, arm `{r.arm}`; output: {output_note}",
-        f"- budget {r.budget} instances per arch; chosen eps: {chosen}",
+        f"- budget {r.budget} instances per arch; {chosen}",
         f"- kept {len(kept)} of {len(r.variants)} "
         f"({instances(r.variants, kept)} instances per arch)",
         f"- rounds {noise.rounds}, ranked graph records {len(r.rankings)}",
@@ -819,7 +832,7 @@ def render_report(r: Reduction, selection, output_note: str) -> str:
 
     lines += ["", "## Eps curve", "", "| eps | kept |", "|---|---|"]
     for e in EPSILON_GRID:
-        mark = " (chosen)" if e == r.epsilon else ""
+        mark = " (chosen)" if e == r.epsilon and not applied else ""
         lines.append(f"| {_eps(e)}{mark} | {len(r.keep(e))} |")
 
     checked = {n for c in r.correctness if c.verdict == "passed" for n in c.winners}
@@ -829,7 +842,12 @@ def render_report(r: Reduction, selection, output_note: str) -> str:
             tag = "numerics checked" if name in checked else "numerics unchecked"
             reason = f"{_keep_reason(r, name, eps)}; {tag}"
         else:
-            reason = _drop_reason(name, r.rankings, kept)
+            applied_ids = [rule.id for rule in applied if name in rule.removed]
+            reason = (
+                f"removed by {', '.join(applied_ids)}"
+                if applied_ids
+                else _drop_reason(name, r.rankings, kept)
+            )
         lines.append(f"| {name} | {'yes' if name in kept else 'no'} | {reason} |")
 
     cells = sorted({v.cell for v in r.variants.values()}, key=repr)
@@ -888,6 +906,7 @@ def main(argv=None) -> int:
         warning = _correctness_warning(reduction)
         if warning:
             print(f"WARNING: {warning}")
+        applied = [rule for rule in reduction.rules if rule.id in chosen]
         if chosen:
             names = apply_rules(reduction.variants, reduction.rules, chosen)
             what = f"rules {','.join(chosen)}"
@@ -899,7 +918,9 @@ def main(argv=None) -> int:
         count = instances(reduction.variants, names)
         if count > reduction.budget:
             note = f"not written: {what} exceed budget"
-            report.write_text(render_report(reduction, args.selection, note), "utf-8")
+            report.write_text(
+                render_report(reduction, args.selection, note, names, applied), "utf-8"
+            )
             print(
                 f"FAIL: {what} exceed budget: {count} instances > "
                 f"{reduction.budget}; report {report}",
@@ -908,7 +929,9 @@ def main(argv=None) -> int:
             return 1
         lines = write_selection(args.selection, names, args.out)
         note = f"`{args.out}` ({what}): {len(names)} kernels, {lines} lines"
-        report.write_text(render_report(reduction, args.selection, note), "utf-8")
+        report.write_text(
+            render_report(reduction, args.selection, note, names, applied), "utf-8"
+        )
     except ReduceError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2

@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import inspect
+import traceback
 import typing
 from importlib import import_module
 from pathlib import Path
@@ -338,8 +339,9 @@ def _check_support_predicate(module, builder, spec_obj, arch):
 
     Only spec-first predicates can be called generically (see
     `_PREDICATE_ALIASES`); a builder with no resolvable predicate is unvalidated.
-    A predicate raising AttributeError or TypeError could not read the spec, so
-    the pack fails; any other exception is ignored.
+    A predicate raising AttributeError or TypeError has no verdict (it could not
+    read the spec, or it has a bug), so the pack fails and names where it raised;
+    any other exception is ignored.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
@@ -350,9 +352,11 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     try:
         verdict = predicate(spec_obj, **kwargs)
     except (AttributeError, TypeError) as exc:
+        where = traceback.extract_tb(exc.__traceback__)[-1]
         raise HkpPackError(
-            f"support predicate {name} for builder '{builder}' @ {arch} "
-            f"could not read the spec: {type(exc).__name__}: {exc}"
+            f"support predicate {name} for builder '{builder}' @ {arch} raised "
+            f"{type(exc).__name__} at {Path(where.filename).name}:{where.lineno} "
+            f"(it could not read the spec, or has a bug): {exc}"
         ) from exc
     except Exception:
         # Any other exception does not block packing: the predicate is a

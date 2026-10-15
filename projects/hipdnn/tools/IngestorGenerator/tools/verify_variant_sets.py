@@ -52,7 +52,7 @@ def _agreement_python_root() -> Path:
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(_agreement_python_root()))
 
-from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
+from codegen.models import ENGINE_NAME_PATTERN, EVERY_ARCH  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
 
@@ -398,7 +398,7 @@ def check(
             either = set(left.arch) | set(right.arch)
             where = (
                 ", ".join(sorted(both if left.arch and right.arch else either))
-                or "every arch"
+                or EVERY_ARCH
             )
             collisions.append(
                 f"{left.ukd.get('name')} and {right.ukd.get('name')} complete to one "

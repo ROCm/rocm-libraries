@@ -13,6 +13,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -194,3 +195,16 @@ def test_g4_the_selection_header_equals_the_manifest(
     assert selection.kernel_source_kind == built.kernel_source_kind
     assert selection.workspace_policy == built.workspace_policy
     assert selection.authored_subpath == built.authored_subpath
+
+
+def test_g5_the_dtype_vocabulary_is_spelled_as_the_cpp_matcher_compares_it(manifest):
+    """The manifest's vocabulary is what the generator writes into every kernel's
+    metadata, so a misspelling there agrees with itself in every Python gate while the
+    matcher's exact string comparison never selects the kernel."""
+    matcher = next(s for s in manifest["launch_surface"] if s["name"] == "matcher")
+    source = (enumerator._REPO / matcher["cpp_mirror"]).read_text(encoding="utf-8")
+    function = re.search(r"supportedDataTypeName\([^)]*\)\s*\{(.*?)\n\}", source, re.S)
+    assert function, "supportedDataTypeName is not in the matcher source"
+    compared = set(re.findall(r'std::string\("([^"]+)"\)', function[1]))
+    declared = set(manifest["specialization"]["vocabulary"]["dtype"].values())
+    assert compared and declared <= compared, (sorted(declared), sorted(compared))

@@ -9,6 +9,8 @@ manifest's ``ground_truth`` template; ``compare`` joins those graphs to a
 ``tools/sweep.py`` output by name and reports hipDNN / owner against a margin.
 
 Exit 0 on success (``compare`` whatever the comparison finds), 2 on unusable input.
+``compare --strict`` exits 1 unless every row is within the margin and has a passing
+correctness verdict (outside, missing, failing, not run and no-reference rows all refuse).
 """
 
 from __future__ import annotations
@@ -245,14 +247,24 @@ def _substitute(node, values: dict):
 
 
 def _pointer_parent(graph, pointer: str):
-    """``(container, key)`` of an existing RFC 6901 location."""
+    """``(container, key)`` of an existing location. This is RFC 6901 except that a
+    segment under a list is the ``name`` of exactly one dict element, never an index:
+    a patch names its node, so a template that gains or reorders nodes cannot move it
+    onto another."""
     if not pointer.startswith("/"):
         raise GroundTruthError(f"value_map patch {pointer!r} is not a JSON pointer")
     parts = [p.replace("~1", "/").replace("~0", "~") for p in pointer[1:].split("/")]
     node = graph
     for index, part in enumerate(parts):
-        if isinstance(node, list) and part.isdigit() and int(part) < len(node):
-            key = int(part)
+        if isinstance(node, list):
+            named = [
+                i
+                for i, item in enumerate(node)
+                if isinstance(item, dict) and item.get("name") == part
+            ]
+            if len(named) != 1:
+                break
+            key = named[0]
         elif isinstance(node, dict) and part in node:
             key = part
         else:
@@ -524,6 +536,12 @@ def main(argv=None) -> int:
     p.add_argument("--arm", help="default: the only timing arm")
     p.add_argument("--margin", required=True, type=float, help="0.05 = 5%% slower")
     p.add_argument("--report", required=True)
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 unless every row is within the margin with a passing correctness "
+        "verdict",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "ingest":
@@ -540,6 +558,14 @@ def main(argv=None) -> int:
             report = render_report(comparison, args.gt, args.sweep_output)
             Path(args.report).write_text(report, encoding="utf-8")
             print(f"report {args.report}: {_summary(comparison['results'])}")
+            refused = [
+                r["row"]
+                for r in comparison["results"]
+                if r["within_margin"] is not True or r["correctness"] != "pass"
+            ]
+            if args.strict and refused:
+                print(f"FAIL: --strict: rows {refused} are refused", file=sys.stderr)
+                return 1
     except (GroundTruthError, EnumerationError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2

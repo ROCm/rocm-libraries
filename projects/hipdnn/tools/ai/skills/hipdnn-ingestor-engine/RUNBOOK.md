@@ -783,6 +783,10 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      --margin "$GT_MARGIN" --report "$EVIDENCE/ground_truth.md"
    ```
 
+   This iteration's `compare` exits 0 whatever it finds: its report is for review, and an
+   outside-the-margin row is expected while the selection is still being reduced. Stage 7
+   reruns it with `--strict` as the gate.
+
 7. **Stop when the user accepts the instance count.** No served graph may lose coverage
    or regress beyond the chosen ε or the applied rules' reported worst gain lost (`inf`:
    a graph lost every ranked kernel), and the last iteration's stages 3–5 ran on exactly the
@@ -800,8 +804,15 @@ the exact phase key set; stage 6 checked only each graph's winner.
 [workloads.md](workloads.md)'s *Installed measurement contract* owns what each terminal
 status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and what resume
 does and does not make a single cohort. With ground truth, rerun stage 6's `compare` on
-this output. If `generate.py` still prints the AOT-budget `WARN`, reduce further or
-justify the count in `$EVIDENCE`.
+this output with `--strict`: exit 1 means a row is outside the margin, missing, failing
+correctness or without a passing correctness verdict, so fix it or record the user's
+acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
+nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
+further or justify the count in `$EVIDENCE`:
+
+```bash
+"$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" --dry-run --strict
+```
 
 Harvest final phase results and available engine logs into the per-input outcome ledger,
 then join within each corpus/phase.
