@@ -1,5 +1,10 @@
 .tox/
 
+# Built by the client or library build and imported from this directory.
+tensilelite_write*.so
+tensilelite_write*.pyd
+tensilelite_write*.dll
+
 # mutmut mutation-testing artifacts (copy dir + cache)
 mutants/
 .mutmut-cache
