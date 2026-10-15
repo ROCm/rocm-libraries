@@ -39,6 +39,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
@@ -48,6 +51,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+* Improved kernel launches to detect invalid launch configuration.
+
+* Fixed sparse functions potentially not using the stream set in the handle.
+
 ### Known issues
 
 * HSEQR (when it uses the multishift QR algorithm), GEBAL (for n >= 256) and GEEV synchronize
