@@ -114,6 +114,9 @@ elseif(TENSILELITE_ENABLE_HOST AND (ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUB
             DESCRIPTION "TensileLite host library for GEMM solution selection and kernel launch"
             MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
             LDCONFIG
+            # The components above own the runtime and development payloads. Prevent
+            # rocm_create_package from adding a default runtime package with the same name.
+            HEADER_ONLY
         )
     endblock()
 endif()

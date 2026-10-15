@@ -35,6 +35,10 @@ else()
     set(TENSILELITE_DEVEL_COMPONENT tensilelite-devel)
 endif()
 
+# project() clears PROJECT_VERSION_TWEAK when the semantic version has no fourth component.
+# rocm-cmake uses this value as the package release, so restore the source commit tag.
+rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
+
 option(TENSILELITE_ENABLE_HOST "Build the TensileLite host library." ON)
 option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
 option(TENSILELITE_ENABLE_YAML "Use YAML for parsing configuration files." OFF)

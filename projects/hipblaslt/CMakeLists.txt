@@ -921,21 +921,17 @@ if(TENSILELITE_BUILD_SHARED_LIBS)
 else()
     set(_tensilelite_devel_package tensilelite-host-static)
 endif()
-rocm_get_patch_version(_tensilelite_patch_version)
-set(_tensilelite_package_version "${TENSILELITE_PROJECT_VERSION}")
+set(tensilelite_minimum 1.5.0)
 if(ENABLE_ASAN_PACKAGING)
     set(_tensilelite_runtime_package tensilelite-host-asan)
 else()
     set(_tensilelite_runtime_package tensilelite-host)
 endif()
-if(_tensilelite_patch_version)
-    string(APPEND _tensilelite_package_version ".${_tensilelite_patch_version}")
-endif()
 if(TENSILELITE_ENABLE_HOST)
     rocm_package_add_deb_dependencies(COMPONENT devel
-        DEPENDS "${_tensilelite_devel_package}-dev >= ${_tensilelite_package_version}")
+        DEPENDS "${_tensilelite_devel_package}-dev >= ${tensilelite_minimum}")
     rocm_package_add_rpm_dependencies(COMPONENT devel
-        DEPENDS "${_tensilelite_devel_package}-devel >= ${_tensilelite_package_version}")
+        DEPENDS "${_tensilelite_devel_package}-devel >= ${tensilelite_minimum}")
 
     if(TENSILELITE_BUILD_SHARED_LIBS)
         if(CPACK_RPM_PACKAGE_REQUIRES)
@@ -950,9 +946,6 @@ if(TENSILELITE_ENABLE_HOST)
             endif()
         endif()
 
-        rocm_package_add_rpm_dependencies(COMPONENT runtime
-            DEPENDS "${_tensilelite_runtime_package} >= ${_tensilelite_package_version}")
-
         if(CPACK_DEBIAN_PACKAGE_DEPENDS)
             rocm_package_add_deb_dependencies(COMPONENT runtime
                 DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
@@ -965,14 +958,13 @@ if(TENSILELITE_ENABLE_HOST)
             endif()
         endif()
 
-        rocm_package_add_deb_dependencies(COMPONENT runtime
-            DEPENDS "${_tensilelite_runtime_package} >= ${_tensilelite_package_version}")
+        rocm_package_add_dependencies(COMPONENT runtime
+            DEPENDS "${_tensilelite_runtime_package} >= ${tensilelite_minimum}")
     endif()
 endif()
 unset(_tensilelite_devel_package)
-unset(_tensilelite_package_version)
 unset(_tensilelite_runtime_package)
-unset(_tensilelite_patch_version)
+unset(tensilelite_minimum)
 
 if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     if(TENSILELITE_ENABLE_HOST)
