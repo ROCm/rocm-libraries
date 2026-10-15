@@ -400,6 +400,32 @@ class ClassifyTest(unittest.TestCase):
             "0xADDR: ch = AMDGPUISD::OP 0xADDR:1",
         )
 
+    def test_selection_dag_result_zero_addresses_are_not_persisted(self):
+        """Result-zero operands are bare addresses in SelectionDAG dumps."""
+        diagnostic = "Cannot select: 0x1234: i32,ch = OP 0x5678, 0x9abc:1"
+        self.assertLess(len(diagnostic), 200)
+
+        status, evidence = G._classify(1, diagnostic)
+
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertEqual(
+            evidence,
+            "Cannot select: 0xADDR: i32,ch = OP 0xADDR, 0xADDR:1",
+        )
+
+    def test_selection_dag_untyped_addresses_are_not_persisted(self):
+        """Match the capitalization LLVM uses for its Untyped value type."""
+        diagnostic = "Cannot select: 0x1234: Untyped = OP 0x5678"
+        self.assertLess(len(diagnostic), 200)
+
+        status, evidence = G._classify(1, diagnostic)
+
+        self.assertEqual(status, G.STATUS_ARCH_ABSENT)
+        self.assertEqual(
+            evidence,
+            "Cannot select: 0xADDR: Untyped = OP 0xADDR",
+        )
+
     def test_semantic_hex_values_are_preserved(self):
         """Only DAG node references are unstable; constants are evidence."""
         cases = (
@@ -418,6 +444,18 @@ class ClassifyTest(unittest.TestCase):
                 "mask 0xaa: invalid, 0xabcd:1",
                 "Cannot select: 0xADDR: i32 = OP Constant:i32<0xff>, "
                 "mask 0xaa: invalid, 0xADDR:1",
+                G.STATUS_ARCH_ABSENT,
+            ),
+            (
+                "Cannot select: 0x1234: i32 = OP Constant:i32<0xff>, 0x5678",
+                "Cannot select: 0xADDR: i32 = OP Constant:i32<0xff>, 0xADDR",
+                G.STATUS_ARCH_ABSENT,
+            ),
+            (
+                "Cannot select: 0x1234: i32 = "
+                "OP<(load from 0xff, align 4)> 0x5678, 0x9abc:1",
+                "Cannot select: 0xADDR: i32 = "
+                "OP<(load from 0xff, align 4)> 0xADDR, 0xADDR:1",
                 G.STATUS_ARCH_ABSENT,
             ),
         )
