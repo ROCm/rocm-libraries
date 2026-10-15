@@ -3306,7 +3306,8 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 
         b = self._builder(name)
         build(b)
-        ll = _lower_kernel_to_llvm_python(b.kernel, **kw, arch="gfx950")
+        kw.setdefault("arch", "gfx950")
+        ll = _lower_kernel_to_llvm_python(b.kernel, **kw)
         _assert_engines_agree(self, b.kernel, ll, **kw)
         _assert_ir_assembles(self, ll, name)
         return ll
@@ -3913,7 +3914,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
                         b = self._builder(f"dpp_raw_{label}")
                         b._op(op_name, operands(b), list(results), attrs=dict(attrs))
                         with self.assertRaisesRegex(exc, msg):
-                            lower(b.kernel)
+                            lower(b.kernel, arch="gfx950")
 
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
