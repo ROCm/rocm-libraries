@@ -273,7 +273,7 @@ Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For exampl
 ./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
     -page_block_size=1024 -kv_layout=linear -kv_lookup=sglang -iperm=0 -mask=b
 ```
-On gfx1250 the dispatcher tries, in order: `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim), both for linear fp16/bf16 KV without dropout or logits soft cap whose pages hold the K/V rows of a warp (page 1024, or page 16 for 64-row K/V tiles), and otherwise the async pipeline (the only one on gfx9).
+On gfx1250 the dispatcher tries, in order: `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), both for linear KV without dropout or logits soft cap whose pages hold the K/V rows of a warp (page 1024, or page 16 for 64-row K/V tiles), and otherwise the async pipeline (the only one on gfx9). `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
 
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:

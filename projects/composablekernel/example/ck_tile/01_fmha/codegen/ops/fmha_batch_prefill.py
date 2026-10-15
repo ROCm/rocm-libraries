@@ -83,7 +83,8 @@ FMHA_BATCH_PREFILL_PIPELINE_MAP = {
     "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
 }
 
-# qr_tdm runs with double K/V LDS buffers and progressive K LDS loading, as in fmha_fwd
+# fp16/bf16 qr_tdm runs with double K/V LDS buffers and progressive K LDS loading, as in
+# fmha_fwd; its fp8 instances keep the defaults, also as in fmha_fwd.
 PROBLEM_EXTRA_MAP = {"qr_async": "", "qr_tdm": ", true, true", "qr_tdm_sched": ""}
 
 
@@ -671,7 +672,11 @@ class FmhaFwdKernel:
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
-            F_problem_extra=PROBLEM_EXTRA_MAP[self.F_pipeline.tag],
+            F_problem_extra=(
+                ""
+                if self.F_dtype == "fp8bf16"
+                else PROBLEM_EXTRA_MAP[self.F_pipeline.tag]
+            ),
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
@@ -849,8 +854,8 @@ class CustomFactory(KernelComponentFactory):
 class KernelComponentFactoryGfx125(KernelComponentFactory):
     # gfx125 runs the same async pipeline with WMMA warp tiles; K is copied with
     # global_load_async_to_lds instead of the gfx9 M0-based buffer_load...lds.
-    # Linear fp16/bf16 KV whose pages are kN0-aligned first try qr_tdm, the TDM
-    # pipeline of fmha_fwd, on fmha_fwd's qr_tdm tile of the same head dims.
+    # Linear KV first tries the TDM pipelines of fmha_fwd (qr_tdm_sched and qr_tdm;
+    # qr_tdm only for fp8bf16 d128) on fmha_fwd's tiles of the same head dims.
     supports_global_load_lds = False
 
     # Head dims in ascending order: the dispatcher takes the first hdim_q/hdim_v
@@ -874,6 +879,11 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  2, F_arch=GFX125_ARCH),
     }  # fmt: skip
 
+    # fmha_fwd's fp8 qr_tdm tile: the scaled gemm1 needs warp K 128 (kK1).
+    _QR_TDM_FP8_TILES = {
+        128 : FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, F_arch=GFX125_ARCH),
+    }  # fmt: skip
+
     @staticmethod
     def _async_tile(bn1, bk0max, bk=32, wk=32):
         return FmhaFwdTileSize(64, 64, bk, bn1, bk, bk0max, 4, 1, 1, 4, 1, 1, 16, 16, wk, 16, 16, wk, -1, F_arch=GFX125_ARCH)  # fmt: skip
@@ -883,7 +893,10 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         # The d256 qr_tdm tile has the async tile's geometry, so pair by identity.
         if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
             return pipeline.tag == "qr_tdm_sched"
-        if any(tile is t for t in cls._QR_TDM_TILES.values()):
+        if any(
+            tile is t
+            for t in (*cls._QR_TDM_TILES.values(), *cls._QR_TDM_FP8_TILES.values())
+        ):
             return pipeline.tag == "qr_tdm"
         # The async pipeline's vectorized V distribution spreads hdim_v over 4 warps x
         # (32 lanes / kABKLane 2) = 64 rows per pass.
@@ -913,6 +926,16 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
                 if sink == "t" and mask in ("no", "s_no"):
                     continue
                 pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
+        if dtype in ["fp8bf16"] and hdim in cls._QR_TDM_FP8_TILES:
+            for qscale, mask, sink, kv_lookup_table in itertools.product(
+                ["pertensor", "kv_blockscale"],
+                get_mask_map(mask_impl).keys(),
+                ["t", "f"],
+                SUPPORTED_KV_LOOKUP_TABLE,
+            ):
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
+                pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
         return pipelines + KernelComponentFactory.get_pipelines(
             dtype, hdim, receipt, mask_impl
         )
@@ -931,7 +954,10 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
             }
         elif dtype in ["fp8bf16"]:
             return {
-                128: [cls._async_tile(128, 128, bk=64, wk=64)],
+                128: [
+                    cls._QR_TDM_FP8_TILES[128],
+                    cls._async_tile(128, 128, bk=64, wk=64),
+                ],
                 256: [cls._async_tile(256, 256, bk=64, wk=64)],
             }
         else:

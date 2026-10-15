@@ -34,6 +34,13 @@ struct BlockFmhaPagedKVRows
     mutable index_t cached_page_id = -1;
     mutable index_t cached_page    = 0;
 
+    // Physical page holding sequence row `row`.
+    CK_TILE_DEVICE index_t physical_page(index_t row) const
+    {
+        return __builtin_amdgcn_readfirstlane(
+            page_idx[__builtin_amdgcn_readfirstlane(min(row / kPageSize, max_page))]);
+    }
+
     // Point `window` at sequence row `row`.
     template <bool kIsK, typename Window>
     CK_TILE_DEVICE void move_to(Window& window, index_t row) const

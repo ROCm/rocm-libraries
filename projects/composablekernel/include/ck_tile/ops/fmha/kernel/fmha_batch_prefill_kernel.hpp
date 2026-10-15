@@ -1306,10 +1306,9 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             {
                 static_assert(kKVMemoryLayout ==
                                       BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
-                                  QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE &&
                                   !kHasDropout && !kHasLogitsSoftCap,
-                              "TDM batch_prefill supports linear fp16/bf16 KV without dropout "
-                              "or logits soft cap");
+                              "TDM batch_prefill supports linear KV without dropout or logits "
+                              "soft cap");
                 // TDM needs affine views and clamps each box to the real lengths: each K/V
                 // tile is read through a view of its page that ends at seqlen_k.
                 const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
@@ -1360,6 +1359,26 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                                           remove_cvref_t<decltype(make_k_view)>,
                                                           remove_cvref_t<decltype(make_v_view)>>{
                     page_idx, max_page_table_idx, kargs.seqlen_k, make_k_view, make_v_view};
+                // Q (and PERTENSOR K) descales are already in sm_scale.
+                const float* k_descale_tdm  = nullptr;
+                const float* v_descale_tdm  = nullptr;
+                index_t page_descale_stride = 1;
+                float v_descale_tdm_scalar  = 1.0f;
+                if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+                {
+                    v_descale_tdm_scalar = *reinterpret_cast<const float*>(kargs.v_descale_ptr);
+                }
+                else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE)
+                {
+                    const long_index_t head_offset =
+                        static_cast<long_index_t>(block_indices.kv_head_idx) *
+                        kargs.nhead_stride_kv_block_descale;
+                    k_descale_tdm =
+                        reinterpret_cast<const float*>(kargs.k_descale_ptr) + head_offset;
+                    v_descale_tdm =
+                        reinterpret_cast<const float*>(kargs.v_descale_ptr) + head_offset;
+                    page_descale_stride = kargs.nblock_stride_kv_block_descale;
+                }
                 if constexpr(kIsSegmentedTdmPipeline)
                 {
                     using Policy = typename FmhaPipeline::Policy;
@@ -1390,7 +1409,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                           variant_params.sm_scale,
                                           static_cast<void*>(smem_ptr),
                                           sink_value,
-                                          kv_rows);
+                                          kv_rows,
+                                          k_descale_tdm,
+                                          v_descale_tdm,
+                                          page_descale_stride,
+                                          v_descale_tdm_scalar);
                 }
             }
             else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)

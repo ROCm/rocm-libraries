@@ -83,10 +83,12 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
-    static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+    // Paged K/V (batch_prefill) with one K and one V descale per page.
+    static constexpr bool kKVBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE;
+    static constexpr bool kQuantized    = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                                       kBlockScale;
-    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
+                                       kBlockScale || kKVBlockScale;
+    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale && !kKVBlockScale;
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
@@ -262,6 +264,35 @@ struct BlockFmhaPipelineQRKSVSTdm
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
 
+    // KV_BLOCKSCALE descales of the page holding a K/V tile. The V descale is any float, but
+    // the scaled MMA only takes its power of two; the fp32 o_acc rescale applies the mantissa
+    // in [1, 2). (Folding it into P before P is quantized biases O by ~1%.) A zero descale
+    // keeps mantissa 1 and scale 2^-127.
+    struct PageDescale
+    {
+        float k;
+        float v_mantissa;
+        int32_t v_exponent; // E8M0 in all four bytes
+    };
+
+    template <typename KVRows>
+    CK_TILE_DEVICE static PageDescale LoadPageDescale(const KVRows& kv_rows,
+                                                      const float* k_descale_ptr,
+                                                      const float* v_descale_ptr,
+                                                      index_t page_descale_stride,
+                                                      index_t kv_tile_start)
+    {
+        static_assert(KVRows::kIsPaged && KVRows::kPageSize_ % kN0 == 0,
+                      "qr_tdm pipeline: KV_BLOCKSCALE needs every K/V tile within one page");
+        const index_t i = kv_rows.physical_page(kv_tile_start) * page_descale_stride;
+        const float k   = cast_pointer_to_constant_address_space(k_descale_ptr)[i];
+        const uint32_t v_bits =
+            bit_cast<uint32_t>(cast_pointer_to_constant_address_space(v_descale_ptr)[i]);
+        const float v_mantissa    = bit_cast<float>((v_bits & 0x007fffffu) | 0x3f800000u);
+        const uint32_t v_exponent = ((v_bits >> 23) & 0xffu) * 0x01010101u;
+        return {k, v_mantissa, pin_to_vgpr(static_cast<int32_t>(v_exponent))};
+    }
+
     template <typename Gemm1>
     CK_TILE_DEVICE static auto make_gemm1_scale([[maybe_unused]] int32_t scale)
     {
@@ -292,7 +323,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
-                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
+                      QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE ||
+                      QScaleEnum == BlockAttentionQuantScaleEnum::KV_BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
     static_assert(!kBlockScale || kHwGemm1Scale,
@@ -597,6 +629,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto l_quant = MLBlockTileType{};
         if constexpr(kQuantized)
             clear_tile(l_quant);
+        // KV_BLOCKSCALE: o_acc is kept in units of the V mantissa of the last tile.
+        [[maybe_unused]] float o_acc_v_mantissa = 1.f;
 
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
@@ -850,7 +884,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
+            [[maybe_unused]] const index_t kv_last   = mask.GetXTotal() - 1;
+            [[maybe_unused]] const auto page_descale = [&] {
+                if constexpr(kKVBlockScale)
+                    return LoadPageDescale(
+                        kv_rows, k_descale_ptr, v_descale_ptr, block_scale_size_kv, kv_tile_start);
+                else
+                    return 0;
+            }();
 
             block_sync_lds();
             // V uses load_tile_tdm (single-box plain LDS write). Both K and V
@@ -915,6 +956,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                         s_acc(i_j_idx) *= k_descale;
                     });
                 });
+            }
+            else if constexpr(kKVBlockScale)
+            {
+                tile_elementwise_inout([&](auto& x) { x *= page_descale.k; }, s_acc);
             }
 
             // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
@@ -1099,6 +1144,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // l{j}, Oacc{j}
+            [[maybe_unused]] float o_acc_v_rescale = 1.f;
+            if constexpr(kKVBlockScale)
+            {
+                o_acc_v_rescale  = o_acc_v_mantissa / page_descale.v_mantissa;
+                o_acc_v_mantissa = page_descale.v_mantissa;
+            }
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -1124,10 +1175,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 if constexpr(kQuantized)
                     l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
+                const auto o_scale = kKVBlockScale ? tmp * o_acc_v_rescale : tmp;
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
-                    o_acc(i_j_idx) *= tmp;
+                    o_acc(i_j_idx) *= o_scale;
                 });
             });
 
@@ -1144,6 +1196,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(pack_v_scale(
                         v_descale_ptr, kv_tile_start + i_k1 * kK1, kv_last, block_scale_size_kv));
+                }
+                else if constexpr(kKVBlockScale)
+                {
+                    ignore = i_k1;
+                    return make_gemm1_scale<decltype(gemm_1)>(page_descale.v_exponent);
                 }
                 else
                 {
@@ -1230,6 +1287,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             if constexpr(kVScaleOnOacc)
             {
                 tmp *= v_descale;
+            }
+            else if constexpr(kKVBlockScale)
+            {
+                tmp *= o_acc_v_mantissa;
             }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -1321,6 +1382,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto l_quant = MLBlockTileType{};
         if constexpr(kQuantized)
             clear_tile(l_quant);
+        // KV_BLOCKSCALE: o_acc is kept in units of the V mantissa of the last tile.
+        [[maybe_unused]] float o_acc_v_mantissa = 1.f;
 
         clear_tile(o_acc);
         // kDeferSink folds to false at compile time for every non-deferred instance; the
@@ -1600,7 +1663,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
             // the tile range rounds its end up to kN0, so bound the scale index by seqlen_k
-            [[maybe_unused]] const index_t kv_last = mask.GetXTotal() - 1;
+            [[maybe_unused]] const index_t kv_last   = mask.GetXTotal() - 1;
+            [[maybe_unused]] const auto page_descale = [&] {
+                if constexpr(kKVBlockScale)
+                    return LoadPageDescale(
+                        kv_rows, k_descale_ptr, v_descale_ptr, block_scale_size_kv, kv_tile_start);
+                else
+                    return 0;
+            }();
 
             // move V tile windows
             block_sync_lds<k_lds_insts>();
@@ -1812,6 +1882,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                         s_acc(i_j_idx) *= k_descale;
                     });
                 });
+            }
+            else if constexpr(kKVBlockScale)
+            {
+                tile_elementwise_inout([&](auto& x) { x *= page_descale.k; }, s_acc);
             }
 
             // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
@@ -2033,6 +2107,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
 
             // l{j}, Oacc{j}
+            [[maybe_unused]] float o_acc_v_rescale = 1.f;
+            if constexpr(kKVBlockScale)
+            {
+                o_acc_v_rescale  = o_acc_v_mantissa / page_descale.v_mantissa;
+                o_acc_v_mantissa = page_descale.v_mantissa;
+            }
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -2065,10 +2145,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 if constexpr(kQuantized)
                     l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
+                const auto o_scale = kKVBlockScale ? tmp * o_acc_v_rescale : tmp;
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
-                    o_acc(i_j_idx) *= tmp;
+                    o_acc(i_j_idx) *= o_scale;
                 });
             });
 
@@ -2100,6 +2181,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 {
                     return make_gemm1_scale<decltype(gemm_1)>(pack_v_scale(
                         v_descale_ptr, kv_tile_start + i_k1 * kK1, kv_last, block_scale_size_kv));
+                }
+                else if constexpr(kKVBlockScale)
+                {
+                    ignore = i_k1;
+                    return make_gemm1_scale<decltype(gemm_1)>(page_descale.v_exponent);
                 }
                 else
                 {
@@ -2238,6 +2324,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 tmp *= v_descale;
             }
+            else if constexpr(kKVBlockScale)
+            {
+                tmp *= o_acc_v_mantissa;
+            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -2266,10 +2356,17 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         float scale_s,
                                         void* smem_ptr,
                                         float sink_v,
-                                        const KVRows& kv_rows) const
+                                        const KVRows& kv_rows,
+                                        const float* k_descale_ptr  = nullptr,
+                                        const float* v_descale_ptr  = nullptr,
+                                        index_t page_descale_stride = 1,
+                                        float v_descale             = 1.0f) const
     {
+        // KV_BLOCKSCALE: k/v_descale_ptr point at this head's descale of page 0 and
+        // page_descale_stride is the distance between pages. PERTENSOR passes v_descale.
         static_assert(KVRows::kIsPaged);
-        static_assert(!kQuantized, "qr_tdm pipeline: this granularity needs the descale arguments");
+        static_assert(!(kQuantized && !kVScaleOnOacc && !kKVBlockScale),
+                      "qr_tdm pipeline: paged K/V takes per-tensor or per-page descales");
         static_assert(KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
                       "the K/V rows of one warp must not straddle two pages");
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
@@ -2283,10 +2380,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             scale_s,
                                             smem_ptr,
                                             sink_v,
-                                            nullptr,
-                                            nullptr,
-                                            1,
-                                            1.0f,
+                                            k_descale_ptr,
+                                            v_descale_ptr,
+                                            page_descale_stride,
+                                            v_descale,
                                             kv_rows);
         else
             return run_single_kv_lds_buffer(q_dram_block_window_tmp,
@@ -2299,10 +2396,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             scale_s,
                                             smem_ptr,
                                             sink_v,
-                                            nullptr,
-                                            nullptr,
-                                            1,
-                                            1.0f,
+                                            k_descale_ptr,
+                                            v_descale_ptr,
+                                            page_descale_stride,
+                                            v_descale,
                                             kv_rows);
     }
 
