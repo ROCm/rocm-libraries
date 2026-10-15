@@ -205,4 +205,3 @@ See [mfma_example.cpp](../examples/cpp/mfma/mfma_example.cpp) for a concrete cod
 
 [cute-paper]: https://arxiv.org/abs/2603.02298
 [linearlayouts-paper]: https://arxiv.org/abs/2505.23819
-
