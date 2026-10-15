@@ -4,7 +4,9 @@
 """Archive consumers carry the loader and thread dependencies of the lowerer."""
 
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -104,6 +106,48 @@ def test_online_build_uses_the_cmake_shared_target(
     configure = next(command for command in calls if "-S" in command)
     assert "-DROCKE_BUILD_SHARED_ENGINE=ON" in configure
     assert "-DBUILD_TESTING=ON" in configure
+
+
+@pytest.mark.skipif(
+    shutil.which("cmake") is None or shutil.which("ctest") is None,
+    reason="CMake and CTest required",
+)
+def test_installed_pytest_gets_distinct_artifact_environment_variables(tmp_path):
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(PLATFORM),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ctest_dir = tmp_path / "installed-ctest"
+    ctest_dir.mkdir()
+    shutil.copy2(
+        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    )
+    listed = subprocess.run(
+        ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tests = json.loads(listed.stdout)["tests"]
+    rocke_pytest = next(test for test in tests if test["name"] == "rocke_pytest")
+    properties = {prop["name"]: prop["value"] for prop in rocke_pytest["properties"]}
+    environment = properties["ENVIRONMENT"]
+
+    assert environment[0] == "PYTHONPATH=."
+    assert environment[1].startswith("ROCKE_REPLAY_CLI=")
+    assert environment[2].startswith("ROCKE_PROVENANCE_MANIFEST=")
+    assert len(environment) == 3
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):

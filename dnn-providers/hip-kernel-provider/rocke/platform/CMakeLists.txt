@@ -446,9 +446,9 @@ if(ROCKE_INSTALL_TESTS)
              "set_tests_properties(rocke_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"PYTHONPATH=."
-             "\;ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/"
+             ";ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/"
              "rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
-             "\;ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/"
+             ";ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/"
              "rocke_portable_ir_provenance.txt\"\n"
              "  TIMEOUT 300)\n")
     endif()
