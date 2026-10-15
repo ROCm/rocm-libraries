@@ -247,10 +247,10 @@ def _substitute(node, values: dict):
 
 
 def _pointer_parent(graph, pointer: str):
-    """``(container, key)`` of an existing location. This is RFC 6901 except that a
-    segment under a list is the ``name`` of exactly one dict element, never an index:
-    a patch names its node, so a template that gains or reorders nodes cannot move it
-    onto another."""
+    """``(container, key)`` of an existing location. This is RFC 6901 plus one
+    extension: a segment under a list may be the ``name`` of exactly one dict element.
+    Naming a node survives the template gaining or reordering nodes; an index still
+    works, so an existing manifest keeps its meaning."""
     if not pointer.startswith("/"):
         raise GroundTruthError(f"value_map patch {pointer!r} is not a JSON pointer")
     parts = [p.replace("~1", "/").replace("~0", "~") for p in pointer[1:].split("/")]
@@ -262,9 +262,12 @@ def _pointer_parent(graph, pointer: str):
                 for i, item in enumerate(node)
                 if isinstance(item, dict) and item.get("name") == part
             ]
-            if len(named) != 1:
+            if len(named) == 1:
+                key = named[0]
+            elif not named and part.isdigit() and int(part) < len(node):
+                key = int(part)
+            else:
                 break
-            key = named[0]
         elif isinstance(node, dict) and part in node:
             key = part
         else:

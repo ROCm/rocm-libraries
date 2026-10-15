@@ -181,11 +181,12 @@ def test_strict_compare_wants_a_passing_correctness_verdict(tmp_path, checked, r
     assert gt.main(argv.split() + ["--strict"]) == rc
 
 
-def test_patch_pointers_name_their_node_not_an_index():
+def test_patch_pointers_accept_a_node_name_or_a_legacy_index():
     graph = {"nodes": [{"name": "a", "x": 0}, {"name": "b", "x": 0}]}
-    container, key = gt._pointer_parent(graph, "/nodes/b/x")
-    container[key] = 1
-    assert graph["nodes"] == [{"name": "a", "x": 0}, {"name": "b", "x": 1}]
-    for pointer in ("/nodes/0/x", "/nodes/c/x"):
+    for pointer, expected in (("/nodes/b/x", "b"), ("/nodes/0/x", "a")):
+        container, key = gt._pointer_parent(graph, pointer)
+        container[key] = 1
+        assert [n["x"] for n in graph["nodes"] if n["name"] == expected] == [1]
+    for pointer in ("/nodes/c/x", "/nodes/2/x"):
         with pytest.raises(gt.GroundTruthError, match="names no template location"):
             gt._pointer_parent(graph, pointer)

@@ -586,7 +586,7 @@ ground_truth:                     # optional; read by tools/ground_truth.py grap
   graph_template: templates/attention_sdpa_fwd.graph.json   # manifest-relative; "stride_order" orders packed strides
   value_map:                      # request value -> template scalar, or patches
     dtype: {bf16: bfloat16, fp16: half}
-    # A patch pointer's list segments are element names, not indices.
+    # A patch pointer's list segments are element names (preferred) or indices.
     mask_type: {NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}}
 ```
 

@@ -209,7 +209,8 @@ reduction:
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
 # `${<request field>}` fills a scalar; `value_map` translates a request value to that
 # scalar or to patches; an unlisted value fails the row. A patch is a JSON pointer whose
-# list segments are element `name`s, not indices (`/nodes/sdpa_node/...`).
+# list segments are preferably element `name`s (`/nodes/sdpa_node/...`), which survive a
+# template reordering; an index (`/nodes/0/...`) is still accepted.
 # A tensor's `"strides": "packed"` packs its axes outermost-first in `stride_order` (BSHD here).
 ground_truth:
   graph_template: templates/attention_sdpa_fwd.graph.json

@@ -903,10 +903,6 @@ def load_shapes(path: str) -> list:
         raise EnumerationError(
             f"shapes file {path} must be a JSON list of request-field mappings."
         )
-    if not loaded:
-        raise EnumerationError(
-            f"shapes file {path} lists no shapes; an empty corpus covers nothing."
-        )
     return loaded
 
 
@@ -949,25 +945,21 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
                 name: registry.coerce(name, value) for name, value in shape.items()
             }
             # The shape's own values win; `fixed` fills only the fields it omits.
-            # The registry rejects bad shape data with ValueError, and a request the
-            # shape cannot form is no better: both are that shape's decline. A
-            # TypeError or AttributeError while judging is the registry breaking.
+            # A shape the request class or the registry cannot take (a null or
+            # mistyped value raises TypeError or ValueError) is that shape's decline,
+            # as it always was; only a missing attribute is the registry itself
+            # being unusable.
             try:
-                request = registry.request_cls(
-                    **{**registry.fixed, **kwargs, **registry.pin}
+                ok, why = registry.candidate.admits(
+                    registry.request_cls(**{**registry.fixed, **kwargs, **registry.pin})
                 )
             except (TypeError, ValueError) as exc:
                 ok, why = False, f"request rejected: {exc}"
-            else:
-                try:
-                    ok, why = registry.candidate.admits(request)
-                except ValueError as exc:
-                    ok, why = False, f"request rejected: {exc}"
-                except (TypeError, AttributeError) as exc:
-                    raise EnumerationError(
-                        f"the registry cannot judge shape {shape!r} "
-                        f"({type(exc).__name__}): {exc}"
-                    ) from exc
+            except AttributeError as exc:
+                raise EnumerationError(
+                    f"the registry cannot judge shape {shape!r} "
+                    f"(AttributeError): {exc}"
+                ) from exc
             cell_text = _show(dict(zip(registry.cell_fields, key)))
             if not ok:
                 category, detail = "declined by registry", f"{cell_text}: {why}"

@@ -91,7 +91,7 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
     assert re.search(r"1 x \{hdim_q: 128, .*nhead_q: 64", text), text
 
 
-@pytest.mark.parametrize("payload", ['{"hdim_q": 64}', "[1, 2]", "not json", "[]"])
+@pytest.mark.parametrize("payload", ['{"hdim_q": 64}', "[1, 2]", "not json"])
 def test_a_malformed_shapes_file_is_exit_2(manifest, tmp_path, capsys, payload):
     bad = tmp_path / "shapes.json"
     bad.write_text(payload)
@@ -139,19 +139,51 @@ def test_strict_fails_a_corpus_in_which_nothing_is_covered(manifest, tmp_path, c
     assert "no shape is covered" in capsys.readouterr().err
 
 
-def test_a_registry_that_raises_judging_a_shape_is_not_a_decline(manifest):
+def _one_cell_registry(manifest):
     one = copy.deepcopy(manifest)
     one["enumerate"]["cells"][0]["values"] = [[128, 128, 128, 8]]
-    registry = re_.Registry(one)
+    return re_.Registry(one)
+
+
+def test_a_null_value_is_that_shapes_decline_not_a_failed_report(manifest):
+    """A corpus that was reportable stays reportable: a null dimension raises
+    TypeError inside the registry and is declined like any other bad shape."""
+    registry = _one_cell_registry(manifest)
+    lines, gaps, covered = re_.shapes_report(
+        registry, [_COVERED, {**_COVERED, "seqlen_q": None}]
+    )
+    text = "\n".join(lines)
+    assert (_category(text, "covered"), _category(text, "declined by registry")) == (
+        1,
+        1,
+    )
+    assert (gaps, covered) == (0, 1)
+
+
+def test_an_empty_corpus_reports_nothing_and_only_strict_refuses_it(
+    manifest, tmp_path, capsys
+):
+    shapes = tmp_path / "shapes.json"
+    shapes.write_text("[]")
+    argv = ["--manifest", str(_MANIFEST), "--out", str(tmp_path / "c.yaml")]
+    argv += ["--shapes", str(shapes)]
+    assert re_.main(argv) == 0
+    assert "shape coverage: 0 shapes" in capsys.readouterr().out
+    assert re_.main(argv + ["--strict"]) == 1
+
+
+def test_a_registry_without_admits_is_not_a_decline(manifest):
+    registry = _one_cell_registry(manifest)
     real = registry.candidate
 
     class Broken:
-        def admits(self, request):
-            raise TypeError("drifted signature")
-
         def __getattr__(self, name):
+            if name == "admits":
+                raise AttributeError("no admits")
             return getattr(real, name)
 
     registry.candidate = Broken()
-    with pytest.raises(re_.EnumerationError, match=r"cannot judge shape.*TypeError"):
+    with pytest.raises(
+        re_.EnumerationError, match=r"cannot judge shape.*AttributeError"
+    ):
         re_.shapes_report(registry, [_COVERED])

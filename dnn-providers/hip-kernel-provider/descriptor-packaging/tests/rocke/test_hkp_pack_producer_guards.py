@@ -293,9 +293,10 @@ def test_every_rocke_builder_resolves_a_predicate_for_its_own_spec():
     assert checked
 
 
-#: Builders `_check_support_predicate` cannot validate, because they have no
-#: spec-first predicate. A new builder missing one fails the test below until it gains
-#: a predicate or is listed here on purpose.
+#: Builders `_check_support_predicate` cannot validate today, because they have no
+#: spec-first predicate. Every builder already in the library is either resolvable or
+#: listed here, so the test below flags only a builder added without a predicate. A
+#: builder that gains one needs no edit here.
 _UNVALIDATED_BUILDERS = frozenset(
     {
         "kernels.common.attention_unified.build_unified_attention_2d",
@@ -318,15 +319,21 @@ _UNVALIDATED_BUILDERS = frozenset(
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
-def test_the_builders_without_a_support_predicate_are_exactly_the_listed_ones():
+def test_no_new_builder_ships_without_a_support_predicate():
     """The pack validates a spec only through a predicate it can resolve, so a builder
-    that gains none ships unvalidated; this keeps that set from growing unnoticed."""
+    added without one ships unvalidated. Give it a predicate, or list it above on
+    purpose."""
     unvalidated = {
         f"{module.__name__}.{builder}"
         for module, builder, _ in _library_builders()
         if _resolve_support_predicate(module, builder)[1] is None
     }
-    assert unvalidated == _UNVALIDATED_BUILDERS
+    new = sorted(unvalidated - _UNVALIDATED_BUILDERS)
+    assert not new, (
+        f"builder(s) with no support predicate: {new}. Add a spec-first "
+        "`supports_*_spec`/`is_valid_*` predicate (see _PREDICATE_ALIASES) or list "
+        "them in _UNVALIDATED_BUILDERS."
+    )
 
 
 # --- C. Literal validation --------------------------------------------------
