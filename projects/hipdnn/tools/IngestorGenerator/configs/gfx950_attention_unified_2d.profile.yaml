@@ -282,7 +282,6 @@ kernel_source_kind: rocke
 # block_tables / seq_lens / query_start_len from (batch, seqlen_q, seqlen_kv,
 # block_size), all known at prepare().
 workspace_policy: derived
-delegates_to_existing_plan: false
 
 # Documentation only; no generator tool reads this block.
 runtime_param_fields:

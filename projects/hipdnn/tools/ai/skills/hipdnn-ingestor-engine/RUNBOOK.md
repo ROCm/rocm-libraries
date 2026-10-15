@@ -254,7 +254,7 @@ descriptor index expands as the recursive glob `/**/*.json` — a walk of the wh
 filesystem.
 
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
-tuple identity includes schema types/defaults and effective architecture overlap.
+tuple identity includes schema types/defaults and the arch tier at which kernels compete.
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with unrun
 checks. `--manifest "$MANIFEST"` optionally names the bundle to gate (the slug of the
 manifest's `engine.name`) and supplies the matcher vocabulary

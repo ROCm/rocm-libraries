@@ -160,6 +160,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # because they need a real container rather than a matching device.
     target_sources(hip_kernel_provider_tests PRIVATE
         compilation/TestKpackArchive.cpp
+        compilation/TestKpackGenericArchive.cpp
         compilation/TestKpackKernelLoader.cpp
         compilation/TestKpackModuleCache.cpp
         engines/kernel_ingestor_engine/packs/TestPointwiseKpackDispatch.cpp

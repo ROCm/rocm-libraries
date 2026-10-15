@@ -249,6 +249,8 @@ if(NOT TARGET hipdnn_flatbuffers_sdk)
     find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 endif()
 if(NOT TARGET hipdnn_plugin_sdk)
+    # Drop a stale cached table path so an older SDK Config cannot be answered by it.
+    unset(HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON CACHE)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 

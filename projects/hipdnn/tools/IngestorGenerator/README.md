@@ -620,6 +620,14 @@ Run, in this order, **before any UUID is minted**:
    `gfx942`), since either looks like an ordinary INFO decline at match time and this tool
    keeps no exhaustive arch list.
 
+### Generic targets
+
+Configs accept generic `arch` targets under the
+[packaging rules](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#generic-gpu-targets).
+`build_kdp` refuses a tuple shared by two kernels only at the same arch tier
+([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate)). The generated census gives every member of
+a generic row the generic's descriptors.
+
 ## Source adapters (`codegen/sources/`)
 
 One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
@@ -635,9 +643,8 @@ producing compiler. `hsaco` authoring also uses the packaged path: `kernel_sourc
 descriptor that names it and `symbol` its kernel. `file` must stay inside the source root,
 with no root-relative fallback. `hkp_pack` packs that object as-is, without compiling, so
 like `hip` the specialization declares `metadata_fields: []`. The packer does not check the
-object's format or target processor: every hsaco kernel must carry a non-empty per-kernel `arch` listing the
-arch(es) its object runs on (a generic-target object lists each one), and the loader
-rejects one without.
+object's format or target processor; `arch` follows
+[hsaco kernels and `arch`](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch).
 `hsaco_file` is rejected explicitly, naming `supportsSourceKind()` as the missing
 prerequisite on `IKernelDispatchHandler`.
 
