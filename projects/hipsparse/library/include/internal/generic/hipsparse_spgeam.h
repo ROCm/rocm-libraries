@@ -207,7 +207,6 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="spgeam_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B / C / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F

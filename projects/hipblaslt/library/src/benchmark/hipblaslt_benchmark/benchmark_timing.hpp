@@ -304,14 +304,14 @@ namespace hipblaslt_bench
     // adaptive configuration, a failure the hooks report, or should_abort ending the run
     // before its first sample.
     template <typename Hooks = DefaultHooks, typename Launch>
-    inline bool run_measurement(Launch&&                     launch,
-                                const TimingConfig&          cfg,
-                                hipEvent_t                   event_start,
-                                hipEvent_t                   event_stop,
-                                hipStream_t                  stream,
-                                TimingResult&                out,
-                                const std::function<bool()>& should_abort = {},
-                                const CollectiveAgreement&   agreement    = {})
+    [[nodiscard]] inline bool run_measurement(Launch&&                     launch,
+                                              const TimingConfig&          cfg,
+                                              hipEvent_t                   event_start,
+                                              hipEvent_t                   event_stop,
+                                              hipStream_t                  stream,
+                                              TimingResult&                out,
+                                              const std::function<bool()>& should_abort = {},
+                                              const CollectiveAgreement&   agreement    = {})
     {
         const detail::event_context events{event_start, event_stop, stream};
         int64_t                     global_index = 0;
