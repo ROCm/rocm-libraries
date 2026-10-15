@@ -271,8 +271,8 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-# Device-library generation and the tensilelite client write MessagePack even
-# when the host library itself is compiled for YAML.
+# The solution-state module and a non-YAML host use msgpack, including when
+# device-library generation or the client is on and the host itself is YAML.
 if(NOT HIPBLASLT_ENABLE_YAML OR HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)

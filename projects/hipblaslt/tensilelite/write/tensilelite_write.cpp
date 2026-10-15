@@ -4,7 +4,6 @@
 #include <nanobind/nanobind.h>
 
 #include <Tensile/msgpack/SolutionState.hpp>
-#include <Tensile/msgpack/Writing.hpp>
 
 #include <msgpack.hpp>
 
@@ -197,25 +196,8 @@ namespace
 
 NB_MODULE(tensilelite_write, m)
 {
-    m.doc() = "Write TensileLite MessagePack libraries, and build a solution record from a "
-              "solution state, with the C++ serialization traits.";
-
-    m.def(
-        "write_library",
-        [](nb::object data) {
-            return asBytes(TensileLite::MessagePackWriteLibraryFromBytes(asDocument(data)));
-        },
-        nb::arg("library"),
-        "Return the eager MasterSolutionLibrary document for a library state.");
-
-    m.def(
-        "write_library_indexed",
-        [](nb::object data) {
-            return asBytes(
-                TensileLite::MessagePackWriteIndexedLibraryFromBytes(asDocument(data)));
-        },
-        nb::arg("library"),
-        "Return the format_version 2 indexed document for a library state.");
+    m.doc() = "Build a solution record from a solution state with the C++ serialization "
+              "traits, and convert MessagePack values for that path.";
 
     m.def(
         "write_mapping",

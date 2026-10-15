@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Nanobind module TensileCreateLibrary uses to write MessagePack libraries.
+# Nanobind module that builds a solution record from a solution state.
 # rocisa fetches nanobind; this target stays separate from _rocisa.
 
 if(NOT COMMAND nanobind_add_module)
@@ -61,9 +61,9 @@ if(_link_msgpack_host)
     endif()
 else()
     # Host library is absent (gemm-libs) or compiled for YAML, which does not
-    # build src/msgpack. Compile the writer and the serialization sources it
-    # links into this module. A YAML host that is not generating device
-    # libraries does not reach this directory.
+    # build src/msgpack. Compile the host sources and the serialization sources
+    # this module links. A YAML host that is not generating device libraries
+    # does not reach this directory.
     if(NOT TARGET ZLIB::ZLIB)
         find_package(ZLIB REQUIRED)
     endif()

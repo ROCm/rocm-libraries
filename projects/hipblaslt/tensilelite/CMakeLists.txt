@@ -292,10 +292,10 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")
 
-# TensileCreateLibrary imports this module to write MessagePack libraries.
-# A client build can be asked to generate and run a kernel, and a device-library
-# build writes the library, so both of those builds produce the module.
-# gemm-libs sets TENSILELITE_ENABLE_HOST=OFF and still generates libraries.
+# Solution parsing imports this module to build a solution record.
+# A client build and a device-library build both run that parsing, and a host
+# build that is not YAML does too. gemm-libs sets TENSILELITE_ENABLE_HOST=OFF
+# and still generates libraries.
 if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         OR (TENSILELITE_ENABLE_HOST AND NOT HIPBLASLT_ENABLE_YAML))
     add_subdirectory(write)
