@@ -2,6 +2,17 @@
 
 Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/hipSPARSELt](https://rocm.docs.amd.com/projects/hipSPARSELt/en/latest/index.html).
 
+## hipSPARSELt 0.2.10 for ROCm 10.2.0
+
+### Added
+
+* Gate residual epilogue (`D = G * X + G`), configured with `HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC`
+  and `HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER`, for the following data type combinations on the
+  LLVM targets gfx942 and gfx950:
+  * FP16 inputs and output, with an FP16 gate.
+  * BF16 inputs and output, with a BF16 gate.
+  * FP8 inputs and FP32 output, with an FP32 or FP8 gate (FP8_FNUZ on gfx942).
+
 ## hipSPARSELt 0.2.9 for ROCm 7.14
 
 ### Added
@@ -9,8 +20,6 @@ Full documentation for hipSPARSELt is available at [rocm.docs.amd.com/projects/h
 * Support for the following data type combinations for the LLVM target gfx942:
   * FP8_FNUZ(E4M3_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
   * BF8_FNUZ(E5M2_FNUZ) inputs, F32 output, and F32 Matrix Core accumulation.
-* Support for the gate residual epilogue (`HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER` and
-  `HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC`) for the LLVM targets gfx942 and gfx950.
 
 ## hipSPARSELt 0.2.8 for ROCm 7.13
 
