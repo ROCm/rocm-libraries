@@ -74,7 +74,7 @@ Configuration
 
 Create a dense descriptor for the gate matrix, then attach it and the gate pointer to the matmul
 descriptor. Set both before calling ``hipsparseLtMatmulAlgSelectionInit()``: the algorithm selection
-chooses the kernel based on the gate configuration, so a gate attached later may not be applied, and no error
+chooses the kernel based on the gate configuration, so a gate attached later might not be applied, and no error
 is returned. To change the gate configuration, create a new algorithm selection and plan.
 
 .. code-block:: cpp
