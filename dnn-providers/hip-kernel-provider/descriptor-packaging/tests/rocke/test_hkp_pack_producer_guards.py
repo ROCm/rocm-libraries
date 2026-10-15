@@ -18,6 +18,7 @@ import pytest
 
 from hkp_pack.errors import HkpPackError
 from hkp_pack.rocke_compile import (
+    _PREDICATE_ALIASES,
     _check_support_predicate,
     _require_spec_arch_signature,
     _resolve_spec_class,
@@ -353,6 +354,56 @@ def test_no_new_builder_ships_without_a_support_predicate():
     )
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[3] / "rocke" / "library").is_dir(),
+    reason="rocke/library not in this tree",
+)
+def test_predicate_aliases_resolve_to_real_predicates():
+    """Each _PREDICATE_ALIASES entry must name a callable in the real library.
+
+    The alias map exists so builders whose predicates don't follow the naming
+    convention still get pre-flight validation.  If a predicate is renamed, the
+    alias becomes stale and hkp_pack silently skips validation for that builder.
+    This test makes stale aliases a test failure rather than a silent regression.
+    """
+    import kernels.gfx942.attention_tiled_2d as gfx942_2d
+    import kernels.gfx942.attention_tiled_3d as gfx942_3d
+    import kernels.gfx950.attention_tiled_2d as gfx950_2d
+    import kernels.gfx950.attention_tiled_3d as gfx950_3d
+
+    # Each entry: alias_key -> (predicate_name, list of modules that must have it)
+    expected = {
+        "build_unified_attention_2d_tiled": (
+            "supports_tiled_2d_spec",
+            [gfx942_2d, gfx950_2d],
+        ),
+        "build_gfx942_4warp_gqa": (
+            "supports_gfx942_4warp_gqa_spec",
+            [gfx942_2d],
+        ),
+        "build_unified_attention_3d_tiled": (
+            "supports_tiled_3d_spec",
+            [gfx942_3d, gfx950_3d],
+        ),
+    }
+    for builder, (predicate_name, modules) in expected.items():
+        # Alias must be present in the map
+        assert (
+            builder in _PREDICATE_ALIASES
+        ), f"_PREDICATE_ALIASES is missing the entry for {builder!r}"
+        assert _PREDICATE_ALIASES[builder] == predicate_name, (
+            f"_PREDICATE_ALIASES[{builder!r}] = {_PREDICATE_ALIASES[builder]!r}, "
+            f"expected {predicate_name!r}"
+        )
+        # Predicate must be a callable in every expected module
+        for mod in modules:
+            fn = getattr(mod, predicate_name, None)
+            assert callable(fn), (
+                f"_PREDICATE_ALIASES[{builder!r}] = {predicate_name!r} "
+                f"but {predicate_name!r} is not callable in {mod.__name__}"
+            )
+
+
 # --- C. Literal validation --------------------------------------------------
 @dataclasses.dataclass
 class _LiteralSpec:
@@ -384,16 +435,14 @@ def test_unresolvable_hint_is_a_readable_error(tmp_path):
     """
     ns = {}
     exec(
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             from __future__ import annotations
             import dataclasses
 
             @dataclasses.dataclass
             class Broken:
                 field: DoesNotExist
-            """
-        ),
+            """),
         ns,
     )
 
