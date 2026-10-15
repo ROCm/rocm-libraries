@@ -683,6 +683,9 @@ struct fmha_batch_prefill_args
     // v_descale_ptr: [num_block, num_kv_head] - points to v block descale
     ck_tile::index_t nblock_stride_kv_block_descale = 0; // Stride along num_block dimension
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
+
+    // set to the name of the kernel that ran, if not null
+    std::string* selected_kernel_name = nullptr;
 };
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
@@ -745,6 +748,23 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
 
     return srd_would_overflow ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
                               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+}
+
+// Archs without GLOBAL_LOAD_LDS kernels (gfx125) always run BUFFER_LOAD. Their K/V loads
+// take a 64-bit base, so only the int32 page offsets (physical_page * page_stride +
+// within_page) limit the KV pool.
+inline bool fmha_batch_prefill_kv_fits_int32_offset(ck_tile::index_t num_total_pages,
+                                                    ck_tile::index_t batch_stride_k,
+                                                    ck_tile::index_t batch_stride_v,
+                                                    ck_tile::index_t element_bytes)
+{
+    const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_k) *
+                              static_cast<uint64_t>(element_bytes);
+    const auto v_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_v) *
+                              static_cast<uint64_t>(element_bytes);
+    return k_pool_bytes <= INT32_MAX && v_pool_bytes <= INT32_MAX;
 }
 
 template <typename FmhaKernel>

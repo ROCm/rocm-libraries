@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_fmha_kv_rows.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 
 #include <cassert>
@@ -23,6 +24,31 @@
 // O[seqlen_q, hdim_v] = P[seqlen_q, seqlen_k] @ V^T[hdim_v, seqlen_k]
 
 namespace ck_tile {
+
+namespace detail {
+// qr_tdm (gfx125) owns one LDS arena and loads K/V tiles with TDM.
+template <typename Pipeline, typename = void>
+struct is_batch_prefill_tdm_pipeline : std::false_type
+{
+};
+template <typename Pipeline>
+struct is_batch_prefill_tdm_pipeline<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsArena)>>
+    : std::bool_constant<Pipeline::kUsesLdsArena>
+{
+};
+// qr_tdm_sched (gfx125) splits its LDS arena into fixed Q/K0/K1/V0/V1 segments.
+template <typename Pipeline, typename = void>
+struct is_batch_prefill_segmented_tdm_pipeline : std::false_type
+{
+};
+template <typename Pipeline>
+struct is_batch_prefill_segmented_tdm_pipeline<
+    Pipeline,
+    std::void_t<decltype(Pipeline::kUsesFixedSegmentedLdsArena)>>
+    : std::bool_constant<Pipeline::kUsesFixedSegmentedLdsArena>
+{
+};
+} // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaBatchPrefillWithPagedKVCacheKernel
@@ -60,13 +86,22 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     static constexpr auto kKVMemoryLayout   = FmhaPipeline::Problem::kKVMemoryLayout;
     static constexpr auto kKVLookupTable    = FmhaPipeline::Problem::kKVLookupTable;
-    static constexpr index_t kPageBlockSize = FmhaPipeline::kPageBlockSize;
-    static constexpr index_t kVectorSize    = FmhaPipeline::kVectorSize;
+    static constexpr index_t kPageBlockSize = FmhaPipeline::Problem::kPageBlockSize;
+    static constexpr index_t kVectorSize    = FmhaPipeline::Problem::kVectorSize;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
-    static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
+    static constexpr bool kIsSegmentedTdmPipeline =
+        detail::is_batch_prefill_segmented_tdm_pipeline<FmhaPipeline>::value;
+    static constexpr bool kIsTdmPipeline =
+        detail::is_batch_prefill_tdm_pipeline<FmhaPipeline>::value || kIsSegmentedTdmPipeline;
+    static constexpr bool kUseAsyncCopy = [] {
+        if constexpr(kIsTdmPipeline)
+            return false;
+        else
+            return FmhaPipeline::Policy::AsyncCopy;
+    }();
     template <ck_tile::index_t I> // to avoid duplicated base class prblem, introduce an template
                                   // arg
     struct FmhaFwdEmptyKargs
@@ -645,7 +680,16 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                                                 ck_tile::index_t seqlen_q_,
                                                 ck_tile::index_t hdim_v_)
     {
-        if constexpr(kIsGroupMode)
+        if constexpr(kIsGroupMode && kIsTdmPipeline)
+        {
+            // As fmha_fwd: the Q tiles of one sequence run next to each other and share
+            // its K/V in L2.
+            return dim3(nhead_,
+                        ck_tile::integer_divide_ceil(seqlen_q_, FmhaPipeline::kM0) *
+                            ck_tile::integer_divide_ceil(hdim_v_, FmhaPipeline::kN1),
+                        batch_size_);
+        }
+        else if constexpr(kIsGroupMode)
         {
             // TODO: this may need tuning
             return dim3(nhead_,
@@ -671,9 +715,10 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             const index_t num_tile_n1 =
                 ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
-            const index_t i_block = blockIdx.z;
-            const index_t i_nhead = blockIdx.x;
-            const index_t i_batch = blockIdx.y;
+            const index_t i_block                     = kIsTdmPipeline ? blockIdx.y : blockIdx.z;
+            const index_t i_nhead                     = blockIdx.x;
+            const index_t i_batch                     = kIsTdmPipeline ? blockIdx.z : blockIdx.y;
+            [[maybe_unused]] const index_t num_blocks = kIsTdmPipeline ? gridDim.y : gridDim.z;
 
             const auto f = [](index_t dividend, index_t divisor) {
                 index_t quotient = dividend / divisor;
@@ -685,7 +730,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             if constexpr(kHasMask)
             {
                 // assume that num_tile_n1 is always 1
-                return ck_tile::make_tuple(gridDim.z - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
+                return ck_tile::make_tuple(num_blocks - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
             }
             else
             {
@@ -742,7 +787,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        alignas(kIsTdmPipeline ? 256 : 1) __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -1257,7 +1302,98 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             kargs.seqlen_k > 0 ? (kargs.seqlen_k - 1) / kPageBlockSize : 0;
 
         auto o_acc_tile = [&] {
-            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+            if constexpr(kIsTdmPipeline)
+            {
+                static_assert(kKVMemoryLayout ==
+                                      BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
+                                  QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE &&
+                                  !kHasDropout && !kHasLogitsSoftCap,
+                              "TDM batch_prefill supports linear fp16/bf16 KV without dropout "
+                              "or logits soft cap");
+                // TDM needs affine views and clamps each box to the real lengths: each K/V
+                // tile is read through a view of its page that ends at seqlen_k.
+                const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
+                    q_ptr,
+                    make_tuple(kargs.seqlen_q, kargs.hdim_q),
+                    make_tuple(kargs.stride_q, 1),
+                    number<FmhaPipeline::kAlignmentQ>{},
+                    number<1>{});
+                // View of the first `rows` rows of physical page `page`.
+                const auto make_k_view = [k_ptr_      = k_ptr,
+                                          page_stride = kargs.batch_stride_k,
+                                          row_stride  = kargs.stride_k,
+                                          hdim        = kargs.hdim_q](index_t page, index_t rows) {
+                    return make_naive_tensor_view<address_space_enum::global>(
+                        k_ptr_ + static_cast<long_index_t>(page) * page_stride,
+                        make_tuple(rows, hdim),
+                        make_tuple(row_stride, 1),
+                        number<FmhaPipeline::kAlignmentK>{},
+                        number<1>{});
+                };
+                const auto make_v_view = [v_ptr_      = v_ptr,
+                                          page_stride = kargs.batch_stride_v,
+                                          row_stride  = kargs.stride_v,
+                                          hdim        = kargs.hdim_v](index_t page, index_t rows) {
+                    return make_naive_tensor_view<address_space_enum::global>(
+                        v_ptr_ + static_cast<long_index_t>(page) * page_stride,
+                        make_tuple(rows, hdim),
+                        make_tuple(row_stride, 1),
+                        number<FmhaPipeline::kAlignmentV>{},
+                        number<1>{});
+                };
+                // The pipeline re-points these windows at one page per K/V tile.
+                const auto k_dram_tdm   = make_k_view(0, kargs.page_block_size);
+                const auto v_dram_tdm   = make_v_view(0, kargs.page_block_size);
+                const auto q_window_tdm = make_tile_window(
+                    q_dram_tdm,
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kSubQKHeaddim>{}),
+                    {i_m0, 0});
+                const auto k_window_tdm = make_tile_window(
+                    k_dram_tdm,
+                    make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
+                    {0, 0});
+                const auto v_window_tdm = make_tile_window(
+                    v_dram_tdm,
+                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
+                    {0, 0});
+                const auto kv_rows = BlockFmhaPagedKVRows<kPageBlockSize,
+                                                          remove_cvref_t<decltype(make_k_view)>,
+                                                          remove_cvref_t<decltype(make_v_view)>>{
+                    page_idx, max_page_table_idx, kargs.seqlen_k, make_k_view, make_v_view};
+                if constexpr(kIsSegmentedTdmPipeline)
+                {
+                    using Policy = typename FmhaPipeline::Policy;
+                    return FmhaPipeline{}(q_window_tdm,
+                                          k_window_tdm,
+                                          v_window_tdm,
+                                          bias_dram_window,
+                                          lse_dram_window,
+                                          mask,
+                                          position_encoding,
+                                          variant_params.sm_scale,
+                                          sink_value,
+                                          smem_ptr + Policy::GetLdsOffsetK0(),
+                                          smem_ptr + Policy::GetLdsOffsetK1(),
+                                          smem_ptr + Policy::GetLdsOffsetV0(),
+                                          smem_ptr + Policy::GetLdsOffsetV1(),
+                                          kv_rows);
+                }
+                else
+                {
+                    return FmhaPipeline{}(q_window_tdm,
+                                          k_window_tdm,
+                                          v_window_tdm,
+                                          bias_dram_window,
+                                          lse_dram_window,
+                                          mask,
+                                          position_encoding,
+                                          variant_params.sm_scale,
+                                          static_cast<void*>(smem_ptr),
+                                          sink_value,
+                                          kv_rows);
+                }
+            }
+            else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
             {
                 // TODO - move global load of descale to pipeline
                 assert(kargs.v_descale_ptr != nullptr);

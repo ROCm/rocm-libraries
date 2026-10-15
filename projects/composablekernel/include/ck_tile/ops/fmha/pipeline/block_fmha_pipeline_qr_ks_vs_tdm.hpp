@@ -6,6 +6,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_fmha_kv_rows.hpp"
 #include "ck_tile/ops/fmha/block/cast_tile_mx.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
@@ -393,6 +394,25 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
+    // Advance a K/V DRAM window by `delta` sequence rows. Paged K/V re-map the new
+    // sequence position through the page table instead of moving linearly.
+    template <bool kIsK, typename KVRows, typename DramWindow>
+    CK_TILE_DEVICE static void
+    MoveKVRows(DramWindow& window, index_t& row, index_t delta, const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsPaged)
+        {
+            row += delta;
+            kv_rows.template move_to<kIsK>(window, row);
+        }
+        else
+        {
+            ignore = row;
+            ignore = kv_rows;
+            move_tile_window(window, {delta, 0});
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
@@ -504,7 +524,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename KVRows = BlockFmhaDenseKVRows>
     CK_TILE_HOST_DEVICE auto
     run_single_kv_lds_buffer(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
                              const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
@@ -519,7 +540,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              const float* k_descale_ptr,
                              const float* v_descale_ptr,
                              index_t block_scale_size_kv,
-                             float v_descale) const
+                             float v_descale,
+                             const KVRows& kv_rows = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -725,10 +747,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
+        index_t k_row = kv_load_start; // K/V sequence position of the DRAM windows
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<true>(k_dram_window, kv_load_start);
 
         // K LDS writer (TDM) and reader share plain row-major desc; see Q
         // comment above for the no-swizzle rationale.
@@ -764,10 +789,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
         // with V's DRAM dist switched to trivial tile-major and the V LDS read
         // view kept plain row-major (matches the write view).
+        index_t v_row = kv_load_start;
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<false>(v_dram_window, kv_load_start);
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(smem_ptrv),
@@ -830,7 +858,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
-            move_tile_window(v_dram_window, {kN0, 0});
+            MoveKVRows<false>(v_dram_window, v_row, kN0, kv_rows);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -965,15 +993,17 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<true>(
+                        k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
+                    MoveKVRows<false>(
+                        v_dram_window, v_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                     move_tile_window(bias_dram_window, {0, physical_seqlen_k_start - sink_seq_end});
                 }
             }
 
             // move K and bias tile windows after current status checked
             // prefetch next-tile along [K]ey sequence length dimension
-            move_tile_window(k_dram_window, {kN0, 0});
+            MoveKVRows<true>(k_dram_window, k_row, kN0, kv_rows);
             move_tile_window(bias_dram_window, {0, kN0});
 
             block_sync_lds();
@@ -1216,7 +1246,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename KVRows = BlockFmhaDenseKVRows>
     CK_TILE_HOST_DEVICE auto run_double_kv_lds_buffer(
         const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
@@ -1231,7 +1262,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        float v_descale) const
+        float v_descale,
+        const KVRows& kv_rows = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -1436,10 +1468,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
+        index_t k_row = kv_load_start; // K/V sequence position of the DRAM windows
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem, true>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<true>(k_dram_window, kv_load_start);
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
@@ -1474,10 +1509,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                              Policy::template MakeSRegTileDistribution<Problem>());
 
         // V tile in LDS (sink-aware start)
+        index_t v_row = kv_load_start;
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
+                             {KVRows::kIsPaged ? 0 : kv_load_start, 0},
                              Policy::template MakeVDramTileDistribution<Problem>());
+        if constexpr(KVRows::kIsPaged)
+            kv_rows.template move_to<false>(v_dram_window, kv_load_start);
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             smem_ptrv0, Policy::template MakeVLdsBlockDescriptor<Problem>());
@@ -1510,7 +1548,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
         LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
 
-        move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
+        MoveKVRows<true>(k_dram_window, k_row, num_total_loop > 1 ? kN0 : 0, kv_rows);
         // The prologue issues two K prefetches: the first into ptrk0, which
         // k_lds_read_window is bound to and which mainloop() therefore consumes at
         // i_total_loops == 0, and the second into ptrk1, consumed at
@@ -1525,7 +1563,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         {
             if(num_sink_loop == 1 && num_total_loop > 1)
             {
-                move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                MoveKVRows<true>(
+                    k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
             }
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
@@ -1573,12 +1612,14 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                 {
-                    move_tile_window(v_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<false>(
+                        v_dram_window, v_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                 }
             }
             // Preserve the TDM counter schedule in the tail, but re-read the last
             // valid tile instead of forming an unused out-of-allocation address.
-            move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
+            MoveKVRows<false>(
+                v_dram_window, v_row, i_total_loops + 1 < num_total_loop ? kN0 : 0, kv_rows);
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
             LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
 
@@ -2043,10 +2084,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             {
                 if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
                 {
-                    move_tile_window(k_dram_window, {physical_seqlen_k_start - sink_seq_end, 0});
+                    MoveKVRows<true>(
+                        k_dram_window, k_row, physical_seqlen_k_start - sink_seq_end, kv_rows);
                 }
             }
-            move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
+            MoveKVRows<true>(
+                k_dram_window, k_row, i_total_loops + 2 < num_total_loop ? kN0 : 0, kv_rows);
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
             LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
 
@@ -2202,6 +2245,64 @@ struct BlockFmhaPipelineQRKSVSTdm
         });
 
         return o_acc;
+    }
+
+    // Paged K/V (batch_prefill): k/v_dram_block_window_tmp span the whole KV cache pool
+    // and kv_rows maps sequence positions onto it.
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename KVRows>
+    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+                                        const KDramBlockWindowTmp& k_dram_block_window_tmp,
+                                        const VDramBlockWindowTmp& v_dram_block_window_tmp,
+                                        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+                                        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+                                        FmhaMask mask,
+                                        PositionEncoding position_encoding,
+                                        float scale_s,
+                                        void* smem_ptr,
+                                        float sink_v,
+                                        const KVRows& kv_rows) const
+    {
+        static_assert(KVRows::kIsPaged);
+        static_assert(!kQuantized, "qr_tdm pipeline: this granularity needs the descale arguments");
+        static_assert(KVRows::kPageSize_ % kN0 == 0, "a K/V tile must not straddle two pages");
+        if constexpr(Problem::kUseDoubleKVLdsBuffer)
+            return run_double_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_ptr,
+                                            sink_v,
+                                            nullptr,
+                                            nullptr,
+                                            1,
+                                            1.0f,
+                                            kv_rows);
+        else
+            return run_single_kv_lds_buffer(q_dram_block_window_tmp,
+                                            k_dram_block_window_tmp,
+                                            v_dram_block_window_tmp,
+                                            bias_dram_block_window_tmp,
+                                            lse_acc_dram_window_tmp,
+                                            mask,
+                                            position_encoding,
+                                            scale_s,
+                                            smem_ptr,
+                                            sink_v,
+                                            nullptr,
+                                            nullptr,
+                                            1,
+                                            1.0f,
+                                            kv_rows);
     }
 
     template <typename QDramBlockWindowTmp,
