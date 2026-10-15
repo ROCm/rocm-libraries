@@ -1816,10 +1816,10 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         is.seekg(0, std::ios::end);
         const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
         is.seekg(header_bytes, std::ios::beg);
-        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 &&
-                         (version == 1 || version == 2) && key_dtype == 0 && emb_dtype == 0 &&
-                         key_dim > 0 && emb_dim > 0 &&
-                         file_size == header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
+        bool header_ok =
+            is.good() && std::memcmp(magic, "MICE", 4) == 0 && (version == 1 || version == 2) &&
+            key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
+            file_size == header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
         // Fail closed when a v2 table was built from a different config encoder than the one
         // installed (model retrained but the table not regenerated).
         if(header_ok && version == 2)

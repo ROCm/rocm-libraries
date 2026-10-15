@@ -612,11 +612,12 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     // The two-tower CandidateSelection encoders are trained with log1p(in_d) appended for BOTH 2D
-    // and 3D: the training preprocessor gates this on in_d being present in the metadata, which is a
-    // constant (= 1) for 2D, so the 2D encoders carry it as log1p(1). The shared EngineeredConvFeatures
-    // only emits it for 3D -- and it is also consumed by the TunaNet path, which must stay at the 2D
-    // width -- so append the 2D depth constant (D_in == 1 here) only in this path, keeping the deploy
-    // feature width and order matched to the config-selection encoders.
+    // and 3D: the training preprocessor gates this on in_d being present in the metadata, which is
+    // a constant (= 1) for 2D, so the 2D encoders carry it as log1p(1). The shared
+    // EngineeredConvFeatures only emits it for 3D -- and it is also consumed by the TunaNet path,
+    // which must stay at the 2D width -- so append the 2D depth constant (D_in == 1 here) only in
+    // this path, keeping the deploy feature width and order matched to the config-selection
+    // encoders.
     std::size_t depth_feature = 0;
     if(!is_3d)
     {

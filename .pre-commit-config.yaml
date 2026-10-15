@@ -65,6 +65,9 @@ exclude: |
     projects/miopen/src/conv/heuristics/lgbm_models/.*|
     projects/miopen/src/conv/heuristics/lgbm_pcfg_models/.*|
     projects/miopen/src/kernels/lgbm_.*\.(json|txt|bin)|
+    # Machine-generated two-tower config-embedding tables (binary; exceed
+    # check-added-large-files and are not lintable/end-of-file-fixable).
+    projects/miopen/src/kernels/.*_kernel_config_embeddings\.bin|
     # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
     # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
     projects/rpp/.*\.(bin|rgb|yuv)$
