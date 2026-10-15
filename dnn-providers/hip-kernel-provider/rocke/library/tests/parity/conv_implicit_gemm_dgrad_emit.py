@@ -1088,6 +1088,29 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    # Configs 47-48: the XCD-contiguous tile order of grouped stride-1
+    # kernels on gfx950 (DgradConvSpec.xcd_tile_order); 47 emits the remap
+    # (the default), 48 is the launch-order A/B build.
+    if idx in (47, 48):
+        p = _cp(N=1, Hi=8, Wi=8, C=256, K=256, Y=3, X=3, pH=1, pW=1, groups=4)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="default",
+                xcd_tile_order=(idx == 47),
+            ),
+            "gfx950",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

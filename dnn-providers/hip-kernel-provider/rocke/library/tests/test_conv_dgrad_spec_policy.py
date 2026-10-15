@@ -402,5 +402,166 @@ class TestTapOuterKIdentity(unittest.TestCase):
         self.assertFalse(any(j.identity.pipeline == "wavelet" for j in tapk))
 
 
+def _all_ops(kernel):
+    out = []
+
+    def walk(ops):
+        for op in ops:
+            out.append(op.name)
+            for r in getattr(op, "regions", ()) or ():
+                walk(r.ops)
+
+    walk(kernel.body.ops)
+    return out
+
+
+_XCD_GROUPED = {"C": 256, "K": 256, "groups": 4}
+
+
+class TestXcdTileOrder(unittest.TestCase):
+    """XCD-contiguous tile order of grouped stride-1 kernels (gfx950).
+
+    Build time: the target, the knob, a grouped kernel, the folded record and
+    no split-K. Run time, from the kernargs: groups > 1, Y*X > 1 or
+    num_pid_n > 1, and at least one workgroup per XCD.
+    """
+
+    def _ops(self, arch=_ARCH, **kw):
+        if arch != _ARCH:
+            # gfx942 has no K-outer transpose read; same tile otherwise.
+            kw.setdefault("lds_k_outer", False)
+            kw.setdefault("warp_tile_k", 8)
+            kw.setdefault("tile_k", 32)
+        spec = _spec(**kw)
+        return _all_ops(build_implicit_gemm_conv_dgrad(spec, arch=arch)), spec
+
+    def test_build_time_rule(self):
+        grouped = _problem(**_XCD_GROUPED)
+        for arch in ("gfx950", "gfx942"):
+            on, spec_on = self._ops(arch, problem=grouped)
+            off, spec_off = self._ops(arch, problem=grouped, xcd_tile_order=False)
+            with self.subTest(arch=arch):
+                self.assertTrue(spec_on.xcd_tile_order)
+                self.assertNotIn("noxcd", spec_on.kernel_name())
+                self.assertTrue(spec_off.kernel_name().endswith("_noxcd"))
+                xcds = dgrad_mod.xcd_tile_order_xcds(spec_on, arch)
+                self.assertEqual(xcds, 8 if arch == "gfx950" else 0)
+                self.assertEqual(dgrad_mod.xcd_tile_order_xcds(spec_off, arch), 0)
+                if xcds:
+                    # The helper's select plus the run-time switch.
+                    self.assertEqual(
+                        on.count("arith.select") - off.count("arith.select"), 2
+                    )
+                else:
+                    self.assertEqual(on, off)
+
+    def test_withheld_elsewhere(self):
+        flat = _XCD_GROUPED
+        cases = {
+            "ungrouped": {"problem": _problem()},
+            "strided": {"problem": _problem(sH=2, sW=2, **flat)},
+            "split-K": {"problem": _problem(**flat), "split_k": 2},
+        }
+        for label, kw in cases.items():
+            with self.subTest(case=label):
+                spec = _spec(**kw)
+                self.assertEqual(dgrad_mod.xcd_tile_order_xcds(spec, _ARCH), 0)
+                on, _ = self._ops(**kw)
+                off, _ = self._ops(xcd_tile_order=False, **kw)
+                self.assertEqual(on, off)
+
+    def test_emitted_order_is_the_model(self):
+        # emit_xcd_tile_order, evaluated op by op, against the model, over
+        # grids that do and do not take the remap; the (tile, group) map is
+        # a bijection of the launch grid either way.
+        from rocke.core.ir import I32, IRBuilder
+
+        names = ("p_num_pid_m", "p_num_pid_n", "p_groups", "p_Y", "p_X")
+        b = IRBuilder("xcd_order")
+        params = {n: b.param(n, I32) for n in names}
+        bx = b.block_id_x()
+        tile, group = dgrad_mod.emit_xcd_tile_order(b, bx, params, num_xcds=8)
+
+        def div(x, y):
+            return int(x / y)
+
+        binop = {
+            "arith.add": lambda x, y: x + y,
+            "arith.mul": lambda x, y: x * y,
+            "arith.div": div,
+            "arith.mod": lambda x, y: x - div(x, y) * y,
+            "arith.smax": max,
+            "arith.and": lambda x, y: x and y,
+            "arith.or": lambda x, y: x or y,
+        }
+        cmp = {
+            "lt": lambda x, y: x < y,
+            "gt": lambda x, y: x > y,
+            "ge": lambda x, y: x >= y,
+        }
+
+        def run(env, by):
+            vals = {params[n].name: env[n] for n in names}
+            vals[bx.name] = env["bx"]
+            for op in b.kernel.body.ops:
+                ins = [vals.get(v.name) for v in op.operands]
+                if op.name == "arith.constant":
+                    vals[op.result.name] = op.attrs["value"]
+                elif op.name == "gpu.block_id" and op.attrs["axis"] == "y":
+                    vals[op.result.name] = by
+                elif op.name in binop:
+                    vals[op.result.name] = binop[op.name](*ins)
+                elif op.name == "arith.cmp":
+                    vals[op.result.name] = cmp[op.attrs["pred"]](*ins)
+                elif op.name == "arith.select":
+                    vals[op.result.name] = ins[1] if ins[0] else ins[2]
+            return vals[tile.name], vals[group.name]
+
+        for m, n, g, taps in (
+            (7, 2, 4, 9),  # remapped
+            (9, 1, 3, 9),  # one N tile, several taps: remapped
+            (6, 1, 4, 1),  # one N tile, one tap: launch order
+            (3, 2, 1, 9),  # ungrouped launch of a grouped binary
+            (1, 1, 5, 9),  # fewer workgroups than XCDs
+            (33, 3, 2, 1),  # 1x1 filter, three N tiles: remapped
+        ):
+            seen = set()
+            remapped = False
+            for gy in range(g):
+                for x in range(m * n):
+                    env = {
+                        "p_num_pid_m": m,
+                        "p_num_pid_n": n,
+                        "p_groups": g,
+                        "p_Y": taps,
+                        "p_X": 1,
+                        "bx": x,
+                    }
+                    got = run(env, gy)
+                    want = dgrad_mod.python_xcd_tile_order(
+                        x, gy, num_pid_m=m, num_pid_n=n, groups=g, taps=taps
+                    )
+                    self.assertEqual(got, want, (m, n, g, taps, x, gy))
+                    remapped |= got != (x, gy)
+                    seen.add(got)
+            with self.subTest(m=m, n=n, g=g, taps=taps):
+                self.assertEqual(
+                    seen, {(t, gg) for t in range(m * n) for gg in range(g)}
+                )
+                takes = g > 1 and (taps > 1 or n > 1) and m * n * g >= 8
+                self.assertEqual(remapped, takes)
+
+    def test_never_swept(self):
+        from benchmarks.common import kernel_sweep as ks
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(_ARCH)
+        geos = ks._geometry_list(target, "bf16")[::211]
+        for job in ks._dgrad_jobs(
+            _ARCH, "bf16", 64, "mma", target, 1024, geometries=geos
+        ):
+            self.assertNotIn("xcd_tile_order", job.spec_kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()

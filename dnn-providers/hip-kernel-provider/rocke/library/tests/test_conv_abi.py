@@ -1085,6 +1085,41 @@ def test_dgrad_stride1_is_shape_invariant(groups, tap_outer_k):
     assert len(fingerprints) == 1, "stride-1 dgrad IR depends on the shape"
 
 
+def test_dgrad_stride1_xcd_order_ignores_the_group_count():
+    """The XCD tile order of grouped stride-1 binaries decides from kernargs.
+
+    On gfx950 a grouped stride-1 binary carries the XCD-contiguous remap and
+    its run-time switch (groups, taps, N tiles, grid size); none of them may
+    reach the IR, so the group count, the filter and the channels can change
+    under one binary.
+    """
+    fingerprints = set()
+    for N, Hi, Wi, cpg, kpg, Y, X, pad, groups in (
+        (2, 14, 14, 64, 64, 3, 3, 1, 2),
+        (1, 9, 23, 32, 96, 3, 3, 1, 3),
+        (3, 17, 11, 128, 64, 1, 1, 0, 8),
+        (1, 31, 7, 96, 160, 5, 5, 2, 64),
+    ):
+        p = ConvProblem(
+            N=N,
+            Hi=Hi,
+            Wi=Wi,
+            C=cpg * groups,
+            K=kpg * groups,
+            Y=Y,
+            X=X,
+            pH=pad,
+            pW=pad,
+            groups=groups,
+        )
+        spec = DgradConvSpec(problem=p, data=_DATA, **_TILE)
+        assert spec.xcd_tile_order
+        fingerprints.add(
+            _op_signature(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH))
+        )
+    assert len(fingerprints) == 1, "the XCD tile order depends on the shape"
+
+
 def _dgrad_kernarg_record(problem, tile_m, tile_n, tile_k, split_k):
     """The stride-1 sub-GEMM record as the kernel rebuilds it from kernargs.
 

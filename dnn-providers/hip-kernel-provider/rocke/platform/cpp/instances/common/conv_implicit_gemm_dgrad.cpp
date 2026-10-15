@@ -113,6 +113,7 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
     s.split_k = 1;
     s.num_load_waves = 4;
     s.max_sub_gemms = 1024;
+    s.xcd_tile_order = true;
     return s;
 }
 
@@ -225,6 +226,25 @@ static bool _dgrad_folds_sub_gemm_record(const rocke_dgrad_conv_spec_t* s)
     return s->problem.sH == 1 && s->problem.sW == 1;
 }
 
+/* Python _XCD_TILE_ORDER_ARCHES: the target whose grouped stride-1 kernels
+ * lay their tiles out XCD-contiguous, and its XCD count (8 on gfx950). */
+#define ROCKE_DGRAD_XCD_TILE_ORDER_ARCH "gfx950"
+#define ROCKE_DGRAD_XCD_TILE_ORDER_XCDS 8
+
+/* Python xcd_tile_order_xcds: the XCD count the kernel lays its tile order
+ * out for, or 0 (launch order). The build-time half of the rule; the kernel
+ * decides the rest from its kernargs. */
+static int _dgrad_xcd_tile_order_xcds(const rocke_dgrad_conv_spec_t* s, const char* arch)
+{
+    if(!arch || strcmp(arch, ROCKE_DGRAD_XCD_TILE_ORDER_ARCH) != 0 || !s->xcd_tile_order)
+        return 0;
+    if(s->problem.groups <= 1 || s->split_k != 1)
+        return 0;
+    if(!_dgrad_folds_sub_gemm_record(s))
+        return 0;
+    return ROCKE_DGRAD_XCD_TILE_ORDER_XCDS;
+}
+
 bool rocke_dgrad_conv_spec_needs_atomic(const rocke_dgrad_conv_spec_t* s)
 {
     /* split_k>1: multiple CTAs accumulate into the same dX elements via atomic_add.
@@ -268,7 +288,7 @@ rocke_status_t
         n += w_;                                                      \
     } while(0)
     /* Flag order must match Python's kernel_name_join flags dict:
-     * async, kouter, spk, ukd, kp, tapk. C previously emitted spk before async, which only
+     * async, kouter, spk, ukd, kp, tapk, noxcd. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
      * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
@@ -286,6 +306,9 @@ rocke_status_t
     /* A different K-loop body; only tagged when set (Python flag "tapk"). */
     if(s->tap_outer_k)
         ROCKE_DGRAD_NAME_APPEND("_tapk");
+    /* The launch-order tile walk (Python flag "noxcd"). */
+    if(!s->xcd_tile_order)
+        ROCKE_DGRAD_NAME_APPEND("_noxcd");
 #undef ROCKE_DGRAD_NAME_APPEND
     return ROCKE_OK;
 }
@@ -2596,6 +2619,38 @@ static rocke_kernel_def_t*
     // ---- 1D grid: block_id_x covers all sub-GEMMs' tiles ----
     rocke_value_t* flat_block_id = rocke_b_block_id_x(b);
 
+    // ---- XCD-contiguous tile order (Python xcd_tile_order_xcds) ----
+    // Remap the launch-order linear id over (group, tile) when the kernargs
+    // ask for it (one uniform select) and split it back into tile and group.
+    // Operands are sequenced in Python's left-to-right evaluation order.
+    rocke_value_t* xcd_group = NULL;
+    const int num_xcds = _dgrad_xcd_tile_order_xcds(spec, arch);
+    if(num_xcds)
+    {
+        rocke_value_t* c1_xcd = rocke_b_const_i32(b, 1);
+        rocke_value_t* flat_tiles = rocke_b_mul(b, ctx.p_num_pid_m, ctx.p_num_pid_n);
+        rocke_value_t* num_wgs = rocke_b_mul(b, flat_tiles, ctx.p_groups);
+        rocke_value_t* by = rocke_b_block_id_y(b);
+        rocke_value_t* by_tiles = rocke_b_mul(b, by, flat_tiles);
+        rocke_value_t* linear_id = rocke_b_add(b, flat_block_id, by_tiles);
+        rocke_value_t* remapped
+            = rocke_chiplet_transform_chunked_runtime(b, linear_id, num_wgs, num_xcds, NULL);
+        if(!remapped)
+            return NULL;
+        rocke_value_t* taps = rocke_b_mul(b, ctx.p_Y, ctx.p_X);
+        rocke_value_t* multi_tap = rocke_b_cmp_gt(b, taps, c1_xcd);
+        rocke_value_t* multi_n = rocke_b_cmp_gt(b, ctx.p_num_pid_n, c1_xcd);
+        rocke_value_t* shares_rows = rocke_b_lor(b, multi_tap, multi_n);
+        rocke_value_t* is_grouped = rocke_b_cmp_gt(b, ctx.p_groups, c1_xcd);
+        rocke_value_t* grp_rows = rocke_b_land(b, is_grouped, shares_rows);
+        rocke_value_t* c_xcds = rocke_b_const_i32(b, num_xcds);
+        rocke_value_t* enough = rocke_b_cmp_ge(b, num_wgs, c_xcds);
+        rocke_value_t* use_xcd = rocke_b_land(b, grp_rows, enough);
+        rocke_value_t* logical_id = rocke_b_select(b, use_xcd, remapped, linear_id);
+        flat_block_id = rocke_b_mod(b, logical_id, flat_tiles);
+        xcd_group = rocke_b_div(b, logical_id, flat_tiles);
+    }
+
     // ---- sub-GEMM record ----
     // Stride 1 (Python DgradConvSpec.folds_sub_gemm_record): the only
     // sub-GEMM's record is rebuilt from the kernargs -- no search, no record
@@ -2822,7 +2877,8 @@ static rocke_kernel_def_t*
     rocke_value_t* c_group_base = NULL;
     if(grouped)
     {
-        rocke_value_t* group_idx = rocke_b_block_id_y(b);
+        /* Under the XCD-contiguous order the group comes from the remapped id. */
+        rocke_value_t* group_idx = xcd_group ? xcd_group : rocke_b_block_id_y(b);
         c_kpg = ctx.p_kpg;
         k_out_group_base = rocke_b_mul(b, group_idx, c_kpg);
         c_group_base = rocke_b_mul(b, group_idx, ctx.p_cpg);
