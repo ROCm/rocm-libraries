@@ -23,27 +23,29 @@ import re
 import shutil
 import time
 import pandas as pd
+import yaml
 
 import logging
 
 logger = logging.getLogger("GEKO")
 
 from pathlib import Path
-from typing import List, Sequence, Union, Tuple
+from typing import Any, List, Mapping, Sequence, Union, Tuple
 from threading import Lock
 from dataclasses import dataclass
 
 from geko import bench
 from geko.config_generator import config_generator as cg
-from geko.config_generator.load_input_config import apply_input_config_defaults
-from geko.constants import GEMM_FIELDS
+from geko.config_generator.load_input_config import apply_input_config_defaults, resolve_mx_defaults
+from geko.constants import GEMM_FIELDS, canonical_arch, runtime_env
 from geko.schemas import GemmConfig
 from geko.concurrency.runner import Runner, Worker
 from geko.utils import (
     build_tensilelite_client,
     parse_devices,
+    tensile_pythonpath,
 )
-from geko.concurrency.utils import wait_process_or_stop
+from geko.concurrency.utils import wait_process_or_stop, DeviceActivityTracker
 from geko.optim.utils import *
 from geko.optim import _metrics
 
@@ -126,6 +128,7 @@ def configure(
     arch: str = "gfx950",
     backend: str = "ductile",
     search_space: str | None = None,
+    config_overrides: Mapping[str, Any] | None = None,
 ) -> dict:
     """Generate tuning YAML configs for one or more GEMM types.
 
@@ -150,15 +153,21 @@ def configure(
             Defaults to "ductile".
         search_space (str, optional): "heuristic", "generic", or None 
             (auto-inferred from backend).
+        config_overrides (Mapping[str, Any] | None, optional): Extra input-config
+            keys merged into the generator's config dict (e.g. LIST_FORWARDED_KEYS
+            forwarded from a ``--list`` YAML). arch, backend and search_space take
+            precedence; per-ARCH defaults fill every key left unset.
 
     Returns:
         dict: The fully populated config dict (after defaults and the
             generator pass), including GemmProblems and ARCH-derived
             hardware fields.
     """
+    arch = canonical_arch(arch)
     gcs: List[GemmConfig] = (
         [gemm_configs] if isinstance(gemm_configs, GemmConfig) else list(gemm_configs)
     )
+    gcs = resolve_mx_defaults(gcs, arch)
 
     for gc in gcs:
         logger.info(f"{gc.gemm_type} with {len(gc.sizes)} sizes (mx={gc.mx})")
@@ -174,6 +183,7 @@ def configure(
         )
 
     config: dict = {
+        **(config_overrides or {}),
         "ARCH": arch,
         "backend": backend.lower(),
         "search_space": search_space,
@@ -192,7 +202,7 @@ def configure(
         write_shell_scripts=False,
     )
 
-    names = ", ".join(gc.gemm_type.gemm_name for gc in gcs)
+    names = ", ".join(gc.name for gc in gcs)
     logger.info(f"Saved GEMM config(s) to '{output_dir}': {names}")
     return config
 
@@ -203,6 +213,9 @@ def run(
     client_build_dir: str | Path = Path("build_tmp"),
     n_slots: int = 4,
     retry: bool = True,
+    stall_timeout: float = 900.0,
+    abort_after_consecutive_failures: int = 8,
+    max_shape_failures: int = 0,
 ) -> None:
     """Run tensilelite optimization across every tuning YAML under tuning_dir.
 
@@ -226,6 +239,15 @@ def run(
             to 4.
         retry (bool, optional): Worker-level retry behavior for existing
             failed / resumable build dirs. Defaults to True.
+        stall_timeout (float, optional): Seconds a worker may go without writing
+            to its tensilelite log before it is killed and its slot released.
+            0 disables. Defaults to 900.0.
+        abort_after_consecutive_failures (int, optional): Stop scheduling new
+            jobs after this many consecutive job failures across all devices;
+            0 disables. Defaults to 8.
+        max_shape_failures (int, optional): Retire a shape after this many
+            failed attempts (tracked in a persistent .failcount file); 0
+            disables retirement. Defaults to 0.
 
     Raises:
         FileNotFoundError: If hipblaslt_path does not exist.
@@ -254,7 +276,7 @@ def run(
     if n_slots < 1:
         raise ValueError("n_slots must be >= 1")
 
-    configs = list_optimization_configs(tuning_dir)
+    configs = list_optimization_configs(tuning_dir, max_shape_failures)
 
     if len(configs) == 0:
         logger.info("No optimizations to run")
@@ -267,6 +289,7 @@ def run(
     )
 
     _timing_lock = Lock()
+    _device_activity = DeviceActivityTracker()
 
     class OptimWorker(Worker):
         def setup(self) -> None:
@@ -276,6 +299,8 @@ def run(
             self.build_dir = tuning_dir / f"build_{self.config_name}"
             self.retry_allowed = retry
             self.should_run = True
+
+            self.had_prior_failure = shape_failure_count(self.build_dir) > 0
 
             self.state = get_build_state(self.build_dir)
 
@@ -310,7 +335,11 @@ def run(
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
-            env = {"PYTHONPATH": str(hipblaslt_path / "tensilelite")}
+            tuning_config = yaml.safe_load(content)
+            env = {
+                "PYTHONPATH": tensile_pythonpath(hipblaslt_path),
+                **runtime_env((tuning_config.get("LibraryLogic") or {}).get("ArchitectureName")),
+            }
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
@@ -328,13 +357,26 @@ def run(
                     start_new_session=(os.name != "nt"),
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
                 )
-                wait_process_or_stop(proc, self.stop_event, self.config_name)
+                stalled = wait_process_or_stop(
+                    proc,
+                    self.stop_event,
+                    self.config_name,
+                    progress_path=self.build_dir / f"{self.config_name}-tensilelite.log",
+                    stall_timeout=stall_timeout,
+                    device_activity=_device_activity,
+                    device=self.device,
+                )
+
+            if stalled:
+                record_shape_failure(self.build_dir)
+                return False
 
             if proc.returncode != 0:
                 logger.debug(
                     f"Optimizer subprocess reported non-zero return code for config={self.config_name}; "
                     "artifacts may be incomplete"
                 )
+                record_shape_failure(self.build_dir)
                 return False
 
             shutil.copyfile(self.config, self.build_dir / self.config.name)
@@ -359,6 +401,7 @@ def run(
         n_slots=n_slots,
         estimate_workload_fn=estimate_workload,
         job_logger_fn=lambda: _log_work(tuning_dir, "running_jobs"),
+        abort_after_consecutive_failures=abort_after_consecutive_failures,
     )
 
     runner(tuning_dir)
