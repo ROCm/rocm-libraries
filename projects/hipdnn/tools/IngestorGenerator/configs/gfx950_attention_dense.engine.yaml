@@ -174,7 +174,7 @@ enumerate:
   # Fields of the registry spec the shipped KDP carries. The registry spec is
   # wider; the rest sit at their dataclass defaults, which
   # tests/test_registry_regeneration.py asserts.
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
   max_kernels: 840
 
@@ -198,6 +198,7 @@ reduction:
       - {name: pv_priority}
       - {name: pv_sched_fence, unset_resolves_by: resolved_pv_sched_fence}
       - {name: pv_sched_group_template, unset_resolves_by: resolved_pv_sched_group_template}
+      - {name: iglp_mode, unset_resolves_by: resolved_iglp_mode}
       - {name: pv_sched_fence_mask}
       - {name: pv_sched_group_ds_read}
       - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}

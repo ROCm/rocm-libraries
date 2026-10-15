@@ -146,6 +146,7 @@ reduction:
       - {name: pv_priority}
       - {name: pv_sched_fence, unset_resolves_by: resolved_pv_sched_fence}
       - {name: pv_sched_group_template, unset_resolves_by: resolved_pv_sched_group_template}
+      - {name: iglp_mode, unset_resolves_by: resolved_iglp_mode}
       - {name: pv_sched_fence_mask}
       - {name: pv_sched_group_ds_read}
       - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
