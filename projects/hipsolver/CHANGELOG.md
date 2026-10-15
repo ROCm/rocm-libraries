@@ -8,6 +8,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Added
 
 * Added functions:
+  * gelsBatched
+    * hipsolverXXgelsBatched_bufferSize
+    * hipsolverXXgelsBatched
   * geqrfBatched
     * hipsolverSgeqrfBatched_bufferSize, hipsolverDgeqrfBatched_bufferSize, hipsolverCgeqrfBatched_bufferSize, hipsolverZgeqrfBatched_bufferSize
     * hipsolverSgeqrfBatched, hipsolverDgeqrfBatched, hipsolverCgeqrfBatched, hipsolverZgeqrfBatched
