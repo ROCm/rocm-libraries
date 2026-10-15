@@ -1421,10 +1421,8 @@ static void rocke_i_fenced_barrier(rocke_ir_builder_t* b, rocke_opcode_t opcode,
     }
     if(strcmp(mode, "compiler") != 0 && strcmp(mode, "workgroup") != 0)
     {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "barrier fence '%s' not in ('compiler', 'workgroup')",
-                        mode);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "barrier fence '%s' not in ('compiler', 'workgroup')", mode);
         return;
     }
     attrs = rocke_i_attrs(b);

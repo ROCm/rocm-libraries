@@ -461,7 +461,7 @@ def case_fields(kind: str, arch: str, cid: str) -> dict:
     return out
 
 
-def build_doc() -> dict:
+def _build_doc() -> dict:
     """The fixture: the uncovered values and, per case, the sha256 of its
     LLVM IR at every flavor."""
     cases, uncovered = {}, {}
@@ -557,7 +557,7 @@ def test_uncovered_values_are_exactly_the_recorded_ones(kind, arch):
 
 
 def _write() -> None:
-    doc = build_doc()
+    doc = _build_doc()
     lines = ["{", f' "schema": {json.dumps(SCHEMA)},', ' "uncovered": {']
     unc = sorted(doc["uncovered"].items())
     for i, (k, v) in enumerate(unc):

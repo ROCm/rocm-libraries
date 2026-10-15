@@ -942,11 +942,8 @@ static void ll_emit_s_barrier(rocke_lower_t* L, const rocke_op_t* op)
     bool workgroup = fence && strcmp(fence, "workgroup") == 0;
     if(fence && !workgroup && strcmp(fence, "compiler") != 0)
     {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "%s: unknown fence '%s'",
-                      op->name ? op->name : "tile.sync",
-                      fence);
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s: unknown fence '%s'", op->name ? op->name : "tile.sync", fence);
         return;
     }
     if(workgroup)
