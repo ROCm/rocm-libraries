@@ -83,6 +83,9 @@ compilation::KpackModuleCache& flydslRmsNormBwdKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaRdnaDecodeKpackModuleCache();
 compilation::KpackModuleCache& flydslSdpaAiwKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDualwaveKpackModuleCache();
+compilation::KpackModuleCache& flydslSdpaCdnaDecodeKpackModuleCache();
 
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 

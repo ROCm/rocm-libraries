@@ -114,9 +114,9 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode` | 309 (90 + 63 + 84 + 72) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx90a` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
-| `gfx942` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
-| `gfx950` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode` | 253 (90 + 63 + 56 + 20 + 24) |
+| `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode"
@@ -189,11 +189,9 @@ a new arch, a deliberate toolchain bump.
 #     $CONTENT/<op>/<arch>.SOURCE.md
 #     for each op. The SDPA kernels carry the gfx11 (RDNA3 / RDNA3.5) and gfx12
 #     (RDNA4) WMMA ABIs; gen_sdpa_rdna refuses any other arch before compiling.
-for ARCH in gfx11-generic gfx12-generic gfx90a gfx942 gfx950; do
+for ARCH in gfx11-generic gfx12-generic; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
   $PY -m generators.gen_rmsnorm_bwd --arch $ARCH
-  case $ARCH in gfx9*) $PY gen_descriptors.py --arch $ARCH
-                       $PY gen_descriptors.py --arch $ARCH --check; continue ;; esac
   $PY -m generators.gen_sdpa_rdna --arch $ARCH
   $PY -m generators.gen_sdpa_rdna_decode --arch $ARCH
   # AOTriton's gfx1201 kernel, its own engine (gfx12-generic only).
@@ -206,7 +204,26 @@ for ARCH in gfx11-generic gfx12-generic gfx90a gfx942 gfx950; do
   # (3) Verify the set. This is the same invocation the build runs before packing.
   $PY gen_descriptors.py --arch $ARCH --check
 done
+
+# The CDNA SDPA kernels are MFMA code, built per arch, one engine per kernel family:
+# FlyDSL's generic kernel (every arch), its dual-wave kernel (gfx950 only; the
+# generator builds nothing for gfx942 or gfx90a) and the generic kernel's split-KV decode
+# objects. Each refuses any other arch before compiling. RMSNorm builds for every arch.
+for ARCH in gfx950 gfx942 gfx90a; do
+  $PY -m generators.gen_rmsnorm --arch $ARCH
+  $PY -m generators.gen_rmsnorm_bwd --arch $ARCH
+  $PY -m generators.gen_sdpa_cdna --arch $ARCH
+  $PY -m generators.gen_sdpa_cdna_dualwave --arch $ARCH
+  $PY -m generators.gen_sdpa_cdna_decode --arch $ARCH
+  $PY gen_descriptors.py --arch $ARCH
+  $PY gen_descriptors.py --arch $ARCH --check
+done
 ```
+
+The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so the CDNA generators trace
+each from torch `meta` tensors -- shapes and strides with no storage. No GPU is
+touched, and the object is identical to one traced from device tensors, because
+every tensor is lowered with a dynamic layout.
 
 **Why `gfx11-generic`.** It is an LLVM *generic* target: one object set that the
 loader accepts on every RDNA3 and RDNA3.5 part -- gfx1100, gfx1101, gfx1102,
@@ -306,23 +323,24 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of sixteen kernel modules from three upstreams.
-Nine come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+`kernels_src/` is a vendored copy of twenty kernel modules from three upstreams.
+Thirteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
 FlyDSL kernels upstream FlyDSL does not; and the RDNA4 attention package
 (`attention_rdna4/`, six modules) comes from AOTriton. Deliberate modifications are
 recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four),
 `kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two) and
 `kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
 port and the runtime arguments that let a few objects cover many shapes) in their
-own headers, the RDNA4 package's in `kernels_src/kernels/attention_rdna4/README.md`.
+own headers, the RDNA4 package's in `kernels_src/kernels/attention_rdna4/README.md`, and the
+CDNA attention files' in `kernels_src/kernels/attention_cdna/README.md`.
 A modified file's header also names the upstream and path it came from -- the renamed
-`attention_rdna/` package maps back to upstream's `kernels/attention/`; the modules of
-`attention_rdna4/` carry none and inherit their package's, which names AOTriton's flat
-`modules/flash/flyc/` directory -- and the tool reads that header to decide what to diff
-it against. A file with no provenance header (the unmodified FlyDSL modules carry only
-FlyDSL's SPDX and copyright lines) is diffed against the same relative path in the
-FlyDSL checkout. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py`.
-To see what has drifted:
+`attention_rdna/` and `attention_cdna/` packages both map back to upstream's
+`kernels/attention/`; the modules of `attention_rdna4/` carry none and inherit their
+package's, which names AOTriton's flat `modules/flash/flyc/` directory -- and the tool
+reads that header to decide what to diff it against. A file with no provenance header
+(the unmodified FlyDSL modules carry only FlyDSL's SPDX and copyright lines) is diffed
+against the same relative path in the FlyDSL checkout. The FlyDSL and AITER commits are
+pinned in `generators/_flydsl_env.py`. To see what has drifted:
 
 ```bash
 python3 tools/diff_upstream.py --upstream /path/to/FlyDSL --aiter /path/to/aiter \
@@ -335,6 +353,14 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
 AITER at the pinned commit 8253efc40595
 AOTriton at the pinned commit b5e8cfb909e5
+=== kernels/attention_cdna/__init__.py
+  …
+=== kernels/attention_cdna/flash_attn_generic.py
+  …
+=== kernels/attention_cdna/flash_attn_gfx950.py
+  …
+=== kernels/attention_cdna/flash_attn_utils.py
+  …
 === kernels/attention_rdna/__init__.py
   …
 === kernels/attention_rdna/flash_attn_func_rdna.py
@@ -353,7 +379,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-7/16 vendored files identical to upstream after normalization; 9 differ, 0 absent upstream, 0 not compared
+7/20 vendored files identical to upstream after normalization; 13 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
@@ -361,7 +387,7 @@ rather than as absent. The RDNA4 package's `__init__.py` is this tree's own (ups
 directory has none) and is not compared. The differing files are the point of the
 tool, not a failure — read each one's hunks against its recorded modifications. Every
 one of them differs at least by the provenance header it carries, or in
-`attention_rdna4/` by the package imports of its modification 0; `attention_rdna/__init__.py` differs by nothing
+`attention_rdna4/` by the package imports of its modification 0; the two `__init__.py` files differ by nothing
 else. Anything those records do not account for is drift: either a local edit nobody
 wrote down, or an upstream re-vendor that did not update the pins in
 `generators/_flydsl_env.py` (AOTriton's commit is recorded in its package's

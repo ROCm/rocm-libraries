@@ -19,10 +19,13 @@ file per engine:
 (backward), with the rules they share in
 [`FlydslRmsNormCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormCommon.hpp);
 [`FlydslSdpaRdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaNative.cpp),
-[`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp)
-and
+[`FlydslSdpaRdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaDecodeNative.cpp),
 [`FlydslSdpaAiwNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaAiwNative.cpp),
-with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp`.
+[`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
+[`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
+and
+[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
+with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`.
 
 **One kernel family per engine.** An engine's objects are one kernel — one algorithm, one
 argument list, one launch rule, one set of knobs every object fills. Two approaches are
@@ -59,8 +62,8 @@ and shipped to every part each covers:
   sources, which carry both WMMA operand layouts. Verified on gfx1201.
 
 Each member's shard carries its family's bytes (see [REGEN.md §3](REGEN.md) for
-why one object set per family is enough, and what it needs). For CDNA it is built
-for each of gfx90a, gfx942 and gfx950.
+why one object set per family is enough, and what it needs). RMSNorm is also built
+for each of the CDNA targets gfx90a, gfx942 and gfx950.
 
 **RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 90 objects: bf16, f16 and f32, and bf16
 and f16 with an f32 gamma; inference, and training that also saves inv_rms; epsilon is
@@ -109,6 +112,21 @@ causal mask or window, f32 masks, V's own head count, a strided LSE). bf16 and f
 RDNA kernel on medium and long sequences, slower on short ones; which runs a graph both
 serve is the heuristic's (or autotune's) to decide. `generators/gen_sdpa_aiw.py` builds each
 row through the kernel's own tuning table and records the schedule it chose as knobs.
+
+**SDPA forward on CDNA**: three engines with objects built per arch — FlyDSL's generic
+MFMA kernel (`hipkernel:flydsl_sdpa_cdna`, **gfx90a**, **gfx942** and **gfx950**), its dual-wave MFMA
+kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic kernel's
+split-KV decode objects (`hipkernel:flydsl_sdpa_cdna_decode`): bf16 and f16 at
+`head_dim` 64, 128 and 256, causal and non-causal; both sequence
+lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
+softmax scale, the causal diagonal and the LSE output are runtime arguments, and
+gfx950 adds a bias in the query's dtype at `head_dim` 64 and 128. Each class ships a default
+object and measured companions -- other tiles for short queries and large problems --
+chosen by timing every candidate on the dnn-benchmarking attention graphs
+([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries
+these kernels through the whole path -- generation, packing, selection and
+launch -- and is verified on all three arches; the order in which it widens is in
+[COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
 ## How it reaches hipDNN
 
@@ -215,9 +233,9 @@ provider tree; everything else is relative to this directory.
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
-| `generators/_sdpa_rdna_build.py` | what the RDNA SDPA generators share |
+| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
@@ -247,7 +265,7 @@ it is generated output inside the per-target folders.**
 ```
 
 `<target>` is a generic family (`gfx11-generic`, `gfx12-generic`) or a concrete
-arch; both can sit side by side under
+arch (`gfx950`, `gfx942`, `gfx90a` for the CDNA SDPA ops); both can sit side by side under
 one op, each its own folder and summary, as the provider grows arch-specific
 objects beside a family set.
 
@@ -278,7 +296,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 153/153 per CDNA target
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 253/253 gfx950, 255/255 gfx942, 255/255 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)
