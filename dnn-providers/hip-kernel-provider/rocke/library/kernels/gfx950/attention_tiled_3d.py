@@ -188,7 +188,7 @@ class UnifiedAttention3DTiledSpec:
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
     # and PV reads over the LDS banks. The DMA lanes fetch permuted source
     # chunks, so the copies stay contiguous and need no padding. Implemented
-    # for paged fp16/bf16 K/V, which can be extended to strided and fp8 K/V.
+    # for fp16/bf16 K/V, which can be extended to fp8 K/V.
     use_kv_lds_swizzle: bool = False
     # The wave loads the segment's page-table entries 64 at a time, one per
     # lane, and each tile reads its page ids from those registers
@@ -218,10 +218,8 @@ class UnifiedAttention3DTiledSpec:
             )
         if self.kv_cache_policy != "all" and self.kv_storage_dtype is not None:
             raise ValueError("kv_cache_policy applies to fp16/bf16 KV storage only")
-        if self.use_kv_lds_swizzle and (
-            self.kv_layout != "paged" or self.kv_storage_dtype is not None
-        ):
-            raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
+        if self.use_kv_lds_swizzle and self.kv_storage_dtype is not None:
+            raise ValueError("use_kv_lds_swizzle needs fp16/bf16 KV")
         if self.use_wave_page_id_load and (
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
@@ -809,6 +807,18 @@ def build_unified_attention_3d_tiled(
         )
         return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
 
+    def _kv_src_linear(linear_half: Value) -> Value:
+        # The async copies write LDS in lane order, so under the swizzle each
+        # lane fetches the element its LDS position holds (_kv_col is its own
+        # inverse).
+        if not KV_SWZ:
+            return linear_half
+        row = b.div(linear_half, b.const_i32(HD))
+        return b.add(
+            b.mul(row, b.const_i32(HD)),
+            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
+        )
+
     def _tile_page_ids(kv_tile_idx: Value) -> list:
         # A tile starts below seq_len, so its first page is always live.
         first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
@@ -862,7 +872,7 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             voff = strided_kv_offset(
-                b, strides, kv_tile_idx, linear_half, seq_len, HD, T
+                b, strides, kv_tile_idx, _kv_src_linear(linear_half), seq_len, HD, T
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(

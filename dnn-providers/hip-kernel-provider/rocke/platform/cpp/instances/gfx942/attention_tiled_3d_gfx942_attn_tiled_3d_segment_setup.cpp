@@ -753,7 +753,13 @@ void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3
         if(ctx->strided_kv)
         {
             voff = rocke_strided_kv_offset(
-                B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
+                B,
+                &ctx->k_strides,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.T);
         }
         else if(page_id != NULL)
         {
@@ -814,7 +820,13 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
         if(ctx->strided_kv)
         {
             voff = rocke_strided_kv_offset(
-                B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
+                B,
+                &ctx->v_strides,
+                kv_tile_idx,
+                rocke_gfx942_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+                ctx->seq_len,
+                CFG.HD,
+                CFG.T);
         }
         else if(page_id != NULL)
         {

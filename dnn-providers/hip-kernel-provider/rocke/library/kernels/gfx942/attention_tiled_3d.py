@@ -157,8 +157,8 @@ class UnifiedAttention3DTiledSpec:
     # (chunk q of row r at q ^ (r % (head_size // 8))), which spreads the QK
     # and PV reads over the LDS banks. The wide loader stores the permuted
     # chunks; the async copies fetch them (permuted source chunks, as on
-    # gfx950). Either way the tiles stay unpadded. Implemented for paged
-    # fp16/bf16 K/V, which can be extended to strided and fp8 K/V.
+    # gfx950). Either way the tiles stay unpadded. Implemented for fp16/bf16
+    # K/V, which can be extended to fp8 K/V.
     use_kv_lds_swizzle: bool = False
     # The wave loads the segment's page-table entries 64 at a time, one per
     # lane, and each tile reads its page id from those registers (v_readlane),
@@ -197,10 +197,8 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError(
                 "the wide K/V loader takes kv_cache_policy 'all' or 'stream'"
             )
-        if self.use_kv_lds_swizzle and (
-            self.kv_layout != "paged" or self.kv_storage_dtype is not None
-        ):
-            raise ValueError("use_kv_lds_swizzle needs paged fp16/bf16 KV")
+        if self.use_kv_lds_swizzle and self.kv_storage_dtype is not None:
+            raise ValueError("use_kv_lds_swizzle needs fp16/bf16 KV")
         if self.use_wave_page_id_load and (
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
@@ -708,7 +706,13 @@ def build_unified_attention_3d_tiled(
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
-                    b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                    b,
+                    k_strides,
+                    kv_tile_idx,
+                    _kv_src_linear(linear_half),
+                    seq_len,
+                    HD,
+                    T,
                 )
             elif page_id is not None:
                 src_half = _kv_src_linear(linear_half)
@@ -753,7 +757,13 @@ def build_unified_attention_3d_tiled(
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
-                    b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                    b,
+                    v_strides,
+                    kv_tile_idx,
+                    _kv_src_linear(linear_half),
+                    seq_len,
+                    HD,
+                    T,
                 )
             elif page_id is not None:
                 src_half = _kv_src_linear(linear_half)

@@ -639,6 +639,26 @@ rocke_value_t* rocke_gfx950_attention_tiled_3d_kv_col(
     return rocke_b_add(B, chunk_col, in_chunk);
 }
 
+/* _kv_src_linear(linear_half): the async copies write LDS in lane order, so
+ * under the swizzle each lane fetches the element its LDS position holds
+ * (_kv_col is its own inverse). */
+rocke_value_t*
+    rocke_gfx950_attention_tiled_3d_kv_src_linear(rocke_gfx950_attention_tiled_3d_build_ctx_t* ctx,
+                                                  rocke_value_t* linear_half)
+{
+    rocke_value_t* row;
+    rocke_value_t* row_base;
+    rocke_value_t* col;
+    if(!CFG.KV_SWZ)
+    {
+        return linear_half;
+    }
+    row = rocke_b_div(B, linear_half, rocke_b_const_i32(B, CFG.HD));
+    row_base = rocke_b_mul(B, row, rocke_b_const_i32(B, CFG.HD));
+    col = rocke_b_mod(B, linear_half, rocke_b_const_i32(B, CFG.HD));
+    return rocke_b_add(B, row_base, rocke_gfx950_attention_tiled_3d_kv_col(ctx, row, col));
+}
+
 /* _load_page_id_window(rel_page): lane l loads the id of the segment's page
  * rel_page + l; past the sequence's last page it gets 0, never used (see
  * _window_tile_ids). */
@@ -938,7 +958,13 @@ static void rocke__issue_strided_tile(rocke_gfx950_attention_tiled_3d_build_ctx_
         rocke_value_t* linear_half
             = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
         rocke_value_t* voff = rocke_strided_kv_offset(
-            B, strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T);
+            B,
+            strides,
+            kv_tile_idx,
+            rocke_gfx950_attention_tiled_3d_kv_src_linear(ctx, linear_half),
+            ctx->seq_len,
+            CFG.HD,
+            CFG.T);
         rocke_value_t* dst = rocke_b_smem_ptr_add(
             B, buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
         rocke_b_async_buffer_load_lds_addr(

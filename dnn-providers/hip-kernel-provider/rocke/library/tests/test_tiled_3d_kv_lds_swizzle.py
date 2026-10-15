@@ -35,12 +35,9 @@ def _spec(**kw) -> UnifiedAttention3DTiledSpec:
     return UnifiedAttention3DTiledSpec(**base)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(
-    "kw", [{"kv_layout": "strided"}, {"kv_storage_dtype": "fp8e4m3"}]
-)
-def test_needs_paged_fp16_bf16_kv(kw):
-    with pytest.raises(ValueError, match="needs paged fp16/bf16 KV"):
-        _spec(**kw)
+def test_needs_fp16_bf16_kv():
+    with pytest.raises(ValueError, match="needs fp16/bf16 KV"):
+        _spec(kv_storage_dtype="fp8e4m3")
 
 
 def test_kernel_name_token():
@@ -48,8 +45,17 @@ def test_kernel_name_token():
     assert "kvswz" not in _spec(use_kv_lds_swizzle=False).kernel_name()
 
 
-@pytest.mark.parametrize("head_size, tile", [(64, 32), (128, 64), (256, None)])
-def test_native_builder_matches_python(head_size, tile):
+@pytest.mark.parametrize(
+    "head_size, tile, kv_layout",
+    [
+        (64, 32, "paged"),
+        (128, 64, "paged"),
+        (256, None, "paged"),
+        (64, None, "strided"),
+        (128, None, "strided"),
+    ],
+)
+def test_native_builder_matches_python(head_size, tile, kv_layout):
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     engine = pytest.importorskip("rocke_engine")
@@ -62,6 +68,7 @@ def test_native_builder_matches_python(head_size, tile):
         tile_size_override=tile,
         use_decode_grid=True,
         kv_cache_policy="stream",
+        kv_layout=kv_layout,
     )
     reduce = UnifiedAttentionReduceTiledSpec(
         head_size=head_size,
@@ -104,7 +111,7 @@ def _gfx942_spec(**kw):
 @pytest.mark.parametrize("wide", [True, False])
 def test_gfx942_spec_contract(wide):
     assert _gfx942_spec(use_wide_kv_load=wide).kernel_name().endswith("_kvswz")
-    with pytest.raises(ValueError, match="needs paged fp16/bf16 KV"):
+    with pytest.raises(ValueError, match="needs fp16/bf16 KV"):
         _gfx942_spec(use_wide_kv_load=wide, kv_storage_dtype="fp8e4m3")
 
 
@@ -115,6 +122,8 @@ def test_gfx942_spec_contract(wide):
         {"head_size": 64, "dtype": "fp16", "use_sinks": True, "has_softcap": True},
         {"use_wide_kv_load": False, "head_size": 256, "num_query_heads": 64},
         {"use_wide_kv_load": False, "block_size": 32, "tile_size_override": 16},
+        {"use_wide_kv_load": False, "kv_layout": "strided"},
+        {"use_wide_kv_load": False, "kv_layout": "strided", "head_size": 256},
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
@@ -351,6 +360,74 @@ def test_gfx942_swizzled_decode_matches_reference(dtype, head_size, wide):
         softmax_scale=1 / math.sqrt(head_size),
         block_table=table,
         softcap=0.0,
+        tuning_spec=spec,
+    )
+    torch.cuda.synchronize()
+    expected = _reference(torch, q_host, k_host, v_host, lengths_host)
+    atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
+    torch.testing.assert_close(out.cpu().float(), expected, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("head_size", [64, 128, 256])
+def test_strided_swizzled_decode_matches_reference(dtype, head_size):
+    torch = pytest.importorskip("torch")
+    from dispatch.attention.common import AttentionTuningSpec
+    from kernels.common import attention_unified as au
+    from rocke.runtime.hip_module import get_device_arch
+
+    if not torch.cuda.is_available() or get_device_arch() not in ("gfx942", "gfx950"):
+        pytest.skip("requires a gfx942 or gfx950 GPU")
+    arch = get_device_arch()
+    batch, q_heads, kv_heads, capacity = 3, 16, 4, 203
+    tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
+    rng = torch.Generator().manual_seed(53 + head_size)
+    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
+    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
+    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
+    k_host, v_host = k_host.to(tdtype), v_host.to(tdtype)
+    # [batch, token, head, dim] storage seen as [batch, head, token, dim].
+    k = k_host.permute(0, 2, 1, 3).contiguous().cuda().permute(0, 2, 1, 3)
+    v = v_host.permute(0, 2, 1, 3).contiguous().cuda().permute(0, 2, 1, 3)
+    # Ragged: a partial last tile, a sequence shorter than one tile, and an
+    # empty one.
+    lengths_host = [capacity, 5, 0]
+    problem = au.UnifiedAttentionProblem(
+        total_q=batch,
+        num_seqs=batch,
+        num_query_heads=q_heads,
+        num_kv_heads=kv_heads,
+        head_size=head_size,
+        block_size=16,
+        max_seqlen_q=1,
+        max_seqlen_k=capacity,
+        dtype=dtype,
+        clamp_arch=arch,
+    )
+    segment, reduce = au._strided_3d_specs_from_problem(problem, arch=arch)
+    spec = AttentionTuningSpec(
+        path="3d",
+        arch=arch,
+        builder_kind="tiled_3d",
+        compile_backend="llvm",
+        candidate_name="kv_lds_swizzle_test",
+        tuning_id="kv_lds_swizzle_test",
+        kernel_spec=replace(segment, use_kv_lds_swizzle=True),
+        reduce_spec=reduce,
+    )
+    out = torch.empty_like(q_host).cuda()
+    au.run_unified_attention_torch(
+        problem=problem,
+        q=q_host.cuda(),
+        k=k,
+        v=v,
+        out=out,
+        cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
+        seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
+        softmax_scale=1 / math.sqrt(head_size),
+        block_table=None,
+        softcap=0.0,
+        kv_layout="strided",
         tuning_spec=spec,
     )
     torch.cuda.synchronize()

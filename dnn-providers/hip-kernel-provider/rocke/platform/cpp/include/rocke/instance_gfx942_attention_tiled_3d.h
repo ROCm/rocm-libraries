@@ -168,7 +168,7 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * "stream"; fp8 K/V keeps "all". */
     const char* kv_cache_policy; /* "all" */
     /* K/V LDS rows store their 16-byte chunks XOR-permuted by the row.
-     * Implemented for paged fp16/bf16 K/V, which can be extended. */
+     * Implemented for fp16/bf16 K/V, which can be extended. */
     bool use_kv_lds_swizzle; /* False */
     /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which

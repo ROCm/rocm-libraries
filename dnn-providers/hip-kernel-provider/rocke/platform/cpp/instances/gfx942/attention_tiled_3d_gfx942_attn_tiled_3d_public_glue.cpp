@@ -186,7 +186,7 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
     }
     if(s->use_kv_lds_swizzle && s->kv_storage_dtype != NULL)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
         return false;
     }
     if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
@@ -947,11 +947,6 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                 b,
                 ROCKE_ERR_VALUE,
                 "strided KV requires fp16/bf16 async loads without paged i64 addressing");
-            return NULL;
-        }
-        if(strided_kv && spec->use_kv_lds_swizzle)
-        {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs paged fp16/bf16 KV");
             return NULL;
         }
         if(strided_kv && spec->use_wave_page_id_load)
