@@ -202,9 +202,8 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * Implemented for paged fp16/bf16 K/V, which can be extended. */
     bool use_kv_lds_swizzle; /* False */
     /* The wave loads the segment's page ids 64 at a time, one per lane; tiles
-     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16 (on
-     * gfx942 for the wide K/V loader with page-sized tiles), which can be
-     * extended. */
+     * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
+     * can be extended. */
     bool use_wave_page_id_load; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 

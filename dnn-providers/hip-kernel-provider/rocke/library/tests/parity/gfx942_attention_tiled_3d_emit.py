@@ -236,6 +236,55 @@ _CONFIGS = {
         kv_cache_policy="stream",
         use_kv_lds_swizzle=True,
     ),
+    15: dict(
+        # Decode K/V streamed by the async copies into swizzled LDS tiles, addressed
+        # from the wave's page-id window.
+        head_size=256,
+        block_size=16,
+        num_query_heads=64,
+        num_kv_heads=64,
+        dtype="bf16",
+        num_segments=32,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        use_decode_grid=True,
+        kv_cache_policy="stream",
+        use_kv_lds_swizzle=True,
+        use_wave_page_id_load=True,
+    ),
+    16: dict(
+        # The wave's page-id window with half-page tiles on the wide loader.
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=16,
+        use_wide_kv_load=True,
+        use_wave_page_id_load=True,
+    ),
+    17: dict(
+        # The wave's page-id window with half-page tiles on the async copies.
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        num_segments=8,
+        use_sinks=True,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        tile_size_override=16,
+        use_wave_page_id_load=True,
+    ),
 }
 
 

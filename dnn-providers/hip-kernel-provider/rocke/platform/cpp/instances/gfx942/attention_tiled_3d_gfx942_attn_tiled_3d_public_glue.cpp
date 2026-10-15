@@ -194,17 +194,6 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
         return false;
     }
-    if(s->use_wave_page_id_load && !s->use_wide_kv_load)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs the wide K/V loader");
-        return false;
-    }
-    if(s->use_wave_page_id_load
-       && rocke_unified_attention_3d_tiled_spec_tile_size(s) != s->block_size)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs page-sized tiles");
-        return false;
-    }
     return true;
 }
 
@@ -770,6 +759,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
             return false;
         }
     }
+    out->TILES_PER_PAGE = out->T > 0 ? out->BS / out->T : 1;
 
     /* reduce-kernel-only fields stay 0 for the segment kind. */
     out->HALFS_PER_THREAD = 0;

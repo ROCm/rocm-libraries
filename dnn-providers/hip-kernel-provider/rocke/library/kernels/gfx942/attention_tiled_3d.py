@@ -163,8 +163,7 @@ class UnifiedAttention3DTiledSpec:
     # The wave loads the segment's page-table entries 64 at a time, one per
     # lane, and each tile reads its page id from those registers (v_readlane),
     # so no page-table load sits on the KV loop's critical path. Paged K/V;
-    # implemented for the fp16/bf16 wide loader with page-sized tiles, which
-    # can be extended to the async and fp8 loaders and to other tile sizes.
+    # implemented for fp16/bf16, which can be extended to the fp8 loader.
     use_wave_page_id_load: bool = False
 
     def __post_init__(self):
@@ -206,10 +205,6 @@ class UnifiedAttention3DTiledSpec:
             self.kv_layout != "paged" or self.kv_storage_dtype is not None
         ):
             raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
-        if self.use_wave_page_id_load and not self.use_wide_kv_load:
-            raise ValueError("use_wave_page_id_load needs the wide K/V loader")
-        if self.use_wave_page_id_load and self.tile_size != self.block_size:
-            raise ValueError("use_wave_page_id_load needs page-sized tiles")
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -699,7 +694,13 @@ def build_unified_attention_3d_tiled(
             ),
         )
 
-    def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_k_load(
+        kv_tile_idx: Value, buf_idx: Value, page_id: Value | None
+    ) -> None:
+        if page_id is not None:
+            # The tile base goes into soffset; each copy adds its lane's
+            # offset within the page.
+            soff = _tile_base(page_id, kv_tile_idx, kv_stride_blk_b, kv_stride_tok_b)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
@@ -708,6 +709,18 @@ def build_unified_attention_3d_tiled(
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
                     b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif page_id is not None:
+                src_half = _kv_src_linear(linear_half)
+                voff = b.add(
+                    b.add(
+                        b.mul(
+                            b.div(src_half, b.const_i32(HD)),
+                            b.const_i32(kv_stride_tok_b),
+                        ),
+                        b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
+                    ),
+                    b.mul(b.mod(src_half, b.const_i32(HD)), b.const_i32(KV_BYTES)),
                 )
             else:
                 voff, _ = paged_kv_desc.offset(
@@ -721,12 +734,18 @@ def build_unified_attention_3d_tiled(
                 key_rsrc,
                 k_dst,
                 voff,
-                zero_soff,
+                soff if page_id is not None else zero_soff,
                 ASYNC_LDS_DWORDS,
                 coherency=KV_CACHE_BITS,
             )
 
-    def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
+    def _issue_v_load(
+        kv_tile_idx: Value, buf_idx: Value, page_id: Value | None
+    ) -> None:
+        if page_id is not None:
+            # The tile base goes into soffset; each copy adds its lane's
+            # offset within the page.
+            soff = _tile_base(page_id, kv_tile_idx, kv_stride_blk_b, kv_stride_tok_b)
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
@@ -735,6 +754,18 @@ def build_unified_attention_3d_tiled(
             if spec.kv_layout == "strided":
                 voff = strided_kv_offset(
                     b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif page_id is not None:
+                src_half = _kv_src_linear(linear_half)
+                voff = b.add(
+                    b.add(
+                        b.mul(
+                            b.div(src_half, b.const_i32(HD)),
+                            b.const_i32(kv_stride_tok_b),
+                        ),
+                        b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
+                    ),
+                    b.mul(b.mod(src_half, b.const_i32(HD)), b.const_i32(KV_BYTES)),
                 )
             else:
                 voff, _ = paged_kv_desc.offset(
@@ -748,7 +779,7 @@ def build_unified_attention_3d_tiled(
                 value_rsrc,
                 v_dst,
                 voff,
-                zero_soff,
+                soff if page_id is not None else zero_soff,
                 ASYNC_LDS_DWORDS,
                 coherency=KV_CACHE_BITS,
             )
@@ -788,7 +819,25 @@ def build_unified_attention_3d_tiled(
 
     WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
     if WAVE_PAGE_ID_LOAD:
-        assert spec.use_wide_kv_load and not KV_FP8 and WIDE_OK and T == BS
+        assert not KV_FP8 and spec.kv_layout == "paged"
+    TILES_PER_PAGE = BS // T
+
+    def _tile_page(kv_tile_idx: Value) -> Value:
+        # The segment-local page index of a tile (tiles never straddle pages).
+        if TILES_PER_PAGE == 1:
+            return kv_tile_idx
+        return b.div(kv_tile_idx, b.const_i32(TILES_PER_PAGE))
+
+    def _tile_base(
+        page_id: Value, kv_tile_idx: Value, page_stride: int, token_stride: int
+    ) -> Value:
+        # Offset of a tile's first token: the page's, plus the tile's rows
+        # before it in the page (sub-page tiles).
+        base = b.mul(page_id, b.const_i32(page_stride))
+        if TILES_PER_PAGE == 1:
+            return base
+        in_page = b.mod(kv_tile_idx, b.const_i32(TILES_PER_PAGE))
+        return b.add(base, b.mul(in_page, b.const_i32(T * token_stride)))
 
     def _issue_wide_load(
         src, lds, kv_tile_idx: Value, buf_idx: Value, page_id: Value | None
@@ -799,10 +848,10 @@ def build_unified_attention_3d_tiled(
             row = b.div(linear_half, b.const_i32(HD))
             col = b.mod(linear_half, b.const_i32(HD))
             if page_id is not None:
-                # The page base plus the chunk's offset within the page, which
+                # The tile base plus the chunk's offset within the page, which
                 # is loop-invariant: no page-table lookup per copy.
                 elem_off = b.add(
-                    b.mul(page_id, b.const_i32(BS * NUM_KV * HD)),
+                    _tile_base(page_id, kv_tile_idx, BS * NUM_KV * HD, NUM_KV * HD),
                     b.add(
                         b.add(
                             b.mul(row, b.const_i32(NUM_KV * HD)),
@@ -883,7 +932,7 @@ def build_unified_attention_3d_tiled(
         elif WIDE_KV:
             _issue_wide_load(key, K_lds, tile_idx, buf_idx, page_id)
         else:
-            _issue_k_load(tile_idx, buf_idx)
+            _issue_k_load(tile_idx, buf_idx, page_id)
 
     def _issue_v(tile_idx: Value, buf_idx: Value, page_id: Value | None) -> None:
         if KV_FP8:
@@ -891,15 +940,15 @@ def build_unified_attention_3d_tiled(
         elif WIDE_KV:
             _issue_wide_load(value, V_lds, tile_idx, buf_idx, page_id)
         else:
-            _issue_v_load(tile_idx, buf_idx)
+            _issue_v_load(tile_idx, buf_idx, page_id)
 
     first_page_id = None
     if WAVE_PAGE_ID_LOAD:
         # The wave holds a 64-page window of the segment's page table, one id
-        # per lane. A tile is one page, and it starts below seq_len, so its
-        # page is always one of the sequence's.
+        # per lane. A tile lies within one page, and it starts below seq_len,
+        # so its page is always one of the sequence's.
         seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
-        seg_first_page = tile_start
+        seg_first_page = _tile_page(tile_start)
 
         def _load_page_id_window(rel_page: Value) -> Value:
             # Lane l: the id of the segment's page rel_page + l (0 past the
@@ -915,7 +964,9 @@ def build_unified_attention_3d_tiled(
             )
 
         def _window_tile_page_id(page_id_window: Value, kv_tile_idx: Value) -> Value:
-            lane = b.mod(b.sub(kv_tile_idx, seg_first_page), b.const_i32(64))
+            lane = b.mod(
+                b.sub(_tile_page(kv_tile_idx), seg_first_page), b.const_i32(64)
+            )
             return b.readlane(page_id_window, lane)
 
         def _refill_page_id_window(page_id_window: Value, kv_tile_idx: Value) -> Value:
@@ -923,11 +974,17 @@ def build_unified_attention_3d_tiled(
             # a new window, load it now; the loop-top wait completes it before
             # the next iteration reads it.
             t2 = b.add(kv_tile_idx, b.const_i32(2))
-            rel2 = b.sub(t2, seg_first_page)
+            rel2 = b.sub(_tile_page(t2), seg_first_page)
             cross = b.land(
                 b.cmp_eq(b.mod(rel2, b.const_i32(64)), b.const_i32(0)),
                 b.cmp_lt(t2, tile_end),
             )
+            if TILES_PER_PAGE > 1:
+                # Only the page's first tile starts the window.
+                first_in_page = b.cmp_eq(
+                    b.mod(t2, b.const_i32(TILES_PER_PAGE)), b.const_i32(0)
+                )
+                cross = b.land(cross, first_in_page)
             # A wave-uniform 0/1-trip loop is an if with a result (scf_if has
             # none): 0 trips keep the window, 1 trip loads the next one. It
             # compiles to a scalar branch around the load.

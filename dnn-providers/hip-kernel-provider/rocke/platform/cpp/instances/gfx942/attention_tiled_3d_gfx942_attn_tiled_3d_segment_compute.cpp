@@ -128,14 +128,14 @@ void rocke_gfx942_attention_tiled_3d_emit_loop_init(
 
     /* ---- the first page-id window (WAVE_PAGE_ID_LOAD) ----
      * The wave holds a 64-page window of the segment's page table, one id per
-     * lane. A tile is one page, and it starts below seq_len, so its page is
-     * always one of the sequence's. */
+     * lane. A tile lies within one page, and it starts below seq_len, so its
+     * page is always one of the sequence's. */
     ctx->first_page_id = NULL;
     if(cfg->WAVE_PAGE_ID_LOAD)
     {
         rocke_value_t* rounded = rocke_b_add(b, ctx->seq_len, rocke_b_const_i32(b, cfg->BS - 1));
         ctx->seq_pages = rocke_b_div(b, rounded, rocke_b_const_i32(b, cfg->BS));
-        ctx->seg_first_page = ctx->tile_start;
+        ctx->seg_first_page = rocke_gfx942_attention_tiled_3d_tile_page(ctx, ctx->tile_start);
         ctx->first_page_id_window
             = rocke_gfx942_attention_tiled_3d_load_page_id_window(ctx, rocke_b_const_i32(b, 0));
         ctx->first_page_id = rocke_gfx942_attention_tiled_3d_window_tile_page_id(

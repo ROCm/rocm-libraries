@@ -101,23 +101,14 @@ def _gfx942_spec(**kw):
     return Gfx942Spec(**base)  # type: ignore[arg-type]
 
 
-def test_gfx942_needs_the_wide_loader_and_page_sized_tiles():
-    with pytest.raises(ValueError, match="needs the wide K/V loader"):
-        _gfx942_spec(use_wide_kv_load=False)
+@pytest.mark.parametrize(
+    "kw",
+    [{}, {"use_wide_kv_load": False}, {"block_size": 32, "tile_size_override": 16}],
+)
+def test_gfx942_spec_contract(kw):
+    assert _gfx942_spec(**kw).kernel_name().endswith("_wpid")
     with pytest.raises(ValueError, match="needs paged fp16/bf16 KV"):
-        _gfx942_spec(kv_storage_dtype="fp8e4m3")
-    with pytest.raises(ValueError, match="needs page-sized tiles"):
-        _gfx942_spec(block_size=32, tile_size_override=16)
-    assert _gfx942_spec().kernel_name().endswith("_wpid")
-    engine = pytest.importorskip("rocke_engine")
-    for kw, message in [
-        ({"use_wide_kv_load": False}, "needs the wide K/V loader"),
-        ({"block_size": 32, "tile_size_override": 16}, "needs page-sized tiles"),
-    ]:
-        spec = asdict(_gfx942_spec(use_wave_page_id_load=False, **kw))
-        spec["use_wave_page_id_load"] = True
-        with pytest.raises(Exception, match=message):
-            engine.gfx942_attention_tiled_3d_lower_llvm(spec, "gfx942")
+        _gfx942_spec(kv_storage_dtype="fp8e4m3", **kw)
 
 
 @pytest.mark.parametrize(
@@ -129,6 +120,10 @@ def test_gfx942_needs_the_wide_loader_and_page_sized_tiles():
             "use_kv_lds_swizzle": True,
         },
         {"head_size": 64, "block_size": 32, "dtype": "fp16", "sliding_window": 64},
+        {"use_wide_kv_load": False, "head_size": 256, "use_kv_lds_swizzle": True},
+        {"use_wide_kv_load": False, "dtype": "fp16", "use_sinks": True},
+        {"block_size": 32, "tile_size_override": 16, "use_kv_lds_swizzle": True},
+        {"use_wide_kv_load": False, "block_size": 32, "tile_size_override": 16},
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
@@ -299,8 +294,22 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("num_segments, swizzle", [(1, False), (4, True)])
-def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle):
+@pytest.mark.parametrize(
+    "head_size, block_size, tile, wide, num_segments, swizzle",
+    [
+        (128, 16, 16, True, 1, False),
+        (128, 16, 16, True, 4, True),
+        (128, 16, 16, False, 1, False),
+        (128, 16, 16, False, 4, True),
+        (256, 16, 16, False, 2, True),
+        (128, 32, 16, True, 1, True),
+        (128, 32, 16, False, 1, False),
+        (128, 32, 16, False, 4, True),
+    ],
+)
+def test_gfx942_wave_page_id_load_matches_reference(
+    dtype, head_size, block_size, tile, wide, num_segments, swizzle
+):
     torch = pytest.importorskip("torch")
     from dispatch.attention.common import AttentionTuningSpec
     from kernels.common import attention_unified as au
@@ -311,13 +320,14 @@ def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle
 
     if not torch.cuda.is_available() or get_device_arch() != "gfx942":
         pytest.skip("requires a gfx942 GPU")
-    # 2203 tokens = 138 pages: a one-segment split spans three 64-page windows.
-    batch, q_heads, kv_heads, capacity, block_size = 3, 16, 4, 2203, 16
+    # 2203 tokens: a one-segment split spans several 64-page windows.
+    batch, q_heads, kv_heads, capacity = 3, 16, 4, 2203
     tdtype = torch.float16 if dtype == "fp16" else torch.bfloat16
-    rng = torch.Generator().manual_seed(41 + num_segments)
-    q_host = torch.randn(batch, q_heads, 128, generator=rng).to(tdtype)
-    k_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
-    v_host = torch.randn(batch, kv_heads, capacity, 128, generator=rng).to(tdtype)
+    rng = torch.Generator().manual_seed(41 + num_segments + head_size + block_size)
+    q_host = torch.randn(batch, q_heads, head_size, generator=rng).to(tdtype)
+    k_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
+    v_host = torch.randn(batch, kv_heads, capacity, head_size, generator=rng)
+    k_host, v_host = k_host.to(tdtype), v_host.to(tdtype)
     k, table = _paged_cache(torch, k_host, block_size)
     v, _ = _paged_cache(torch, v_host, block_size)
     # Ragged: a partial last tile, a sequence shorter than one tile, and an
@@ -335,7 +345,7 @@ def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle
         num_seqs=batch,
         num_query_heads=q_heads,
         num_kv_heads=kv_heads,
-        head_size=128,
+        head_size=head_size,
         block_size=block_size,
         max_seqlen_q=1,
         max_seqlen_k=capacity,
@@ -346,12 +356,13 @@ def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle
     segment = replace(
         au._tiled_3d_spec_from_problem(problem),
         num_segments=num_segments,
-        use_wide_kv_load=True,
+        tile_size_override=None if tile == block_size else tile,
+        use_wide_kv_load=wide,
         use_kv_lds_swizzle=swizzle,
         use_wave_page_id_load=True,
     )
     reduce = Gfx942Reduce(
-        head_size=128,
+        head_size=head_size,
         num_query_heads=q_heads,
         num_kv_heads=kv_heads,
         dtype=dtype,
@@ -377,7 +388,7 @@ def test_gfx942_wave_page_id_load_matches_reference(dtype, num_segments, swizzle
         out=out,
         cu_seqlens_q=torch.arange(batch + 1, dtype=torch.int32).cuda(),
         seqused_k=torch.tensor(lengths_host, dtype=torch.int32).cuda(),
-        softmax_scale=1 / math.sqrt(128),
+        softmax_scale=1 / math.sqrt(head_size),
         block_table=table,
         softcap=0.0,
         tuning_spec=spec,
