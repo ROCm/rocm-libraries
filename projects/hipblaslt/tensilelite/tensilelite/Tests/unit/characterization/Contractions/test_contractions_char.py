@@ -40,7 +40,7 @@ def solution_state():
     # obtained by parsing the fixture into a real Solution.
     import importlib.util
 
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
+    if importlib.util.find_spec("tensilelite_write") is None:
         pytest.skip("tensilelite_write extension was not built")
     from Tensile.Common.Architectures import SUPPORTED_ISA
     from Tensile.Common.Capabilities import makeIsaInfoMap

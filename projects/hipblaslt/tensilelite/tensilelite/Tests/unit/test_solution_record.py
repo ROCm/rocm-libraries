@@ -20,7 +20,7 @@ _FIXTURE = (
 
 
 def test_library_logic_solution_record_has_kernel_name_and_size_mapping():
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
+    if importlib.util.find_spec("tensilelite_write") is None:
         pytest.skip("tensilelite_write extension was not built")
 
     from Tensile.Common.Architectures import SUPPORTED_ISA

@@ -84,10 +84,10 @@ def _predicate_from_document(cls, document):
 
 def _tensilelite_write():
     try:
-        from tensilelite import tensilelite_write
+        import tensilelite_write
     except (ImportError, OSError) as exc:
         printExit(
-            "tensilelite.tensilelite_write is required to build a solution record ({})".format(exc)
+            "tensilelite_write is required to build a solution record ({})".format(exc)
         )
     return tensilelite_write
 

@@ -101,9 +101,9 @@ def size_mapping_from_state(state):
 
     import pytest
 
-    if importlib.util.find_spec("tensilelite.tensilelite_write") is None:
+    if importlib.util.find_spec("tensilelite_write") is None:
         pytest.skip("tensilelite_write extension was not built")
-    from tensilelite import tensilelite_write
+    import tensilelite_write
     from test_msgpack_writer import _small_solution_state
 
     full = _small_solution_state()

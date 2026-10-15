@@ -75,10 +75,10 @@ if __name__ == '__main__':
 
     if lib_format == 'dat':
         try:
-            from tensilelite import tensilelite_write
+            import tensilelite_write
         except ImportError as error:
             raise SystemExit(
-                "hipblasltExtOpLibrary MessagePack is written by tensilelite.tensilelite_write, "
+                "hipblasltExtOpLibrary MessagePack is written by tensilelite_write, "
                 "which this build did not produce: {}".format(error)
             )
         existing_path = output_lib_gz_path if os.path.exists(output_lib_gz_path) else (
