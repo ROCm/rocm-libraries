@@ -2331,6 +2331,26 @@ TEST_CASE("GEMM: PGR1 wins for single-K-iter tiles", "[gemm][pgr]") {
   }
 }
 
+TEST_CASE("GEMM: one LDS buffer exposes the next tile's writes once they outlast a K-step",
+          "[gemm][lds]") {
+  // bf16 MT128x128, MI16x16x32 on 2x2 waves: a K-step is 16 MFMAs of 16 cycles, and writing the
+  // next tile takes 256 cycles at DepthU 64 and 512 at DepthU 128.
+  auto latency = [](size_t depth_u, bool one_buffer) {
+    auto hw                    = make_hardware(950);
+    auto c                     = make_config(128, 128, depth_u, 16, 16, 32, false, 1, 1, 0, 0, 0);
+    c.tensile().one_lds_buffer = one_buffer;
+    return origami::gemm::compute_total_latency(make_problem(128, 8192, 8192), hw, c, false, false);
+  };
+
+  SECTION("writes that fit in the last K-step cost nothing") {
+    REQUIRE(latency(64, true) == latency(64, false));
+  }
+
+  SECTION("writes that outlast it are exposed") {
+    REQUIRE(latency(128, true) > latency(128, false));
+  }
+}
+
 TEST_CASE("GEMM: SourceSwap changes only epilogue store traffic", "[gemm][sourceswap]") {
   for (int gpu_arch : test_architectures) {
     auto hw             = make_hardware(gpu_arch);

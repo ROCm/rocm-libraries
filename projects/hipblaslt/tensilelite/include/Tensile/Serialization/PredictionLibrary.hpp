@@ -157,6 +157,7 @@ namespace TensileLite
                                     .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
                                     .buffer_load          = solution->sizeMapping.BufferLoad,
                                     .buffer_store         = solution->sizeMapping.BufferStore,
+                                    .one_lds_buffer       = solution->sizeMapping.OneLDSBuffer,
                                     .source_swap          = solution->sizeMapping.SourceSwap,
                                     .unroll_major_lds_a   = solution->sizeMapping.UnrollMajorLDSA,
                                     .unroll_major_lds_b   = solution->sizeMapping.UnrollMajorLDSB,

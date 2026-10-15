@@ -233,6 +233,7 @@ namespace TensileLite
                 iot::mapRequired(io, "LocalSplitU", s.LocalSplitU);
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
+                iot::mapOptional(io, "OneLDSBuffer", s.OneLDSBuffer);
                 iot::mapOptional(io, "UnrollMajorLDSA", s.UnrollMajorLDSA);
                 iot::mapOptional(io, "UnrollMajorLDSB", s.UnrollMajorLDSB);
                 iot::mapOptional(io, "enableLDSTrA", s.enableLDSTrA);

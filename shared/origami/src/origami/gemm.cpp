@@ -1770,7 +1770,7 @@ double compute_epilogue_latency(const problem_t& problem,
       double L_poll_wait = store_bytes / per_cu_store_bw;
       double L_sync      = L_poll_wait + static_cast<double>(n_partials) *
                                         (heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD +
-                                         2.0 * heuristic_defaults_t::EPILOGUE_L_BARRIER +
+                                         2.0 * heuristic_defaults_t::L_BARRIER +
                                          heuristic_defaults_t::EPILOGUE_L_SMEM);
 
       double L_partial_read = partial_bytes / per_cu_reduce_bw;
@@ -2093,6 +2093,26 @@ double compute_tile_latency(const problem_t& problem,
   const double L_loop_overhead =
       heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
 
+  // With one LDS buffer the next iteration's tile can only be written once every wave has read
+  // the current one, so the writes fit only between the MFMAs of the last K-step.  When writing
+  // the tile at LDS bandwidth outlasts that K-step, the writes and the barriers on either side
+  // are exposed in every iteration that writes LDS, unless another WG on the CU fills them.
+  double L_single_lds_buffer = 0.0;
+  if (tp.one_lds_buffer) {
+    const dim3_t wave       = compute_wave_share(config);
+    const double kstep_mfma = static_cast<double>(wave.m / std::max<size_t>(config.mi.m, 1)) *
+                              static_cast<double>(wave.n / std::max<size_t>(config.mi.n, 1)) *
+                              static_cast<double>(hardware.get_mi_latency(
+                                  config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype));
+    const double tile_write = (static_cast<double>(config.mt.m) * context.a_bytes +
+                               static_cast<double>(config.mt.n) * context.b_bytes) *
+                              static_cast<double>(MT_K) /
+                              static_cast<double>(heuristic_defaults_t::LDS_XFER_BYTES);
+    if (tile_write > kstep_mfma && wgs_per_cu <= 1.0)
+      L_single_lds_buffer = (tile_write + 2.0 * heuristic_defaults_t::L_BARRIER) *
+                            static_cast<double>(num_main_iters + num_ngll_iters);
+  }
+
   // DepthU load waste: an MT_K that doesn't divide K loads ceil(K/MT_K)*MT_K deep
   // but uses only K; the extra depth is wasted, measured the same whether it's an
   // oversized window (MT_K > K) or a partial tail.  Zero when MT_K divides K.
@@ -2145,8 +2165,8 @@ double compute_tile_latency(const problem_t& problem,
       (L_main_per_iter + heuristic_defaults_t::K_ITER_LOOP_OVERHEAD);
 
   // MainLoop subtotal.
-  const double L_mainloop =
-      L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead + L_du_waste;
+  const double L_mainloop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead +
+                            L_single_lds_buffer + L_du_waste;
 
   // ---------------------------------------------------------------------------
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
@@ -2221,6 +2241,7 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("pgr_mem_exposure: " << pgr_mem_exposure);
     OLOG_DEBUG("L_pgr_stall: " << L_pgr_stall);
     OLOG_DEBUG("L_loop_overhead: " << L_loop_overhead);
+    OLOG_DEBUG("L_single_lds_buffer: " << L_single_lds_buffer);
     OLOG_DEBUG("depth_waste_ratio: " << depth_waste_ratio);
     OLOG_DEBUG("batched_fill_ratio: " << batched_fill_ratio);
     OLOG_DEBUG("L_du_waste: " << L_du_waste);

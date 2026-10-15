@@ -61,7 +61,7 @@ struct heuristic_defaults_t {
   static constexpr double EPILOGUE_NONSWAP_STORE_TRAFFIC      = 1.5;
   static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
   static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
-  static constexpr double EPILOGUE_L_BARRIER                = 100.0;
+  static constexpr double L_BARRIER                            = 100.0;
   static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
   static constexpr size_t POSTGSU_COMPUTE_BYTES = 4;       // workspace partials stored as f32
 
