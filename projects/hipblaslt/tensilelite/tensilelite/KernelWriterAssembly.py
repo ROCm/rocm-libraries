@@ -2664,13 +2664,11 @@ class KernelWriterAssembly(KernelWriter):
     # SE from HW_ID[14:13], CU from HW_ID[11:8]); a CU with SH != 0, SE >= 4
     # or XCC >= 8 does not store. Then WGs whose raw launch id is >= ProbeGrid
     # (probe-only WGs padding the dispatch) end. Plain store, no wait.
-    # Requires KernArgAddress shifted past the common args (ArgType 0/3 path)
-    # and the raw id snapshot in StreamKTileIdx. Clobbers VCC.
+    # Requires KernArgAddress shifted past the common args (ArgType 0/3 path),
+    # the raw id snapshot in StreamKTileIdx and full waves (exec all ones on entry).
     module = Module("OccupancyProbe")
     if self.states.probeKernArgOffset < 0:
       return module
-    # Exec is saved in VCC, so v_cmpx must take exec as its SGPR dst.
-    assert rocIsa.getInstance().getArchCaps()["CMPXWritesSGPR"], "occupancy probe needs CMPXWritesSGPR"
     module.addComment1("CU-occupancy probe")
     skipLabel = Label(self.labels.getNameInc("OccupancyProbe_Skip"), "")
     # tmp+0..1 ProbeAddr; tmp+2 ProbeEpoch then HW_ID/XCC_ID; tmp+3 ProbeGrid.
@@ -2701,13 +2699,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftOrB32(dst=vgpr(vOffset), shiftHex=8, src0=sgpr(sTmp), src1=vgpr(vOffset),
                                   comment="probe slot byte offset"))
       execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
-      module.add(execMovInst(dst=VCC(), src=EXEC(), comment="save exec"))
       module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0, comment="thread 0 stores"))
       module.add(VCmpXGtU32(dst=EXEC(), src0=8, src1=sgpr(sTmp), comment="mapped CU (XCC < 8)"))
       module.add(SNop(waitState=4, comment="VALU write exec -> VMEM"))
       module.add(GlobalStoreB32(vaddr=vgpr(vOffset), src=vgpr(vEpoch), saddr=sgpr(sAddr, 2),
                                 comment="ProbeAddr[slot] = ProbeEpoch"))
-      module.add(execMovInst(dst=EXEC(), src=VCC(), comment="restore exec"))
+      module.add(execMovInst(dst=EXEC(), src=-1, comment="reset exec"))
       module.add(SCmpGeU32(src0=sgpr("StreamKTileIdx"), src1=sgpr(sGrid),
                            comment="probe-only WG: raw WG id >= ProbeGrid"))
       module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="real WG"))

@@ -105,14 +105,15 @@ def test_occupancy_probe_emission():
     assert all(labelName in line for i, line in zip(items, lines)
                if isinstance(i, (SCBranchSCC0, SCBranchSCC1)))
 
-    # Exec is saved in VCC, narrowed by v_cmpx writing exec and restored after
-    # the store, with one s_nop between the last v_cmpx and the store.
+    # Exec is narrowed by v_cmpx writing exec and reset to all ones after the
+    # store, with one s_nop between the last v_cmpx and the store; VCC is untouched.
     cmpx = [l for l in lines if l.startswith("v_cmp")]
     assert len(cmpx) == 2 and all(l.startswith("v_cmpx_") and l.split()[1] == "exec," for l in cmpx)
     storeIdx = lines.index(store)
     movs = [(n, l.split("//")[0].strip()) for n, l in enumerate(lines) if l.startswith("s_mov_b64 ")]
-    assert [m for _, m in movs] == ["s_mov_b64 vcc, exec", "s_mov_b64 exec, vcc"]
-    assert movs[0][0] < lines.index(cmpx[0]) and movs[1][0] > storeIdx
+    assert [m for _, m in movs] == ["s_mov_b64 exec, -1"]
+    assert movs[0][0] > storeIdx
+    assert not any("vcc" in l.split("//")[0] for l in lines)
     assert sum(isinstance(i, SNop) for i in items[lines.index(cmpx[-1]):storeIdx]) == 1
 
     # Four SGPRs at most; temps are returned to the pools.
@@ -131,7 +132,7 @@ def _run_probe(lines, hwId, xccId, serial, rawId, grid, addr=0x1000):
     """Interprets the emitted probe for one lane; returns (store offset or None, exits)."""
     s = {"sgprStreamKTileIdx": rawId}
     v = {"vgprSerial": serial}
-    exec_, vcc, scc, stored = 1, None, None, None
+    exec_, scc, stored = 1, None, None
     hwregs = {"HW_REG_HW_ID": hwId, "HW_REG_XCC_ID": xccId}
 
     def val(op):
@@ -180,10 +181,8 @@ def _run_probe(lines, hwId, xccId, serial, rawId, grid, addr=0x1000):
             v[reg(ops[0])] = (m & val(ops[2])) | (~m & val(ops[3]) & 0xffffffff)
         elif ins == "v_lshl_or_b32":
             v[reg(ops[0])] = (val(ops[1]) << val(ops[2]) | val(ops[3])) & 0xffffffff
-        elif ins == "s_mov_b64" and ops == ["vcc", "exec"]:
-            vcc = exec_
-        elif ins == "s_mov_b64" and ops == ["exec", "vcc"]:
-            exec_ = vcc
+        elif ins == "s_mov_b64" and ops == ["exec", "-1"]:
+            exec_ = 1
         elif ins == "v_cmpx_eq_u32":
             exec_ &= val(ops[1]) == val(ops[2])
         elif ins == "v_cmpx_gt_u32":
@@ -196,9 +195,11 @@ def _run_probe(lines, hwId, xccId, serial, rawId, grid, addr=0x1000):
             scc = val(ops[0]) >= val(ops[1])
         elif ins == "s_cbranch_scc0":
             if not scc:
+                assert exec_ == 1
                 return stored, False
         elif ins == "s_cbranch_scc1":
             if scc:
+                assert exec_ == 1
                 return stored, False
         elif ins == "s_endpgm":
             return stored, True
