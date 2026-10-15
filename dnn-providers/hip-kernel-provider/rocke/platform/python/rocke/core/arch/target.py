@@ -65,6 +65,25 @@ _LaneCoordFn = Any  # Callable[[IRBuilder, Value, int], Tuple[Value, Value]]
 
 
 @dataclass(frozen=True)
+class SlotPacking:
+    """Logical scalar span represented by one physical fragment slot.
+
+    Most fragment slots represent one scalar and therefore need no packing
+    descriptor. Packed integer WMMA operands instead map a slot to the first
+    logical coordinate in a contiguous span along ``axis``.
+    """
+
+    axis: int
+    elements_per_slot: int
+
+    def __post_init__(self) -> None:
+        if self.axis not in (0, 1):
+            raise ValueError(f"packing axis must be 0 or 1, got {self.axis!r}")
+        if self.elements_per_slot <= 1:
+            raise ValueError("packed slots must contain more than one logical element")
+
+
+@dataclass(frozen=True)
 class LayoutMap:
     """Lane/slot -> tile-coordinate map for one MMA fragment role.
 
@@ -92,6 +111,13 @@ class LayoutMap:
         WMMA). Surfaced so a kernel can assert the launch geometry matches.
     fn
         The lowering callable ``(builder, lane, slot) -> (coord0, coord1)``.
+    replication_factor
+        Expected number of physical lane/slot sources for every logical
+        element. Most layouts are bijective and use one. gfx11 WMMA operands
+        are replicated across the two 16-lane halves and use two.
+    packing
+        Optional description of multiple contiguous logical scalars represented
+        by one physical slot. This is independent of replication.
 
     Use :meth:`coord` to invoke the map; it validates the slot index and emits
     the arithmetic through the supplied builder.
@@ -101,6 +127,15 @@ class LayoutMap:
     frag_len: int
     wave_size: int
     fn: _LaneCoordFn = field(repr=False)
+    replication_factor: int = 1
+    packing: Optional[SlotPacking] = None
+
+    def __post_init__(self) -> None:
+        if self.replication_factor <= 0:
+            raise ValueError(
+                "layout replication factor must be a positive integer, got "
+                f"{self.replication_factor!r}"
+            )
 
     def coord(self, builder: Any, lane: Any, slot: int) -> Tuple[Any, Any]:
         """Emit the index math for ``(lane, slot)`` and return the coord pair.
@@ -697,6 +732,12 @@ class _FragInfo:
     a_fn: _LaneCoordFn = None
     b_fn: _LaneCoordFn = None
     c_fn: _LaneCoordFn = None
+    a_replication: int = 1
+    b_replication: int = 1
+    c_replication: int = 1
+    a_packing: Optional[SlotPacking] = None
+    b_packing: Optional[SlotPacking] = None
+    c_packing: Optional[SlotPacking] = None
     a_scale_frag_len: int = 0
     b_scale_frag_len: int = 0
     a_scale_fn: _LaneCoordFn = None
@@ -779,24 +820,60 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(
-        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+        16,
+        16,
+        8,
+        32,
+        _wmma_a_16x16,
+        _wmma_b_16x16,
+        _wmma_acc_16x16,
+        a_replication=2,
+        b_replication=2,
     ),
     # bf16 shares the f16 fragment layout (same 16x16x16 lane math; only the
     # element type / intrinsic mangling differ — operands lower as <16 x i16>).
     "wmma_f32_16x16x16_bf16": _FragInfo(
-        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+        16,
+        16,
+        8,
+        32,
+        _wmma_a_16x16,
+        _wmma_b_16x16,
+        _wmma_acc_16x16,
+        a_replication=2,
+        b_replication=2,
     ),
     # --- WMMA iu8 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <4 x i32> (16 int8 packed 4-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
     "wmma_i32_16x16x16_iu8": _FragInfo(
-        4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_acc_16x16
+        4,
+        4,
+        8,
+        32,
+        _wmma_a_16x16_iu8,
+        _wmma_b_16x16_iu8,
+        _wmma_acc_16x16,
+        a_replication=2,
+        b_replication=2,
+        a_packing=SlotPacking(axis=1, elements_per_slot=4),
+        b_packing=SlotPacking(axis=0, elements_per_slot=4),
     ),
     # --- WMMA iu4 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <2 x i32> (16 int4 packed 8-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
     "wmma_i32_16x16x16_iu4": _FragInfo(
-        2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_acc_16x16
+        2,
+        2,
+        8,
+        32,
+        _wmma_a_16x16_iu4,
+        _wmma_b_16x16_iu4,
+        _wmma_acc_16x16,
+        a_replication=2,
+        b_replication=2,
+        a_packing=SlotPacking(axis=1, elements_per_slot=8),
+        b_packing=SlotPacking(axis=0, elements_per_slot=8),
     ),
     # --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) -------------------------------
     # No cross-half duplication: A/B are <8 x half> per lane; column-distributed
@@ -1426,10 +1503,23 @@ def _build_mma_op(o: dict) -> MmaOp:
     op_id = o["op_id"]
     info = _frag_info(op_id)
 
-    def _mk(role: str, frag_len: int, fn: _LaneCoordFn) -> Optional[LayoutMap]:
+    def _mk(
+        role: str,
+        frag_len: int,
+        fn: _LaneCoordFn,
+        replication_factor: int,
+        packing: Optional[SlotPacking],
+    ) -> Optional[LayoutMap]:
         if fn is None or frag_len <= 0:
             return None
-        return LayoutMap(role=role, frag_len=frag_len, wave_size=info.wave_size, fn=fn)
+        return LayoutMap(
+            role=role,
+            frag_len=frag_len,
+            wave_size=info.wave_size,
+            fn=fn,
+            replication_factor=replication_factor,
+            packing=packing,
+        )
 
     return MmaOp(
         family=o["family"],
@@ -1444,16 +1534,34 @@ def _build_mma_op(o: dict) -> MmaOp:
         b_frag_len=info.b_frag_len,
         c_frag_len=info.c_frag_len,
         wave_size=info.wave_size,
-        _a_layout=_mk("a", info.a_frag_len, info.a_fn),
-        _b_layout=_mk("b", info.b_frag_len, info.b_fn),
-        _c_layout=_mk("c", info.c_frag_len, info.c_fn),
+        _a_layout=_mk(
+            "a",
+            info.a_frag_len,
+            info.a_fn,
+            info.a_replication,
+            info.a_packing,
+        ),
+        _b_layout=_mk(
+            "b",
+            info.b_frag_len,
+            info.b_fn,
+            info.b_replication,
+            info.b_packing,
+        ),
+        _c_layout=_mk(
+            "c",
+            info.c_frag_len,
+            info.c_fn,
+            info.c_replication,
+            info.c_packing,
+        ),
         a_scale_dtype=o.get("a_scale_dtype"),
         b_scale_dtype=o.get("b_scale_dtype"),
         scale_block_k=o.get("scale_block_k"),
         a_scale_frag_len=info.a_scale_frag_len,
         b_scale_frag_len=info.b_scale_frag_len,
-        _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
-        _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
+        _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn, 2, None),
+        _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn, 2, None),
     )
 
 

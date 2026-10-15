@@ -387,6 +387,35 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(G._IMMARG_PROBE_VALUES, (1, 2, 4, 12, 16))
 
 
+class DebugValueProbeTest(unittest.TestCase):
+    def test_debug_probe_preserves_valid_variable_metadata(self):
+        from check_ir_validity import _llvm_tool
+
+        opt = _llvm_tool("opt")
+        if opt is None:
+            self.skipTest("LLVM opt is unavailable")
+        text, why = G._probe_module(
+            "declare void @llvm.dbg.value(metadata, metadata, metadata)",
+            "e-p:64:64-i64:64",
+        )
+        self.assertEqual(why, "")
+        proc = subprocess.run(
+            [opt, "-S", "-passes=verify", "-o", "-", "-"],
+            input=text,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
+        self.assertIn("!DILocalVariable", proc.stdout)
+        self.assertIn("!DIExpression()", proc.stdout)
+        self.assertTrue(
+            "@llvm.dbg.value(metadata i32 %value" in proc.stdout
+            or "#dbg_value(i32 %value" in proc.stdout
+        )
+
+
 class ImmargSweepTest(unittest.TestCase):
     """A negative must survive being asked with a legal operand value.
 
