@@ -331,6 +331,16 @@ def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
     au._validate_strided_3d_spec(problem, explicit)
 
 
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_spec_policy_rejects_other_arches(arch):
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    problem = _problem(_strided_request("gfx942"))
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au._strided_3d_specs_from_problem(problem, arch=arch)
+
+
 @pytest.fixture
 def strided_binding_case():
     from dispatch.attention import dispatch_attention
@@ -487,6 +497,24 @@ def test_strided_runtime_rejects_ignored_scaling(
             tuning_spec=result.spec,
             kv_layout="strided",
             **{"softcap": 0, **overrides},
+        )
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_runtime_rejects_other_launch_arches(
+    strided_binding_case, monkeypatch, arch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            kv_layout="strided",
         )
 
 
