@@ -148,7 +148,9 @@ def test_gfx942_native_builder_matches_python(kw):
     [
         ({}, "gfx942", True),
         ({"head_size": 64}, "gfx942", False),
-        ({"head_size": 256}, "gfx942", False),
+        ({"head_size": 256}, "gfx942", True),
+        ({"head_size": 256, "block_size": 32}, "gfx942", False),
+        ({"head_size": 256, "use_fp8": True}, "gfx942", False),
         ({"block_size": 32}, "gfx942", False),
         ({"total_q": 8, "max_seqlen_q": 2}, "gfx942", False),
         ({"use_fp8": True}, "gfx942", False),

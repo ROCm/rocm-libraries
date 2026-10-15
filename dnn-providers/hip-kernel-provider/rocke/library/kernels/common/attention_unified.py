@@ -3172,16 +3172,22 @@ def _kv_lds_swizzle_3d(
 ) -> bool:
     """3D ``use_kv_lds_swizzle``. gfx950: on with multi-page KV tiles
     (``_gfx950_3d_tile_size_override``); with page-sized tiles it measured
-    neutral. gfx942: on for all-decode head size 128 on the wide K/V loader
-    (``_enable_gfx942_3d_wide_kv_load``)."""
+    neutral. gfx942, all-decode: head size 128 on the wide K/V loader
+    (``_enable_gfx942_3d_wide_kv_load``); head size 256 (async copies) with
+    page-sized fp16/bf16 tiles, where it pays only together with the page ids
+    (``_wave_page_id_load_3d``): alone it is slower under some compilers."""
     arch = arch or _resolve_attention_arch()
     if arch == "gfx950":
         return _gfx950_3d_tile_size_override(problem, arch=arch) is not None
     if arch == "gfx942":
+        if not problem.all_decode:
+            return False
+        if problem.head_size == 128:
+            return _enable_gfx942_3d_wide_kv_load(problem)
         return (
-            problem.all_decode
-            and problem.head_size == 128
-            and _enable_gfx942_3d_wide_kv_load(problem)
+            problem.head_size == 256
+            and _kv_storage_dtype(problem) is None
+            and _gfx942_3d_tile_size_override(problem, arch=arch) is None
         )
     return False
 
