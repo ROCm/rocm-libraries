@@ -2,7 +2,7 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: Only the bootstrap path ships. A UHD has `kind: "native"` and names a `ScoreFn` symbol in `payload`, and a UED names at most one UHD through `heuristic` (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp`, `IKernelHeuristic.hpp`, #10606). The `adapter` header, role maps, `features_signature`, `tree_data`, ranking metrics, and the generation tool are not built. A benchmarked winner overrides the heuristic order (#11068, #11101).
+- **Status notes**: Only the bootstrap path ships: a UHD has `kind: "native"` and names a `ScoreFn` symbol in `payload`, and a UED names at most one UHD through `heuristic` (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp`, `IKernelHeuristic.hpp`, #10606). The `adapter` header, role maps, `features_signature`, `tree_data`, ranking metrics, and the generation tool are not built. A benchmarked winner overrides the heuristic order (#11068, #11101).
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:

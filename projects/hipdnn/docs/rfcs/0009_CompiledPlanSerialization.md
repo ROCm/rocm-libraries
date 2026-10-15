@@ -2,7 +2,7 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
-- **Status notes**: Plan-only serialization shipped in #6970. #7182 removed the engine config from the restore hook. The envelope gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728). #7975 added a graph-and-plan container format. No shipped provider exports the plugin hooks; the fusilli sample was removed (#7806).
+- **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), #7975 added a graph-and-plan container, and #7182 removed the engine config from the restore hook. No shipped provider exports the plugin hooks; the fusilli sample was removed (#7806).
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Scope: frontend, backend, engine plugin API, fusilli sample implementation
 

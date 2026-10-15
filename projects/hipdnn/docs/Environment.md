@@ -276,16 +276,12 @@ export HIPDNN_CACHE_DIR=$PWD/.hipdnn-cache
 - Caching is **on by default**. Setting `HIPDNN_CACHE_DIR` to an empty string does **not**
   disable caching -- an empty value is treated as unset and the per-user default applies,
   leaving the cache enabled. Use `HIPDNN_DISABLE_CACHE` (below) to turn it off.
-- Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically. Each record line also carries an independent per-line format-version stamp, so a foreign or pre-upgrade line appended to an otherwise-valid shard is skipped rather than misparsed, even when the outer version-line stamp alone cannot separate two builds. That happens whenever `git rev-parse --short HEAD` cannot resolve a commit hash at configure time (no `.git` directory, git not installed, `ERROR_QUIET`-suppressed failure) -- `VersionUtils.cmake` then falls back to a constant `unknown` tweak, so the version stamp degrades from per-commit to per-semver and stops distinguishing any of the commits sharing that build.
-- The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`, not the `winners-<base-arch>-v<N>.jsonl` naming the original design specified: the engine level was added so two engines in one process do not share a shard, and the version moved from the file name into a directory so a version bump leaves a whole subtree to delete rather than sibling files to filter. The engine component is passed through `sanitizeForPath()`, which the original design rejected as inventing a naming scheme -- but engine names are provider-supplied and reach the filesystem directly, so a name carrying `:` (every current name does, e.g. `test:CrossInstance`) is not a legal Windows path component. `sanitizeForPath()`'s hash suffix makes a collision between two sanitized engine names improbable, not impossible (a 64-bit FNV-1a collision, ~2^-64 per pair), which is a fact worth knowing when eyeballing the engine directory name. The arch component is deliberately **not** sanitized: it is validated by `isPlainArchComponent()` and kept verbatim, so `gfx942` reads as `gfx942`.
-- Deleting the cache root at any time is safe on both Linux and Windows: `writeBackToShard()` recreates the directory and file and registers a fresh inode/handle on every write-back, so the registry keeps appending correctly after a mid-run delete. On Windows this relies on `FILE_SHARE_DELETE`, added so another process can delete a shard's parent directory while this process still holds the shard open; `TestLineStore.AShardsParentDirectoryCanBeRemovedWhileTheRegistryHoldsItOpen` confirms on Windows CI that NTFS reclaims the deleted directory's name while this process keeps running, even though the registry never closes that handle.
+- Cache entries are stamped with the hipDNN version that produced them, so an upgrade does not read measurements taken by a different build. Stale directories from older versions are not removed automatically. A build made without git metadata cannot tell commits apart, so its stamp changes with the release version, not with each commit.
+- The ingestor winner-cache shard path is `ingestor-winners/<version>/<engine>/<arch>/winners.jsonl`. The engine directory name is a filesystem-safe form of the engine name. The architecture name is used as is, so `gfx942` appears as `gfx942`.
+- Deleting the cache root at any time is safe on Linux and Windows. hipDNN recreates it on the next write, and a run in progress keeps working.
 - Two checkouts, or two CI jobs, that should not share measurements need different values here. Records are keyed by graph content and device, not by checkout.
 - The winner cache is append-only and is never compacted, so a long-lived cache directory grows with the number of distinct graphs benchmarked.
-- A lookup in the ingestor winner cache can create a file: `openLineStore()` opens (creating it if absent) the shard
-  file and writes its version-stamp line before the caller learns whether the key it is querying
-  has a record in it. A pure read miss therefore still leaves a version-stamped, otherwise-empty
-  shard behind. The autotune ranking cache does not do this: its lookup uses `openExistingLineStore()`
-  and creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
+- A lookup in the ingestor winner cache can create a file. A read miss still leaves an empty shard file, stamped with the version, behind. A lookup in the autotune ranking cache creates nothing (see [Autotune Ranking Cache](#autotune-ranking-cache-autotune-rankings)).
 
 #### HIPDNN_DISABLE_CACHE
 
@@ -310,7 +306,7 @@ export HIPDNN_DISABLE_CACHE=1
 
 **Notes:**
 - Takes precedence over `HIPDNN_CACHE_DIR`: both set is not an error, but the disable wins.
-- Read once per `cacheRoot()` call, not cached across the process, so it can be toggled between runs without restarting anything long-lived.
+- Read each time hipDNN resolves the cache root, not once per process, so it can be toggled between runs without restarting anything long-lived.
 
 ### Autotune Ranking Cache (`autotune-rankings/`)
 
@@ -352,11 +348,11 @@ already has recorded (e.g. a run scoped with an engine filter) is declined outri
 narrower sweep can never regress a full-coverage record to one that then fails every later
 lookup.
 
-**A lookup never creates anything.** Reads open the shard without `O_CREAT`, so a key with no
-shard is an ordinary miss leaving behind no file and no open descriptor; only the write path
-creates the versioned subtree and its shards. The read path runs for every graph on the
-default heuristic policy list over an unbounded key space, so a creating read would cost one
-empty file and one process-lifetime descriptor per distinct graph ever looked up.
+**A lookup never creates anything.** A key with no stored ranking is an ordinary miss. It leaves
+no file behind and holds no open file handle; only a write creates the versioned subtree and its
+shards. This matters because the lookup runs for every graph on the default heuristic policy list
+over an unbounded key space, so a lookup that created files would leave one empty file per distinct
+graph ever looked up.
 
 **Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
 `[BuiltInConfig] policyFinalize:` log fragment:
