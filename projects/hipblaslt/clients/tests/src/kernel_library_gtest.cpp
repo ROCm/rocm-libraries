@@ -360,6 +360,102 @@ namespace
             EXPECT_EQ(readLines(dir / run), expected) << run;
     }
 
+    // Calls MatrixTransform on the handle's device with transformDevice current and
+    // returns its status, or nullopt if the test setup failed. On success, ok
+    // reports whether C holds 2 * A; current is the device current afterwards.
+    std::optional<hipblasStatus_t>
+        transformWithDeviceCurrent(int handleDevice, int transformDevice, bool& ok, int& current)
+    {
+        const uint32_t     rows = 64, cols = 32;
+        std::vector<float> host(rows * cols);
+        for(size_t i = 0; i < host.size(); ++i)
+            host[i] = 0.5f * (i % 31);
+
+        hipblasLtHandle_t handle = nullptr;
+        hipStream_t       stream = nullptr;
+        float *           input = nullptr, *output = nullptr;
+        bool              ready
+            = hipSetDevice(handleDevice) == hipSuccess
+              && hipblasLtCreate(&handle) == HIPBLAS_STATUS_SUCCESS
+              && hipStreamCreate(&stream) == hipSuccess
+              && hipMalloc(&input, host.size() * sizeof(float)) == hipSuccess
+              && hipMalloc(&output, host.size() * sizeof(float)) == hipSuccess
+              && hipMemcpy(input, host.data(), host.size() * sizeof(float), hipMemcpyHostToDevice)
+                     == hipSuccess;
+
+        hipblasLtMatrixTransformDesc_t desc;
+        hipblasLtMatrixLayout_t        layout;
+        hipblasLtMatrixTransformDescCreate(&desc, HIP_R_32F);
+        hipblasLtMatrixLayoutCreate(&layout, HIP_R_32F, rows, cols, rows);
+        const float                    alpha = 2.0f, beta = 0.0f;
+        std::optional<hipblasStatus_t> status;
+        ok = false;
+        if(ready && hipSetDevice(transformDevice) == hipSuccess)
+        {
+            status = hipblasLtMatrixTransform(
+                handle, desc, &alpha, input, layout, &beta, input, layout, output, layout, stream);
+            if(hipGetDevice(&current) != hipSuccess)
+                current = -1;
+            if(*status == HIPBLAS_STATUS_SUCCESS && hipStreamSynchronize(stream) == hipSuccess)
+            {
+                std::vector<float> out(host.size());
+                ok = hipMemcpy(
+                         out.data(), output, out.size() * sizeof(float), hipMemcpyDeviceToHost)
+                     == hipSuccess;
+                for(size_t i = 0; i < host.size(); ++i)
+                    ok = ok && out[i] == 2.0f * host[i];
+            }
+        }
+
+        hipblasLtMatrixLayoutDestroy(layout);
+        hipblasLtMatrixTransformDescDestroy(desc);
+        static_cast<void>(hipSetDevice(handleDevice));
+        static_cast<void>(hipFree(input));
+        static_cast<void>(hipFree(output));
+        if(stream)
+            static_cast<void>(hipStreamDestroy(stream));
+        if(handle)
+            hipblasLtDestroy(handle);
+        return status;
+    }
+
+    // MatrixTransform runs on the handle's device whichever device is current,
+    // with the same outcome as when the handle's device is current, and leaves
+    // the caller's device current. A device without transform kernels takes
+    // the error path after the device switch.
+    TEST(multi_gpu_KernelLibrary, MatrixTransformRunsOnHandleDevice)
+    {
+        const int count = deviceCount();
+        if(count < 2)
+            GTEST_SKIP() << "needs at least two devices";
+        int original = 0;
+        ASSERT_EQ(hipGetDevice(&original), hipSuccess);
+
+        for(int a = 0; a < count; ++a)
+        {
+            bool       aloneOk = false;
+            int        current = -1;
+            const auto alone   = transformWithDeviceCurrent(a, a, aloneOk, current);
+            ASSERT_TRUE(alone) << "setup failed on device " << a;
+            ASSERT_TRUE(*alone == HIPBLAS_STATUS_ARCH_MISMATCH
+                        || (*alone == HIPBLAS_STATUS_SUCCESS && aloneOk))
+                << "device " << a << " status " << *alone;
+
+            for(int b = 0; b < count; ++b)
+            {
+                if(b == a)
+                    continue;
+                bool       ok       = false;
+                const auto switched = transformWithDeviceCurrent(a, b, ok, current);
+                ASSERT_TRUE(switched) << "setup failed on devices " << a << ", " << b;
+                EXPECT_EQ(*switched, *alone) << "handle on " << a << ", " << b << " current";
+                EXPECT_EQ(ok, aloneOk) << "handle on " << a << ", " << b << " current";
+                EXPECT_EQ(current, b) << "handle on " << a << ", " << b << " current";
+            }
+        }
+        EXPECT_EQ(hipSetDevice(original), hipSuccess);
+    }
+
     // With no Tensile library loaded, the GEMM APIs return errors.
     void exitAfterGemmWithoutLibrary()
     {
@@ -378,7 +474,8 @@ namespace
                                       HIP_R_16F,
                                       HIPBLAS_COMPUTE_32F,
                                       algos)
-           != HIPBLAS_STATUS_INVALID_VALUE)
+               != HIPBLAS_STATUS_INVALID_VALUE
+           || !algos.empty())
             std::exit(2);
 
         hipblasLtMatmulDesc_t       desc;
@@ -391,7 +488,7 @@ namespace
         int                              returned = 0;
         const auto                       status   = hipblasLtMatmulAlgoGetHeuristic(
             handle, desc, layout, layout, layout, layout, preference, 1, &heuristic, &returned);
-        if(status == HIPBLAS_STATUS_SUCCESS && returned != 0)
+        if(status != HIPBLAS_STATUS_INVALID_VALUE || returned != 0)
             std::exit(3);
 
         hipblasLtMatmulPreferenceDestroy(preference);
