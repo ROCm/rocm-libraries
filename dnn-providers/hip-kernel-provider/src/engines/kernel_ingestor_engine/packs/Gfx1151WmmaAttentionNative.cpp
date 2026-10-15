@@ -847,9 +847,12 @@ double scoreKernel(const MatchContext& /*context*/,
         const double specializedMask = *maskMode == "window" ? 0.0 : 1.0;
         return 10.0 + 2.0 * bucketSteps + exactWidth + specializedMask;
     }
-    // The shipped objects are gfx11-generic builds, whose 32-key single-wave
+    // Every shipped object is a generic build, whose 32-key single-wave
     // transposed kernels outrun the 64-key two-wave geometry at every measured
-    // sequence length; the catalog ships only the narrow one.
+    // sequence length; the catalog ships only the narrow one. The metadata does
+    // not carry the compile target, so IngestorGenerator's
+    // test_shipped_wmma_catalog_compiles_only_generic_objects keeps native
+    // objects (where #12710 measured the wide geometry faster) out of the catalog.
     const bool narrow = *blockN == 32 && *numWaves == 1;
     return narrow ? 100.0 : 50.0;
 }
