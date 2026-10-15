@@ -1193,6 +1193,9 @@ void expectCandidateMatchesReference(const MatchContext& context,
         left = 64;
     }
     double worst = 0.0;
+    int64_t nonFinite = 0;
+    int64_t firstNonFiniteRow = std::numeric_limits<int64_t>::max();
+    int64_t lastNonFiniteRow = -1;
     std::string where;
     double worstLse = 0.0;
     std::string whereLse;
@@ -1275,17 +1278,29 @@ void expectCandidateMatchesReference(const MatchContext& context,
                     const double actual = at(o, oStrides, 0, bi, hi, si, e);
                     const double error = std::isfinite(actual) ? std::abs(actual - expected)
                                                                : std::numeric_limits<double>::max();
+                    if(!std::isfinite(actual))
+                    {
+                        ++nonFinite;
+                        firstNonFiniteRow = std::min(firstNonFiniteRow, si);
+                        lastNonFiniteRow = std::max(lastNonFiniteRow, si);
+                    }
                     if(error > worst)
                     {
                         worst = error;
                         where = "b=" + std::to_string(bi) + " h=" + std::to_string(hi)
-                                + " s=" + std::to_string(si) + " d=" + std::to_string(e);
+                                + " s=" + std::to_string(si) + " d=" + std::to_string(e) + ": got "
+                                + std::to_string(actual) + ", expected " + std::to_string(expected);
                     }
                 }
             }
         }
     }
-    EXPECT_LE(worst, absoluteTolerance) << "worst error at " << where;
+    EXPECT_LE(worst, absoluteTolerance)
+        << "worst error at " << where << "; " << nonFinite << " non-finite element(s)"
+        << (nonFinite > 0 ? " in query rows " + std::to_string(firstNonFiniteRow) + "-"
+                                + std::to_string(lastNonFiniteRow)
+                          : std::string())
+        << "; split workspace " << workspaceBytes << " bytes";
     EXPECT_EQ(worstLse, 0.0) << "an LSE outside tolerance, worst at " << whereLse;
 }
 

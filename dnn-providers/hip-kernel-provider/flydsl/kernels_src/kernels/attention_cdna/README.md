@@ -298,9 +298,12 @@ diff against upstream plus the modifications below.
     than keys, or a window) a split's accumulators are not valid; the direct store zeroes
     such blocks, but the split store wrote them times 0, which is NaN when they hold
     NaN, and the merge weighted that partial by 0 again. The row came out NaN instead of
-    0 (seen on gfx942; gfx950's workspace happened to hold zeros). The split store now
-    selects 0 for a row with no keys, and the merge selects away any partial whose LSE is
-    -inf. Not yet upstream.
+    0. The split store now selects 0 for a row with no keys, and the merge selects away
+    any partial whose LSE is -inf -- testing -inf by its bits, since under the kernels'
+    no-infs fast-math `x == -inf` folds to false: the merge's own m_safe guard had been
+    folded away, so even a correct workspace (LSE -inf, O 0 in every split) merged to
+    exp(-inf - -inf) = NaN. Seen on gfx942 with two splits; gfx950 ran the case with one
+    split, which never merges. Not yet upstream.
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

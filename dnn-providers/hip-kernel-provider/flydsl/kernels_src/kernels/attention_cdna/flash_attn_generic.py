@@ -803,6 +803,13 @@ def build_flash_attn_func_module_primary(
         o_rsrc = buffer_ops.create_buffer_resource(O, max_size=True)
         c_ninf = fx.Float32(float("-inf"))
         c_zero = fx.Float32(0.0)
+        # -inf (a split no key reached) is tested by its bits: the kernels build with
+        # no-infs fast-math, under which `x == -inf` folds to false and exp(-inf - -inf)
+        # turned a keyless row's 0 * 0 into NaN (modification 27).
+        c_ninf_bits = fx.Int32(-8388608)  # 0xFF800000
+
+        def is_ninf(x):
+            return fx.Float32(x).bitcast(fx.Int32) == c_ninf_bits
 
         def lse_at(i):
             return fx.Float32(
@@ -818,7 +825,7 @@ def build_flash_attn_func_module_primary(
         for i, carry in range(fx.Index(0), ns, fx.Index(1), init=[m]):
             m = yield [fx.Float32(carry[0]).maximumf(lse_at(i))]
         m_all = fx.Float32(m)
-        m_safe = (m_all == c_ninf).select(c_zero, m_all)
+        m_safe = is_ninf(m_all).select(c_zero, m_all)
         # Every column, the last pass partial where V is not a multiple of 64 wide
         # (modification 26).
         cols = -(-traits.HEAD_DIM_V // _MERGE_THREADS)
@@ -827,7 +834,7 @@ def build_flash_attn_func_module_primary(
         res = init
         for i, carry in range(fx.Index(0), ns, fx.Index(1), init=init):
             li = lse_at(i)
-            w = (li == c_ninf).select(c_zero, fx.math.exp(li - m_safe))
+            w = is_ninf(li).select(c_zero, fx.math.exp(li - m_safe))
             acc = []
             for j in range_constexpr(cols):
                 d = tid + fx.Index(j * _MERGE_THREADS)
@@ -847,7 +854,7 @@ def build_flash_attn_func_module_primary(
                 # holds whatever the workspace held, and 0 * NaN would poison the row
                 # (modification 27).
                 acc.append(
-                    fx.Float32(carry[1 + j]) + (li == c_ninf).select(c_zero, w * ov)
+                    fx.Float32(carry[1 + j]) + is_ninf(li).select(c_zero, w * ov)
                 )
             res = yield [fx.Float32(carry[0]) + w] + acc
         l_all = fx.Float32(res[0])

@@ -24,7 +24,7 @@ instance list is untouched.
 | flydsl_kernels_commit | `89ad52fbbb9e252396829a8a44b12e18b7acd970` |
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | rocm_version | `7.13.0` |
-| inputs_sha256 | `18b871eda8d251831cb5759e5b313dab1449f31d335bce7da4f1b62b0f9be443` |
+| inputs_sha256 | `cdc9275245bb860cc48b14ed49124da7ad004017529f3eb7880b97f81a4f02ec` |
 
 ## Instances
 

@@ -7,7 +7,7 @@
     "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "61e67e0662af3f176515cc4eba7fd9f854b1904526ba16cecffddaca65f5e4bc"
+    "inputs_sha256": "e221586311757db9294d81a7a6acbead96112074a898a8a155e963896942a441"
   },
   "instances": [
     {
@@ -54,7 +54,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -120,8 +120,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d64_causal0_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 20912,
-      "sha256": "84c1ffbd5d44ef335d76056270d7bf998fc5f93098f94cc89f278e98d1009e09",
+      "bytes": 21104,
+      "sha256": "10a4aeb99eafb781f24b5cdc983d628d990c8d1ef7c0a61058ebac37e376629e",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 194,
@@ -174,7 +174,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -240,8 +240,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d64_causal1_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 21168,
-      "sha256": "e40a86dbdf2309a3f67e0159fea969f02c08045585d3826233c75223817ffb8b",
+      "bytes": 21360,
+      "sha256": "f4f011a1dda8ffb1316abc417f1b359078ab4e1c3f7982415f10aa57a1c4bdb7",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 157,
@@ -294,7 +294,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -360,8 +360,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d128_causal0_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 25200,
-      "sha256": "2ef0972fcbb4ab2b765c992f56ff18aba96093eeea115fee42fe541f3da0919a",
+      "bytes": 25392,
+      "sha256": "bb9c1b86843e015f949cd7b5ebde633ada818b62547250950172bf0040422ab4",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 290,
@@ -414,7 +414,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -480,8 +480,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d128_causal1_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 29808,
-      "sha256": "b2218d028f364e0c934da9bd4319a8f66fcb377c180d3b66fbf071d87deb1dc3",
+      "bytes": 30000,
+      "sha256": "b8f50b11a451c4ea358b2a83438d89e181c5fb3bf87c479c820fdbebf29c2cbe",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 275,
@@ -534,7 +534,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 21,
+      "merge_vgprs": 24,
       "block": [
         256,
         1,
@@ -600,8 +600,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d256_causal0_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 32112,
-      "sha256": "c26ffb5e598781d85bf13e78c81946b6e411148541804651b2ba01e83d57160f",
+      "bytes": 32304,
+      "sha256": "1a3cf9581c79f7552bee707cd91de37796d28205d34bd1f2feff68d4ca404cc1",
       "kernarg_segment_size": 708,
       "lds_bytes": 65536,
       "vgprs": 447,
@@ -657,7 +657,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 21,
+      "merge_vgprs": 24,
       "block": [
         256,
         1,
@@ -723,8 +723,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d256_causal1_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 32880,
-      "sha256": "a0801c4b7efd1226299b66e16441c2bce64e0e5c5819779927ae14f3e56272b4",
+      "bytes": 33072,
+      "sha256": "1aefca69acde6655100b371127bfd7bec714afc78a4afe18caa37e5295c0d61e",
       "kernarg_segment_size": 708,
       "lds_bytes": 65536,
       "vgprs": 441,
@@ -780,7 +780,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -846,8 +846,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d64_causal0_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 21040,
-      "sha256": "5d20e8aaf43b0bfdf9f56624a61c44b3dfbbf5ab9e576c1edd42c7754f870614",
+      "bytes": 21232,
+      "sha256": "e92233df4eaca577061a6987e85aadfe9065899cdc475baa6f7cc092d33e4d94",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 194,
@@ -900,7 +900,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -966,8 +966,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d64_causal1_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 21040,
-      "sha256": "9f4e76c5c52194f24ec408854092d5b50060afcc161a97cbf7bd8948fe69b622",
+      "bytes": 21232,
+      "sha256": "bf73e9a38189516e588ac9427596d836e12fc820ae7e819b6341b738bbf5241c",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 157,
@@ -1020,7 +1020,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -1086,8 +1086,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d128_causal0_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 25072,
-      "sha256": "5ee1d78998cfe92748a7bb22167e544b94bba3acec0a0a91253543b18a9e8a29",
+      "bytes": 25264,
+      "sha256": "f121134b9cb6bb927e29aa823bc8ac25754c0adc73d05ce79e2045e9695ae667",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 290,
@@ -1140,7 +1140,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -1206,8 +1206,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d128_causal1_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 29424,
-      "sha256": "1529b7ba29108ea311541b79c025f566acd443539e486419933164cc277b3675",
+      "bytes": 29616,
+      "sha256": "fe9dfd06fc0ea75f6189cb80713423941a19d02d6efd30c89a0359c0888d1a5c",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 275,
@@ -1260,7 +1260,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 33,
+      "merge_vgprs": 24,
       "block": [
         128,
         1,
@@ -1326,8 +1326,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 36208,
-      "sha256": "fb70361fcce05e5e9e2d53a76e6ffc9a8e30b3697efc8ec2bb87b92e2d175b91",
+      "bytes": 35824,
+      "sha256": "ccfcec9eaf2ee2162146be5b8cd2f99594482805e77aceb3eec1d4d0bef0ef87",
       "kernarg_segment_size": 708,
       "lds_bytes": 50176,
       "vgprs": 359,
@@ -1380,7 +1380,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 33,
+      "merge_vgprs": 24,
       "block": [
         128,
         1,
@@ -1446,8 +1446,8 @@
       ],
       "file": "sdpa_cdna_decode_bf16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 36720,
-      "sha256": "46461f9358c02a1d3db64586d2175dd8e4e51b70c720f7becb2c69c03cb9bdf1",
+      "bytes": 36336,
+      "sha256": "4e0f7b7c2543e152c618beefc5d3f56005e047e772669824da391c826f72a62d",
       "kernarg_segment_size": 708,
       "lds_bytes": 50176,
       "vgprs": 331,
@@ -1500,7 +1500,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -1566,8 +1566,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d64_causal0_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19824,
-      "sha256": "0f22296ac3ba1753633d8aa34183fd166e9911301a646a1fe08376349ae857d4",
+      "bytes": 20016,
+      "sha256": "460b46738d2d136b0d1979f1bcb96c060552f814f6f8e8d97b90c11971375a0c",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 194,
@@ -1620,7 +1620,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -1686,8 +1686,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d64_causal1_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 20080,
-      "sha256": "5ad030bb43a1067579e141d0de861547f8cb11668fc7a6cfd2652539da24aaac",
+      "bytes": 20272,
+      "sha256": "d89fac22e1face5b65f4514549f07264356bb7c0dbc98c8c754da644fe6e269a",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 164,
@@ -1740,7 +1740,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -1806,8 +1806,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d128_causal0_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 23024,
-      "sha256": "f1c36580d5e7dba6f5c1f29f8f7a2f374a208e67dc9a0a1a6e02bbb032a44b6c",
+      "bytes": 23280,
+      "sha256": "f36366566ef5769319c16d555f5b3985b8e03c6935213c66cb31f7ffbae0636d",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 299,
@@ -1860,7 +1860,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -1926,8 +1926,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d128_causal1_bm64.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 27632,
-      "sha256": "1ce011d597f9436b28819314c6a50983e2dfaa0e2feadc9a83d40ba7cc3628ba",
+      "bytes": 27888,
+      "sha256": "c0712a2158b698205cc14f89f895d80d08a6045877e64832d4d4d6d256972076",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 275,
@@ -1980,7 +1980,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 21,
+      "merge_vgprs": 24,
       "block": [
         256,
         1,
@@ -2046,8 +2046,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d256_causal0_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 26864,
-      "sha256": "f8e35e58d4dad5c82ae9e831e0fbf7b160ce1f34142f447b5e3188d927d86b3f",
+      "bytes": 26992,
+      "sha256": "828c8c3481cb94d0541c71762864d83e9a217e5d97509ce450257c26c74bf5b3",
       "kernarg_segment_size": 708,
       "lds_bytes": 65536,
       "vgprs": 429,
@@ -2103,7 +2103,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 21,
+      "merge_vgprs": 24,
       "block": [
         256,
         1,
@@ -2169,8 +2169,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d256_causal1_bm128.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 27376,
-      "sha256": "aee252cb6fffc8f0898d66e91c3ffe0bb519ab455416179ea7593bc4fdaaea21",
+      "bytes": 27504,
+      "sha256": "e57d0b5b26322edb0a8c50ad90f801ca6404a0808f577197999005bc62850202",
       "kernarg_segment_size": 708,
       "lds_bytes": 65536,
       "vgprs": 423,
@@ -2226,7 +2226,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -2292,8 +2292,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d64_causal0_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 19952,
-      "sha256": "1ac80187f5f906fcd112d7c473ae98d6dfaa138685491e89ad8fce9f6f09656c",
+      "bytes": 20144,
+      "sha256": "60899fcf5822ec80d6e576be257bd0a236866bd91a11f893bcd27cf2cf847de9",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 194,
@@ -2346,7 +2346,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 18,
+      "merge_vgprs": 23,
       "block": [
         128,
         1,
@@ -2412,8 +2412,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d64_causal1_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 20208,
-      "sha256": "1593eb7b7cc7acde607c41ad6f80c1dfd05cca027e463ede466a58f254069f62",
+      "bytes": 20400,
+      "sha256": "db55392636174be05a774941325f9fb0308421d2b3dedf74c4fa6b377f37c69a",
       "kernarg_segment_size": 708,
       "lds_bytes": 17152,
       "vgprs": 164,
@@ -2466,7 +2466,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -2532,8 +2532,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d128_causal0_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 23152,
-      "sha256": "aa12559db22b33376f4b5424fb4f807b0a33b6c3e22259d51918d7955d4234db",
+      "bytes": 23408,
+      "sha256": "586632ec0efef54bd868f914b5f5229eb4779e9dd11c9d1c9a0c21620d48ae76",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 299,
@@ -2586,7 +2586,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 23,
+      "merge_vgprs": 28,
       "block": [
         128,
         1,
@@ -2652,8 +2652,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d128_causal1_bm64_sink1.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 27760,
-      "sha256": "ccc8e6b9caa86771443b30d2d3b9c7263246e8369c61befe9b2c965ff114d0cf",
+      "bytes": 28016,
+      "sha256": "a7545764e33aabf60069fc97ce323aadce13a0b66e59a3c5f8b7fe4b3164deed",
       "kernarg_segment_size": 708,
       "lds_bytes": 33792,
       "vgprs": 275,
@@ -2706,7 +2706,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 33,
+      "merge_vgprs": 24,
       "block": [
         128,
         1,
@@ -2772,8 +2772,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d768_causal0_bm64_gpf0_vd512_qkm1_dv4_kc256.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 34352,
-      "sha256": "045d95758c081a49aafbed18cb4ecba4af088d7a1f5d7fef8cf4439d617f9c8f",
+      "bytes": 33968,
+      "sha256": "06e81e0004a128ba7e39c0bbd3cf54fcb5d0d15d8e28a9f0049127dd9f1b2c6a",
       "kernarg_segment_size": 708,
       "lds_bytes": 50176,
       "vgprs": 359,
@@ -2826,7 +2826,7 @@
         {"name": "stride_lse_h", "kind": "by_value", "size": 4, "offset": 284},
         {"name": "stride_lse_n", "kind": "by_value", "size": 4, "offset": 288}
       ],
-      "merge_vgprs": 33,
+      "merge_vgprs": 24,
       "block": [
         128,
         1,
@@ -2892,8 +2892,8 @@
       ],
       "file": "sdpa_cdna_decode_f16_d768_causal1_bm64_gpf0_vd512_qkm1_dv4_kc256.hsaco",
       "symbol": "flash_attn_generic_kernel_0",
-      "bytes": 34096,
-      "sha256": "07ad43486a108904a02fa173a1c9604e3d3ddbe33c796f52afdc2d777c4d2541",
+      "bytes": 33712,
+      "sha256": "a210a2e1a23ca0cc6ffaeebb27d5f1eb7146e341553a8b7ef2aa4dbf4550073b",
       "kernarg_segment_size": 708,
       "lds_bytes": 50176,
       "vgprs": 331,
