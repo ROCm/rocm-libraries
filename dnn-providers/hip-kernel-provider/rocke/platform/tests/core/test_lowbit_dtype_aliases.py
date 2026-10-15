@@ -4,7 +4,7 @@
 
 import pytest
 from rocke.core.arch import ArchTarget
-from rocke.core.arch.target import normalize_dtype
+from rocke.core.dtypes import normalize_dtype
 
 
 @pytest.mark.parametrize(
@@ -32,6 +32,7 @@ def test_alias_catalog_lookup(alias, canonical):
             found = True
             assert catalog.has_shape(
                 family=op.family,
+                scales=(op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k),
                 a_dtype=alias,
                 b_dtype=op.b_dtype,
                 c_dtype=op.c_dtype,
@@ -39,7 +40,7 @@ def test_alias_catalog_lookup(alias, canonical):
                 n=op.n,
                 k=op.k,
             )
-    # BF6 is only present on the branch that supplies its packed atom.
+    # BF6 name recognition does not require a corresponding catalog atom.
     if alias != "bf6":
         assert found
 

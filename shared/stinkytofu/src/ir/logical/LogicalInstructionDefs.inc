@@ -615,6 +615,16 @@
              false,
              "IF_VALU"},
 
+                                    {"VMaximumMinimumF32",
+             "VMaximumMinimumF32",
+             3,
+             true,
+             "Vector MinMax",
+             true,
+             true,
+             false,
+             "IF_VALU"},
+
                                     {"VAndB32",
              "VAndB32",
              2,
@@ -677,6 +687,16 @@
 
                                     {"VCndMaskB32",
              "VCndMaskB32",
+             3,
+             true,
+             "Vector Other",
+             true,
+             true,
+             false,
+             "IF_VALU"},
+
+                                    {"VCndMaskB16",
+             "VCndMaskB16",
              3,
              true,
              "Vector Other",

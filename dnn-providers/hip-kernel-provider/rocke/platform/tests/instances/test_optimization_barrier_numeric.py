@@ -23,7 +23,6 @@ from rocke.core.ir import (
     PtrType,
 )
 from rocke.helpers import compile_kernel
-from rocke.helpers.compile import compile_kernel_via_hipcc
 from rocke.runtime.hip_module import Runtime, get_device_arch
 
 
@@ -39,9 +38,8 @@ def arch():
     return target
 
 
-def _run(kernel, data, arch, route):
-    compile_fn = compile_kernel if route == "comgr" else compile_kernel_via_hipcc
-    art = compile_fn(kernel, arch=arch)
+def _run(kernel, data, arch):
+    art = compile_kernel(kernel, arch=arch)
     rt = Runtime()
     module = rt.load_module(art.hsaco)
     ptr = rt.alloc(len(data))
@@ -62,7 +60,6 @@ def _run(kernel, data, arch, route):
         module.unload()
 
 
-@pytest.mark.parametrize("route", ["comgr", "hip"])
 @pytest.mark.parametrize(
     "dtype,width",
     [
@@ -77,7 +74,7 @@ def _run(kernel, data, arch, route):
         (BF8E5M2, 1),
     ],
 )
-def test_barrier_preserves_scalar_bits(arch, route, dtype, width):
+def test_barrier_preserves_scalar_bits(arch, dtype, width):
     b = IRBuilder("barrier_bits_" + dtype.name)
     p = b.param("p", PtrType(dtype, "global"))
     tid = b.thread_id_x()
@@ -89,11 +86,10 @@ def test_barrier_preserves_scalar_bits(arch, route, dtype, width):
     raw[:width] = 0
     raw[width : 2 * width] = 255
     data = raw.tobytes()
-    assert _run(b.kernel, data, arch, route) == data
+    assert _run(b.kernel, data, arch) == data
 
 
-@pytest.mark.parametrize("route", ["comgr", "hip"])
-def test_barrier_rounds_product_before_add(arch, route):
+def test_barrier_rounds_product_before_add(arch):
     b = IRBuilder("barrier_product")
     p = b.param("p", PtrType(F32, "global"))
     tid = b.thread_id_x()
@@ -101,19 +97,20 @@ def test_barrier_rounds_product_before_add(arch, route):
     other = b.add(tid, b.const_i32(64))
     bb = b.global_load(p, other, F32)
     product = b.optimization_barrier(b.fmul(a, bb))
-    value = b.fadd(product, b.const_f32(-1.0))
+    addend = b.global_load(p, b.add(tid, b.const_i32(128)), F32)
+    value = b.fadd(product, addend)
     b.global_store(p, tid, value)
     b.ret()
     # (1+2^-13)*(1-2^-13) rounds to FP32 1.0; a fused FMA returns -2^-26.
     a = np.full(64, 1 + 2**-13, dtype=np.float32)
     bb = np.full(64, 1 - 2**-13, dtype=np.float32)
-    data = np.concatenate((a, bb)).tobytes()
-    result = np.frombuffer(_run(b.kernel, data, arch, route), dtype=np.float32)
+    addend = np.full(64, -1.0, dtype=np.float32)
+    data = np.concatenate((a, bb, addend)).tobytes()
+    result = np.frombuffer(_run(b.kernel, data, arch), dtype=np.float32)
     np.testing.assert_array_equal(result[:64], np.zeros(64, dtype=np.float32))
 
 
-@pytest.mark.parametrize("route", ["comgr", "hip"])
-def test_barrier_preserves_lane_predicates(arch, route):
+def test_barrier_preserves_lane_predicates(arch):
     b = IRBuilder("barrier_predicate")
     p = b.param("p", PtrType(I32, "global"))
     tid = b.thread_id_x()
@@ -123,14 +120,11 @@ def test_barrier_preserves_lane_predicates(arch, route):
     b.global_store(p, tid, b.zext(result, I32))
     b.ret()
     values = np.random.default_rng(13).integers(-16, 16, 64, dtype=np.int32)
-    result = np.frombuffer(
-        _run(b.kernel, values.tobytes(), arch, route), dtype=np.int32
-    )
+    result = np.frombuffer(_run(b.kernel, values.tobytes(), arch), dtype=np.int32)
     np.testing.assert_array_equal(result, (values < 0).astype(np.int32))
 
 
-@pytest.mark.parametrize("route", ["comgr", "hip"])
-def test_barrier_rounds_product_before_fp16(arch, route):
+def test_barrier_rounds_product_before_fp16(arch):
     b = IRBuilder("barrier_fp16")
     p = b.param("p", PtrType(F32, "global"))
     tid = b.thread_id_x()
@@ -148,7 +142,7 @@ def test_barrier_rounds_product_before_fp16(arch, route):
     assert np.all(expected == -375.5)
     assert np.all((a.astype(np.float64) * scale).astype(np.float16) == -375.25)
     result = np.frombuffer(
-        _run(b.kernel, np.concatenate((a, scale)).tobytes(), arch, route),
+        _run(b.kernel, np.concatenate((a, scale)).tobytes(), arch),
         dtype=np.float32,
     )
     np.testing.assert_array_equal(result[:64], expected)

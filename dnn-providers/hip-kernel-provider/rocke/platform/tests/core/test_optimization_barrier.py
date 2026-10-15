@@ -21,7 +21,6 @@ from rocke.core.ir import (
     VectorType,
 )
 from rocke.core.ir_serialize import parse, serialize
-from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
@@ -43,9 +42,6 @@ def test_scalar_barrier_roundtrip(dtype):
         assert llvm == lower_kernel_to_llvm(copy, arch=arch, llvm_flavor="llvm23")
         assert 'asm "", "=v,0"' in llvm
         assert "asm sideeffect" not in llvm
-        hip = lower_kernel_to_hip(copy, arch=arch)
-        assert 'asm ("" : "=v"' in hip
-        assert '"memory"' not in hip
 
 
 @pytest.mark.parametrize(
@@ -54,5 +50,40 @@ def test_scalar_barrier_roundtrip(dtype):
 def test_rejects_non_numeric_scalar(dtype):
     b = IRBuilder("invalid_barrier")
     value = b.param("value", dtype)
-    with pytest.raises(ValueError, match="numeric scalar"):
+    before = serialize(b.kernel)
+    with pytest.raises(ValueError, match="directly lowerable scalar"):
         b.optimization_barrier(value)
+    assert serialize(b.kernel) == before
+
+
+@pytest.mark.parametrize("dtype", ["fp4", "fp6", "bf6", "e8m0", "e5m3", "tf32"])
+def test_logical_types_use_storage_barriers(dtype):
+    from rocke.core.ir import dtype_to_ir_type
+    from rocke.helpers.mma_io import storage_ir_type
+
+    logical = dtype_to_ir_type(dtype)
+    b = IRBuilder("logical_barrier")
+    value = b.param("value", logical)
+    before = serialize(b.kernel)
+    with pytest.raises(ValueError, match="directly lowerable scalar"):
+        b.optimization_barrier(value)
+    assert serialize(b.kernel) == before
+    storage = storage_ir_type(dtype)
+    assert storage == (I32 if dtype == "tf32" else I8)
+    assert b.optimization_barrier(b.param("bits", storage)).type == storage
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+def test_predicate_producer(arch):
+    b = IRBuilder("barrier_predicate")
+    ptr = b.param("p", PtrType(I32, "global"))
+    tid = b.thread_id_x()
+    value = b.global_load(ptr, tid, I32)
+    predicate = b.cmp_lt(value, b.const_i32(0))
+    result = b.optimization_barrier(predicate)
+    b.global_store(ptr, tid, b.zext(result, I32))
+    b.ret()
+    copy = parse(serialize(b.kernel))
+    llvm = lower_kernel_to_llvm(b.kernel, arch=arch, llvm_flavor="llvm23")
+    assert llvm == lower_kernel_to_llvm(copy, arch=arch, llvm_flavor="llvm23")
+    assert 'asm "", "=v,0"' in llvm

@@ -1,16 +1,9 @@
 # gfx1250 scaled GEMM examples
 
-Matrix dtype names normalize through the architecture catalog: `fp8e4m3`,
-`bf8e5m2`, `fp6e2m3`, `fp6e3m2`, and `fp4e2m1`. The short spellings `fp8`,
-`bf8`, `fp6`, `bf6`, and `fp4` remain accepted aliases wherever that matrix
-format is supported. Example argument parsing normalizes aliases before
-checking the family's supported choices. The FP8 and FP6 examples default to
-`both`, which runs their two homogeneous encodings separately.
-
-These matrix names are distinct from scale formats such as `e8m0`. Scales use
-byte storage and packed integer instruction operands; a scale-format name does
-not introduce a scalar IR type or general conversion support. Existing operation
-IDs retain their instruction-format tokens.
+Matrix dtype names normalize through `core/dtypes.py`: `fp8e4m3`, `bf8e5m2`,
+`fp6e2m3`, `fp6e3m2`, and `fp4e2m1`, with short aliases `fp8`, `bf8`,
+`fp6`, `bf6`, and `fp4` for these examples.
+Example argument parsing normalizes aliases before checking supported choices.
 
 Run these modules from an installed rocKE environment, or with the platform's
 `python` directory on `PYTHONPATH`. They require a gfx1250 device, matching
@@ -19,80 +12,102 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 | Example | Matrix inputs | Scale contract |
 | --- | --- | --- |
 | `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
+| `mxfp6_gemm` | Packed FP6 E2M3 or E3M2 on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
+| [`mixed_scaled_gemm`](mixed_scaled_gemm.py) | Different A/B formats from FP8, BF8, FP6, BF6, and FP4 | E8M0 |
+| [`scale_formats_gemm`](scale_formats_gemm.py) | Any A/B pair drawn from FP8/BF8/FP6/BF6/FP4 | E8M0 for non-FP4; E8M0/E4M3/E5M3 for FP4; matching scales for FP4 × FP4 |
 
 ```sh
-python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
-python -m rocke.examples.gfx1250.gemm.mxfp4_gemm --compile-route hip --case all
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp8_gemm
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6 --output-dtype fp16
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp4_gemm --compile-route hip --case all
 ```
 
 Each example constructs a family-specific spec and invokes the shared verifier
 to prepare inputs, pack them, compile once, launch, and compare with an
 independent decoded reference. M and N must be positive multiples of 16; the
-bounded correctness fixtures support K=128 and K=256, with BF16 output.
+bounded correctness fixtures support K=128 and K=256. All three examples accept
+`--output-dtype bf16` (the default) or `--output-dtype fp16`, selecting both output
+storage and reference rounding.
 
 The default `wmma_scale` instruction uses one E8M0 scale per 32 K elements.
 `--matrix-path wmma_scale16` explicitly selects the native 16-element block
 variant. Scale bytes are packed in increasing K-group order. FP8 uses one byte
-per value; [FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
+per value; [FP6 uses four codes per three bytes](FP6.md);
+[FP4 uses two values per byte, low nibble first](FP4_SCALE.md).
 
 `--case all` checks neutral scales, independent A/B scales, varying scales, and
-every scale group. These bounded exact fixtures do not establish arbitrary-input
-rounding, special-value semantics, or performance. The kernel builders and
+every scale group. Native comparisons require exact numerical equality after
+output-type rounding; positive and negative zero compare equal. They do not
+check output zero-sign or signed-zero accumulation semantics. These bounded
+fixtures do not establish arbitrary-input rounding, E8M0 NaN behavior, or
+performance. The kernel builders and
 runtime/packing utilities are shared; each example exposes one input contract.
 
 The generic `block_scaled_gemm_verify` CLI remains available for regression
 testing and the older software-scaled WMMA path. That older path is not the
 default in the focused MX examples.
 
-## FP6 and mixed matrix formats
+`mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
+homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
+or `--dtype both` explicitly. Both operands use the selected format with E8M0
+scales. `mxfp6_gemm` similarly defaults to both homogeneous FP6 encodings;
+use `--dtype fp6` or `--dtype bf6` to select one. Mixed matrix formats are outside these examples.
 
-`mxfp6_gemm --dtype fp6` and `mxfp6_gemm --dtype bf6` select homogeneous
-six-bit inputs. See [FP6.md](FP6.md) for packing. These families have their
-own examples and numerical groups.
+[`mixed_scaled_gemm`](mixed_scaled_gemm.py) defaults to FP8 E4M3 x FP4 E2M1.
+Use `--dtype-a` and `--dtype-b` to select either operand independently; equal
+normalized formats are rejected with guidance to the homogeneous examples.
+All 20 ordered mixed pairs have SCALE and SCALE16 catalog entries. The builder
+uses each operand's atom-selected layout and shared packed-storage helpers.
 
-`mixed_scaled_gemm` selects different A/B formats, with independent packed
-row strides and fragments. Its default is FP8 x FP4; it also accepts FP6/BF6.
-It rejects equal canonical formats and uses E8M0 scales on both operands.
-
-```bash
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp8 --dtype-b fp4
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp6 --dtype-b bf6 --compile-route hip
+```sh
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --case all
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm --dtype-a fp6 --dtype-b fp4 --matrix-path wmma_scale16 --compile-route hip
 ```
 
-The verifier's `mixed` case means combined A/B scale variation; the example's
-matrix choices determine whether the input dtypes are homogeneous or mixed.
+The target-independent aliases in `core/dtypes.py` normalize logical format
+names. Recognition does not imply that a target supports an atom; use its
+catalog to query supported operand formats and shapes. Each example defines
+its accepted matrix and scale formats.
 
-## Independent scale formats
+`e8m0` identifies a scale format carried in bytes and packed integer operands.
+It is not a general scalar IR type or conversion API. Native scaled WMMA uses
+one `wmma_scaled` catalog family. Its operation IDs encode the matrix source
+and accumulator dtype, each source's scale format, and a shared K-group size; the backend
+selects the LLVM intrinsic and packed operand types from that contract.
 
-`scale_formats_gemm` defaults to FP4 x FP4 with E4M3 scales. Choose
-`--scale-dtype-a` and `--scale-dtype-b` explicitly for mixed inputs. E4M3/E5M3
-requires an FP4 operand, and FP4 x FP4 requires matching scale formats.
-See [SCALE_FORMATS.md](SCALE_FORMATS.md) for the supported combinations.
+The native loader uses the atom's `a_scale_layout()` and `b_scale_layout()` for
+lane ownership. Global scale tensors have shapes `[M, K/block_k]` and
+`[K/block_k, N]`, respectively. K32 packs four E8M0 bytes per lane into i32;
+K16 packs eight into i64, first K group in the low byte. Both half-waves carry
+the same scales. Matrix A/B lane maps for these scaled atoms are not yet exposed.
 
-```bash
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm
-ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --dtype-a fp6 --scale-dtype-a e8m0 --scale-dtype-b e5m3
+CPU tests independently check every scale coordinate, multi-tile addresses and
+packed byte order. The opt-in numerical suite exercises both encodings and
+scale group sizes, one-sided/group-isolated inputs, multiple tiles and K steps,
+and HIP/COMGR compilation. These cases bound the validation; dtype recognition
+alone does not establish support for other operand contracts.
+
+The [scale-format example](SCALE_FORMATS.md) defaults to FP4 x FP4 with E4M3
+scales. `--scale-dtype-a` and `--scale-dtype-b` select the input encodings;
+FP8/BF8 and FP6/BF6 operands require E8M0, while FP4 accepts E8M0, E4M3,
+or E5M3. FP4 × FP4 requires matching formats. The shared verifier decodes
+each scale buffer independently.
+
+```sh
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --case all
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --dtype-a fp6 --dtype-b fp4 --scale-dtype-a e8m0 --scale-dtype-b e5m3 --matrix-path wmma_scale16
 ```
 
 ## NVFP4 tensor scaling
 
-`nvfp4_gemm` uses packed FP4 with E4M3 block scales at K=16 and runtime
-FP32 tensor factors. It shares the NVFP4 builder and verifier, retaining the
-explicit FP32 rounding step before output conversion. See [NVFP4.md](NVFP4.md).
+`nvfp4_gemm` consumes packed E2M1 with K=16 E4M3 block scales and runtime
+FP32 tensor factors. It preserves FP32 rounding before BF16/FP16 conversion.
+See [NVFP4.md](NVFP4.md) for the input and launch contracts.
 
-```bash
+```sh
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm --dtype-c fp16 --compile-route hip
 ```
-
-`mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
-homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
-or `--dtype both` explicitly. The names follow the FP6/BF6 convention.
-Both operands use the selected format with E8M0 scales; mixed matrix formats
-have a separate example.
-
-`mxfp6_gemm` runs both `fp6` (E2M3) and `bf6` (E3M2) by default, as
-separate homogeneous cases. Use `--dtype fp6`, `--dtype bf6`, or explicit
-`--dtype both` to select the encodings.

@@ -74,9 +74,9 @@ namespace TensileLite
 
                     for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
                     {
-                        int index = mappingIndices[local_index];
-                        auto slnIter = ctx->solutions->find(index);
-                        if(slnIter == ctx->solutions->end())
+                        int  index    = mappingIndices[local_index];
+                        auto solution = resolveContextSolution(ctx, index);
+                        if(!solution)
                         {
                             iot::setError(
                                 io,
@@ -85,7 +85,10 @@ namespace TensileLite
                         }
                         else
                         {
-                            auto solution = slnIter->second;
+                            // origami_config_list below is built from this
+                            // solution's sizeMapping and must stay index-aligned
+                            // with solution_list, so both are filled here rather
+                            // than deferred.
                             lib.solution_list.emplace_back(index, solution);
 
                             origami::dim3_t origami_mi;
@@ -125,12 +128,31 @@ namespace TensileLite
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
-                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .cache_hints_a             = solution->sizeMapping.cacheHintA(),
+                                .cache_hints_b             = solution->sizeMapping.cacheHintB(),
+                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .stream_k                  = solution->sizeMapping.streamK,
+                                .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
                                 .index                     = local_index,
+                                .grvw_a                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwA),
+                                .grvw_b                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwB),
+                                .gwvw_d                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.gwvwD),
+                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
+                                                              solution->sizeMapping.clusterDim.y,
+                                                              solution->sizeMapping.clusterDim.z},
+                                .backend                   = origami::tensile_params_t{
+                                    .local_split_u        = solution->sizeMapping.LocalSplitU,
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                    .wave_group_m         = solution->sizeMapping.waveGroup[0],
+                                    .wave_group_n         = solution->sizeMapping.waveGroup[1],
+                                    .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
+                                    .source_swap          = solution->sizeMapping.SourceSwap,
+                                },
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);

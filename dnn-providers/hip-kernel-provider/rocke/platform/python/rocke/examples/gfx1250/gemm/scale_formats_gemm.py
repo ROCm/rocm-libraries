@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
-from ....core.arch.target import normalize_dtype
-from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec, _LOWBIT_DTYPES
+from ....core.dtypes import normalize_dtype
+from ....instances.gfx1250.block_scaled_gemm import (
+    BlockScaledGemmSpec,
+    _LOWBIT_DTYPES,
+    is_valid_spec,
+)
 from ._scaled_gemm_example import argument_parser, verify
 
 FORMATS = tuple(sorted(_LOWBIT_DTYPES))
@@ -19,7 +23,7 @@ def make_spec(args) -> BlockScaledGemmSpec:
         K=args.k,
         dtype_a=args.dtype_a,
         dtype_b=args.dtype_b,
-        dtype_c="bf16",
+        dtype_c=args.output_dtype,
         scale_dtype="e8m0",
         scale_dtype_a=args.scale_dtype_a,
         scale_dtype_b=args.scale_dtype_b,
@@ -47,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         spec = make_spec(args)
     except ValueError as exc:
         parser.error(str(exc))
+    ok, reason = is_valid_spec(spec, arch="gfx1250")
+    if not ok:
+        parser.error(reason)
     return verify(spec, args)
 
 

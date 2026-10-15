@@ -18,55 +18,159 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
+from enum import Enum, IntEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .wmma_scale import SCALED_WMMA_OPS
+# Re-export for callers using the original architecture entry point.
+from ..dtypes import normalize_dtype
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
-# Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
-# are normalised through this map so "f16"/"half" and "fp16" all resolve.
-_DTYPE_ALIASES = {
-    "f16": "fp16",
-    "half": "fp16",
-    "fp16": "fp16",
-    "bf16": "bf16",
-    "bfloat16": "bf16",
-    "f32": "fp32",
-    "float": "fp32",
-    "fp32": "fp32",
-    "fp8": "fp8e4m3",
-    "fp8e4m3": "fp8e4m3",
-    "bf8": "bf8e5m2",
-    "bf8e5m2": "bf8e5m2",
-    "fp6": "fp6e2m3",
-    "fp6e2m3": "fp6e2m3",
-    "bf6": "fp6e3m2",
-    "fp6e3m2": "fp6e3m2",
-    "fp4": "fp4e2m1",
-    "fp4e2m1": "fp4e2m1",
-    # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
-    # (signedness is an instruction operand, not the dtype); "i32" is the
-    # integer accumulator. Scalar int spellings pass through for completeness.
-    "iu8": "iu8",
-    "iu4": "iu4",
-    "i8": "i8",
-    "int8": "i8",
-    "i4": "i4",
-    "int4": "i4",
-    "i32": "i32",
-    "int32": "i32",
+# A bounded family declaration, rather than a general catalog templating DSL.
+# Version 1 freezes the shipped axes and historical enumeration order.
+_GFX1250_SCALED_FAMILY = {
+    "generate": "gfx1250_wmma_scaled_v1",
+    "family": "wmma_scaled",
+    "input_dtypes": ["fp8", "bf8", "fp6", "bf6", "fp4"],
+    "scale_dtypes": ["e8m0", "e5m3", "e4m3"],
+    "block_k": [32, 16],
+    "shape": [16, 16, 128],
+    "c": "fp32",
 }
 
 
-def normalize_dtype(name: str) -> str:
-    """Map a dtype spelling to its canonical catalog key."""
-    key = name.strip().lower()
-    return _DTYPE_ALIASES.get(key, key)
+def _gfx1250_scale_combination_valid(a: str, b: str, sa: str, sb: str) -> bool:
+    """Supported matrix/scale combinations, independent of compiler version.
 
+    Mirrors LLVM's isValidWMMAScaleFmtCombination:
+    https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74
+    """
+    a, b = normalize_dtype(a), normalize_dtype(b)
+    return (
+        (a == "fp4e2m1" or sa == "e8m0")
+        and (b == "fp4e2m1" or sb == "e8m0")
+        and (a != "fp4e2m1" or b != "fp4e2m1" or sa == sb)
+    )
+
+
+def _expand_mma_rows(gfx: str, declarations: list[dict]) -> list[dict]:
+    """Expand supported families to ordinary rows; reject duplicate identities."""
+    if not isinstance(declarations, list):
+        raise ValueError(f"MMA declarations for {gfx} must be a list")
+    out = []
+    ids = set()
+    for declaration in declarations:
+        if not isinstance(declaration, dict) or (
+            "generate" not in declaration and "op_id" not in declaration
+        ):
+            raise ValueError(f"invalid MMA declaration for {gfx}: {declaration!r}")
+        if "generate" not in declaration:
+            rows = [declaration]
+        else:
+            # JSON text comparison also rejects bools masquerading as integers.
+            if gfx != "gfx1250" or json.dumps(
+                declaration, sort_keys=True
+            ) != json.dumps(_GFX1250_SCALED_FAMILY, sort_keys=True):
+                raise ValueError(
+                    f"unsupported MMA family declaration for {gfx}: {declaration!r}"
+                )
+            rows = _gfx1250_scaled_rows(declaration)
+        for row in rows:
+            if row["op_id"] in ids:
+                raise ValueError(f"duplicate MMA op_id for {gfx}: {row['op_id']}")
+            ids.add(row["op_id"])
+            out.append(row)
+    return out
+
+
+def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
+    inputs = declaration["input_dtypes"]
+    scales = declaration["scale_dtypes"]
+    blocks = declaration["block_k"]
+    # Original homogeneous E8M0 atoms precede mixed E8M0 and supported FP4
+    # alternative encodings.
+    homogeneous = [
+        (0, 32),
+        (2, 32),
+        (3, 32),
+        (1, 32),
+        (0, 16),
+        (2, 16),
+        (3, 16),
+        (4, 32),
+        (4, 16),
+        (1, 16),
+    ]
+    keys = [(inputs[i], inputs[i], scales[0], scales[0], k) for i, k in homogeneous]
+    keys.extend(
+        (a, b, scales[0], scales[0], k)
+        for k in blocks
+        for a in inputs
+        for b in inputs
+        if a != b
+    )
+    for k in blocks:
+        keys.extend(
+            (a, inputs[4], scales[0], sb, k) for a in inputs[:4] for sb in scales[1:]
+        )
+        keys.extend(
+            (inputs[4], b, sa, scales[0], k) for b in inputs[:4] for sa in scales[1:]
+        )
+        keys.extend((inputs[4], inputs[4], scale, scale, k) for scale in scales[1:])
+    rows = []
+    # Preserve the supported atoms' historical order and reject unsupported pairs.
+    for a, b, sa, sb, block_k in dict.fromkeys(keys):
+        if not _gfx1250_scale_combination_valid(a, b, sa, sb):
+            continue
+        m, n, k = declaration["shape"]
+        rows.append(
+            {
+                "family": declaration["family"],
+                "a": a,
+                "b": b,
+                "c": declaration["c"],
+                "a_scale_dtype": sa,
+                "b_scale_dtype": sb,
+                "scale_block_k": block_k,
+                "m": m,
+                "n": n,
+                "k": k,
+                "op_id": f"wmma_gfx1250_f32_{m}x{n}x{k}_{a}_{b}_scale_{sa}_{sb}_k{block_k}",
+            }
+        )
+    return rows
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> Dict[str, dict]:
+    # Pin UTF-8 for embedded interpreters whose default codec is ASCII.
+    with open(_DATA_FILE, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    for gfx, spec in doc["arches"].items():
+        spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
+    return doc["arches"]
+
+
+# LLVM defines generic-processor membership explicitly; it is not a naming
+# wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
+# https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+_GFX11_GENERIC_PROCESSORS = frozenset(
+    {
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1154",
+    }
+)
 
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
@@ -101,7 +205,9 @@ class LayoutMap:
     role
         ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
         operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
-        ``(k, col)``).
+        ``(k, col)``), ``"a_scale"`` (``(row, K-group)``), or
+        ``"b_scale"`` (``(K-group, col)``). Scale slots count logical elements,
+        independently of the backend register carrier.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
         length: e.g. 4 for an MFMA 16x16x16 accumulator, 8 for the WMMA
@@ -137,13 +243,56 @@ class LayoutMap:
         return self.fn(builder, lane, slot)
 
 
+class MmaScaleDType(str, Enum):
+    """Scale value formats, independent of matrix dtypes and target support.
+
+    E5M3 is an unsigned scale format, distinct from the signed E5M2 matrix
+    format. Only E4M3 shares the accepted matrix spelling ``fp8e4m3``.
+    """
+
+    E8M0 = "e8m0"
+    E4M3 = "e4m3"
+    E5M3 = "e5m3"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> MmaScaleDType | None:
+        if value == "fp8e4m3":
+            return cls.E4M3
+        return None
+
+
+class MmaScaleBlockK(IntEnum):
+    """Number of K elements sharing one scale, common to both matrix inputs."""
+
+    K16 = 16
+    K32 = 32
+
+
+def _normalize_mma_scales(
+    a_dtype: str | None, b_dtype: str | None, block_k: int | None
+) -> tuple[MmaScaleDType | None, MmaScaleDType | None, MmaScaleBlockK | None]:
+    """Validate the complete scale contract, independently of backend support."""
+    if a_dtype is None and b_dtype is None and block_k is None:
+        return None, None, None
+    try:
+        a, b = MmaScaleDType(a_dtype), MmaScaleDType(b_dtype)
+    except ValueError:
+        raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3") from None
+    if type(block_k) not in (int, MmaScaleBlockK) or block_k not in (16, 32):
+        raise ValueError("MMA scale_block_k must be an integer equal to 16 or 32")
+    return a, b, MmaScaleBlockK(block_k)
+
+
 @dataclass(frozen=True)
 class MmaOp:
     """A single supported matrix-multiply-accumulate atom on a target.
 
-    ``op_id`` is the opaque handle the backend consumes; today it matches the
-    ISA-named ``IRBuilder`` method (e.g. ``mfma_f32_16x16x16_f16``). It is **not**
-    LLVM intrinsic text — the backend maps ``op_id`` to an intrinsic.
+    ``op_id`` identifies a concrete operand contract. Scaled WMMA IDs extend
+    the target/accumulator/shape/input convention with A/B scale types and a
+    shared K-group size. The backend reads metadata, not the ID spelling.
 
     The ``*_frag_len`` fields and the layout-map accessors describe the
     *physical* register fragmentation of the atom: how many values of each
@@ -155,7 +304,7 @@ class MmaOp:
     the accessor until a map is added.
     """
 
-    family: str  # "mma" | "wmma"
+    family: str  # "mma" | "wmma" | "wmma_scaled"
     a_dtype: str
     b_dtype: str
     c_dtype: str
@@ -174,6 +323,41 @@ class MmaOp:
     _b_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
     _c_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
 
+    # All absent means unscaled. The K-group size applies to both inputs;
+    # scale types describe values, not the backend's packed register carrier.
+    a_scale_dtype: MmaScaleDType | str | None = None
+    b_scale_dtype: MmaScaleDType | str | None = None
+    scale_block_k: MmaScaleBlockK | None = None
+
+    a_scale_frag_len: int = 0
+    b_scale_frag_len: int = 0
+    _a_scale_layout: Optional[LayoutMap] = field(
+        default=None, repr=False, compare=False
+    )
+    _b_scale_layout: Optional[LayoutMap] = field(
+        default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        a, b, block_k = _normalize_mma_scales(
+            self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
+        )
+        object.__setattr__(self, "a_scale_dtype", a)
+        object.__setattr__(self, "b_scale_dtype", b)
+        object.__setattr__(self, "scale_block_k", block_k)
+        for role in ("a_scale", "b_scale"):
+            count = getattr(self, f"{role}_frag_len")
+            layout = getattr(self, f"_{role}_layout")
+            if type(count) is not int or count < 0 or (block_k is None and count):
+                raise ValueError(f"invalid {role} fragment length: {count!r}")
+            if layout is not None and (
+                not count
+                or layout.role != role
+                or layout.frag_len != count
+                or layout.wave_size != self.wave_size
+            ):
+                raise ValueError(f"{role} layout does not match its fragment metadata")
+
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
@@ -190,6 +374,14 @@ class MmaOp:
     def c_layout(self) -> LayoutMap:
         """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
         return self._require_layout(self._c_layout, "c")
+
+    def a_scale_layout(self) -> LayoutMap:
+        """A scale ``(row, K-group)`` coordinates for each logical scale slot."""
+        return self._require_layout(self._a_scale_layout, "a_scale")
+
+    def b_scale_layout(self) -> LayoutMap:
+        """B scale ``(K-group, col)`` coordinates for each logical scale slot."""
+        return self._require_layout(self._b_scale_layout, "b_scale")
 
     # Convenience aliases for the accumulator (the most-used map).
     def acc_layout(self) -> LayoutMap:
@@ -278,6 +470,38 @@ def _mfma_b_16x16(builder, lane, slot):
     k_blk = builder.div(lane, c16)
     k = builder.add(builder.mul(k_blk, builder.const_i32(4)), builder.const_i32(slot))
     return k, n_in_atom
+
+
+def _mfma_a_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
+
+
+def _mfma_a_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
 
 
 def _mfma_a_16x16x4_f32(builder, lane, slot):
@@ -576,10 +800,20 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     return k, col
 
 
+def _wmma_gfx1250_a_scale(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(16))
+    return row, builder.const_i32(slot)
+
+
+def _wmma_gfx1250_b_scale(builder, lane, slot):
+    col = builder.mod(lane, builder.const_i32(16))
+    return builder.const_i32(slot), col
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
-    (optional) lane/slot coordinate functions for A / B / accumulator."""
+    (optional) lane/slot coordinate functions for matrices and scales."""
 
     a_frag_len: int
     b_frag_len: int
@@ -588,6 +822,10 @@ class _FragInfo:
     a_fn: _LaneCoordFn = None
     b_fn: _LaneCoordFn = None
     c_fn: _LaneCoordFn = None
+    a_scale_frag_len: int = 0
+    b_scale_frag_len: int = 0
+    a_scale_fn: _LaneCoordFn = None
+    b_scale_fn: _LaneCoordFn = None
 
 
 # op_id -> physical fragment metadata. Frag lengths are populated for every
@@ -595,6 +833,12 @@ class _FragInfo:
 # layout-map functions are populated for the atoms whose lane math is verified.
 # Adding a new atom is one row here.
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
+    "mfma_f32_32x32x4_xf32": _FragInfo(
+        2, 2, 16, 64, _mfma_a_32x32x4_xf32, _mfma_b_32x32x4_xf32, _mfma_acc_32x32
+    ),
+    "mfma_f32_16x16x8_xf32": _FragInfo(
+        2, 2, 4, 64, _mfma_a_16x16x8_xf32, _mfma_b_16x16x8_xf32, _mfma_acc_16x16
+    ),
     # --- MFMA fp32 (wave64) -----------------------------------------------
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
@@ -757,46 +1001,6 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
-    # Native gfx1250 scaled WMMA. FP8 uses 64 bytes per lane; FP4 uses
-    # 32 packed bytes padded with eight zero words to the same <16 x i32> ABI.
-    # SCALE packs four K=32 E8M0 bytes in i32 and SCALE16 packs eight K=16
-    # bytes in i64. Both share the gfx12 column-distributed accumulator.
-    "wmma_scale_f32_16x16x128_fp8_fp8": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
-    "wmma_scale_f32_16x16x128_fp4_fp4": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
-    "wmma_scale16_f32_16x16x128_fp8_fp8": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
-    "wmma_scale16_f32_16x16x128_fp4_fp4": _FragInfo(
-        16,
-        16,
-        8,
-        32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
-    ),
     "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
         16,
         16,
@@ -809,12 +1013,83 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 }
 
 
-# All native matrix pairs share the padded ABI and accumulator layout.
+# Scaled operands share the padded <16 x i32> ABI, byte-carrier scales,
+# and gfx12 accumulator map. Derive every ID from the expanded catalog.
+for _row in _load_specs()["gfx1250"]["mma"]:
+    if _row["family"] == "wmma_scaled":
+        _scale_frag_len = 128 // _row["scale_block_k"]
+        _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
+            16,
+            16,
+            8,
+            32,
+            None,
+            None,
+            _wmma_gfx12_acc_16x16,
+            a_scale_frag_len=_scale_frag_len,
+            b_scale_frag_len=_scale_frag_len,
+            a_scale_fn=_wmma_gfx1250_a_scale,
+            b_scale_fn=_wmma_gfx1250_b_scale,
+        )
+del _row, _scale_frag_len
+
+
+def _mfma_scaled_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(32)),
+        builder.const_i32(slot),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_a(builder, lane, slot):
+    row = builder.mod(lane, builder.const_i32(32))
+    k = builder.add(
+        builder.mul(builder.div(lane, builder.const_i32(32)), builder.const_i32(16)),
+        builder.const_i32((slot // 16) * 32 + slot % 16),
+    )
+    return row, k
+
+
+def _mfma_scaled_f8_b(builder, lane, slot):
+    row, k = _mfma_scaled_f8_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_b(builder, lane, slot):
+    row, k = _mfma_scaled_a(builder, lane, slot)
+    return k, row
+
+
+def _mfma_scaled_scale_a(builder, lane, slot):
+    return builder.mod(lane, builder.const_i32(32)), builder.div(
+        lane, builder.const_i32(32)
+    )
+
+
+def _mfma_scaled_scale_b(builder, lane, slot):
+    row, k = _mfma_scaled_scale_a(builder, lane, slot)
+    return k, row
+
 
 _MMA_FRAGMENT_INFO.update(
     {
-        op_id: _MMA_FRAGMENT_INFO["wmma_scale_f32_16x16x128_fp8_fp8"]
-        for op_id in SCALED_WMMA_OPS
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+            32,
+            32,
+            16,
+            64,
+            _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
+            _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
+            _mfma_acc_32x32,
+            1,
+            1,
+            _mfma_scaled_scale_a,
+            _mfma_scaled_scale_b,
+        )
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
     }
 )
 
@@ -835,6 +1110,17 @@ class MemoryCapabilities:
     has_ds_read_tr: bool
     has_tdm: bool
     buffer_load_max_dwords: int
+    # Widest per-lane DRAM->LDS DMA the ``buffer_load_lds`` family can do, in
+    # dwords (0 where the arch has no such instruction). Distinct from
+    # ``buffer_load_max_dwords``, which is the *register* vector buffer-load
+    # width: CDNA3 loads a full dwordx4 into VGPRs but only a dword into LDS.
+    async_lds_max_dwords: int
+    # gfx1250 feature flags. An arch sets one only after its feature passes a
+    # functional run on a device; the ops themselves are gated separately.
+    has_scalar_data_prefetch: bool = False
+    has_global_prefetch: bool = False
+    has_cluster_launch: bool = False
+    has_multicast_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -846,7 +1132,13 @@ class ResourceLimits:
 
 
 class MmaCatalog:
-    """The arch-selected set of MMA atoms, with enumeration + best-K selection."""
+    """The arch-selected MMA atoms, with optional exact A/B scale filtering.
+
+    ``scales=(a_dtype, b_dtype, block_k)`` selects the complete scale contract.
+    Scale dtypes accept ``MmaScaleDType`` members or their string spellings.
+    ``None`` leaves scales unconstrained; ``(None, None, None)`` selects unscaled
+    atoms. Exact selection and largest-K ties must be unambiguous.
+    """
 
     def __init__(self, ops: List[MmaOp]) -> None:
         self._ops = tuple(ops)
@@ -862,9 +1154,14 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: Optional[int] = None,
         n: Optional[int] = None,
     ) -> List[MmaOp]:
+        if scales is not None:
+            if len(scales) != 3:
+                raise ValueError("scales must contain exactly 3 entries")
+            scales = _normalize_mma_scales(*scales)
         a, b, c = (
             normalize_dtype(a_dtype),
             normalize_dtype(b_dtype),
@@ -875,6 +1172,11 @@ class MmaCatalog:
             if op.family != family:
                 continue
             if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
+                continue
+            if (
+                scales is not None
+                and (op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k) != scales
+            ):
                 continue
             if m is not None and op.m != m:
                 continue
@@ -890,6 +1192,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
@@ -901,6 +1204,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                scales=scales,
                 m=m,
                 n=n,
             )
@@ -913,6 +1217,7 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k_max: Optional[int] = None,
@@ -924,6 +1229,7 @@ class MmaCatalog:
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                scales=scales,
                 m=m,
                 n=n,
             )
@@ -931,7 +1237,14 @@ class MmaCatalog:
         ]
         if not cands:
             return None
-        return max(cands, key=lambda op: op.k)
+        largest_k = max(op.k for op in cands)
+        return self._unique([op for op in cands if op.k == largest_k])
+
+    @staticmethod
+    def _unique(ops: list[MmaOp]) -> MmaOp | None:
+        if len(ops) > 1:
+            raise ValueError("ambiguous MMA query; specify the full operand contract")
+        return ops[0] if ops else None
 
     def by_op_id(self, op_id: str) -> Optional[MmaOp]:
         """Look up an atom by its ``op_id`` handle (the backend's MMA key)."""
@@ -947,21 +1260,21 @@ class MmaCatalog:
         a_dtype: str,
         b_dtype: str,
         c_dtype: str,
+        scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
         k: int,
     ) -> Optional[MmaOp]:
-        for op in self.enumerate(
+        candidates = self.enumerate(
             family=family,
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
+            scales=scales,
             m=m,
             n=n,
-        ):
-            if op.k == k:
-                return op
-        return None
+        )
+        return self._unique([op for op in candidates if op.k == k])
 
 
 @dataclass(frozen=True)
@@ -1008,8 +1321,27 @@ class ArchTarget:
         return self.memory.buffer_load_max_dwords
 
     @property
+    def async_lds_max_dwords(self) -> int:
+        """Widest per-lane DRAM->LDS DMA this arch can do, in dwords (0 = none).
+
+        Every ``buffer_load_lds`` emitter must clamp to this. The backend does
+        not diagnose an over-wide one -- it aborts the whole process.
+        """
+        return self.memory.async_lds_max_dwords
+
+    @property
     def max_threads_per_block(self) -> int:
         return self.limits.max_threads_per_block
+
+    @property
+    def has_dpp_row_xmask(self) -> bool:
+        """Whether DPP has ``row_xmask`` (an XOR with any mask 1..15 inside a
+        16-lane row). It is a gfx10+ encoding: gfx11, gfx12 and gfx1250 have
+        it; the gfx9 CDNA targets (``gfx9_mfma``, ``gfx950``) do not. An
+        allow-list, so a new family gets the base-DPP encodings (valid on
+        every target) until someone adds it here. Mirrored by
+        ``rocke_arch_has_dpp_row_xmask`` in the C++ engine."""
+        return self.target_family in ("gfx11_rdna", "gfx12_rdna", "gfx12_cdna")
 
     @staticmethod
     def from_gfx(gfx: str) -> "ArchTarget":
@@ -1019,15 +1351,6 @@ class ArchTarget:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
-
-
-@lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
-    # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
-    # arch_specs.json contains non-ASCII bytes.
-    with open(_DATA_FILE, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    return doc["arches"]
 
 
 @lru_cache(maxsize=1)
@@ -1069,6 +1392,22 @@ def _op_id_c_dtype() -> Dict[str, str]:
     return out
 
 
+@lru_cache(maxsize=1)
+def _op_id_family() -> Dict[str, str]:
+    """Resolve operation families without selecting a target or parsing IDs."""
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for op in row["mma"]:
+            op_id, family = op["op_id"], op["family"]
+            previous = out.setdefault(op_id, family)
+            if previous != family:
+                raise ValueError(
+                    f"arch SSOT drift: op_id {op_id!r} has inconsistent family "
+                    f"across arches ({previous!r} vs {family!r})"
+                )
+    return out
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1096,6 +1435,13 @@ def _build_mma_op(o: dict) -> MmaOp:
         _a_layout=_mk("a", info.a_frag_len, info.a_fn),
         _b_layout=_mk("b", info.b_frag_len, info.b_fn),
         _c_layout=_mk("c", info.c_frag_len, info.c_fn),
+        a_scale_dtype=o.get("a_scale_dtype"),
+        b_scale_dtype=o.get("b_scale_dtype"),
+        scale_block_k=o.get("scale_block_k"),
+        a_scale_frag_len=info.a_scale_frag_len,
+        b_scale_frag_len=info.b_scale_frag_len,
+        _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
+        _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
     )
 
 
@@ -1127,6 +1473,11 @@ def _build_target(gfx: str) -> ArchTarget:
             has_ds_read_tr=mem["has_ds_read_tr"],
             has_tdm=mem.get("has_tdm", False),
             buffer_load_max_dwords=mem["buffer_load_max_dwords"],
+            async_lds_max_dwords=mem["async_lds_max_dwords"],
+            has_scalar_data_prefetch=mem.get("has_scalar_data_prefetch", False),
+            has_global_prefetch=mem.get("has_global_prefetch", False),
+            has_cluster_launch=mem.get("has_cluster_launch", False),
+            has_multicast_load=mem.get("has_multicast_load", False),
         ),
         limits=ResourceLimits(
             max_threads_per_block=lim["max_threads_per_block"],
@@ -1153,9 +1504,102 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def target_id_from_isa(isa: str) -> str:
+    """Extract the target ID from a COMGR ISA name.
+
+    ``compile_kernel(..., isa=...)`` passes its ``isa`` argument here. That
+    value may come from an example's ``--isa`` option, a fixed string in a
+    script, or the compile helper's ``gfx950`` default. See the input paths
+    documented in :mod:`rocke.helpers.compile`.
+
+    For ``amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-``, this returns
+    ``gfx942:sramecc+:xnack-``, keeping any profile or feature suffix.
+    It also accepts a target ID without the ISA prefix.
+
+    The result starts at the last ``gfx`` in the input. If there is no
+    ``gfx``, the input is returned unchanged. This does not validate the name.
+    """
+
+    start = isa.rfind("gfx")
+    return isa[start:] if start >= 0 else isa
+
+
+def _processor_from_target_id(target_id: str) -> str:
+    """Extract the processor token before any profile or feature suffix."""
+
+    target_without_features = target_id.split(":", 1)[0]
+    arches = known_arches()
+    if target_without_features in arches:
+        return target_without_features
+    for arch in sorted(arches, key=len, reverse=True):
+        if target_without_features.startswith(f"{arch}-"):
+            return arch
+    for processor in _GFX11_GENERIC_PROCESSORS:
+        if target_without_features == processor or target_without_features.startswith(
+            f"{processor}-"
+        ):
+            return processor
+    match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
+    return match.group(1) if match else target_without_features
+
+
+def base_arch_from_target_id(target_id: str) -> str:
+    """Derive the architecture name used for rocKE catalog lookup and lowering.
+
+    Removes features after ``:`` and profile suffixes such as ``-strict``:
+    ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
+    ``gfx942``. Names already in :func:`known_arches`, including
+    ``gfx11-generic``, are preserved. A concrete processor in LLVM's documented
+    ``gfx11-generic`` compatibility domain uses that generic rocKE catalog row
+    unless rocKE has a more-specific row; exact rows therefore take precedence.
+
+    Any other unknown name is reduced to its leading ``gfx`` token when
+    possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
+    a matching catalog entry.
+    """
+
+    target_without_features = target_id.split(":", 1)[0]
+    processor = _processor_from_target_id(target_id)
+    if processor in known_arches():
+        return processor
+    if processor in _GFX11_GENERIC_PROCESSORS and (
+        target_without_features == processor
+        or target_without_features.startswith(f"{processor}-")
+    ):
+        return "gfx11-generic"
+    return processor
+
+
+def compiler_target_from_target_id(target_id: str) -> str:
+    """Derive the target name that the compile helpers pass to COMGR or hipcc.
+
+    Removes profile suffixes such as ``-strict`` from the processor token, but
+    keeps features after ``:``. Catalog selection remains independent, so a
+    concrete processor may compile for itself while lowering through a generic
+    rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
+    while ``gfx942:sramecc+:xnack-`` stays unchanged.
+
+    This only converts the string. COMGR or hipcc checks whether the target
+    and its features are supported when compilation runs.
+    """
+
+    target_without_features, separator, features = target_id.partition(":")
+    processor = _processor_from_target_id(target_id)
+    if target_without_features.startswith(f"{processor}-"):
+        target_without_features = processor
+    if separator:
+        return f"{target_without_features}:{features}"
+    return target_without_features
+
+
 def arch_from_isa(isa: str) -> str:
-    """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
-    return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+    """Extract a target ID from a COMGR ISA name, then derive its base architecture.
+
+    Combines :func:`target_id_from_isa` and :func:`base_arch_from_target_id`.
+    For example, ``amdgcn-amd-amdhsa--gfx942:xnack-`` becomes ``gfx942``.
+    """
+
+    return base_arch_from_target_id(target_id_from_isa(isa))
 
 
 def validate_arch(arch: Optional[str]) -> None:

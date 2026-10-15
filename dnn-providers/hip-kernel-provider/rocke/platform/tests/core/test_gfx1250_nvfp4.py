@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rocke.core.ir import F32, I32, I64, IRBuilder
+from rocke.core.arch import ArchTarget
+from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.nvfp4_gemm_verify import (
@@ -123,21 +124,44 @@ def test_tensor_scale_requires_native_path():
     "sa,sb", [("e4m3", "e8m0"), ("e5m3", "e4m3"), ("e5m2", "e5m2")]
 )
 def test_invalid_atom_scale_combination(sa, sb):
-    b = IRBuilder("invalid")
-    a = b.zero_vec(I32, 16)
-    c = b.zero_vec(F32, 8)
-    scale = b.const_i64(0)
+    spec = replace(
+        NvFp4GemmSpec("invalid", 16, 16, 128).block_spec(),
+        scale_dtype_a=sa,
+        scale_dtype_b=sb,
+    )
+    assert not is_valid_block_spec(spec)[0]
     with pytest.raises(ValueError):
-        b.mma(
-            "wmma_scale16_f32_16x16x128_fp4_fp4",
-            a,
-            a,
-            c,
-            scale,
-            scale,
-            scale_dtype_a=sa,
-            scale_dtype_b=sb,
-        )
+        build_block_scaled_gemm(spec)
+
+
+def test_nvfp4_uses_canonical_scale_contract():
+    spec = NvFp4GemmSpec("catalog", 16, 16, 128).block_spec()
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=spec.dtype_a,
+        b_dtype=spec.dtype_b,
+        c_dtype=spec.dtype_acc,
+        m=16,
+        n=16,
+        k=128,
+        scales=(*spec.resolved_scale_dtypes(), spec.block_k),
+    )
+    assert atom.op_id == "wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e4m3_e4m3_k16"
+    assert gfx1250_scaled_wmma(atom.op_id).scale_formats == (2, 2)
+    assert atom.a_scale_frag_len == atom.b_scale_frag_len == 8
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16", "f16"])
+def test_tensor_scale_has_distinct_signature_and_name(dtype):
+    spec = NvFp4GemmSpec("identity", 16, 16, 128, dtype).block_spec()
+    plain = replace(spec, tensor_scale=False)
+    assert spec.kernel_name() != plain.kernel_name()
+    from rocke.instances.gfx1250.block_scaled_gemm import block_scaled_gemm_signature
+
+    assert block_scaled_gemm_signature(spec)[:-2] == block_scaled_gemm_signature(plain)
+    assert NvFp4GemmSpec("identity", 16, 16, 128, "f16").kernel_name() == (
+        NvFp4GemmSpec("identity", 16, 16, 128, "fp16").kernel_name()
+    )
 
 
 def test_e4m3_scale_decoding_against_numeric_dtype():
@@ -219,3 +243,45 @@ def test_default_fp4_api_keeps_kernel_identity():
     ) == lower_kernel_to_llvm(
         build_block_scaled_gemm(explicit), arch="gfx1250", llvm_flavor="llvm23"
     )
+
+
+@pytest.mark.parametrize("tensor_scales", [None, (1.3, 0.7)])
+def test_launcher_tensor_factor_argument_bytes(tensor_scales):
+    import ctypes
+    import struct
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    class Runtime:
+        def __init__(self):
+            self.pointers = []
+            self.freed = []
+
+        def alloc(self, size):
+            pointer = 4096 * (len(self.pointers) + 1)
+            self.pointers.append(pointer)
+            return pointer
+
+        def memcpy_h2d(self, *args):
+            pass
+
+        def launch(self, fn, grid, block, args):
+            self.args = args
+
+        def sync(self):
+            pass
+
+        def memcpy_d2h(self, destination, pointer, size):
+            ctypes.memset(destination, 0, size)
+
+        def free(self, pointer):
+            self.freed.append(pointer)
+
+    spec = NvFp4GemmSpec("launch", 16, 16, 128).block_spec()
+    inputs, _ = make_case_inputs(NvFp4GemmSpec("launch", 16, 16, 128), "mixed")
+    runtime = Runtime()
+    _launch(runtime, None, spec, inputs, tensor_scales=tensor_scales)
+    expected = struct.pack("<QQQQQiii", *runtime.pointers, spec.M, spec.N, spec.K)
+    if tensor_scales is not None:
+        expected += struct.pack("<ff", *tensor_scales)
+    assert runtime.args == expected
+    assert runtime.freed == runtime.pointers

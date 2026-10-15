@@ -19,6 +19,16 @@ from rocke.core.ir import (
 
 from _emit_common import run_emit
 
+ARCHES = (
+    "gfx1250",
+    "gfx950",
+    "gfx90a",
+    "gfx942",
+    "gfx1151",
+    "gfx1201",
+    "gfx11-generic",
+)
+
 
 def build_optimization_barriers(b: IRBuilder) -> None:
     tid = b.thread_id_x()
@@ -31,9 +41,9 @@ def build_optimization_barriers(b: IRBuilder) -> None:
 
 
 def _spec(idx):
-    if idx not in (0, 1):
+    if not 0 <= idx < len(ARCHES):
         raise SystemExit(f"unknown config index {idx}")
-    return None, ("gfx1250", "gfx950")[idx]
+    return None, ARCHES[idx]
 
 
 def _build(spec, *, arch):
@@ -43,5 +53,9 @@ def _build(spec, *, arch):
     return b.kernel
 
 
+def main() -> int:
+    return run_emit(_spec, _build)
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_emit(_spec, _build))
+    raise SystemExit(main())

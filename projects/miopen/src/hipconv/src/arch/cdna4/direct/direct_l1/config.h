@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv::cdna4::direct_l1
 {
@@ -61,6 +61,12 @@ struct Config
     // When false the loop needs C64 >= 2. A separate config so the C64 >= 2 configs
     // carry no single-C branch.
     bool single_c = false;
+
+    // Element width the tile is sized for: 2 for fp16/bf16, 4 for tf32.
+    //
+    // A tile is sized for exactly one width (tf32's LDS tile holds two bf16 planes, so
+    // it is twice a 16-bit one); is_valid_config rejects a mismatched input type.
+    int elem_bytes = 2;
 
     // When true, address global memory with a per-tile row-origin fold (large tensors).
     //

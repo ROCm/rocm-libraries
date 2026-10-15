@@ -21,7 +21,7 @@ encoders emit) fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
-This module imports only from ``core/arch`` at module load; the shared LLVM
+This module imports from ``core/arch`` at module load; the shared LLVM
 constants are pulled from ``core/lower_llvm`` lazily inside methods to avoid an
 import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 """
@@ -32,7 +32,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
-from ..arch.wmma_scale import scale_formats
+from .wmma_scale import ScaledWmmaLLVM
 
 
 class ISABackend:
@@ -136,6 +136,11 @@ class ISABackend:
         from ..ir import Op
 
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -362,6 +367,11 @@ class Gfx11RdnaBackend(ISABackend):
         from ..ir import Op
 
         op_id = op.attrs["op_id"]
+        from ..arch.mfma_scale import gfx950_scaled_mfma
+
+        if gfx950_scaled_mfma(op_id) is not None:
+            lowerer._emit_gfx950_scaled_mfma(op)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -613,7 +623,7 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         )
 
     def _emit_wmma_scale(self, lowerer, op) -> None:
-        """Emit the ROCm 7.13+ gfx1250 SCALE/SCALE16 FP8/FP4 call."""
+        """Emit the gfx1250 SCALE/SCALE16 intrinsic using the resolved operand contract."""
         if lowerer._flavor != "llvm23":
             raise NotImplementedError(
                 f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
@@ -623,18 +633,12 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
-        mode = "scale16" if spec.scale16 else "scale"
-        # Declaration keys are shared across matrix dtypes: the ABI is identical.
-        decl_key = f"wmma.{mode}.gfx1250.f32.16x16x128.fp8.fp8"
-        intrinsic = f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
-        scale_ty = spec.scales.llvm_type
-        fmt_a, fmt_b = spec.matrix_format, spec.matrix_format_b
-        sa, sb = scale_formats(
-            fmt_a,
-            fmt_b,
-            op.attrs.get("scale_dtype_a", "e8m0"),
-            op.attrs.get("scale_dtype_b", "e8m0"),
-        )
+        # Declarations describe physical signatures, independently of matrix encodings.
+        signature = ScaledWmmaLLVM(spec)
+        decl_key = signature.declaration_key
+        intrinsic = signature.intrinsic
+        scale_ty = signature.scale_type
+        fmt0, fmt1 = spec.matrix_formats
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
@@ -644,11 +648,11 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt_a}, <16 x i32> {lowerer._operand(a)}, "
-            f"i32 {fmt_b}, <16 x i32> {lowerer._operand(b)}, "
+            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 {sa}, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 {sb}, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

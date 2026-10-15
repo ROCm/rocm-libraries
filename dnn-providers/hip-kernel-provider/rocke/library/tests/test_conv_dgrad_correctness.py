@@ -8,6 +8,7 @@ against a float32 torch reference (``torch.nn.grad.conv2d_input``).  Covers:
   - stride=1 (direct-store epilogue, no atomics)
   - stride=2 (tilde-decomposition, atomic epilogue)
   - split_k > 1 (atomic epilogue)
+  - pointwise 1x1/stride1/pad0 (flat-offset fast path, no tilde decomposition)
   - bf16 and fp32 data types
   - gfx1151 / gfx1201 via WMMA candidates
   - gfx1250 via WMMA wavelet pipeline (stride=1 mem + stride>1 / split_k wavelet)
@@ -212,6 +213,55 @@ class TestConvDgradCorrectness(unittest.TestCase):
             label="fp32 stride=1",
         )
 
+    # ---- pointwise 1x1 (flat-offset fast path) -------------------------------
+
+    def test_fp16_pointwise_1x1(self):
+        """fp16 dgrad, 1x1/stride1/pad0 ungrouped — the flat-offset fast path.
+
+        dy_descriptor/w_descriptor take a separate branch when
+        ``p.is_pointwise and not grouped``: the tilde decomposition is skipped
+        and the offsets collapse to ``m_sub*K + k_sub`` and ``k_sub*C + c_val``.
+        The emitter parity config only byte-compares the Python and C++
+        emitters, so a shared wrong offset would pass there; this is the
+        reference-based check, and the offset arithmetic is what it pins down.
+
+        N*Ho*Wo == 98 and gemm_k == K == 48 are each short of the widest
+        candidate tile, so the last M and K tiles are partial and the tail lanes
+        do take the branch.  What that deliberately does NOT buy is coverage of
+        the branch's validity predicate: on a pointwise shape the offset is a
+        flat index, so an out-of-range m_sub lands past the end of dY and an
+        out-of-range k_sub lands past the end of W, and the descriptor's OOB
+        clamp (see the dg_K_padded note in conv_implicit_gemm_dgrad) has already
+        zeroed those lanes.  Deleting either clause leaves this test green.  Do
+        not widen the dims hoping to change that — the redundancy is structural,
+        not a property of these particular numbers.
+        """
+        self._verify(
+            "--dtype",
+            "fp16",
+            "--N",
+            "2",
+            "--Hi",
+            "7",
+            "--Wi",
+            "7",
+            "--C",
+            "64",
+            "--K",
+            "48",
+            "--Y",
+            "1",
+            "--X",
+            "1",
+            "--pH",
+            "0",
+            "--pW",
+            "0",
+            "--split-k",
+            "1",
+            label="fp16 pointwise 1x1",
+        )
+
     # ---- stride=2 (tilde decomposition, atomic epilogue) ---------------------
 
     def test_fp16_stride2(self):
@@ -284,6 +334,47 @@ class TestConvDgradCorrectness(unittest.TestCase):
             "--split-k",
             "1",
             label="bf16 stride=2",
+        )
+
+    def test_bf16_patch_embedding_stride16(self):
+        """bf16 dgrad of a 16x16 / stride-16 patch embedding.
+
+        Its tilde decomposition has 16*16 = 256 sub-GEMMs, more than the 64 a
+        kernel used to dispatch over: the CTA's search over the records runs
+        as many steps as their count needs.
+        """
+        if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
+            self.skipTest(
+                f"stride>1 dgrad requires atomic-add or wavelet pipeline; running on {ARCH}"
+            )
+        self._verify(
+            "--dtype",
+            "bf16",
+            "--N",
+            "2",
+            "--Hi",
+            "32",
+            "--Wi",
+            "32",
+            "--C",
+            "3",
+            "--K",
+            "32",
+            "--Y",
+            "16",
+            "--X",
+            "16",
+            "--pH",
+            "0",
+            "--pW",
+            "0",
+            "--sH",
+            "16",
+            "--sW",
+            "16",
+            "--split-k",
+            "1",
+            label="bf16 patch 16x16 stride=16",
         )
 
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
@@ -534,11 +625,11 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
     def _lower_gfx1250_kouter(self, dtype: str) -> str:
         """Lower a K-outer (transpose-read) gfx1250 dgrad kernel, CPU-only."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             build_implicit_gemm_conv_dgrad,
             is_valid_dgrad_spec,
@@ -579,11 +670,11 @@ class TestConvDgradGfx1250Emit(unittest.TestCase):
         """
         import dataclasses
 
-        from rocke.instances.common._conv_implicit_gemm_common import (
+        from kernels.common._conv_implicit_gemm_common import (
             ConvDataSpec,
             ConvProblem,
         )
-        from rocke.instances.common.conv_implicit_gemm_dgrad import (
+        from kernels.common.conv_implicit_gemm_dgrad import (
             DgradConvSpec,
             is_valid_dgrad_spec,
         )
@@ -736,7 +827,8 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_dgrad import (
         build_implicit_gemm_conv_dgrad,
         pack_sub_gemm_buffer,
@@ -769,24 +861,24 @@ def _dgrad_run_inprocess(spec, dtype, seed=0):
     sg_d = rt.alloc(ctypes.sizeof(raw))
     rt.memcpy_h2d(sg_d, raw, ctypes.sizeof(raw))
 
-    sig = conv_args_signature(dtype) + [
-        {"name": "sub_gemm_buf", "type": "ptr<i32, global>", "size_bytes": 8},
-        {"name": "num_sub_gemms", "type": "i32", "size_bytes": 4},
-    ]
+    # The tilde record buffer is part of the dgrad ABI, not an extension.
+    sig = conv_args_signature(dtype, direction="dgrad")
     launcher = KernelLauncher(
         hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=sig
     )
     launcher(
-        {
-            "A": dY_d,
-            "B": W_d,
-            "D": dX_d,
-            "A_bytes": dY.nbytes,
-            "B_bytes": W.nbytes,
-            "D_bytes": dX.nbytes,
-            "sub_gemm_buf": sg_d,
-            "num_sub_gemms": len(sub_gemms),
-        },
+        ConvArgs.from_problem(
+            p, direction="dgrad", tile_m=spec.tile_m, tile_n=spec.tile_n
+        ).to_launch_values(
+            int(dY_d),
+            int(W_d),
+            int(dX_d),
+            dY.nbytes,
+            W.nbytes,
+            dX.nbytes,
+            sub_gemm_buf=int(sg_d),
+            num_sub_gemms=len(sub_gemms),
+        ),
         config=LaunchConfig(
             grid=(sub_gemms[-1].block_end, p.groups, spec.split_k),
             block=(spec.launch_block_size, 1, 1),
@@ -951,6 +1043,171 @@ class TestConvDgradLdsKOuter(unittest.TestCase):
         delta = (ref.float() - got.float()).abs().max().item()
         scale = ref.float().abs().max().item()
         self.assertLess(delta / max(scale, 1e-6), 5e-2)
+
+
+@unittest.skipUnless(
+    ARCH in _MFMA_ARCHES and _HAS_TORCH, f"needs one of {_MFMA_ARCHES} + torch"
+)
+class TestConvDgradUniformKDecode(unittest.TestCase):
+    """``uniform_k_decode`` must compute exactly what the plain K loop computes.
+
+    Both loops visit the same k values in the same order and feed the same
+    MFMA sequence, so with split_k == 1 dX must match bit for bit. The cases
+    cover the per-tile decode loop (kpg a multiple of tile_k) -- including the
+    k_out -> xdot -> ydot wraps of a multi-tap filter, the tilde sub-GEMMs,
+    dilation, grouping and both B layouts -- and the fallback loop the same
+    binary runs when kpg is not a multiple of tile_k.
+    """
+
+    def _run(
+        self,
+        dtype,
+        *,
+        ukd,
+        tile_k=64,
+        groups=1,
+        K=64,
+        C=64,
+        Hi=14,
+        Y=3,
+        stride=1,
+        dil=1,
+        pad=1,
+        kouter=True,
+        epilogue="cshuffle",
+        split_k=1,
+    ):
+        sys.path.insert(0, os.path.abspath(_PYDIR))
+        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        kw = "convbfp16" if dtype == "bf16" else "convfp16"
+        problem, _dt, _f = parse_miopen_cmd(
+            f"./MIOpenDriver {kw} -n 2 -c {C} -H {Hi} -W {Hi + 3} -k {K} -y {Y} "
+            f"-x {Y} -p {pad} -q {pad} -u {stride} -v {stride} -l {dil} -j {dil} "
+            f"-m conv -g {groups} -F 2 -t 1"
+        )
+        wt = 32
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_ukd",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=64,
+            tile_n=64,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=wt,
+            warp_tile_n=wt,
+            warp_tile_k=16,
+            wave_size=64,
+            pipeline="mem",
+            epilogue=epilogue,
+            split_k=split_k,
+            lds_k_outer=kouter and ARCH == "gfx950",
+            uniform_k_decode=ukd,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        if not ok:
+            self.skipTest(f"invalid spec (uniform_k_decode={ukd}): {reason}")
+        spec.validate()
+        return _dgrad_run_inprocess(spec, dtype)
+
+    def _assert_exact(self, dtype="bf16", **kw):
+        import torch
+
+        ref = self._run(dtype, ukd=False, **kw)
+        got = self._run(dtype, ukd=True, **kw)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        self.assertTrue(
+            torch.equal(ref, got),
+            "uniform_k_decode reorders no work, so dX must match the plain K "
+            f"loop bit for bit; max |diff| = "
+            f"{(ref.float() - got.float()).abs().max().item()}",
+        )
+
+    def test_stride1_3x3(self):
+        self._assert_exact()
+
+    def test_several_k_tiles_per_tap(self):
+        # kpg = 3 * tile_k: k_out wraps every third tile.
+        self._assert_exact(K=96, tile_k=32)
+
+    def test_tilde_4x4_stride2(self):
+        # 4 sub-GEMMs, each with a 2x2 tap set: xdot and ydot both wrap.
+        self._assert_exact(Y=4, stride=2, Hi=15)
+
+    def test_dilation2(self):
+        self._assert_exact(dil=2, pad=2)
+
+    def test_mouter_default_epilogue_fp16(self):
+        self._assert_exact("fp16", kouter=False, epilogue="default")
+
+    def test_grouped(self):
+        self._assert_exact(groups=2, C=128, K=128)
+
+    def test_fallback_kpg_not_tile_multiple(self):
+        # kpg = 48 is not a multiple of tile_k = 32: the binary takes its plain
+        # loop, and the tail tile still relies on the buffer OOB clamp.
+        self._assert_exact(K=48, tile_k=32, Hi=13)
+
+    def _assert_close_split_k(self, **kw):
+        # The atomic epilogue's accumulation order is not deterministic, so
+        # compare within tolerance.
+        import torch
+
+        kw = dict(epilogue="default", split_k=2, tile_k=32, **kw)
+        ref = self._run("bf16", ukd=False, **kw)
+        got = self._run("bf16", ukd=True, **kw)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        delta = (ref.float() - got.float()).abs().max().item()
+        scale = ref.float().abs().max().item()
+        self.assertLess(delta / max(scale, 1e-6), 5e-2)
+
+    def test_split_k_matches_plain(self):
+        # Exercises a non-zero k_lo decode.
+        self._assert_close_split_k()
+
+    def test_split_k_tiles_past_gemm_k(self):
+        # gemm_k = 3*3*32 = 288 pads to 320 under split-K 2: the last slice
+        # ends in a tile past gemm_k, which the B (y, x) test must zero.
+        self._assert_close_split_k(K=32)
+
+    def test_split_k_tilde_stride2(self):
+        # 4x4 stride 2: the tilde sub-GEMMs have different tap slices, so
+        # each one's slices start at a different decode position.
+        self._assert_close_split_k(Y=4, stride=2, Hi=15)
+
+    def test_grouped_fallback_kpg_not_tile_multiple(self):
+        # K = 96 is a multiple of tile_k = 32 but kpg = 48 is not: the run-time
+        # test must key on kpg, so the grouped binary takes its plain loop.
+        self._assert_exact(groups=2, C=64, K=96, tile_k=32)
+
+    def test_grouped_split_k(self):
+        self._assert_close_split_k(groups=2, C=128, K=128)
+
+    def test_matches_torch_reference(self):
+        import torch
+
+        got = self._run("bf16", ukd=True, Y=4, stride=2, Hi=15)
+        # Same problem as _run builds: N=2, C=64, H=15, W=18, K=64, 4x4, s2, p1.
+        torch.manual_seed(0)
+        dY = torch.empty(2, 7, 9, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
+        W = torch.empty(64, 4, 4, 64).uniform_(-1.0, 1.0).to(torch.bfloat16)
+        ref = torch.nn.grad.conv2d_input(
+            (2, 64, 15, 18),
+            W.float().permute(0, 3, 1, 2),
+            dY.float().permute(0, 3, 1, 2),
+            stride=2,
+            padding=1,
+        ).permute(0, 2, 3, 1)
+        self.assertEqual(tuple(got.shape), tuple(ref.shape))
+        delta = (got.float() - ref).abs().max().item()
+        self.assertLess(delta / ref.abs().max().item(), 2e-2)
 
 
 if __name__ == "__main__":

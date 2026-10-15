@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from ....core.arch.target import normalize_dtype
+from ....core.dtypes import normalize_dtype
 from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec, _LOWBIT_DTYPES
 from ._scaled_gemm_example import argument_parser, verify
 
@@ -23,7 +23,7 @@ def make_spec(args) -> BlockScaledGemmSpec:
         K=args.k,
         dtype_a=args.dtype_a,
         dtype_b=args.dtype_b,
-        dtype_c="bf16",
+        dtype_c=args.output_dtype,
         scale_dtype="e8m0",
         matrix_path=args.matrix_path,
         block_k=16 if args.matrix_path == "wmma_scale16" else 32,

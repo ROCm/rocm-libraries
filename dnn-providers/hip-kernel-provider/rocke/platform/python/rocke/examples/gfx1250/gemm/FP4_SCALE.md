@@ -14,7 +14,10 @@ buffers of shapes `[M, K/2]` and `[N, K/2]`, computing `C = A @ B.T`.
 For byte `j`, bits 0–3 encode element `2*j`; bits 4–7 encode element `2*j+1`.
 The E2M1 positive codes 0–7 represent `0, 0.5, 1, 1.5, 2, 3, 4, 6`;
 bit 3 is the sign, including negative zero. Every nibble is a valid code.
-The pointer ABI is `i8`, with 16-byte-aligned matrix buffers.
+The pointer ABI is `i8`, with 16-byte-aligned matrix buffers. The builder uses
+[`BitPacking`](../../../core/storage.py) for row strides and passes row bases,
+dtypes, and alignment to the shared
+[`load_matrix_fragment`](../../../helpers/mma_io.py) helper.
 
 | Matrix path | K elements per scale | A/B scale operand |
 | --- | --- | --- |
@@ -24,8 +27,9 @@ The pointer ABI is `i8`, with 16-byte-aligned matrix buffers.
 Scale memory has shape `[M, K/block_k]` for A and `[K/block_k, N]` for B.
 Successive K groups occupy successive bytes, starting at the low byte of the
 instruction operand. `scale_dtype="e8m0"` selects this contract; `i8` is its
-storage alias. FP4 also accepts E4M3/E5M3 scale formats. See
-[per-operand scale formats](SCALE_FORMATS.md) for accepted combinations and API.
+storage alias. E4M3/E5M3 scale formats are not exposed by this path.
+Both modes use the `wmma_scaled` catalog family, selected with matrix dtype
+`fp4` or `fp4e2m1`, E8M0 scales for A/B, and K-group size 32 or 16.
 The [scaled-WMMA operand descriptor](../../../core/arch/wmma_scale.py) records
 the E8M0 scale count and K-group size. The builder packs from that descriptor,
 and the lowerers derive the integer carrier width from the same contract.
@@ -39,9 +43,8 @@ are two 16-byte loads, yielding eight i32 words padded with eight zero words
 for the builtin's sixteen-word argument. Both scale modes use this input map.
 Output slot `i` maps to row `8*h+i`, column `l % 16` within the output tile.
 
-M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats
-are supported as described in [FP6 and mixed matrix formats](FP6.md).
-Partial tiles, a logical FP4 IR type, and quantization conversions are outside
+M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats,
+partial tiles, scalar FP4 arithmetic, and quantization conversions are outside
 this path. The K loop is statically unrolled, as in the existing FP8 builder.
 
 ## Verification
@@ -64,5 +67,9 @@ set `ROCKE_BACKEND=both` to compare Python/C++ LLVM before COMGR compilation.
 The HIP verifier invokes the Python HIP lowerer directly. Numerical validation
 requires a matching gfx1250 device, NumPy, and ml_dtypes; it does not need torch.
 
-For E4M3 block scales and runtime FP32 tensor dequantization factors, see
+Additional E4M3/E5M3 scale encodings use the same packed matrix storage.
+See [independent scale formats](SCALE_FORMATS.md) for the accepted combinations
+and the scale-format example.
+
+For K=16 E4M3 block scales and runtime FP32 tensor factors, see
 [packed NVFP4 GEMM](NVFP4.md).

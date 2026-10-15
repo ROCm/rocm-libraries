@@ -6,19 +6,52 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-MATRIX_FORMATS = {"fp8": 0, "bf8": 1, "fp6": 2, "bf6": 3, "fp4": 4}
+from .target import ArchTarget, MmaOp, MmaScaleDType, _gfx1250_scale_combination_valid
+from ..dtypes import dtype_info
+from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
+
+
+def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
+    """gfx1250 scaled operand layout, independent of atom availability.
+
+    Matrix formats share storage mechanics but retain their atom-selected layout.
+    """
+    info = dtype_info(dtype)
+    chunks = {"fp8e4m3": 16, "bf8e5m2": 16, "fp6e2m3": 32, "fp6e3m2": 32, "fp4e2m1": 32}
+    if info.name not in chunks:
+        raise ValueError(f"unsupported scaled matrix layout {dtype!r}")
+    return MatrixFragmentLayout(
+        FragmentPacking(BitPacking(info.encoded_bits), 64, 32, abi_words),
+        chunks[info.name],
+        2,
+        16,
+    )
 
 
 @dataclass(frozen=True)
-class E8M0ScalePacking:
+class ScalePacking:
     """Pack consecutive K groups into a word, first group in its low byte.
 
-    Each scale is one E8M0 byte. Both A and B use this ordering independently;
+    Each encoded scale occupies one byte. A and B use this ordering independently;
     the integer word is only a carrier for the encoded floating-point scales.
     """
 
     count: int
     block_k: int
+
+    def __post_init__(self) -> None:
+        if self.block_k <= 0:
+            raise ValueError("scale block_k must be positive")
+        if not isinstance(self.count, int) or self.count not in (1, 2, 4, 8):
+            raise ValueError("carrier_bits must be 8, 16, 32, or 64")
+
+    @property
+    def packing(self) -> BitPacking:
+        return BitPacking(self.element_bits)
+
+    @property
+    def fragment(self) -> FragmentPacking:
+        return FragmentPacking(self.packing, self.count, self.word_bits, 1)
 
     @property
     def element_bits(self) -> int:
@@ -28,71 +61,77 @@ class E8M0ScalePacking:
     def word_bits(self) -> int:
         return self.count * self.element_bits
 
-    @property
-    def llvm_type(self) -> str:
-        return f"i{self.word_bits}"
-
 
 @dataclass(frozen=True)
 class ScaledWmmaOp:
-    """One supported matrix pair and its packed E8M0 scale contract."""
+    """Backend packing derived from a supported catalog operand contract."""
 
-    op_id: str
-    matrix_dtype: str
-    scales: E8M0ScalePacking
-    matrix_dtype_b: str | None = None
+    atom: MmaOp
+    matrix_formats: tuple[int, int]
+    scale_formats: tuple[int, int]
+    scales: ScalePacking
+
+    def matrix_layout(self, operand: str) -> MatrixFragmentLayout:
+        if operand == "a":
+            return scaled_matrix_layout(self.atom.a_dtype, self.atom.a_frag_len)
+        if operand == "b":
+            return scaled_matrix_layout(self.atom.b_dtype, self.atom.b_frag_len)
+        raise ValueError("matrix operand must be 'a' or 'b'")
+
+    def scale_packing(self, operand: str) -> ScalePacking:
+        if operand == "a":
+            count = self.atom.a_scale_frag_len
+        elif operand == "b":
+            count = self.atom.b_scale_frag_len
+        else:
+            raise ValueError("scale operand must be 'a' or 'b'")
+        return ScalePacking(count, self.atom.scale_block_k)
+
+    @property
+    def op_id(self) -> str:
+        return self.atom.op_id
 
     @property
     def scale16(self) -> bool:
         return self.scales.block_k == 16
 
-    @property
-    def matrix_format(self) -> int:
-        return MATRIX_FORMATS[self.matrix_dtype]
-
-    @property
-    def matrix_format_b(self) -> int:
-        return MATRIX_FORMATS[self.matrix_dtype_b or self.matrix_dtype]
-
-
-_SCALE = E8M0ScalePacking(count=4, block_k=32)
-_SCALE16 = E8M0ScalePacking(count=8, block_k=16)
-_GFX1250_WMMA_SCALE = {
-    op_id: ScaledWmmaOp(op_id=op_id, matrix_dtype=a, scales=packing, matrix_dtype_b=b)
-    for family, packing in (("wmma_scale", _SCALE), ("wmma_scale16", _SCALE16))
-    for a in MATRIX_FORMATS
-    for b in MATRIX_FORMATS
-    for op_id in (f"{family}_f32_16x16x128_{a}_{b}",)
-}
-
 
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
-    """Resolve a catalog ID or concrete tile op name; reject unknown variants."""
-    return _GFX1250_WMMA_SCALE.get(op_id.removeprefix("tile."))
-
-
-SCALED_WMMA_OPS = {
-    op_id: (spec.scale16, spec.matrix_format, spec.matrix_format_b)
-    for mode in ("wmma_scale", "wmma_scale16")
-    for a in MATRIX_FORMATS
-    for b in MATRIX_FORMATS
-    for op_id in (f"{mode}_f32_16x16x128_{a}_{b}",)
-    if (spec := gfx1250_scaled_wmma(op_id)) is not None
-}
-
-
-SCALE_FORMATS = {"e8m0": 0, "i8": 0, "e5m3": 1, "e4m3": 2}
-
-
-def scale_formats(
-    fmt_a: int, fmt_b: int, dtype_a: str = "e8m0", dtype_b: str = "e8m0"
-) -> tuple[int, int]:
-    """Validate a documented matrix/scale combination and return selectors."""
-    if dtype_a not in SCALE_FORMATS or dtype_b not in SCALE_FORMATS:
-        raise ValueError("scaled WMMA scale types must be e8m0, e5m3, or e4m3")
-    sa, sb = SCALE_FORMATS[dtype_a], SCALE_FORMATS[dtype_b]
-    if (fmt_a != 4 and sa != 0) or (fmt_b != 4 and sb != 0):
-        raise ValueError("scaled WMMA e5m3/e4m3 scales require an FP4 operand")
-    if fmt_a == fmt_b == 4 and sa != sb:
-        raise ValueError("scaled WMMA FP4 x FP4 requires matching scale formats")
-    return sa, sb
+    """Resolve a catalog contract; LLVM selectors are backend details."""
+    atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(op_id.removeprefix("tile."))
+    if atom is None or atom.family != "wmma_scaled":
+        return None
+    formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3, "fp4e2m1": 4}
+    scale_selectors = {
+        MmaScaleDType.E8M0: 0,
+        MmaScaleDType.E5M3: 1,
+        MmaScaleDType.E4M3: 2,
+    }
+    # Matrix and scale formats are independent selectors for each operand.
+    # Validate the backend contract independently of the catalog query model.
+    if (
+        atom.a_dtype not in formats
+        or atom.b_dtype not in formats
+        or atom.a_scale_dtype not in scale_selectors
+        or atom.b_scale_dtype not in scale_selectors
+        or atom.scale_block_k not in (16, 32)
+        or atom.c_dtype != "fp32"
+        or atom.shape != (16, 16, 128)
+    ):
+        raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
+    if not _gfx1250_scale_combination_valid(
+        atom.a_dtype, atom.b_dtype, atom.a_scale_dtype, atom.b_scale_dtype
+    ):
+        raise ValueError("unsupported scaled WMMA matrix/scale format combination")
+    counts = (atom.a_scale_frag_len, atom.b_scale_frag_len)
+    if any(count != atom.k // atom.scale_block_k for count in counts):
+        raise ValueError(f"unsupported scaled WMMA scale fragment lengths: {counts}")
+    return ScaledWmmaOp(
+        atom=atom,
+        matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
+        scale_formats=(
+            scale_selectors[atom.a_scale_dtype],
+            scale_selectors[atom.b_scale_dtype],
+        ),
+        scales=ScalePacking(count=atom.a_scale_frag_len, block_k=atom.scale_block_k),
+    )

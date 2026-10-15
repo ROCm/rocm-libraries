@@ -12,10 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
+#include "rocke/wmma_scale_internal.h"
 
 /* Every builder call below is its own statement, and the statement order
  * matches the Python emitter exactly. Nesting a builder call inside an argument
@@ -117,11 +119,22 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
     wmma_k64(b, "wmma_gfx1250_f32_16x16x64_bf8_bf8");
 }
 
-/* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
- * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
-static void wmma_scaled_formats(
-    rocke_ir_builder_t* b, bool scale16, const char* op_id, const char* sa, const char* sb)
+/* K=128 SCALE/SCALE16 WMMA with independent matrix and scale formats.
+ * Matrix fragments are <16 x i32>; packed scale operands are i32 for SCALE
+ * and i64 for SCALE16. */
+static void wmma_scaled(rocke_ir_builder_t* b,
+                        bool scale16,
+                        const char* dtype,
+                        const char* dtype_b,
+                        const char* scale_a,
+                        const char* scale_b)
 {
+    const rocke_mma_scale_block_k_t block = scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
+    const rocke_mma_scale_filter_t query = {scale_a, scale_b, block};
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
+        &target->mma, "wmma_scaled", dtype, dtype_b, "fp32", 16, 16, 128, &query);
+    const char* op_id = atom->op_id;
     const rocke_type_t* scale_ty = scale16 ? rocke_i64() : rocke_i32();
     rocke_value_t* a_ptr = frag_param(b, "A", rocke_i32(), true);
     rocke_value_t* b_ptr = frag_param(b, "B", rocke_i32(), true);
@@ -138,39 +151,46 @@ static void wmma_scaled_formats(
     rocke_value_t* bb = rocke_b_vec_concat(b, b_lo, b_hi);
     rocke_value_t* c = rocke_b_global_load_vN(b, c_ptr, tid, rocke_f32(), 8, /*align=*/0);
     rocke_value_t* scale = rocke_b_global_load(b, scale_ptr, tid, scale_ty, /*align=*/1);
-    rocke_value_t* d = rocke_b_mma_scaled(b, op_id, a, bb, c, scale, scale, sa, sb);
+    rocke_value_t* scales[] = {scale, scale};
+    rocke_value_t* d = rocke_b_mma(b, op_id, a, bb, c, scales, 2);
     rocke_b_global_store(b, c_ptr, tid, d, /*align=*/1);
     rocke_b_ret(b);
 }
 
-static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* op_id)
-{
-    wmma_scaled_formats(b, scale16, op_id, "e8m0", "e8m0");
-}
-
 static void build_wmma_scale(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
+    wmma_scaled(b, false, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
+}
+
+static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
+    wmma_scaled(b, true, "fp8e4m3", "fp8e4m3", "e8m0", "e8m0");
+}
+
+static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "bf8e5m2", "bf8e5m2", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp4_fp4");
+    wmma_scaled(b, false, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 static void build_wmma_scale16_fp4(rocke_ir_builder_t* b)
 {
-    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp4_fp4");
+    wmma_scaled(b, true, "fp4e2m1", "fp4e2m1", "e8m0", "e8m0");
 }
 
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
- * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
+ * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret.
+ */
 static void tr16_b128(rocke_ir_builder_t* b, const rocke_type_t* elem)
 {
     rocke_param_opts_t o;
@@ -346,22 +366,213 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_scale_coordinates(rocke_ir_builder_t* b, rocke_mma_scale_block_k_t block)
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block};
+    const auto* atom = rocke_mma_catalog_op_for_shape(
+        &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &scales);
+    rocke_value_t* out = frag_param(b, "coords", rocke_i32(), false);
+    rocke_value_t* lane = rocke_b_thread_id_x(b);
+    const rocke_layout_map_t* maps[]
+        = {rocke_mma_op_a_scale_layout(atom, b), rocke_mma_op_b_scale_layout(atom, b)};
+    for(int source = 0; source < 2; ++source)
+    {
+        for(int slot = 0; slot < maps[source]->frag_len; ++slot)
+        {
+            rocke_value_t *x = NULL, *y = NULL;
+            rocke_layout_map_coord(maps[source], b, lane, slot, &x, &y);
+            rocke_b_global_store(b, out, lane, x, 1);
+            rocke_b_global_store(b, out, lane, y, 1);
+        }
+    }
+    rocke_b_ret(b);
+}
+
+static void build_scale_coordinates_k32(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K32);
+}
+
+static void build_scale_coordinates_k16(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K16);
+}
+
+/* Every data-prefetch op once, over each pointer space s_prefetch_data
+ * accepts, with non-default immediates so a dropped attr shows up. */
+static void build_data_prefetch(rocke_ir_builder_t* b)
+{
+    rocke_param_opts_t src_o;
+    rocke_param_opts_t table_o;
+    memset(&src_o, 0, sizeof(src_o));
+    memset(&table_o, 0, sizeof(table_o));
+    src_o.readonly = true;
+    src_o.readonly_set = true;
+    src_o.align = 16;
+    src_o.align_set = true;
+    table_o.addr_space = "constant";
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_f32(), "global"), &src_o);
+    rocke_value_t* table
+        = rocke_b_param(b, "table", rocke_ptr_type(b, rocke_i32(), "global"), &table_o);
+    rocke_value_t* flat = rocke_b_param(b, "flat", rocke_ptr_type(b, rocke_f32(), "private"), NULL);
+    rocke_value_t* nbytes = rocke_b_param(b, "nbytes", rocke_i32(), NULL);
+    rocke_value_t* lines = rocke_b_const_i32(b, 4);
+    rocke_b_enable_scalar_prefetch(b);
+    rocke_b_s_prefetch_data(b, src, lines);
+    rocke_b_s_prefetch_data(b, table, lines);
+    rocke_b_s_prefetch_data(b, flat, lines);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, src, nbytes);
+    rocke_b_s_buffer_prefetch_data(b, rsrc, lines, /*offset=*/256);
+    rocke_b_global_prefetch(b, src, /*cachepolicy=*/3);
+    rocke_b_flat_prefetch(b, flat, /*cachepolicy=*/5);
+    rocke_b_ret(b);
+}
+
+/* Every cluster read on every axis, stored so the pure reads stay live, then
+ * cluster_size and one cluster barrier. */
+static void build_cluster(rocke_ir_builder_t* b)
+{
+    static const char* const axes[] = {"x", "y", "z"};
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    for(int i = 0; i < 3; ++i)
+    {
+        rocke_value_t* cid = rocke_b_cluster_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cid, 1);
+        rocke_value_t* cwid = rocke_b_cluster_workgroup_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwid, 1);
+        rocke_value_t* cwmax = rocke_b_cluster_workgroup_max_id(b, axes[i]);
+        rocke_b_global_store(b, out, tid, cwmax, 1);
+    }
+    rocke_value_t* flat = rocke_b_cluster_workgroup_flat_id(b);
+    rocke_b_global_store(b, out, tid, flat, 1);
+    rocke_value_t* max_flat = rocke_b_cluster_workgroup_max_flat_id(b);
+    rocke_b_global_store(b, out, tid, max_flat, 1);
+    rocke_value_t* size = rocke_b_cluster_size(b, "y");
+    rocke_b_global_store(b, out, tid, size, 1);
+    rocke_b_cluster_barrier(b);
+    rocke_b_ret(b);
+}
+
+/* A 2x2x1 cluster shape: the only effect is the "amdgpu-cluster-dims"
+ * function attribute, so the body just reads the cluster-local flat id. */
+static void build_cluster_dims(rocke_ir_builder_t* b)
+{
+    static const int64_t dims[] = {2, 2, 1};
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_attr_set_int_list(b, &rocke_ir_builder_kernel(b)->attrs, "cluster_dims", dims, 3);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* flat = rocke_b_cluster_workgroup_flat_id(b);
+    rocke_b_global_store(b, out, tid, flat, 1);
+    rocke_b_ret(b);
+}
+
+/* Every cluster multicast width once, with non-default immediates so a
+ * dropped attr shows up; the sync results are stored so they stay live. */
+static void build_multicast(rocke_ir_builder_t* b)
+{
+    static const int shape[] = {64};
+    rocke_param_opts_t ro;
+    memset(&ro, 0, sizeof(ro));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i32(), "global"), &ro);
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
+    rocke_value_t* mask = rocke_b_param(b, "mask", rocke_i32(), NULL);
+    rocke_value_t* local
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage"));
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* v1 = rocke_b_cluster_load(b, src, mask, 4, 0);
+    rocke_b_global_store(b, out, tid, v1, 1);
+    rocke_value_t* v2 = rocke_b_cluster_load(b, src, mask, 8, 1);
+    rocke_b_global_store(b, out, tid, rocke_b_vec_extract(b, v2, 1), 1);
+    rocke_value_t* v4 = rocke_b_cluster_load(b, src, mask, 16, 8);
+    rocke_b_global_store(b, out, tid, rocke_b_vec_extract(b, v4, 3), 1);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 1, 0, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 4, 16, 0);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 8, 0, 3);
+    rocke_b_cluster_load_async_to_lds(b, src, local, mask, 16, -32, 31);
+    rocke_b_ret(b);
+}
+
+/* Two packed TDM descriptors: the load takes the smem (i64) LDS address with
+ * padding and a workgroup mask set; the store takes an i32 LDS address with the
+ * defaults, so both address paths and every flag field show up. */
+static void build_tdm(rocke_ir_builder_t* b)
+{
+    static const int shape[] = {64 * 16};
+    rocke_param_opts_t ro;
+    rocke_param_opts_t wo;
+    rocke_value_t* g[5];
+    memset(&ro, 0, sizeof(ro));
+    memset(&wo, 0, sizeof(wo));
+    ro.readonly = true;
+    ro.readonly_set = true;
+    ro.align = 16;
+    ro.align_set = true;
+    wo.align = 16;
+    wo.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, rocke_i16(), "global"), &ro);
+    rocke_value_t* dst = rocke_b_param(b, "dst", rocke_ptr_type(b, rocke_i16(), "global"), &wo);
+    rocke_value_t* dim0 = rocke_b_param(b, "dim0", rocke_i32(), NULL);
+    rocke_value_t* dim1 = rocke_b_param(b, "dim1", rocke_i32(), NULL);
+    rocke_value_t* stride = rocke_b_param(b, "stride", rocke_i32(), NULL);
+    rocke_value_t* lds32 = rocke_b_param(b, "lds32", rocke_i32(), NULL);
+    rocke_value_t* lds
+        = rocke_b_smem_addr_of(b, rocke_b_smem_alloc(b, rocke_i16(), shape, 1, "tile"));
+    rocke_b_tdm_descriptor_2d(b,
+                              src,
+                              lds,
+                              /*elem_bytes=*/2,
+                              dim0,
+                              dim1,
+                              stride,
+                              /*tile_dim0=*/64,
+                              /*tile_dim1=*/16,
+                              /*workgroup_mask=*/3,
+                              /*pad_interval=*/2,
+                              /*pad_amount=*/5,
+                              g);
+    rocke_b_tensor_load_to_lds(b, g[0], g[1], g[2], g[3], g[4], 0);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_tdm_descriptor_2d(b,
+                              dst,
+                              lds32,
+                              /*elem_bytes=*/2,
+                              dim0,
+                              dim1,
+                              stride,
+                              /*tile_dim0=*/0xFFFF,
+                              /*tile_dim1=*/16,
+                              /*workgroup_mask=*/0,
+                              /*pad_interval=*/-1,
+                              /*pad_amount=*/0,
+                              g);
+    rocke_b_tensor_store_from_lds(b, g[0], g[1], g[2], g[3], g[4], 5);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
 {
     build_fn_t build;
     const char* arch;
-    const char* op_id;
+    const char* dtype;
+    bool scale16;
+    const char* dtype_b;
     const char* scale_a;
     const char* scale_b;
-    bool scale16;
 } config_t;
 
 /* Each gfx1250 config that tests a *choice* of encoding is followed by its
  * gfx950 twin, so the pair pins both branches. Index-for-index with the Python
  * emitter's CONFIGS list. */
-static const config_t CONFIGS[] = {
+static const config_t BASE_CONFIGS[] = {
     {build_wmma_k32_f16, "gfx1250"},
     {build_wmma_k32_bf16, "gfx1250"},
     {build_wmma_k64_fp8_fp8, "gfx1250"},
@@ -386,91 +597,116 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_bf8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_bf6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp4", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_bf8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_bf6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp4", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_bf8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_bf6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp4", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp4", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf8", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf6", "e8m0", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp4", "e8m0", "e5m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp8_fp4", "e8m0", "e4m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp4", "e8m0", "e5m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf8_fp4", "e8m0", "e4m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp4", "e8m0", "e5m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp6_fp4", "e8m0", "e4m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp4", "e8m0", "e5m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_fp4", "e8m0", "e4m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp8", "e5m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp8", "e4m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf8", "e5m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf8", "e4m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp6", "e5m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp6", "e4m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf6", "e5m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_bf6", "e4m3", "e8m0", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp4", "e5m3", "e5m3", false},
-    {NULL, "gfx1250", "wmma_scale_f32_16x16x128_fp4_fp4", "e4m3", "e4m3", false},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_bf8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_bf6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp4", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_bf8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_bf6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp4", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_bf8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_bf6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp4", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp4", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf8", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf6", "e8m0", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp4", "e8m0", "e5m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp8_fp4", "e8m0", "e4m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp4", "e8m0", "e5m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf8_fp4", "e8m0", "e4m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp4", "e8m0", "e5m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp4", "e8m0", "e4m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp4", "e8m0", "e5m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_fp4", "e8m0", "e4m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp8", "e5m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp8", "e4m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf8", "e5m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf8", "e4m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp6", "e5m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp6", "e4m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf6", "e5m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_bf6", "e4m3", "e8m0", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp4", "e5m3", "e5m3", true},
-    {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp4_fp4", "e4m3", "e4m3", true},
+    {NULL, "gfx1250", "fp6", false},
+    {NULL, "gfx1250", "bf6", false},
+    {NULL, "gfx1250", "fp6", true},
+    {NULL, "gfx1250", "bf6", true},
+    {build_wmma_scale_bf8, "gfx1250"},
+    {build_wmma_scale16_bf8, "gfx1250"},
+    {build_scale_coordinates_k32, "gfx1250"},
+    {build_scale_coordinates_k16, "gfx1250"},
+    {NULL, "gfx1250", "fp8", false, "bf8"},
+    {NULL, "gfx1250", "fp8", false, "fp6"},
+    {NULL, "gfx1250", "fp8", false, "bf6"},
+    {NULL, "gfx1250", "fp8", false, "fp4"},
+    {NULL, "gfx1250", "bf8", false, "fp8"},
+    {NULL, "gfx1250", "bf8", false, "fp6"},
+    {NULL, "gfx1250", "bf8", false, "bf6"},
+    {NULL, "gfx1250", "bf8", false, "fp4"},
+    {NULL, "gfx1250", "fp6", false, "fp8"},
+    {NULL, "gfx1250", "fp6", false, "bf8"},
+    {NULL, "gfx1250", "fp6", false, "bf6"},
+    {NULL, "gfx1250", "fp6", false, "fp4"},
+    {NULL, "gfx1250", "bf6", false, "fp8"},
+    {NULL, "gfx1250", "bf6", false, "bf8"},
+    {NULL, "gfx1250", "bf6", false, "fp6"},
+    {NULL, "gfx1250", "bf6", false, "fp4"},
+    {NULL, "gfx1250", "fp4", false, "fp8"},
+    {NULL, "gfx1250", "fp4", false, "bf8"},
+    {NULL, "gfx1250", "fp4", false, "fp6"},
+    {NULL, "gfx1250", "fp4", false, "bf6"},
+    {NULL, "gfx1250", "fp8", true, "bf8"},
+    {NULL, "gfx1250", "fp8", true, "fp6"},
+    {NULL, "gfx1250", "fp8", true, "bf6"},
+    {NULL, "gfx1250", "fp8", true, "fp4"},
+    {NULL, "gfx1250", "bf8", true, "fp8"},
+    {NULL, "gfx1250", "bf8", true, "fp6"},
+    {NULL, "gfx1250", "bf8", true, "bf6"},
+    {NULL, "gfx1250", "bf8", true, "fp4"},
+    {NULL, "gfx1250", "fp6", true, "fp8"},
+    {NULL, "gfx1250", "fp6", true, "bf8"},
+    {NULL, "gfx1250", "fp6", true, "bf6"},
+    {NULL, "gfx1250", "fp6", true, "fp4"},
+    {NULL, "gfx1250", "bf6", true, "fp8"},
+    {NULL, "gfx1250", "bf6", true, "bf8"},
+    {NULL, "gfx1250", "bf6", true, "fp6"},
+    {NULL, "gfx1250", "bf6", true, "fp4"},
+    {NULL, "gfx1250", "fp4", true, "fp8"},
+    {NULL, "gfx1250", "fp4", true, "bf8"},
+    {NULL, "gfx1250", "fp4", true, "fp6"},
+    {NULL, "gfx1250", "fp4", true, "bf6"},
 };
 
-static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
+static const config_t FEATURE_CONFIGS[] = {
+    {build_data_prefetch, "gfx1250"},
+    {build_cluster, "gfx1250"},
+    {build_cluster_dims, "gfx1250"},
+    {build_multicast, "gfx1250"},
+    {build_tdm, "gfx1250"},
+};
+static const int NUM_FEATURE_CONFIGS = (int)(sizeof(FEATURE_CONFIGS) / sizeof(FEATURE_CONFIGS[0]));
+
+static const int NUM_BASE_CONFIGS = (int)(sizeof(BASE_CONFIGS) / sizeof(BASE_CONFIGS[0]));
+static const char* const MATRIX_DTYPES[] = {"fp8", "bf8", "fp6", "bf6", "fp4"};
+static const char* const SCALE_DTYPES[] = {"e8m0", "e5m3", "e4m3"};
+static const int NUM_MATRIX_DTYPES = (int)(sizeof(MATRIX_DTYPES) / sizeof(MATRIX_DTYPES[0]));
+static const int NUM_SCALE_DTYPES = (int)(sizeof(SCALE_DTYPES) / sizeof(SCALE_DTYPES[0]));
+static const int NUM_CONFIGS
+    = NUM_BASE_CONFIGS + NUM_FEATURE_CONFIGS
+      + 2 * (2 * (NUM_MATRIX_DTYPES - 1) * (NUM_SCALE_DTYPES - 1) + NUM_SCALE_DTYPES - 1);
+
+/* Mirror the Python emitter's supported scale pairs in their original order.
+ * Selecting by index keeps the table immutable.
+ */
+static bool select_config(int idx, config_t* out)
+{
+    if(idx < 0 || idx >= NUM_CONFIGS)
+        return false;
+    if(idx < NUM_BASE_CONFIGS)
+    {
+        *out = BASE_CONFIGS[idx];
+        return true;
+    }
+    if(idx >= NUM_CONFIGS - NUM_FEATURE_CONFIGS)
+    {
+        *out = FEATURE_CONFIGS[idx - (NUM_CONFIGS - NUM_FEATURE_CONFIGS)];
+        return true;
+    }
+    idx -= NUM_BASE_CONFIGS;
+    for(int mode = 0; mode < 2; ++mode)
+        for(int a = 0; a < NUM_MATRIX_DTYPES; ++a)
+            for(int b = 0; b < NUM_MATRIX_DTYPES; ++b)
+                for(int sa = 0; sa < NUM_SCALE_DTYPES; ++sa)
+                    for(int sb = 0; sb < NUM_SCALE_DTYPES; ++sb)
+                    {
+                        if(sa == 0 && sb == 0)
+                            continue;
+                        if(!rocke_scaled_wmma_formats_valid(a, b, sa, sb))
+                            continue;
+                        if(idx-- == 0)
+                        {
+                            *out = (config_t){NULL,
+                                              "gfx1250",
+                                              MATRIX_DTYPES[a],
+                                              mode != 0,
+                                              MATRIX_DTYPES[b],
+                                              SCALE_DTYPES[sa],
+                                              SCALE_DTYPES[sb]};
+                            return true;
+                        }
+                    }
+    return false;
+}
 
 int main(int argc, char** argv)
 {
@@ -488,7 +724,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }
-    if(idx < 0 || idx >= NUM_CONFIGS)
+    config_t config;
+    if(!select_config(idx, &config))
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
@@ -502,17 +739,18 @@ int main(int argc, char** argv)
     }
     /* Python: b.kernel.attrs["max_workgroup_size"] = 64 */
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
-    if(CONFIGS[idx].build)
+    if(config.build)
     {
-        CONFIGS[idx].build(&b);
+        config.build(&b);
     }
     else
     {
-        wmma_scaled_formats(&b,
-                            CONFIGS[idx].scale16,
-                            CONFIGS[idx].op_id,
-                            CONFIGS[idx].scale_a,
-                            CONFIGS[idx].scale_b);
+        wmma_scaled(&b,
+                    config.scale16,
+                    config.dtype,
+                    config.dtype_b ? config.dtype_b : config.dtype,
+                    config.scale_a ? config.scale_a : "e8m0",
+                    config.scale_b ? config.scale_b : "e8m0");
     }
 
     if(!rocke_ir_builder_ok(&b))
@@ -529,7 +767,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-            kernel, ROCKE_LLVM_FLAVOR_AUTO, CONFIGS[idx].arch, &llvm_text, err, sizeof err);
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, config.arch, &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);

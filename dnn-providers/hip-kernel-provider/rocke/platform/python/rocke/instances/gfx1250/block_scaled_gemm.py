@@ -13,22 +13,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.arch.target import normalize_dtype
-from ...core.arch.wmma_scale import MATRIX_FORMATS, gfx1250_scaled_wmma, scale_formats
+from ...core.dtypes import dtype_info, normalize_dtype
+from ...core.arch import ArchTarget
+from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
-    BF16,
     F16,
     F32,
     I8,
     I32,
-    I64,
     IRBuilder,
     KernelDef,
     PtrType,
     Type,
     VectorType,
 )
-from ...helpers.quant import quant_ir_type
+from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
+from ...core.storage import BitPacking
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
 _LOWBIT_FORMATS = {
@@ -56,6 +56,10 @@ _WMMA_SCALE_K = 128
 _WAVE = 32
 _HALF_K = 32  # K-elements per lane-half for the K=64 atom
 _ACC = 8  # accumulator slots per lane (<8 x f32>)
+# ``prefetch=True`` sizes its scalar prefetch in lines of this many bytes. It
+# is the largest line size assumed, so the hint never reaches past the
+# workgroup's own scale rows.
+_PREFETCH_LINE_BYTES = 128
 
 
 def _wmma_op_id(dtype_a: str, dtype_b: str) -> str:
@@ -99,14 +103,23 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+
+    # Data-prefetch hints (gfx1250, llvm23 only): one scalar prefetch of the
+    # workgroup's A-scale rows and a per-lane ``global_prefetch`` of the next
+    # K step's A/B rows. Results do not change; off keeps the default IR.
+    prefetch: bool = False
     scale_dtype_a: str | None = None
     scale_dtype_b: str | None = None
     tensor_scale: bool = False
 
     def resolved_scale_dtypes(self) -> tuple[str, str]:
-        return (
-            self.scale_dtype if self.scale_dtype_a is None else self.scale_dtype_a,
-            self.scale_dtype if self.scale_dtype_b is None else self.scale_dtype_b,
+        aliases = {"i8": "e8m0", "fp8e4m3": "e4m3"}
+        return tuple(
+            aliases.get(dtype, dtype)
+            for dtype in (
+                self.scale_dtype if self.scale_dtype_a is None else self.scale_dtype_a,
+                self.scale_dtype if self.scale_dtype_b is None else self.scale_dtype_b,
+            )
         )
 
     def __post_init__(self) -> None:
@@ -122,6 +135,7 @@ class BlockScaledGemmSpec:
             self.name,
             "block_scaled",
             f"{_canon_lowbit(self.dtype_a)}_{_canon_lowbit(self.dtype_b)}",
+            f"out_{normalize_dtype(self.dtype_c)}",
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
@@ -132,8 +146,9 @@ class BlockScaledGemmSpec:
                     f"s{operand}_{dtype}": True
                     for operand, dtype in zip("ab", self.resolved_scale_dtypes())
                     if self.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
-                    and dtype not in ("e8m0", "i8")
+                    and dtype != "e8m0"
                 },
+                "pf": self.prefetch,
             },
         )
 
@@ -143,6 +158,19 @@ class BlockScaledGemmSpec:
         if self.matrix_path in ("auto", "wmma_scaffold"):
             return "wmma"
         return self.matrix_path
+
+
+def _native_scaled_atom(spec: BlockScaledGemmSpec, target: ArchTarget):
+    return target.mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=spec.dtype_a,
+        b_dtype=spec.dtype_b,
+        c_dtype=spec.dtype_acc,
+        scales=(*spec.resolved_scale_dtypes(), spec.block_k),
+        m=_BLOCK_M,
+        n=_BLOCK_N,
+        k=_WMMA_SCALE_K,
+    )
 
 
 def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[bool, str]:
@@ -184,7 +212,7 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
     family = matrix_path if native_scale else "wmma"
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
-    if not target.mma.has_shape(
+    if not native_scale and not target.mma.has_shape(
         family=family,
         a_dtype=_canon_lowbit(spec.dtype_a),
         b_dtype=_canon_lowbit(spec.dtype_b),
@@ -206,24 +234,22 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if spec.tensor_scale and not native_scale:
         return False, "tensor scales require native scaled WMMA"
     if native_scale:
-        try:
-            scale_formats(
-                MATRIX_FORMATS[_canon_lowbit(spec.dtype_a)],
-                MATRIX_FORMATS[_canon_lowbit(spec.dtype_b)],
-                *spec.resolved_scale_dtypes(),
-            )
-        except ValueError as e:
-            return False, str(e)
-        scale_op = gfx1250_scaled_wmma(
-            f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
-        )
-        assert scale_op is not None
-        required_block_k = scale_op.scales.block_k
+        required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
             return False, (
                 f"{matrix_path} requires block_k={required_block_k} scale groups "
                 f"(got {spec.block_k})"
             )
+        try:
+            atom = _native_scaled_atom(spec, target)
+        except ValueError as exc:
+            return False, str(exc)
+        if atom is None:
+            return (
+                False,
+                "no gfx1250 scaled WMMA atom for the requested operand and scale contract",
+            )
+
     else:
         if spec.scale_dtype_a is not None or spec.scale_dtype_b is not None:
             return False, "per-operand scale types require native scaled WMMA"
@@ -245,7 +271,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if native_scale:
         return (
             True,
-            f"ok: gfx1250 K=128 native {matrix_path} {_canon_lowbit(spec.dtype_a)} GEMM",
+            f"ok: gfx1250 K=128 native {matrix_path} "
+            f"{_canon_lowbit(spec.dtype_a)}x{_canon_lowbit(spec.dtype_b)} GEMM",
         )
     return True, "ok: gfx1250 K=64 FP8/BF8 WMMA block-scaled GEMM"
 
@@ -263,7 +290,7 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
             "A",
             (
                 "i8"
-                if _canon_lowbit(spec.dtype_a) in ("fp4", "fp6", "bf6")
+                if storage_ir_type(spec.dtype_a) == I8
                 else _canon_lowbit(spec.dtype_a)
             ),
         )
@@ -271,7 +298,7 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
             "B",
             (
                 "i8"
-                if _canon_lowbit(spec.dtype_b) in ("fp4", "fp6", "bf6")
+                if storage_ir_type(spec.dtype_b) == I8
                 else _canon_lowbit(spec.dtype_b)
             ),
         )
@@ -291,17 +318,6 @@ def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
     return ceil_div_grid((spec.N, spec.tile_n), (spec.M, spec.tile_m))
 
 
-def _storage_type(dtype: str) -> Type:
-    dtype = normalize_dtype(dtype)
-    if dtype in ("fp4", "fp4e2m1", "fp6", "bf6", "fp6e2m3", "fp6e3m2"):
-        return I8
-    if dtype in ("fp16", "f16"):
-        return F16
-    if dtype == "bf16":
-        return BF16
-    return quant_ir_type(dtype)
-
-
 def _scale_type(dtype: str) -> Type:
     return F16 if _wire_scale_dtype(dtype) == "f16" else F32
 
@@ -313,42 +329,51 @@ def _as_f32(b: IRBuilder, v):
 def build_block_scaled_gemm(
     spec: BlockScaledGemmSpec, arch: str = "gfx1250"
 ) -> KernelDef:
-    """Build a gfx1250 FP8/FP6/FP4 block-scaled GEMM (RCR, ``C = A @ B^T``).
+    """Build a gfx1250 block-scaled GEMM (RCR, ``C = A @ B^T``).
 
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 FP8/FP6/FP4 atoms and pass packed scale bytes
+    ``wmma_scale16`` paths use K=128 scaled WMMA atoms and pass packed encoded scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
     ``(l // 16) * 8 : (l // 16 + 1) * 8``. Legacy matrix fragments carry 32
-    low-bit bytes per lane as ``<8 x i32>``. Native FP8 fragments carry 64 bytes as
+    low-bit bytes per lane as ``<8 x i32>``. For FP8/BF8, native fragments carry 64 bytes as
     ``<16 x i32>`` as four 16-byte K chunks, alternating chunks between lane
     halves. Both paths use the gfx12 column-distributed ``<8 x f32>``
-    accumulator layout. FP4 uses prepacked E2M1 bytes: A is [M, K/2], B
-    is [N, K/2], low nibble first along K. Each lane loads two K=32
-    chunks and pads eight packed i32 words to the sixteen-word builtin ABI.
+    accumulator layout. FP6 uses prepacked E2M3 or E3M2 bytes: A is
+    [M, 3*K/4], B is [N, 3*K/4], four codes per three little-endian bytes.
+    Each lane pads twelve packed i32 words to the sixteen-word builtin ABI.
+    FP4 uses prepacked E2M1 bytes: A is [M, K/2], B is [N, K/2],
+    low nibble first along K. Each lane pads eight packed i32 words
+    to the sixteen-word builtin ABI.
     Scale arrays remain A_scale[M, K/block_k] and B_scale[K/block_k, N].
+
+    ``spec.prefetch`` adds data-prefetch hints, which need gfx1250 and the
+    llvm23 flavor: the wave enables scalar prefetch and prefetches its
+    contiguous A_scale rows once, then each K step prefetches the next step's
+    A and B rows per lane. The last step prefetches nothing, so no hint
+    reaches past the operands.
     """
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid block_scaled_gemm spec for {arch}: {reason}")
 
-    a_ty = _storage_type(spec.dtype_a)
-    b_ty = _storage_type(spec.dtype_b)
-    c_ty = _storage_type(spec.dtype_c)
+    a_ty = storage_ir_type(spec.dtype_a)
+    b_ty = storage_ir_type(spec.dtype_b)
+    c_ty = storage_ir_type(spec.dtype_c)
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
-    scale_ty = I8 if native_scale else _scale_type(spec.scale_dtype)
-    op_id = (
-        f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
-        if native_scale
-        else _wmma_op_id(spec.dtype_a, spec.dtype_b)
+    scale_ty = (
+        storage_ir_type("e8m0") if native_scale else _scale_type(spec.scale_dtype)
     )
+    atom = (
+        _native_scaled_atom(spec, ArchTarget.from_gfx(arch)) if native_scale else None
+    )
+    op_id = atom.op_id if atom is not None else _wmma_op_id(spec.dtype_a, spec.dtype_b)
     scale_op = gfx1250_scaled_wmma(op_id)
-    atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
-    frag_words = 16 if native_scale else _ACC
+    frag_words = atom.a_frag_len if atom is not None else _ACC
     a_frag_ty = VectorType(I32, frag_words)
 
     groups = spec.K // spec.block_k
@@ -390,24 +415,55 @@ def build_block_scaled_gemm(
     n0 = ir.mul(ir.block_id_x(), c16)
     a_row = ir.add(m0, frag)  # this lane's A row
     b_row = ir.add(n0, frag)  # this lane's B row (= output col n)
+    a_packing = BitPacking(dtype_info(spec.dtype_a).encoded_bits)
+    b_packing = BitPacking(dtype_info(spec.dtype_b).encoded_bits)
 
-    def _storage_k(dtype):
-        if _canon_lowbit(dtype) == "fp4":
-            return ir.div(cK, ir.const_i32(2))
-        if _canon_lowbit(dtype) in ("fp6", "bf6"):
-            return ir.const_i32(spec.K * 3 // 4)
-        return cK
+    def _row_stride(packing):
+        # All current pointer types use their natural byte size; low-bit inputs
+        # use an explicit byte carrier. A/B storage contracts stay independent.
+        if packing.element_bits >= 8:
+            return cK
+        values, packed_bytes = packing.group(8)
+        groups = ir.div(cK, ir.const_i32(values))
+        return (
+            groups if packed_bytes == 1 else ir.mul(groups, ir.const_i32(packed_bytes))
+        )
 
-    storage_k = _storage_k(spec.dtype_a)
-    a_base = ir.mul(a_row, storage_k)
-    b_storage_k = (
-        storage_k
-        if _canon_lowbit(spec.dtype_a) == _canon_lowbit(spec.dtype_b)
-        else _storage_k(spec.dtype_b)
-    )
-    b_base = ir.mul(b_row, b_storage_k)
+    a_stride = _row_stride(a_packing)
+    b_stride = a_stride if a_packing == b_packing else _row_stride(b_packing)
+    a_base = ir.mul(a_row, a_stride)
+    b_base = ir.mul(b_row, b_stride)
 
-    def _load_frag(ptr, base, storage_ty, k0, dtype):
+    if spec.prefetch:
+        # A_scale rows m0 .. m0+15 are contiguous and m0 is wave-uniform, as
+        # s_prefetch_data requires.
+        scale_bytes = {I8: 1, F16: 2, F32: 4}[scale_ty]
+        tile_bytes = _BLOCK_M * groups * scale_bytes
+        # The length field encodes chunks - 1 (0..31 = 1..32 chunks of 128 B),
+        # and the hardware rounds the start down to 128 B. The start alignment
+        # is not known at build time, so cover a worst-case 127-byte offset.
+        lines = (tile_bytes + 2 * _PREFETCH_LINE_BYTES - 2) // _PREFETCH_LINE_BYTES
+        prefetch_chunks = min(31, lines - 1)
+        ir.enable_scalar_prefetch()
+        # The ISA requires XCNT to drain before a scalar prefetch.
+        ir.s_wait_xcnt(0)
+        ir.s_prefetch_data(
+            ir.global_ptr_add(AScale, ir.mul(m0, ir.const_i32(groups * scale_bytes))),
+            ir.const_i32(prefetch_chunks),
+        )
+
+    def _prefetch_step(k_next):
+        # a_base/b_base are in bytes (see _row_stride), so the next K step is
+        # k_next * element_bits / 8 bytes further along the row.
+        if not spec.prefetch or k_next >= spec.K:
+            return
+        for ptr, base, packing in ((A, a_base, a_packing), (B, b_base, b_packing)):
+            k_bytes = k_next * packing.element_bits // 8
+            ir.global_prefetch(
+                ir.global_ptr_add(ptr, ir.add(base, ir.const_i32(k_bytes)))
+            )
+
+    def _load_frag(ptr, base, storage_ty, k0, dtype, operand):
         if not native_scale:
             off0 = ir.add(ir.add(base, ir.const_i32(k0)), half_k)
             off1 = ir.add(off0, ir.const_i32(16))
@@ -415,109 +471,49 @@ def build_block_scaled_gemm(
             hi = ir.global_load_vN(ptr, off1, storage_ty, 16, align=16)
             return ir.bitcast(ir.vec_concat(lo, hi), a_frag_ty)
 
-        if _canon_lowbit(dtype) in ("fp6", "bf6"):
-            # Each lane owns two K=32 groups, packed into 24 bytes each.
-            # Lane half 0 loads K[0:32], K[64:96]; half 1 the intervening groups.
-            lane_bytes = ir.mul(half, ir.const_i32(24))
-            step_base = ir.add(base, ir.const_i32(k0 * 3 // 4))
-            words = []
-            for group in (0, 48):
-                for offset in (0, 8, 16):
-                    index = ir.add(
-                        ir.add(step_base, ir.const_i32(group + offset)), lane_bytes
-                    )
-                    raw = ir.global_load_vN(ptr, index, I8, 8, align=8)
-                    pair = ir.bitcast(raw, VectorType(I32, 2))
-                    words.extend(ir.vec_extract(pair, j) for j in range(2))
-            zero = ir.const_i32(0)
-            return ir.vec_pack(words + [zero] * 4, I32)
+        return load_matrix_fragment(
+            ir,
+            ptr,
+            base,
+            half,
+            k0,
+            dtype=dtype,
+            layout=scale_op.matrix_layout(operand),
+            # K is a multiple of 128, so every packed row is 16-byte aligned.
+            alignment_bytes=16,
+        )
 
-        if _canon_lowbit(dtype) == "fp4":
-            # Each lane owns two K=32 chunks (16 packed bytes each):
-            # half 0 gets K[0:32] and K[64:96], half 1 the intervening chunks.
-            # Byte low/high nibbles hold even/odd logical K, respectively.
-            lane_bytes = ir.mul(half, ir.const_i32(16))
-            step_base = ir.add(base, ir.const_i32(k0 // 2))
-            lo = ir.global_load_vN(ptr, ir.add(step_base, lane_bytes), I8, 16, align=16)
-            hi = ir.global_load_vN(
-                ptr,
-                ir.add(ir.add(step_base, ir.const_i32(32)), lane_bytes),
-                I8,
-                16,
-                align=16,
-            )
-            words = ir.bitcast(ir.vec_concat(lo, hi), VectorType(I32, 8))
-            # Match CK's padded builtin ABI: eight meaningful words, then zeros.
-            padding = ir.vector_splat(ir.const_i32(0), 8)
-            return ir.vec_concat(words, padding)
-
-        # CK's gfx1250 SCALE and SCALE16 wrappers use the same four 16-byte
-        # matrix chunks. The instruction variants differ in scale grouping,
-        # not in their <16 x i32> A/B fragment layout.
-        chunk_width = 16
-        lane_chunk = ir.mul(half, ir.const_i32(chunk_width))
-        step_base = ir.add(base, ir.const_i32(k0))
-        chunks = [
-            ir.global_load_vN(
-                ptr,
-                ir.add(
-                    ir.add(step_base, ir.const_i32(offset)),
-                    lane_chunk,
-                ),
-                storage_ty,
-                chunk_width,
-                align=chunk_width,
-            )
-            for offset in range(0, atom_k, 2 * chunk_width)
-        ]
-        packed = chunks[0]
-        for chunk in chunks[1:]:
-            packed = ir.vec_concat(packed, chunk)
-        return ir.bitcast(packed, a_frag_ty)
-
-    def _pack_strided_scales(ptr, row_or_col, call_idx, *, for_b):
-        assert scale_op is not None
-        packing = scale_op.scales
-        count = packing.count
-        word_ty = I64 if packing.word_bits == 64 else I32
-        word_const = ir.const_i64 if packing.word_bits == 64 else ir.const_i32
-        packed = word_const(0)
+    def _pack_strided_scales(ptr, call_idx, *, for_b):
+        assert scale_op is not None and atom is not None
+        layout = atom.b_scale_layout() if for_b else atom.a_scale_layout()
+        packing = scale_op.scale_packing("b" if for_b else "a")
         scale_groups = spec.K // spec.block_k
-        for j in range(count):
-            scale_group = call_idx * count + j
+
+        def _load_bits(j):
+            coord0, coord1 = layout.coord(ir, lane, j)
+            group_offset = ir.const_i32(call_idx * (atom.k // spec.block_k))
             if for_b:
-                idx = ir.add(ir.mul(ir.const_i32(scale_group), cN), row_or_col)
+                group = ir.add(group_offset, coord0)
+                col = ir.add(n0, coord1)
+                idx = ir.add(ir.mul(group, cN), col)
             else:
-                idx = ir.add(
-                    ir.mul(row_or_col, ir.const_i32(scale_groups)),
-                    ir.const_i32(scale_group),
-                )
-            byte = ir.global_load(ptr, idx, I8, align=1)
-            widened = ir.zext(byte, word_ty)
-            shift = word_const(j * packing.element_bits)
-            shifted = ir.shl(widened, shift)
-            packed = ir.lor(packed, shifted)
-        return packed
+                row = ir.add(m0, coord0)
+                group = ir.add(group_offset, coord1)
+                idx = ir.add(ir.mul(row, ir.const_i32(scale_groups)), group)
+            return ir.global_load(ptr, idx, I8, align=1)
+
+        return pack_fragment_bits(ir, _load_bits, packing.fragment)[0]
 
     if native_scale:
         acc = ir.zero_vec_f32(_ACC)
         for step in range(spec.K // _WMMA_SCALE_K):
             k0 = step * _WMMA_SCALE_K
-            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a)
-            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b)
-            a_scale = _pack_strided_scales(AScale, a_row, step, for_b=False)
-            b_scale = _pack_strided_scales(BScale, b_row, step, for_b=True)
-            da, db = spec.resolved_scale_dtypes()
-            acc = ir.mma(
-                op_id,
-                a_frag,
-                b_frag,
-                acc,
-                a_scale,
-                b_scale,
-                scale_dtype_a=da,
-                scale_dtype_b=db,
-            )
+            _prefetch_step(k0 + _WMMA_SCALE_K)
+            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
+            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
+            a_scale = _pack_strided_scales(AScale, step, for_b=False)
+            b_scale = _pack_strided_scales(BScale, step, for_b=True)
+            acc = ir.mma(op_id, a_frag, b_frag, acc, a_scale, b_scale)
 
         out_col = ir.add(n0, frag)
         row_base = ir.add(m0, ir.mul(half, ir.const_i32(_ACC)))
@@ -540,8 +536,9 @@ def build_block_scaled_gemm(
         acc = ir.zero_vec_f32(_ACC)
         for step in range(steps_per_group):
             k0 = kg * spec.block_k + step * _WMMA_K
-            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a)
-            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b)
+            _prefetch_step(k0 + _WMMA_K)
+            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
+            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
             acc = ir.mma(op_id, a_frag, b_frag, acc)
 
         # b_scale[kg, n] (col = n0 + frag), shared across this lane's 8 slots.

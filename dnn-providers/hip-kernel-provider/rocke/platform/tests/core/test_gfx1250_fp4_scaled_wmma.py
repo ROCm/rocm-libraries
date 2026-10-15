@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from rocke.core.arch import ArchTarget
+from rocke.core.backend import resolve_backend
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -164,7 +165,9 @@ def test_fp4_fixtures_detect_layout_and_scale_errors(path, k):
 def test_fp4_catalog_signature_and_lowering(path, scale_type):
     spec = fp4_spec(path)
     assert is_valid_spec(spec)[0]
-    op = ArchTarget.from_gfx("gfx1250").mma.by_op_id(f"{path}_f32_16x16x128_fp4_fp4")
+    op = ArchTarget.from_gfx("gfx1250").mma.by_op_id(
+        f"wmma_gfx1250_f32_16x16x128_fp4_fp4_scale_e8m0_e8m0_k{spec.block_k}"
+    )
     assert (op.a_frag_len, op.b_frag_len, op.c_frag_len) == (16, 16, 8)
     assert all(
         p["type"] == "ptr<i8, global>" for p in block_scaled_gemm_signature(spec)[:4]
@@ -176,11 +179,12 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
     )
     assert call.count("i32 4, <16 x i32>") == 2
     assert call.count(f", {scale_type} %") == 2
-    assert llvm.count("load <16 x i8>") == 4  # Two packed chunks per operand.
+    assert llvm.count("load <4 x i32>") == 4  # Two packed chunks per operand.
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert f"__builtin_amdgcn_{path}_f32_16x16x128_f8f6f4(4," in hip
     for flavor in ("llvm20", "llvm22"):
-        with pytest.raises(NotImplementedError, match="requires llvm23"):
+        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        with pytest.raises(error_type, match="requires llvm23"):
             lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     with pytest.raises(NotImplementedError):
         lower_kernel_to_hip(kernel, arch="gfx950")
@@ -189,7 +193,7 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"dtype_b": "fp16"},
+        {"dtype_b": "i8"},
         {"matrix_path": "wmma"},
         {"K": 192},
         {"scale_dtype": "fp32"},
@@ -214,7 +218,8 @@ def test_fp4e2m1_alias_preserves_packed_contract(path, a_dtype, b_dtype):
     assert is_valid_spec(alias)[0]
     assert block_scaled_gemm_signature(alias) == block_scaled_gemm_signature(original)
     assert ArchTarget.from_gfx("gfx1250").mma.has_shape(
-        family=path,
+        family="wmma_scaled",
+        scales=("e8m0", "e8m0", original.block_k),
         a_dtype=a_dtype,
         b_dtype=b_dtype,
         c_dtype="fp32",

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from rocke.core.arch import ArchTarget
+from rocke.core.backend import resolve_backend
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -29,14 +30,9 @@ FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 @pytest.mark.parametrize(
     "case,expected_sha",
-    [
-        (case, sha)
-        for case, sha in json.loads(
-            Path(__file__).with_name("gfx1250_scaled_wmma_llvm23.json").read_text()
-        ).items()
-        if case.split("/")[1] == case.split("/")[2]
-        and case.split("/")[1] in ("fp6", "bf6")
-    ],
+    json.loads(
+        Path(__file__).with_name("gfx1250_scaled_wmma_llvm23.json").read_text()
+    ).items(),
 )
 def test_scaled_wmma_llvm23_golden(case, expected_sha):
     mode, a, b, sa, sb = case.split("/")
@@ -92,6 +88,52 @@ def test_fp6_cross_byte_packing():
     )
 
 
+@pytest.fixture(params=["byte-positions", 3, 24, 48, 96])
+def arbitrary_fp6_bytes(request):
+    if request.param == "byte-positions":
+        # Each byte takes every value with nonzero neighbors in the packed group.
+        packed = np.tile(np.array([0xAA, 0x55, 0xFF], dtype=np.uint8), (768, 1))
+        for position in range(3):
+            packed[position * 256 : (position + 1) * 256, position] = np.arange(
+                256, dtype=np.uint8
+            )
+        return packed
+    return np.random.default_rng(0xF6).integers(
+        0, 256, size=(7, request.param), dtype=np.uint8
+    )
+
+
+def _fp6_codes_from_bytes(packed):
+    # Independent whole-row integer oracle; no shared packer or np.unpackbits.
+    return np.array(
+        [
+            [
+                (int.from_bytes(row.tobytes(), "little") >> bit) & 63
+                for bit in range(0, row.size * 8, 6)
+            ]
+            for row in packed
+        ],
+        dtype=np.uint8,
+    )
+
+
+def test_arbitrary_fp6_bytes_repack_exactly(arbitrary_fp6_bytes):
+    codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
+    np.testing.assert_array_equal(pack_fp6_codes(codes), arbitrary_fp6_bytes)
+
+
+@pytest.mark.parametrize(
+    "dtype,ml_name", [("fp6", "float6_e2m3fn"), ("bf6", "float6_e3m2fn")]
+)
+def test_arbitrary_fp6_bytes_decode_independently(arbitrary_fp6_bytes, dtype, ml_name):
+    ml = pytest.importorskip("ml_dtypes", minversion="0.6.0")
+    codes = _fp6_codes_from_bytes(arbitrary_fp6_bytes)
+    expected = codes.view(getattr(ml, ml_name)).astype(np.float64)
+    actual = decode_fp6(arbitrary_fp6_bytes, dtype)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(np.signbit(actual), np.signbit(expected))
+
+
 @pytest.mark.parametrize(
     "codes",
     [
@@ -112,7 +154,16 @@ def test_invalid_fp6_codes(codes):
 def test_all_native_matrix_pairs(a, b, mode):
     spec = spec_for(a, b, mode)
     assert is_valid_spec(spec)[0]
-    atom = ArchTarget.from_gfx("gfx1250").mma.by_op_id(f"{mode}_f32_16x16x128_{a}_{b}")
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=a,
+        b_dtype=b,
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", spec.block_k),
+    )
     assert (atom.a_frag_len, atom.b_frag_len, atom.c_frag_len) == (16, 16, 8)
     kernel = build_block_scaled_gemm(spec)
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
@@ -124,9 +175,13 @@ def test_all_native_matrix_pairs(a, b, mode):
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert f"__builtin_amdgcn_{mode}_f32_16x16x128_f8f6f4({FORMATS.index(a)}," in hip
     for flavor in ("llvm20", "llvm22"):
-        with pytest.raises(NotImplementedError, match="requires llvm23"):
+        error_type = RuntimeError if resolve_backend() == "cpp" else NotImplementedError
+        with pytest.raises(error_type, match="requires llvm23"):
             lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
     if a in ("fp6", "bf6"):
+        # Two 24-byte chunks per operand per K=128 step, with no overread.
+        assert llvm.count("load <4 x i32>") == 8
+        assert llvm.count("load <2 x i32>") == 8
         assert block_scaled_gemm_signature(spec)[0]["type"] == "ptr<i8, global>"
 
 
@@ -150,3 +205,59 @@ def test_fp6_aliases():
     alias = replace(original, dtype_a="fp6e2m3", dtype_b="fp6e2m3")
     assert alias.kernel_name() == original.kernel_name()
     assert is_valid_spec(alias)[0]
+
+
+@pytest.mark.parametrize("a,b", [("fp6", "bf6"), ("fp8", "fp4"), ("fp6", "fp4")])
+def test_mixed_matrix_contracts_are_admitted(a, b):
+    assert is_valid_spec(spec_for(a, b))[0]
+
+
+@pytest.mark.parametrize("mode", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize("a", FORMATS)
+@pytest.mark.parametrize("b", FORMATS)
+def test_scaled_catalog_boundary(a, b, mode):
+    spec = spec_for(a, b, mode)
+    accepted = a in FORMATS and b in FORMATS
+    assert is_valid_spec(spec)[0] == accepted
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=a,
+        b_dtype=b,
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", spec.block_k),
+    )
+    assert (atom is not None) == accepted
+
+
+@pytest.mark.parametrize("dtype", ["fp6", "bf6"])
+@pytest.mark.parametrize("block_k", [16, 32])
+def test_fp6_atom_storage_contract(dtype, block_k):
+    from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
+
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", block_k),
+    )
+    contract = gfx1250_scaled_wmma(atom.op_id)
+    for operand in ("a", "b"):
+        layout = contract.matrix_layout(operand)
+        assert layout.fragment.packing.group(32) == (16, 3)
+        assert layout.chunk_elements == 32 and layout.chunk_bytes == 24
+        assert layout.fragment.live_carriers == 12
+        assert layout.fragment.padding_bits == 128
+        assert contract.scale_packing(operand).block_k == block_k
+        # Literal bit-stream oracle, independent of the shared packer.
+        patterns = list(range(64))
+        expected = sum(value << (6 * i) for i, value in enumerate(patterns))
+        assert layout.fragment.pack(patterns) == tuple(
+            (expected >> (32 * i)) & 0xFFFFFFFF for i in range(16)
+        )

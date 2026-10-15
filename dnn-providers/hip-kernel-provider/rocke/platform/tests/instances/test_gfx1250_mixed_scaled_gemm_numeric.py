@@ -8,33 +8,35 @@ from itertools import product
 
 import pytest
 
-_MODULE = "rocke.examples.gfx1250.gemm.block_scaled_gemm_verify"
+_MODULE = "rocke.examples.gfx1250.gemm.mixed_scaled_gemm"
 
-# Mixed matrix pairs with E8M0 through COMGR and representative FP6 HIP cases.
+# Every ordered mixed pair with E8M0 through both compiler routes.
 _FORMATS = ("fp8e4m3", "bf8e5m2", "fp6", "bf6", "fp4")
 _MIXED = [(a, b) for a, b in product(_FORMATS, repeat=2) if a != b]
+# Exercise FP16 output with different storage widths in both operand positions.
+_MIXED_OUTPUTS = [(a, b, "bf16") for a, b in _MIXED] + [
+    ("fp8e4m3", "fp4", "fp16"),
+    ("fp4", "fp8e4m3", "fp16"),
+]
 
 
 @pytest.mark.parametrize("matrix_path", ["wmma_scale", "wmma_scale16"])
 @pytest.mark.parametrize(
-    "a,b,route",
-    [
-        (*case, route)
-        for case in _MIXED
-        for route in ("comgr", "hip")
-        if route == "comgr" or case in (("fp6", "bf6"), ("bf6", "fp6"))
-    ],
+    "a,b,output_dtype,route",
+    [(*case, route) for case in _MIXED_OUTPUTS for route in ("comgr", "hip")],
 )
-def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, route):
+def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, output_dtype, route):
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             _MODULE,
-            "--dtype",
+            "--dtype-a",
             a,
             "--dtype-b",
             b,
+            "--output-dtype",
+            output_dtype,
             "--matrix-path",
             matrix_path,
             "--compile-route",
@@ -46,7 +48,7 @@ def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, route):
             "--k",
             "256",
             "--case",
-            "mixed",
+            "all",
         ],
         env=gpu_env,
         capture_output=True,
@@ -55,5 +57,7 @@ def test_mixed_scaled_wmma_numeric(gpu_env, matrix_path, a, b, route):
     )
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "PASS: verified 1 cases" in output and output.count("bad=0") == 1, output
+    count = 20 if matrix_path == "wmma_scale16" else 12
+    assert f"PASS: verified {count} cases" in output, output
+    assert output.count("bad=0") == count, output
     print(output, end="")

@@ -81,7 +81,7 @@ tensor scaling; they do not establish arbitrary-input accumulation behavior.
 ```sh
 ROCKE_LLVM_FLAVOR=llvm23 ROCKE_BACKEND=both ROCKE_CPP_STRICT=1 \
 ROCKE_REQUIRE_GFX1250=1 python -m pytest -q -s \
-    tests/instances/test_gfx1250_scaled_wmma_numeric.py
+    tests/instances/test_gfx1250_nvfp4_numeric.py
 ```
 
 Run from the platform directory with a matching gfx1250 device, LLVM 23
