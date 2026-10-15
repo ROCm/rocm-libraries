@@ -11,13 +11,17 @@
 #include <utility>
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+#include "local_kernel_test_common.hpp"
+
 #include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -385,6 +389,87 @@ namespace
             SolutionAdapter::ModuleApi{throwingLocalLoad, countLocalUnload, noLastError});
         EXPECT_EQ(adapter.loadLocalCodeObject(local), hipErrorInvalidImage);
         EXPECT_EQ(adapter.localCodeObjectCount(), 0u);
+    }
+
+    constexpr char otherLocal[] = "/payload/other.co";
+
+    std::atomic<bool> holdLocalLoad{false};
+    std::atomic<bool> localLoadStarted{false};
+
+    // Loads of `local` wait until holdLocalLoad is cleared.
+    hipError_t heldLocalLoad(hipModule_t* module, const char* path)
+    {
+        if(std::string(path) == local)
+        {
+            localLoadStarted = true;
+            while(holdLocalLoad.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        *module = reinterpret_cast<hipModule_t>(static_cast<uintptr_t>(++localLoads));
+        return hipSuccess;
+    }
+
+    TEST(HipSolutionAdapterLocalCodeObject, smoke_LoadsOfDifferentPathsDoNotWait)
+    {
+        localLoads       = 0;
+        localUnloads     = 0;
+        holdLocalLoad    = true;
+        localLoadStarted = false;
+        {
+            SolutionAdapter adapter(
+                SolutionAdapter::ModuleApi{heldLocalLoad, countLocalUnload, noLastError});
+            std::thread slow([&]() { EXPECT_EQ(adapter.loadLocalCodeObject(local), hipSuccess); });
+            while(!localLoadStarted.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            auto other = std::async(std::launch::async,
+                                    [&]() { return adapter.loadLocalCodeObject(otherLocal); });
+            EXPECT_EQ(other.wait_for(std::chrono::seconds(5)), std::future_status::ready)
+                << "the load of another path waited for the slow one";
+
+            holdLocalLoad = false;
+            slow.join();
+            EXPECT_EQ(other.get(), hipSuccess);
+            EXPECT_EQ(adapter.localCodeObjectCount(), 2u);
+        }
+        EXPECT_EQ(localUnloads.load(), 2);
+    }
+
+    // The check that refuses truncated files accepts every code object this
+    // build ships, whatever its layout.
+    TEST_F(HipSolutionAdapterTest, smoke_ShippedCodeObjectsAreNotRefused)
+    {
+        std::vector<std::string> files;
+        for(auto const& root : local_kernel_test::libraryRoots())
+        {
+            std::error_code ec;
+            for(auto const& entry : std::filesystem::recursive_directory_iterator(root, ec))
+            {
+                auto extension = entry.path().extension();
+                if(entry.is_regular_file() && (extension == ".co" || extension == ".hsaco"))
+                    files.push_back(std::filesystem::absolute(entry.path()).string());
+            }
+            if(!files.empty())
+                break;
+        }
+        ASSERT_FALSE(files.empty()) << "no code objects in this build's library";
+
+        std::map<std::string, int> layouts;
+        for(auto const& file : files)
+        {
+            char magic[8] = {};
+            std::ifstream(file, std::ios::binary).read(magic, sizeof(magic));
+            std::string head(magic, sizeof(magic));
+            layouts[head.rfind("CCOB", 0) == 0       ? "compressed offload bundle"
+                    : head.rfind("__CLANG_", 0) == 0 ? "offload bundle"
+                    : head.compare(1, 3, "ELF") == 0 ? "ELF"
+                                                     : "other"]++;
+
+            expectLoad(file.c_str());
+            EXPECT_EQ(adapter->loadLocalCodeObject(file), hipSuccess) << file;
+        }
+        for(auto const& [layout, count] : layouts)
+            std::printf("%d %s file(s)\n", count, layout.c_str());
     }
 #endif
 
