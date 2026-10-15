@@ -122,6 +122,15 @@ struct rocke_dynamic_tensor_descriptor*
 struct rocke_dynamic_tensor_descriptor*
     rocke_dconv_d_descriptor_dynamic(rocke_ir_builder_t* b, const rocke_dconv_params_t* params);
 
+/* _krsc_descriptor_dynamic: [rows, KH, KW, inner] with a runtime innermost
+ * extent `inner` -- strides [KH*KW*inner, KW*inner, inner, 1]. */
+rocke_tensor_descriptor_t* rocke_dconv_krsc_descriptor_dynamic(rocke_ir_builder_t* b,
+                                                               const char* name,
+                                                               const char* const* coords,
+                                                               rocke_value_t* inner,
+                                                               int KH,
+                                                               int KW);
+
 /* How many row steps one scf.for body covers: lcm(2, KH) where the variant
  * ping-pongs LDS, KH alone where it reads straight from DRAM. */
 int rocke_dconv_row_loop_unroll(int kh, bool lds_ping_pong);
