@@ -21,9 +21,10 @@ from the dispatcher):
     ``(name, kernel_source.spec, metadata, priority)``. Order is not meaningful,
     but multiplicity is: two entries that differ only by id are two compiled
     kernels, and dropping one silently halves what ships.
-  * the ENGINE-LEVEL blocks -- ``engine``/``dispatch``/``matchers`` references
-    and every native symbol string -- compared with ids masked but symbols
-    byte-equal, since a symbol is the entire contract with the native pack.
+  * the ENGINE-LEVEL blocks -- ``engine``/``dispatch``/``matchers`` reference
+    arity and ``provenance.specialization_contract`` content -- compared with ids
+    masked. Native symbol strings in the UED/UHD/UDD/UMD are NOT compared here
+    (only the KDP is read); symbol drift is a separate follow-up gate.
 
 Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage.
 
@@ -79,6 +80,11 @@ def _load(path: str, label: str) -> dict:
     if "kernelDescriptors" not in kdp:
         raise CatalogDiffError(
             f"the {label} file has no 'kernelDescriptors'; is it a KDP?"
+        )
+    if not isinstance(kdp["kernelDescriptors"], list):
+        raise CatalogDiffError(
+            f"the {label} KDP 'kernelDescriptors' must be an array, "
+            f"got {type(kdp['kernelDescriptors']).__name__}"
         )
     return kdp
 
@@ -154,11 +160,11 @@ def compare_catalog(
 
     missing = left - right
     added = right - left
-    for key, count in sorted(missing.items())[:20]:
+    for key, count in sorted(missing.items(), key=lambda kv: repr(kv[0]))[:20]:
         problems.append(f"  only in shipped    (x{count}): {key[0]}")
     if len(missing) > 20:
         problems.append(f"  ... and {len(missing) - 20} more shipped-only entries")
-    for key, count in sorted(added.items())[:20]:
+    for key, count in sorted(added.items(), key=lambda kv: repr(kv[0]))[:20]:
         problems.append(f"  only in regenerated(x{count}): {key[0]}")
     if len(added) > 20:
         problems.append(f"  ... and {len(added) - 20} more regenerated-only entries")
@@ -182,13 +188,13 @@ def compare_subset(shipped: dict, regenerated: dict) -> tuple[list[str], list[st
     missing = left - right
     problems = [
         f"  only in shipped    (x{count}): {key[0]}"
-        for key, count in sorted(missing.items())[:20]
+        for key, count in sorted(missing.items(), key=lambda kv: repr(kv[0]))[:20]
     ]
     if len(missing) > 20:
         problems.append(f"  ... and {len(missing) - 20} more shipped-only entries")
     extras = [
         str(key[0])
-        for key, count in sorted((right - left).items())
+        for key, count in sorted((right - left).items(), key=lambda kv: repr(kv[0]))
         for _ in range(count)
     ]
     return problems, extras
