@@ -200,7 +200,20 @@ class KernelIdentity:
     # binary's identity rather than a default the two could drift apart on.
     # 0 = no scratch (not two-stage).
     ws_replicas: int = 0
+    # wgrad stream-K (WgradConvSpec.streamk / streamk_reduction): the launch
+    # mode ("dp_sk" or "persistent") and the partial-sum reduction are baked
+    # into the ISA; the CTA pool is a kernarg, so it is not here. "off" / ""
+    # for every other kernel.
+    streamk: str = "off"
+    streamk_reduction: str = ""
     group_merge: int = 1
+    # wgrad only (WgradConvSpec.prefetch_addr): carried K-loop byte offsets.
+    # Left out of the hash while False, like ws_replicas, so identities that
+    # predate the field keep their hash and their cache entries.
+    prefetch_addr: bool = False
+    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
+    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    uniform_k_decode: bool = False
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -228,8 +241,8 @@ class KernelIdentity:
     grouped: bool = False
     # Direct conv only: rows per block (the H-loop trip count).
     block_h: int = 0
-    # Dgrad only: the largest tilde sub-GEMM count the CTA dispatch search
-    # was unrolled for.
+    # Dgrad only: the largest tilde sub-GEMM count the record table (and the
+    # binary search's runtime trip count) was built to support.
     max_sub_gemms: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
@@ -271,6 +284,13 @@ class KernelIdentity:
         # field keep their hash (and their cache entries).
         if not fields["ws_replicas"]:
             del fields["ws_replicas"]
+        if not fields["prefetch_addr"]:
+            del fields["prefetch_addr"]
+        if not fields["uniform_k_decode"]:
+            del fields["uniform_k_decode"]
+        # Same for the stream-K pair at "no stream-K".
+        if fields["streamk"] == "off" and not fields["streamk_reduction"]:
+            del fields["streamk"], fields["streamk_reduction"]
         payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(payload.encode()).hexdigest()
 
@@ -588,12 +608,14 @@ class KernelCache:
     def _group_merge_fits(
         identity: KernelIdentity, problem: object, gm: int
     ) -> Tuple[bool, str]:
-        """Can a wgrad binary merging ``gm`` groups serve ``problem``?
+        """Can a binary merging ``gm`` groups serve ``problem``?
 
-        Mirrors the shape rules of ``wgrad_group_merge_available``: merging is
-        depthwise only, ``gm`` must divide the group count, and the merged
-        GEMM (``kpg*Gm`` x ``[Z*]Y*X*cpg*Gm``) must fit one tile -- the
+        Mirrors the shape rules of ``wgrad_group_merge_available`` /
+        ``fwd_group_merge_available``: merging is depthwise only, ``gm`` must
+        divide the group count, and the merged GEMM must fit one tile -- the
         filter extent is a runtime value, so it is checked here, per problem.
+        wgrad's merged GEMM is ``kpg*Gm`` x ``[Z*]Y*X*cpg*Gm``; fwd's only
+        merged free axis is GEMM-N, ``kpg*Gm``.
         """
         cpg = int(getattr(problem, "cpg", 0))
         kpg = int(getattr(problem, "kpg", 0))
@@ -602,6 +624,12 @@ class KernelCache:
             return False, "group-merged kernel needs depthwise (cpg=kpg=1)"
         if groups % gm:
             return False, f"group_merge {gm} does not divide groups {groups}"
+        if identity.direction == "fwd":
+            if kpg * gm > identity.tile_n:
+                return False, (
+                    f"merged GEMM-N {kpg * gm} exceeds tile_n {identity.tile_n}"
+                )
+            return True, "ok"
         spatial = int(getattr(problem, "Y", 1)) * int(getattr(problem, "X", 1))
         if bool(getattr(problem, "is_3d", False)):
             spatial *= int(getattr(problem, "Z", 1))
@@ -660,12 +688,18 @@ class KernelCache:
             extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
         gm = max(1, int(identity.group_merge))
         if gm > 1:
-            # A group-merged wgrad kernel (depthwise only) loads dY and X along
-            # the Gm merged channels; dW stays per group.
             ok, why = self._group_merge_fits(identity, problem, gm)
             if not ok:
                 return False, why
-            extents = ((kpg * gm, "kpg*Gm"), (cpg * gm, "cpg*Gm"), (cpg, "cpg"))
+            if identity.direction == "fwd":
+                # A group-merged fwd kernel (depthwise only) loads X and stores
+                # Y along the Gm merged channels; W stays per group (its merged
+                # load is per-element masked).
+                extents = ((cpg * gm, "cpg*Gm"), (cpg, "cpg"), (kpg * gm, "kpg*Gm"))
+            else:
+                # A group-merged wgrad kernel (depthwise only) loads dY and X
+                # along the Gm merged channels; dW stays per group.
+                extents = ((kpg * gm, "kpg*Gm"), (cpg * gm, "cpg*Gm"), (cpg, "cpg"))
         for field, (extent, name) in zip(
             ("vector_size_a", "vector_size_b", "vector_size_c"), extents
         ):
@@ -711,10 +745,11 @@ class KernelCache:
             if not ok:
                 return False, why
 
-        # Baked filter geometry (direct conv) and the stride/dilation that
-        # implicit-GEMM dgrad folds into its tilde decomposition. For implicit
-        # GEMM 0 means "runtime"; direct conv bakes all of them, and there 0 is
-        # a real value (PAD=0 for a 1x1 filter) that has to match too.
+        # Baked filter geometry (direct conv), and the stride/dilation older
+        # implicit-GEMM dgrad caches recorded per binary (current ones record
+        # 0: the tilde kernel takes them at run time). For implicit GEMM 0
+        # means "runtime"; direct conv bakes all of them, and there 0 is a real
+        # value (PAD=0 for a 1x1 filter) that has to match too.
         for field, attrs in (
             ("filter_h", ("KH", "Y")),
             ("filter_w", ("KW", "X")),
@@ -761,16 +796,17 @@ class KernelCache:
                         f"divide the problem's contiguous run of {run}"
                     )
 
-        # Implicit-GEMM dgrad dispatches CTAs with a binary search over the
-        # tilde sub-GEMM table whose depth is baked for ``max_sub_gemms``; a
-        # problem that decomposes into more would be rejected only at launch.
+        # Implicit-GEMM dgrad dispatches CTAs with a binary search whose trip
+        # count is runtime, but the sub-GEMM record table the search walks is
+        # sized at build time for ``max_sub_gemms``; a problem that decomposes
+        # into more would be rejected only at launch.
         if identity.direction == "dgrad" and not identity.is_direct:
             n_sub = _dgrad_sub_gemm_count(identity, problem)
             bound = identity.max_sub_gemms or _DGRAD_DEFAULT_MAX_SUB_GEMMS
             if n_sub > bound:
                 return False, (
-                    f"problem needs {n_sub} tilde sub-GEMMs, kernel unrolled "
-                    f"for {bound}"
+                    f"problem needs {n_sub} tilde sub-GEMMs, kernel's record "
+                    f"table supports {bound} (max_sub_gemms)"
                 )
             # Mirrors is_valid_dgrad_spec: the grouped implicit-GEMM dgrad has
             # no depthwise (cpg == 1) path, and the grouped binary is offered
@@ -804,12 +840,13 @@ class KernelCache:
         kpg = int(getattr(problem, "kpg", 0))
         tm, tn = max(1, identity.tile_m), max(1, identity.tile_n)
         if identity.direction == "fwd":
+            gm = max(1, identity.group_merge)
             gy = -(-int(getattr(problem, "M", 0)) // tm)
-            gx = -(-kpg // tn)
+            gx = -(-(kpg * gm) // tn)
             axes = (
                 ("y", gy, f"M={getattr(problem, 'M', 0)} tile_m={tm}"),
-                ("x", gx, f"kpg={kpg} tile_n={tn}"),
-                ("z", groups, f"groups={groups}"),
+                ("x", gx, f"kpg*Gm={kpg * gm} tile_n={tn}"),
+                ("z", groups // gm, f"groups/Gm={groups // gm}"),
             )
         elif identity.direction == "wgrad":
             gm = max(1, identity.group_merge)

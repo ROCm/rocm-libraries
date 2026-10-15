@@ -238,6 +238,10 @@ is chosen with `--verification-mode` (or `HIPDNN_TEST_VERIFICATION_MODE`):
 specific oracle, so `golden` on a bundle with no golden data is a failure, not a
 skip — `dvc pull` the op, or use `auto`.
 
+Which operations, datatypes and layouts each reference executor can run is documented in
+[GPU Reference Implementation - Operation Support](docs/OperationSupport-GpuReferenceImpl.md) and
+[CPU Reference Implementation - Operation Support](../../projects/hipdnn/docs/OperationSupport-ReferenceImpl.md).
+
 A reference that cannot run an op declines, and the chain moves on. A reference
 that errors is listed under "REFERENCE EXECUTOR ERRORS" and the chain also moves on,
 but if it was the last one tried (the only one in `gpu`/`cpu` mode, the CPU
