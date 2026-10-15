@@ -127,8 +127,8 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
 
 
 def _current_source_build_id() -> str | None:
-    # Do not memoize: editors and test watchers keep Python processes alive
-    # while C++ sources change underneath them.
+    # Keep artifact selection/build boundaries sensitive to edits made by a
+    # long-lived watcher. The loaded-engine hot path does not call this helper.
     return source_build_id()
 
 
@@ -696,8 +696,10 @@ def load(path: Optional[str] = None) -> ctypes.CDLL:
                 "rocKE engine already loaded from "
                 f"{_lib_path!r}; refusing to switch this process to {explicit!r}"
             )
-        assert _lib_path is not None
-        _check_source_freshness(_lib, _lib_path)
+        # _adopt() validated this immutable native image before publishing it to
+        # the process. Re-hashing the complete source tree here would put that
+        # filesystem cost on every online API call without making the already-
+        # loaded image replaceable; source edits require a new process/build.
         return _lib
 
     # A named library is a demand, not a hint. Skipping a missing ROCKE_ONLINE_LIB
