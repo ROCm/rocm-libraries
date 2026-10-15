@@ -108,26 +108,34 @@ def parse_pytest(path, index, why):
         "SKIPPED": SKIP,
         "XFAIL": SKIP,
     }
-    sessions, status = [], {}  # each session: (summary line, {id: status})
+    # Sessions are counted by their start line, so one that dies before its summary
+    # keeps its place and the later ones keep their numbers. [summary or None, {id: status}]
+    sessions = []
     with open(path, errors="replace") as f:
         lines = f.readlines()
     for raw in lines:
         line = ANSI.sub("", raw.rstrip("\n"))
-        if re.match(r"^=+ .*\b(passed|failed|error|errors|skipped)\b.* =+$", line):
-            sessions.append((line, status))
-            status = {}
+        if re.match(r"^=+ test session starts =+$", line):
+            sessions.append([None, {}])
+        elif not sessions:
+            continue
+        elif re.match(r"^=+ .*\b(passed|failed|error|errors|skipped)\b.* =+$", line):
+            sessions[-1][0] = line
         elif m := (
             re.search(r"\] (PASSED|FAILED|ERROR|XPASS|SKIPPED|XFAIL) (\S+)", line)
             or re.match(r"^(FAILED|ERROR) (\S+)", line)
         ):
             # A failure line wins over an earlier progress line.
+            status = sessions[-1][1]
             if status.get(m.group(2)) != FAIL:
                 status[m.group(2)] = word[m.group(1)]
             if re.search(r" - .*\bTimeout >", line):  # pytest-timeout
                 why[m.group(2)] = "timeout"
     try:
         line, status = sessions[index - 1 if index > 0 else index]
-    except IndexError:  # that session didn't finish (or never started)
+    except IndexError:  # that session never started
+        return None, {}
+    if line is None:  # it started but never finished
         return None, {}
     c = {
         k: int(n)
