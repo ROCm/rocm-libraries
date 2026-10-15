@@ -1355,10 +1355,22 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                     v_dram_tdm,
                     make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
                     {0, 0});
-                const auto kv_rows = BlockFmhaPagedKVRows<kPageBlockSize,
-                                                          remove_cvref_t<decltype(make_k_view)>,
-                                                          remove_cvref_t<decltype(make_v_view)>>{
-                    page_idx, max_page_table_idx, kargs.seqlen_k, make_k_view, make_v_view};
+                // Pages smaller than a warp's K/V rows are read with TDM gathers.
+                constexpr index_t kKVWarpRows =
+                    FmhaPipeline::kN0 / (FmhaPipeline::kBlockSize / get_warp_size());
+                constexpr index_t kGatherWarpRows =
+                    kPageBlockSize % kKVWarpRows != 0 ? kKVWarpRows : 0;
+                const auto kv_rows =
+                    BlockFmhaPagedKVRows<kPageBlockSize,
+                                         remove_cvref_t<decltype(make_k_view)>,
+                                         remove_cvref_t<decltype(make_v_view)>,
+                                         kGatherWarpRows>{page_idx,
+                                                          max_page_table_idx,
+                                                          kargs.seqlen_k,
+                                                          make_k_view,
+                                                          make_v_view,
+                                                          kargs.batch_stride_k / kargs.stride_k,
+                                                          kargs.batch_stride_v / kargs.stride_v};
                 // Q (and PERTENSOR K) descales are already in sm_scale.
                 const float* k_descale_tdm  = nullptr;
                 const float* v_descale_tdm  = nullptr;

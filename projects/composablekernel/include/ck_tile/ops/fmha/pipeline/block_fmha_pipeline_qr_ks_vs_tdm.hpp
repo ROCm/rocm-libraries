@@ -426,6 +426,41 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
+    // K/V TDM tile loads. Gather-mode paged K/V issue kTdmInsts TDM gathers per wave instead.
+    template <bool kIsK, typename LdsWindow, typename DramWindow, typename KVRows>
+    CK_TILE_DEVICE static void LoadKVTile(const TDMConfig& config,
+                                          LdsWindow& lds_window,
+                                          const DramWindow& dram_window,
+                                          const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
+        else
+        {
+            ignore = kv_rows;
+            load_tile_tdm(config, lds_window, dram_window);
+        }
+    }
+
+    template <bool kIsK,
+              bool AllowDenseFullBox = false,
+              typename LdsWindow,
+              typename DramWindow,
+              typename KVRows>
+    CK_TILE_DEVICE static void LoadKVTileFullOrPadded(const TDMConfig& config,
+                                                      LdsWindow& lds_window,
+                                                      const DramWindow& dram_window,
+                                                      const KVRows& kv_rows)
+    {
+        if constexpr(KVRows::kIsGather)
+            kv_rows.template load_gather<kIsK>(config, lds_window, dram_window);
+        else
+        {
+            ignore = kv_rows;
+            LoadTdmFullTileOrPadded<AllowDenseFullBox>(config, lds_window, dram_window);
+        }
+    }
+
     // Advance a K/V DRAM window by `delta` sequence rows. Paged K/V re-map the new
     // sequence position through the page table instead of moving linearly.
     template <bool kIsK, typename KVRows, typename DramWindow>
@@ -870,7 +905,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
 
         block_sync_lds();
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
         do
         {
@@ -896,7 +931,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             block_sync_lds();
             // V uses load_tile_tdm (single-box plain LDS write). Both K and V
             // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
+            LoadKVTile<false>(
+                tdm_config_v, v_lds_write_window, v_dram_window, kv_rows); // prefetch load v tile
 
             // move V tile windows
             MoveKVRows<false>(v_dram_window, v_row, kN0, kv_rows);
@@ -920,7 +956,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     // loop over along the [K]ey head dimension
                     move_tile_window(k_dram_window, {0, kK0});
                     block_sync_lds();
-                    load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+                    LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
                 });
                 // move back to the origin
                 move_tile_window(k_dram_window, {0, -kK0 * (k0_loops - 1)});
@@ -1052,7 +1088,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             move_tile_window(bias_dram_window, {0, kN0});
 
             block_sync_lds();
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            LoadKVTile<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
             // Gemm1
             auto s_new = [&]() {
@@ -1607,9 +1643,15 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        // TDM instructions per K/V tile load and wave: the tensorcnt waits below count these.
+        constexpr index_t kKTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(k_dram_window)>>;
+        constexpr index_t kVTdmInsts =
+            KVRows::template kTdmInsts<remove_cvref_t<decltype(v_dram_window)>>;
         block_sync_lds<0>();
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
-        LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+        LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
+        LoadKVTileFullOrPadded<false, true>(
+            tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
 
         MoveKVRows<true>(k_dram_window, k_row, num_total_loop > 1 ? kN0 : 0, kv_rows);
         // The prologue issues two K prefetches: the first into ptrk0, which
@@ -1632,19 +1674,19 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
 
-        // drain-to-2: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
+        // drain-to-2 loads: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
         // K->ptrk1). Wait for the oldest (K->ptrk0) to land so the load_tile
         // below can read ptrk0, while ptrk1 and V stay in flight. This count is
         // structurally coupled to the prologue's prefetch sequence: it equals
         // (TDM loads issued in prologue) - (loads that must complete before the
         // first LDS read). If the prologue prefetch count changes, update this
         // value or risk a silent data hazard / unnecessary stall.
-        s_wait_tensorcnt_barrier<2>();
+        s_wait_tensorcnt_barrier<kKTdmInsts + kVTdmInsts>();
         auto k_tile = load_tile(k_lds_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
@@ -1691,7 +1733,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             MoveKVRows<false>(
                 v_dram_window, v_row, i_total_loops + 1 < num_total_loop ? kN0 : 0, kv_rows);
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
+            LoadKVTileFullOrPadded<false, true>(
+                tdm_config_v, v_lds_write_window, v_dram_window, kv_rows);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -1921,7 +1964,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            s_wait_tensorcnt_barrier<1>();
+            s_wait_tensorcnt_barrier<kVTdmInsts>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -2172,7 +2215,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             MoveKVRows<true>(
                 k_dram_window, k_row, i_total_loops + 2 < num_total_loop ? kN0 : 0, kv_rows);
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+            LoadKVTileFullOrPadded<true>(tdm_config_k, k_lds_write_window, k_dram_window, kv_rows);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -2236,7 +2279,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                        rowsum_p);
             }
 
-            s_wait_tensorcnt_barrier<1>();
+            s_wait_tensorcnt_barrier<kKTdmInsts>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
@@ -2367,7 +2410,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(KVRows::kIsPaged);
         static_assert(!(kQuantized && !kVScaleOnOacc && !kKVBlockScale),
                       "qr_tdm pipeline: paged K/V takes per-tensor or per-page descales");
-        static_assert(KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+        static_assert(KVRows::kIsGather ||
+                          KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
                       "the K/V rows of one warp must not straddle two pages");
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
             return run_double_kv_lds_buffer(q_dram_block_window_tmp,

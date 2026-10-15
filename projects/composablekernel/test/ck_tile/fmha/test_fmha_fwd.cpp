@@ -531,7 +531,8 @@ INSTANTIATE_TEST_SUITE_P(
         BatchPrefillCase{256, 256, 130, 1100, "b", 1024, "linear", "vllm", false, "_qr_tdm_vr"},
         BatchPrefillCase{128, 128, 300, 1000, "b", 16, "linear", "sglang", false, "_qr_tdm_vr"},
         BatchPrefillCase{64, 64, 300, 1000, "0", 16, "linear", "vllm", true, "_qr_tdm_sched_"},
-        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "linear", "sglang", false, "_qr_async_"},
+        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "linear", "sglang", false, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "b", 1, "linear", "vllm", true, "_qr_tdm_vr"},
         BatchPrefillCase{128, 128, 300, 1000, "b", 16, "vectorized", "vllm", true, "_qr_async_"}));
 
 TEST_P(BatchPrefill, DataTypeConfig)
