@@ -565,6 +565,15 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
 # Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
 SWIZZLE_LOAD_BYTES = 16
 
+# Largest DepthU the pre-swizzled global read supports.  Its K-window step rides
+# in the 12-bit MUBUF immediate, scaled by the rows in a swizzle block, and runs
+# out past this.  Enforced both when deriving a solution and when emitting one.
+SWIZZLE_MAX_DEPTHU = 512
+
+# MUBUF offset12 is a 12-bit unsigned field.  rocisa does not range-check it, so
+# an oversized step would be emitted verbatim rather than rejected.
+SWIZZLE_DTL_OFFSET12_MAX = 4095
+
 def swizzleGeometry(solution, tc: str) -> dict:
     """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
 
@@ -579,13 +588,18 @@ def swizzleGeometry(solution, tc: str) -> dict:
     `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
     WavefrontSize and ProblemType.DataType{tc} are read.
     """
-    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    # Sub-byte types give a fractional bpe (0.5 for F4), which int() truncates to
+    # 0 and makes a divisor below. Keep it fractional and fold it into the
+    # divisor so the division stays exact.
+    bpe       = solution["ProblemType"][f"DataType{tc}"].numBytes()
     miInput   = solution[f"MIInputPerThread{tc}"]
     miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
     # Pack several MI steps into one load when one operand is narrower than a dwordx4.
-    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    packK     = max(1, int(SWIZZLE_LOAD_BYTES // (miInput * bpe)))
     miOperand = miInput * packK
-    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the host pre-swizzle vectorises over per lane: half a dwordx4.
+    miKv      = max(1, int(SWIZZLE_LOAD_BYTES // 2 // bpe))
+    laneSize  = min(miOperand, int(SWIZZLE_LOAD_BYTES // bpe))
     # Elements the wave holds vs. distinct elements the instruction consumes.
     dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
     lanesUsed = solution["WavefrontSize"] // dupFactor
@@ -593,6 +607,13 @@ def swizzleGeometry(solution, tc: str) -> dict:
         "packK":        packK,
         "laneSize":     laneSize,
         "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        # K granularity the host pre-swizzle pads to before reshaping.  It packs
+        # SWIZZLE_LOAD_BYTES per lane out of miKv-element vectors, so the step is
+        # miInput * SWIZZLE_LOAD_BYTES / (miKv * bpe) elements.  This is the
+        # pre-shuffled 16-row block stride and is not swizzleK, which covers a
+        # whole wave and is larger; rounding K to swizzleK instead puts every
+        # block after the first at the wrong offset.
+        "layoutK":      int(miInput * SWIZZLE_LOAD_BYTES // (miKv * bpe)),
         "lanesUsed":    lanesUsed,
         "dupFactor":    dupFactor,
         "loadsPerLane": miOperand // laneSize,

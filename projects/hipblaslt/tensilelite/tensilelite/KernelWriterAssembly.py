@@ -5054,12 +5054,25 @@ class KernelWriterAssembly(KernelWriter):
                           strideF, comment="numLine * stride"))
                 if isMxSwizzledScaleLayout:
                   module.add(SAddU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr(stmp+0), src1=extra_bytes, comment="buffer_load limit for %s"%tc))
+                elif isPreShuffledAB:
+                  # numLine is measured in 16-row blocks.  Convert the logical
+                  # row stride to the physical block stride before adding the
+                  # final DepthU-wide block covered by this SRD.
+                  module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=swizzleSize0,
+                                     comment="numLine * stride * %u (row-block stride)"%swizzleSize0))
+                  module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes,
+                                     comment="+ swizzleBlock*DepthU/swizzleSize1"))
+                  module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                                               comment="buffer_load limit for %s (pre-shuffled, tile-boundary)"%tc))
                 else:
                   # (numLine * stride + DepthU) * bpe  -- mirrors scale path structure
                   module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=extra_bytes, comment="+ DepthU (one K step)"))
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isPreShuffledAB:
+            module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
+                      swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))
         elif useFixedSrd2:
           # Unit-stride tile dim (TLU=1): the strided formula above cannot fire,
           # and without this Srd+2 stays 0 and every load returns 0.  Bound the
@@ -5754,8 +5767,11 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
+      # The stride is the pre-shuffled 16-row block stride, so it has to follow the
+      # padding the host applied when it laid the tensor out, not the per-wave
+      # swizzleK block.  They differ whenever swizzleK > one operand.
       module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
-      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleK"]))
+      module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleLayoutK"]))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]

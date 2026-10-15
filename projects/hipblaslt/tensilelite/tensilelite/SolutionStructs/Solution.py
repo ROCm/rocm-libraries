@@ -84,7 +84,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, SWIZZLE_MAX_DEPTHU
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -4954,20 +4954,29 @@ class Solution(collections.abc.Mapping):
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
+          if state["DepthU"] > SWIZZLE_MAX_DEPTHU:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support DepthU {state['DepthU']} > {SWIZZLE_MAX_DEPTHU}")
+            continue
           laneSize = swizzleGeometry(state, tc)["laneSize"]
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
 
       if state["ProblemType"]["SwizzleTensorA"]:
-        if not state["DirectToVgprA"]:
-          reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+        # The subtile global-read emitter walks the swizzled A layout itself, so it
+        # does not need A staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprA"]:
+            reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        if not state["DirectToVgprB"]:
-          reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+        # The subtile global-read emitter walks the swizzled B layout itself, so it
+        # does not need B staged through DirectToVgpr the way the classic path does.
+        if not state["UseSubtileImpl"]:
+          if not state["DirectToVgprB"]:
+            reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
 
