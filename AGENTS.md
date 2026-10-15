@@ -138,3 +138,4 @@ All under [`projects/hipdnn/tools/ai/skills/`](projects/hipdnn/tools/ai/skills/)
 - Prefer the repo's own standards and scripts over inventing a process: [CONTRIBUTING.md](CONTRIBUTING.md), each project's `TESTING.md`, and the pre-commit hooks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml) (`pre-commit run --files <changed files>`).
 - Do not post to GitHub or Jira on someone's behalf without showing them the exact text first.
 - Do not skip, disable, or weaken a test just to turn CI green.
+- When you move, rename, or delete files, search `.github/`, tox files, and `CODEOWNERS` for the old paths and update them in the same PR. CI path filters and trigger maps do not follow a rename on their own.
