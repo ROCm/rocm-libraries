@@ -12,7 +12,9 @@
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime.h>
+#ifdef HIPBLASLT_TEST_HAVE_HIPRTC
 #include <hip/hiprtc.h>
+#endif
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt-local-kernel.h>
 #include <hipblaslt/hipblaslt.h>
@@ -437,11 +439,24 @@ namespace local_kernel_test
         return deviceArch() == "gfx90a" ? "gfx942" : "gfx90a";
     }
 
-    // Compiles HIP `source` for `arch` into a code object at `path`.
+#ifdef HIPBLASLT_TEST_HAVE_HIPRTC
+    inline constexpr bool canCompileCodeObjects = true;
+#else
+    inline constexpr bool canCompileCodeObjects = false;
+#endif
+
+    // Compiles HIP `source` for `arch` into a code object at `path`. Fails
+    // when canCompileCodeObjects is false.
     inline bool compileCodeObject(std::string const& source,
                                   std::string const& arch,
                                   std::string const& path)
     {
+#ifndef HIPBLASLT_TEST_HAVE_HIPRTC
+        static_cast<void>(source);
+        static_cast<void>(arch);
+        static_cast<void>(path);
+        return false;
+#else
         hiprtcProgram program;
         if(hiprtcCreateProgram(
                &program, source.c_str(), "local_kernel_test.hip", 0, nullptr, nullptr)
@@ -472,6 +487,7 @@ namespace local_kernel_test
         std::ofstream out(path, std::ios::binary);
         out.write(code.data(), static_cast<std::streamsize>(code.size()));
         return static_cast<bool>(out);
+#endif
     }
 
     // Empty kernels with these names. The parameter is larger than any

@@ -28,15 +28,18 @@ extern "C" {
  *
  *  Each solution in the payload receives an index usable with the index-based
  *  algorithm path of \ref hipblasLtMatmul. Registration is per architecture:
- *  the kernels serve devices of the architecture of the handle's device, and
- *  on a device of any other architecture they are never selected and an index
- *  is rejected as for any kernel that cannot serve the problem. Registration
- *  does not change heuristic selection; use
+ *  the kernels serve devices of the architecture of the handle's device. On a
+ *  device of any other architecture they are never selected, and their indices
+ *  are treated as unknown by every call that takes an index, including
+ *  \ref hipblasLtMatmul. Registration does not change heuristic selection; use
  *  \ref hipblasLtLocalKernelSetExactMatch for that.
  *
  *  The code object must define every kernel the shard names. Kernels run only
  *  from the code object they were registered with, even if a shipped or
  *  earlier registered kernel has the same name.
+ *
+ *  The code object is loaded on the handle's device, which is made current
+ *  for the duration of the call; the caller's current device is restored.
  *
  *  Indices are valid only in the current process. Registering the same
  *  payload twice registers its kernels twice. A device loads a code object
