@@ -1108,7 +1108,8 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                                         const KVRows& kv_rows) const
     {
         static_assert(KVRows::kIsPaged);
-        static_assert(KVRows::kPageSize_ % kN0 == 0, "a K/V tile must not straddle two pages");
+        static_assert(KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+                      "the K/V rows of one warp must not straddle two pages");
         return run(q_dram_block_window_tmp,
                    k_dram_block_window_tmp,
                    v_dram_block_window_tmp,

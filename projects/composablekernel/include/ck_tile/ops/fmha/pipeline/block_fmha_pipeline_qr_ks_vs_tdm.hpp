@@ -2270,7 +2270,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     {
         static_assert(KVRows::kIsPaged);
         static_assert(!kQuantized, "qr_tdm pipeline: this granularity needs the descale arguments");
-        static_assert(KVRows::kPageSize_ % kN0 == 0, "a K/V tile must not straddle two pages");
+        static_assert(KVRows::kPageSize_ % (kN0 / (kBlockSize / get_warp_size())) == 0,
+                      "the K/V rows of one warp must not straddle two pages");
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
             return run_double_kv_lds_buffer(q_dram_block_window_tmp,
                                             k_dram_block_window_tmp,
