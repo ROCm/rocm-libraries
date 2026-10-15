@@ -63,11 +63,13 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                           includeNames.data()));
 
     // Build compile options from defines vector
+    auto compileOptions = compileDefines;
+    compileOptions.emplace_back("-I" GPU_REF_HIP_INCLUDE_DIR);
     std::vector<const char*> optPtrs;
-    optPtrs.reserve(compileDefines.size());
-    for(const auto& def : compileDefines)
+    optPtrs.reserve(compileOptions.size());
+    for(const auto& option : compileOptions)
     {
-        optPtrs.push_back(def.c_str());
+        optPtrs.push_back(option.c_str());
     }
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
