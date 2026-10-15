@@ -57,7 +57,13 @@ group_conv::GroupConvTestConfig<3u> CanonicalShape()
 
 } // namespace
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
+// Parameterized only so that INSTANTIATE_TEST_SUITE_P can put these tests under the
+// "Standard/" prefix used by test_categories.yaml; the int param itself is unused.
+struct GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32 : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -82,7 +88,7 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernelZe
 // Same, in deterministic mode -- the configuration that SILOTIGER-1243 reported, where the
 // inverted exit made GetAllConfigs return empty. The seed must still be emitted, and the first
 // advance must step to the next kernel while holding split_k at 1.
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchStartsAtKernelZero)
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -111,6 +117,10 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchSta
     EXPECT_EQ(cfg.split_k, 1) << "Deterministic mode must hold split_k at 1";
     EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels[1] + "+1");
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32,
+                         ::testing::Values(0));
 
 // Deterministic walk: with three valid kernels, deterministic SetNextValue() must visit index 1
 // then index 2 before exhausting. The inverted-NextLinear bug exhausted after the first call.
