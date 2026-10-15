@@ -104,10 +104,9 @@ def test_writeMsgPack_missing_stale_uncompressed_is_noop(tmp_path):
 def test_writeMsgPack_reader_contract_is_zlib_wrapped_msgpack(tmp_path):
     """The on-disk format the C++ loader depends on: zlib(msgpack(data)).
 
-    This guards the producer side of the Python-writer -> C++-reader contract:
-    the C++ ``readCompressedMsgObject`` inflates the file then msgpack-parses
-    the result, so the writer must emit exactly that, for non-trivial nested
-    data, with no extra framing.
+    writeMsgPack emits that with msgpack.packb. readCompressedMsgObject inflates
+    the file and msgpack-parses the result, so a non-trivial nested document
+    has no extra framing.
     """
     dest = str(tmp_path / "library.dat")
     data = {

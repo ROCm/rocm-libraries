@@ -4,7 +4,6 @@
 #include <Tensile/msgpack/Writing.hpp>
 
 #include <Tensile/CachingLibrary.hpp>
-#include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/msgpack/MessagePack.hpp>
 
 #include <limits>
@@ -52,36 +51,6 @@ namespace TensileLite
         // INDEXED_FORMAT_VERSION in tensilelite/LibraryIO.py and
         // MasterSolutionLibrary's IndexedFormatVersion.
         constexpr int IndexedFormatVersion = 2;
-
-        std::shared_ptr<MasterContractionLibrary>
-            loadMasterOrThrow(std::vector<uint8_t> const& data)
-        {
-            std::shared_ptr<MasterContractionLibrary> rv;
-
-            // Building the in-memory library must not query a device.
-            // hipGetDevice runs when a library is loaded to run a solution.
-            [[maybe_unused]] Predicates::Contraction::DeferWorkgroupMappingDeviceQuery deferDevice;
-
-            auto result = msgpack::unpack(reinterpret_cast<const char*>(data.data()), data.size());
-            LibraryIOContext<ContractionSolution> context{std::string(""), {}, nullptr};
-            Serialization::MessagePackInput      min(result.get(), &context);
-
-            Serialization::PointerMappingTraits<MasterContractionLibrary,
-                                                Serialization::MessagePackInput>::mapping(min, rv);
-
-            if(!min.error.empty() || !rv)
-            {
-                std::ostringstream msg;
-                msg << "Error loading msgpack data:" << std::endl;
-                for(auto const& err : min.error)
-                    msg << err << std::endl;
-                if(!rv && min.error.empty())
-                    msg << "MasterSolutionLibrary was empty." << std::endl;
-                throw std::runtime_error(msg.str());
-            }
-
-            return rv;
-        }
 
         std::map<int, std::shared_ptr<ContractionSolution>>
             solutionsForIndex(MasterContractionLibrary& lib)
@@ -206,17 +175,6 @@ namespace TensileLite
 
         auto data = reinterpret_cast<const uint8_t*>(buffer.data());
         return std::vector<uint8_t>(data, data + buffer.size());
-    }
-
-    std::vector<uint8_t> MessagePackWriteLibraryFromBytes(std::vector<uint8_t> const& data)
-    {
-        return MessagePackWriteLibraryData(*loadMasterOrThrow(data));
-    }
-
-    std::vector<uint8_t>
-        MessagePackWriteIndexedLibraryFromBytes(std::vector<uint8_t> const& data)
-    {
-        return MessagePackWriteIndexedLibraryData(*loadMasterOrThrow(data));
     }
 
     std::vector<uint8_t> MessagePackWriteSolutionData(ContractionSolution const& solution)

@@ -939,16 +939,6 @@ TEST_F(MessagePackWritingLazyTest, IndexedDocumentKeepsFormatVersion2)
     auto eagerKeys = mapKeys(eagerHandle.get());
     EXPECT_EQ(std::find(eagerKeys.begin(), eagerKeys.end(), "version"), eagerKeys.end());
 
-    msgpack::sbuffer                  emptyVersion;
-    msgpack::packer<msgpack::sbuffer> packer(emptyVersion);
-    packer.pack_map(1);
-    packer.pack(std::string("version"));
-    packer.pack(std::string(""));
-    std::vector<uint8_t> emptyVersionBytes(
-        reinterpret_cast<uint8_t const*>(emptyVersion.data()),
-        reinterpret_cast<uint8_t const*>(emptyVersion.data()) + emptyVersion.size());
-    EXPECT_THROW(MessagePackWriteLibraryFromBytes(emptyVersionBytes), std::runtime_error);
-
     auto bareBytes
         = MessagePackWriteIndexedLibraryData(*bare);
     auto bareHandle
