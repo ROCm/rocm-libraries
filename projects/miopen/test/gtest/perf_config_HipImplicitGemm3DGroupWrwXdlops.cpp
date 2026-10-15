@@ -8,10 +8,11 @@
 //   2. deterministic mode used an inverted `!NextLinear` exit, so GetAllConfigs returned empty and
 //      only the GenericSearch fallback config was ever tuned -- deterministic 3D-Wrw was untuned.
 //
-// GPU_* exercises the real CK populate path end-to-end and needs a ROCm device plus the installed
-// CK grouped-conv library (GTEST_SKIP otherwise). It uses a canonical group=1, C=K=64 shape that
-// CK should always enumerate kernels for; a missing kernel fails the ASSERT on purpose, signalling
-// a real CK/applicability regression rather than a bad test shape. CPU_* checks the deterministic
+// GPU_* exercises the real CK populate path end-to-end, in both non-deterministic and
+// deterministic mode, and needs a ROCm device plus the installed CK grouped-conv library
+// (GTEST_SKIP otherwise). It uses a canonical group=1, C=K=64 shape that CK should always
+// enumerate kernels for; a missing kernel fails the ASSERT on purpose, signalling a real
+// CK/applicability regression rather than a bad test shape. CPU_* checks the deterministic
 // and non-deterministic advance on the host by injecting valid_kernels directly -- no device
 // needed (same technique as perf_config_group_deterministic_set_next_value.cpp).
 
@@ -78,6 +79,39 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernelZe
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
+// Same, in deterministic mode -- the configuration that SILOTIGER-1243 reported, where the
+// inverted exit made GetAllConfigs return empty. The seed must still be emitted, and the first
+// advance must step to the next kernel while holding split_k at 1.
+TEST(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchStartsAtKernelZero)
+{
+    const auto device_name = miopen::solver::GetCurrentDeviceName();
+    if(device_name.empty())
+        GTEST_SKIP() << "No ROCm-capable device is detected";
+
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
+
+    const auto problem =
+        MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/true);
+
+    Config cfg(false);
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    ASSERT_FALSE(cfg.valid_kernels.empty());
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.split_k, 1);
+    EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front() + "+1");
+    EXPECT_TRUE(cfg.IsValid(problem));
+
+    if(cfg.valid_kernels.size() < 2)
+        GTEST_SKIP() << "Only one applicable CK instance; nothing left to advance to";
+
+    ASSERT_TRUE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 1);
+    EXPECT_EQ(cfg.split_k, 1) << "Deterministic mode must hold split_k at 1";
+    EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels[1] + "+1");
+}
+
 // Deterministic walk: with three valid kernels, deterministic SetNextValue() must visit index 1
 // then index 2 before exhausting. The inverted-NextLinear bug exhausted after the first call.
 TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, WalksEveryKernelThenExhausts)
@@ -111,9 +145,13 @@ TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, SingleKernelTerminates)
     const auto problem =
         MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/true);
 
+    // One valid kernel: the seed is the whole search, so SetNextValue must report exhaustion
+    // immediately and leave the cursor untouched -- no re-emit, no step past index 0.
     Config cfg(false);
     cfg.valid_kernels = {"A"};
     cfg.index         = 0;
+    cfg.split_k       = 1;
+    cfg.kernel_id     = cfg.valid_kernels.front() + "+1";
 
     int iterations = 0;
     while(cfg.SetNextValue(problem))
@@ -123,6 +161,8 @@ TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, SingleKernelTerminates)
     }
     EXPECT_EQ(iterations, 0);
     EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.split_k, 1);
+    EXPECT_EQ(cfg.kernel_id, "A+1");
 }
 
 // Non-deterministic smoke: the (untouched) non-deterministic branch must still terminate and
