@@ -208,6 +208,75 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_QUAD_PERM, &data, 1, rocke_i32(), &attrs, "qperm");
 }
 
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "dpp_xor: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "dpp_xor requires i32 data");
+    if(xor_mask < 1 || xor_mask > 15)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "dpp_xor xor_mask must be 1..15 (intra-16-lane row), got %d",
+            xor_mask);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "xor_mask", (int64_t)xor_mask);
+    return rocke_i_op1(b, ROCKE_OP_TILE_DPP_XOR, &data, 1, rocke_i32(), &attrs, "dppx");
+}
+
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp: NULL operand");
+    if(lane_xor < 1 || lane_xor > 15)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp lane_xor must be 1..15, got %d", lane_xor);
+    if(rocke_i_type_is(v->type, "f32"))
+    {
+        rocke_value_t* v_i = rocke_b_bitcast(b, v, rocke_i32());
+        rocke_value_t* r = rocke_b_dpp_xor(b, v_i, lane_xor);
+        return rocke_b_bitcast(b, r, rocke_f32());
+    }
+    if(rocke_flow_is_i32(v->type))
+        return rocke_b_dpp_xor(b, v, lane_xor);
+    return (rocke_value_t*)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp: unsupported type %s", v->type->name);
+}
+
+int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask)
+{
+    /* Python rocke.core.ir.dpp_xor_ctrl / DPP_XOR_CTRL_NO_ROW_XMASK. Each
+     * gfx9 entry is exactly lane i -> i ^ mask inside a 16-lane row. */
+    if(xor_mask < 1 || xor_mask > 15)
+        return -1;
+    if(has_row_xmask)
+        return 0x160 | xor_mask;
+    switch(xor_mask)
+    {
+    case 1:
+        return 0xB1; /* quad_perm [1, 0, 3, 2] */
+    case 2:
+        return 0x4E; /* quad_perm [2, 3, 0, 1] */
+    case 3:
+        return 0x1B; /* quad_perm [3, 2, 1, 0] */
+    case 7:
+        return 0x141; /* row_half_mirror */
+    case 8:
+        return 0x128; /* row_ror:8 */
+    case 15:
+        return 0x140; /* row_mirror */
+    default:
+        return -1;
+    }
+}
+
 static bool flow_wave_reduce_allowed(const char* reduce_op, const char* ty)
 {
     if(!reduce_op || !ty)
@@ -532,6 +601,16 @@ rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v,
     if(!v)
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "warp_shuffle_xor: NULL operand");
+
+    /* f64: split into two i32 halves and shuffle each on the 32-bit path. */
+    if(rocke_i_type_is(v->type, "f64"))
+    {
+        rocke_value_t* halves = rocke_b_bitcast(b, v, rocke_vector_type(b, rocke_i32(), 2));
+        rocke_value_t* parts[2];
+        parts[0] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 0), lane_xor);
+        parts[1] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 1), lane_xor);
+        return rocke_b_bitcast(b, rocke_b_vec_pack(b, parts, 2, rocke_i32()), rocke_f64());
+    }
 
     if(lane_xor >= 1 && lane_xor <= 31)
     {
@@ -1119,6 +1198,27 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
     ops[1] = voffset;
     ops[2] = soffset;
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16, ops, 3, rocke_f16(), NULL, "bl1");
+}
+
+/* D16-form scalar half buffer load: ``raw.ptr.buffer.load.f16`` returns
+ * ``half`` directly (no i16 bitcast). Port of Python
+ * IRBuilder.buffer_load_f16_d16 / the pinned PR9710
+ * tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_f16_d16: NULL operand");
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, ops, 3, rocke_f16(), NULL, "bld16");
 }
 
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
