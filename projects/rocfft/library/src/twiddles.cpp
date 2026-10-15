@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -277,13 +277,11 @@ public:
                    const hipDeviceProp_t& deviceProp,
                    size_t                 _N1,
                    size_t                 _N2,
-                   bool                   _attach_halfN1,
-                   bool                   _attach_halfN2)
+                   bool                   _attach_halfN1)
         : TwiddleTable<T>(precision, deviceProp, 0, 0, false)
         , N1(_N1)
         , N2(_N2)
         , attach_halfN1(_attach_halfN1)
-        , attach_halfN2(_attach_halfN2)
     {
     }
 
@@ -292,9 +290,8 @@ public:
                               hipStream_t&               stream,
                               gpubuf&                    output)
     {
-        // _half_N can be either halfN1 or halfN2, we don't enable both at the same time
-        size_t _half_N = (attach_halfN1) ? (N1 + 1) / 2 : ((attach_halfN2) ? (N2 + 1) / 2 : 0);
-        size_t _N1orN2 = (attach_halfN1) ? N1 : ((attach_halfN2) ? N2 : 0);
+        // half-N section is appended only when attach_halfN1 is set
+        size_t _half_N = (attach_halfN1) ? (N1 + 1) / 2 : 0;
 
         if(radices1 == radices2)
             N2 = 0;
@@ -348,8 +345,7 @@ public:
 
         if(_half_N)
         {
-            TwiddleTable<T>::launch_half_N_kernel(
-                stream, device_data_ptr + table_sz, _half_N, _N1orN2);
+            TwiddleTable<T>::launch_half_N_kernel(stream, device_data_ptr + table_sz, _half_N, N1);
         }
     }
 };
@@ -547,7 +543,6 @@ gpubuf twiddles_create_2D_pr(size_t                     N1,
                              rocfft_precision           precision,
                              const hipDeviceProp_t&     deviceProp,
                              bool                       attach_halfN,
-                             bool                       attach_halfN2,
                              const std::vector<size_t>& radices1,
                              const std::vector<size_t>& radices2,
                              unsigned int               deviceId)
@@ -559,7 +554,7 @@ gpubuf twiddles_create_2D_pr(size_t                     N1,
     if(!stream)
         stream.alloc();
 
-    TwiddleTable2D<T> twTable(precision, deviceProp, N1, N2, attach_halfN, attach_halfN2);
+    TwiddleTable2D<T> twTable(precision, deviceProp, N1, N2, attach_halfN);
     twTable.GenerateTwiddleTable(radices1, radices2, stream, twts);
 
     if(hipStreamSynchronize(stream) != hipSuccess)
@@ -573,7 +568,6 @@ gpubuf twiddles_create_2D(size_t                     N1,
                           rocfft_precision           precision,
                           const hipDeviceProp_t&     deviceProp,
                           bool                       attach_halfN,
-                          bool                       attach_halfN2,
                           const std::vector<size_t>& radices1,
                           const std::vector<size_t>& radices2,
                           unsigned int               deviceId)
@@ -581,35 +575,14 @@ gpubuf twiddles_create_2D(size_t                     N1,
     switch(precision)
     {
     case rocfft_precision_single:
-        return twiddles_create_2D_pr<rocfft_complex<float>>(N1,
-                                                            N2,
-                                                            precision,
-                                                            deviceProp,
-                                                            attach_halfN,
-                                                            attach_halfN2,
-                                                            radices1,
-                                                            radices2,
-                                                            deviceId);
+        return twiddles_create_2D_pr<rocfft_complex<float>>(
+            N1, N2, precision, deviceProp, attach_halfN, radices1, radices2, deviceId);
     case rocfft_precision_double:
-        return twiddles_create_2D_pr<rocfft_complex<double>>(N1,
-                                                             N2,
-                                                             precision,
-                                                             deviceProp,
-                                                             attach_halfN,
-                                                             attach_halfN2,
-                                                             radices1,
-                                                             radices2,
-                                                             deviceId);
+        return twiddles_create_2D_pr<rocfft_complex<double>>(
+            N1, N2, precision, deviceProp, attach_halfN, radices1, radices2, deviceId);
     case rocfft_precision_half:
-        return twiddles_create_2D_pr<rocfft_complex<rocfft_fp16>>(N1,
-                                                                  N2,
-                                                                  precision,
-                                                                  deviceProp,
-                                                                  attach_halfN,
-                                                                  attach_halfN2,
-                                                                  radices1,
-                                                                  radices2,
-                                                                  deviceId);
+        return twiddles_create_2D_pr<rocfft_complex<rocfft_fp16>>(
+            N1, N2, precision, deviceProp, attach_halfN, radices1, radices2, deviceId);
     }
 }
 

@@ -55,6 +55,18 @@ except Exception as e:  # pragma: no cover - optional for CK-only runs
     _AITER_IMPORT_ERROR = e
 
 
+# The one architecture this harness targets.
+#
+# It lives under `builders/gfx950/`, takes no `--arch` flag, and every selector
+# it calls is a gfx950 cohort gate, so the target is fixed by construction. The
+# selectors still take `arch` as an explicit argument -- a gate named for a
+# cohort must verify the request is actually for that cohort, or a gfx942
+# problem would match a gfx950-named gate -- but there is no reason for THIS
+# file to spell the answer out six times. Name it once; the call sites then read
+# as "the arch this harness is for" rather than as a repeated literal.
+_ARCH = "gfx950"
+
+
 # ---------------------------------------------------------------------------
 # Path forcing
 #
@@ -487,6 +499,61 @@ def default_scenarios() -> List[Scenario]:
             head_size=128,
             block_size=64,
             dtype=torch.bfloat16,
+        ),
+        # fp16 sink prefill: the cohort the combo widening admits. Gate 1 (D64
+        # b32 GQA-8, multi-seq) and Gate 2 (D64 b16, single-seq).
+        Scenario(
+            name="fp16_d64_sinks_gate1",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=512,
+        ),
+        # fp16 SWA-sink correctness. The two gates differ on sliding_window:
+        # Gate 1 (`_enable_combo_2d`) does NOT exclude it, so `gate1_swa` still
+        # rides the widened combo (with its SW-specific settings); Gate 2's wpe3
+        # predicate checks `sliding_window == 0`, so `gate2_swa` falls to the
+        # untuned path. Either way the purpose is to confirm the fp16 SWA+sinks
+        # path is numerically correct. sliding_window=512 is ≥ block_size for both
+        # cohorts and is a realistic short-context window.
+        Scenario(
+            name="fp16_d64_sinks_gate1_swa",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2_swa",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=512,
         ),
     ]
 
@@ -1154,7 +1221,7 @@ def make_inputs(s: Scenario, seed: int = 0):
         0, s.num_blocks, (num_seqs, max_blocks), dtype=torch.int32, device="cuda"
     )
     sinks = (
-        torch.randn(s.num_query_heads, dtype=torch.bfloat16, device="cuda")
+        torch.randn(s.num_query_heads, dtype=s.dtype, device="cuda")
         if s.use_sinks
         else None
     )
@@ -1329,6 +1396,7 @@ def _run_rocke(
     kq_swizzle: bool = False,
     kq_pad: int = 0,
     probe_occupancy: bool = False,
+    force_wpe: Optional[int] = None,
 ):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
@@ -1370,6 +1438,7 @@ def _run_rocke(
         use_fp8=False,
         num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
+        waves_per_eu=force_wpe,
     )
 
     hip_stream = _bench_stream_handle()
@@ -1404,8 +1473,8 @@ def _run_rocke(
         # run_unified_attention_torch dispatcher overhead). --no-interleave
         # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
         # this lane measure both the interleave fast path and the "32x32 base".
-        if _d256_gfx950_fast(problem):
-            spec = _tiled_spec_from_problem(problem)
+        if _d256_gfx950_fast(problem, _ARCH):
+            spec = _tiled_spec_from_problem(problem, _ARCH)
             if kq_swizzle:
                 spec = _with_kq_xor_swizzle(spec)
                 print(
@@ -1421,7 +1490,7 @@ def _run_rocke(
                     "correct: numerics preserved)"
                 )
             kernel = build_unified_attention_2d_tiled(spec)
-            if _select_2d_compile_backend(problem) == "hipcc":
+            if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
                 from rocke.helpers.compile import compile_kernel_via_hipcc
 
                 artifact = compile_kernel_via_hipcc(kernel)
@@ -1438,7 +1507,7 @@ def _run_rocke(
             if probe_occupancy:
                 from builders.common.occupancy_probe import print_occupancy
 
-                print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
+                print_occupancy(artifact.hsaco, spec.num_warps, arch=_ARCH)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -1491,9 +1560,9 @@ def _run_rocke(
         if not ok:
             raise NotImplementedError(reason)
 
-        spec = _tiled_spec_from_problem(problem)
+        spec = _tiled_spec_from_problem(problem, _ARCH)
         kernel = build_unified_attention_2d_tiled(spec)
-        if _select_2d_compile_backend(problem) == "hipcc":
+        if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
             artifact = compile_kernel_via_hipcc(kernel)
@@ -1770,6 +1839,15 @@ def _main_impl() -> int:
         help="comma-separated list of paths to run: auto, 2d, 3d",
     )
     parser.add_argument(
+        "--force-wpe",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Pin waves_per_eu=N on UnifiedAttentionProblem for the CK auto lane, "
+        "overriding all gate logic. Use 2 vs 3 to A/B the Gate-2 occupancy hint "
+        "without modifying production selectors.",
+    )
+    parser.add_argument(
         "--set",
         choices=("default", "creative", "fmha", "all"),
         default="default",
@@ -1920,6 +1998,7 @@ def _main_impl() -> int:
                                 path="auto",
                                 warmup=args.warmup,
                                 attempts=args.attempts,
+                                force_wpe=args.force_wpe,
                             )
                         )
                         if ck_auto:

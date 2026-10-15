@@ -1292,7 +1292,7 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
 }
 
 // ============================================================================
-// buildFullIndices extra tests
+// Scale/bias and mean/rstd padded with 1s to the input rank
 // ============================================================================
 
 TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePadded)

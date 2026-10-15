@@ -19,6 +19,8 @@
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
+from rocke.core.arch import ArchTarget
+from rocke.core.arch.target import _gfx1250_scale_combination_valid
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -74,10 +76,22 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, scale_a="e8m0", scale_b="e8m0"):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
-    op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
+    block_k = 16 if scale_mode == "scale16" else 32
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=a_kind,
+        b_dtype=b_kind,
+        c_dtype="fp32",
+        scales=(scale_a, scale_b, block_k),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    op_id = atom.op_id
 
     def build(b: IRBuilder) -> None:
         a_ptr = b.param(
@@ -237,6 +251,8 @@ CONFIGS = [
     (_wmma_k64("bf8", "bf8"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale"), "gfx1250"),
     (_wmma_scaled("fp8", "fp8", "scale16"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale"), "gfx1250"),
+    (_wmma_scaled("fp4", "fp4", "scale16"), "gfx1250"),
     (_tr16_b128(F16), "gfx1250"),
     (_tr16_b128(F16), "gfx950"),
     (_tr16_b128(BF16), "gfx1250"),
@@ -252,6 +268,211 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
 ]
+
+
+# Matrix pairs with E8M0 scales; retain the original config indices above.
+_SCALED_PAIRS = [("fp6", "fp6"), ("bf6", "bf6")]
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b in _SCALED_PAIRS
+)
+
+
+# Homogeneous BF8 belongs to the eight-bit example contract.
+CONFIGS.extend(
+    (_wmma_scaled("bf8", "bf8", mode), "gfx1250") for mode in ("scale", "scale16")
+)
+
+
+def _scale_coordinates(block_k):
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", block_k),
+    )
+
+    def build(b):
+        out = b.param("coords", PtrType(I32, "global"), noalias=True, align=16)
+        lane = b.thread_id_x()
+        for layout in (atom.a_scale_layout(), atom.b_scale_layout()):
+            for slot in range(layout.frag_len):
+                x, y = layout.coord(b, lane, slot)
+                b.global_store(out, lane, x)
+                b.global_store(out, lane, y)
+        b.ret()
+
+    return build
+
+
+CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
+
+
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    if a != b
+)
+
+
+# Keep the supported FP4 scale cases in their original order.
+_MATRIX_DTYPES = ("fp8", "bf8", "fp6", "bf6", "fp4")
+_SCALE_DTYPES = ("e8m0", "e5m3", "e4m3")
+_SCALE_PAIRS = [
+    (a, b, sa, sb)
+    for a in _MATRIX_DTYPES
+    for b in _MATRIX_DTYPES
+    for sa in _SCALE_DTYPES
+    for sb in _SCALE_DTYPES
+    if (sa, sb) != ("e8m0", "e8m0") and _gfx1250_scale_combination_valid(a, b, sa, sb)
+]
+
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b, sa, sb in _SCALE_PAIRS
+)
+
+
+def build_data_prefetch(b: IRBuilder) -> None:
+    """Every data-prefetch op once, over each pointer space s_prefetch_data
+    accepts, with non-default immediates so a dropped attr shows up."""
+    src = b.param("src", PtrType(F32, "global"), readonly=True, align=16)
+    table = b.param("table", PtrType(I32, "global"), addr_space="constant")
+    flat = b.param("flat", PtrType(F32, "private"))
+    nbytes = b.param("nbytes", I32)
+    lines = b.const_i32(4)
+    b.enable_scalar_prefetch()
+    b.s_prefetch_data(src, lines)
+    b.s_prefetch_data(table, lines)
+    b.s_prefetch_data(flat, lines)
+    rsrc = b.buffer_rsrc(src, nbytes)
+    b.s_buffer_prefetch_data(rsrc, lines, offset=256)
+    b.global_prefetch(src, cachepolicy=3)
+    b.flat_prefetch(flat, cachepolicy=5)
+    b.ret()
+
+
+CONFIGS.append((build_data_prefetch, "gfx1250"))
+
+
+def build_cluster(b: IRBuilder) -> None:
+    """Every cluster read on every axis, stored so the pure reads stay live,
+    then cluster_size and one cluster barrier."""
+    out = b.param("out", PtrType(I32, "global"))
+    tid = b.thread_id_x()
+    for axis in ("x", "y", "z"):
+        cid = b.cluster_id(axis)
+        b.global_store(out, tid, cid)
+        cwid = b.cluster_workgroup_id(axis)
+        b.global_store(out, tid, cwid)
+        cwmax = b.cluster_workgroup_max_id(axis)
+        b.global_store(out, tid, cwmax)
+    flat = b.cluster_workgroup_flat_id()
+    b.global_store(out, tid, flat)
+    max_flat = b.cluster_workgroup_max_flat_id()
+    b.global_store(out, tid, max_flat)
+    size = b.cluster_size("y")
+    b.global_store(out, tid, size)
+    b.cluster_barrier()
+    b.ret()
+
+
+CONFIGS.append((build_cluster, "gfx1250"))
+
+
+def build_cluster_dims(b: IRBuilder) -> None:
+    """A 2x2x1 cluster shape: the only effect is the "amdgpu-cluster-dims"
+    function attribute, so the body just reads the cluster-local flat id."""
+    out = b.param("out", PtrType(I32, "global"))
+    b.set_cluster_dims(2, 2, 1)
+    tid = b.thread_id_x()
+    flat = b.cluster_workgroup_flat_id()
+    b.global_store(out, tid, flat)
+    b.ret()
+
+
+CONFIGS.append((build_cluster_dims, "gfx1250"))
+
+
+def build_multicast(b: IRBuilder) -> None:
+    """Every cluster multicast width once, with non-default immediates so a
+    dropped attr shows up; the sync results are stored so they stay live."""
+    src = b.param("src", PtrType(I32, "global"), readonly=True, align=16)
+    out = b.param("out", PtrType(I32, "global"))
+    mask = b.param("mask", I32)
+    local = b.smem_addr_of(b.smem_alloc(I32, [64], name_hint="stage"))
+    tid = b.thread_id_x()
+    v1 = b.cluster_load(src, mask)
+    b.global_store(out, tid, v1)
+    v2 = b.cluster_load(src, mask, width_bytes=8, cachepolicy=1)
+    b.global_store(out, tid, b.vec_extract(v2, 1))
+    v4 = b.cluster_load(src, mask, width_bytes=16, cachepolicy=8)
+    b.global_store(out, tid, b.vec_extract(v4, 3))
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=1)
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=4, offset_bytes=16)
+    b.cluster_load_async_to_lds(src, local, mask, width_bytes=8, cachepolicy=3)
+    b.cluster_load_async_to_lds(
+        src, local, mask, width_bytes=16, offset_bytes=-32, cachepolicy=31
+    )
+    b.ret()
+
+
+CONFIGS.append((build_multicast, "gfx1250"))
+
+
+def build_tdm(b: IRBuilder) -> None:
+    """Two packed TDM descriptors: the load takes the smem (i64) LDS address
+    with padding and a workgroup mask set; the store takes an i32 LDS address
+    with the defaults, so both address paths and every flag field show up."""
+    src = b.param("src", PtrType(I16, "global"), readonly=True, align=16)
+    dst = b.param("dst", PtrType(I16, "global"), align=16)
+    dim0 = b.param("dim0", I32)
+    dim1 = b.param("dim1", I32)
+    stride = b.param("stride", I32)
+    lds32 = b.param("lds32", I32)
+    lds = b.smem_addr_of(b.smem_alloc(I16, [64 * 16], name_hint="tile"))
+    b.tensor_load_to_lds(
+        *b.tdm_descriptor_2d(
+            src,
+            lds,
+            elem_bytes=2,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=64,
+            tile_dim1=16,
+            workgroup_mask=3,
+            pad_interval=2,
+            pad_amount=5,
+        )
+    )
+    b.s_wait_tensorcnt(0)
+    b.tensor_store_from_lds(
+        *b.tdm_descriptor_2d(
+            dst,
+            lds32,
+            elem_bytes=2,
+            tensor_dim0=dim0,
+            tensor_dim1=dim1,
+            row_stride=stride,
+            tile_dim0=0xFFFF,
+            tile_dim1=16,
+        ),
+        cachepolicy=5,
+    )
+    b.s_wait_tensorcnt(0)
+    b.ret()
+
+
+CONFIGS.append((build_tdm, "gfx1250"))
 
 
 def _spec(idx: int):

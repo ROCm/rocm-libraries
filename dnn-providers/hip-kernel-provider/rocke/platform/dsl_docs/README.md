@@ -85,22 +85,23 @@ New to the DSL? Read in this order:
 22. [`optimization/runbook_mapping.md`](./optimization/runbook_mapping.md) — compatibility pointer to the compliance map
 23. [`optimization/measured_results.md`](./optimization/measured_results.md) — measurement retention policy and scoped evidence index
 24. [`fusion/overview.md`](./fusion/overview.md)
-25. [`autotune/overview.md`](./autotune/overview.md)
-26. [`development/testing.md`](./development/testing.md)
-27. [`development/extending.md`](./development/extending.md)
-28. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
-29. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
-30. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
-31. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
-32. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
-33. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
-34. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
-35. [`reference/file_index.md`](./reference/file_index.md)
-36. [`reference/api_index.md`](./reference/api_index.md)
-37. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
-38. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
-39. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
-40. [`reference/glossary.md`](./reference/glossary.md)
+25. [`fusion/adding_fused_kernels.md`](./fusion/adding_fused_kernels.md) — decision guide: when a fusion pays, when it doesn't, how to land one
+26. [`autotune/overview.md`](./autotune/overview.md)
+27. [`development/testing.md`](./development/testing.md)
+28. [`development/extending.md`](./development/extending.md)
+29. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+30. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
+31. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
+32. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)
+33. [`development/invariants.md`](./development/invariants.md) — non-obvious rules (the landmines) for engine contributors
+34. [`development/troubleshooting.md`](./development/troubleshooting.md) — engine/build failure catalog (stale-artifact class, gate failures)
+35. [`development/debugging_rocgdb.md`](./development/debugging_rocgdb.md) — driving rocgdb: fault → authoring line, workgroup/lane, precise-memory
+36. [`reference/file_index.md`](./reference/file_index.md)
+37. [`reference/api_index.md`](./reference/api_index.md)
+38. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
+39. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
+40. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
+41. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 

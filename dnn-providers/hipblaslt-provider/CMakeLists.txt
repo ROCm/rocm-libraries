@@ -127,6 +127,9 @@ include(ClangTidy)
 # Sanitizer support (Address Sanitizer, etc.)
 include(Sanitizers)
 
+# Stage System32-shadowed ROCm DLLs into the build bin dir (Windows)
+include(WindowsDllStaging)
+
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
