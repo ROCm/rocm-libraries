@@ -185,6 +185,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE_RELPATH="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_test_kpack_subdir}/test_zstd.kpack")
 
+    # Install the vendored kpack test fixture beside the test binary so it is
+    # available in installed / repackaged layouts (e.g. TheRock CI) where the
+    # source tree is absent. The test code falls back to this exe-relative path
+    # when the compile-time source path does not exist.
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/fixtures")
+
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
@@ -271,6 +278,32 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950AttentionDense for "
             "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for the gfx1151 WMMA-attention production pack, gated like gfx950 above.
+    hkp_product_ships_engine_for_arch(
+        _hkp_gfx1151_wmma_attention "hipkernel:Gfx1151WmmaAttention" gfx1151)
+    if(_hkp_gfx1151_wmma_attention)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1151
+            SUITES TestGfx1151WmmaAttentionPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
+            "gfx1151, so its census is not registered.")
     endif()
 endif()
 

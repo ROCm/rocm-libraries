@@ -163,8 +163,8 @@ option(MIOPEN_ENABLE_HIPDNN_WRAPPER
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     message(STATUS
         "MIOPEN_ENABLE_HIPDNN_WRAPPER: ENABLED - building libMIOpen.so as a public "
-        "wrapper over libMIOpen_private.so. The wrapper is an unconditional "
-        "pass-through; runtime forwarding to hipDNN is not implemented yet.")
+        "wrapper over libMIOpen_private.so. Set MIOPEN_HIPDNN_FORWARDING=enabled "
+        "at run time to forward the convolution entry points to hipDNN.")
 endif()
 
 option(MIOPEN_INCBIN "Include kernels using incbin" OFF)
@@ -780,7 +780,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1151 gfx1200 gfx1201)
+set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project

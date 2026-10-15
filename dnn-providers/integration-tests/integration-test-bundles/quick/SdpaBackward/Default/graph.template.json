@@ -38,7 +38,7 @@
       },
       "parameters": {
         "alibi_mask": false,
-        "attn_scale_value": null,
+        "attn_scale_value": 0.08838834764831843,
         "causal_mask": false,
         "causal_mask_bottom_right": false,
         "diagonal_alignment": "${case.attributes.parameters__diagonal_alignment}",

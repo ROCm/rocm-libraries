@@ -466,8 +466,12 @@ class AsmMovePropagationPassImpl : public Pass {
 
             // For same-instruction read/write, keep "use-before-def" semantics by
             // applying defs first, then sources overwrite as Use.
+            // A read-write dest keeps part of its old value (v_writelane_b32 writes one
+            // lane), so it is a Use even when the frontend lists it only as a dest.
+            const ReadWriteDestKeys rwDests = collectReadWriteDestKeys(*inst);
             for (const StinkyRegister& defReg : inst->getDestRegs()) {
-                markRegisterLanes(defReg, NextEvent::Def, nextEvents);
+                markRegisterLanes(defReg, rwDests.covers(defReg) ? NextEvent::Use : NextEvent::Def,
+                                  nextEvents);
             }
             for (const StinkyRegister& useReg : inst->getSrcRegs()) {
                 markRegisterLanes(useReg, NextEvent::Use, nextEvents);

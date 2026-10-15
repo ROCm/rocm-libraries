@@ -1,0 +1,486 @@
+################################################################################
+# Characterization tests for Tensile.TensileLibLogicToYaml
+#
+# ADD-ONLY: pins the library-logic -> benchmark-config YAML transformers and the
+# TensileLibLogicToYaml orchestrator (LibraryIO read/parse stubbed).
+################################################################################
+import importlib
+
+import pytest
+import yaml
+
+pytestmark = pytest.mark.unit
+
+M = importlib.import_module("Tensile.TensileLibLogicToYaml")
+
+
+# ---------------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------------
+def test_make_flow():
+    assert isinstance(M.makeFlow([1, 2]), M.FlowList)
+    assert M.makeFlow(5) == 5
+
+
+def test_tprint_gated(monkeypatch, capsys):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    M.tPrint(1, "hidden")
+    assert capsys.readouterr().out == ""
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 2)
+    M.tPrint(1, "shown")
+    assert "shown" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# setGlobalParams
+# ---------------------------------------------------------------------------
+def test_set_global_params_non_i8():
+    res = M.setGlobalParams({"MinimumRequiredVersion": M.__version__}, {"DataType": "S"})
+    assert res["MinimumRequiredVersion"] == M.__version__
+    assert res["DataInitTypeA"] == 12
+    assert res["NumElementsToValidate"] == 0
+
+
+def test_set_global_params_replaces_a_version_tensile_refuses(capsys, monkeypatch):
+    # Tensile refuses a config from another major version (DECISIONS D48).
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 1)
+    for recorded in ("1.2.3", "1", None):
+        res = M.setGlobalParams({"MinimumRequiredVersion": recorded}, {"DataType": "S"})
+        assert res["MinimumRequiredVersion"] == M.__version__
+    assert "does not accept in a config" in capsys.readouterr().out
+
+
+def test_set_global_params_i8():
+    res = M.setGlobalParams({"MinimumRequiredVersion": "1"}, {"DataType": "I8"})
+    assert res["DataInitTypeA"] == 3
+    assert res["DataInitTypeB"] == 3
+
+
+# ---------------------------------------------------------------------------
+# formProblemTypeYamlData
+# ---------------------------------------------------------------------------
+def test_form_problem_type_empty_raises():
+    with pytest.raises(RuntimeError, match="empty"):
+        M.formProblemTypeYamlData({})
+
+
+def test_form_problem_type_always_and_default_keys():
+    state = {
+        "OperationType": "GEMM",
+        "DataType": "S",
+        "TransposeA": True,
+        "TransposeB": False,
+        "HighPrecisionAccumulate": True,
+    }
+    # add a default-valued key (skipped) — pick one that is NOT in the
+    # always-print set nor OperationType
+    always = {"OperationType", "DataType", "DestDataType", "ComputeDataType",
+              "HighPrecisionAccumulate", "TransposeA", "TransposeB"}
+    key = next(k for k in M.defaultProblemType if k not in always)
+    state[key] = M.defaultProblemType[key]  # equals default -> skipped
+    data = M.formProblemTypeYamlData(state)
+    assert data["OperationType"] == "GEMM"
+    assert data["TransposeA"] is True
+    assert key not in data  # default value omitted
+
+
+# ---------------------------------------------------------------------------
+# formGroups / form9BitMIInst
+# ---------------------------------------------------------------------------
+def test_form_groups():
+    data = M.formGroups({"a": 1, "b": 2})
+    assert data["Groups"][0][0] == {"a": 1, "b": 2}
+
+
+def test_form_9bit_mi_inst():
+    sol = {
+        "MIBlock": [1, 2, 3, 4, 5, 6],
+        "MIWaveTile": [7, 8],
+        "MIWaveGroup": [9, 10],
+        "WorkGroup": [16, 16, 1],
+        "MIArchVgpr": True,
+    }
+    groups = M.form9BitMIInst(sol)
+    # MIBlock[0:5] + MIWaveTile + MIWaveGroup = 5+2+2 = 9 bits
+    assert list(groups["MatrixInstruction"]) == [1, 2, 3, 4, 5, 7, 8, 9, 10]
+    assert isinstance(groups["WorkGroup"], M.FlowList)
+    assert groups["MIArchVgpr"] is True
+
+
+def test_form_9bit_mi_inst_empty_raises():
+    with pytest.raises(RuntimeError, match="cannot be empty"):
+        M.form9BitMIInst({"MIBlock": [], "MIWaveTile": [], "MIWaveGroup": []})
+
+
+# ---------------------------------------------------------------------------
+# formForkParams
+# ---------------------------------------------------------------------------
+def test_form_fork_params_skip_mi_emits_workgroup():
+    # D14 / AIHPBLAS-4409 (was pinned, now FIXED): this path used to pass the
+    # string "None" to formGroups, whose .items() raised AttributeError. It now
+    # emits a WorkGroup group, so the skipMI / MI-disabled path works.
+    sol = {"EnableMatrixInstruction": False, "WorkGroup": [16, 16, 1]}
+    data = M.formForkParams(sol, skipMI=True)
+    grp = data["ForkParameters"][-1]["Groups"][0][0]
+    assert list(grp["WorkGroup"]) == [16, 16, 1]
+    assert "MatrixInstruction" not in grp
+
+
+def test_form_fork_params_skip_mi_without_workgroup_raises():
+    # formGroups is the only emitter for WorkGroup, so a solution that omits it
+    # cannot produce a group at all.
+    with pytest.raises(KeyError):
+        M.formForkParams({"EnableMatrixInstruction": False}, skipMI=True)
+
+
+def test_form_fork_params_with_mi():
+    sol = {
+        "EnableMatrixInstruction": True,
+        "MatrixInstruction": [16, 16, 4, 1],
+        "MIBlock": [1, 2, 3, 4, 5, 6],
+        "MIWaveTile": [7, 8],
+        "MIWaveGroup": [9, 10],
+        "WorkGroup": [16, 16, 1],
+        "MIArchVgpr": False,
+    }
+    data = M.formForkParams(sol, skipMI=False)
+    grp = data["ForkParameters"][-1]["Groups"][0][0]
+    assert "MatrixInstruction" in grp
+
+
+def test_form_fork_params_includes_nondefault_fork_key():
+    # A settable key whose value differs from the one a config would otherwise
+    # get is emitted (DECISIONS D48). MI enabled + skipMI=False keeps this on
+    # the MI group path.
+    sol = {
+        "EnableMatrixInstruction": True,
+        "MatrixInstruction": [16, 16, 4, 1],
+        "MIBlock": [1, 2, 3, 4, 5, 6],
+        "MIWaveTile": [7, 8],
+        "MIWaveGroup": [9, 10],
+        "WorkGroup": [16, 16, 1],
+        "MIArchVgpr": False,
+        "GlobalSplitU": 4,
+    }
+    data = M.formForkParams(sol, skipMI=False)
+    fork_keys = [k for d in data["ForkParameters"] for k in d]
+    assert "GlobalSplitU" in fork_keys
+
+
+# ---------------------------------------------------------------------------
+# formProblemSize
+# ---------------------------------------------------------------------------
+def test_form_problem_size_with_exact():
+    data = M.formProblemSize([([128, 128, 1, 64], [0, 0.9])], 0, {"BiasDataTypeList": ["S"]})
+    assert data["BenchmarkJoinParameters"] is None
+    sizes = data["BenchmarkFinalParameters"][0]["ProblemSizes"]
+    assert list(sizes[0]["Exact"]) == [128, 128, 1, 64]
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == ["S"]
+
+
+def test_form_problem_size_origami_none(capsys, monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 1)
+    data = M.formProblemSize(None, 0, {"BiasDataTypeList": []})
+    sizes = data["BenchmarkFinalParameters"][0]["ProblemSizes"]
+    assert list(sizes[0]["Exact"]) == [1, 1, 1, 1]
+    assert "Origami" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# formLibraryLogic
+# ---------------------------------------------------------------------------
+def _solution_source(**overrides):
+    fields = dict(
+        versionString={"MinimumRequiredVersion": "1.2.3"},
+        scheduleName="sched",
+        architectureName="gfx942",
+        deviceNames=["Device 75a0"],
+        problemType={},
+        solution={},
+    )
+    fields.update(overrides)
+    return M.SolutionSource(**fields)
+
+
+def test_form_library_logic():
+    data = M.formLibraryLogic(_solution_source())
+    assert str(data["ScheduleName"]) == "sched"
+    assert str(data["ArchitectureName"]) == "gfx942"
+    assert [str(x) for x in data["DeviceNames"]] == ["Device 75a0"]
+
+
+def test_form_library_logic_prefers_run_config(monkeypatch):
+    # Values recorded by the run config win over the ones derived from the input.
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    runSettings = M.RunSettings(
+        libraryLogic={
+            "ScheduleName": "recorded",
+            "ArchitectureName": "gfx950",
+            "DeviceNames": ["Device 0050"],
+        }
+    )
+    data = M.formLibraryLogic(_solution_source(), runSettings)
+    assert str(data["ScheduleName"]) == "recorded"
+    assert str(data["ArchitectureName"]) == "gfx950"
+    assert [str(x) for x in data["DeviceNames"]] == ["Device 0050"]
+
+
+def test_form_library_logic_unwraps_dict_architecture():
+    # rawLibraryLogic may hand back {'Architecture': 'gfx950', 'CUCount': 128}.
+    data = M.formLibraryLogic(
+        _solution_source(architectureName={"Architecture": "gfx950", "CUCount": 128})
+    )
+    assert str(data["ArchitectureName"]) == "gfx950"
+
+
+# ---------------------------------------------------------------------------
+# BiasTypeArgs shape normalization / benchmark header scan
+# ---------------------------------------------------------------------------
+def test_normalize_bias_type_args_flattens_nested():
+    # LibraryIO._writeSolutionsHeader wrote "[{}]".format([7]) -> [[7]] for
+    # years, so existing benchmark data files carry the nested shape while the
+    # benchmark config schema takes a flat list. See DECISIONS D45.
+    assert M.normalizeBiasTypeArgs([[7]]) == [7]
+    assert M.normalizeBiasTypeArgs([[0, 4]]) == [0, 4]
+
+
+def test_normalize_bias_type_args_passes_flat_through():
+    assert M.normalizeBiasTypeArgs([7]) == [7]
+    assert M.normalizeBiasTypeArgs(["s"]) == ["s"]
+
+
+def test_normalize_bias_type_args_empty_is_absent():
+    # [[]] is what the old writer emitted for an empty bias list; both it and []
+    # must read as "not set" so the BiasDataTypeList fallback engages.
+    assert M.normalizeBiasTypeArgs([[]]) is None
+    assert M.normalizeBiasTypeArgs([]) is None
+    assert M.normalizeBiasTypeArgs(None) is None
+
+
+def test_form_problem_size_flattens_nested_bias():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[7]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [7]
+
+
+def test_form_problem_size_empty_bias_falls_back_to_problem_type():
+    data = M.formProblemSize(
+        exactLogic=None,
+        solutionIndex=0,
+        problemTypeStat={"BiasDataTypeList": [0]},
+        problemSizes=[{"Exact": [128, 64, 1, 256]}],
+        biasTypeArgs=[[]],
+    )
+    assert list(data["BenchmarkFinalParameters"][1]["BiasTypeArgs"]) == [0]
+
+
+def test_split_benchmark_header_all_optional_fields():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"GateTypeArgs": [[4]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 5
+    assert header["BiasTypeArgs"] == [[7]]
+    assert "GateTypeArgs" in header
+
+
+def test_split_benchmark_header_optional_fields_absent():
+    # Each optional entry is written only when set, so a file without bias or
+    # activation puts the first solution at index 2, not at a fixed offset.
+    data = [{"MinimumRequiredVersion": "1.2.3"}, {"ProblemSizes": []}, {"ProblemType": {}}]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 2
+    assert header == {}
+
+
+def test_split_benchmark_header_skips_absent_middle_key():
+    # Each optional entry is independent, so activation can be present with no
+    # bias. The scan must keep going rather than stop at the first miss.
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ActivationArgs": [[{"Enum": "relu"}]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 3
+    assert "ActivationArgs" in header
+    assert "BiasTypeArgs" not in header
+
+
+def test_split_benchmark_header_bias_and_gate_without_activation():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"BiasTypeArgs": [[7]]},
+        {"GateTypeArgs": [[3]]},
+        {"ProblemType": {}},
+    ]
+    header, offset = M.splitBenchmarkHeader(data)
+    assert offset == 4
+    assert header["BiasTypeArgs"] == [[7]]
+    assert header["GateTypeArgs"] == [[3]]
+    assert "ActivationArgs" not in header
+
+
+def test_benchmark_reader_matches_without_optional_header():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": []},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    assert M.BenchmarkDataReader.matches(data) is True
+
+
+def test_benchmark_reader_reads_nested_bias_as_flat():
+    data = [
+        {"MinimumRequiredVersion": "1.2.3"},
+        {"ProblemSizes": [{"Exact": [128, 64, 1, 256]}]},
+        {"BiasTypeArgs": [[7]]},
+        {"ProblemType": {"DataType": "S"}, "ISA": [9, 4, 2], "SolutionIndex": 0},
+    ]
+    source = M.BenchmarkDataReader.read(data, 0)
+    assert source.biasTypeArgs == [7]
+
+
+# ---------------------------------------------------------------------------
+# writeToTensileYamlFile
+# ---------------------------------------------------------------------------
+def test_write_yaml_file_ok(tmp_path, monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    out = tmp_path / "sub" / "config.yaml"
+    ret = M.writeToTensileYamlFile(str(out), {"a": 1})
+    assert ret == str(out)
+    assert yaml.safe_load(out.read_text()) == {"a": 1}
+
+
+def test_write_yaml_file_error_returns_none(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    # empty filename -> open("") raises FileNotFoundError (OSError) -> None
+    assert M.writeToTensileYamlFile("", {"a": 1}) is None
+
+
+# ---------------------------------------------------------------------------
+# TensileLibLogicToYaml orchestrator (LibraryIO stubbed)
+# ---------------------------------------------------------------------------
+def _fields():
+    versionString = {"MinimumRequiredVersion": "1.0"}
+    scheduleName = "sched"
+    architectureName = "gfx942"
+    deviceNames = ["Device 75a0"]
+    problemTypeState = {
+        "OperationType": "GEMM",
+        "DataType": "S",
+        "TransposeA": True,
+        "TransposeB": False,
+        "HighPrecisionAccumulate": True,
+        "BiasDataTypeList": ["S"],
+    }
+    allSolutionStates = [{
+        "EnableMatrixInstruction": True,
+        "MatrixInstruction": [16, 16, 4, 1],
+        "MIBlock": [1, 2, 3, 4, 5, 6],
+        "MIWaveTile": [7, 8],
+        "MIWaveGroup": [9, 10],
+        "WorkGroup": [16, 16, 1],
+        "MIArchVgpr": False,
+    }]
+    indexOrder = None
+    exactLogic = [([128, 128, 1, 64], [0, 0.9])]
+    rangeLogic = None
+    otherFields = None
+    return (
+        versionString, scheduleName, architectureName, deviceNames, problemTypeState,
+        allSolutionStates, indexOrder, exactLogic, rangeLogic, otherFields,
+    )
+
+
+def test_orchestrator_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    monkeypatch.setattr(M.LibraryIO, "readYAML", lambda p: {"nonempty": 1})
+    monkeypatch.setattr(M.LibraryIO, "rawLibraryLogic", lambda y: _fields())
+    out = tmp_path / "config.yaml"
+    ret = M.TensileLibLogicToYaml("logic.yaml", 0, str(out), skipMI=False)
+    assert ret == str(out)
+    loaded = yaml.safe_load(out.read_text())
+    assert "GlobalParameters" in loaded
+    assert "BenchmarkProblems" in loaded
+    assert loaded["LibraryLogic"]["ArchitectureName"] == "gfx942"
+
+
+def test_orchestrator_empty_yaml_raises(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    monkeypatch.setattr(M.LibraryIO, "readYAML", lambda p: "")
+    with pytest.raises(RuntimeError, match="empty"):
+        M.TensileLibLogicToYaml("logic.yaml", 0, "out.yaml", skipMI=True)
+
+
+# ---------------------------------------------------------------------------
+# parseArgs / main
+# ---------------------------------------------------------------------------
+def test_parse_args(monkeypatch):
+    monkeypatch.setattr(
+        M.sys, "argv",
+        ["prog", "-i", "in.yaml", "-d", "0,3", "-o", "out.yaml", "-s"],
+    )
+    args = M.parseArgs()
+    assert args.indices == "0,3"
+    assert args.skipMI is True
+    assert args.input.endswith("in.yaml")
+    assert args.keep_epilogues is False
+
+
+def test_main_single_index(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "0", "-o", "out.yaml"])
+    calls = []
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg, keepEpi: calls.append((idx, out, keepEpi)),
+    )
+    M.main()
+    assert len(calls) == 1
+    assert calls[0][0] == 0
+    assert calls[0][2] is False
+
+
+def test_main_forwards_keep_epilogues(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    monkeypatch.setattr(
+        M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "0", "-o", "out.yaml", "--keep-epilogues"]
+    )
+    calls = []
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg, keepEpi: calls.append(keepEpi),
+    )
+    M.main()
+    assert calls == [True]
+
+
+def test_main_multi_index_suffixes(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "ClientLogLevel", 0)
+    monkeypatch.setattr(M.sys, "argv", ["prog", "-i", "in.yaml", "-d", "1,2", "-o", "/tmp/out.yaml"])
+    calls = []
+    monkeypatch.setattr(
+        M,
+        "TensileLibLogicToYaml",
+        lambda inp, idx, out, skip, runCfg, useRunCfg, keepEpi: calls.append((idx, out)),
+    )
+    M.main()
+    assert [c[0] for c in calls] == [1, 2]
+    # multi-id appends _<id> before .yaml
+    assert calls[0][1].endswith("_1.yaml")
+    assert calls[1][1].endswith("_2.yaml")
