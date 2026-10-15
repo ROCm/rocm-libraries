@@ -41,7 +41,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx11__) || defined(__gfx117__)
+#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx11__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
         __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
@@ -72,7 +72,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx11__) || defined(__gfx117__)
+#if defined(__gfx9__) || defined(__gfx12__) || defined(__gfx11__)
     // Pass two lds pointer is the key to tell compiler that ds_read/write
     // operate on different lds chunk at same time without order dependecy
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
@@ -357,7 +357,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
     using Base::I2;
     using ThisThreadBlock = typename Base::ThisThreadBlock;
 
-#if defined(__gfx12__) || defined(__gfx117__)
+#if defined(__gfx12__)
     static constexpr index_t TransposeC = true;
 #else
     static constexpr index_t TransposeC = false;

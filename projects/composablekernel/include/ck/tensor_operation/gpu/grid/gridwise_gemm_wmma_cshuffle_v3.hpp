@@ -619,7 +619,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
     __device__ static bool constexpr IsValidCompilationParameter()
     {
-#if defined(__gfx12__) || defined(__gfx117__)
+#if defined(__gfx12__)
         if constexpr(KPerBlock % (Base::KPerWmmaBlk * 2) != 0)
         {
             return false;
