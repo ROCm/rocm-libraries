@@ -130,6 +130,17 @@ class ForwardingFailureModesTest(unittest.TestCase):
             run.stderr_lines,
         )
 
+    def test_trace_prints_once_per_entry_point(self):
+        run = self.run_probe(
+            ["conv_forward", "repeat", "2"], {**FORWARDING_ON, "MIOPEN_LOG_LEVEL": "6"}
+        )
+        self.assertEqual(run.statuses("conv_forward"), [INTERNAL_ERROR] * 3)
+        self.assertEqual(
+            run.lines_starting(CONV_TRACE),
+            [CONV_TRACE + "mode=enabled route=hipdnn reason=hipdnn-unavailable"],
+            run.stderr,
+        )
+
     def test_forwarded_failure_is_told_apart_until_a_later_call_succeeds(self):
         run = self.run_probe(
             [
@@ -185,14 +196,16 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertFalse(run.loaded_fake_backend(), run.stderr)
         self.assertEqual(run.statuses("conv_forward"), [BAD_PARM])
 
-    def test_quiet_and_fatal_levels_hide_the_failure_line(self):
+    def test_quiet_and_fatal_levels_hide_the_failure_lines(self):
         for level in ("1", "2"):
             with self.subTest(MIOPEN_LOG_LEVEL=level):
                 run = self.run_probe(
                     ["conv_forward"],
                     {**FORWARDING_ON, "MIOPEN_LOG_LEVEL": level},
                 )
+                self.assertTrue(run.loaded_fake_backend(), run.stderr)
                 self.assertEqual(run.statuses("conv_forward"), [INTERNAL_ERROR])
+                self.assertEqual(run.lines_starting(UNAVAILABLE), [], run.stderr)
                 self.assertEqual(run.lines_starting(FORWARDED_FAILURE), [], run.stderr)
 
     def test_trace_with_forwarding_off(self):

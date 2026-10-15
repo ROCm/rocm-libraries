@@ -122,9 +122,10 @@ forwarding code prints the following lines to ``stderr``:
 
 * ``[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set HIPDNN_LOG_LEVEL=error): <message>``
 
-  Printed once per process, when hipDNN could not be loaded or refused to run. A common cause is a
-  hipDNN whose major version differs from the one MIOpen was built against. Every call routed to
-  hipDNN then fails with ``miopenStatusInternalError``.
+  Printed once per process when hipDNN could not be loaded or refused to run, unless
+  ``MIOPEN_LOG_LEVEL`` is ``1`` or ``2``. A common cause is a hipDNN whose major version differs
+  from the one MIOpen was built against. Every call routed to hipDNN then fails with
+  ``miopenStatusInternalError``, whatever the log level.
 
 * ``[MIOpen] [hipDNN-forwarded] <status>: <reason>``
 

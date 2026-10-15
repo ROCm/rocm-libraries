@@ -383,9 +383,10 @@ bool IsAvailable()
         auto [handle, error] = fe::createHipdnnHandle();
         if(error.is_good() && handle != nullptr)
             return true;
-        std::cerr << "[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set "
-                     "HIPDNN_LOG_LEVEL=error): " +
-                         error.get_message() + "\n";
+        if(ErrorLoggingEnabled())
+            std::cerr << "[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, "
+                         "set HIPDNN_LOG_LEVEL=error): " +
+                             error.get_message() + "\n";
         return false;
     }();
     return available;
