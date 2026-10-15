@@ -62,6 +62,9 @@ namespace TensileLite
             size_t                                      commFlagsBytes;
             void*                                       commFlags = nullptr;
             std::vector<std::shared_ptr<SdmaQueue>>     sdmaQueues;
+
+        private:
+            void release();
         };
 
         template <typename F>

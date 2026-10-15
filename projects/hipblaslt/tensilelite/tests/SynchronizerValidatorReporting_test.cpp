@@ -441,3 +441,51 @@ INSTANTIATE_TEST_SUITE_P(Transfers,
                         ::testing::Values(TransferFailure::None,
                                           TransferFailure::Readback,
                                           TransferFailure::Clear));
+
+namespace
+{
+    class SynchronizerValidatorFlagBlock : public ::testing::TestWithParam<TransferFailure>
+    {
+    };
+}
+
+TEST_P(SynchronizerValidatorFlagBlock, DirtyBlockFailsTheSolutionWithoutAWarmup)
+{
+    auto reporter = std::make_shared<FakeResultReporter>();
+
+    // Residue on the second flag channel.
+    std::vector<uint32_t> flags{0, 0, 1, 0};
+    auto                  device = std::make_shared<DeviceContext>(0, true);
+    device->commFlags            = flags.data();
+    device->commFlagsBytes       = flags.size() * sizeof(uint32_t);
+    HostBufferValidator validator({device});
+    validator.setReporter(reporter);
+    TensileLite::ContractionSolution solution;
+    solution.problemType.fusedGemmA2A = true;
+
+    validator.preSolution(&solution);
+    validator.failure = GetParam();
+    validator.postSolution();
+
+    EXPECT_EQ(validator.error(), 1);
+    ASSERT_EQ(reporter->stringReports.size(), 1u);
+    EXPECT_EQ(reporter->stringReports.back(),
+              std::make_pair(std::string(ResultKey::Validation), std::string("FAILED")));
+    EXPECT_EQ(flags[2], GetParam() == TransferFailure::None ? 0u : 1u);
+
+    validator.failure = TransferFailure::None;
+    std::fill(flags.begin(), flags.end(), 0);
+    validator.preSolution(&solution);
+    validator.postSolution();
+    EXPECT_EQ(validator.error(), 1);
+    EXPECT_EQ(reporter->stringReports.size(), 1u);
+
+    // Not a HIP allocation.
+    device->commFlags = nullptr;
+}
+
+INSTANTIATE_TEST_SUITE_P(Transfers,
+                         SynchronizerValidatorFlagBlock,
+                         ::testing::Values(TransferFailure::None,
+                                           TransferFailure::Readback,
+                                           TransferFailure::Clear));
