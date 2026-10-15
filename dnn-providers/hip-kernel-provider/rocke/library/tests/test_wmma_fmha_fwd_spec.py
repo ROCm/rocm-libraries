@@ -7,7 +7,12 @@ import unittest
 from dataclasses import replace
 from itertools import combinations
 
-from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, wmma_fmha_fwd_grid
+from kernels.gfx1151.wmma_fmha_fwd import (
+    WmmaFmhaFwdSpec,
+    _wmma_op_id_for_arch,
+    is_valid_spec,
+    wmma_fmha_fwd_grid,
+)
 
 
 class TestWmmaFmhaFwdSpec(unittest.TestCase):
@@ -318,6 +323,29 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
                 transposed_qk=True,
                 use_attn_bias=True,
             )
+
+
+class TestWmmaFmhaFwdAtomSelection(unittest.TestCase):
+    """The WMMA atom follows the (arch, dtype) pair on both RDNA generations."""
+
+    def test_op_id_tracks_arch_and_dtype(self):
+        for arch, dtype, op_id in (
+            ("gfx1151", "fp16", "wmma_f32_16x16x16_f16"),
+            ("gfx1151", "bf16", "wmma_f32_16x16x16_bf16"),
+            ("gfx1201", "fp16", "wmma_gfx12_f32_16x16x16_f16"),
+            ("gfx1201", "bf16", "wmma_gfx12_f32_16x16x16_bf16"),
+        ):
+            with self.subTest(arch=arch, dtype=dtype):
+                self.assertEqual(_wmma_op_id_for_arch(arch, dtype), op_id)
+
+    def test_is_valid_spec_accepts_both_dtypes_on_rdna(self):
+        for arch in ("gfx1151", "gfx1201"):
+            for dtype in ("fp16", "bf16"):
+                with self.subTest(arch=arch, dtype=dtype):
+                    ok, why = is_valid_spec(
+                        WmmaFmhaFwdSpec(head_size=64, dtype=dtype), arch=arch
+                    )
+                    self.assertTrue(ok, why)
 
 
 if __name__ == "__main__":

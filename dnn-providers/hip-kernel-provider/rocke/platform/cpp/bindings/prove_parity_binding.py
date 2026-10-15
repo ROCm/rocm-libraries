@@ -857,6 +857,16 @@ def cfgs_gfx1151_wmma_fmha_fwd():
     )
 
 
+def cfgs_gfx1201_wmma_fmha_fwd():
+    # The gfx1201 emitters carry the first 12 gfx1151 configs: 0-5 are the fp16
+    # specs and 6-11 repeat them as bf16. Config 11 is bf16 crossed with
+    # v_lds_stage, the one knob whose LDS allocation, stores and loads are typed
+    # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
+    # binding would still report VALIDATED on this arch, because fp16 is what an
+    # unset dtype falls back to.
+    return cfgs_gfx1151_wmma_fmha_fwd()[:12]
+
+
 def cfgs_attention_unified():
     rows = [
         (64, 32, "bf16", 64, 8, 128, 512, 512, True, 0.0, 0, 1),
@@ -1953,6 +1963,15 @@ FAMILIES = [
         "gfx1151_wmma_fmha_fwd_lower_llvm",
         cfgs_gfx1151_wmma_fmha_fwd(),
         "gfx1151",
+    ),
+    (
+        "gfx1201_wmma_fmha_fwd",
+        # Same binding entry point as gfx1151: the spec is arch-parameterised,
+        # and gfx1201 selects the gfx12 WMMA atoms, so the gfx12 bf16 atom gets
+        # binding coverage too, not just the gfx11 one.
+        "gfx1151_wmma_fmha_fwd_lower_llvm",
+        cfgs_gfx1201_wmma_fmha_fwd(),
+        "gfx1201",
     ),
     (
         "gfx1201_wmma_gemm",
