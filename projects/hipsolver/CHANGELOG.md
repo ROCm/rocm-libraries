@@ -20,6 +20,10 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
   * getrsBatched
     * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
     * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
+* Added compatibility-only functions:
+  * trtri
+    * hipsolverDnXtrtri_bufferSize
+    * hipsolverDnXtrtri
 
 ### Changed
 
