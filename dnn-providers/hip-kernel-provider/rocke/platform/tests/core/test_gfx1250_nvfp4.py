@@ -100,7 +100,7 @@ def test_nvfp4_kernel_contract(dtype, k):
     assert "A_tensor_scale * B_tensor_scale" in hip
     assert "0, 2," in hip
     for flavor in ("llvm20", "llvm22"):
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(RuntimeError, match="requires llvm23"):
             lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor=flavor)
 
 
@@ -118,6 +118,50 @@ def test_tensor_scale_requires_native_path():
     assert not is_valid_block_spec(
         BlockScaledGemmSpec("legacy", 16, 16, 128, tensor_scale=True)
     )[0]
+
+
+@pytest.mark.parametrize(
+    "a,b,scale,path,bk",
+    [
+        ("fp4", "fp4", "e8m0", "wmma_scale", 32),
+        ("fp8", "bf8", "e8m0", "wmma_scale", 32),
+        ("fp6", "bf6", "e8m0", "wmma_scale16", 16),
+        ("fp8", "fp4", "e8m0", "wmma_scale16", 16),
+        ("fp4", "fp4", "e8m0", "wmma_scale16", 16),
+        ("fp4", "fp4", "e5m3", "wmma_scale16", 16),
+    ],
+)
+def test_tensor_scale_rejects_other_native_contracts(a, b, scale, path, bk):
+    plain = BlockScaledGemmSpec(
+        "native",
+        16,
+        16,
+        128,
+        dtype_a=a,
+        dtype_b=b,
+        scale_dtype=scale,
+        matrix_path=path,
+        block_k=bk,
+    )
+    assert is_valid_block_spec(plain)[0]
+    build_block_scaled_gemm(plain)
+    tensor = replace(plain, tensor_scale=True)
+    ok, reason = is_valid_block_spec(tensor)
+    assert not ok and "NVFP4 contract" in reason
+    with pytest.raises(ValueError, match="NVFP4 contract"):
+        build_block_scaled_gemm(tensor)
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16", "f16"])
+def test_tensor_scale_accepts_normalized_nvfp4_contract(dtype):
+    spec = replace(
+        NvFp4GemmSpec("aliases", 16, 16, 128, dtype).block_spec(),
+        dtype_a="fp4e2m1",
+        dtype_b="fp4",
+        scale_dtype="fp8e4m3",
+    )
+    assert is_valid_block_spec(spec)[0]
+    build_block_scaled_gemm(spec)
 
 
 @pytest.mark.parametrize(
@@ -276,7 +320,10 @@ def test_launcher_tensor_factor_argument_bytes(tensor_scales):
         def free(self, pointer):
             self.freed.append(pointer)
 
-    spec = NvFp4GemmSpec("launch", 16, 16, 128).block_spec()
+    spec = replace(
+        NvFp4GemmSpec("launch", 16, 16, 128).block_spec(),
+        tensor_scale=tensor_scales is not None,
+    )
     inputs, _ = make_case_inputs(NvFp4GemmSpec("launch", 16, 16, 128), "mixed")
     runtime = Runtime()
     _launch(runtime, None, spec, inputs, tensor_scales=tensor_scales)
@@ -285,3 +332,32 @@ def test_launcher_tensor_factor_argument_bytes(tensor_scales):
         expected += struct.pack("<ff", *tensor_scales)
     assert runtime.args == expected
     assert runtime.freed == runtime.pointers
+
+
+@pytest.mark.parametrize(
+    "enabled,factors",
+    [
+        (True, None),
+        (False, (1.3, 0.7)),
+        (True, (1.0,)),
+        (True, (1.0, 2.0, 3.0)),
+        (True, (float("nan"), 1.0)),
+        (True, (1.0, float("inf"))),
+    ],
+)
+def test_launcher_rejects_invalid_tensor_factors_before_allocation(enabled, factors):
+    from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import _launch
+
+    class Runtime:
+        def alloc(self, size):
+            pytest.fail("invalid factors reached GPU allocation")
+
+        def launch(self, *args):
+            pytest.fail("invalid factors reached GPU launch")
+
+    spec = replace(
+        NvFp4GemmSpec("invalid_factors", 16, 16, 128).block_spec(),
+        tensor_scale=enabled,
+    )
+    with pytest.raises(ValueError, match="tensor"):
+        _launch(Runtime(), None, spec, (), tensor_scales=factors)

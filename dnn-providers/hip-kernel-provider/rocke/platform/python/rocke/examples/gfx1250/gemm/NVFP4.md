@@ -56,6 +56,13 @@ grid = nvfp4_gemm_grid(spec)
 The existing `BlockScaledGemmSpec` defaults and launch ABI are unchanged.
 It gains defaulted scale overrides and a `tensor_scale=False` field;
 `NvFp4GemmSpec` selects FP4/E4M3/SCALE16 with tensor scaling enabled.
+The shared spec accepts `tensor_scale=True` only for this operand and scale
+contract. Use `nvfp4_gemm_verify.run_cases` to verify tensor-enabled kernels;
+it supplies both factors and a tensor-aware reference. The generic
+`block_scaled_gemm_verify.run_cases` rejects tensor-enabled specs before
+device discovery or compilation. The shared launcher requires exactly two
+finite FP32 factors for tensor-enabled specs and rejects factors for plain specs
+before allocating GPU memory.
 Scale selection is mirrored by Python `IRBuilder.mma` and C
 `rocke_b_mma_scaled`; the complete spec-to-kernel builder remains Python-only.
 C++ lowers its serialized IR, including the tensor-scale epilogue.

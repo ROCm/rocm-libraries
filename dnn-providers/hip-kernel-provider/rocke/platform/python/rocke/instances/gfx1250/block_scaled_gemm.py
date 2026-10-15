@@ -110,6 +110,7 @@ class BlockScaledGemmSpec:
     prefetch: bool = False
     scale_dtype_a: str | None = None
     scale_dtype_b: str | None = None
+    # Runtime tensor factors are supported for FP4/E4M3/SCALE16 (NVFP4) only.
     tensor_scale: bool = False
 
     def resolved_scale_dtypes(self) -> tuple[str, str]:
@@ -233,6 +234,14 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         return False, f"block_scaled_gemm supports RCR only (got {spec.layout!r})"
     if spec.tensor_scale and not native_scale:
         return False, "tensor scales require native scaled WMMA"
+    if spec.tensor_scale and (
+        spec.dtype_a != normalize_dtype("fp4")
+        or spec.dtype_b != normalize_dtype("fp4")
+        or matrix_path != "wmma_scale16"
+        or spec.block_k != 16
+        or spec.resolved_scale_dtypes() != ("e4m3", "e4m3")
+    ):
+        return False, "tensor scales require the FP4/E4M3/SCALE16 NVFP4 contract"
     if native_scale:
         required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:

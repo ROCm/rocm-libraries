@@ -2,7 +2,29 @@
 # SPDX-License-Identifier: MIT
 """NVFP4 entry point retains the existing verifier's spec and case contract."""
 
-from rocke.examples.gfx1250.gemm import nvfp4_gemm, nvfp4_gemm_verify
+import pytest
+
+from rocke.examples.gfx1250.gemm import (
+    block_scaled_gemm_verify,
+    nvfp4_gemm,
+    nvfp4_gemm_verify,
+)
+from rocke.instances.gfx1250.nvfp4_gemm import NvFp4GemmSpec
+
+
+def test_generic_verifier_rejects_tensor_spec_before_device_or_compile(monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("tensor-enabled spec reached device discovery or compilation")
+
+    monkeypatch.setattr(block_scaled_gemm_verify, "get_device_arch", unexpected)
+    monkeypatch.setattr(block_scaled_gemm_verify, "compile_kernel", unexpected)
+    monkeypatch.setattr(
+        block_scaled_gemm_verify, "compile_kernel_via_hipcc", unexpected
+    )
+    spec = NvFp4GemmSpec("tensor", 16, 16, 128).block_spec()
+    for route in ("comgr", "hip"):
+        with pytest.raises(ValueError, match="nvfp4_gemm_verify.run_cases"):
+            block_scaled_gemm_verify.run_cases(spec, ("mixed",), compile_route=route)
 
 
 def test_nvfp4_example_delegates_cases(monkeypatch):
