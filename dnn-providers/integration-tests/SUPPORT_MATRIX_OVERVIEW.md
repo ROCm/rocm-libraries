@@ -21,7 +21,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -54,7 +54,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -87,7 +87,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -120,7 +120,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -153,7 +153,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -186,7 +186,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -219,7 +219,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | ✅ 138/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | ✅ 138/138 | — |
@@ -252,7 +252,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | — | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | — | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | — | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | — | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | — | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | — | — | — |
 | **ConvolutionFwd** | — | — | — | — | — | — |
@@ -285,7 +285,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | — | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | — | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | — | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | — | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | — | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
@@ -318,7 +318,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
@@ -351,7 +351,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | 🟡 108/138 | — |
@@ -384,7 +384,7 @@ A box is one op (row) × engine (column) on this target: claimed graphs out of a
 | **BatchnormInferenceAttributesVarianceExtPointwise** | — | — | 🟡 84/169 | 🟡 145/169 | — | — |
 | **BatchnormInferencePointwise** | — | — | 🟡 84/168 | 🟡 144/168 | — | — |
 | **BatchnormInferencePointwiseBatchnormBackward** | — | — | ✅ 180/180 | ✅ 180/180 | — | — |
-| **BatchnormPointwise** | — | — | 🟡 348/600 | 🟡 432/600 | — | — |
+| **BatchnormPointwise** | — | — | 🟡 348/602 | 🟡 432/602 | — | — |
 | **BlockScaleDequantizeMatmul** | — | — | — | — | — | — |
 | **ConvolutionBwd** | — | — | — | ✅ 138/138 | — | — |
 | **ConvolutionFwd** | — | — | — | ✅ 138/138 | — | — |
