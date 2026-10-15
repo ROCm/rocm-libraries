@@ -15,9 +15,9 @@
 //     if SetNextValue() returns no kernels the ASSERT fails on purpose -- that signals a real CK /
 //     applicability regression, not a bad test shape. The 3D Fwd/Bwd end-to-end equivalents live in
 //     their own perf_config_HipImplicitGemm3DGroup*Xdlops.cpp files.
-//   * CPU_* : host-only checks of SeedFirstValidKernel() -- the populate-branch seed extracted for
-//     testability -- for all five fixed solvers. valid_kernels is injected directly, so no device
-//     or CK library is needed and these run in the CPU-only test stage.
+//   * CPU_* : host-only advance walks for the non-split solvers (2D Fwd, 3D Fwd/Bwd). With
+//     valid_kernels injected directly, SetNextValue() bypasses the CK populate branch and only the
+//     advance path runs -- no device or CK library is needed and these run in the CPU-only stage.
 
 #include <gtest/gtest.h>
 #include <gtest/group_conv.hpp>
@@ -153,65 +153,6 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-// --- Host-only (no device / CK library): SeedFirstValidKernel() must make valid_kernels[0] the
-// first enumerated config. valid_kernels is injected directly; index/split_k are pre-clobbered to
-// prove the seed resets them. Non-split solvers seed kernel_id = valid_kernels[0]; split-k solvers
-// seed split_k = 1 and kernel_id = valid_kernels[0] + "+1".
-
-TEST(CPU_PerfConfigGroupFwdSeed_NONE, SeedsKernelZero)
-{
-    FwdConfig cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 7;
-    cfg.SeedFirstValidKernel();
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.kernel_id, "A");
-}
-
-TEST(CPU_PerfConfigGroupBwdSeed_NONE, SeedsKernelZero)
-{
-    BwdConfig cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 7;
-    cfg.split_k       = 64;
-    cfg.SeedFirstValidKernel();
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.split_k, 1);
-    EXPECT_EQ(cfg.kernel_id, "A+1");
-}
-
-TEST(CPU_PerfConfigGroupWrwSeed_NONE, SeedsKernelZero)
-{
-    WrwConfig cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 7;
-    cfg.split_k       = 64;
-    cfg.SeedFirstValidKernel();
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.split_k, 1);
-    EXPECT_EQ(cfg.kernel_id, "A+1");
-}
-
-TEST(CPU_PerfConfig3DGroupFwdSeed_NONE, SeedsKernelZero)
-{
-    Fwd3DConfig cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 7;
-    cfg.SeedFirstValidKernel();
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.kernel_id, "A");
-}
-
-TEST(CPU_PerfConfig3DGroupBwdSeed_NONE, SeedsKernelZero)
-{
-    Bwd3DConfig cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 7;
-    cfg.SeedFirstValidKernel();
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.kernel_id, "A");
-}
-
 // --- Host-only advance walk for the non-split solvers (2D Fwd, 3D Fwd, 3D Bwd). With valid_kernels
 // pre-populated, SetNextValue() bypasses the CK populate branch and runs only the advance path: it
 // must visit index 0..N-1 in order and then return false without stepping out of bounds. (The
@@ -227,7 +168,8 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 
     FwdConfig cfg(false);
     cfg.valid_kernels = {"A", "B", "C"};
-    cfg.SeedFirstValidKernel();
+    cfg.index         = 0;
+    cfg.kernel_id     = cfg.valid_kernels.front();
     ASSERT_EQ(cfg.index, 0);
     ASSERT_EQ(cfg.kernel_id, "A");
 
@@ -243,6 +185,26 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.index, 2);
 }
 
+TEST(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
+{
+    const auto problem =
+        MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
+                          miopenHalf,
+                          miopenTensorNHWC,
+                          Direction::Forward);
+
+    // One valid kernel: the seed (index 0) is the whole search, so SetNextValue must report
+    // exhaustion immediately and must not re-emit or step past index 0.
+    FwdConfig cfg(false);
+    cfg.valid_kernels = {"A"};
+    cfg.index         = 0;
+    cfg.kernel_id     = cfg.valid_kernels.front();
+
+    EXPECT_FALSE(cfg.SetNextValue(problem));
+    EXPECT_EQ(cfg.index, 0);
+    EXPECT_EQ(cfg.kernel_id, "A");
+}
+
 TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem = MakeSearchProblem3D(
@@ -253,7 +215,8 @@ TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 
     Fwd3DConfig cfg(false);
     cfg.valid_kernels = {"A", "B", "C"};
-    cfg.SeedFirstValidKernel();
+    cfg.index         = 0;
+    cfg.kernel_id     = cfg.valid_kernels.front();
     ASSERT_EQ(cfg.index, 0);
 
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -278,7 +241,8 @@ TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
 
     Bwd3DConfig cfg(false);
     cfg.valid_kernels = {"A", "B", "C"};
-    cfg.SeedFirstValidKernel();
+    cfg.index         = 0;
+    cfg.kernel_id     = cfg.valid_kernels.front();
     ASSERT_EQ(cfg.index, 0);
 
     ASSERT_TRUE(cfg.SetNextValue(problem));

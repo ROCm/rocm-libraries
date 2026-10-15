@@ -209,19 +209,13 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        // For generic search, we want all available kernels, not heuristic selection
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
         InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-        assert(!valid_kernels.empty());
-
-        // Seed the first enumerated config to valid_kernels[0]. Without this, the branch returned
-        // with kernel_id still unset: GenericSearch's ComputedIterator skips configs whose
-        // IsValid() is false, so the empty kernel_id was skipped and enumeration began at
-        // valid_kernels[1] -- valid_kernels[0] was never tuned, even though it is applicable
-        // (IsArgsSupported == true) and is offered to the AI heuristic candidate list via
-        // FillValidKernels.
-        SeedFirstValidKernel();
         return true;
     }
     if((index + 1) < valid_kernels.size())

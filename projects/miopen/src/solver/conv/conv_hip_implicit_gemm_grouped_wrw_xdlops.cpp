@@ -399,29 +399,14 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
-        if(!loader.IsLoaded())
-            return false;
-
-        auto data_type = problem.GetInDataType();
-        use_tf32       = (data_type == miopenFloat && problem.UseTF32());
-
-        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
-
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds the first config to (valid_kernels[0], split_k = 1) -- required,
+        // because GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently drop the "valid_kernels[0]+1" candidate and start the
+        // sweep at split_k 2 / valid_kernels[1].
+        InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-
-        assert(!valid_kernels.empty());
-
-        // Seed the first enumerated config to (valid_kernels[0], split_k = 1), the minimum split_k
-        // for both deterministic mode and the NextCKSplitkValue<1,128> sweep. Without this, the
-        // branch returned with kernel_id unset: GenericSearch's ComputedIterator skips configs
-        // whose IsValid() is false, so the empty kernel_id was skipped and the first split_k step
-        // advanced 1 -> 2, dropping the "valid_kernels[0]+1" candidate. That candidate was never
-        // tuned, even though it is applicable (IsArgsSupported == true) and is offered to the AI
-        // heuristic candidate list via FillValidKernels.
-        SeedFirstValidKernel();
         return true;
     }
 
