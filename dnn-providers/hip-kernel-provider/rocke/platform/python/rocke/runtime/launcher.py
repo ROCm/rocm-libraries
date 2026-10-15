@@ -113,6 +113,7 @@ __all__ = [
     "no_fence",
     "release_retained_for_stream",
     "retain_for_stream",
+    "retain_until_drain",
     "synchronize_and_release",
     "time_launches",
 ]
@@ -331,6 +332,11 @@ def retain_for_stream(stream: int, *objects: Any) -> None:
     even if their Python owner is discarded before the queued replay completes.
     """
     _runtime().retain_for_stream(int(stream), *objects)
+
+
+def retain_until_drain(stream: int, owner: Any, *, resources=None) -> None:
+    """Retain an immutable reusable launch owner before asynchronous enqueue."""
+    _runtime().retain_until_drain(int(stream), owner, resources=resources)
 
 
 def release_retained_for_stream(stream: int = 0) -> None:

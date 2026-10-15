@@ -85,11 +85,16 @@ Torch device/stream contexts. Other devices and streams keep the explicit
 context boundary and restore the caller's state. Callers must make input
 production visible to it and wait before consuming outputs on another stream.
 
-Compiled kernels are cached. Each eager invocation allocates independent
-scratch, so overlapping calls cannot overwrite each other's partial results.
+Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
+reuse bounded scratch owned by the problem and effective device/stream. A
+whole-pair submission lock protects segment/reducer ordering; overlapping or
+recursive calls use private scratch. Unchanged pointers and scalars reuse an
+immutable packed pair. Changed bindings rebuild it, retaining previous input
+storage and argument buffers until completion.
 The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
-periodically. This adds eager allocator work; no performance claim is made.
+periodically. Request-local input storage is released by that completion drain;
+the eager cache owns only scratch and immutable packed addresses afterward.
 
 For a sequential decoding loop, prepare an execution once outside timing. Keep
 permuted K/V view objects stable, and update their storage and the device length

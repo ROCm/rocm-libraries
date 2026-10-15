@@ -41,6 +41,7 @@ from rocke.runtime.launcher import (
     no_fence,
     release_retained_for_stream,
     retain_for_stream,
+    retain_until_drain,
     wait_stream_and_release,
 )
 
@@ -3843,7 +3844,9 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
         # Only the setup call may borrow the owner's lock. Recursive submission
         # on the same thread must still reject overlapping segment/reducer work.
         execution._setup_entered = True
+    workspace_owner = None
     try:
+        launch_arch = _resolve_attention_arch()
         if execution is not None and execution._closed:
             raise RuntimeError("execution is closed")
         if (
@@ -3852,26 +3855,62 @@ def _run_3d_tiled(*, q, stream: int = 0, execution=None, **kwargs):
             and execution._scope_operation is not None
         ):
             raise RuntimeError("previous scope did not drain; close execution")
+        # Reuse eager scratch only while this invocation owns the complete
+        # segment/reducer submission. A concurrent or recursive caller gets
+        # private scratch; different effective streams have separate entries.
+        if (
+            execution is None
+            and launch_arch in ("gfx942", "gfx950")
+            and not _torch_stream_capturing()
+        ):
+            problem = kwargs["problem"]
+            spec = kwargs.get("tuning_spec")
+            segments = (
+                int(spec.kernel_spec.num_segments)
+                if spec is not None
+                else _num_segments(problem, launch_arch)
+            )
+            key = (problem, segments, str(q.device), stream)
+            with _3D_EAGER_LOCK:
+                owner = _3D_EAGER_WORKSPACES.get(key)
+                if owner is None:
+                    owner = _Attention3DEagerWorkspace()
+                    _3D_EAGER_WORKSPACES[key] = owner
+                _3D_EAGER_WORKSPACES.move_to_end(key)
+                if len(_3D_EAGER_WORKSPACES) > _3D_EAGER_CAPACITY:
+                    _3D_EAGER_WORKSPACES.popitem(last=False)
+                if owner.lock.acquire(blocking=False):
+                    workspace_owner = owner
         # Allocation and replay already use the required stream in the common
         # case. Avoid constructing an ExternalStream and switching contexts
         # when the caller has established that device/stream boundary.
         device_index = getattr(q.device, "index", None)
         if (
-            _resolve_attention_arch() in ("gfx942", "gfx950")
+            launch_arch in ("gfx942", "gfx950")
             and isinstance(device_index, int)
             and torch.cuda.current_device() == device_index
             and int(torch.cuda.current_stream().cuda_stream) == stream
         ):
             return _run_3d_tiled_on_stream(
-                q=q, stream=stream, execution=execution, **kwargs
+                q=q,
+                stream=stream,
+                execution=execution,
+                workspace_owner=workspace_owner,
+                **kwargs,
             )
         with torch.cuda.device(q.device), torch.cuda.stream(
             torch.cuda.ExternalStream(stream, device=q.device)
         ):
             return _run_3d_tiled_on_stream(
-                q=q, stream=stream, execution=execution, **kwargs
+                q=q,
+                stream=stream,
+                execution=execution,
+                workspace_owner=workspace_owner,
+                **kwargs,
             )
     finally:
+        if workspace_owner is not None:
+            workspace_owner.lock.release()
         if execution is not None and not borrowing_lock:
             execution._lock.release()
 
@@ -3903,6 +3942,7 @@ def _run_3d_tiled_on_stream(
     kv_cache_layout=None,
     execution=None,
     capture_refs=None,
+    workspace_owner=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3927,6 +3967,10 @@ def _run_3d_tiled_on_stream(
     if kv_cache_layout is not None:
         cache_key = cache_key + ("strided_kv",)
     capturing = _torch_stream_capturing()
+    if capturing:
+        # Capture may be active only on the caller-selected stream, after the
+        # outer wrapper switched away from the ambient stream.
+        workspace_owner = None
     replay = (
         use_graph and _enable_3d_graph_replay(problem, _launch_arch) and not capturing
     )
@@ -4022,13 +4066,18 @@ def _run_3d_tiled_on_stream(
 
     # External and internal captures own separate graph-private allocation.
     # Eager reuse is safe only under the owner's whole-pair submission lock.
-    if execution is None or capturing or execution._workspace is None:
+    eager_workspace = workspace_owner.workspace if workspace_owner is not None else None
+    if eager_workspace is not None:
+        workspace = eager_workspace
+    elif execution is None or capturing or execution._workspace is None:
         workspace = tuple(
             torch.empty(spec.shape, dtype=spec.dtype, device=spec.device)
             for spec in _attention_3d_workspace_specs(problem, num_segments, q.device)
         )
         if execution is not None and not capturing:
             execution._workspace = workspace
+        if workspace_owner is not None:
+            workspace_owner.workspace = workspace
     else:
         workspace = execution._workspace
     if capture_refs is not None:
@@ -4038,6 +4087,30 @@ def _run_3d_tiled_on_stream(
         segm_max.fill_(-1e30)
         segm_expsum.zero_()
         segm_output.zero_()
+
+    # An ordinary eager call still reads every live pointer/scalar. Only the
+    # immutable packed pair is reused; changed storage creates a new pair whose
+    # previous owner remains retained until the stream drains.
+    binding_key = None
+    if workspace_owner is not None and isinstance(prepared, _Attention3DPrepared):
+        binding_key = (
+            id(prepared),
+            tuple(
+                (id(t), int(t.data_ptr()) if hasattr(t, "data_ptr") else 0)
+                for t in tensors
+            ),
+            float(softmax_scale),
+            float(k_scale),
+            float(v_scale),
+            float(softcap),
+            int(bt_stride),
+            int(qq_bias_stride_0),
+            kv_cache_layout,
+        )
+        if workspace_owner.binding_key == binding_key:
+            return _submit_eager_3d_pair(
+                workspace_owner.operation, stream, prepared, tensors
+            )
 
     seg_vals = {
         "segm_output_ptr": segm_output,
@@ -4084,6 +4157,32 @@ def _run_3d_tiled_on_stream(
             bound_reduce()
 
         execution._scope_operation = submit_pair
+    if binding_key is not None:
+        # Cache packed addresses without retaining request-local input storage.
+        # Scratch stays owned by this cache; input storage is retained only in
+        # the runtime's completion registry for each submitted immutable pair.
+        def pointer_values(values):
+            return {
+                name: int(value.data_ptr()) if hasattr(value, "data_ptr") else value
+                for name, value in values.items()
+            }
+
+        bound_segment = prepared.pipeline.stages[0].bind(
+            pointer_values(seg_vals),
+            config=replace(prepared.seg_config, stream=stream, fence=False),
+        )
+        bound_reduce = prepared.pipeline.stages[1].bind(
+            pointer_values(red_vals),
+            config=replace(prepared.red_config, stream=stream, fence=False),
+        )
+
+        def submit_eager_pair(_workspace=workspace, _prepared=prepared):
+            bound_segment()
+            bound_reduce()
+
+        workspace_owner.binding_key = binding_key
+        workspace_owner.operation = submit_eager_pair
+        return _submit_eager_3d_pair(submit_eager_pair, stream, prepared, tensors)
     # hipStreamSynchronize is illegal while a stream is capturing, and the
     # default LaunchConfig.fence=True path does exactly that. Frameworks
     # that wrap the whole forward in torch.cuda.graph (vLLM, an outer
@@ -4304,6 +4403,14 @@ class _Attention3DPrepared:
     red_config: LaunchConfig
 
 
+class _Attention3DEagerWorkspace:
+    def __init__(self):
+        self.lock = Lock()
+        self.workspace = None
+        self.binding_key = None
+        self.operation = None
+
+
 @dataclass(frozen=True)
 class _Attention2DLaunchMeta:
     grid: Tuple[int, int, int]
@@ -4312,6 +4419,9 @@ class _Attention2DLaunchMeta:
 
 # Compiled state is shared; scratch belongs to an execution, invocation or graph.
 _3D_PIPELINES: Dict[Tuple, _Attention3DPrepared] = {}
+_3D_EAGER_CAPACITY = 8
+_3D_EAGER_LOCK = Lock()
+_3D_EAGER_WORKSPACES: OrderedDict[tuple, _Attention3DEagerWorkspace] = OrderedDict()
 _3D_GRAPH_CAPACITY = 8
 _3D_GRAPH_LOCK = RLock()
 _3D_GRAPHS: OrderedDict[tuple, _Attention3DGraph] = OrderedDict()
@@ -4320,6 +4430,20 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _submit_eager_3d_pair(operation, stream, prepared, tensors):
+    def resources():
+        # Detach gives a separate TensorImpl that keeps the old storage even
+        # after same-object set_ rebinding. Deduplication invokes this only once
+        # per bound operation between completion drains.
+        return tuple(t.detach() if hasattr(t, "detach") else t for t in tensors)
+
+    retain_until_drain(stream, operation, resources=resources)
+    operation()
+    if _resolved_fence(prepared.red_config.fence):
+        wait_stream_and_release(stream)
+    return LaunchSummary(launches=2)
 
 
 def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
@@ -5150,8 +5274,9 @@ def run_unified_attention_torch(
 
     ``stream`` is the HIP stream handle (an `int`) to launch on. In the 3D
     path, zero selects Torch's current stream on Q's device. Scratch allocation,
-    initialization and both launches use that stream. Eager calls own separate
-    scratch unless an execution owner is supplied. Captures use graph-private
+    initialization and both launches use that stream. On gfx942/gfx950, eager
+    calls reuse bounded stream-owned scratch under a whole-pair submission lock;
+    overlapping submissions get private scratch. Captures use graph-private
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """

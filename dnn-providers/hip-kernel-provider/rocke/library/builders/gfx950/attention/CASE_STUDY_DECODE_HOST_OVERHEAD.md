@@ -6,6 +6,37 @@ that captured graph, eager calls, prepared eager calls, and fixed-binding replay
 scopes. It makes no general
 kernel-performance claim; the emitted segment/reducer computation is unchanged.
 
+## Ordinary eager submission
+
+The ordinary gfx942/gfx950 3D path also reuses scratch and packed launch
+arguments without requiring callers to enter a replay scope. A bounded cache
+owns scratch by problem, segment count, device and effective stream. Its lock
+covers the complete segment/reducer submission; a recursive or concurrent call
+that cannot acquire that owner uses private scratch. Stream FIFO ordering
+protects sequential reuse. Capture is checked again after switching to the
+selected stream and always uses graph-private allocations.
+
+Every ordinary invocation retains its support and architecture checks and reads
+live tensor addresses and scalar values. Unchanged bindings reuse immutable
+packed segment/reducer buffers; a change constructs a new pair. The cache holds
+packed addresses, scratch and compiled launchers, rather than request-local input
+storage. A separate completion registry snapshots input storage on the first
+submission of a pair between drains, retains each pair once, and releases it
+only after a successful explicit stream/device drain or caller-confirmed
+external synchronization. Eviction and partial submission failure therefore
+cannot discard in-flight arguments. Default-stream retention includes device
+identity so draining one device cannot release another device's queued buffers.
+
+Validate this path by timing the ordinary saved-spec dispatcher closure with
+internal graph replay disabled, using the pre-ownership parent
+`b69179f7d5df831788b2c1cd5c919d63459124b2` as baseline. Keep setup and numerical
+checks outside timing while including every ordinary invocation's host work.
+Use identical specs and quantized inputs, independent reference checks before
+and after timing, identical LLVM/HSACO and geometry, and three sequential trials
+with the middle order reversed. Capture-only or scoped timing cannot substitute
+for this ordinary-call gate. Configuration-specific evidence stays in its
+access-controlled validation record.
+
 ## Diagnosis and narrow change
 
 A stream-ownership repair added a device/ExternalStream context around every
@@ -19,7 +50,8 @@ PR #13110.
 On gfx942/gfx950, the runtime now skips the context only when Q's device and the effective stream
 are already current. It normalizes live layout metadata once, checks it and
 storage addresses against the resident entry, and probes the most recent graph
-before hashing its immutable identity. No additional lifetime cache is added.
+before hashing its immutable identity. These graph changes add no additional
+lifetime cache; ordinary eager ownership is described above.
 Content changes reuse the graph; address changes drain and replace it.
 Prepared layout/device/stream validation, graph-private scratch, cache bounds,
 and asynchronous argument retention remain part of the contract.
@@ -98,9 +130,9 @@ Each measured arm passed the independent CPU FP32 reference after BF16
 quantization with `atol=0.01, rtol=0.02`; paired LLVM/HSACO digests and launch
 geometry matched. The complete decode numeric suite also passed on gfx942 and
 gfx950, including both scoped modes, content updates and storage rebinding.
-This is a fixed-binding synthetic decode comparison: scope entry and exit costs
+This is a historical fixed-binding synthetic decode comparison: scope entry and exit costs
 are excluded, and a loop that changes bindings must pay the rebind boundary.
-The ordinary validated call retains a host overhead gap. No gfx942 timing claim
+The ordinary validated call at that revision retained a host overhead gap. No gfx942 timing claim
 or workload-wide speedup follows from these results. The release wheel's device
 reference kernels were unavailable, so inputs and the reference were computed
 on CPU and transported to/from the rocKE GPU kernels.
@@ -146,6 +178,7 @@ by these changes. The prior graph behavior is retained pending a working lane.
 | `library/tests/test_attention_workspace.py` | Stream, capture and scratch ownership contracts |
 | `library/tests/test_attention_3d_replay_bindings.py` | Content/address/layout changes, clear and LRU behavior |
 | `library/tests/test_attention_3d_replay_scope.py` | Fixed-binding scope, thread ownership, failure drain and rebind |
+| `library/tests/test_attention_3d_eager_reuse.py` | Ordinary pair reuse, storage retention, explicit-stream capture and completion cleanup |
 | `library/tests/test_strided_kv_decode_numeric.py` | Independent on-GPU numerical and lifetime gate |
 | `docs/strided-kv-decode.md` | Caller stream, update and completion contract |
 | `platform/dsl_docs/optimization/optimization_runbook.md` §3.5 | Host-versus-device diagnosis procedure |
@@ -208,8 +241,8 @@ not enter `Attention3DExecution.replay_scope()`. On gfx950, the internal 3D
 graph heuristic is disabled by default; an ordinary graph-enabled diagnostic
 is a different mode from default eager dispatch. An outer captured batch
 measures device replay separately and excludes most host submission costs.
-The scoped results above do not establish an improvement for either ordinary
-eager dispatch or an external benchmark that has not adopted scoped replay.
+The scoped results above are separate from the ordinary eager submission gate
+described at the start of this study.
 
 The architecture-independent support gates now accept decorated target IDs.
 The common launch path already supplies canonical `gfx942`, `gfx950`, or

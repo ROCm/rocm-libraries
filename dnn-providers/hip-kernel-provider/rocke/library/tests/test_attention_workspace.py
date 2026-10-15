@@ -4,6 +4,7 @@
 """Host checks for split-KV scratch ownership, independent of GPU scheduling."""
 
 import sys
+from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 
@@ -64,6 +65,7 @@ def runtime(monkeypatch):
     shared = tuple(empty((1,), dtype="float32", device="cuda:0") for _ in range(3))
     prepared = SimpleNamespace(workspace=lambda *args: shared)
     monkeypatch.setattr(au, "_get_3d_pipeline", lambda *args, **kwargs: prepared)
+    monkeypatch.setattr(au, "_3D_EAGER_WORKSPACES", OrderedDict())
     return state
 
 
