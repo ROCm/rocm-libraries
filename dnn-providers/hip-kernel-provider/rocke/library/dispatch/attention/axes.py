@@ -145,6 +145,7 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        "kv_storage_dtype",
     }
 )
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {

@@ -70,7 +70,9 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right"},
+        # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
+        # persistent variants do not advertise it).
+        features=_FEATURES | {"causal_bottom_right", "fp8"},
     ),
     Gfx950DenseVariant(
         "persist",
@@ -164,6 +166,14 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             ):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
+    if bool(req.use_fp8):
+        # gfx950 decodes OCP fp8; reject an FNUZ-encoded request here (it would
+        # otherwise map to the same OCP spec and be decoded ~2x off).
+        from .tuning_specs import validate_explicit_fp8_encoding
+
+        validate_explicit_fp8_encoding(
+            arch="gfx950", use_fp8=True, fp8_fnuz=bool(getattr(req, "fp8_fnuz", False))
+        )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -186,6 +196,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         wide_lds_dma=variant.wide_lds_dma,
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
+        kv_storage_dtype="fp8e4m3" if bool(req.use_fp8) else None,
     )
 
 

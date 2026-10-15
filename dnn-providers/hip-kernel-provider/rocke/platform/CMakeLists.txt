@@ -459,6 +459,24 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
 
+    # Library attention CPU tests (no GPU; dispatch/spec/binding guards, incl. the
+    # fp8 dense guards). Same staging and PYTHONPATH rationale as the conv list.
+    set(_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS
+        "tests/library/tests/dispatch/attention/test_review_followups.py"
+        "tests/library/tests/test_attention_dense_gfx942.py")
+    set(_ROCKE_LIBRARY_ATTENTION_TESTS "")
+    foreach(_rocke_attn_test ${_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_attn_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_TESTS} -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

@@ -23,7 +23,7 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
 # kernels write LSE, so every other candidate must keep declining it.
 _GFX950_DENSE_FEATURES = {"causal", "lse", "sinks", "sliding_window"}
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right", "fp8"}
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
         "strided_kv",

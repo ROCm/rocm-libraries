@@ -1044,6 +1044,14 @@ def supports_attention_dense(
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
     if spec.causal_bottom_right:
         return False, "gfx942 attention_dense: causal_bottom_right not yet supported"
+    # fp8 KV dequant is a gfx950-only loader; the gfx942 body is bf16/fp16 and
+    # would otherwise emit a bf16-identical kernel under an fp8 name and size its
+    # extent guard at 1 B/elem. Refuse here, as gfx942 unified does.
+    if spec.kv_storage_dtype is not None:
+        return False, (
+            "gfx942 attention_dense: fp8 KV storage is gfx950-only "
+            f"(got kv_storage_dtype={spec.kv_storage_dtype!r})"
+        )
     try:
         spec = _as_gfx942_spec(spec)
     except TypeError as exc:
