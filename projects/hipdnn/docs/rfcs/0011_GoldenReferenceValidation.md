@@ -384,7 +384,7 @@ In the source tree, bundle data lives with the integration test suite at `dnn-pr
 
 ##### Tier folders
 
-The top-level folder determines the tier. Discovery scans the whole data root once (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/README.md#test-tiers):
+The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers):
 
 | Folder | GTest suite prefix | `ctest -L` |
 |--------|-------------|------------|
@@ -860,7 +860,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 > ctest targets, including `hipdnn_golden_data_tests`. No CI workflow sets
 > `--verification-mode`, so CI uses `auto`. Tier labels come from `test_categories.yaml`.
 
-Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests.
+Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#how-tiers-cascade) as all other integration tests.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
 |----------|--------------|-------------------|-------|
@@ -874,8 +874,8 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 > [!NOTE]
 > **Implementation note (2026-10-15):** A provider does not subclass a harness. It calls
 > `add_external_integration_test_target()` from
-> `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake` (see "Provider
-> Integration" in the [integration tests README](../../../../dnn-providers/integration-tests/README.md#provider-integration)).
+> `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake` (see "Add an engine
+> lane" in the [integration tests docs](../../../../dnn-providers/integration-tests/docs/adding-tests.md#add-an-engine-lane)).
 
 **Add a test -- any operation, any data type** (developer):
 1. Write a generation script following the [`generate_batchnorm_reference.py`](../../../../dnn-providers/integration-tests/reference-data-scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle

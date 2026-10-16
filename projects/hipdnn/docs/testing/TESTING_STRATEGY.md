@@ -121,13 +121,13 @@ These tests cover descriptor APIs, handles, execution, plugin management, graph 
 
 `hipdnn_integration_tests` is provider-agnostic. It contains one shared graph set. Each provider runs the executable independently with its own plugin and engine; one run never loads or compares several providers.
 
-Use the shared suite for graph execution and numerical comparison against the CPU reference executor. See the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) for bundles, provider configuration, and categories.
+Use the shared suite for graph execution and numerical comparison against the CPU reference executor. See the [integration test documentation](../../../../dnn-providers/integration-tests/docs/README.md) for bundles, provider configuration, and categories.
 
 ### Graph Validation
 
 The CPU Graph Executor provides expected results for integration tests. A provider must first accept the graph, choose an engine, and run it. The test then compares the provider result with the reference result. See [CPU Graph Executor Design](../rfcs/0001_CpuGraphExecutorDesign.md).
 
-Bundle tests can also compare with golden data or with the GPU reference executor. The default `auto` verification mode tries golden data, then the GPU reference, then the CPU reference. See [Verification modes](../../../../dnn-providers/integration-tests/README.md#verification-modes).
+Bundle tests can also compare with golden data or with the GPU reference executor. The default `auto` verification mode tries golden data, then the GPU reference, then the CPU reference. See [Verification modes](../../../../dnn-providers/integration-tests/docs/running-tests.md#verification-modes).
 
 ## Validation Responsibilities and GPU Coverage
 
@@ -156,7 +156,7 @@ A green hipDNN core job proves that its selected routing and API tests passed. I
 
 ### Test Categories
 
-The public test tiers are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. [`test_categories.yaml`](../../test_categories.yaml) also defines the `ffm-quick` tier (also labelled `ffm-full`) and the non-tier categories `unit` and `integration`. Each category creates `hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` build targets. Provider categories may differ; see the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
+The public test tiers are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. [`test_categories.yaml`](../../test_categories.yaml) also defines the `ffm-quick` tier (also labelled `ffm-full`) and the non-tier categories `unit` and `integration`. Each category creates `hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` build targets. Provider categories may differ; see [Test tiers](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers).
 
 ### Code Coverage
 

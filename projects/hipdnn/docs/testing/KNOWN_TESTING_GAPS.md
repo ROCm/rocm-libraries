@@ -4,7 +4,7 @@ This file lists known limits in current hipDNN testing.
 
 ## Integration test bundles
 
-Integration test bundles run by default (#10416). The C++ graph tests under `dnn-providers/integration-tests/src/integration-tests/` build only with `-DBUILD_CPP_GRAPH_TESTS=ON`, which is off by default, so provider CI runs bundles only. See [Bundles are the CI driver](../../../../dnn-providers/integration-tests/README.md#bundles-are-the-ci-driver).
+Integration test bundles run by default (#10416). The C++ graph tests under `dnn-providers/integration-tests/src/integration-tests/` build only with `-DBUILD_CPP_GRAPH_TESTS=ON`, which is off by default, so provider CI runs bundles only. See [In CI](../../../../dnn-providers/integration-tests/docs/running-tests.md#in-ci).
 
 ## Sanitizers and platforms
 

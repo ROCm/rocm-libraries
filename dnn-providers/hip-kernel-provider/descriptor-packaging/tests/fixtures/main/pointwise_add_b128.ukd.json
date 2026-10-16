@@ -2,6 +2,7 @@
   "version": "0.1",
   "id": "ukd-pointwise-add-f32-b128",
   "name": "PointwiseAdd f32 block128",
+  "arch": ["gfx942", "gfx950"],
   "kernel_source": {
     "kind": "hip",
     "source": "PointwiseAdd.cpp",

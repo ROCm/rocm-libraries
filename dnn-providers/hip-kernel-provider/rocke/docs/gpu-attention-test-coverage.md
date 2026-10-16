@@ -10,10 +10,6 @@ related KDA/GDN operators. CPU/IR/dispatch/compile-only checks and provider
 C++/hipDNN integration tests are excluded. GPU-harness negative controls are
 labelled separately and do not count as additional kernel or shape coverage.
 
-The full source inventory below is historical; newer gfx950 tests for scale
-variation, sliding windows, and output-store equality are not included in its
-counts. The gfx950 and standalone WMMA pinned cohorts are summarized separately below.
-
 Source inventory: commit `270fab13c2c`, reviewed 2026-10-02. The latest supplied
 gfx942 CI log executed on 2026-10-01: all eight reference cases and three negative
 checks passed; the wider library GPU suite reported 84 passes and 134 skips.
@@ -48,9 +44,7 @@ listed separately in the inventory, not added to the eight workload rows.
 | gfx942 forced exp2 A/B | 2 | No A/B assertion | Skipped |
 | gfx942 paged D128 ring regression | 12 | No: different path | Skipped |
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
-| gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
-| gfx1151 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1151 CI artifact-splitting validation |
-| gfx1201 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1201 CI artifact-splitting validation |
+| gfx950 dense attention | 51 shapes in 50 test configurations | No | Torch/device-gated |
 | gfx1250 WMMA attention | 2 | No | Device-gated; verifier uses NumPy/HIP |
 | Extended FMHA/Sage/sparse harness | 15 named cases | No | Outer test skips; per-case hardware guards also apply |
 | KDA/GDN prefill and decode | See separate matrix | No: recurrent operators | Torch/device-gated |
@@ -76,34 +70,6 @@ There are four distinct Q/K/V shape combinations, not eight unique shapes.
 The additional three GPU tests are harness rejection checks (perturbed current
 output, perturbed baseline output, missing launch), not more workload coverage.
 The 54 host tests similarly validate the harness, not 54 GPU shapes.
-
-## gfx950 required base coverage
-
-Seven configurations now have a separate gfx950 reference bundle: FP16 and BF16
-D128 Hq16/Hkv4 with default and persistent grids; FP16 D64 Hq16/Hkv16 default;
-FP16 D128 Hq16/Hkv16 persistent; and BF16 D64 Hq16/Hkv4 persistent. All use
-B1/Sq512/Sk512 and causal masking. Persistent D128 selects wide DMA.
-See the [SDPA guide](sdpa-test-reference.md#gfx950-base-dense-cohort) for exact
-candidates, qualification evidence, and publication status.
-
-These are equivalent configurations with different inputs from the Torch tests.
-The seven GPU comparisons and three harness failure controls passed both source
-and installed verification without Torch. They do not establish coverage for
-non-default scales, windows, sinks, ragged/unequal lengths, paging, binary reuse,
-or narrow-store equality. The detailed historical inventory below retains those
-gaps; it is not a count of the current source's complete test matrix.
-
-## Standalone WMMA reference coverage
-
-Each of gfx1151 and gfx1201 has eight qualified FP16 cases: D64/D128 ×
-Hq4/Hkv4 or Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent
-`(4,4,2)` grid. All eight comparisons and three failure controls passed in source
-and installed Torch-free runs on each target, with no selected GPU skips.
-These use the standalone WMMA builders, not automatic unified attention dispatch.
-See the [SDPA guide](sdpa-test-reference.md#standalone-wmma-coverage) for
-qualification provenance, runtime requirements, and publication status.
-
-The historical source inventory below is unchanged by this new cohort.
 
 ## Concrete missing gfx942 coverage
 
@@ -212,13 +178,13 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: test_dense_fp16_d128_numeric_correct_at_non_shipped_tile_width | gfx942 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | block_n=32; default causal | Missing |
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: test_exp2_fast_matches_plain_exp2 | gfx942 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | forced fast/plain exp2 exact equality; persistent=False | Missing |
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: test_exp2_fast_matches_plain_exp2 | gfx942 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | forced fast/plain exp2 exact equality; persistent=True | Missing |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 16 | 64 | persistent=False; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 16 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
-| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 64 | persistent=True; causal=True | Equivalent configuration (different inputs) |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 16 | 64 | persistent=False; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 16 | 128 | persistent=True; causal=True | Missing |
+| [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 64 | persistent=True; causal=True | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_one_binary_serves_every_shape | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | same binary for both shapes; default causal | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_one_binary_serves_every_shape | gfx950 | bf16 | 4 | 1024 | 1024 | 16 | 4 | 128 | same binary for both shapes; default causal | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_gqa_pair_variant_numeric | gfx950 | fp16 | 1 | 512 | 512 | 32 | 8 | 128 | {'_name': 'plain', 'sliding_window': 0, 'use_sinks': False, 'interleave': False} | Missing |

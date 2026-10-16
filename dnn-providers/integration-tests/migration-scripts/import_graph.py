@@ -28,6 +28,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from bundle_utils import (
     derive_operation,
     expand,
     infer_layout,
+    next_free_topology_dir,
     remap_graph,
     remap_meta_inputs,
     sanitize,
@@ -237,6 +239,41 @@ def _extract_values(graph: dict, template: dict) -> dict:
 # Main
 # --------------------------------------------------------------------------
 
+_SWEEP_SUPPORT_FILE = "support.json"
+
+
+def _canonical_support_json() -> str:
+    """Canonical bytes for an empty support-claim sidecar (LF line endings)."""
+    return json.dumps({"claims": {}, "version": 1}, indent=2, sort_keys=True) + "\n"
+
+
+def _ensure_support_json(sweep_dir: Path, dry_run: bool) -> bool:
+    """Create an empty canonical support.json next to a sweep if one is missing.
+
+    Never touches an existing support.json. Returns whether one was (or,
+    under --dry-run, would be) created.
+    """
+    support_path = sweep_dir / _SWEEP_SUPPORT_FILE
+    if support_path.exists():
+        return False
+    if not dry_run:
+        with open(support_path, "w", newline="\n") as f:
+            f.write(_canonical_support_json())
+    return True
+
+
+def _sanitize_gtest(s: str) -> str:
+    """Mirror BundleDiscovery.hpp's sanitizeForGtest: non [A-Za-z0-9_] -> '_'."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", s)
+
+
+def _gtest_name(sweep_dir: Path, bundle_dir: Path, case_id: str) -> str:
+    """The full GTest name the harness registers for a case in this sweep dir."""
+    suite = "_".join(
+        _sanitize_gtest(part) for part in sweep_dir.relative_to(bundle_dir).parts
+    )
+    return f"{suite}.{_sanitize_gtest(case_id)}"
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(
@@ -288,6 +325,13 @@ def main() -> int:
             meta[k] = v
     if args.seed is not None:
         meta["seed"] = args.seed
+    meta.setdefault("generator", "import_graph.py")
+    if not str(meta.get("reference_source", "")).strip():
+        print(
+            "import_graph: warning: no reference_source in metadata;"
+            " pass --meta reference_source=... to record where this graph came from",
+            file=sys.stderr,
+        )
 
     # Canonicalize UIDs by tensor name so an imported graph lines up with sweeps
     # built by place_bundles (which does the same). The C++ builder auto-assigns
@@ -357,15 +401,27 @@ def main() -> int:
             )
             return 1
 
+        # existing_cases keep every original key (e.g. golden, tensor_patches);
+        # only their id is (re)assigned above, and any other top-level sweep
+        # key already survives untouched since only sweep["cases"] is
+        # replaced below.
+        sweep["cases"] = existing_cases + [new_case]
+        support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
         if not args.dry_run:
-            sweep["cases"] = [
-                {"id": c["id"], "values": c["values"], "metadata": c["metadata"]}
-                for c in all_cases
-            ]
-            with open(sweep_path, "w") as f:
+            with open(sweep_path, "w", newline="\n") as f:
                 json.dump(sweep, f, indent=2)
                 f.write("\n")
         print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
+        print(
+            "  gtest name: "
+            f"{_gtest_name(sweep_path.parent, args.bundle_dir, new_case['id'])}",
+            file=sys.stderr,
+        )
+        if support_created:
+            print(
+                f"  created empty support.json in {sweep_path.parent}",
+                file=sys.stderr,
+            )
         return 0
 
     # --- No structural match: create new template+sweep ---
@@ -388,21 +444,36 @@ def main() -> int:
     tmap = tensors_by_uid(graph)
     first = tmap[min(tmap)] if tmap else {}
     layout = infer_layout(first.get("dims"), first.get("strides")) or "Default"
-    topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
+    preferred_topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
 
-    out_dir = args.bundle_dir / args.tier / op / topo_name
-    case_entry = {"id": "case", "values": values, "metadata": meta}
+    op_dir = args.bundle_dir / args.tier / op
+    topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
+    out_dir = op_dir / topo_name
+
+    case_entry = {"id": None, "values": values, "metadata": meta}
+    assign_case_ids([case_entry])
     sweep_out = {"version": 1, "cases": [case_entry]}
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
-        with open(out_dir / "graph.template.json", "w") as f:
+    support_created = _ensure_support_json(out_dir, args.dry_run)
+    if not args.dry_run:
+        with open(out_dir / "graph.template.json", "w", newline="\n") as f:
             json.dump(template, f, indent=2)
             f.write("\n")
-        with open(out_dir / "sweep.json", "w") as f:
+        with open(out_dir / "sweep.json", "w", newline="\n") as f:
             json.dump(sweep_out, f, indent=2)
             f.write("\n")
-    print(f"  created new bundle: {out_dir}", file=sys.stderr)
+    print(
+        f"  created new bundle: {out_dir} (case '{case_entry['id']}')",
+        file=sys.stderr,
+    )
+    print(
+        f"  gtest name: {_gtest_name(out_dir, args.bundle_dir, case_entry['id'])}",
+        file=sys.stderr,
+    )
+    if support_created:
+        print(f"  created empty support.json in {out_dir}", file=sys.stderr)
     return 0
 
 

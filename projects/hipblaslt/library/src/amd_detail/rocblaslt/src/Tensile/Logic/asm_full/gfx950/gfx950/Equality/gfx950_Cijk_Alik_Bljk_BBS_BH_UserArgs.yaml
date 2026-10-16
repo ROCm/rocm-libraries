@@ -250,6 +250,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2gHFVK2bz
   KernelNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
   ActivationFuncCall: false
@@ -407,6 +408,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 1
+  SolutionUID: 0uR2gHFUhNV9
   KernelNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950
   ActivationFuncCall: false
@@ -564,6 +566,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 2
+  SolutionUID: 0uR2gHFV2QMN
   KernelNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950
   ActivationFuncCall: false
