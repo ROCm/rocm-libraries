@@ -198,3 +198,17 @@ The Python bindings expose scalar metadata and `__version__` through the single
 `ScalarType` identifies an encoding, and `scalarTypeInfo(type)` describes its
 category, storage width, exponent, fraction, and special-value support. Python
 exposes the same metadata through `scalar_type_info(type)`.
+
+`Layout` owns a `Shape`, signed strides, and a starting offset. Strides and
+offsets count elements rather than bytes: `elementOffset(indices)` computes
+`offset + sum(indices[d] * strides[d])`. For shape `[2, 3]`, C order has strides
+`[3, 1]` and Fortran order has `[1, 2]`. Negative strides describe reversal;
+zero strides describe repeated addresses. Layout does not own storage or check
+allocation bounds. Coordinate conversion checks rank, bounds, and intermediate
+arithmetic overflow; production loops should reuse a prepared mapping after
+validation. Python exposes the same interface as `Layout`, with
+`element_offset` and copied `shape`/`strides` properties.
+
+Internal fallible layout helpers return `detail::Expected<Layout, LayoutError>`.
+Callers can inspect the returned error before choosing a recovery path; the
+throwing contiguous factories translate it into a terminal C++ error.
