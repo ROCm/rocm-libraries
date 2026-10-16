@@ -619,3 +619,23 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_strided_runtime_rejects_conflicting_clamp_arch(
+    strided_binding_case, monkeypatch, explicit
+):
+    from kernels.common import attention_unified as au
+
+    _, result, tensors = strided_binding_case
+    tensors = dict(tensors, problem=replace(tensors["problem"], clamp_arch="gfx950"))
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(ValueError, match="clamp_arch.*conflicts"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            tuning_spec=result.spec if explicit else None,
+            kv_layout="strided",
+        )

@@ -54,6 +54,12 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+from kernels.common._attention_validation import (
+    require_attention_int,
+    validate_attention_request_types,
+    validate_attention_3d_spec_types,
+)
+
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
@@ -145,7 +151,7 @@ class AttentionRequest(OperatorRequest):
     window_right: int | None = None
     window_bottom_right: bool = False
     tensor_layout: str = "auto"  # dense tensors only: "auto" | "bshd" | "bhsd"
-    kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
+    kv_block_size: int = 16  # paged KV page size; {16,32,64}, or 1 for tiled decode
     # 0 => auto-resolve at dispatch (_resolve_num_cus). NOTE: auto-resolution is
     # the one part of selection that is NOT host-independent -- on-box it reads
     # the live CU count. Pass a real count (or `target_ctas`) for a reproducible,
@@ -180,6 +186,7 @@ class AttentionRequest(OperatorRequest):
     use_attn_bias: bool = False
     attn_bias_dtype: str = "f32"
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
+    softcap: float = 0.0
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
     # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
@@ -191,9 +198,12 @@ class AttentionRequest(OperatorRequest):
     runtime_head_dims: bool = False
 
     def __post_init__(self) -> None:
-        # ONE ``__post_init__``, normalizing both fields. Two of them is not two
-        # hooks -- Python keeps the last binding and the earlier one never runs.
-        #
+        # Preserve missing-arch normalization before validating the raw fields.
+        if self.arch is None:
+            object.__setattr__(self, "arch", "")
+        validate_attention_request_types(self)
+        if self.softcap > 0:
+            object.__setattr__(self, "use_softcap", True)
         # Callers rebuild pins from stored JSON; a bad value fails here, with
         # its name, rather than as an unhashable key inside a cache.
         object.__setattr__(self, "tuning_knobs", normalize_knobs(self.tuning_knobs))
@@ -205,6 +215,7 @@ class AttentionRequest(OperatorRequest):
         object.__setattr__(self, "arch", canonical_arch(self.arch))
 
     def normalized(self) -> dict:
+        validate_attention_request_types(self)
         d = asdict(self)
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
@@ -220,18 +231,20 @@ class AttentionRequest(OperatorRequest):
         return d
 
     def dims(self) -> dict[str, int]:
+        validate_attention_request_types(self)
         return {
-            "batch": int(self.batch),
-            "nhead_q": int(self.nhead_q),
-            "nhead_k": int(self.nhead_k),
-            "seqlen_q": int(self.seqlen_q),
-            "seqlen_k": int(self.seqlen_k),
-            "hdim_q": int(self.hdim_q),
-            "hdim_v": int(self.hdim_v),
-            "kv_block_size": int(self.kv_block_size),
+            "batch": self.batch,
+            "nhead_q": self.nhead_q,
+            "nhead_k": self.nhead_k,
+            "seqlen_q": self.seqlen_q,
+            "seqlen_k": self.seqlen_k,
+            "hdim_q": self.hdim_q,
+            "hdim_v": self.hdim_v,
+            "kv_block_size": self.kv_block_size,
         }
 
     def features(self) -> frozenset[str]:
+        validate_attention_request_types(self)
         active = set()
         if self.kv_layout == "strided":
             active.add("strided_kv")
@@ -246,16 +259,17 @@ class AttentionRequest(OperatorRequest):
             AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
         ):
             active.add("causal")
-        if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
-            self.seqlen_q
-        ) != int(self.seqlen_k):
+        if (
+            mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+            and self.seqlen_q != self.seqlen_k
+        ):
             active.add("causal_bottom_right")
         explicit_window = self.window_left is not None or (
             self.window_right is not None and int(self.window_right) >= 0
         )
         windowed = (
             mask_type == AttentionMaskType.SLIDING_WINDOW
-            or int(self.sliding_window) > 0
+            or self.sliding_window > 0
             or explicit_window
         )
         if windowed:
@@ -271,17 +285,17 @@ class AttentionRequest(OperatorRequest):
             active.add("lse")
         if self.runtime_head_dims:
             active.add("runtime_head_dims")
-        if bool(self.use_sinks):
+        if self.use_sinks:
             active.add("sinks")
-        if bool(self.use_fp8):
+        if self.use_fp8:
             active.add("fp8")
-        if bool(self.use_softcap):
+        if self.use_softcap or self.softcap > 0:
             active.add("softcap")
-        if bool(self.use_alibi):
+        if self.use_alibi:
             active.add("alibi")
-        if bool(self.use_qq_bias):
+        if self.use_qq_bias:
             active.add("qq_bias")
-        if bool(self.use_attn_bias):
+        if self.use_attn_bias:
             active.add("attn_bias")
         layout = self.layout.strip().lower() if isinstance(self.layout, str) else ""
         if layout not in ("auto", ""):
@@ -324,6 +338,7 @@ def _request_errors(
     """
     if not isinstance(req, AttentionRequest):
         return [f"expected AttentionRequest, got {type(req).__name__}"]
+    validate_attention_request_types(req)
     errors: list[str] = []
     if req.kv_layout not in ("paged", "strided"):
         errors.append("kv_layout must be paged or strided")
@@ -344,7 +359,7 @@ def _request_errors(
             errors.append("hdim_v must be positive")
     elif req.hdim_q != req.hdim_v:
         errors.append("only hdim_q == hdim_v is supported")
-    if int(req.nhead_k) > 0 and int(req.nhead_q) % int(req.nhead_k):
+    if req.nhead_k > 0 and req.nhead_q % req.nhead_k:
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
     layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
     if layout not in ("auto", "dense", "ragged", "paged"):
@@ -485,7 +500,8 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     segment counts for every caller that leaves ``num_cus`` at 0 -- a measured
     behaviour change, not a refactor. It is deliberately out of scope here.
     """
-    n = int(req.num_cus)
+    validate_attention_request_types(req)
+    n = req.num_cus
     if n > 0:
         return n
     arch = req.arch
@@ -519,23 +535,29 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
+    validate_attention_request_types(req)
+    require_attention_int(num_cus, "num_cus")
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
-        total_q=int(req.batch) * int(req.seqlen_q),
-        num_seqs=int(req.batch),
-        num_query_heads=int(req.nhead_q),
-        num_kv_heads=int(req.nhead_k),
-        head_size=int(req.hdim_q),
-        block_size=int(req.kv_block_size),
-        max_seqlen_q=int(req.seqlen_q),
-        max_seqlen_k=int(req.seqlen_k),
+        total_q=req.batch * req.seqlen_q,
+        num_seqs=req.batch,
+        num_query_heads=req.nhead_q,
+        num_kv_heads=req.nhead_k,
+        head_size=req.hdim_q,
+        block_size=req.kv_block_size,
+        max_seqlen_q=req.seqlen_q,
+        max_seqlen_k=req.seqlen_k,
         dtype=req.dtype.lower(),
-        sliding_window=int(req.sliding_window),
-        use_sinks=bool(req.use_sinks),
-        use_fp8=bool(req.use_fp8),
-        fp8_fnuz=bool(req.fp8_fnuz),
-        num_cus=int(num_cus),
-        target_ctas=int(req.target_ctas),
+        sliding_window=req.sliding_window,
+        use_sinks=req.use_sinks,
+        softcap=req.softcap,
+        use_alibi=req.use_alibi,
+        use_qq_bias=req.use_qq_bias,
+        use_fp8=req.use_fp8,
+        fp8_fnuz=req.fp8_fnuz,
+        num_cus=num_cus,
+        target_ctas=req.target_ctas,
+        clamp_arch=req.arch.lower(),
     )
 
 
@@ -552,7 +574,8 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     pure function of the request: honor an explicit ``num_cus`` and otherwise
     use the deterministic cross-compile fallback.
     """
-    num_cus = int(req.num_cus)
+    validate_attention_request_types(req)
+    num_cus = req.num_cus
     return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
 
 
@@ -773,12 +796,17 @@ class AttentionTuningSpec:
         changes :meth:`identity` (a different binary) but never ``tuning_id``,
         so an id recorded after binding still replays from the request.
         """
-        count = int(num_kv_blocks)
+        require_attention_int(num_kv_blocks, "num_kv_blocks")
+        count = num_kv_blocks
         if count < 0:
             raise ValueError("num_kv_blocks must be non-negative")
         if self.path == "dense":
             return self  # contiguous K/V: nothing to retarget
         kernel_spec = self.kernel_spec
+        if self.path == "3d" and self.arch in ("gfx942", "gfx950"):
+            validate_attention_3d_spec_types(kernel_spec)
+        for name in ("block_size", "num_kv_heads", "head_size"):
+            require_attention_int(getattr(kernel_spec, name), f"kernel_spec.{name}")
         if not hasattr(kernel_spec, "use_i64_kv_addr"):
             return replace(self, num_kv_blocks=count)
         elem_bytes = 1 if kernel_spec.kv_storage_dtype == "fp8e4m3" else 2

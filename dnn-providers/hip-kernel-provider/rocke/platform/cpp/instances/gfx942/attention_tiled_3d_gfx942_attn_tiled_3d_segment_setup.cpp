@@ -32,6 +32,7 @@
  * individually.
  */
 
+#include "rocke/instance_attention_paged_kv_internal.h"
 #include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf */
 #include <string.h>
@@ -316,7 +317,7 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
     ctx->num_seqs_p = rocke_b_param(B, "num_seqs", rocke_i32(), NULL);
     ctx->bt_stride_p = rocke_b_param(B, "block_table_stride", rocke_i32(), NULL);
     ctx->qq_bias_stride0_p = rocke_b_param(B, "qq_bias_stride_0", rocke_i32(), NULL);
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->k_strides = rocke_declare_strided_kv_params(B, "k");
         ctx->v_strides = rocke_declare_strided_kv_params(B, "v");
@@ -338,11 +339,15 @@ static void rocke__build_paged_kv_desc(rocke_gfx942_attention_tiled_3d_build_ctx
     const int NUM_KV = CFG.NUM_KV;
 
     /* seq_base = seq_idx * bt_stride_p (line 569) */
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         return;
     }
     ctx->seq_base = rocke_b_mul(B, ctx->seq_idx, ctx->bt_stride_p);
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+    {
+        return;
+    }
 
     /* _kv_base = TensorDescriptor.naive("paged_kv_bytes",
      *   lengths=[1<<24, BS, NUM_KV, HD],
@@ -496,7 +501,8 @@ void rocke_gfx942_attention_tiled_3d_emit_prologue(rocke_gfx942_attention_tiled_
         const int k_shape[3] = {2, T, HD};
         ctx->Q_lds = rocke_b_smem_alloc(B, dtype, q_shape, 2, "Qlds");
         ctx->K_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Klds");
-        ctx->V_lds = rocke_b_smem_alloc(B, dtype, k_shape, 3, "Vlds");
+        const int v_shape[3] = {(HD == 256 && T == 32) ? 1 : 2, T, HD};
+        ctx->V_lds = rocke_b_smem_alloc(B, dtype, v_shape, 3, "Vlds");
     }
     {
         const int p_shape[2] = {BLOCK_M, T};
@@ -555,7 +561,7 @@ void rocke_gfx942_attention_tiled_3d_emit_async_infra(
 {
     /* ---- async DMA infra (lines 538-567) ---- */
     ctx->big_bytes = rocke_b_const_i32(B, 0x7FFF0000);
-    if(ctx->strided_kv)
+    if(ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED)
     {
         ctx->key_rsrc = rocke_strided_kv_resource(
             B, ctx->key, &ctx->k_strides, ctx->seq_idx, ctx->kv_head_idx);
@@ -706,68 +712,68 @@ void rocke_gfx942_attention_tiled_3d_emit_q_to_lds(rocke_gfx942_attention_tiled_
  * Load issuers (Python closures, lines 604-719).
  * ============================================================ */
 
-/* _issue_k_load(kv_tile_idx, buf_idx) -- lines 604-617. */
+/* Shared architecture-local async K/V tile issuer. */
+static void
+    rocke_gfx942_attention_tiled_3d_issue_kv_tile(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+                                                  bool is_value,
+                                                  rocke_value_t* kv_tile_idx,
+                                                  rocke_value_t* buf_idx)
+{
+    rocke_value_t* lds_addr = is_value ? ctx->V_lds_addr : ctx->K_lds_addr;
+    rocke_value_t* rsrc = is_value ? ctx->value_rsrc : ctx->key_rsrc;
+    const rocke_strided_kv_params_t* strides = is_value ? &ctx->v_strides : &ctx->k_strides;
+    const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
+    const int kv_calls_per_tile = CFG.kv_calls_per_tile;
+    const int bytes_per_call = CFG.bytes_per_call;
+    const int bytes_per_buf = CFG.bytes_per_buf;
+    const int ASYNC_LDS_DWORDS = CFG.ASYNC_LDS_DWORDS;
+    int call;
+
+    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, bytes_per_buf));
+    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
+    rocke_value_t* buf_base = rocke_b_smem_ptr_add(B, lds_addr, buf_off_i64);
+
+    for(call = 0; call < kv_calls_per_tile; ++call)
+    {
+        rocke_value_t* linear_half
+            = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
+        rocke_value_t* voff
+            = ctx->kv_loader_kind == ROCKE_ATTN_KV_STRIDED
+                  ? rocke_strided_kv_offset(
+                        B, strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
+              : (ctx->kv_loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+                  ? rocke_paged_kv_offset(B,
+                                          ctx->block_tables,
+                                          ctx->seq_base,
+                                          ctx->kv_head_idx,
+                                          kv_tile_idx,
+                                          linear_half,
+                                          ctx->seq_len,
+                                          CFG.HD,
+                                          CFG.BS,
+                                          CFG.T,
+                                          CFG.NUM_KV)
+                  : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
+        rocke_value_t* dst = rocke_b_smem_ptr_add(
+            B, buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
+            B, rsrc, dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
+    }
+}
+
+/* Preserve the existing K/V entry points and scheduling callers. */
 void rocke_gfx942_attention_tiled_3d_issue_k_load(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
                                                   rocke_value_t* buf_idx)
 {
-    const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
-    const int kv_calls_per_tile = CFG.kv_calls_per_tile;
-    const int bytes_per_call = CFG.bytes_per_call;
-    const int bytes_per_buf = CFG.bytes_per_buf;
-    const int ASYNC_LDS_DWORDS = CFG.ASYNC_LDS_DWORDS;
-    int call;
-
-    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, bytes_per_buf));
-    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
-    rocke_value_t* K_buf_base = rocke_b_smem_ptr_add(B, ctx->K_lds_addr, buf_off_i64);
-
-    for(call = 0; call < kv_calls_per_tile; ++call)
-    {
-        rocke_value_t* linear_half
-            = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* voff
-            = ctx->strided_kv
-                  ? rocke_strided_kv_offset(
-                        B, &ctx->k_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
-                  : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
-        rocke_value_t* k_dst = rocke_b_smem_ptr_add(
-            B, K_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
-        rocke_b_async_buffer_load_lds_addr(
-            B, ctx->key_rsrc, k_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
-    }
+    rocke_gfx942_attention_tiled_3d_issue_kv_tile(ctx, false, kv_tile_idx, buf_idx);
 }
 
-/* _issue_v_load(kv_tile_idx, buf_idx) -- lines 619-632. */
 void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                                   rocke_value_t* kv_tile_idx,
                                                   rocke_value_t* buf_idx)
 {
-    const int KV_HALVES_PER_CALL = CFG.KV_HALVES_PER_CALL;
-    const int kv_calls_per_tile = CFG.kv_calls_per_tile;
-    const int bytes_per_call = CFG.bytes_per_call;
-    const int bytes_per_buf = CFG.bytes_per_buf;
-    const int ASYNC_LDS_DWORDS = CFG.ASYNC_LDS_DWORDS;
-    int call;
-
-    rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, bytes_per_buf));
-    rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
-    rocke_value_t* V_buf_base = rocke_b_smem_ptr_add(B, ctx->V_lds_addr, buf_off_i64);
-
-    for(call = 0; call < kv_calls_per_tile; ++call)
-    {
-        rocke_value_t* linear_half
-            = rocke_b_add(B, rocke_b_const_i32(B, call * KV_HALVES_PER_CALL), ctx->lane_half_base);
-        rocke_value_t* voff
-            = ctx->strided_kv
-                  ? rocke_strided_kv_offset(
-                        B, &ctx->v_strides, kv_tile_idx, linear_half, ctx->seq_len, CFG.HD, CFG.T)
-                  : rocke__paged_kv_offset(ctx, kv_tile_idx, linear_half, ctx->kv_head_idx);
-        rocke_value_t* v_dst = rocke_b_smem_ptr_add(
-            B, V_buf_base, rocke_b_const_i64(B, (int64_t)call * bytes_per_call));
-        rocke_b_async_buffer_load_lds_addr(
-            B, ctx->value_rsrc, v_dst, voff, ctx->zero_soff, ASYNC_LDS_DWORDS, ROCKE_CACHE_ALL);
-    }
+    rocke_gfx942_attention_tiled_3d_issue_kv_tile(ctx, true, kv_tile_idx, buf_idx);
 }
 
 /* _issue_wide_load(src, lds, kv_tile_idx, buf_idx) -- lines 645-658.

@@ -15,6 +15,11 @@ from dataclasses import dataclass, replace
 from threading import Lock, RLock
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from ._attention_validation import (
+    validate_attention_problem_types,
+    validate_attention_3d_spec_types,
+)
+
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
@@ -129,6 +134,12 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
+    # Compatibility field for paged/strided runtime arch consistency checks.
+    # Selection and geometry use their explicit arch argument.
+    clamp_arch: Optional[str] = None
+
+    def __post_init__(self):
+        validate_attention_problem_types(self)
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -3124,7 +3135,7 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem, arch: str) 
     Opt-in via HIPDNN_GFX942_3D_WKV while it is A/B'd against the async path;
     promoted to default once the win is confirmed.
     """
-    if arch != "gfx942":
+    if arch != "gfx942" or problem.block_size == 1:
         return False
     if _kv_storage_dtype(problem) is not None:  # fp8 path already loads wide
         return False
@@ -3276,8 +3287,8 @@ def _tiled_3d_spec_from_problem(
     return _impl(problem, arch)
 
 
-def _tiled_3d_segment_lds_bytes(spec) -> int:
-    """Q[M,D], K/V[2,T,D], P[M,T] in the gfx942/gfx950 3D schedule.
+def _tiled_3d_segment_lds_bytes(spec, *, arch: str) -> int:
+    """Q[M,D], K[2,T,D], V[slots,T,D], P[M,T] in the 3D schedule.
 
     These tiles overlap in lifetime. Supported tile dimensions need no
     inter-allocation padding; the lowering aligns the final pool to 16 bytes.
@@ -3289,7 +3300,8 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
     if bits % 8:
         raise ValueError("tiled 3D LDS requires byte-addressable scalar elements")
     m, d, t = spec.block_m, spec.head_size, spec.tile_size
-    size = (m * d + 4 * t * d + m * t) * (bits // 8)
+    v_slots = 1 if arch == "gfx942" and d == 256 and t == 32 else 2
+    size = (m * d + (2 + v_slots) * t * d + m * t) * (bits // 8)
     return (size + 15) & ~15
 
 
@@ -3306,7 +3318,7 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
 
     target = ArchTarget.from_gfx(arch)
     for kind, used in (
-        ("segment", _tiled_3d_segment_lds_bytes(segment)),
+        ("segment", _tiled_3d_segment_lds_bytes(segment, arch=arch)),
         ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
     ):
         if not target.fits_lds(used):
@@ -3355,11 +3367,12 @@ def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: st
 
 def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> None:
     """Reject explicit specs whose baked semantics disagree with the launch."""
+    validate_attention_problem_types(problem)
     segment = tuning_spec.kernel_spec
     reduce = getattr(tuning_spec, "reduce_spec", None)
     if tuning_spec.path != "3d" or reduce is None:
         raise ValueError("strided decode requires segment and reduce specs")
-    for name, expected in (
+    expected_fields = (
         ("kv_layout", "strided"),
         ("head_size", problem.head_size),
         ("block_size", problem.block_size),
@@ -3373,9 +3386,14 @@ def _validate_strided_3d_spec(problem: UnifiedAttentionProblem, tuning_spec) -> 
         ("use_alibi", False),
         ("use_qq_bias", False),
         ("kv_storage_dtype", None),
-    ):
+    )
+    for name, _ in expected_fields:
         if not hasattr(segment, name):
             raise ValueError(f"strided kernel_spec is missing {name}")
+    # Presence errors retain the strided protocol's established diagnostic.
+    validate_attention_3d_spec_types(segment)
+    validate_attention_3d_spec_types(reduce, reducer=True)
+    for name, expected in expected_fields:
         if getattr(segment, name) != expected:
             raise ValueError(f"strided kernel_spec.{name} disagrees with problem")
     for name in (
@@ -3650,6 +3668,8 @@ def prepare_unified_attention_torch(**arguments: Any) -> Attention3DExecution:
     """
     if "execution" in arguments:
         raise ValueError("preparation creates its own execution owner")
+    if "problem" in arguments:
+        validate_attention_problem_types(arguments["problem"])
     execution = Attention3DExecution()
     try:
         run_unified_attention_torch(**arguments, execution=execution)
@@ -4935,7 +4955,11 @@ def run_unified_attention_torch(
     ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
     supplied, the kernel applies the ALiBi linear bias on each row.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
+    is its positive first-axis stride (in elements), matching the tensor layout.
+    Paged gfx942/gfx950 3D features require aligned tensors on Q's device:
+    sinks are a contiguous query-head vector in the problem dtype, ALiBi is a
+    contiguous query-head f32 vector, and QQ bias has contiguous f32 columns.
+    Both follow AITER's Triton
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
 
@@ -4946,6 +4970,7 @@ def run_unified_attention_torch(
     scratch; ``use_graph=False`` disables internal 3D replay.
     Warm up compilation before enclosing calls in ``torch.cuda.graph``.
     """
+    validate_attention_problem_types(problem)
     if execution is not None:
         if not isinstance(execution, Attention3DExecution):
             raise TypeError("execution must be an Attention3DExecution")
@@ -5000,6 +5025,12 @@ def run_unified_attention_torch(
             raise ValueError("strided decode does not support K/V/output scaling")
         if (softcap > 0) != (problem.softcap > 0):
             raise ValueError("strided softcap enablement disagrees with problem")
+        if problem.clamp_arch not in (None, _launch_arch):
+            raise ValueError(
+                f"strided clamp_arch {problem.clamp_arch!r} conflicts with {_launch_arch}"
+            )
+        if problem.clamp_arch is None:
+            problem = replace(problem, clamp_arch=_launch_arch)
         if tuning_spec is not None:
             _validate_strided_3d_spec(problem, tuning_spec)
         else:
@@ -5077,6 +5108,46 @@ def run_unified_attention_torch(
     ):
         raise ValueError("strided tuning spec requires kv_layout='strided'")
 
+    # New token-mapped loaders have stricter admission than the legacy paged
+    # path. Validate before cache lookup, address-width retargeting or launch;
+    # allow_unsupported is a tuning override, never an address-safety bypass.
+    from .attention_paged_decode import (
+        validate_paged_3d_features,
+        validate_paged_decode,
+        validate_paged_loader_geometry,
+    )
+
+    loader_geometry = validate_paged_loader_geometry(problem, tuning_spec)
+    feature_inputs = dict(
+        softcap=softcap,
+        sinks=sinks,
+        alibi_slopes=alibi_slopes,
+        qq_bias=qq_bias,
+        k_scale=k_scale,
+        v_scale=v_scale,
+        out_scale=out_scale,
+        qq_bias_stride_0=qq_bias_stride_0,
+    )
+    if loader_geometry is not None:
+        validate_paged_3d_features(problem, tuning_spec, q=q, **feature_inputs)
+    uses_paged_gather = loader_geometry is not None and loader_geometry[2]
+    if problem.block_size == 1 or uses_paged_gather:
+        arch = _launch_arch
+        if arch not in ("gfx942", "gfx950") or problem.clamp_arch not in (None, arch):
+            raise ValueError(
+                "paged gather requires matching gfx942/gfx950 architecture"
+            )
+        if backend not in ("auto", "3d"):
+            raise ValueError("paged gather requires the 3D backend")
+        if tuning_spec is None:
+            validate_paged_3d_features(problem, None, q=q, **feature_inputs)
+        validate_paged_decode(
+            problem, (q, k, v, out, cu_seqlens_q, seqused_k, block_table), tuning_spec
+        )
+        if problem.clamp_arch is None:
+            problem = replace(problem, clamp_arch=arch)
+        backend = "3d"
+
     bt_stride = (
         int(block_table.stride(0))
         if hasattr(block_table, "stride")
@@ -5101,7 +5172,25 @@ def run_unified_attention_torch(
     if tuning_spec is not None:
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
+        explicit_target = tuning_spec.arch, tuning_spec.path
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
+        _require_explicit_tuning_spec(tuning_spec)
+        if (tuning_spec.arch, tuning_spec.path) != explicit_target:
+            raise ValueError(
+                "KV block retargeting must preserve the spec arch and path"
+            )
+        if validate_paged_loader_geometry(problem, tuning_spec) != loader_geometry:
+            raise ValueError("KV block retargeting must preserve paged loader geometry")
+        if loader_geometry is not None:
+            validate_paged_3d_features(problem, tuning_spec, q=q, **feature_inputs)
+        if uses_paged_gather:
+            # Retargeting is part of the structural protocol; validate the spec
+            # actually consumed by the cache and launcher, including workspace.
+            validate_paged_decode(
+                problem,
+                (q, k, v, out, cu_seqlens_q, seqused_k, block_table),
+                tuning_spec,
+            )
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton

@@ -270,13 +270,12 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_block_q(
 int rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(
     const rocke_unified_attention_3d_tiled_spec_t* s)
 {
-    /* gfx950 @property: tile_size == block_size (tile_size_override is ignored;
-     * the gfx950 spec accepts the knob only for signature parity). */
     if(s == NULL)
     {
         return -1;
     }
-    return s->block_size;
+    return s->has_tile_size_override ? s->tile_size_override
+                                     : (s->block_size == 1 ? 32 : s->block_size);
 }
 
 const rocke_type_t* rocke_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
@@ -326,7 +325,8 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
-    const char* parts[16];
+    char tile_part[32];
+    const char* parts[18];
     size_t np = 0;
     size_t out_len = 0;
     rocke_status_t st;
@@ -376,6 +376,15 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+
+    if(rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(s) != s->block_size)
+    {
+        snprintf(tile_part,
+                 sizeof(tile_part),
+                 "t%d",
+                 rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(s));
+        parts[np++] = tile_part;
     }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
@@ -503,13 +512,18 @@ bool rocke_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON(reason_buf);
         return false;
     }
-    if(block_size != 16 && block_size != 32 && block_size != 64)
+    if(block_size != 1 && block_size != 16 && block_size != 32 && block_size != 64)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports block_size in {16,32,64} (got %d)",
+                 "tiled 3D kernel only supports block_size in {1,16,32,64} (got %d)",
                  block_size);
         ATTN3D950_REASON(reason_buf);
+        return false;
+    }
+    if(block_size == 1 && (use_fp8 || kv_storage_dtype != NULL))
+    {
+        ATTN3D950_REASON("one-token pages require fp16/bf16 KV storage");
         return false;
     }
     if(kv_storage_dtype != NULL && !rocke_attn3d950_streq(kv_storage_dtype, "fp8e4m3"))
@@ -881,6 +895,28 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
             return NULL;
         }
 
+        const int tile = rocke_gfx950_unified_attention_3d_tiled_spec_tile_size(spec);
+        if((spec->block_size != 1 && spec->block_size != 16 && spec->block_size != 32
+            && spec->block_size != 64)
+           || (tile != 16 && tile != 32 && tile != 64))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "tiled decode requires page size 1/16/32/64 and tile size 16/32/64");
+            return NULL;
+        }
+        const rocke_attention_kv_loader_kind_t loader_kind
+            = rocke_gfx950_resolve_attention_kv_loader(strided_kv, spec->block_size, tile);
+        if(loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER
+           && (tile != 32 || spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr
+               || spec->use_wide_kv_load))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "paged gather requires tile 32 and fp16/bf16 bounded async loads");
+            return NULL;
+        }
+
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
          * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
@@ -920,6 +956,7 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         }
 
         ctx.strided_kv = strided_kv;
+        ctx.kv_loader_kind = loader_kind;
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 303). */
         if(b->kernel != NULL)
