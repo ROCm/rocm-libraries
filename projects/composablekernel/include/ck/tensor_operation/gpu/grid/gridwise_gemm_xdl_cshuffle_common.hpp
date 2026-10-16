@@ -374,18 +374,62 @@ struct GridwiseGemm_xdl_cshuffle_base
             if constexpr(UseLdsTranspose &&
                          is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value)
             {
-                constexpr index_t M1     = MPerXdl / 2;
+                // constexpr index_t M1     = MPerXdl / 2;
+                // constexpr auto base_desc = make_naive_tensor_descriptor(
+                //     make_tuple(Number<MPerBlock / M1>{}, Number<KPerBlock>{}, Number<M1>{}),
+                //     make_tuple(Number<KPerBlock + 1>{} * Number<M1>{}, Number<M1>{}, I1));
+
+                // return transform_tensor_descriptor(
+                //     base_desc,
+                //     make_tuple(make_merge_transform_v1_carry_check(
+                //                    make_tuple(Number<MPerBlock / M1>{}, Number<M1>{})),
+                //                make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
+                //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+
                 constexpr auto base_desc = make_naive_tensor_descriptor(
-                    make_tuple(Number<MPerBlock / M1>{}, Number<KPerBlock>{}, Number<M1>{}),
-                    make_tuple(Number<KPerBlock + 1>{} * Number<M1>{}, Number<M1>{}, I1));
+                    make_tuple(Number<KPerBlock>{}, Number<MPerBlock>{}),
+                    make_tuple(Number<MPerBlock + PaddingSize>{}, I1));
 
                 return transform_tensor_descriptor(
                     base_desc,
-                    make_tuple(make_merge_transform_v1_carry_check(
-                                   make_tuple(Number<MPerBlock / M1>{}, Number<M1>{})),
-                               make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
-                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-                    make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+                    make_tuple(make_unmerge_transform(make_tuple(AK0Number, AK1Number)),
+                               make_pass_through_transform(Number<MPerBlock>{})),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
+
+                // constexpr auto a_lds_block_desc_ak0_m_unmerge_ak1 =
+                //     make_naive_tensor_descriptor(
+                //         make_tuple(Number<MPerBlock / 8>{},
+                //                    Number<AKPerBlock / MLdsLayer / MPerThreadLayer>{},
+                //                    Number<MPerThreadLayer>{},
+                //                    Number<MLdsLayer>{},
+                //                    Number<8>{}),
+                //         make_tuple(
+                //             Number<8>{},
+                //             Number<(MPerBlock * MLdsLayer + PaddingSize) * MPerThreadLayer>{},
+                //             Number<MPerBlock * MLdsLayer + PaddingSize>{},
+                //             Number<MPerBlock>{},
+                //             I1));
+
+                // constexpr auto a_lds_block_desc_ak0_m_ak1 = transform_tensor_descriptor(
+                //     a_lds_block_desc_ak0_m_unmerge_ak1,
+                //     make_tuple(make_pass_through_transform(Number<MPerBlock / 8>{}),
+                //                make_merge_transform_v3_division_mod(
+                //                    make_tuple(Number<MPerBlock / MLdsLayer / MPerThreadLayer>{},
+                //                               Number<MLdsLayer>{},
+                //                               Number<MPerThreadLayer>{})),
+                //                make_pass_through_transform(Number<8>{})),
+                //     make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
+                //     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+                // return transform_tensor_descriptor(
+                //     a_lds_block_desc_ak0_m_ak1,
+                //     make_tuple(make_merge_transform_v1_carry_check(
+                //                    make_tuple(Number<MPerBlock / 8>{}, Number<8>{})),
+                //                make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
+                //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
             }
             else
             {
@@ -758,26 +802,65 @@ struct GridwiseGemm_xdl_cshuffle_base
         {
             // 16 is the byte size of ds_load_b128 and ds_write_b128.
             constexpr auto PaddingSize = 16 / sizeof(BDataType);
-            static_assert(UseLdsTranspose &&
-                          is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value);
             if constexpr(UseLdsTranspose &&
                          is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value)
             {
-                constexpr index_t N1     = NPerXdl / 2;
+                // constexpr index_t N1     = NPerXdl / 2;
+                // constexpr auto base_desc = make_naive_tensor_descriptor(
+                //     make_tuple(Number<NPerBlock / N1>{}, Number<KPerBlock>{}, Number<N1>{}),
+                //     make_tuple(Number<KPerBlock + 1>{} * Number<N1>{}, Number<N1>{}, I1));
+
+                // return transform_tensor_descriptor(
+                //     base_desc,
+                //     make_tuple(make_merge_transform_v1_carry_check(
+                //                    make_tuple(Number<NPerBlock / N1>{}, Number<N1>{})),
+                //                make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
+                //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+
                 constexpr auto base_desc = make_naive_tensor_descriptor(
-                    make_tuple(Number<NPerBlock / N1>{}, Number<KPerBlock>{}, Number<N1>{}),
-                    make_tuple(Number<KPerBlock + 1>{} * Number<N1>{}, Number<N1>{}, I1));
+                    make_tuple(Number<KPerBlock>{}, Number<NPerBlock>{}),
+                    make_tuple(Number<NPerBlock + PaddingSize>{}, I1));
 
                 return transform_tensor_descriptor(
                     base_desc,
-                    make_tuple(make_merge_transform_v1_carry_check(
-                                   make_tuple(Number<NPerBlock / N1>{}, Number<N1>{})),
-                               make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
-                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
-                    make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
+                    make_tuple(make_unmerge_transform(make_tuple(AK0Number, AK1Number)),
+                               make_pass_through_transform(Number<NPerBlock>{})),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 
-                // return make_naive_tensor_descriptor_packed(
-                //     make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number));
+                // constexpr auto b_lds_block_desc_ak0_n_unmerge_ak1 =
+                //     make_naive_tensor_descriptor(
+                //         make_tuple(Number<NPerBlock / 8>{},
+                //                    Number<BKPerBlock / NLdsLayer / NPerThreadLayer>{},
+                //                    Number<NPerThreadLayer>{},
+                //                    Number<NLdsLayer>{},
+                //                    Number<8>{}),
+                //         make_tuple(
+                //             Number<8>{},
+                //             Number<(NPerBlock * NLdsLayer + PaddingSize) * NPerThreadLayer>{},
+                //             Number<NPerBlock * NLdsLayer + PaddingSize>{},
+                //             Number<NPerBlock>{},
+                //             I1));
+
+                // constexpr auto b_lds_block_desc_ak0_n_ak1 = transform_tensor_descriptor(
+                //     b_lds_block_desc_ak0_n_unmerge_ak1,
+                //     make_tuple(make_pass_through_transform(Number<NPerBlock / 8>{}),
+                //                make_merge_transform_v3_division_mod(
+                //                    make_tuple(Number<NPerBlock / NLdsLayer / NPerThreadLayer>{},
+                //                               Number<NLdsLayer>{},
+                //                               Number<NPerThreadLayer>{})),
+                //                make_pass_through_transform(Number<8>{})),
+                //     make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
+                //     make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+
+                // return transform_tensor_descriptor(
+                //     b_lds_block_desc_ak0_n_ak1,
+                //     make_tuple(make_merge_transform_v1_carry_check(
+                //                    make_tuple(Number<NPerBlock / 8>{}, Number<8>{})),
+                //                make_unmerge_transform(make_tuple(AK0Number, AK1Number))),
+                //     make_tuple(Sequence<0, 2>{}, Sequence<1>{}),
+                //     make_tuple(Sequence<1>{}, Sequence<0, 2>{}));
             }
             else
             {

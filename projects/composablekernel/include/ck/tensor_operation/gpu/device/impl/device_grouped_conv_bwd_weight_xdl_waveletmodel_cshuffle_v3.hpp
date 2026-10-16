@@ -609,6 +609,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
                 // Clamp to 128: higher split counts degrade accuracy because
                 // inter-split accumulation uses data type (e.g. F16) not compute type (F32).
                 this->k_batch_ = std::min(this->k_batch_, index_t{128});
+                std::cout << "occupancy based k_batch_: " << this->k_batch_ << std::endl;
             }
             else
             {
@@ -792,6 +793,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
             const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
             const index_t GemmK =
                 arg.a_grid_desc_k0_m_k1_.GetLength(I0) * arg.a_grid_desc_k0_m_k1_.GetLength(I2);
+
+            std::cout << "GemmM = " << GemmM << ", GemmN = " << GemmN << ", GemmK = " << GemmK
+                      << std::endl;
 
             const ADataType* p_a_grid = arg.p_a_grid_;
             const BDataType* p_b_grid = arg.p_b_grid_;

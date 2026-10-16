@@ -97,7 +97,10 @@ using device_grouped_conv_bwd_weight_wavelet_xdl_c_shuffle_bf16_instances = std:
     // M=128 N=64: 2x2 waves, 32 AccVGPRs/wave
     DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec,    1,      256,     256,   128,  64,  32, 8,  32,  32,   2,   1, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    4,    4, false, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    2,    4, false,   1,   1, S<1, 32, 1, 8>,    2>,
     // M=64 N=128: 2x2 waves, 32 AccVGPRs/wave
-    DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec,    1,      256,     256,    64, 128,  32, 8,  32,  32,   1,   2, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    2,    4, false, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    4,    4, false,   1,   1, S<1, 32, 1, 8>,    2>
+    DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec,    1,      256,     256,    64, 128,  32, 8,  32,  32,   1,   2, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    2,    4, false, S<4, 32, 2>, S<2, 0, 1>, S<1, 0, 2>,     1,    4,    4, false,   1,   1, S<1, 32, 1, 8>,    2>,
+    // Direct Load
+    DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec,    1,      512,     256,   128, 128, 128, 8,  16,  16,   4,   4, S<4, 16, 8>, S<0, 2, 1>, S<0, 2, 1>,     1,    8,    8,  true, S<4, 16, 8>, S<0, 2, 1>, S<0, 2, 1>,     1,    8,    8,  true,   1,   2, S<1, 32, 1, 8>,    8, BF16, BF16, 1, true>,
+    DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<NDimSpatial, ALayout, BLayout, ELayout, BF16, BF16, BF16, F32, PassThrough, PassThrough, PassThrough, ConvSpec,    1,      512,     256,    64, 128, 256, 8,  16,  16,   4,   2, S<8,  8, 8>, S<0, 2, 1>, S<0, 2, 1>,     1,    8,    8,  true, S<4, 16, 8>, S<0, 2, 1>, S<0, 2, 1>,     1,    8,    8,  true,   2,   1, S<1, 32, 1, 8>,    8, BF16, BF16, 1, true>
     // clang-format on
     >;
 
