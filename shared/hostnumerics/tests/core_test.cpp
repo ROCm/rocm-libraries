@@ -150,6 +150,13 @@ TEST(ShapeCpp, ConstructionAndOwnership) {
     EXPECT_EQ(spanCopy, copied);
     EXPECT_EQ(Shape(std::move(source)), (Shape{9, 3, 4}));
     EXPECT_EQ(Shape(std::array<size_t, 3>{2, 3, 4}), copied);
+    const size_t maximum = std::numeric_limits<size_t>::max();
+    const std::vector<size_t> oversized{maximum, 2};
+    EXPECT_THROW((Shape(oversized)), std::runtime_error);
+    EXPECT_THROW((Shape{maximum, 2}), std::runtime_error);
+    EXPECT_THROW(Shape(std::span<const size_t>(oversized)), std::runtime_error);
+    EXPECT_THROW((Shape(std::vector<size_t>{maximum, 2})), std::runtime_error);
+    EXPECT_EQ(Shape({maximum, 2, 0}).elementCount(), 0);
 }
 
 TEST(ShapeCpp, CallerProvidedCoordinates) {
@@ -168,7 +175,7 @@ TEST(ShapeCpp, CallerProvidedCoordinates) {
         EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
     }
     for (const Shape& invalidShape :
-         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 2, 1}}) {
+         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
         output.fill(99);
         EXPECT_THROW(invalidShape.coordinates(0, order, output), std::runtime_error);
         EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
