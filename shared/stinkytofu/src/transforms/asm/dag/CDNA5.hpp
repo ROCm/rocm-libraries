@@ -2351,9 +2351,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
+    // A load the spread gate holds does not stand in for the ones it releases: its section may
+    // open later than another's.
     DAGNode* pickedDS = nullptr;
-    for (DAGNode* n : localReadQueue) {
-        if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
+    const bool spreadOn = dsSpreadOn();
+    for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
+        for (DAGNode* n : localReadQueue) {
+            if (pass == 0 && spreadOn && !dsSpread_.released(n->id, clock_)) continue;
+            if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
+        }
     }
 
     // Phase B — try WMMA if all gates pass.
