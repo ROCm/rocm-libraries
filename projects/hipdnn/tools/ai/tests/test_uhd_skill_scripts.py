@@ -9,6 +9,7 @@ The validation scripts run against a fake `hipdnn_bench` that answers like the r
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1008,19 +1009,23 @@ def test_a_promoted_candidate_is_bound_in_the_copy_and_the_build_is_untouched(
 def test_a_promote_runs_the_evaluator_it_is_given(
     tree, promotable, tmp_path, monkeypatch
 ):
-    """A build outside the checkout is found by nothing but its name: promote without it
-    fails, and with the build's evaluator named it installs."""
+    """promote is handed the build's evaluator: one that does not exist is refused by its
+    name, whatever promote could find on its own, and the real one installs."""
     from uhd_gen.features import resolve_feature_evaluator
 
     evaluator = resolve_feature_evaluator()
     monkeypatch.setenv("PYTHONPATH", promotable["env"]["PYTHONPATH"])
-    monkeypatch.delenv("HIPDNN_UHD_FEATURE_EVALUATOR", raising=False)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    unnamed = tmp_path / "unnamed"
-    tree.build_farm(promotable["root"], unnamed)
-    with pytest.raises(SystemExit, match="hipdnn_uhd_features was not found"):
+    absent = str(tmp_path / "no-such-build" / "hipdnn_uhd_features")
+    refused = tmp_path / "refused"
+    tree.build_farm(promotable["root"], refused)
+    with pytest.raises(SystemExit, match=re.escape(absent)):
         tree.install_promoted(
-            unnamed, promotable["model"], "test:engine", "sort_kernel_catalog", "gfx942"
+            refused,
+            promotable["model"],
+            "test:engine",
+            "sort_kernel_catalog",
+            "gfx942",
+            absent,
         )
     named = tmp_path / "named"
     tree.build_farm(promotable["root"], named)

@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace
@@ -18,8 +19,9 @@ namespace
 hipDeviceProp_t mi300x(unsigned char board)
 {
     hipDeviceProp_t properties{};
-    std::strncpy(properties.gcnArchName, "gfx942:sramecc+:xnack-", sizeof(properties.gcnArchName));
-    std::strncpy(properties.name, "AMD Instinct MI300X", sizeof(properties.name));
+    std::snprintf(
+        properties.gcnArchName, sizeof(properties.gcnArchName), "%s", "gfx942:sramecc+:xnack-");
+    std::snprintf(properties.name, sizeof(properties.name), "%s", "AMD Instinct MI300X");
     properties.warpSize = 64;
     properties.multiProcessorCount = 304;
     properties.totalGlobalMem = 206158430208;

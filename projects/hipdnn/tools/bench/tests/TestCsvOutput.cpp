@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -97,7 +98,8 @@ TEST(TestCsvOutput, AQuotedFieldRoundTripsBackToItsInput)
 TEST(TestCsvOutput, TheHeaderIsTheOneTheDatasetFixtureConverts)
 {
     hipDeviceProp_t properties{};
-    std::strncpy(properties.gcnArchName, "gfx942:sramecc+:xnack-", sizeof(properties.gcnArchName));
+    std::snprintf(
+        properties.gcnArchName, sizeof(properties.gcnArchName), "%s", "gfx942:sramecc+:xnack-");
     const auto columns = deviceColumns(properties);
     std::vector<std::string> deviceNames;
     deviceNames.reserve(columns.size());
