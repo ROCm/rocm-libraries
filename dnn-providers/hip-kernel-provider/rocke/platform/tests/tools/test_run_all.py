@@ -44,6 +44,8 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
     nontemporal.touch()
+    unsigned_int_ops = tmp_path / "Debug" / "rocke_unsigned_int_ops"
+    unsigned_int_ops.touch()
     selected = tmp_path / "override" if override else executable
     if override:
         selected.touch()
@@ -56,6 +58,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
+                {
+                    "name": "rocke_unsigned_int_ops",
+                    "command": [str(unsigned_int_ops)],
+                },
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
@@ -83,6 +89,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
+    )
+    assert all(
+        env["ROCKE_UNSIGNED_INT_OPS_CLI"] == str(unsigned_int_ops)
+        for _, env in children
     )
     assert "ROCKE_BACKEND" not in children[0][1]
     assert children[-1][1]["ROCKE_BACKEND"] == "both"
@@ -264,7 +274,8 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_nontemporal_hip rocke_dtypes)\n"
+        "foreach(name rocke_storage rocke_nontemporal_hip rocke_unsigned_int_ops\n"
+        "             rocke_dtypes)\n"
         '  set(output "${CMAKE_CURRENT_BINARY_DIR}/fixtures/${name}${tool_suffix}")\n'
         '  add_custom_command(OUTPUT "${output}"\n'
         '    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/fixtures"\n'
@@ -290,6 +301,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
+    assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()
     if override:
         assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")

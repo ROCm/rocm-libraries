@@ -137,6 +137,11 @@ NATIVE_PARITY_TESTS = (
         "rocke_nontemporal_hip",
         "native nontemporal HIP parity",
     ),
+    (
+        "ROCKE_UNSIGNED_INT_OPS_CLI",
+        "rocke_unsigned_int_ops",
+        "native unsigned integer op C API parity",
+    ),
 )
 
 

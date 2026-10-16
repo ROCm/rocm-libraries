@@ -892,6 +892,11 @@ const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
     {
         return v->name;
     }
+    if(op->opcode == ROCKE_OP_ARITH_ASSUME_RANGE && op->num_operands >= 1)
+    {
+        /* A range marker is its first operand: it emits no instruction. */
+        return rocke_ll_operand(L, op->operands[0]);
+    }
     if(op->opcode == ROCKE_OP_ARITH_CONSTANT)
     {
         const char* ity = rocke_attr_get_str(&op->attrs, "ity");

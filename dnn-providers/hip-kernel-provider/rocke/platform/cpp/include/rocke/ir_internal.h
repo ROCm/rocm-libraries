@@ -150,6 +150,22 @@ rocke_attr_map_t rocke_i_attrs(rocke_ir_builder_t* b);
  * attrs pointer; Op.attrs is dict(attrs or {}) in Python). */
 void rocke_i_attrs_copy(rocke_ir_builder_t* b, rocke_attr_map_t* dst, const rocke_attr_map_t* src);
 
+/* Mirrors ir._int_add_wrap_error: the error for arith.add's "wrap" attr on
+ * operands of type `operand_type`, or NULL when it is absent (meaning nsw) or
+ * valid; "nuw" takes i32 or i64 operands. A formatted message is written into
+ * `buf`, which the result then points to. */
+const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._int_cmp_pred_error: the same for arith.cmp's "pred" attr
+ * (absent means lt; "ult" takes i32 or i64 operands). */
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
 /* ------------------------------------------------------------- DPP helpers */
 
 /* DPP control word that lowers tile.dpp_xor with `xor_mask` (Python
