@@ -244,7 +244,14 @@ if(HIPSPARSELT_BUILD_TESTING)
 endif()
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+    # The clients link a CPU reference BLAS/LAPACK (xerbla_, dlange_) and need the
+    # Fortran runtime. TheRock's cblas is OpenBLAS and bundles LAPACK already, so
+    # only that configuration can skip this. Keep this selector in sync with
+    # clients/CMakeLists.txt and hipsparselt_link_blas_libraries().
+    #
+    # Do not widen to HIPSPARSELT_ENABLE_CLIENT: it defaults ON and TheRock does
+    # not override it, so fetch_lapack.cmake would FATAL_ERROR there.
+    if(NOT HIPSPARSELT_ENABLE_THEROCK OR HIPSPARSELT_ENABLE_BLIS)
         if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
             set(CMAKE_Fortran_COMPILER "gfortran")
         endif()
