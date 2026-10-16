@@ -288,8 +288,14 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                              {0, seqlen_k_start}, // TODO: hdim split?
                              Policy::template MakeVDramTileDistribution<Problem>());
 
+        // buffer_load_fence(1) is a partial vmcnt wait (keeps one load in flight) and must stay
+        // unfenced. The barrier below publishes the async-loaded K/V now resident in LDS to the
+        // workgroup and the fence builtins ensure LDS gets published (that is, this inlines an
+        // "LDS-only __syncthreads()").
         buffer_load_fence(1);
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
         __builtin_amdgcn_s_barrier();
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
         __builtin_amdgcn_sched_barrier(0);
 
         if(block_relation_onehot[0])
