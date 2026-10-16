@@ -364,7 +364,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
 # carries one copy of device code per --offload-arch and dominates the library, so the default
 # placement pushes .data out of range of the 4-byte PC-relative relocations in the exception
 # tables once the GPU_TARGETS list gets long enough. See cmake/hip-fatbin-layout.ld for detail.
-if("${BACKEND}" STREQUAL "HIP" AND RPP_HIP_FATBIN_LAYOUT)
+if("${BACKEND}" STREQUAL "HIP" AND RPP_HIP_FATBIN_LAYOUT AND NOT WIN32)
     set(RPP_FATBIN_LAYOUT_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-fatbin-layout.ld)
     target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-T,${RPP_FATBIN_LAYOUT_SCRIPT}")
     set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS ${RPP_FATBIN_LAYOUT_SCRIPT})
