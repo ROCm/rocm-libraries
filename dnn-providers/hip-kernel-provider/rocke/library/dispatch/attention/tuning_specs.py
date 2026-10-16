@@ -14,6 +14,7 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _kv_cache_policy_3d,
     _tiled_2d_impl,
     _tiled_3d_impl,
 )
@@ -151,6 +152,7 @@ _SEMANTIC_FIELDS = frozenset(
         "kv_storage_dtype",
         "kv_layout",
         "use_i64_kv_addr",
+        "use_decode_grid",
     }
 )
 
@@ -258,8 +260,10 @@ def make_explicit_attention_3d_specs(
         raise ValueError(f"waves_per_eu must be one of {WAVES_PER_EU}")
 
     tile = resolve_tile_policy(problem.block_size, config.tile_policy)
-    if arch == "gfx950" and tile != int(problem.block_size):
-        raise ValueError("gfx950 3D implements only tile_size == block_size")
+    if arch == "gfx950" and (tile % int(problem.block_size) or tile > 128):
+        raise ValueError(
+            "gfx950 3D implements tiles that are a multiple of block_size, up to 128"
+        )
     if arch == "gfx942" and tile not in (
         int(problem.block_size),
         max(1, int(problem.block_size) // 2),
@@ -273,11 +277,16 @@ def make_explicit_attention_3d_specs(
         for name in ("use_invariant_hoist", "use_wide_kv_load")
     ):
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
+    # Follows the problem unless the config sets it (``_kv_cache_policy_3d``).
+    knobs.setdefault("kv_cache_policy", _kv_cache_policy_3d(problem, arch=arch))
     segment = spec_type(
         **_semantic_fields(problem),
         num_segments=int(config.num_segments),
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),
+        # Both explicit 3D arches implement the all-decode grid
+        # (``_use_decode_grid``); it follows the problem, never the config.
+        use_decode_grid=bool(problem.all_decode),
         **knobs,
     )
     ok, why = supports(

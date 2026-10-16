@@ -117,9 +117,14 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_causal_mask_phase_split"),
 )
 
+# The K/V cache policy's base value follows the problem (``_kv_cache_policy_3d``).
+# Combinations the spec rejects (e.g. a K/V layout knob without paged fp16/bf16
+# K/V) are dropped.
 _3D_AXES: Tuple[KnobAxis, ...] = (
-    _flag("use_invariant_hoist"),
     _flag("use_wide_kv_load"),
+    _values("kv_cache_policy", None, ("stream", "all")),
+    _flag("use_kv_lds_swizzle"),
+    _flag("use_wave_page_id_load"),
 )
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
@@ -475,9 +480,7 @@ _PRODUCTION_STACKS: Mapping[Tuple[str, str], Tuple[Tuple[str, Mapping], ...]] = 
     + (("kvcp_nt", {"kv_cache_policy": "nt"}),),
     ("gfx942", "splitkv"): (
         ("baseline", {}),
-        ("hoist", {"use_invariant_hoist": True}),
         ("widekv", {"use_wide_kv_load": True}),
-        ("hoist_widekv", {"use_invariant_hoist": True, "use_wide_kv_load": True}),
     ),
     ("gfx950", "splitkv"): (("baseline", {}),),
 }

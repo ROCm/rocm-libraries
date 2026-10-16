@@ -103,6 +103,9 @@ _GEOMETRY_FIELDS = frozenset(
     }
 )
 
+# Inert 3D spec fields, kept so saved specs that set them still load.
+_INERT_3D_FIELDS = frozenset({"use_invariant_hoist"})
+
 
 class TestTuningSpace(unittest.TestCase):
     def test_every_kernel_tuning_field_is_swept(self):
@@ -132,6 +135,7 @@ class TestTuningSpace(unittest.TestCase):
                         - swept
                         - codepath
                         - KNOWN_WRONG_KNOBS[arch]
+                        - (_INERT_3D_FIELDS if path == "3d" else frozenset())
                     )
                     self.assertFalse(missing, sorted(missing))
 
@@ -153,7 +157,9 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
-        self.assertEqual(len(specs), 5)
+        # waves_per_eu (5) x kv_cache_policy ("stream" for decode, or "all") x
+        # use_kv_lds_swizzle x use_wave_page_id_load.
+        self.assertEqual(len(specs), 40)
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(

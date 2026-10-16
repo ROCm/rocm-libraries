@@ -220,6 +220,9 @@ def test_segments_bounded_after_bump():
     try:
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+        # The clamp below the gfx942 decode split rule, which these shapes enter
+        # at some CU counts.
+        p.attr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
         # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
         s120 = au._num_segments(
             _prob(120, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
@@ -278,6 +281,13 @@ def test_gfx950_segments_conservatively_clamped():
             dict(nq=32, nk=4, D=64, kv=32768, batch=1),
         ]
         for c in cases:
+            if (
+                au._gfx950_3d_decode_ctas_per_segment(_prob(256, **c), "gfx950")
+                is not None
+            ):
+                # Paged decode in the split rule's scope derives its segments
+                # from num_cus by design (test_tiled_3d_decode_split.py).
+                continue
             s120 = au._num_segments(_prob(120, **c), "gfx950")
             s256 = au._num_segments(_prob(256, **c), "gfx950")
             assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
@@ -300,7 +310,9 @@ def test_target_ctas_bypasses_the_gfx950_clamp():
     try:
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
-        shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
+        # num_2d=8 -> pre_bump 64. Head size 64 keeps the shape outside the decode
+        # split rule (_gfx950_3d_decode_ctas_per_segment), which replaces the clamp.
+        shape = dict(nq=8, nk=8, D=64, kv=2048, batch=1)
         ceiling = au._pre_bump_segments(_prob(120, **shape))
 
         # Default callers: clamped to the pre-bump ceiling regardless of the bump.
@@ -590,31 +602,38 @@ class TestNumCusResolver(unittest.TestCase):
 
     def test_segments_bounded_after_bump(self):
         """The num_cus bump must not over-split D128 decode: clamp == pre-bump."""
-        # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
-        s120 = au._num_segments(
-            _prob(120, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
-        )
-        s304 = au._num_segments(
-            _prob(304, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
-        )
-        assert s120 == s304, f"bump over-split D128 decode: {s120} -> {s304}"
-        # kv boundary: 16385 and 32767 must STILL clamp (only kv>=32768 uncapped)
-        for kv in (16385, 32767):
-            b120 = au._num_segments(
-                _prob(120, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+        p = _Patch()
+        try:
+            # The clamp below the gfx942 decode split rule, which these shapes enter
+            # at some CU counts.
+            p.attr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
+            # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
+            s120 = au._num_segments(
+                _prob(120, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
             )
-            b304 = au._num_segments(
-                _prob(304, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+            s304 = au._num_segments(
+                _prob(304, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942"
             )
-            assert b120 == b304, f"D128 kv={kv} must clamp: {b120} -> {b304}"
-        # kv>=32768: uncapped -> the bump IS allowed to raise the split
-        u120 = au._num_segments(
-            _prob(120, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
-        )
-        u304 = au._num_segments(
-            _prob(304, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
-        )
-        assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
+            assert s120 == s304, f"bump over-split D128 decode: {s120} -> {s304}"
+            # kv boundary: 16385 and 32767 must STILL clamp (only kv>=32768 uncapped)
+            for kv in (16385, 32767):
+                b120 = au._num_segments(
+                    _prob(120, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+                )
+                b304 = au._num_segments(
+                    _prob(304, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942"
+                )
+                assert b120 == b304, f"D128 kv={kv} must clamp: {b120} -> {b304}"
+            # kv>=32768: uncapped -> the bump IS allowed to raise the split
+            u120 = au._num_segments(
+                _prob(120, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
+            )
+            u304 = au._num_segments(
+                _prob(304, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942"
+            )
+            assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
+        finally:
+            p.restore()
 
         # q>1 (prefill / spec-decode) D128: the else-branch clamp also holds
         def qprob(num_cus):
@@ -653,6 +672,13 @@ class TestNumCusResolver(unittest.TestCase):
             dict(nq=32, nk=4, D=64, kv=32768, batch=1),
         ]
         for c in cases:
+            if (
+                au._gfx950_3d_decode_ctas_per_segment(_prob(256, **c), "gfx950")
+                is not None
+            ):
+                # Paged decode in the split rule's scope derives its segments
+                # from num_cus by design (test_tiled_3d_decode_split.py).
+                continue
             s120 = au._num_segments(_prob(120, **c), "gfx950")
             s256 = au._num_segments(_prob(256, **c), "gfx950")
             assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
@@ -667,7 +693,9 @@ class TestNumCusResolver(unittest.TestCase):
         target straight back to the 120-baseline ceiling. The bypass therefore has to
         live in the branch GUARD -- which is what this test pins.
         """
-        shape = dict(nq=8, nk=8, D=128, kv=8192, batch=1)  # num_2d=8 -> pre_bump 64
+        # num_2d=8 -> pre_bump 64. Head size 64 keeps the shape outside the decode
+        # split rule (_gfx950_3d_decode_ctas_per_segment), which replaces the clamp.
+        shape = dict(nq=8, nk=8, D=64, kv=2048, batch=1)
         ceiling = au._pre_bump_segments(_prob(120, **shape))
 
         # Default callers: clamped to the pre-bump ceiling regardless of the bump.
