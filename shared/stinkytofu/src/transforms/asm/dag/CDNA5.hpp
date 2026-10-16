@@ -375,7 +375,8 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
 //      src VGPRs has decayed; seed from the BB prefix before each region.
 //  (3) VALU is only gated by the co-issue window.
 //  (4) ds_load pacing — the ds credit queue (dsReadQueueDepth) bounds ds_loads in flight; with
-//      dagFeatures.dsSpread, DsSpreadPacer also spreads them evenly over the region's WMMAs.
+//      dagFeatures.dsSpread, DsSpreadPacer also spreads them evenly over the region's timeline
+//      (cycles).
 //  (5) Loop tail vs head — defer first WMMA in the loop header BB until
 //      non-WMMA queues drain once. Cross-BB via LoopDetection.
 //
@@ -961,8 +962,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
         PASS_DEBUG({
             if (dsSpreadOn() && dsSpread_.active())
                 std::cerr << "[CDNA5 dsSpread] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
-                          << " slackWindows=" << dsSpread_.slack() << " gapCv=" << dsSpread_.gapCv()
-                          << "\n";
+                          << " periodCycles=" << dsSpread_.periodCycles()
+                          << " gapCv=" << dsSpread_.gapCv() << "\n";
         });
     }
     void onScheduled(const StinkyInstruction& inst) override {
@@ -1617,8 +1618,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) {
-            if (!spread || (dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_) &&
-                            dsSpread_.extraGate(clock_))) {
+            if (!spread || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -3389,14 +3389,18 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
             if (isDSRead(*deps.dag.nodes[id].inst)) loads.push_back({id, consumerWindow(id)});
         }
-        const int tol = dagFeatures.dsSpreadToleranceCycles;
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         constexpr int kDsLeadWindows = 2;
-        dsSpread_.plan(loads, wmmaTotalThisRegion_,
-                       tol < 0 ? -1 : (tol + windowCycles - 1) / windowCycles, kDsLeadWindows);
-        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
-                             << " wmmas=" << wmmaTotalThisRegion_
-                             << " slackWindows=" << dsSpread_.slack() << "\n");
+        // The wave issues WMMAs up to the queue cover ahead of the pipe, so the region's issue
+        // time is shorter than its pipe time by about that cover.
+        const int queueLead = std::max(0, wmmaQueueCover());
+        const int regionCycles =
+            std::max(windowCycles, wmmaTotalThisRegion_ * windowCycles - queueLead);
+        dsSpread_.plan(loads, regionCycles, windowCycles, dagFeatures.dsSpreadToleranceCycles,
+                       kDsLeadWindows * windowCycles, clock_);
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
+                             << wmmaTotalThisRegion_ << " periodCycles=" << dsSpread_.periodCycles()
+                             << " toleranceCycles=" << dsSpread_.toleranceCycles() << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

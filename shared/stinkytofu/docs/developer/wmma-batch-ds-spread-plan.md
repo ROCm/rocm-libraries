@@ -82,14 +82,17 @@ slot-first and hide-budget ds logic.
 - **Soft preference:** spread ds_loads evenly. A ready ds_load that fits a free
   credit issues. A load is delayed only to avoid a burst that would fill the
   FIFO. Evenness never idles the pipe by itself.
-- **Pre-scan per region:** each ds_load gets a feasible window in WMMA-index
-  terms. Earliest comes from barrier thresholds and the WAR gate. Deadline is its
-  consumer WMMA minus the data latency. The ds order lock is kept.
-- **Per-period quota:** a period runs from one WMMA refill to the next.
-  `quota = round(remaining_ds / remaining_periods)`, recomputed every period. A
-  load blocked by a dependency pushes its debt to later periods.
-- **Spacing:** ds_loads issue in the shadow of a filled WMMA queue. Target gap is
-  `period / quota`.
+- **Timeline in cycles, not WMMA index:** the region's issue time is
+  `wmmaTotal * L - queue cover` (the wave runs ahead of the pipe by the queued
+  cover). The k-th ds_load is planned `k * regionTime / n` cycles after the region
+  clock start, so a barrier wait or any other stall moves the plan with the clock.
+- **Spacing:** a ds_load issues no earlier than its planned cycle (less the
+  tolerance) and no earlier than one period (`regionTime / n`) after the previous
+  ds_load, so a backlog drains at the planned rate instead of as a burst.
+- **Per-load deadline:** a load whose first consumer WMMA needs it earlier has its
+  own deadline (consumer window * L - lead) and issues then, bypassing the plan and
+  the spacing. No global slack: one tight consumer does not open the gate for the
+  rest. The ds order lock is kept.
 - **Never deadlocks:** the deadline lifts any hold, and the existing Phase G
   fallback stays.
 
@@ -97,11 +100,10 @@ slot-first and hide-budget ds logic.
 
 - **Metric:** coefficient of variation of ds_load issue gaps in the main loop,
   written to the debug log and asserted in tests.
-- **Auto:** binary-search the smallest tolerance J (cycles of allowed deviation
-  from the ideal slot) for which every load still fits its window. Result is "as
-  even as dependencies allow". Runs on the pre-scan, no dry-run schedule.
-- **Manual:** `DsSpreadTolerance=<cycles>`. 0 = as even as possible, large =
-  today's greedy behavior. -1 = auto.
+- **Auto (-1):** strict, tolerance 0; the per-load consumer deadlines are the only
+  early release, so the spread is as even as dependencies allow. No pre-scan search.
+- **Manual:** `DsSpreadToleranceCycles=<cycles>`: every load may issue that many
+  cycles before its planned cycle. Large = today's greedy behavior.
 
 ### 4. Unchanged
 
