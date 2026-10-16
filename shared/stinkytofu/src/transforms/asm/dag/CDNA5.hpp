@@ -534,6 +534,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // dsReadCyclesPerLoad() capped at the even spread of the region's `dsTotal` loads over its
     // WMMAs: a ds-dense region overflows at an even pace instead of being held back until
     // deadlines force a burst. The pace and the barrier windows must use the same rate.
+    bool dsOwedGateOn() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsOwedGate;
+    }
     int effectiveDsCyclesPerLoad(int dsTotal) const {
         int cpl = dsReadCyclesPerLoad();
         if (cpl > 0 && dsTotal > 0 && wmmaTotalThisRegion_ > 0) {
@@ -1671,7 +1674,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         // An owed load (its slot is due) issues whatever the credit says; the wait is charged
         // as pacing time. The barrier position was decided first, so the loads must meet it.
-        const bool dsOwed = spread && dsSpread_.owed(clock_) > 0;
+        const bool dsOwed = spread && dsOwedGateOn() && dsSpread_.owed(clock_) > 0;
         if (fitsSchedulingBudget || (spread && dsOverflow_) || dsOwed) {
             if (!spread || wmmaRunAtLimit_ || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
@@ -2456,7 +2459,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         // A ds_load is owed: it goes before the next WMMA (old's hide-budget gate, driven by the
         // section slots).
         const bool blockWmmaForOwedDs = hasPickableNonWmma && pickKind == kLocalRead &&
-                                        dsSpreadOn() && dsSpread_.owed(clock_) > 0;
+                                        dsSpreadOn() && dsOwedGateOn() &&
+                                        dsSpread_.owed(clock_) > 0;
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
             !blockWmmaForRunLimit && !blockWmmaForOwedDs) {
