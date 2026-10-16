@@ -39,9 +39,9 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
-#include <Tensile/UserKernelIndex.hpp>
-#include <Tensile/UserKernelLibrary.hpp>
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+#include <Tensile/LocalKernelIndex.hpp>
+#include <Tensile/LocalKernelLibrary.hpp>
 #endif
 
 #include <tensilelitehost/export.h>
@@ -173,12 +173,12 @@ namespace TensileLite
         mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
             solutionSources;
 
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
         // Consulted by the master the caller queries. Shard masters hold the
         // same pointer but are never queried: placeholders call their inner
         // library directly.
-        std::shared_ptr<UserKernelLibrary<MyProblem, MySolution>> userLibrary
-            = globalUserKernelLibrary<MyProblem, MySolution>();
+        std::shared_ptr<LocalKernelLibrary<MyProblem, MySolution>> localLibrary
+            = globalLocalKernelLibrary<MyProblem, MySolution>();
 #endif
 
         MasterSolutionLibrary() = default;
@@ -305,12 +305,12 @@ namespace TensileLite
         /// file's blob cache or to a loaded shard's cache.
         std::shared_ptr<MySolution> resolveSolutionByIndex(const int index) const
         {
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
-            // User kernels have no shard; loadLibrary would load an unrelated
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+            // Local kernels have no shard; loadLibrary would load an unrelated
             // one.
-            if(isUserKernelIndex(index))
-                return userLibrary ? userLibrary->lookupIndex(index)
-                                   : std::shared_ptr<MySolution>();
+            if(isLocalKernelIndex(index))
+                return localLibrary ? localLibrary->lookupIndex(index)
+                                    : std::shared_ptr<MySolution>();
 #endif
             // Idempotent, and a no-op unless this is a lazy-loading master.
             loadLibrary(index);
@@ -534,8 +534,8 @@ namespace TensileLite
             }
             else
             {
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
-                if(userLibrary && (rv = userLibrary->findExact(problem, hardware)))
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
+                if(localLibrary && (rv = localLibrary->findExact(problem, hardware)))
                 {
                     if(fitness)
                         *fitness = 0.0;
@@ -561,12 +561,12 @@ namespace TensileLite
                              SolutionLibrarySearchType searchType
                              = SolutionLibrarySearchType::DEFAULT) const override
         {
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
             auto rv = library->findAllSolutions(problem, hardware, searchType);
-            if(userLibrary)
+            if(localLibrary)
             {
-                auto user = userLibrary->findAll(problem, hardware, searchType);
-                rv.insert(user.begin(), user.end());
+                auto local = localLibrary->findAll(problem, hardware, searchType);
+                rv.insert(local.begin(), local.end());
             }
             return rv;
 #else
@@ -607,16 +607,16 @@ namespace TensileLite
                                                            Hardware const&  hardware,
                                                            int              numSolutions) const
         {
-#ifdef TENSILELITE_ENABLE_USER_KERNELS
+#ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
             // The mapped kernel goes first and the shipped library fills the
             // rest. It cannot appear twice: the shipped library never holds a
-            // user kernel.
-            std::shared_ptr<MySolution> user;
-            if(userLibrary && numSolutions > 0)
-                user = userLibrary->findExact(problem, hardware);
-            if(user)
+            // local kernel.
+            std::shared_ptr<MySolution> local;
+            if(localLibrary && numSolutions > 0)
+                local = localLibrary->findExact(problem, hardware);
+            if(local)
             {
-                SolutionVector<MySolution> rv{user};
+                SolutionVector<MySolution> rv{local};
                 if(numSolutions == 1)
                 {
                     lastFindTopRetAll = false;

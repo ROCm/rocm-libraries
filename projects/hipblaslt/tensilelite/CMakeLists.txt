@@ -129,8 +129,8 @@ if(TENSILELITE_ENABLE_HOST)
 
     # PUBLIC because it changes the layout of MasterSolutionLibrary: every target
     # that includes the TensileLite headers has to agree on it.
-    if(HIPBLASLT_ENABLE_USER_KERNELS)
-        target_compile_definitions(tensilelite-host PUBLIC TENSILELITE_ENABLE_USER_KERNELS)
+    if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+        target_compile_definitions(tensilelite-host PUBLIC TENSILELITE_ENABLE_LOCAL_KERNELS)
     endif()
 
     if(TENSILELITE_ENABLE_HOST_ASAN)

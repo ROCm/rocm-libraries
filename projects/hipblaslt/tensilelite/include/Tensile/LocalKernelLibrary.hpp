@@ -21,23 +21,23 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Task.hpp>
-#include <Tensile/UserKernelIndex.hpp>
 
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
     /// [M, N, batch, K], the same key as the shipped Equality tables.
-    struct UserExactShape
+    struct LocalExactShape
     {
         size_t m     = 0;
         size_t n     = 0;
         size_t batch = 0;
         size_t k     = 0;
 
-        bool operator==(UserExactShape const& rhs) const
+        bool operator==(LocalExactShape const& rhs) const
         {
             return m == rhs.m && n == rhs.n && batch == rhs.batch && k == rhs.k;
         }
@@ -54,9 +54,9 @@ namespace TensileLite
      * from its full problem type, so fields left out here (grouped GEMM, MX
      * block sizes, epilogue, and any added later) are still checked.
      */
-    struct UserExactKey
+    struct LocalExactKey
     {
-        UserExactShape   shape;
+        LocalExactShape  shape;
         bool             transA      = false;
         bool             transB      = false;
         rocisa::DataType aType       = rocisa::DataType::Float;
@@ -79,19 +79,19 @@ namespace TensileLite
                                          dType,
                                          computeType);
         }
-        bool operator==(UserExactKey const& rhs) const
+        bool operator==(LocalExactKey const& rhs) const
         {
             return tie() == rhs.tie();
         }
-        bool operator!=(UserExactKey const& rhs) const
+        bool operator!=(LocalExactKey const& rhs) const
         {
             return !(*this == rhs);
         }
     };
 
-    struct UserExactKeyHash
+    struct LocalExactKeyHash
     {
-        size_t operator()(UserExactKey const& key) const noexcept
+        size_t operator()(LocalExactKey const& key) const noexcept
         {
             size_t h = 0;
             for(size_t v : {key.shape.m,
@@ -111,36 +111,36 @@ namespace TensileLite
     };
 
     template <typename MyProblem>
-    inline UserExactShape userExactShapeFor(MyProblem const& problem)
+    inline LocalExactShape localExactShapeFor(MyProblem const& problem)
     {
-        return UserExactShape{
+        return LocalExactShape{
             problem.freeSizeA(0), problem.freeSizeB(0), problem.batchSize(0), problem.boundSize(0)};
     }
 
     /// The key a problem is looked up by.
     template <typename MyProblem>
-    inline UserExactKey userExactKeyFor(MyProblem const& problem)
+    inline LocalExactKey localExactKeyFor(MyProblem const& problem)
     {
-        return UserExactKey{userExactShapeFor(problem),
-                            problem.transA(),
-                            problem.transB(),
-                            problem.a().dataType(),
-                            problem.b().dataType(),
-                            problem.c().dataType(),
-                            problem.d().dataType(),
-                            problem.computeType()};
+        return LocalExactKey{localExactShapeFor(problem),
+                             problem.transA(),
+                             problem.transB(),
+                             problem.a().dataType(),
+                             problem.b().dataType(),
+                             problem.c().dataType(),
+                             problem.d().dataType(),
+                             problem.computeType()};
     }
 
     /// The key a kernel of this problem type is mapped under at `shape`.
     template <typename ProblemType>
-    inline UserExactKey userExactKeyFor(UserExactShape const& shape, ProblemType const& pt)
+    inline LocalExactKey localExactKeyFor(LocalExactShape const& shape, ProblemType const& pt)
     {
-        return UserExactKey{
+        return LocalExactKey{
             shape, pt.transA, pt.transB, pt.aType, pt.bType, pt.cType, pt.dType, pt.computeType};
     }
 
     /**
-     * Immutable state of the user kernel library. Each change publishes a new
+     * Immutable state of the local kernel library. Each change publishes a new
      * snapshot, so readers never see a partial update.
      *
      * `solutions` holds every registered kernel and serves enumeration and
@@ -152,12 +152,12 @@ namespace TensileLite
      * that can serve the problem.
      */
     template <typename MySolution>
-    struct UserKernelSnapshot
+    struct LocalKernelSnapshot
     {
         using Candidates = std::vector<std::shared_ptr<MySolution>>;
 
-        std::map<int, std::shared_ptr<MySolution>>                     solutions;
-        std::unordered_map<UserExactKey, Candidates, UserExactKeyHash> exactTable;
+        std::map<int, std::shared_ptr<MySolution>>                       solutions;
+        std::unordered_map<LocalExactKey, Candidates, LocalExactKeyHash> exactTable;
     };
 
     /**
@@ -167,18 +167,18 @@ namespace TensileLite
      * split into shards.
      */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    class UserKernelLibrary
+    class LocalKernelLibrary
     {
     public:
-        using Snapshot = UserKernelSnapshot<MySolution>;
+        using Snapshot = LocalKernelSnapshot<MySolution>;
 
-        UserKernelLibrary()
+        LocalKernelLibrary()
             : m_snapshot(std::make_shared<const Snapshot>())
         {
         }
 
-        UserKernelLibrary(UserKernelLibrary const&)            = delete;
-        UserKernelLibrary& operator=(UserKernelLibrary const&) = delete;
+        LocalKernelLibrary(LocalKernelLibrary const&)            = delete;
+        LocalKernelLibrary& operator=(LocalKernelLibrary const&) = delete;
 
         /**
          * The newest kernel mapped under this problem's key that can serve
@@ -192,7 +192,7 @@ namespace TensileLite
                 return std::shared_ptr<MySolution>();
 
             auto snap = current();
-            auto it   = snap->exactTable.find(userExactKeyFor(problem));
+            auto it   = snap->exactTable.find(localExactKeyFor(problem));
             if(it == snap->exactTable.end())
                 return std::shared_ptr<MySolution>();
 
@@ -247,7 +247,7 @@ namespace TensileLite
         /// Any registered kernel by index, mapped or not.
         std::shared_ptr<MySolution> lookupIndex(int index) const
         {
-            if(!isUserKernelIndex(index) || !m_hasAny.load(std::memory_order_acquire))
+            if(!isLocalKernelIndex(index) || !m_hasAny.load(std::memory_order_acquire))
                 return std::shared_ptr<MySolution>();
 
             auto snap = current();
@@ -257,15 +257,15 @@ namespace TensileLite
 
         /**
          * Registers solutions and returns their indices in order. Each solution
-         * gets a new index in the user range, written back to
+         * gets a new index in the local range, written back to
          * `solution->index`. Indices are valid only in this process.
          *
          * Each is also tagged Equal here, before it is published, because a
-         * user kernel is selected only through an exact mapping; selection then
+         * local kernel is selected only through an exact mapping; selection then
          * never writes to a solution that concurrent lookups share.
          *
          * Registers all of them, or none and returns an empty vector if any is
-         * null, repeated, or already registered, or if the user range cannot
+         * null, repeated, or already registered, or if the local range cannot
          * hold them all.
          */
         std::vector<int> addSolutions(std::vector<std::shared_ptr<MySolution>> const& incoming)
@@ -307,7 +307,7 @@ namespace TensileLite
          * before; mapping it again moves it back to the front. Returns false if
          * the index is not registered.
          */
-        bool setExactMatch(UserExactShape const& shape, int index)
+        bool setExactMatch(LocalExactShape const& shape, int index)
         {
             std::unique_lock<std::shared_mutex> lock(m_snapshotMutex);
 
@@ -316,7 +316,7 @@ namespace TensileLite
                 return false;
 
             auto  next       = std::make_shared<Snapshot>(*m_snapshot);
-            auto& candidates = next->exactTable[userExactKeyFor(shape, it->second->problemType)];
+            auto& candidates = next->exactTable[localExactKeyFor(shape, it->second->problemType)];
             candidates.erase(std::remove(candidates.begin(), candidates.end(), it->second),
                              candidates.end());
             candidates.insert(candidates.begin(), it->second);
@@ -403,21 +403,21 @@ namespace TensileLite
         std::atomic<bool> m_hasAny{false};
         std::atomic<bool> m_hasExact{false};
 
-        int64_t m_nextIndex = UserKernelIndexBase;
+        int64_t m_nextIndex = LocalKernelIndexBase;
     };
 
     /**
-     * The process-wide user kernel library. Defined only for the GEMM problem,
+     * The process-wide local kernel library. Defined only for the GEMM problem,
      * and out of line in tensilelite-host, so every shared library that links
      * it, hipblaslt included, sees the same instance. A function-local static
      * in a header would give each shared library its own copy, because they
      * build with hidden visibility.
      */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    std::shared_ptr<UserKernelLibrary<MyProblem, MySolution>> globalUserKernelLibrary();
+    std::shared_ptr<LocalKernelLibrary<MyProblem, MySolution>> globalLocalKernelLibrary();
 
     template <>
     TENSILELITEHOST_EXPORT
-        std::shared_ptr<UserKernelLibrary<ContractionProblemGemm, ContractionSolution>>
-        globalUserKernelLibrary<ContractionProblemGemm, ContractionSolution>();
+        std::shared_ptr<LocalKernelLibrary<ContractionProblemGemm, ContractionSolution>>
+        globalLocalKernelLibrary<ContractionProblemGemm, ContractionSolution>();
 } // namespace TensileLite
