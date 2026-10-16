@@ -276,7 +276,7 @@ runs no heuristics and needs no GPU.
 
 | Risk | Mitigation |
 |---|---|
-| Umbrella compile time | Measured per phase on the v9 sample corpus; > 15% regression triggers the split-umbrella fallback |
+| Compile time | The header-only C API emulation is instantiated in every TU that includes `cudnn.h` (after Phase 3: about +1.5 s per TU). Accepted to keep the shim header-only; measured each phase on single TUs and the v9 sample corpus. The split umbrella remains the fallback for the v0.x builder headers only |
 | Licensing of declared names | Names only, no MIT claim; shim-assigned values; legal review before Phase 1 merges |
 | FALLBACK-only heuristics and missing notes change engine choice | One WARN per mode; documented in `KNOWN_DIVERGENCES.md` |
 | Unsupported by providers: int8, four-op conv fusions, alignment < 16, ragged tensors | Out of scope; expected failures in the corpus harness |
