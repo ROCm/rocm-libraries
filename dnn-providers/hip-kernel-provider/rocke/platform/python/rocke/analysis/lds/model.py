@@ -10,7 +10,9 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 
+# Default schema for existing single-address callers; dual-address results use 2.
 SCHEMA_VERSION = 1
+_SUPPORTED_SCHEMA_VERSIONS = (1, 2)
 
 
 class ModelValidationError(ValueError):
@@ -158,7 +160,8 @@ class LdsAccess:
 
     The LDS address and access width are measured in bytes. A coordinate may link
     the access to caller-defined axes, while ``active`` controls whether the profile
-    includes it in the prediction.
+    includes it in the prediction. ``operand_index`` identifies address operand
+    0 or 1 of the instruction; single-address requests use the default 0.
     """
 
     access_id: int
@@ -167,6 +170,7 @@ class LdsAccess:
     access_width_bytes: int
     coordinate: tuple[int, ...] | None = None
     active: bool = True
+    operand_index: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -183,6 +187,9 @@ class LdsAccess:
             "access_width_bytes",
             _require_int("access_width_bytes", self.access_width_bytes, minimum=1),
         )
+        _require_int("operand_index", self.operand_index, minimum=0)
+        if self.operand_index not in (0, 1):
+            raise ModelValidationError("operand_index must be 0 or 1")
         if self.coordinate is not None:
             object.__setattr__(
                 self, "coordinate", _tuple_of_ints("coordinate", self.coordinate)
@@ -191,6 +198,7 @@ class LdsAccess:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            **({"operand_index": self.operand_index} if self.operand_index else {}),
             "access_id": self.access_id,
             "lane": self.lane,
             "lds_byte_address": self.lds_byte_address,
@@ -207,12 +215,13 @@ class LdsAccess:
             "access",
             value,
             required={"access_id", "lane", "lds_byte_address", "access_width_bytes"},
-            optional={"coordinate", "active"},
+            optional={"coordinate", "active", "operand_index"},
         )
         coordinate = data.get("coordinate")
         if coordinate is not None:
             coordinate = _tuple_of_ints("access.coordinate", coordinate)
         return cls(
+            operand_index=data.get("operand_index", 0),
             access_id=data["access_id"],
             lane=data["lane"],
             lds_byte_address=data["lds_byte_address"],
@@ -335,6 +344,7 @@ class AccessResult:
     coordinate: tuple[int, ...] | None
     classification: AccessClassification
     conflict_group_ids: tuple[int, ...] = ()
+    operand_index: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -351,6 +361,9 @@ class AccessResult:
             "access_width_bytes",
             _require_int("access_width_bytes", self.access_width_bytes, minimum=1),
         )
+        _require_int("operand_index", self.operand_index, minimum=0)
+        if self.operand_index not in (0, 1):
+            raise ModelValidationError("operand_index must be 0 or 1")
         if self.coordinate is not None:
             object.__setattr__(
                 self, "coordinate", _tuple_of_ints("coordinate", self.coordinate)
@@ -387,6 +400,7 @@ class AccessResult:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            **({"operand_index": self.operand_index} if self.operand_index else {}),
             "access_id": self.access_id,
             "lane": self.lane,
             "lds_byte_address": self.lds_byte_address,
@@ -412,11 +426,13 @@ class AccessResult:
                 "classification",
                 "conflict_group_ids",
             },
+            optional={"operand_index"},
         )
         coordinate = data["coordinate"]
         if coordinate is not None:
             coordinate = _tuple_of_ints("access_result.coordinate", coordinate)
         return cls(
+            operand_index=data.get("operand_index", 0),
             access_id=data["access_id"],
             lane=data["lane"],
             lds_byte_address=data["lds_byte_address"],
@@ -660,7 +676,7 @@ class LdsConflictResult:
         if not isinstance(self.summary, ConflictSummary):
             raise ModelValidationError("summary must be a ConflictSummary")
         schema_version = _require_int("schema_version", self.schema_version, minimum=1)
-        if schema_version != SCHEMA_VERSION:
+        if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
             raise ModelValidationError(f"unsupported schema_version: {schema_version}")
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(
@@ -713,6 +729,8 @@ class LdsConflictResult:
             raise ModelValidationError(
                 "access lane must be smaller than request.wave_size"
             )
+        if self.schema_version == 1 and any(a.operand_index for a in accesses):
+            raise ModelValidationError("operand_index 1 requires schema_version 2")
         active_lanes = {
             access.lane
             for access in accesses
@@ -758,6 +776,10 @@ class LdsConflictResult:
             if any(access_id not in access_by_id for access_id in group.access_ids):
                 raise ModelValidationError(
                     "conflict group references an unknown access"
+                )
+            if len({access_by_id[i].operand_index for i in group.access_ids}) != 1:
+                raise ModelValidationError(
+                    "conflict group must use one address operand"
                 )
             if any(
                 group.group_id not in access_by_id[access_id].conflict_group_ids
@@ -824,8 +846,17 @@ class LdsConflictResult:
         schema_version = _require_int(
             "result.schema_version", data["schema_version"], minimum=1
         )
-        if schema_version != SCHEMA_VERSION:
+        if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
             raise ModelValidationError(f"unsupported schema_version: {schema_version}")
+        if (
+            schema_version == 1
+            and isinstance(data["accesses"], list)
+            and any(
+                isinstance(a, Mapping) and "operand_index" in a
+                for a in data["accesses"]
+            )
+        ):
+            raise ModelValidationError("schema_version 1 does not encode operand_index")
         for array_name in ("accesses", "conflict_groups", "diagnostics"):
             if not isinstance(data[array_name], list):
                 raise ModelValidationError(f"result.{array_name} must be an array")

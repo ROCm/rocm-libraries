@@ -53,9 +53,9 @@ def test_canonical_json_round_trip_is_stable():
 
 def test_loads_rejects_unknown_schema_version():
     document = _result().as_dict()
-    document["schema_version"] = 2
+    document["schema_version"] = 3
 
-    with pytest.raises(ModelValidationError, match="unsupported schema_version: 2"):
+    with pytest.raises(ModelValidationError, match="unsupported schema_version: 3"):
         loads(json.dumps(document))
 
 

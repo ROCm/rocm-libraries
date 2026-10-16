@@ -21,11 +21,15 @@ from rocke.analysis.lds.registry import registered_targets, resolve_profile
 @pytest.mark.parametrize("address", [0, 128])
 @pytest.mark.parametrize("active", [True, False])
 def test_repeated_lane_requires_inactive_access(target, opcode, address, active):
-    width = get_opcode_spec(opcode).access_width_bytes
+    spec = get_opcode_spec(opcode)
+    width = spec.access_width_bytes
     accesses = [
         LdsAccess(0, 0, 0, width),
         LdsAccess(1, 0, address, width, active=active),
     ]
+    if spec.address_count == 2:
+        spacing = width * 64 if "stride64" in opcode or "st64" in opcode else 64
+        accesses.append(LdsAccess(2, 0, spacing, width, operand_index=1))
     wave_size = min(resolve_profile(target).supported_wave_sizes)
     request = dict(target=target, opcode=opcode, wave_size=wave_size, accesses=accesses)
 
@@ -37,7 +41,7 @@ def test_repeated_lane_requires_inactive_access(target, opcode, address, active)
         assert [access.classification.value for access in result.accesses] == [
             "normal",
             "inactive",
-        ]
+        ] + (["normal"] if spec.address_count == 2 else [])
         assert not result.conflict_groups
 
 

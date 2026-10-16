@@ -4,9 +4,10 @@
 
 Call the production predictor with an exact target, opcode, wave size, and a
 sequence of access records for one instruction in one wave. Each lane may supply
-at most one active access, covering the opcode's full width. Submit separate
-requests for separate instructions or waves. Each access must be naturally aligned
-to the opcode's full width, and its full byte range must fit within the selected
+one active access per address operand, covering that operand's full width.
+Single-address instructions have operand index 0; dual-address instructions need
+both indices 0 and 1, subject to the selected profile's supported scope. Submit separate
+requests for separate instructions or waves. Each access must meet the opcode's supported prediction alignment, and its full byte range must fit within the selected
 profile's LDS capacity.
 
 Each access has:
@@ -15,7 +16,8 @@ Each access has:
 - a lane within the selected wave;
 - a non-negative `lds_byte_address`;
 - a positive `access_width_bytes`;
-- an active flag; and
+- an active flag;
+- an `operand_index` of 0 or 1 (default 0); and
 - optional integer coordinates whose axis names are supplied separately by the
   result contract.
 
@@ -51,7 +53,12 @@ group list if prediction failed or the request was unsupported.
 ## Serialization
 
 Use the production canonical JSON functions. They provide deterministic ordering,
-JSON primitives only, and strict schema-version validation. Do not serialize
+JSON primitives only, and strict schema-version validation. Single-address
+results use schema v1 and omit operand indices. Dual-address results use
+[the v2 schema](../../../../../../python/rocke/analysis/lds/schema/lds-conflict-result-v2.schema.json);
+an omitted operand index means 0, and operand 1 is encoded explicitly. New
+readers accept both versions; existing v1 readers reject v2 documents. Conflict
+groups never span different operand indices. Do not serialize
 dataclass internals manually or use tuple-keyed JSON objects. Analyze an in-memory
 result and its canonical JSON round trip with identical group and classification
 semantics.

@@ -35,6 +35,7 @@ class OpcodeSpec:
     direction: str
     access_width_bytes: int
     alignment_bytes: int | None = None
+    address_count: int = 1
 
 
 _OPCODE_SPECS = {
@@ -60,6 +61,22 @@ _OPCODE_SPECS = {
         OpcodeSpec("ds_load_i16", "read", 2, 4),
         OpcodeSpec("ds_store_b8", "write", 1, 4),
         OpcodeSpec("ds_store_b16", "write", 2, 4),
+        OpcodeSpec("ds_load_2addr_b32", "read", 4, address_count=2),
+        OpcodeSpec("ds_load_2addr_stride64_b32", "read", 4, address_count=2),
+        OpcodeSpec("ds_read2_b32", "read", 4, address_count=2),
+        OpcodeSpec("ds_read2st64_b32", "read", 4, address_count=2),
+        OpcodeSpec("ds_load_2addr_b64", "read", 8, address_count=2),
+        OpcodeSpec("ds_load_2addr_stride64_b64", "read", 8, address_count=2),
+        OpcodeSpec("ds_read2_b64", "read", 8, address_count=2),
+        OpcodeSpec("ds_read2st64_b64", "read", 8, address_count=2),
+        OpcodeSpec("ds_store_2addr_b32", "write", 4, address_count=2),
+        OpcodeSpec("ds_store_2addr_stride64_b32", "write", 4, address_count=2),
+        OpcodeSpec("ds_write2_b32", "write", 4, address_count=2),
+        OpcodeSpec("ds_write2st64_b32", "write", 4, address_count=2),
+        OpcodeSpec("ds_store_2addr_b64", "write", 8, address_count=2),
+        OpcodeSpec("ds_store_2addr_stride64_b64", "write", 8, address_count=2),
+        OpcodeSpec("ds_write2_b64", "write", 8, address_count=2),
+        OpcodeSpec("ds_write2st64_b64", "write", 8, address_count=2),
     )
 }
 
