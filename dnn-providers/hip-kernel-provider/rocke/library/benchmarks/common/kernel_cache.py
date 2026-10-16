@@ -150,6 +150,10 @@ _POST_V1_HASH_DEFAULTS: dict[str, object] = {
     "prefetch_addr": False,
     "uniform_k_decode": False,
     "tap_outer_k": False,
+    "dy_halo": 0,
+    "dy_halo_setprio": 0,
+    "dy_halo_kouter_pad": 0,
+    "halo_max_wo": 0,
 }
 
 
@@ -230,6 +234,13 @@ class KernelIdentity:
     # Serves only problems whose kpg is a multiple of tile_k (see
     # supports_problem). Left out of the hash while False.
     tap_outer_k: bool = False
+    # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
+    # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
+    # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
+    # Wo it serves (halo_max_wo, below). Left out of the hash at 0.
+    dy_halo: int = 0
+    dy_halo_setprio: int = 0
+    dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -260,6 +271,10 @@ class KernelIdentity:
     # Dgrad only: the largest tilde sub-GEMM count the record table (and the
     # binary search's runtime trip count) was built to support.
     max_sub_gemms: int = 0
+    # Dgrad dY halo only (DgradConvSpec.halo_max_wo): the staged halo is
+    # sized for this output width, so the binary serves Wo <= halo_max_wo.
+    # 0 = not a halo binary. Left out of the hash at 0.
+    halo_max_wo: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -844,6 +859,23 @@ class KernelCache:
                     return False, (
                         f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
                         f"tile_k={identity.tile_k}"
+                    )
+            # The dY halo loop shifts the linear pixel index by whole output
+            # rows, so the output must be the input's size, and its LDS tile
+            # is sized for halo_max_wo. The filter (filter_h/w, baked) is
+            # matched above; with stride 1 and Ho == Hi it fixes the pad.
+            if identity.dy_halo:
+                ho = int(getattr(problem, "Ho", -1))
+                wo = int(getattr(problem, "Wo", -1))
+                if (ho, wo) != (
+                    int(getattr(problem, "Hi", -2)),
+                    int(getattr(problem, "Wi", -2)),
+                ):
+                    return False, "dy_halo needs Ho == Hi and Wo == Wi"
+                if wo > identity.halo_max_wo:
+                    return False, (
+                        f"dy_halo binary serves Wo <= {identity.halo_max_wo}, "
+                        f"problem has Wo={wo}"
                     )
 
         if not identity.is_direct:

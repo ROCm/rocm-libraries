@@ -1111,6 +1111,85 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    # Configs 49-54: the dY halo mode of the tap-outer loop (dy_halo).
+    # 49-52 build; 53 (no tap-outer loop) and 54 (Wo > halo_max_wo) are
+    # rejected by both validators.
+    halo = {
+        49: (
+            _cp(N=2, Hi=10, Wi=14, C=128, K=128, Y=3, X=3, pH=1, pW=1, groups=2),
+            {
+                "epilogue": "cshuffle",
+                "lds_k_outer": True,
+                "vector_size_a": 8,
+                "vector_size_b": 8,
+                "vector_size_c": 8,
+                "dy_halo": 2,
+                "halo_max_wo": 16,
+            },
+        ),
+        50: (
+            _cp(N=1, Hi=9, Wi=20, C=64, K=128, Y=5, X=5, pH=2, pW=2),
+            {
+                "tile_m": 128,
+                "warp_m": 4,
+                "warp_n": 1,
+                "lds_k_outer": True,
+                "dy_halo": 1,
+                "dy_halo_setprio": 1,
+                "dy_halo_kouter_pad": 32,
+                "halo_max_wo": 32,
+            },
+        ),
+        51: (
+            _cp(N=2, Hi=8, Wi=8, C=64, K=64, Y=7, X=7, pH=3, pW=3),
+            {
+                "tile_m": 256,
+                "warp_m": 4,
+                "warp_n": 1,
+                "epilogue": "cshuffle",
+                "lds_k_outer": True,
+                "dy_halo": 2,
+                "dy_halo_setprio": 2,
+                "halo_max_wo": 8,
+            },
+        ),
+        52: (
+            _cp(N=1, Hi=6, Wi=19, C=256, K=256, Y=3, X=5, pH=1, pW=2, groups=4),
+            {"dy_halo": 2, "halo_max_wo": 24},
+        ),
+        53: (
+            _cp(N=2, Hi=10, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            {
+                "lds_k_outer": True,
+                "dy_halo": 2,
+                "halo_max_wo": 16,
+                "tap_outer_k": False,
+            },
+        ),
+        54: (
+            _cp(N=2, Hi=10, Wi=40, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            {"lds_k_outer": True, "dy_halo": 2, "halo_max_wo": 32},
+        ),
+    }
+    if idx in halo:
+        p, kw = halo[idx]
+        base = {
+            "problem": p,
+            "tile_m": 64,
+            "tile_n": 64,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_m": 32,
+            "warp_tile_n": 32,
+            "warp_tile_k": 16,
+            "pipeline": "mem",
+            "epilogue": "default",
+            "tap_outer_k": True,
+        }
+        base.update(kw)
+        return DgradConvSpec(**base), "gfx950"
+
     raise SystemExit(f"unknown config index {idx}")
 
 

@@ -79,7 +79,12 @@ Per direction, on top of that:
   ``uniform_k_decode``; served to problems whose kpg is a multiple of
   tile_k). A stride-1 binary with the flat K loop is not built: it serves
   the same problems as the tilde binary of its configuration with the same
-  K loop. The B tile takes the layout the JIT sweep
+  K loop. On gfx950 a capped sub-grid adds the dY halo mode of the tap-outer
+  loop (``dy_halo`` = 2): the three halo tiles (``CACHE_DGRAD_HALO_TILES``)
+  x square filters 3/5/7 (baked, ``filter_h/w``) x the widest output row
+  served (``halo_max_wo`` in ``CACHE_DGRAD_HALO_MAX_WO``) x the
+  ``dy_halo_setprio`` / ``dy_halo_kouter_pad`` pairs of the tile
+  (``_dgrad_halo_knobs``), K-outer only (b = c in {2, 4, 8}, a = 8). The B tile takes the layout the JIT sweep
   picks (``DgradConvSpec.default_lds_k_outer``): K-outer wherever the arch,
   dtype, atom and pipeline allow it and the B load is wider than one element,
   M-outer otherwise. ``uniform_k_decode`` follows
@@ -194,6 +199,28 @@ _AOT_ALIAS_PIPELINES: Dict[str, Tuple[str, ...]] = {
 CACHE_GROUPED: Tuple[bool, ...] = (True,)
 # Whether the stride-1 dgrad binaries are built next to the tilde ones.
 CACHE_DGRAD_STRIDE1: tuple[bool, ...] = (False, True)
+# dY halo binaries (DgradConvSpec.dy_halo): a capped sub-grid, not the
+# geometry product. The tiles are the halo tiles of the gfx950 dgrad pick, as
+# (tile_m, tile_n, tile_k, warp_m, warp_n, warp tile): 64x64 on 2x2 waves and
+# 128x64 / 256x64 on 4x1 waves, 32x32 atoms. The filter is baked (the taps
+# are unrolled), square 3, 5 and 7 (stride 1 and Ho == Hi fix the pad). The
+# staged halo is tile_m + (Y-1)*halo_max_wo + (X-1) LDS rows, so a binary
+# serves Wo <= halo_max_wo and a wider bucket costs LDS on a narrower image;
+# that costs time only where the extra rows cross an LDS occupancy step. Powers
+# of two keep the over-size under 2x, and 48 / 96 bound it at 1.5x between
+# the wider ones, where the steps lie closest together. The loads are K-outer
+# (B = D width > 1); A loads 8 wide, which every halo problem admits (kpg is a
+# multiple of tile_k). dy_halo = 2 (the double-buffered B tile) only.
+CACHE_DGRAD_HALO_TILES: tuple[tuple[int, ...], ...] = (
+    (64, 64, 64, 2, 2, 32),
+    (128, 64, 64, 4, 1, 32),
+    (256, 64, 64, 4, 1, 32),
+)
+CACHE_DGRAD_HALO_FILTERS: tuple[int, ...] = (3, 5, 7)
+CACHE_DGRAD_HALO_MAX_WO: tuple[int, ...] = (8, 16, 32, 48, 64, 96, 128)
+CACHE_DGRAD_HALO_VEC_BC: tuple[int, ...] = (2, 4, 8)
+CACHE_DGRAD_HALO_VEC_A = 8
+CACHE_DGRAD_HALO_MODES: tuple[int, ...] = (2,)
 # Sub-GEMM records an implicit-GEMM dgrad binary dispatches over (its tilde
 # decomposition has stride_h * stride_w of them at most): 32x32, so the
 # patch-embedding strides 14 and 16 of vision transformers fit. The CTA's
@@ -417,6 +444,54 @@ def _dgrad_tap_outer_variants(
     if wave_size == 64 and pipeline != "wavelet":
         return (True,)
     return ()
+
+
+def _dgrad_halo_knobs(warp_n: int) -> tuple[tuple[int, int], ...]:
+    """``(dy_halo_setprio, dy_halo_kouter_pad)`` pairs built per halo tile.
+
+    The 4x1-wave tiles carry the wave priority and the wider K-outer B row
+    pad as options (each with and without); the 2x2 tile neither.
+    """
+    if warp_n == 1:
+        return tuple((prio, kpad) for prio in (0, 1) for kpad in (0, 32))
+    return ((0, 0),)
+
+
+def _dgrad_halo_jobs_for(
+    arch: str, geometry: tuple, wave_size: int, db: str
+) -> list[tuple[int, int, int, int, int, int, int]]:
+    """The dY halo variants of one dgrad geometry, as ``(dy_halo, vec_bc,
+    filter, halo_max_wo, setprio, kpad, vec_c)``; empty off the halo grid.
+
+    Shared by :func:`_dgrad_jobs` and :func:`count_jobs`.
+    """
+    from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, _ = geometry
+    if (tile_m, tile_n, tile_k, warp_m, warp_n, wt) not in CACHE_DGRAD_HALO_TILES:
+        return []
+    if pipeline != "mem" or wave_size != 64:
+        return []
+    out = []
+    for vec_bc in CACHE_DGRAD_HALO_VEC_BC:
+        if not DgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_b=db,
+            warp_tile_n=wt,
+            cpg=vec_bc,
+            wave_size=wave_size,
+            pipeline=pipeline,
+        ):
+            continue
+        vec_c = 1 if epilogue == "default" else vec_bc
+        for mode, filt, max_wo, (prio, kpad) in itertools.product(
+            CACHE_DGRAD_HALO_MODES,
+            CACHE_DGRAD_HALO_FILTERS,
+            CACHE_DGRAD_HALO_MAX_WO,
+            _dgrad_halo_knobs(warp_n),
+        ):
+            out.append((mode, vec_bc, filt, max_wo, prio, kpad, vec_c))
+    return out
 
 
 def _job_flavor(llvm_flavor: Optional[str]) -> str:
@@ -1005,6 +1080,75 @@ def _dgrad_jobs(
                     spec_kwargs=cfg,
                     caps=caps,
                 )
+        # The dY halo mode of the tap-outer loop (stride 1 / dilation 1, the
+        # filter and the widest Wo baked), on the halo tiles only.
+        geometry = (
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            wt,
+            pipeline,
+            epilogue,
+            atom,
+        )
+        for mode, vec_bc, filt, max_wo, prio, kpad, vec_c in _dgrad_halo_jobs_for(
+            arch, geometry, wave_size, db
+        ):
+            caps = {
+                "grouped": True,
+                "stride": 1,
+                "dilation": 1,
+                "halo_filter": filt,
+                "halo_max_wo": max_wo,
+            }
+            cfg = {
+                "tile_m": tile_m,
+                "tile_n": tile_n,
+                "tile_k": tile_k,
+                "warp_m": warp_m,
+                "warp_n": warp_n,
+                "warp_tile_m": wt,
+                "warp_tile_n": wt,
+                "warp_tile_k": atom.k,
+                "pipeline": pipeline,
+                "epilogue": epilogue,
+                "wave_size": wave_size,
+                "vector_size_a": CACHE_DGRAD_HALO_VEC_A,
+                "vector_size_b": vec_bc,
+                "vector_size_c": vec_c,
+                "lds_k_outer": True,
+                "max_sub_gemms": max_sub_gemms,
+                "uniform_k_decode": False,
+                "tap_outer_k": True,
+                "dy_halo": mode,
+                "dy_halo_setprio": prio,
+                "dy_halo_kouter_pad": kpad,
+                "halo_max_wo": max_wo,
+            }
+            yield BuildJob(
+                identity=KernelIdentity(
+                    arch=arch,
+                    direction="dgrad",
+                    algorithm="implicit_gemm",
+                    llvm_flavor=flavor,
+                    dtype_a=da,
+                    dtype_b=db,
+                    dtype_d=dd,
+                    grouped=True,
+                    stride_h=1,
+                    stride_w=1,
+                    dilation_h=1,
+                    dilation_w=1,
+                    filter_h=filt,
+                    filter_w=filt,
+                    **cfg,
+                ),
+                direction="dgrad",
+                spec_kwargs=cfg,
+                caps=caps,
+            )
 
 
 def job_for_identity(identity: KernelIdentity) -> BuildJob:
@@ -1174,6 +1318,7 @@ def count_jobs(
                 len(_dgrad_tap_outer_variants(caps, wave_size, pipeline))
                 for caps in _dgrad_caps()
             )
+            total += len(_dgrad_halo_jobs_for(target.gfx, geo, wave_size, db))
     return total
 
 
@@ -1511,6 +1656,22 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     # Keep the dilated filter inside the image so Ho/Wo stay positive.
     extent = 16 + 2 * (dilation - 1)
     channels = 64
+    if caps.get("halo_filter"):
+        # A dY halo binary bakes its filter and is sized for halo_max_wo: the
+        # probe is a same-size output (pad (F-1)/2) that wide.
+        f = int(caps["halo_filter"])
+        return ConvProblem(
+            N=1,
+            Hi=max(f, 8),
+            Wi=int(caps["halo_max_wo"]),
+            C=channels * 2,
+            K=channels * 2,
+            Y=f,
+            X=f,
+            pH=(f - 1) // 2,
+            pW=(f - 1) // 2,
+            groups=2,
+        )
     if caps.get("group_merge", 1) > 1:
         # Merging is depthwise only: cpg = kpg = 1, and 64 groups divide by
         # every merge degree.

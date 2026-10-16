@@ -486,6 +486,73 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->xcd_tile_order = (idx == 47);
         *arch = "gfx950";
         return 0;
+    /* 49-54: the dY halo mode of the tap-outer loop. 53 (no tap-outer loop)
+     * and 54 (Wo > halo_max_wo) are rejected by both validators. */
+    case 49:
+        spec->problem = rocke_conv_problem_make(2, 10, 14, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 8;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 8;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 8;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+        *arch = "gfx950";
+        return 0;
+    case 50:
+        spec->problem = rocke_conv_problem_make(1, 9, 20, 64, 128, 5, 5, 1, 1, 2, 2, 1, 1);
+        spec->tile_m = 128;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 1;
+        spec->dy_halo_setprio = 1;
+        spec->dy_halo_kouter_pad = 32;
+        spec->halo_max_wo = 32;
+        *arch = "gfx950";
+        return 0;
+    case 51:
+        spec->problem = rocke_conv_problem_make(2, 8, 8, 64, 64, 7, 7, 1, 1, 3, 3, 1, 1);
+        spec->tile_m = 256;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->dy_halo_setprio = 2;
+        spec->halo_max_wo = 8;
+        *arch = "gfx950";
+        return 0;
+    case 52:
+        spec->problem = rocke_conv_problem_make(1, 6, 19, 256, 256, 3, 5, 1, 1, 1, 2, 1, 1);
+        spec->problem.groups = 4;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 24;
+        *arch = "gfx950";
+        return 0;
+    case 53:
+        spec->problem = rocke_conv_problem_make(2, 10, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->lds_k_outer = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 16;
+        *arch = "gfx950";
+        return 0;
+    case 54:
+        spec->problem = rocke_conv_problem_make(2, 10, 40, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->lds_k_outer = true;
+        spec->tap_outer_k = true;
+        spec->dy_halo = 2;
+        spec->halo_max_wo = 32;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }
