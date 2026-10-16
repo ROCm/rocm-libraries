@@ -23,13 +23,14 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
+#include <rocRoller/hostnumerics/HostReference.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
-#include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest
 {
@@ -121,8 +122,22 @@ namespace GEMMDriverTest
             TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
             TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
 
-            auto seed = 31415u;
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            auto const bounded         = hostnumerics::DataInitialization{};
+            auto       generatedInputs = hostnumerics::generateGEMMInputs(descA,
+                                                                    descB,
+                                                                    descC,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    bounded,
+                                                                    DataType::None,
+                                                                    DataType::None,
+                                                                    1,
+                                                                    -1.0f,
+                                                                    1.0f,
+                                                                    31415u);
+            hostA                      = hostnumerics::copyTensorStorage<T>(generatedInputs.a);
+            hostB                      = hostnumerics::copyTensorStorage<T>(generatedInputs.b);
+            hostC                      = hostnumerics::copyTensorStorage<T>(generatedInputs.c);
 
             if(setIdentity)
             {
@@ -340,18 +355,15 @@ namespace GEMMDriverTest
             }
 
             // Host result
-            std::vector<T> h_result(M * N, 0.0);
-            rocRoller::CPUMM(h_result,
-                             hostC,
-                             hostA,
-                             hostB,
-                             M,
-                             N,
-                             K,
-                             alpha,
-                             beta,
-                             gemm.transA == "T",
-                             gemm.transB == "T");
+            auto h_result = hostnumerics::convertHostReference<T>(
+                hostnumerics::computeHostReference(hostnumerics::hostTensor(descA, hostA),
+                                                   hostnumerics::hostTensor(descB, hostB),
+                                                   hostnumerics::hostTensor(descC, hostC),
+                                                   std::nullopt,
+                                                   std::nullopt,
+                                                   0,
+                                                   alpha,
+                                                   beta));
             // Host leaky relu
             for(size_t i = 0; i < M; i++)
             {
@@ -404,12 +416,12 @@ namespace GEMMDriverTest
                            "execution";
                 }
 
-                auto tol = gemmAcceptableError<T, T, T>(
-                    M, N, K, m_context->targetArchitecture().target());
+                auto tol
+                    = gemmAcceptableError<T, T, T>(K, m_context->targetArchitecture().target());
                 auto res = compare(d_result, h_result, tol);
 
-                Log::info("RNorm is {}", res.relativeNormL2);
-                if(debuggable && !res.ok)
+                Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+                if(debuggable && !res.ok())
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -427,7 +439,7 @@ namespace GEMMDriverTest
                         }
                     }
                 }
-                ASSERT_TRUE(res.ok) << res.message();
+                ASSERT_TRUE(res.ok()) << res.message();
             }
         }
     };

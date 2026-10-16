@@ -28,5 +28,11 @@
 
 #include <string>
 
-// Parse --data and --yaml command-line arguments
+struct Arguments;
+
+// Parse data-file selection and shared validation controls, removing consumed options.
 bool hipblaslt_parse_data(int& argc, char** argv, const std::string& default_file = "");
+
+// Explicit command-line controls override a GEMM's YAML/data-file settings.
+// --freivalds selects compact validation; --verify also requests a dense reference.
+void hipblaslt_apply_validation_options(Arguments& arg);

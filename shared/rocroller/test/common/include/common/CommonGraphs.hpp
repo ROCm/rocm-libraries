@@ -20,6 +20,7 @@
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include <common/GEMMProblem.hpp>
 #include <common/Utilities.hpp>
@@ -245,16 +246,21 @@ namespace rocRollerTest
 
                 TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, m_problem.transA);
                 TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, m_problem.transB);
-                TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
+                TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
                 TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-                auto seed = 31415u;
+                auto const seed           = 31415u;
+                auto const bounded        = hostnumerics::DataInitialization{};
+                auto       scaleTypeA     = DataType::None;
+                auto       scaleTypeB     = DataType::None;
+                size_t     scaleBlockSize = 1;
                 if(m_problem.scaleAMode == Operations::ScaleMode::Separate
                    || m_problem.scaleBMode == Operations::ScaleMode::Separate)
                 {
-                    auto const& arch           = context->targetArchitecture();
-                    auto        scaleBlockSize = m_problem.scaleBlockSize;
-                    AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                    auto const& arch = context->targetArchitecture();
+                    AssertFatal(m_problem.scaleBlockSize > 0,
+                                "scaleBlockSize must be set to scale A or B.");
+                    scaleBlockSize = static_cast<size_t>(m_problem.scaleBlockSize);
                     AssertFatal(
                         arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -265,25 +271,29 @@ namespace rocRollerTest
                                             m_problem.k,
                                             scaleBlockSize));
 
-                    DGenInput(seed,
-                              hostA,
-                              descA,
-                              hostB,
-                              descB,
-                              hostC,
-                              descC,
-                              hostScaleA,
-                              hostScaleB,
-                              m_problem.scaleTypeA,
-                              m_problem.scaleTypeB,
-                              -1.f,
-                              1.f,
-                              static_cast<uint>(scaleBlockSize));
+                    scaleTypeA = m_problem.scaleTypeA;
+                    scaleTypeB = m_problem.scaleTypeB;
                 }
-                else
-                {
-                    DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
-                }
+
+                auto generatedInputs = hostnumerics::generateGEMMInputs(descA,
+                                                                        descB,
+                                                                        descC,
+                                                                        bounded,
+                                                                        bounded,
+                                                                        bounded,
+                                                                        scaleTypeA,
+                                                                        scaleTypeB,
+                                                                        scaleBlockSize,
+                                                                        -1.0f,
+                                                                        1.0f,
+                                                                        seed);
+                hostA = hostnumerics::copyTensorStorage<PackedTypeA>(generatedInputs.a);
+                hostB = hostnumerics::copyTensorStorage<PackedTypeB>(generatedInputs.b);
+                hostC = hostnumerics::copyTensorStorage<TC>(generatedInputs.c);
+                if(generatedInputs.scaleA)
+                    hostScaleA = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleA);
+                if(generatedInputs.scaleB)
+                    hostScaleB = hostnumerics::copyTensorStorage<uint8_t>(*generatedInputs.scaleB);
 
                 auto deviceA = make_shared_device<TA>(hostA);
                 auto deviceB = make_shared_device<TB>(hostB);

@@ -112,9 +112,9 @@ public:
             {
                 if(gflops != ArgumentLogging::NA_value)
                 {
-                    double cblas_gflops = gflops * batch_count / cpu_us * 1e6;
+                    double cpu_reference_gflops = gflops * batch_count / cpu_us * 1e6;
                     name_line << ",CPU-Gflops";
-                    val_line << "," << cblas_gflops;
+                    val_line << "," << cpu_reference_gflops;
                 }
 
                 name_line << ",CPU-us";
@@ -134,8 +134,7 @@ public:
                 {
                     name_line << ",atol";
                     if(atol == 1) // atol == init value
-                        val_line << ","
-                                 << "failed";
+                        val_line << "," << "failed";
                     else
                         val_line << "," << atol;
                 }
@@ -143,8 +142,7 @@ public:
                 {
                     name_line << ",rtol";
                     if(rtol == 1) // rtol == init value
-                        val_line << ","
-                                 << "failed";
+                        val_line << "," << "failed";
                     else
                         val_line << "," << rtol;
                 }
@@ -159,27 +157,27 @@ public:
         }
     }
 
-    void log_args(hipDataType                 Tc,
-                  hipblaslt_internal_ostream& str,
-                  size_t                      index,
-                  int32_t                     solution_index,
-                  std::string&                solution_name,
-                  std::string&                kernel_name,
-                  std::string&                archName,
-                  std::string&                cuNum,
-                  const Arguments&            arg,
-                  uint32_t                    splitK,
-                  uint32_t                    wgm,
-                  double                      gpu_us,
-                  double                      gflops,
-                  double                      gbytes = ArgumentLogging::NA_value,
-                  double                      cpu_us = ArgumentLogging::NA_value,
-                  double                      norm    = ArgumentLogging::NA_value,
-                  double                      atol    = ArgumentLogging::NA_value,
-                  double                      rtol    = ArgumentLogging::NA_value,
-                  double                      max_ulp = 0.0,
-                  double                      avg_ulp = 0.0,
-                  const hipblaslt_bench::TimingResult& timing = {})
+    void log_args(hipDataType                          Tc,
+                  hipblaslt_internal_ostream&          str,
+                  size_t                               index,
+                  int32_t                              solution_index,
+                  std::string&                         solution_name,
+                  std::string&                         kernel_name,
+                  std::string&                         archName,
+                  std::string&                         cuNum,
+                  const Arguments&                     arg,
+                  uint32_t                             splitK,
+                  uint32_t                             wgm,
+                  double                               gpu_us,
+                  double                               gflops,
+                  double                               gbytes  = ArgumentLogging::NA_value,
+                  double                               cpu_us  = ArgumentLogging::NA_value,
+                  double                               norm    = ArgumentLogging::NA_value,
+                  double                               atol    = ArgumentLogging::NA_value,
+                  double                               rtol    = ArgumentLogging::NA_value,
+                  double                               max_ulp = 0.0,
+                  double                               avg_ulp = 0.0,
+                  const hipblaslt_bench::TimingResult& timing  = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -241,10 +239,12 @@ public:
             (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, double{}), 0)...};
             break;
         case HIP_C_32F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<float>{}), 0)...};
+            (void)(int[]){
+                (ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<float>{}), 0)...};
             break;
         case HIP_C_64F:
-            (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<double>{}), 0)...};
+            (void)(int[]){
+                (ArgumentsHelper::apply<Args>{}()(print, arg, std::complex<double>{}), 0)...};
             break;
         case HIP_R_16F:
             (void)(int[]){(ArgumentsHelper::apply<Args>{}()(print, arg, hipblasLtHalf{}), 0)...};

@@ -18,6 +18,7 @@ include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
 include(fetch_rocm_cmake)
+include(rocroller_materialize_monorepo_paths)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
@@ -274,6 +275,82 @@ add_subdirectory(GPUArchitectureGenerator)
 if(ROCROLLER_EMBED_ARCH_DEF)
     target_link_libraries(rocroller PUBLIC $<BUILD_INTERFACE:rocroller::GPUArchitecture_def>)
     target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
+endif()
+
+set(_rocroller_needs_hostnumerics OFF)
+if(ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
+    set(_rocroller_needs_hostnumerics ON)
+endif()
+
+if(_rocroller_needs_hostnumerics AND NOT TARGET roc::hostnumerics)
+    set(_rocroller_hostnumerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../hostnumerics"
+    )
+    if(NOT EXISTS "${_rocroller_hostnumerics_source}/CMakeLists.txt")
+        find_package(
+            HostNumerics
+            CONFIG
+            QUIET
+            COMPONENTS Operations BLAS AMDGPULayout
+        )
+    endif()
+    if(NOT TARGET roc::hostnumerics
+       AND NOT EXISTS "${_rocroller_hostnumerics_source}/CMakeLists.txt")
+        rocroller_materialize_monorepo_paths(
+            _rocroller_materialized_root
+            shared/hostnumerics
+        )
+        if(_rocroller_materialized_root)
+            set(_rocroller_hostnumerics_source
+                "${_rocroller_materialized_root}/shared/hostnumerics"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::hostnumerics
+       AND EXISTS "${_rocroller_hostnumerics_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOSTNUMERICS_BUILD_TESTING OFF)
+            set(HOSTNUMERICS_BUILD_BLAS_BACKEND ON)
+            add_subdirectory(
+                "${_rocroller_hostnumerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+    if(NOT TARGET roc::hostnumerics)
+        message(FATAL_ERROR
+            "rocRoller HostNumerics require the HostNumerics component. "
+            "Include shared/hostnumerics in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the HostNumerics package and add it to CMAKE_PREFIX_PATH."
+        )
+    endif()
+endif()
+
+if(_rocroller_needs_hostnumerics
+   AND TARGET roc::hostnumerics
+   AND NOT TARGET roc::hostnumerics-blas
+   AND COMMAND hostnumerics_enable_blas_backend)
+    hostnumerics_enable_blas_backend()
+endif()
+
+if(_rocroller_needs_hostnumerics
+   AND NOT TARGET roc::hostnumerics-amd-gpu-layout)
+    message(FATAL_ERROR
+        "rocRoller clients require the roc::hostnumerics-amd-gpu-layout target."
+    )
+endif()
+
+if(_rocroller_needs_hostnumerics AND NOT TARGET roc::hostnumerics-blas)
+    message(FATAL_ERROR
+        "rocRoller HostNumerics require the roc::hostnumerics-blas target. "
+        "Install HostNumerics with its BLAS component or include shared/hostnumerics."
+    )
+endif()
+
+if(_rocroller_needs_hostnumerics)
+    add_subdirectory(host)
 endif()
 
 if(ROCROLLER_BUILD_TESTING)

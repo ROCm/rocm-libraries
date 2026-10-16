@@ -25,14 +25,13 @@
  * SPDX-License-Identifier: MIT
  * ************************************************************************ */
 
-#include <gtest/gtest.h>
 #include <filesystem>
+#include <gtest/gtest.h>
 
 #include <Tensile/ContractionLibrary.hpp>
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/YAML.hpp>
 #endif
-#include <TestUtils.hpp>
 
 #include "TestData.hpp"
 
@@ -111,17 +110,17 @@ TEST_P(RangeLibraryTest, SpecificSizes)
     // transposeA: true, transposeB false, datatype BFloat16,
     // M in [128, 768], N in [1024, 1408], batch_count in [-1, -1], K in [49024, 49280]
 
-    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB =
-        {{128, 1024, 1,  49024, true},
-         {768, 1024, 1,  49024, true},
-         {128, 1408, 1,  49024, true},
-         {128, 1024, 1,  49280, true},
-         {10,  1024, 1,  49024, false},
-         {769, 1024, 1,  49024, false},
-         {128, 10,   1,  49024, false},
-         {128, 1409, 1,  49024, false},
-         {128, 1024, 1,  16,    false},
-         {128, 1024, 1,  49285, false}};
+    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB
+        = {{128, 1024, 1, 49024, true},
+           {768, 1024, 1, 49024, true},
+           {128, 1408, 1, 49024, true},
+           {128, 1024, 1, 49280, true},
+           {10, 1024, 1, 49024, false},
+           {769, 1024, 1, 49024, false},
+           {128, 10, 1, 49024, false},
+           {128, 1409, 1, 49024, false},
+           {128, 1024, 1, 16, false},
+           {128, 1024, 1, 49285, false}};
 
     for(auto [M, N, B, K, in_range] : MNKB)
     {
@@ -135,21 +134,21 @@ TEST_P(RangeLibraryTest, SpecificSizes)
                                                             N,
                                                             K,
                                                             B,
-                                                            K,    // lda
-                                                            M*K,  // stridea
-                                                            K,    // ldb
-                                                            K*N,  // strideb
-                                                            M,    // ldc
-                                                            M*N,  // stridec
-                                                            M,    // ldd
-                                                            M*N,  // strided
+                                                            K, // lda
+                                                            M * K, // stridea
+                                                            K, // ldb
+                                                            K * N, // strideb
+                                                            M, // ldc
+                                                            M * N, // stridec
+                                                            M, // ldd
+                                                            M * N, // strided
                                                             2.0); // beta
         problem.setComputeInputTypeA(rocisa::DataType::BFloat16);
         problem.setComputeInputTypeB(rocisa::DataType::BFloat16);
         problem.setHighPrecisionAccumulate(true);
         problem.setWorkspaceSize(120324096);
 
-        auto solution = library->findBestSolution(problem, hardware);
+        auto solution  = library->findBestSolution(problem, hardware);
         auto solutions = library->findTopSolutions(problem, hardware, 1);
         if(in_range)
         {
@@ -192,4 +191,6 @@ std::vector<RangeLibraryTest::ParamType> GetRangeLibraryParams()
     return rv;
 }
 
-INSTANTIATE_TEST_SUITE_P(RangeLibraryTest, RangeLibraryTest, ::testing::ValuesIn(GetRangeLibraryParams()));
+INSTANTIATE_TEST_SUITE_P(RangeLibraryTest,
+                         RangeLibraryTest,
+                         ::testing::ValuesIn(GetRangeLibraryParams()));
