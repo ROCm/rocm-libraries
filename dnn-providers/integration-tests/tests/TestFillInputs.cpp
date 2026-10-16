@@ -18,6 +18,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "harness/input-init/FillInputs.hpp"
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -49,12 +50,32 @@ namespace
 const std::vector<int64_t> kDims = {2, 3};
 const std::vector<int64_t> kStrides = {3, 1};
 
-InputTensorMap makeTensors(const std::vector<int64_t>& uids)
+InputTensorMap makeTensors(const std::vector<int64_t>& uids,
+                           const std::unordered_map<int64_t, const TensorAttributes*>* tensorAttrs
+                           = nullptr)
 {
+    using namespace hipdnn_flatbuffers_sdk::utilities;
+
     InputTensorMap map;
     for(const int64_t uid : uids)
     {
-        map[uid] = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(kDims, kStrides);
+        const TensorAttributes* attrs = nullptr;
+        if(tensorAttrs != nullptr)
+        {
+            auto it = tensorAttrs->find(uid);
+            if(it != tensorAttrs->end())
+            {
+                attrs = it->second;
+            }
+        }
+
+        const std::vector<int64_t> dims
+            = (attrs != nullptr) ? convertFlatBufferVectorToStdVector(attrs->dims()) : kDims;
+
+        const std::vector<int64_t> strides
+            = (attrs != nullptr) ? convertFlatBufferVectorToStdVector(attrs->strides()) : kStrides;
+
+        map[uid] = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(dims, strides);
         map[uid]->fillTensorWithValue(0.f);
     }
     return map;
@@ -81,6 +102,27 @@ struct GraphResult
             }
         }
         return uids;
+    }
+
+    auto getTensorAttributes(const std::vector<int64_t>& uids) const
+    {
+        auto tensorAttrs = std::make_unique<std::unordered_map<int64_t, const TensorAttributes*>>();
+
+        const auto* tensors = graph->tensors();
+        if(tensors == nullptr || uids.empty())
+        {
+            return tensorAttrs;
+        }
+
+        for(const auto* t : *tensors)
+        {
+            if(t != nullptr && std::find(uids.begin(), uids.end(), t->uid()) != uids.end())
+            {
+                (*tensorAttrs)[t->uid()] = t;
+            }
+        }
+
+        return tensorAttrs;
     }
 };
 
@@ -317,24 +359,127 @@ GraphResult buildSdpaFwdWithSeqLenQGraph()
 // ── SDPA backward standalone ────────────────────────────────────────────────
 // O and stats are leaf inputs (not virtual) — filled as free(0, 1)
 
-GraphResult buildSdpaBwdStandaloneGraph()
+struct SdpaBwdGraphOptions
+{
+    enum ScaleSource
+    {
+        ATTRIBUTE, // written to attn_scale_value
+        TENSOR // value the test fills the tensor
+    };
+
+    std::vector<int64_t> qDims; // [B, H, Sq, D]
+    std::optional<std::vector<int64_t>> kDims = std::nullopt; // defaults to qDims
+
+    ScaleSource scaleSource = ScaleSource::ATTRIBUTE;
+    std::optional<float> attnScaleValue = std::nullopt;
+
+    std::optional<int64_t> leftBound = std::nullopt;
+    std::optional<int64_t> rightBound = std::nullopt;
+    bool topLeft = true;
+
+    std::vector<int64_t> k() const
+    {
+        return kDims.value_or(qDims);
+    }
+    std::vector<int64_t> v() const
+    {
+        return k();
+    }
+    std::vector<int64_t> o() const
+    {
+        return qDims;
+    }
+
+    float scale() const
+    {
+        return attnScaleValue.value_or(
+            static_cast<float>(1.0 / std::sqrt(static_cast<double>(qDims.back()))));
+    }
+
+    std::vector<int64_t> statsDims() const
+    {
+        return {qDims[0], qDims[1], qDims[2], 1};
+    }
+};
+
+GraphResult buildSdpaBwdStandaloneGraph(const SdpaBwdGraphOptions& opts = {{1, 2, 4, 8}})
 {
     GraphResult r;
     auto& b = r.builder;
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "q", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 2, "k", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 3, "v", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 4, "o", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 5, "do", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 6, "stats", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 7, "dq", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 8, "dk", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 9, "dv", DataType::FLOAT, &kStrides, &kDims));
+    const auto addTensor = [&](int64_t uid, const char* name, const std::vector<int64_t>& dims) {
+        const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, uid, name, DataType::FLOAT, &strides, &dims));
+    };
 
-    auto bwd = CreateSdpaBackwardAttributes(b, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    addTensor(1, "q", opts.qDims);
+    addTensor(2, "k", opts.k());
+    addTensor(3, "v", opts.v());
+    addTensor(4, "o", opts.o());
+    addTensor(5, "do", opts.o());
+    addTensor(6, "stats", opts.statsDims());
+    addTensor(7, "dq", opts.qDims);
+    addTensor(8, "dk", opts.k());
+    addTensor(9, "dv", opts.v());
+
+    flatbuffers::Optional<int64_t> scaleUid = flatbuffers::nullopt;
+    flatbuffers::Optional<float> scaleValue = flatbuffers::nullopt;
+    if(opts.scaleSource == SdpaBwdGraphOptions::ScaleSource::TENSOR)
+    {
+        addTensor(10, "scale", std::vector<int64_t>(1, 1));
+        scaleUid = 10;
+    }
+    else if(opts.scaleSource == SdpaBwdGraphOptions::ScaleSource::ATTRIBUTE)
+    {
+        scaleValue = opts.scale();
+    }
+
+    flatbuffers::Optional<int64_t> left = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> right = flatbuffers::nullopt;
+    if(opts.leftBound.has_value())
+    {
+        left = opts.leftBound;
+    }
+    if(opts.rightBound.has_value())
+    {
+        right = opts.rightBound;
+    }
+
+    const auto alignment
+        = opts.topLeft ? hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT
+                       : hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+
+    auto bwd = CreateSdpaBackwardAttributes(b,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7,
+                                            8,
+                                            9,
+                                            scaleUid,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            flatbuffers::nullopt,
+                                            false,
+                                            false,
+                                            false,
+                                            false,
+                                            flatbuffers::nullopt,
+                                            scaleValue,
+                                            left,
+                                            right,
+                                            alignment);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(
@@ -346,6 +491,209 @@ GraphResult buildSdpaBwdStandaloneGraph()
 
     r.graph = GetGraph(b.GetBufferPointer());
     return r;
+}
+
+// Check if the element is within the causal window defined by the bounds
+bool isWithinWindow(int64_t i, int64_t j, int64_t Sq, int64_t Skv, const SdpaBwdGraphOptions& opts)
+{
+    const int64_t off = opts.topLeft ? 0 : (Skv - Sq);
+    if(opts.leftBound.has_value())
+    {
+        if(j < i + off - opts.leftBound.value())
+        {
+            return false;
+        }
+    }
+    if(opts.rightBound.has_value())
+    {
+        if(j > i + off + opts.rightBound.value())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void expectDerivedAttentionRowsSumToOne(const SdpaBwdGraphOptions& opts,
+                                        bool useDeviceReference = false)
+{
+    using namespace hipdnn_data_sdk::utilities;
+
+    const auto gr = buildSdpaBwdStandaloneGraph(opts);
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+
+    InputFillRecipes recipes;
+    recipes.setRange(1, -1.0f, 1.0f).setRange(2, -1.0f, 1.0f).setRange(3, -1.0f, 1.0f);
+    if(opts.scaleSource == SdpaBwdGraphOptions::ScaleSource::TENSOR)
+    {
+        recipes.setFixed(10, opts.scale());
+    }
+
+    const auto result
+        = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, useDeviceReference);
+    ASSERT_TRUE(result.filled) << result.reason;
+
+    const auto& q = static_cast<const TensorBase<float>&>(*inputs.at(1));
+    const auto& k = static_cast<const TensorBase<float>&>(*inputs.at(2));
+    const auto& stats = static_cast<const TensorBase<float>&>(*inputs.at(6));
+
+    const auto B = q.dims()[0];
+    const auto H = q.dims()[1];
+    const auto Sq = q.dims()[2];
+    const auto D = q.dims()[3];
+    const auto Hkv = k.dims()[1];
+    const auto Skv = k.dims()[2];
+
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            const int64_t hk = h / (H / Hkv); // kT head index for this qT head
+            for(int64_t i = 0; i < Sq; ++i)
+            {
+                const float rowLse = stats.dims().size() == 4 ? stats.getHostValue(b, h, i, 0)
+                                                              : stats.getHostValue(b, h, i);
+                float sum = 0.0;
+                for(int64_t j = 0; j < Skv; ++j)
+                {
+                    if(!isWithinWindow(i, j, Sq, Skv, opts))
+                    {
+                        continue;
+                    }
+                    float s = 0.0;
+                    for(int64_t d = 0; d < D; ++d)
+                    {
+                        s += q.getHostValue(b, h, i, d) * k.getHostValue(b, hk, j, d);
+                    }
+                    sum += std::exp(s * opts.scale() - rowLse);
+                }
+                EXPECT_NEAR(sum, 1.0, 1e-5f) << "b=" << b << " h=" << h << " row=" << i;
+            }
+        }
+    }
+}
+
+void verifyFullyMaskedRows(const SdpaBwdGraphOptions& opts)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    using namespace hipdnn_test_sdk::utilities;
+
+    const auto gr = buildSdpaBwdStandaloneGraph(opts);
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+
+    InputFillRecipes recipes;
+    recipes.setRange(1, -1.0f, 1.0f)
+        .setRange(2, -1.0f, 1.0f)
+        .setRange(3, -1.0f, 1.0f)
+        .setRange(5, -1.0f, 1.0f);
+
+    ASSERT_TRUE(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr).filled);
+
+    const auto& q = static_cast<const TensorBase<float>&>(*inputs.at(1));
+    const auto& k = static_cast<const TensorBase<float>&>(*inputs.at(2));
+    const auto& stats = static_cast<const TensorBase<float>&>(*inputs.at(6));
+
+    const auto B = q.dims()[0];
+    const auto H = q.dims()[1];
+    const auto Sq = q.dims()[2];
+    const auto D = q.dims()[3];
+    const auto Skv = k.dims()[2];
+
+    const auto rowFullyMasked = [&](int64_t i) {
+        for(int64_t j = 0; j < Skv; ++j)
+        {
+            if(isWithinWindow(i, j, Sq, Skv, opts))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Verify that the LSE for fully masked rows is -inf and that all other rows are finite
+    int64_t maskedRows = 0;
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t i = 0; i < Sq; ++i)
+            {
+                const float v = stats.dims().size() == 4 ? stats.getHostValue(b, h, i, 0)
+                                                         : stats.getHostValue(b, h, i);
+                if(rowFullyMasked(i))
+                {
+                    ++maskedRows;
+                    EXPECT_TRUE(std::isinf(v) && v < 0)
+                        << "b=" << b << " h=" << h << " row=" << i << " lse=" << v;
+                }
+                else
+                {
+                    EXPECT_TRUE(std::isfinite(v))
+                        << "b=" << b << " h=" << h << " row=" << i << " lse=" << v;
+                }
+            }
+        }
+    }
+    ASSERT_GT(maskedRows, 0) << "No fully masked rows found in the test case";
+
+    // dQ must be zero for the masked rows and there must be no NaN in any gradient
+    const auto& v = static_cast<const TensorBase<float>&>(*inputs.at(3));
+    const auto& o = static_cast<const TensorBase<float>&>(*inputs.at(4));
+    const auto& dO = static_cast<const TensorBase<float>&>(*inputs.at(5));
+
+    const std::vector<int64_t> gradUids = {7, 8, 9};
+    auto grads = makeTensors(gradUids, gr.getTensorAttributes(gradUids).get());
+    auto& dQ = static_cast<TensorBase<float>&>(*grads.at(7));
+    auto& dK = static_cast<TensorBase<float>&>(*grads.at(8));
+    auto& dV = static_cast<TensorBase<float>&>(*grads.at(9));
+
+    CpuFpReferenceSdpa::backward<float, float, float, float, float, float, float, float, float>(
+        q,
+        k,
+        v,
+        o,
+        dO,
+        dQ,
+        dK,
+        dV,
+        opts.scale(),
+        &stats,
+        nullptr,
+        opts.leftBound.value_or(-1),
+        opts.rightBound.value_or(-1),
+        opts.topLeft);
+
+    // No NaN in any gradient
+    for(auto* t : {&dQ, &dK, &dV})
+    {
+        const auto d = static_cast<const float*>(t->rawHostData());
+        for(size_t n = 0; n < t->elementCount(); ++n)
+        {
+            ASSERT_FALSE(std::isnan(d[n])) << "NaN at index " << n;
+        }
+    }
+
+    // dQ rows with no valid column must be exactly zero
+    for(int64_t b = 0; b < B; ++b)
+    {
+        for(int64_t h = 0; h < H; ++h)
+        {
+            for(int64_t i = 0; i < Sq; ++i)
+            {
+                if(!rowFullyMasked(i))
+                {
+                    continue;
+                }
+                for(int64_t d = 0; d < D; ++d)
+                {
+                    EXPECT_EQ(dQ.getHostValue(b, h, i, d), 0.0f)
+                        << "dQ b=" << b << " h=" << h << " row=" << i << " d=" << d;
+                }
+            }
+        }
+    }
 }
 
 // ── SDPA fwd+bwd fused ─────────────────────────────────────────────────────
@@ -596,7 +944,7 @@ std::set<float> filledMagnitudes(DataType aType)
 FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
 {
     const auto leafUids = gr.leafInputUids(outputUids);
-    auto inputs = makeTensors(leafUids);
+    auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
     InputFillRecipes recipes;
     return fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
 }
@@ -734,6 +1082,183 @@ TEST(TestFillInputs, SdpaBwdStandaloneFills)
     const auto result = runFill(gr, {7, 8, 9});
 
     EXPECT_TRUE(result.filled) << result.reason;
+}
+
+TEST(TestFillInputs, SdpaBwdDeriveFillSkipsVirtualOAndStats)
+{
+    const auto gr = buildSdpaFwdBwdFusedGraph();
+
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+    InputFillRecipes recipes;
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+
+    EXPECT_TRUE(result.filled) << result.reason;
+}
+
+TEST(TestFillInputs, SdpaBwdDeriveFillSkipsOAndStatsWithRecipes)
+{
+    const auto gr = buildSdpaBwdStandaloneGraph();
+
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+    InputFillRecipes recipes;
+
+    recipes.setFixed(4, 999.0f); // o tensor
+    recipes.setFixed(6, 999.0f); // stats tensor
+
+    // Set random inputs for q, k, v tensors to introduce randomness
+    // and ensure the test doesn't pass trivially due to default values.
+    const float fillRange = 10.0f;
+    recipes.setRange(1, -fillRange, fillRange); // q tensor
+    recipes.setRange(2, -fillRange, fillRange); // k tensor
+    recipes.setRange(3, -fillRange, fillRange); // v tensor
+
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+
+    EXPECT_TRUE(result.filled) << result.reason;
+
+    // Check if values in o and stats tensors remain unchanged
+    for(const int64_t uid : {4, 6})
+    {
+        auto& tensor = *inputs.at(uid);
+        const auto data = static_cast<const float*>(tensor.rawHostData());
+        for(size_t i = 0; i < tensor.elementCount(); ++i)
+        {
+            EXPECT_FLOAT_EQ(data[i], 999.0f) << "uid " << uid << ", index " << i;
+        }
+    }
+}
+
+TEST(TestFillInputs, SdpaBwdDeriveFillThrowPaths)
+{
+    // Only 4D tensors are supported in derive fill
+    {
+        const auto gr = buildSdpaBwdStandaloneGraph({{2, 3, 4}});
+        const auto result = runFill(gr, {7, 8, 9});
+        EXPECT_FALSE(result.filled) << result.reason;
+    }
+
+    // Only float, half, and bfloat16 q/k/v/o types are supported in derive fill
+    {
+        const auto gr = buildSdpaBwdStandaloneGraph();
+        const auto leafUids = gr.leafInputUids({7, 8, 9});
+        // Find the position of the o tensor in the graph's tensor list
+        unsigned int oTPos = 0;
+        for(const auto* tensor : *gr.graph->tensors())
+        {
+            if(tensor->uid() == 4)
+            {
+                break;
+            }
+            ++oTPos;
+        }
+        ASSERT_TRUE(const_cast<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>(
+                        gr.graph->tensors()->Get(oTPos))
+                        ->mutate_data_type(DataType::FP8_E5M2));
+
+        auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+        InputFillRecipes recipes;
+
+        const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+        EXPECT_FALSE(result.filled) << result.reason;
+    }
+
+    // Only float compute data type is supported in derive fill
+    {
+        const auto gr = buildSdpaBwdStandaloneGraph();
+        const auto leafUids = gr.leafInputUids({7, 8, 9});
+        ASSERT_TRUE(
+            const_cast<hipdnn_flatbuffers_sdk::data_objects::Node*>(gr.graph->nodes()->Get(0))
+                ->mutate_compute_data_type(DataType::HALF));
+        auto inputs = makeTensors(leafUids, gr.getTensorAttributes(leafUids).get());
+        InputFillRecipes recipes;
+
+        const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+        EXPECT_FALSE(result.filled) << result.reason;
+    }
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneScaleTensor)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {1, 2, 4, 8};
+    opts.scaleSource = SdpaBwdGraphOptions::ScaleSource::TENSOR;
+    opts.attnScaleValue = 0.50f; // Should break the test if not read properly from the scale tensor
+    expectDerivedAttentionRowsSumToOne(opts);
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneUseDeviceRef)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {1, 2, 4, 8};
+    opts.scaleSource = SdpaBwdGraphOptions::ScaleSource::TENSOR;
+    opts.attnScaleValue = 0.80f;
+    expectDerivedAttentionRowsSumToOne(opts, true);
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneNoMask)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {2, 4, 8, 16};
+    opts.kDims = {2, 4, 12, 16};
+    expectDerivedAttentionRowsSumToOne(opts);
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneCausalTopLeft)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {2, 4, 8, 16};
+    opts.kDims = {2, 4, 12, 16};
+    opts.rightBound = 0;
+    opts.topLeft = true;
+    expectDerivedAttentionRowsSumToOne(opts);
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneCausalBottomRight)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {2, 4, 8, 16};
+    opts.kDims = {2, 4, 12, 16};
+    opts.leftBound = 0;
+    opts.topLeft = false;
+    expectDerivedAttentionRowsSumToOne(opts);
+}
+
+TEST(TestFillInputs, SdpaBwdDerivedAttentionRowsSumToOneSlidingWindow)
+{
+    for(const bool topLeft : {true, false})
+    {
+        SdpaBwdGraphOptions opts;
+        opts.qDims = {2, 4, 8, 16};
+        opts.kDims = {2, 4, 12, 16};
+        opts.leftBound = 2;
+        opts.rightBound = 1;
+        opts.topLeft = topLeft;
+        expectDerivedAttentionRowsSumToOne(opts);
+    }
+}
+
+TEST(TestFillInputs, SdpaBwdFullyMaskedRowsBottomRightCausal)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {2, 4, 12, 16}; // Sq > Skv to produce fully masked rows
+    opts.kDims = {2, 4, 8, 16};
+    opts.rightBound = 0;
+    opts.topLeft = false;
+    verifyFullyMaskedRows(opts);
+}
+
+TEST(TestFillInputs, SdpaBwdFullyMaskedRowsTopLeftCausal)
+{
+    SdpaBwdGraphOptions opts;
+    opts.qDims = {2, 4, 12, 16}; // Sq > Skv to produce fully masked rows
+    opts.kDims = {2, 4, 8, 16};
+    opts.rightBound = 0;
+    opts.leftBound = 1;
+    opts.topLeft = true;
+    verifyFullyMaskedRows(opts);
 }
 
 TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
