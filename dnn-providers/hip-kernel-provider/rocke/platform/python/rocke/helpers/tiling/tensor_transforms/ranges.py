@@ -48,7 +48,7 @@ from enum import Enum
 from math import gcd, prod
 from typing import TYPE_CHECKING
 
-from .graph import Node, TransformGraph, TransformType
+from .graph import Node, TransformGraph, TransformType, _require_outputs_match_rank
 
 if TYPE_CHECKING:
     from rocke.core.ir import Value
@@ -859,12 +859,7 @@ def required_checks(
     of it, or (for an output) the tensor's ``[0, length)``; a side the ranges prove is ``None``.
     ``input_ranges`` gives one half-open pair per graph input, in ``inputs(...)`` order.
     """
-    rank = len(tensor.lengths)
-    if len(graph.outputs) != rank:
-        raise ValueError(
-            f"graph has {len(graph.outputs)} outputs {graph.outputs} but the tensor has rank "
-            f"{rank}"
-        )
+    _require_outputs_match_rank(graph, len(tensor.lengths))
     bounds = tuple(AxisBound.of(0, length) for length in tensor.lengths)
     return _required_checks(graph, _intervals(graph, input_ranges), bounds)
 

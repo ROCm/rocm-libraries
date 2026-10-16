@@ -591,21 +591,43 @@ class TransformGraph:
         return self._run("resolve", coords)
 
     def _run(self, caller: str, coords: tuple[int, ...]) -> dict[str, int]:
-        if not isinstance(coords, tuple):
-            raise TypeError(
-                f"{caller} takes the coordinates as a tuple in inputs(...) order, got "
-                f"{type(coords).__name__} -- coordinates are positional"
-            )
-        names = tuple(self.inputs)
-        if len(coords) != len(names):
-            raise ValueError(
-                f"{caller} got {len(coords)} coordinates, the graph has {len(names)} inputs "
-                f"{names} -- give one int per input, in inputs(...) order"
-            )
-        env = dict(zip(names, coords))
+        _require_input_coordinates(self, caller, coords)
+        env = dict(zip(self.inputs, coords))
         for node in self.nodes:
             _evaluate_node(node, env, self._edges)
         return env
+
+
+def _require_input_coordinates(
+    graph: TransformGraph, caller: str, coords: object
+) -> None:
+    """Refuse anything but a tuple of one coordinate per graph input (the positional rule).
+
+    ``caller`` is the public function the author called, so the message names it.
+    """
+    if not isinstance(coords, tuple):
+        raise TypeError(
+            f"{caller} takes the coordinates as a tuple in inputs(...) order, got "
+            f"{type(coords).__name__} -- coordinates are positional"
+        )
+    names = tuple(graph.inputs)
+    if len(coords) != len(names):
+        raise ValueError(
+            f"{caller} got {len(coords)} coordinates, the graph has {len(names)} inputs "
+            f"{names} -- give one int per input, in inputs(...) order"
+        )
+
+
+def _require_outputs_match_rank(graph: TransformGraph, rank: int) -> None:
+    """Refuse binding ``graph`` to a tensor whose rank is not its number of outputs.
+
+    Output ``i`` is tensor axis ``i``, so the two counts must agree.
+    """
+    if len(graph.outputs) != rank:
+        raise ValueError(
+            f"graph has {len(graph.outputs)} outputs {graph.outputs} but the tensor has rank "
+            f"{rank}"
+        )
 
 
 def make_transform_graph(

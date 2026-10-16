@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""rocke.helpers.tiling.tensor_transforms -- coordinate graphs and their bound checks.
+"""rocke.helpers.tiling.tensor_transforms -- coordinate graphs, their bound checks and addresses.
 
 One way to say "these loop coordinates become these tensor coordinates", for any workload (copy,
 prefetch, reduction, attention, convolution, GEMM). A graph holds no tensor and no bound: a
@@ -27,10 +27,14 @@ half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order):
     ``required_checks`` -> ``BoundCheck`` / ``CheckReason``   which side of which coordinate
         can leave its domain or its tensor bound, and so needs a run-time check.
     ``graph_injective``   whether distinct in-domain inputs always reach distinct outputs.
+    ``address_of`` / ``transform_address_of`` (``address.py``)   a tensor's strides applied to
+        a position (or to a graph's outputs for its inputs): the element address every emitted
+        address is tested against.
 """
 
 from __future__ import annotations
 
+from .address import address_of, transform_address_of
 from .graph import (
     BroadcastParams,
     Edge,
@@ -85,6 +89,7 @@ __all__ = [
     "TransformType",
     "UnmergeParams",
     "XorParams",
+    "address_of",
     "broadcast",
     "embed",
     "freeze",
@@ -96,6 +101,7 @@ __all__ = [
     "outputs",
     "required_checks",
     "slice_window",
+    "transform_address_of",
     "unmerge",
     "value_ranges",
     "xor",
