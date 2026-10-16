@@ -19,11 +19,12 @@ class Gfx1201Profile:
     """Aligned, distinct-address pair rules independent of the gfx9 profiles.
 
     The address class and lane phases describe empirical conflict equivalence,
-    not physical banks. Broadcasts and multi-lane composition are outside v1.
+    not physical banks. Broadcasts and multi-lane composition are unsupported.
+    Dual-address support is limited to the documented fixed operand spacing.
     """
 
     identity: ProfileIdentity = field(
-        default_factory=lambda: ProfileIdentity(target="gfx1201", profile_version=1)
+        default_factory=lambda: ProfileIdentity(target="gfx1201", profile_version=2)
     )
     supported_wave_sizes: frozenset[int] = frozenset({32})
     lds_capacity_bytes: int = 65536
@@ -50,6 +51,22 @@ class Gfx1201Profile:
             "ds_store_b8",
             "ds_store_b16",
         }
+    )
+
+    # Explicit admission keeps global opcode metadata from expanding this profile.
+    supported_opcodes = supported_opcodes | frozenset(
+        f"ds_{verb}{suffix}_b{bits}"
+        for verb, suffix in (
+            ("load", "_2addr"),
+            ("load", "_2addr_stride64"),
+            ("store", "_2addr"),
+            ("store", "_2addr_stride64"),
+            ("read", "2"),
+            ("read", "2st64"),
+            ("write", "2"),
+            ("write", "2st64"),
+        )
+        for bits in (32, 64)
     )
 
     def _check_opcode(self, opcode: str) -> None:
@@ -81,13 +98,41 @@ class Gfx1201Profile:
         """Reject requests that would inherit unverified grouping semantics."""
 
         self._check_opcode(opcode)
+        spec = get_opcode_spec(opcode)
         active = [access for access in accesses if access.active]
-        if len(active) > 2:
-            return False, "gfx1201 v1 supports at most two active lanes"
-        if len(active) == 2:
-            distance = abs(active[0].lds_byte_address - active[1].lds_byte_address)
-            if distance < get_opcode_spec(opcode).access_width_bytes:
-                return False, "gfx1201 v1 requires distinct, non-overlapping addresses"
+        lanes = {access.lane for access in active}
+        if len(lanes) > 2:
+            return False, "gfx1201 supports at most two active lanes"
+        if spec.address_count == 2:
+            stride64 = "stride64" in opcode or "st64" in opcode
+            spacing = spec.access_width_bytes * 64 if stride64 else 64
+            for lane in lanes:
+                operands = {a.operand_index: a for a in active if a.lane == lane}
+                if set(operands) != {0, 1}:
+                    return (
+                        False,
+                        "dual-address lanes require both active address operands",
+                    )
+                if (
+                    operands[1].lds_byte_address - operands[0].lds_byte_address
+                    != spacing
+                ):
+                    return (
+                        False,
+                        f"gfx1201 requires {spacing}-byte address operand spacing",
+                    )
+        for operand in range(spec.address_count):
+            members = [a for a in active if a.operand_index == operand]
+            if len(members) == 2:
+                distance = abs(
+                    members[0].lds_byte_address - members[1].lds_byte_address
+                )
+                if distance < spec.access_width_bytes:
+                    return (
+                        False,
+                        "gfx1201 requires distinct, non-overlapping addresses per operand",
+                    )
+
         return True, "ok"
 
 

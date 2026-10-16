@@ -17,7 +17,7 @@ def test_registry_selects_explicit_profile(target):
     profile = resolve_profile(target)
 
     assert profile.identity.target == target
-    assert profile.identity.profile_version == 1
+    assert profile.identity.profile_version == (2 if target == "gfx1201" else 1)
     assert registered_targets() == ("gfx1201", "gfx90a", "gfx942", "gfx950")
 
 

@@ -59,12 +59,17 @@ def _validate_accesses(
     if len(set(access_ids)) != len(access_ids):
         raise LdsPredictionError("access_id values must be unique")
 
-    active_lanes = [access.lane for access in ordered if access.active]
-    if len(set(active_lanes)) != len(active_lanes):
-        raise LdsPredictionError("each request allows only one active access per lane")
-
     spec = get_opcode_spec(opcode)
+    active_keys = [(a.lane, a.operand_index) for a in ordered if a.active]
+    if len(set(active_keys)) != len(active_keys):
+        raise LdsPredictionError(
+            "each request allows only one active access per lane operand"
+        )
     for access in ordered:
+        if access.operand_index >= spec.address_count:
+            raise LdsPredictionError(
+                f"{opcode} has no address operand {access.operand_index}"
+            )
         if access.lane >= wave_size:
             raise LdsPredictionError(
                 f"access {access.access_id} lane {access.lane} must be smaller than "
@@ -103,18 +108,19 @@ def _build_groups(
     profile: LdsProfile, opcode: str, accesses: Sequence[LdsAccess]
 ) -> tuple[tuple[ConflictGroup, ...], dict[int, int]]:
     spec = get_opcode_spec(opcode)
-    buckets: dict[tuple[tuple[int, ...], int], list[LdsAccess]] = defaultdict(list)
+    buckets: dict[tuple[int, tuple[int, ...], int], list[LdsAccess]] = defaultdict(list)
     for access in accesses:
         if not access.active:
             continue
         key = (
+            access.operand_index,
             profile.phase_key(opcode, access.lane),
             profile.collision_key(opcode, access.lds_byte_address),
         )
         buckets[key].append(access)
 
     group_specs: list[
-        tuple[tuple[tuple[int, ...], int], GroupKind, tuple[int, ...]]
+        tuple[tuple[int, tuple[int, ...], int], GroupKind, tuple[int, ...]]
     ] = []
     for key, members in buckets.items():
         if len(members) < 2:
@@ -155,7 +161,8 @@ def predict_lds_conflicts(
 ) -> LdsConflictResult:
     """Predict conflicts and broadcasts for one LDS instruction in one wave.
 
-    Each lane may contribute at most one active access of the opcode's full width.
+    Each lane supplies one full-width access per address operand. Dual-address
+    requests must include both operands and satisfy the profile's fixed spacing.
     Accesses must meet the opcode's alignment and the profile's request scope,
     and fit within the profile's LDS capacity.
     """
@@ -196,6 +203,7 @@ def predict_lds_conflicts(
             group_ids = (group_id,)
         results.append(
             AccessResult(
+                operand_index=access.operand_index,
                 access_id=access.access_id,
                 lane=access.lane,
                 lds_byte_address=access.lds_byte_address,
@@ -216,6 +224,7 @@ def predict_lds_conflicts(
     )
     result_accesses = tuple(results)
     return LdsConflictResult(
+        schema_version=2 if spec.address_count == 2 else 1,
         profile=profile.identity,
         request=request,
         coordinate_axes=tuple(coordinate_axes),

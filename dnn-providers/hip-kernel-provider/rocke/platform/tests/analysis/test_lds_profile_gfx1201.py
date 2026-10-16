@@ -94,7 +94,7 @@ def test_legacy_and_native_spellings_have_the_same_groups(width, canonical, nati
     legacy = _predict(f"ds_{canonical}_b{width * 8}", width)
     result = _predict(f"  DS_{native.upper()}_B{width * 8}  ", width)
     assert result.profile.target == "gfx1201"
-    assert result.profile.profile_version == 1
+    assert result.profile.profile_version == 2
     assert result.request.opcode == f"ds_{native}_b{width * 8}"
     assert legacy.accesses == result.accesses
     assert legacy.conflict_groups == result.conflict_groups
@@ -175,7 +175,7 @@ def test_native_opcodes_do_not_expand_gfx9_support(target):
         )
 
 
-@pytest.mark.parametrize("unsupported", ["ds_load_2addr_b32", "ds_load_tr16_b128"])
+@pytest.mark.parametrize("unsupported", ["ds_load_tr16_b128"])
 def test_unrepresented_opcodes_are_rejected(unsupported):
     with pytest.raises(opcodes.UnsupportedLdsOpcodeError):
         _predict(unsupported, 4)
