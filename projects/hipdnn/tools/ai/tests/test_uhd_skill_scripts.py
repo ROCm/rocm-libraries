@@ -584,6 +584,47 @@ def test_a_run_records_refusals_and_record_ordered_catalogs(l2_job, tmp_path):
     assert row["from_record"] and "does not expose as knobs" in row["refusals"][0]
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        # DescriptorLoader.hpp, a model its provenance or arch does not admit.
+        "[error] descriptor loader: engine 'hipkernel:X' role=sort_kernel_catalog "
+        "arch='gfx942' model=1 disabled: arch-relevant UMD is missing from training "
+        "provenance: 2; engine remains available with declared-order fallback",
+        # DescriptorLoader.hpp, an unregistered symbol or an artifact outside the tree.
+        "[error] descriptor loader: engine 'hipkernel:X' arch='gfx942' model=1 names "
+        "unregistered score symbol 's'; disabling model, preserving engine",
+        # The custom-library adapter.
+        "[error] CustomLibraryAdapter: no hash declared for library lib.so; an unverified "
+        "library is not loaded",
+        # UhdKernelHeuristic.hpp, no model for the device's arch.
+        "[info] uhd trace: hipkernel:X decided_by=declared_order reason=no_model_for_arch "
+        "metric=tflops arch=gfx942 candidates=4",
+    ],
+)
+def test_every_way_the_runtime_declines_a_model_is_a_refusal(l2_job, tmp_path, refusal):
+    """The L2 gate passes only when the candidate was used; each of the runtime's refusal
+    messages means it was not."""
+    bench = _fake_bench(
+        tmp_path,
+        (
+            f"import sys\nprint({refusal!r}, file=sys.stderr)\n"
+            "print('{\"avgTimeMs\": 1.5}')\n"
+        ),
+    )
+    row = l2_job.run(
+        str(bench),
+        tmp_path / "g.fb",
+        "/plugins",
+        "7",
+        dict(os.environ),
+        None,
+        60,
+        tmp_path / "caches",
+    )
+    assert row["refusals"] == [refusal]
+
+
 def test_a_failed_run_keeps_the_runtimes_error_lines_not_the_teardown(l2_job, tmp_path):
     bench = _fake_bench(
         tmp_path,

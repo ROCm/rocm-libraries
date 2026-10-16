@@ -43,10 +43,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import candidate_tree  # noqa: E402  (beside this script)
 import engine_run  # noqa: E402
 
-#: What the runtime says when it declines a model it was given (UhdKernelHeuristic.hpp and the
-#: UHD adapters): the plan still builds, so this text is the only evidence.
+#: What the runtime says when it declines a model it was given: the descriptor loader
+#: (DescriptorLoader.hpp), the ranker (UhdKernelHeuristic.hpp) and the UHD adapters. The plan
+#: still builds, so this text is the only evidence.
 REFUSAL = re.compile(
     r"the model is not used|ranking degrades to static_order|cannot be brought up"
+    r"|declared-order fallback|disabling model, preserving engine|is not loaded"
+    r"|reason=no_model_for_arch"
 )
 #: KernelIngestorStateManager.hpp, at INFO: a benchmarked record ordered the catalog, not the ranker.
 FROM_RECORD = re.compile(r"catalog entries from a benchmarked\s*record")
