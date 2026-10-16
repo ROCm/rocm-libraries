@@ -25,6 +25,7 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     F32,
     I32,
+    _int_add_wrap_error,
     KernelDef,
     Op,
     PtrType,
@@ -459,7 +460,28 @@ class _Lowerer:
         )
 
     def _op_arith_add(self, op: Op) -> None:
-        self._binary(op, "+")
+        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        if wrap_error:
+            raise ValueError(wrap_error)
+        wrap = op.attrs.get("wrap", "nsw")
+        if wrap == "nsw":
+            self._binary(op, "+")
+            return
+        # Unsigned sum, cast back: a signed ``a + b`` that passes the signed
+        # maximum is undefined behaviour in C++, which clang emits as ``nsw``.
+        a, b = op.operands
+        width = op.result.type.name
+        unsigned = _HIP_UNSIGNED_INT_TYPE[width]
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
+            f"(int{width[1:]}_t)(({unsigned}){_name(a)} + ({unsigned}){_name(b)});"
+        )
+
+    def _op_arith_assume_range(self, op: Op) -> None:
+        # A range marker is a copy of its first operand.
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = {_name(op.operands[0])};"
+        )
 
     def _op_arith_sub(self, op: Op) -> None:
         self._binary(op, "-")
@@ -475,10 +497,16 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         pred = op.attrs.get("pred", "lt")
+        a, b = op.operands
+        if pred == "ult":
+            unsigned = _HIP_UNSIGNED_INT_TYPE[a.type.name]
+            self._emit(
+                f"bool {_name(op.result)} = ({unsigned}){_name(a)} < ({unsigned}){_name(b)};"
+            )
+            return
         c_op = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}[
             pred
         ]
-        a, b = op.operands
         self._emit(f"bool {_name(op.result)} = {_name(a)} {c_op} {_name(b)};")
 
     def _op_arith_select(self, op: Op) -> None:

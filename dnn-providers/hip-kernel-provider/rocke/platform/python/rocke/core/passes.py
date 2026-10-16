@@ -63,7 +63,10 @@ def canonicalize_region(region: Region) -> PassStats:
         if folded_value is not None and len(op.results) == 1:
             op.name = "arith.constant"
             op.operands = []
-            op.attrs = {"value": folded_value, "ity": _constant_ity(op.result.type)}
+            op.attrs = {
+                "value": _wrap_to_width(folded_value, op.result.type),
+                "ity": _constant_ity(op.result.type),
+            }
             op.regions = []
             folded += 1
 
@@ -163,12 +166,39 @@ def _const_int(v: Value) -> Optional[int]:
     ity = op.attrs.get("ity", "i32")
     if ity not in ("i1", "i32", "i64"):
         return None
-    return int(op.attrs["value"])
+    # Read at the constant's width, as folded results are written: an i32
+    # literal 0x80000000 and a folded i32 sum of the same bits are one value.
+    return _wrap_to_width(int(op.attrs["value"]), v.type)
+
+
+def _int_width(t: Type) -> int:
+    """Bit width of an integer constant's type (the folder's three widths)."""
+    return {"i1": 1, "i64": 64}.get(t.name, 32)
+
+
+def _wrap_to_width(value: int, t: Type) -> int:
+    """``value`` as the hardware holds it in an integer of type ``t``.
+
+    The fold computes with unbounded ints, but the folded constant stands for
+    a fixed-width register, so it wraps as two's complement: an i32 sum of
+    2**31 - 1 and 1 (defined for ``add_nuw``) reads back as -2**31, which is
+    what later signed folds must compare. An i1 keeps 0 / 1, the form the
+    compare folds and the printers use.
+    """
+    width = _int_width(t)
+    if width == 1:
+        return value & 1
+    value &= (1 << width) - 1
+    return value - (1 << width) if value >> (width - 1) else value
 
 
 def _try_fold(op: Op) -> Optional[int]:
     if len(op.results) != 1:
         return None
+    if op.name == "arith.assume_range":
+        # The marker is its first operand; a runtime end (operand 1) does not
+        # stop a constant marked value from folding.
+        return _const_int(op.operands[0])
     ints = [_const_int(v) for v in op.operands]
     if any(v is None for v in ints):
         return None
@@ -187,11 +217,18 @@ def _try_fold(op: Op) -> Optional[int]:
         return ints[0] & ints[1]
     if op.name == "arith.or":
         return ints[0] | ints[1]
-    if op.name == "arith.zext" or op.name == "arith.sext":
+    if op.name == "arith.zext":
+        # Zero-extend: the operand read as unsigned at its own width.
+        return ints[0] & ((1 << _int_width(op.operands[0].type)) - 1)
+    if op.name == "arith.sext":
         return ints[0]
     if op.name == "arith.cmp":
         pred = op.attrs.get("pred", "lt")
         a, b = ints
+        if pred == "ult":
+            # Unsigned at the operand width: -1 reads as the largest value.
+            mask = (1 << _int_width(op.operands[0].type)) - 1
+            return int((a & mask) < (b & mask))
         return int(
             {
                 "lt": a < b,
