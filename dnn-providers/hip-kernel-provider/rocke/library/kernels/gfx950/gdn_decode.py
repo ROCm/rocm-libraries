@@ -96,12 +96,13 @@ from __future__ import annotations
 
 import math
 import numbers
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from functools import partial
-from typing import Dict, Literal, Tuple, get_args
+from typing import Dict, Iterator, Literal, Optional, Tuple, get_args
 
 from rocke.helpers.activations import LN2, LOG2E, SOFTPLUS_THRESHOLD
-from rocke.core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
 from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
@@ -387,6 +388,29 @@ def _kda_channel_decay(b: IRBuilder, spec: "GdnDecodeSpec", exp_alog, g, dt):
     return _exp_f32(b, log_decay)
 
 
+def _kda_head_decay(
+    b: IRBuilder, spec: "GdnDecodeSpec", Ag, DTB, exp_alog, g_row, dtb_row
+):
+    """The reference path's KDA decay: one per K channel over the full DK
+    extent (each thread owns a whole state row), loaded and computed one
+    STATE_VEC chunk at a time."""
+    decay = []
+    for c in range(0, spec.head_k_dim, STATE_VEC):
+        gv = load_vec_as_f32(
+            b, Ag, b.add(g_row, b.const_i32(c)), dtype=spec.dtype, n=STATE_VEC
+        )
+        # dt_bias is f32, so load_vec_as_f32 (a 16-bit ingest helper) does
+        # not apply: one f32 vector load instead of STATE_VEC scalar ones.
+        dtv = _load_f32_vec(
+            b, DTB, b.add(dtb_row, b.const_i32(c)), STATE_VEC, align=_KDA_DT_BIAS_ALIGN
+        )
+        decay += [
+            _kda_channel_decay(b, spec, exp_alog, g, lambda d=d: d)
+            for g, d in zip(gv, dtv)
+        ]
+    return decay
+
+
 def _dot(b: IRBuilder, xs, ys, reduce):
     """``reduce`` of the element-wise products ``xs[i] * ys[i]``."""
     return reduce([b.fmul(x, y) for x, y in zip(xs, ys)])
@@ -524,18 +548,14 @@ class GdnDecodeSpec:
         )
 
 
-def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]:
-    """Reject impossible/unsupported GDN decode configs before IR is built."""
-    from rocke.core.arch import ArchTarget
+def _field_type_error(spec: GdnDecodeSpec) -> Optional[str]:
+    """The first flag, integer or real field of the wrong type, or None.
 
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except KeyError as e:
-        return False, str(e)
-    # Type checks first: every rule below branches on these fields' truth or
-    # arithmetic, so a wrong type would be coerced into a DIFFERENT valid spec
-    # (``fuse_conv="false"`` is truthy and swaps in the fused ABI) rather than
-    # rejected.
+    Every other rule branches on these fields' truth or arithmetic, so a
+    wrong type would be coerced into a DIFFERENT valid spec
+    (``fuse_conv="false"`` is truthy and swaps in the fused ABI) rather than
+    rejected.
+    """
     for _field in (
         "use_qk_l2norm",
         "fuse_gate",
@@ -545,7 +565,7 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
     ):
         _value = getattr(spec, _field)
         if type(_value) is not bool:
-            return False, f"{_field} must be a bool, got {_value!r}"
+            return f"{_field} must be a bool, got {_value!r}"
     for _field in (
         "num_k_heads",
         "num_v_heads",
@@ -558,11 +578,26 @@ def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]
     ):
         _value = getattr(spec, _field)
         if isinstance(_value, bool) or not isinstance(_value, numbers.Integral):
-            return False, f"{_field} must be an integer, got {_value!r}"
+            return f"{_field} must be an integer, got {_value!r}"
     if isinstance(spec.lower_bound, bool) or not isinstance(
         spec.lower_bound, numbers.Real
     ):
-        return False, f"lower_bound must be a real number, got {spec.lower_bound!r}"
+        return f"lower_bound must be a real number, got {spec.lower_bound!r}"
+    return None
+
+
+def is_valid_spec(spec: GdnDecodeSpec, arch: str = "gfx950") -> Tuple[bool, str]:
+    """Reject impossible/unsupported GDN decode configs before IR is built."""
+    from rocke.core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+    # Type checks first (see _field_type_error).
+    why = _field_type_error(spec)
+    if why:
+        return False, why
 
     if spec.wave_size != target.wave_size:
         # The wave_size rules further down check INTERNAL consistency
@@ -713,30 +748,11 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
         if spec.gate_kind == "gdn":
             decay, beta = _gdn_gate(b, spec, Ag, Bg, DTB, ALOG, a_idx, hv_i)
         else:
-            # KDA: one decay per K channel. This thread owns a whole state
-            # row, so it needs the full DK extent.
+            # KDA: one decay per K channel.
             beta, exp_alog, g_row, dtb_row = _kda_gate_head(
                 b, spec, Bg, ALOG, a_idx, b_i, hv_i
             )
-            decay = []
-            for c in range(0, DK, STATE_VEC):
-                gv = load_vec_as_f32(
-                    b, Ag, b.add(g_row, b.const_i32(c)), dtype=spec.dtype, n=STATE_VEC
-                )
-                # dt_bias is f32, so load_vec_as_f32 (a 16-bit ingest helper)
-                # does not apply: one f32 vector load instead of STATE_VEC
-                # scalar ones.
-                dtv = _load_f32_vec(
-                    b,
-                    DTB,
-                    b.add(dtb_row, b.const_i32(c)),
-                    STATE_VEC,
-                    align=_KDA_DT_BIAS_ALIGN,
-                )
-                decay += [
-                    _kda_channel_decay(b, spec, exp_alog, g, lambda d=d: d)
-                    for g, d in zip(gv, dtv)
-                ]
+            decay = _kda_head_decay(b, spec, Ag, DTB, exp_alog, g_row, dtb_row)
 
         # ---- dot(k_hat, q_hat) (scalar, redundant per thread) ----
         dot_kq = _dot(b, kn, qn, reduce)
@@ -777,48 +793,192 @@ def _build_simple(spec: GdnDecodeSpec) -> KernelDef:
     return b.kernel
 
 
-def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
-    """v2: warp-tiled. One CTA per (seq, value-head); the
-    ``head_v_dim x head_k_dim`` state is distributed across the block's warps
-    (WTV x WTK lanes, VPT values/lane), and the K-reductions (L2 norms,
-    dot(k,q), S.k, S.q) are folded once per WTK-lane group via shuffle-xor,
-    eliminating v1's per-thread redundant compute and register pressure.
+@dataclass(frozen=True)
+class _Tile:
+    """Geometry of the warp-tiled body, in plain ints (no IR).
 
-    Per-lane K values (q, k, KDA decay, each state row) are flat lists of
-    WTK_ITERS * VPT entries in (K chunk, slot) order; ``chunk`` cuts chunk
-    ``ki`` out of one.
+    A workgroup of NW waves covers TILE_V of a head's DV rows. A wave is WTV
+    V lanes x WTK K lanes; a lane owns WTV_ITERS V rows (WGROUP_V apart) and,
+    of each, WTK_ITERS K chunks of VPT consecutive channels (WARP_TILE_K
+    apart).
     """
-    HK, HV = spec.num_k_heads, spec.num_v_heads
-    DK, DV = spec.head_k_dim, spec.head_v_dim
-    WAVE = spec.wave_size
-    WTK = spec.warp_threads_k
-    WTV = WAVE // WTK
-    NW = spec.num_warps
-    VPT = STATE_VEC
-    BS = NW * WAVE
-    WARP_TILE_K = WTK * VPT
-    WTK_ITERS = DK // WARP_TILE_K
-    WGROUP_V = NW * WTV
-    BPV = spec.blocks_per_v_dim
-    TILE_V = DV // BPV
-    WTV_ITERS = TILE_V // WGROUP_V
-    shfl = [1 << i for i in range(WTK.bit_length() - 1)]  # [1,2,4] for WTK=8
 
-    S_SLOT = HV * DV * DK * _ELEM_BYTES[spec.state_dtype]  # bytes per pool slot
+    HK: int
+    HV: int
+    DK: int
+    DV: int
+    WAVE: int
+    WTK: int
+    WTV: int
+    NW: int
+    VPT: int
+    BS: int
+    WARP_TILE_K: int
+    WTK_ITERS: int
+    WGROUP_V: int
+    BPV: int
+    TILE_V: int
+    WTV_ITERS: int
+    S_SLOT: int  # bytes per state pool slot
+    CST_SLOT: int  # bytes per conv-state pool slot; it carries the I/O dtype
+    LATE_ROW_INPUTS: bool
+
+    @classmethod
+    def of(cls, spec: GdnDecodeSpec) -> "_Tile":
+        WAVE, WTK, NW = spec.wave_size, spec.warp_threads_k, spec.num_warps
+        WARP_TILE_K = WTK * STATE_VEC
+        WGROUP_V = NW * (WAVE // WTK)
+        TILE_V = spec.head_v_dim // spec.blocks_per_v_dim
+        return cls(
+            HK=spec.num_k_heads,
+            HV=spec.num_v_heads,
+            DK=spec.head_k_dim,
+            DV=spec.head_v_dim,
+            WAVE=WAVE,
+            WTK=WTK,
+            WTV=WAVE // WTK,
+            NW=NW,
+            VPT=STATE_VEC,
+            BS=NW * WAVE,
+            WARP_TILE_K=WARP_TILE_K,
+            WTK_ITERS=spec.head_k_dim // WARP_TILE_K,
+            WGROUP_V=WGROUP_V,
+            BPV=spec.blocks_per_v_dim,
+            TILE_V=TILE_V,
+            WTV_ITERS=TILE_V // WGROUP_V,
+            S_SLOT=spec.num_v_heads
+            * spec.head_v_dim
+            * spec.head_k_dim
+            * _ELEM_BYTES[spec.state_dtype],
+            CST_SLOT=spec.conv_dim * CONV_TAPS * _ELEM_BYTES[spec.dtype],
+            # One wave owns all DV rows. Hoisting every row's v conv inputs,
+            # the state and the norm inputs as well exceeds the VGPR budget,
+            # so with fuse_conv that tile loads them where the parent order
+            # did: v in the row loop, each state chunk at its decay, out_gate
+            # and norm_weight at the norm (ALGORITHM.md §4.3, "One exception").
+            LATE_ROW_INPUTS=spec.fuse_conv and NW == 1,
+        )
+
+
+@dataclass(frozen=True)
+class _Args:
+    """The warp-tiled kernel's arguments; a fusion's are None while it is
+    off. Under fuse_conv, Q, K and Vv are the one packed ``mixed_qkv`` row."""
+
+    Q: Value
+    K: Value
+    Vv: Value
+    Ag: Value
+    Bg: Value
+    DTB: Value
+    ALOG: Value
+    RIDX: Value
+    WIDX: Value
+    STATE: Value
+    OUT: Value
+    batch_size: Value
+    CST: Optional[Value] = None  # fuse_conv
+    CW: Optional[Value] = None
+    qkv_stride: Optional[Value] = None
+    OG: Optional[Value] = None  # fuse_out_norm
+    NWT: Optional[Value] = None
+    og_stride: Optional[Value] = None
+    norm_eps: Optional[Value] = None
+    lds_rn: Optional[Value] = None  # fuse_out_norm with NW > 1
+
+
+@dataclass(frozen=True)
+class _Lane:
+    """One lane of the warp-tiled body: the builder, spec, geometry and
+    arguments every phase shares, and this lane's coordinates.
+
+    ``k_offs[ki]`` (the K offset of this lane's chunk ``ki``), ``v_rows[vi]``
+    and ``s_rows[vi]`` (the in-slot base of state row ``v_rows[vi]``) are
+    computed once and shared by every load and store, so a K channel or a V
+    row has one index expression in the whole kernel: slot i of each chunk
+    is the same K channel for the gate, q/k, the state and the conv taps.
+    Per-lane K values (q, k, KDA decay, each state row) are flat lists of
+    WTK_ITERS * VPT entries in (K chunk, slot) order; :meth:`chunk` cuts
+    chunk ``ki`` out of one.
+    """
+
+    b: IRBuilder
+    spec: GdnDecodeSpec
+    t: _Tile
+    a: _Args
+    tid: Value
+    b_i: Value
+    hv_i: Value
+    hk_i: Value
+    k_lane: Value
+    gv_start: Value
+    read_pool: Value
+    write_pool: Value
+    k_offs: list
+    v_rows: list
+    s_rows: list
+
+    def wsum(self, v):
+        """xor-butterfly sum over the WTK-lane group (broadcast in-group)."""
+        # xor 1/2 via quad_perm (VALU DPP: no LDS crossbar / no lgkmcnt(0) stall);
+        # xor 4 crosses the 4-lane quad so it stays on ds_swizzle.
+        #
+        # This split is NOT applied at the four sibling sites that make the
+        # same choice -- they are all still on plain warp_shuffle_xor, and
+        # each would take the same win for masks 1 and 2:
+        #   helpers/reduction.py `_warp_xor_reduce` (the generic form of
+        #     this loop, in a module this kernel already imports)
+        #   cpp/helpers/attention.cpp `rocke_warp_xor_reduce_sum` (its twin)
+        #   kernels/gfx950/kda_chunkwise.py `_reduce16_fadd`
+        #   attention_tiled_2d.py + its gfx950 twin, register transpose
+        # Sweeping them touches two engines and three families, so it is
+        # deliberately not done here; see the follow-up ticket. Anyone
+        # editing this loop should consider whether the sibling is still
+        # waiting.
+        b = self.b
+        shfl = [1 << i for i in range(self.t.WTK.bit_length() - 1)]  # [1,2,4]: WTK=8
+        for off in shfl:
+            if off <= 2:
+                v = b.fadd(v, b.warp_shuffle_xor_quad(v, off))
+            else:
+                v = b.fadd(v, b.warp_shuffle_xor(v, off))
+        return v
+
+    def head_sum(self, xs):
+        """Sum over every K channel of the head: this lane's values, then
+        the WTK-lane group."""
+        return self.wsum(tree_reduce(self.b, self.b.fadd, xs))
+
+    def chunk(self, xs, ki):
+        return xs[ki * self.t.VPT : (ki + 1) * self.t.VPT]
+
+    def is_k_lane0(self):
+        return self.b.cmp_eq(self.k_lane, self.b.const_i32(0))
+
+    # conv_state layout [slot, channel, tap]: cst_chan and CST_SLOT are the
+    # only places that know it.
+    def cst_chan(self, ch):
+        return self.b.mul(ch, self.b.const_i32(CONV_TAPS))
+
+    def q_chan(self, koff):
+        """q conv channel of the K-chunk at ``koff``: hk*DK + koff."""
+        return self.b.add(self.b.mul(self.hk_i, self.b.const_i32(self.t.DK)), koff)
+
+    def k_chan(self, qch, k_span=None):
+        """k conv channel of q channel ``qch``: one q-span (Hk*DK) later,
+        as in the packed row. ``k_span`` is an optional prebuilt Hk*DK
+        constant, so each call site keeps its op order (golden IR)."""
+        if k_span is None:
+            k_span = self.b.const_i32(self.t.HK * self.t.DK)
+        return self.b.add(qch, k_span)
+
+
+def _warp_tiled_args(b: IRBuilder, spec: GdnDecodeSpec, t: _Tile) -> _Args:
+    """Declare the warp-tiled kernel's params in ABI order
+    (:func:`gdn_decode_signature`), then the fused norm's LDS partials."""
     CONV, RN = spec.fuse_conv, spec.fuse_out_norm
-    # One wave owns all DV rows. Hoisting every row's v conv inputs, the state
-    # and the norm inputs as well exceeds the VGPR budget, so with fuse_conv
-    # that tile loads them where the parent order did: v in the row loop, each
-    # state chunk at its decay, out_gate and norm_weight at the norm
-    # (ALGORITHM.md §4.3, "One exception").
-    LATE_ROW_INPUTS = CONV and NW == 1
-    # One conv-state pool slot; the conv state carries the I/O dtype.
-    CST_SLOT = spec.conv_dim * CONV_TAPS * _ELEM_BYTES[spec.dtype]
-
     io_ty = io_ir_type(spec.dtype)
-    b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = BS
-
+    fused = {}
     if CONV:
         Q = K = Vv = _vec_param(b, "mixed_qkv", io_ty, readonly=True)
     else:
@@ -829,407 +989,551 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     STATE = _vec_param(b, "state", _state_ir_type(spec.state_dtype))
     OUT = _vec_param(b, "out", io_ty, writeonly=True)
     if CONV:
-        CST = _vec_param(b, "conv_state", io_ty)
-        CW = _vec_param(b, "conv_weight", F32, readonly=True)
+        fused["CST"] = _vec_param(b, "conv_state", io_ty)
+        fused["CW"] = _vec_param(b, "conv_weight", F32, readonly=True)
     if RN:
-        OG = b.param("out_gate", PtrType(io_ty, "global"), noalias=True, readonly=True)
-        NWT = b.param(
+        fused["OG"] = b.param(
+            "out_gate", PtrType(io_ty, "global"), noalias=True, readonly=True
+        )
+        fused["NWT"] = b.param(
             "norm_weight", PtrType(F32, "global"), noalias=True, readonly=True
         )
-    _ = b.param("batch_size", I32)  # noqa: F841
+    batch_size = b.param("batch_size", I32)
     if CONV:
-        qkv_stride = b.param("qkv_stride", I32)
+        fused["qkv_stride"] = b.param("qkv_stride", I32)
     if RN:
-        og_stride = b.param("og_stride", I32)
-        norm_eps = b.param("norm_eps", F32)
+        fused["og_stride"] = b.param("og_stride", I32)
+        fused["norm_eps"] = b.param("norm_eps", F32)
         # one f32 partial per wave for the cross-wave sum of squares
-        lds_rn = b.smem_alloc_f32([NW], name_hint="rn_partials") if NW > 1 else None
+        if t.NW > 1:
+            fused["lds_rn"] = b.smem_alloc_f32([t.NW], name_hint="rn_partials")
+    return _Args(
+        Q, K, Vv, Ag, Bg, DTB, ALOG, RIDX, WIDX, STATE, OUT, batch_size, **fused
+    )
 
+
+@contextmanager
+def _active_lane(
+    b: IRBuilder, spec: GdnDecodeSpec, t: _Tile, a: _Args
+) -> Iterator[_Lane]:
+    """This lane's coordinates, then the body's guard: yields the
+    :class:`_Lane` inside ``scf_if(active)``, so a padded sequence (negative
+    pool index) runs nothing."""
     tid = b.thread_id_x()
     bidx = b.block_id_x()
-    b_hv_i = b.div(bidx, b.const_i32(BPV))
-    tile_v_start = b.mul(b.mod(bidx, b.const_i32(BPV)), b.const_i32(TILE_V))
-    b_i = b.div(b_hv_i, b.const_i32(HV))
-    hv_i = b.mod(b_hv_i, b.const_i32(HV))
+    b_hv_i = b.div(bidx, b.const_i32(t.BPV))
+    tile_v_start = b.mul(b.mod(bidx, b.const_i32(t.BPV)), b.const_i32(t.TILE_V))
+    b_i = b.div(b_hv_i, b.const_i32(t.HV))
+    hv_i = b.mod(b_hv_i, b.const_i32(t.HV))
     hk_i = b.div(hv_i, b.const_i32(spec.v_per_k_head))
-    w_tid = b.mod(tid, b.const_i32(WAVE))
-    wid = b.div(tid, b.const_i32(WAVE))
-    k_lane = b.mod(w_tid, b.const_i32(WTK))
-    v_lane = b.div(w_tid, b.const_i32(WTK))
-    warp_k_start = b.mul(k_lane, b.const_i32(VPT))
-    gv_start = b.add(b.mul(wid, b.const_i32(WTV)), v_lane)
+    w_tid = b.mod(tid, b.const_i32(t.WAVE))
+    wid = b.div(tid, b.const_i32(t.WAVE))
+    k_lane = b.mod(w_tid, b.const_i32(t.WTK))
+    v_lane = b.div(w_tid, b.const_i32(t.WTK))
+    warp_k_start = b.mul(k_lane, b.const_i32(t.VPT))
+    gv_start = b.add(b.mul(wid, b.const_i32(t.WTV)), v_lane)
 
-    read_pool, write_pool, active = _pool_slots(b, RIDX, WIDX, b_i)
+    read_pool, write_pool, active = _pool_slots(b, a.RIDX, a.WIDX, b_i)
     with b.scf_if(active):
-
-        def wsum(v):  # xor-butterfly sum over the WTK-lane group (broadcast in-group)
-            # xor 1/2 via quad_perm (VALU DPP: no LDS crossbar / no lgkmcnt(0) stall);
-            # xor 4 crosses the 4-lane quad so it stays on ds_swizzle.
-            #
-            # This split is NOT applied at the four sibling sites that make the
-            # same choice -- they are all still on plain warp_shuffle_xor, and
-            # each would take the same win for masks 1 and 2:
-            #   helpers/reduction.py `_warp_xor_reduce` (the generic form of
-            #     this loop, in a module this kernel already imports)
-            #   cpp/helpers/attention.cpp `rocke_warp_xor_reduce_sum` (its twin)
-            #   kernels/gfx950/kda_chunkwise.py `_reduce16_fadd`
-            #   attention_tiled_2d.py + its gfx950 twin, register transpose
-            # Sweeping them touches two engines and three families, so it is
-            # deliberately not done here; see the follow-up ticket. Anyone
-            # editing this loop should consider whether the sibling is still
-            # waiting.
-            for off in shfl:
-                if off <= 2:
-                    v = b.fadd(v, b.warp_shuffle_xor_quad(v, off))
-                else:
-                    v = b.fadd(v, b.warp_shuffle_xor(v, off))
-            return v
-
-        def head_sum(xs):
-            """Sum over every K channel of the head: this lane's values, then
-            the WTK-lane group."""
-            return wsum(tree_reduce(b, b.fadd, xs))
-
-        def chunk(xs, ki):
-            return xs[ki * VPT : (ki + 1) * VPT]
-
-        def k_off(ki):
-            """K offset of this lane's chunk ``ki``. Every per-channel access
-            (gate, q/k, state, conv taps) uses it, so slot i of each chunk is
-            the same K channel everywhere."""
-            return b.add(warp_k_start, b.const_i32(ki * WARP_TILE_K))
-
-        def v_row_of(vi):
-            return b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * WGROUP_V)))
-
-        def is_k_lane0():
-            return b.cmp_eq(k_lane, b.const_i32(0))
-
-        # Fusion helpers (fuse_conv / fuse_out_norm). They emit nothing unless
-        # called, and only the fused paths below call them.
-        def conv_silu(h, w, x):
-            """conv1d + SiLU of one channel. h: CONV_TAPS taps oldest-first,
-            w: CONV_WIDTH weights, x: the newest (current) value."""
-            acc = tree_reduce(
-                b, b.fadd, [b.fmul(t, wt) for t, wt in zip(list(h) + [x], w)]
-            )
-            return _silu(b, acc)
-
-        # conv_state layout [slot, channel, tap]: cst_chan and CST_SLOT are
-        # the only places that know it.
-        def cst_chan(ch):
-            return b.mul(ch, b.const_i32(CONV_TAPS))
-
-        def q_chan(koff):
-            """q conv channel of the K-chunk at ``koff``: hk*DK + koff."""
-            return b.add(b.mul(hk_i, b.const_i32(DK)), koff)
-
-        def k_chan(qch, k_span=None):
-            """k conv channel of q channel ``qch``: one q-span (Hk*DK) later,
-            as in the packed row. ``k_span`` is an optional prebuilt Hk*DK
-            constant, so each call site keeps its op order (golden IR)."""
-            if k_span is None:
-                k_span = b.const_i32(HK * DK)
-            return b.add(qch, k_span)
-
-        def conv_taps8(slot, ch):
-            """CONV_TAPS taps x 8 channels from [slot, channel, tap]: CONV_TAPS
-            contiguous 8-element vectors."""
-            taps = []
-            for j in range(CONV_TAPS):
-                taps += load_vec_as_f32(
-                    b,
-                    slot,
-                    b.add(cst_chan(ch), b.const_i32(8 * j)),
-                    dtype=spec.dtype,
-                    n=8,
-                )
-            return [taps[CONV_TAPS * i : CONV_TAPS * (i + 1)] for i in range(VPT)]
-
-        def conv_weights8(ch):
-            """CONV_WIDTH weights x 8 channels from [channel, tap]: CONV_WIDTH
-            contiguous 8-float vectors. The param promises 16 B, so the 32 B
-            loads claim 16 B."""
-            ws = []
-            for j in range(CONV_WIDTH):
-                ws += _load_f32_vec(
-                    b,
-                    CW,
-                    b.add(b.mul(ch, b.const_i32(CONV_WIDTH)), b.const_i32(8 * j)),
-                    8,
-                    align=_VEC_ALIGN,
-                )
-            return [ws[CONV_WIDTH * i : CONV_WIDTH * (i + 1)] for i in range(VPT)]
-
-        # Every global load is issued before any math; ALGORITHM.md §4.3 ("Why
-        # loads first") gives the reason and the register cost. The K-chunk
-        # lane offsets, V rows and state row bases are computed once here and
-        # shared by every load and store, so a K channel or a V row has one
-        # index expression in the whole kernel.
-        k_offs = [k_off(ki) for ki in range(WTK_ITERS)]
-        v_rows = [v_row_of(vi) for vi in range(WTV_ITERS)]
+        k_offs = [
+            b.add(warp_k_start, b.const_i32(ki * t.WARP_TILE_K))
+            for ki in range(t.WTK_ITERS)
+        ]
+        v_rows = [
+            b.add(tile_v_start, b.add(gv_start, b.const_i32(vi * t.WGROUP_V)))
+            for vi in range(t.WTV_ITERS)
+        ]
         s_rows = [_state_row(b, hv_i, v_row, spec) for v_row in v_rows]
-
-        a_idx = b.add(b.mul(b_i, b.const_i32(HV)), hv_i)
-        if spec.gate_kind == "gdn":
-            gdn_in = _gdn_gate_inputs(b, spec, Ag, Bg, DTB, ALOG, a_idx, hv_i)
-        else:
-            kda_in = _kda_head_inputs(b, spec, Bg, ALOG, a_idx, hv_i)
-            g_row, dtb_row = _kda_gate_rows(b, spec, b_i, hv_i)
-            gvs, dtvecs = [], []
-            for koff in k_offs:
-                # koff is also the state load's offset, so slot i of this
-                # slice is the same K channel as slot i of the state.
-                gvs.append(
-                    load_vec_as_f32(b, Ag, b.add(g_row, koff), dtype=spec.dtype, n=VPT)
-                )
-                dtvecs.append(
-                    b.global_load_vN(
-                        DTB, b.add(dtb_row, koff), F32, VPT, align=_KDA_DT_BIAS_ALIGN
-                    )
-                )
-
-        # this lane's q,k K-chunks -> f32, one list per chunk until the conv
-        qn, kn = [], []
-        if CONV:
-            # q/k/v come from one packed row: q at channel hk*DK, k one q-span
-            # later, v after both. The conv taps live at the read slot.
-            qkv_row = b.mul(b_i, qkv_stride)
-            qk_base = b.add(qkv_row, b.mul(hk_i, b.const_i32(DK)))
-            k_shift = b.const_i32(HK * DK)
-            cst_r = _slot_ptr(b, CST, read_pool, CST_SLOT)
-            q_taps, k_taps, q_w, k_w = [], [], [], []
-            qchs = [q_chan(koff) for koff in k_offs]
-            for ki in range(WTK_ITERS):
-                off = b.add(qk_base, k_offs[ki])
-                qn.append(load_vec_as_f32(b, Q, off, dtype=spec.dtype, n=VPT))
-                kn.append(
-                    load_vec_as_f32(b, K, b.add(off, k_shift), dtype=spec.dtype, n=VPT)
-                )
-                kch = k_chan(qchs[ki], k_shift)
-                q_taps.append(conv_taps8(cst_r, qchs[ki]))
-                q_w.append(conv_weights8(qchs[ki]))
-                k_taps.append(conv_taps8(cst_r, kch))
-                k_w.append(conv_weights8(kch))
-        else:
-            qk_base = _head_base(b, b_i, hk_i, HK, DK)
-            for koff in k_offs:
-                off = b.add(qk_base, koff)
-                qn.append(load_vec_as_f32(b, Q, off, dtype=spec.dtype, n=VPT))
-                kn.append(load_vec_as_f32(b, K, off, dtype=spec.dtype, n=VPT))
-
-        # raw state chunks
-        state_r = _slot_ptr(b, STATE, read_pool, S_SLOT)
-
-        def state_chunk(vi, ki):
-            off = b.add(s_rows[vi], k_offs[ki])
-            return _load_state_f32(b, state_r, off, state_dtype=spec.state_dtype, n=VPT)
-
-        if not LATE_ROW_INPUTS:
-            s_raw = {
-                (vi, ki): state_chunk(vi, ki)
-                for vi in range(WTV_ITERS)
-                for ki in range(WTK_ITERS)
-            }
-
-        # this lane's v, one per V row
-        v_idx = [b.add(_head_base(b, b_i, hv_i, HV, DV), v_row) for v_row in v_rows]
-        if CONV:
-            # v channel of each owned row in the packed row / conv state
-            vch = [
-                b.add(
-                    b.const_i32(2 * HK * DK),
-                    b.add(b.mul(hv_i, b.const_i32(DV)), v_row),
-                )
-                for v_row in v_rows
-            ]
-
-            def v_raw_of(c):
-                return load_scalar_as_f32(b, Vv, b.add(qkv_row, c), dtype=spec.dtype)
-
-            def v_taps_of(c):
-                return [
-                    load_scalar_as_f32(
-                        b, cst_r, b.add(cst_chan(c), b.const_i32(t)), dtype=spec.dtype
-                    )
-                    for t in range(CONV_TAPS)
-                ]
-
-            def v_w_of(c):
-                return _load_f32_vec(
-                    b,
-                    CW,
-                    b.mul(c, b.const_i32(CONV_WIDTH)),
-                    CONV_WIDTH,
-                    align=_VEC_ALIGN,
-                )
-
-            if LATE_ROW_INPUTS:
-                v_raw, v_taps, v_w = [], [], []
-            else:
-                v_raw = [v_raw_of(c) for c in vch]
-                v_taps = [v_taps_of(c) for c in vch]
-                v_w = [v_w_of(c) for c in vch]
-        else:
-            rv = [load_scalar_as_f32(b, Vv, i, dtype=spec.dtype) for i in v_idx]
-
-        def norm_inputs():
-            """Each owned row's out_gate and norm_weight."""
-            og_row = b.add(b.mul(b_i, og_stride), b.mul(hv_i, b.const_i32(DV)))
-            r_og = [
-                load_scalar_as_f32(b, OG, b.add(og_row, v_row), dtype=spec.dtype)
-                for v_row in v_rows
-            ]
-            return r_og, [b.global_load_f32(NWT, v_row) for v_row in v_rows]
-
-        if RN and not LATE_ROW_INPUTS:
-            r_og, r_nw = norm_inputs()
-
-        # gates (per value head)
-        if spec.gate_kind == "gdn":
-            decay, beta = _gdn_gate_math(b, *gdn_in)
-        else:
-            # KDA: one decay per K channel, for the slice THIS lane owns.
-            #
-            # The state tile is keyed (vi, ki) -- V row and K chunk -- but a
-            # channel's decay does not depend on which V row is being faded, so
-            # the decay is computed once per K channel and reused across all
-            # WTV_ITERS rows. That is what holds the extra register cost to
-            # WTK_ITERS*VPT values instead of multiplying with the state tile.
-            beta, exp_alog = _kda_head_math(b, *kda_in)
-            decay = []
-            for gv, dtvec in zip(gvs, dtvecs):
-                # dt_bias lanes are extracted lazily, next to their use.
-                decay += [
-                    _kda_channel_decay(
-                        b, spec, exp_alog, gv[i], lambda i=i: b.vec_extract(dtvec, i)
-                    )
-                    for i in range(VPT)
-                ]
-
-        if CONV:
-            # conv1d + SiLU on the raw q/k/v; the raw values are kept, since
-            # they become the newest conv tap.
-            q_raw, k_raw = qn, kn
-            qn = [
-                [conv_silu(q_taps[ki][i], q_w[ki][i], q_raw[ki][i]) for i in range(VPT)]
-                for ki in range(WTK_ITERS)
-            ]
-            kn = [
-                [conv_silu(k_taps[ki][i], k_w[ki][i], k_raw[ki][i]) for i in range(VPT)]
-                for ki in range(WTK_ITERS)
-            ]
-            rv = [conv_silu(t, w, x) for t, w, x in zip(v_taps, v_w, v_raw)]
-
-        qn, kn = _scale_qk(
-            b,
-            [x for c in qn for x in c],
-            [x for c in kn for x in c],
-            use_l2norm=spec.use_qk_l2norm,
-            scale=1.0 / math.sqrt(DK),
-            reduce=head_sum,
+        yield _Lane(
+            b=b,
+            spec=spec,
+            t=t,
+            a=a,
+            tid=tid,
+            b_i=b_i,
+            hv_i=hv_i,
+            hk_i=hk_i,
+            k_lane=k_lane,
+            gv_start=gv_start,
+            read_pool=read_pool,
+            write_pool=write_pool,
+            k_offs=k_offs,
+            v_rows=v_rows,
+            s_rows=s_rows,
         )
-        dot_kq = _dot(b, kn, qn, head_sum)
 
-        # decay the state chunks. A KDA decay chunk covers the same K channels
-        # as state chunk ki, in the same order, and is reused across every vi.
-        # The LATE_ROW_INPUTS tile loads each chunk here, as the parent order did.
-        sv = []  # sv[vi]: this lane's decayed K values of state row vi
-        for vi in range(WTV_ITERS):
-            row = []
-            for ki in range(WTK_ITERS):
-                vec = state_chunk(vi, ki) if LATE_ROW_INPUTS else s_raw[(vi, ki)]
-                row += _forget(
-                    b, spec, vec, decay if spec.gate_kind == "gdn" else chunk(decay, ki)
-                )
-            sv.append(row)
 
-        state_w = _slot_ptr(b, STATE, write_pool, S_SLOT)
-        outs = []  # per-row outputs the fused norm below needs
-        for vi in range(WTV_ITERS):
-            phk = _dot(b, sv[vi], kn, head_sum)
-            phq = _dot(b, sv[vi], qn, head_sum)
-            if LATE_ROW_INPUTS:
-                v_raw.append(v_raw_of(vch[vi]))
-                v_taps.append(v_taps_of(vch[vi]))
-                rv.append(conv_silu(v_taps[vi], v_w_of(vch[vi]), v_raw[vi]))
-            # v_new is in-group uniform (rv, broadcast phk, beta) - no bcast.
-            v_new = b.fmul(b.fsub(rv[vi], phk), beta)
-            out_val = b.fadd(phq, b.fmul(v_new, dot_kq))
-            if RN:
-                outs.append(out_val)  # stored after the cross-wave norm below
-            else:
-                with b.scf_if(is_k_lane0()):
-                    store_scalar_from_f32(b, OUT, v_idx[vi], out_val, dtype=spec.dtype)
-            for ki in range(WTK_ITERS):
-                new = [
-                    b.fma(k, v_new, s) for k, s in zip(chunk(kn, ki), chunk(sv[vi], ki))
-                ]
-                vec = _pack_state(b, new, state_dtype=spec.state_dtype)
-                off = b.add(s_rows[vi], k_offs[ki])
-                _store_state(b, state_w, off, vec, state_dtype=spec.state_dtype, n=VPT)
+def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
+    """v2: warp-tiled. One CTA per (seq, value-head); the
+    ``head_v_dim x head_k_dim`` state is distributed across the block's warps
+    (WTV x WTK lanes, VPT values/lane), and the K-reductions (L2 norms,
+    dot(k,q), S.k, S.q) are folded once per WTK-lane group via shuffle-xor,
+    eliminating v1's per-thread redundant compute and register pressure.
 
-        if RN:
-            # Gated RMSNorm over the head's DV outputs; the gate activation
-            # follows the gate kind (OUT_GATE_ACTIVATION). Every k-lane of a
-            # row holds the same out_val, so only k-lane 0 contributes to the
-            # sum of squares. For NW > 1 the cross-wave reduction issues a
-            # workgroup barrier after every wave has written its partial,
-            # i.e. after every wave's tap reads (taps -> outs -> partial).
-            gate_act = _silu if spec.out_gate_activation == "silu" else _sigmoid
-            if LATE_ROW_INPUTS:
-                r_og, r_nw = norm_inputs()
-            ss = tree_reduce(b, b.fadd, [b.fmul(o, o) for o in outs])
-            contrib = b.select(is_k_lane0(), ss, b.const_f32(0.0))
-            total = block_lds_reduce_with_wave_prologue(
-                b, contrib, lds_rn, tid, block_size=BS, wave_size=WAVE
-            )
-            rstd = b.rsqrt(b.fadd(b.fmul(total, b.const_f32(1.0 / DV)), norm_eps))
-            for vi in range(WTV_ITERS):
-                gate = gate_act(b, r_og[vi])
-                y = b.fmul(b.fmul(b.fmul(outs[vi], rstd), r_nw[vi]), gate)
-                with b.scf_if(is_k_lane0()):
-                    store_scalar_from_f32(b, OUT, v_idx[vi], y, dtype=spec.dtype)
+    The body runs in phases: every global load (gate, q/k and their conv
+    inputs, state, v, norm inputs), then the gate math, the conv, the
+    recurrence over this lane's rows, the fused norm and the conv-tap shift.
+    """
+    t = _Tile.of(spec)
+    CONV, RN = spec.fuse_conv, spec.fuse_out_norm
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = t.BS
+    a = _warp_tiled_args(b, spec, t)
 
+    with _active_lane(b, spec, t, a) as ln:
+        # Every global load is issued before any math; ALGORITHM.md §4.3 ("Why
+        # loads first") gives the reason and the register cost.
+        gate_in = _load_gate_inputs(ln)
+        q_raw, k_raw, conv = _load_qk(ln)
+        st = _load_state(ln)
+        v = _load_v(ln, conv)
+        r_norm = _norm_inputs(ln) if RN and not t.LATE_ROW_INPUTS else None
+
+        decay, beta = _gate_math(ln, gate_in)
         if CONV:
-            # Shift the conv taps in place: drop the oldest, append the raw
-            # current token. Other waves read the same q/k taps, so every wave
-            # must be past its tap reads before any tap is overwritten. With
-            # the norm on, its reduction barrier (above) already orders that;
-            # otherwise one barrier is emitted here. One wave needs none.
-            if NW > 1 and not RN:
-                b.sync()
-            cst_w = _slot_ptr(b, CST, write_pool, CST_SLOT)
-            # q/k channels: one writer group (wave 0, v-lane 0), each k-lane
-            # writing its 8 channels x CONV_TAPS shifted taps.
-            with b.scf_if(b.cmp_eq(gv_start, b.const_i32(0))):
-                for ki in range(WTK_ITERS):
-                    qch = qchs[ki]
-                    kch = k_chan(qch)
-                    for ch, taps, raw in ((qch, q_taps, q_raw), (kch, k_taps, k_raw)):
-                        shifted = []
-                        for i in range(VPT):
-                            shifted += list(taps[ki][i][1:]) + [raw[ki][i]]
-                        for j in range(CONV_TAPS):
-                            store_vec(
-                                b,
-                                cst_w,
-                                b.add(cst_chan(ch), b.const_i32(8 * j)),
-                                pack_f32_to(
-                                    b, shifted[8 * j : 8 * j + 8], dtype=spec.dtype
-                                ),
-                                n=8,
-                            )
-            # v channels: the k-lane-0 owner of each row
-            with b.scf_if(is_k_lane0()):
-                for vi in range(WTV_ITERS):
-                    base = cst_chan(vch[vi])
-                    for t, val in enumerate(list(v_taps[vi][1:]) + [v_raw[vi]]):
-                        store_scalar_from_f32(
-                            b, cst_w, b.add(base, b.const_i32(t)), val, dtype=spec.dtype
-                        )
+            qn, kn, rv = _conv_qkv(ln, q_raw, k_raw, conv, v)
+        else:
+            qn, kn, rv = q_raw, k_raw, v.rv
+        outs, v = _recurrence(ln, st, decay, beta, qn, kn, rv, v, conv)
+        if RN:
+            _out_norm(ln, outs, v.v_idx, r_norm)
+        if CONV:
+            _shift_conv_taps(ln, q_raw, k_raw, conv, v)
 
     return b.kernel
+
+
+@dataclass(frozen=True)
+class _GateIn:
+    """The gate's loaded inputs: the per-head ones (GDN's a, b, dt_bias and
+    A_log; KDA's b and A_log) and, for KDA, this lane's gate slice and f32
+    dt_bias vector per K chunk."""
+
+    head: tuple
+    gvs: list
+    dtvecs: list
+
+
+def _load_gate_inputs(ln: _Lane) -> _GateIn:
+    """The gate's global loads. Each koff is also the state load's offset,
+    so slot i of a KDA gate slice is the same K channel as slot i of the
+    state."""
+    b, spec, t, a = ln.b, ln.spec, ln.t, ln.a
+    a_idx = b.add(b.mul(ln.b_i, b.const_i32(t.HV)), ln.hv_i)
+    if spec.gate_kind == "gdn":
+        gdn_in = _gdn_gate_inputs(b, spec, a.Ag, a.Bg, a.DTB, a.ALOG, a_idx, ln.hv_i)
+        return _GateIn(gdn_in, [], [])
+    kda_in = _kda_head_inputs(b, spec, a.Bg, a.ALOG, a_idx, ln.hv_i)
+    g_row, dtb_row = _kda_gate_rows(b, spec, ln.b_i, ln.hv_i)
+    gvs, dtvecs = [], []
+    for koff in ln.k_offs:
+        gvs.append(
+            load_vec_as_f32(b, a.Ag, b.add(g_row, koff), dtype=spec.dtype, n=t.VPT)
+        )
+        dtvecs.append(
+            b.global_load_vN(
+                a.DTB, b.add(dtb_row, koff), F32, t.VPT, align=_KDA_DT_BIAS_ALIGN
+            )
+        )
+    return _GateIn(kda_in, gvs, dtvecs)
+
+
+def _conv_taps8(ln: _Lane, slot, ch):
+    """CONV_TAPS taps x 8 channels from [slot, channel, tap]: CONV_TAPS
+    contiguous 8-element vectors."""
+    b = ln.b
+    taps = []
+    for j in range(CONV_TAPS):
+        taps += load_vec_as_f32(
+            b,
+            slot,
+            b.add(ln.cst_chan(ch), b.const_i32(8 * j)),
+            dtype=ln.spec.dtype,
+            n=8,
+        )
+    return [taps[CONV_TAPS * i : CONV_TAPS * (i + 1)] for i in range(ln.t.VPT)]
+
+
+def _conv_weights8(ln: _Lane, ch):
+    """CONV_WIDTH weights x 8 channels from [channel, tap]: CONV_WIDTH
+    contiguous 8-float vectors. The param promises 16 B, so the 32 B
+    loads claim 16 B."""
+    b = ln.b
+    ws = []
+    for j in range(CONV_WIDTH):
+        ws += _load_f32_vec(
+            b,
+            ln.a.CW,
+            b.add(b.mul(ch, b.const_i32(CONV_WIDTH)), b.const_i32(8 * j)),
+            8,
+            align=_VEC_ALIGN,
+        )
+    return [ws[CONV_WIDTH * i : CONV_WIDTH * (i + 1)] for i in range(ln.t.VPT)]
+
+
+@dataclass(frozen=True)
+class _ConvQk:
+    """fuse_conv: this token's packed-row and conv-state read-slot handles,
+    and the conv inputs of this lane's q/k chunks, indexed ``[ki][i]``."""
+
+    qkv_row: Value  # first element of this token's packed [q | k | v] row
+    cst_r: Value  # conv-state read slot
+    qchs: list  # q conv channel of each K chunk
+    q_taps: list  # CONV_TAPS taps per channel, oldest first
+    k_taps: list
+    q_w: list  # CONV_WIDTH weights per channel
+    k_w: list
+
+
+def _load_qk(ln: _Lane):
+    """This lane's raw q and k K chunks, one VPT list per chunk, and under
+    fuse_conv their conv inputs: ``(q, k, conv)``."""
+    b, spec, t, a = ln.b, ln.spec, ln.t, ln.a
+    qn, kn = [], []
+    if not spec.fuse_conv:
+        qk_base = _head_base(b, ln.b_i, ln.hk_i, t.HK, t.DK)
+        for koff in ln.k_offs:
+            off = b.add(qk_base, koff)
+            qn.append(load_vec_as_f32(b, a.Q, off, dtype=spec.dtype, n=t.VPT))
+            kn.append(load_vec_as_f32(b, a.K, off, dtype=spec.dtype, n=t.VPT))
+        return qn, kn, None
+    # q/k/v come from one packed row: q at channel hk*DK, k one q-span
+    # later, v after both. The conv taps live at the read slot.
+    qkv_row = b.mul(ln.b_i, a.qkv_stride)
+    qk_base = b.add(qkv_row, b.mul(ln.hk_i, b.const_i32(t.DK)))
+    k_shift = b.const_i32(t.HK * t.DK)
+    cst_r = _slot_ptr(b, a.CST, ln.read_pool, t.CST_SLOT)
+    q_taps, k_taps, q_w, k_w = [], [], [], []
+    qchs = [ln.q_chan(koff) for koff in ln.k_offs]
+    for ki in range(t.WTK_ITERS):
+        off = b.add(qk_base, ln.k_offs[ki])
+        qn.append(load_vec_as_f32(b, a.Q, off, dtype=spec.dtype, n=t.VPT))
+        kn.append(
+            load_vec_as_f32(b, a.K, b.add(off, k_shift), dtype=spec.dtype, n=t.VPT)
+        )
+        kch = ln.k_chan(qchs[ki], k_shift)
+        q_taps.append(_conv_taps8(ln, cst_r, qchs[ki]))
+        q_w.append(_conv_weights8(ln, qchs[ki]))
+        k_taps.append(_conv_taps8(ln, cst_r, kch))
+        k_w.append(_conv_weights8(ln, kch))
+    return qn, kn, _ConvQk(qkv_row, cst_r, qchs, q_taps, k_taps, q_w, k_w)
+
+
+@dataclass(frozen=True)
+class _StateIn:
+    """The state read slot and, unless LATE_ROW_INPUTS, every raw state
+    chunk this lane owns, keyed (vi, ki)."""
+
+    state_r: Value
+    s_raw: Optional[dict]
+
+
+def _state_chunk(ln: _Lane, state_r, vi, ki):
+    """This lane's chunk ``ki`` of state row ``vi``, loaded as f32."""
+    off = ln.b.add(ln.s_rows[vi], ln.k_offs[ki])
+    return _load_state_f32(
+        ln.b, state_r, off, state_dtype=ln.spec.state_dtype, n=ln.t.VPT
+    )
+
+
+def _load_state(ln: _Lane) -> _StateIn:
+    """The raw state chunks; the LATE_ROW_INPUTS tile loads each one at its
+    decay instead (:func:`_decay_row`)."""
+    t = ln.t
+    state_r = _slot_ptr(ln.b, ln.a.STATE, ln.read_pool, t.S_SLOT)
+    if t.LATE_ROW_INPUTS:
+        return _StateIn(state_r, None)
+    s_raw = {
+        (vi, ki): _state_chunk(ln, state_r, vi, ki)
+        for vi in range(t.WTV_ITERS)
+        for ki in range(t.WTK_ITERS)
+    }
+    return _StateIn(state_r, s_raw)
+
+
+# One conv channel at a time (each owned v row): its newest value from the
+# packed row, its taps at the read slot, its weights, and the shifted taps at
+# the write slot.
+def _chan_x(ln: _Lane, qkv_row, c):
+    return load_scalar_as_f32(ln.b, ln.a.Vv, ln.b.add(qkv_row, c), dtype=ln.spec.dtype)
+
+
+def _chan_taps(ln: _Lane, cst_r, c):
+    """The CONV_TAPS taps of channel ``c``, oldest first."""
+    b = ln.b
+    return [
+        load_scalar_as_f32(
+            b, cst_r, b.add(ln.cst_chan(c), b.const_i32(j)), dtype=ln.spec.dtype
+        )
+        for j in range(CONV_TAPS)
+    ]
+
+
+def _chan_w(ln: _Lane, c):
+    b = ln.b
+    return _load_f32_vec(
+        b, ln.a.CW, b.mul(c, b.const_i32(CONV_WIDTH)), CONV_WIDTH, align=_VEC_ALIGN
+    )
+
+
+def _store_shifted_taps(ln: _Lane, cst_w, c, taps, x):
+    """Drop channel ``c``'s oldest tap and append its newest value ``x``."""
+    b = ln.b
+    base = ln.cst_chan(c)
+    for j, val in enumerate(list(taps[1:]) + [x]):
+        store_scalar_from_f32(
+            b, cst_w, b.add(base, b.const_i32(j)), val, dtype=ln.spec.dtype
+        )
+
+
+@dataclass(frozen=True)
+class _VRows:
+    """This lane's value inputs, one entry per owned V row. On the
+    LATE_ROW_INPUTS tile the conv inputs stay None here: :func:`_recurrence`
+    loads them in its row loop and returns a copy that carries them."""
+
+    v_idx: list  # element offset of the row in value / out
+    rv: Optional[list] = None  # unfused: the row's v
+    vch: Optional[list] = None  # fuse_conv: the row's v conv channel,
+    v_raw: Optional[list] = None  # its newest value, taps and weights
+    v_taps: Optional[list] = None
+    v_w: Optional[list] = None
+
+
+def _load_v(ln: _Lane, conv: Optional[_ConvQk]) -> _VRows:
+    """This lane's v, one per V row: loaded, or under fuse_conv each row's
+    conv channel and (but on the LATE_ROW_INPUTS tile) its conv inputs."""
+    b, spec, t = ln.b, ln.spec, ln.t
+    v_idx = [
+        b.add(_head_base(b, ln.b_i, ln.hv_i, t.HV, t.DV), v_row) for v_row in ln.v_rows
+    ]
+    if not spec.fuse_conv:
+        rv = [load_scalar_as_f32(b, ln.a.Vv, i, dtype=spec.dtype) for i in v_idx]
+        return _VRows(v_idx, rv=rv)
+    # v channel of each owned row in the packed row / conv state
+    vch = [
+        b.add(
+            b.const_i32(2 * t.HK * t.DK),
+            b.add(b.mul(ln.hv_i, b.const_i32(t.DV)), v_row),
+        )
+        for v_row in ln.v_rows
+    ]
+    if t.LATE_ROW_INPUTS:
+        return _VRows(v_idx, vch=vch)
+    return _VRows(
+        v_idx,
+        vch=vch,
+        v_raw=[_chan_x(ln, conv.qkv_row, c) for c in vch],
+        v_taps=[_chan_taps(ln, conv.cst_r, c) for c in vch],
+        v_w=[_chan_w(ln, c) for c in vch],
+    )
+
+
+def _norm_inputs(ln: _Lane):
+    """Each owned row's out_gate and norm_weight: ``(r_og, r_nw)``."""
+    b, a = ln.b, ln.a
+    og_row = b.add(b.mul(ln.b_i, a.og_stride), b.mul(ln.hv_i, b.const_i32(ln.t.DV)))
+    r_og = [
+        load_scalar_as_f32(b, a.OG, b.add(og_row, v_row), dtype=ln.spec.dtype)
+        for v_row in ln.v_rows
+    ]
+    return r_og, [b.global_load_f32(a.NWT, v_row) for v_row in ln.v_rows]
+
+
+def _gate_math(ln: _Lane, gate_in: _GateIn):
+    """``(decay, beta)`` from the loaded gate inputs. GDN's decay is one
+    scalar; KDA's is a flat list over this lane's K channels."""
+    b, spec = ln.b, ln.spec
+    if spec.gate_kind == "gdn":
+        return _gdn_gate_math(b, *gate_in.head)
+    # KDA: one decay per K channel, for the slice THIS lane owns.
+    #
+    # The state tile is keyed (vi, ki) -- V row and K chunk -- but a
+    # channel's decay does not depend on which V row is being faded, so
+    # the decay is computed once per K channel and reused across all
+    # WTV_ITERS rows. That is what holds the extra register cost to
+    # WTK_ITERS*VPT values instead of multiplying with the state tile.
+    beta, exp_alog = _kda_head_math(b, *gate_in.head)
+    decay = []
+    for gv, dtvec in zip(gate_in.gvs, gate_in.dtvecs):
+        # dt_bias lanes are extracted lazily, next to their use.
+        decay += [
+            _kda_channel_decay(
+                b, spec, exp_alog, gv[i], lambda i=i: b.vec_extract(dtvec, i)
+            )
+            for i in range(ln.t.VPT)
+        ]
+    return decay, beta
+
+
+def _conv_silu(b: IRBuilder, h, w, x):
+    """conv1d + SiLU of one channel. h: CONV_TAPS taps oldest-first,
+    w: CONV_WIDTH weights, x: the newest (current) value."""
+    acc = tree_reduce(b, b.fadd, [b.fmul(t, wt) for t, wt in zip(list(h) + [x], w)])
+    return _silu(b, acc)
+
+
+def _conv_qkv(ln: _Lane, q_raw, k_raw, conv: _ConvQk, v: _VRows):
+    """conv1d + SiLU on this lane's raw q/k chunks and v rows: ``(qn, kn,
+    rv)``. The raw values stay with the caller: they become the newest conv
+    tap. ``rv`` is None on the LATE_ROW_INPUTS tile, whose v conv runs in
+    :func:`_recurrence`'s row loop."""
+    b, t = ln.b, ln.t
+    qn = [
+        [
+            _conv_silu(b, conv.q_taps[ki][i], conv.q_w[ki][i], q_raw[ki][i])
+            for i in range(t.VPT)
+        ]
+        for ki in range(t.WTK_ITERS)
+    ]
+    kn = [
+        [
+            _conv_silu(b, conv.k_taps[ki][i], conv.k_w[ki][i], k_raw[ki][i])
+            for i in range(t.VPT)
+        ]
+        for ki in range(t.WTK_ITERS)
+    ]
+    if t.LATE_ROW_INPUTS:
+        return qn, kn, None
+    rv = [_conv_silu(b, h, w, x) for h, w, x in zip(v.v_taps, v.v_w, v.v_raw)]
+    return qn, kn, rv
+
+
+def _decay_row(ln: _Lane, st: _StateIn, decay, vi):
+    """This lane's decayed K values of state row ``vi``. A KDA decay chunk
+    covers the same K channels as state chunk ki, in the same order, and is
+    reused across every vi. The LATE_ROW_INPUTS tile loads each chunk here,
+    as the parent order did."""
+    spec, t = ln.spec, ln.t
+    row = []
+    for ki in range(t.WTK_ITERS):
+        if t.LATE_ROW_INPUTS:
+            vec = _state_chunk(ln, st.state_r, vi, ki)
+        else:
+            vec = st.s_raw[(vi, ki)]
+        row += _forget(
+            ln.b, spec, vec, decay if spec.gate_kind == "gdn" else ln.chunk(decay, ki)
+        )
+    return row
+
+
+def _recurrence(ln: _Lane, st: _StateIn, decay, beta, qn, kn, rv, v, conv):
+    """The gated delta rule on this lane's rows: scale q/k, dot(k, q), fade
+    every state row, then per row S.k, S.q, the delta value, the output and
+    the rank-1 update stored to the write slot: ``(outs, v)``. Unfused, each
+    row's k-lane-0 owner stores its output here; under fuse_out_norm
+    ``outs`` holds the outputs for :func:`_out_norm`. The LATE_ROW_INPUTS
+    tile loads and convolves each row's v here, and ``v`` is returned with
+    those conv inputs for the tap shift."""
+    b, spec, t = ln.b, ln.spec, ln.t
+    qn, kn = _scale_qk(
+        b,
+        [x for c in qn for x in c],
+        [x for c in kn for x in c],
+        use_l2norm=spec.use_qk_l2norm,
+        scale=1.0 / math.sqrt(t.DK),
+        reduce=ln.head_sum,
+    )
+    dot_kq = _dot(b, kn, qn, ln.head_sum)
+
+    sv = [_decay_row(ln, st, decay, vi) for vi in range(t.WTV_ITERS)]
+    state_w = _slot_ptr(b, ln.a.STATE, ln.write_pool, t.S_SLOT)
+    outs = []  # per-row outputs the fused norm needs
+    if t.LATE_ROW_INPUTS:
+        rv, v_raw, v_taps = [], [], []
+    for vi in range(t.WTV_ITERS):
+        phk = _dot(b, sv[vi], kn, ln.head_sum)
+        phq = _dot(b, sv[vi], qn, ln.head_sum)
+        if t.LATE_ROW_INPUTS:
+            v_raw.append(_chan_x(ln, conv.qkv_row, v.vch[vi]))
+            v_taps.append(_chan_taps(ln, conv.cst_r, v.vch[vi]))
+            rv.append(_conv_silu(b, v_taps[vi], _chan_w(ln, v.vch[vi]), v_raw[vi]))
+        # v_new is in-group uniform (rv, broadcast phk, beta) - no bcast.
+        v_new = b.fmul(b.fsub(rv[vi], phk), beta)
+        out_val = b.fadd(phq, b.fmul(v_new, dot_kq))
+        if spec.fuse_out_norm:
+            outs.append(out_val)  # stored after the cross-wave norm
+        else:
+            with b.scf_if(ln.is_k_lane0()):
+                store_scalar_from_f32(
+                    b, ln.a.OUT, v.v_idx[vi], out_val, dtype=spec.dtype
+                )
+        for ki in range(t.WTK_ITERS):
+            new = [
+                b.fma(k, v_new, s)
+                for k, s in zip(ln.chunk(kn, ki), ln.chunk(sv[vi], ki))
+            ]
+            vec = _pack_state(b, new, state_dtype=spec.state_dtype)
+            off = b.add(ln.s_rows[vi], ln.k_offs[ki])
+            _store_state(b, state_w, off, vec, state_dtype=spec.state_dtype, n=t.VPT)
+    if t.LATE_ROW_INPUTS:
+        v = replace(v, v_raw=v_raw, v_taps=v_taps)
+    return outs, v
+
+
+def _out_norm(ln: _Lane, outs, v_idx, r_norm):
+    """Gated RMSNorm over the head's DV outputs, stored by each row's
+    k-lane-0 owner.
+
+    The gate activation follows the gate kind (OUT_GATE_ACTIVATION). Every
+    k-lane of a row holds the same out_val, so only k-lane 0 contributes to
+    the sum of squares. For NW > 1 the cross-wave reduction issues a
+    workgroup barrier after every wave has written its partial, i.e. after
+    every wave's tap reads (taps -> outs -> partial).
+    """
+    b, spec, t = ln.b, ln.spec, ln.t
+    gate_act = _silu if spec.out_gate_activation == "silu" else _sigmoid
+    if t.LATE_ROW_INPUTS:
+        r_norm = _norm_inputs(ln)
+    r_og, r_nw = r_norm
+    ss = tree_reduce(b, b.fadd, [b.fmul(o, o) for o in outs])
+    contrib = b.select(ln.is_k_lane0(), ss, b.const_f32(0.0))
+    total = block_lds_reduce_with_wave_prologue(
+        b, contrib, ln.a.lds_rn, ln.tid, block_size=t.BS, wave_size=t.WAVE
+    )
+    rstd = b.rsqrt(b.fadd(b.fmul(total, b.const_f32(1.0 / t.DV)), ln.a.norm_eps))
+    for vi in range(t.WTV_ITERS):
+        gate = gate_act(b, r_og[vi])
+        y = b.fmul(b.fmul(b.fmul(outs[vi], rstd), r_nw[vi]), gate)
+        with b.scf_if(ln.is_k_lane0()):
+            store_scalar_from_f32(b, ln.a.OUT, v_idx[vi], y, dtype=spec.dtype)
+
+
+def _shift_conv_taps(ln: _Lane, q_raw, k_raw, conv: _ConvQk, v: _VRows):
+    """Shift the conv taps in place: drop the oldest, append the raw
+    current token.
+
+    Other waves read the same q/k taps, so every wave must be past its tap
+    reads before any tap is overwritten. With the norm on, its reduction
+    barrier already orders that; otherwise one barrier is emitted here. One
+    wave needs none.
+    """
+    b, spec, t = ln.b, ln.spec, ln.t
+    if t.NW > 1 and not spec.fuse_out_norm:
+        b.sync()
+    cst_w = _slot_ptr(b, ln.a.CST, ln.write_pool, t.CST_SLOT)
+    # q/k channels: one writer group (wave 0, v-lane 0), each k-lane
+    # writing its 8 channels x CONV_TAPS shifted taps.
+    with b.scf_if(b.cmp_eq(ln.gv_start, b.const_i32(0))):
+        for ki in range(t.WTK_ITERS):
+            qch = conv.qchs[ki]
+            kch = ln.k_chan(qch)
+            for ch, taps, raw in ((qch, conv.q_taps, q_raw), (kch, conv.k_taps, k_raw)):
+                shifted = []
+                for i in range(t.VPT):
+                    shifted += list(taps[ki][i][1:]) + [raw[ki][i]]
+                for j in range(CONV_TAPS):
+                    store_vec(
+                        b,
+                        cst_w,
+                        b.add(ln.cst_chan(ch), b.const_i32(8 * j)),
+                        pack_f32_to(b, shifted[8 * j : 8 * j + 8], dtype=spec.dtype),
+                        n=8,
+                    )
+    # v channels: the k-lane-0 owner of each row
+    with b.scf_if(ln.is_k_lane0()):
+        for vi in range(t.WTV_ITERS):
+            _store_shifted_taps(ln, cst_w, v.vch[vi], v.v_taps[vi], v.v_raw[vi])
 
 
 def gdn_decode_pointer_alignment(spec: GdnDecodeSpec) -> Dict[str, int]:
