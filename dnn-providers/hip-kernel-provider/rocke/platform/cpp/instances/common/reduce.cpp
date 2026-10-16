@@ -558,13 +558,13 @@ rocke_kernel_def_t*
         }
 
         /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):
-         *     if is_f64: b.global_store(Y, row, total)
+         *     if is_f64: b.global_store(Y, row, total, align=8)
          *     else: store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype) */
         {
             rocke_if_t iff = rocke_b_scf_if(b, rocke_b_cmp_eq(b, tid, rocke_b_const_i32(b, 0)));
             rocke_b_region_enter(b, iff.then_region);
             if(is_f64)
-                rocke_b_global_store(b, Y, row, total, 0);
+                rocke_b_global_store(b, Y, row, total, 8);
             else
                 rocke_b_store_scalar_from_f32(b, Y, row, total, spec->dtype);
             rocke_b_region_leave(b);

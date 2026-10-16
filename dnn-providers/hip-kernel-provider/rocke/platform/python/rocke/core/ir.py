@@ -1963,6 +1963,9 @@ class IRBuilder:
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
 
+    def global_load_f64(self, ptr: Value, idx: Value, *, align: int = 8) -> Value:
+        return self.global_load(ptr, idx, F64, align=align)
+
     def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, I8, align=align)
 

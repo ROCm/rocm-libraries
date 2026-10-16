@@ -319,7 +319,7 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
 
     with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
         if is_f64:
-            b.global_store(Y, row, total)
+            b.global_store(Y, row, total, align=8)
         else:
             store_scalar_from_f32(b, Y, row, total, dtype=spec.dtype)
 
