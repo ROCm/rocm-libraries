@@ -175,15 +175,21 @@ def _apply(op, a: list[int], bits: int) -> int:
         return a[0] ^ a[1]
     if name == "arith.smin":
         return min(a)
+    if name == "arith.smax":
+        return max(a)
     if name == "arith.cmp":
         x, y = a
         if op.attrs["pred"] == "ult":
-            return int(x % 2**32 < y % 2**32)
-        return int({"ge": x >= y, "lt": x < y}[op.attrs["pred"]])
+            unsigned = 1 << _BITS[op.operands[0].type.name]
+            return int(x % unsigned < y % unsigned)
+        return int({"ge": x >= y, "lt": x < y, "gt": x > y}[op.attrs["pred"]])
     if name == "arith.select":
         return a[1] if a[0] else a[2]
     if name in ("arith.zext", "arith.sext"):
         return a[0]
+    if name == "arith.trunc":
+        low = a[0] % span
+        return low - span if low >= span // 2 else low
     if name == "arith.umul_hi_i32":
         high = ((a[0] % 2**32) * (a[1] % 2**32)) >> 32
         return high - 2**32 if high >= 2**31 else high

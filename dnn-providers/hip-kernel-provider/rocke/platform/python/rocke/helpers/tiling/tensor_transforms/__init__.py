@@ -20,9 +20,12 @@ The door, one line per concept (``graph.py`` unless noted):
     ``RuntimeValue`` (``ranges.py``)   a runtime integer with its stated range and multiple-of
         fact, received from the tiling layer and passed on as a length; read-only (``.value`` is
         the IR value, ``str()`` its facts).
-    ``ElementAddress`` / ``UniformTerm`` (``emit.py``)   an emitted element address split into
-        wave-uniform terms (one per set of graph inputs), one per-lane part and a constant; read,
-        never built.
+    ``emit_accesses`` (``emit.py``)   each access's split element address and its validity
+        against the tensor's own bounds, over one shared table; a vector along one graph input
+        keeps one validity (and the span of its valid elements when that differs between them).
+    ``Access`` / ``ElementAddress`` / ``UniformTerm`` (``emit.py``)   what ``emit_accesses``
+        returns: the address split into wave-uniform terms (one per set of graph inputs), one
+        per-lane part and a constant, and the i1 validity; read, never built.
 
 The toolbox, for tests and custom memory code (``ranges.py``; pure Python, no IR; ranges are
 half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order):
@@ -38,12 +41,23 @@ The emitting toolbox (``emit.py``; builder first, IR side effects; coordinates a
 values or ints, one per graph input in ``inputs(...)`` order):
     ``emit_coords``   every named coordinate of a graph as one emitted value.
     ``emit_addresses``   one ``ElementAddress`` per access, all accesses over one shared table.
+    ``emit_access_validity``   each access's validity alone (``None``: statically valid).
+    ``emit_bound_check``   the one predicate: ``lo <= value < hi`` for one plain value.
 """
 
 from __future__ import annotations
 
 from .address import address_of, transform_address_of
-from .emit import ElementAddress, UniformTerm, emit_addresses, emit_coords
+from .emit import (
+    Access,
+    ElementAddress,
+    UniformTerm,
+    emit_access_validity,
+    emit_accesses,
+    emit_addresses,
+    emit_bound_check,
+    emit_coords,
+)
 from .graph import (
     BroadcastParams,
     Edge,
@@ -81,6 +95,7 @@ from .ranges import (
 )
 
 __all__ = [
+    "Access",
     "BoundCheck",
     "BroadcastParams",
     "CheckReason",
@@ -103,7 +118,10 @@ __all__ = [
     "address_of",
     "broadcast",
     "embed",
+    "emit_access_validity",
+    "emit_accesses",
     "emit_addresses",
+    "emit_bound_check",
     "emit_coords",
     "freeze",
     "graph_injective",
