@@ -184,6 +184,22 @@ class ShapeTests(unittest.TestCase):
                                 with self.assertRaises(RuntimeError):
                                     shape.coordinates(expected, order)
 
+    def test_coordinate_bounds_before_arithmetic(self):
+        shape = hn.Shape([SIZE_MAX, 2, 0])
+        for order in itertools.permutations(range(shape.rank)):
+            for indices, dimension, coordinate, extent in (
+                ([SIZE_MAX - 1, 1, 0], 2, 0, 0),
+                ([0, 1, 5], 2, 5, 0),
+                ([SIZE_MAX, 1, 0], 0, SIZE_MAX, SIZE_MAX),
+            ):
+                with self.subTest(order=order, indices=indices):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        rf"coordinate {coordinate} in dimension {dimension} is outside "
+                        rf"\[0, {extent}\)",
+                    ):
+                        shape.linear_index(indices, order)
+
     def test_projection(self):
         shape = hn.Shape([2, 3, 4])
         self.assertEqual(shape.project([2, 0]).dimensions, [4, 2])
