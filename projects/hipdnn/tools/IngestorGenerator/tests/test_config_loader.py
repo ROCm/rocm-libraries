@@ -5,6 +5,9 @@
 configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
 rejection, and the kernel_source_kind rejections."""
 
+import sys
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -187,6 +190,77 @@ class TestKernelArchSubsetOfPackCheck:
         pack = make_pack(arch=[], kernels=[kernel])
         config = make_minimal_config(packs=[pack])
         _check_kernel_arch_subset_of_pack(config)  # does not raise
+
+
+class TestGenericArchRules:
+    """Generic-target rules; ``gfx11-generic`` holds gfx1100..gfx1153, ``gfx12-generic`` gfx1200/gfx1201."""
+
+    @staticmethod
+    def _config(pack_arch, kernel_arch, kind=None):
+        extra = {"kernel_source": KernelSource(kind=kind)} if kind else {}
+        kernel = make_kernel(arch=kernel_arch, **extra)
+        return make_minimal_config(packs=[make_pack(arch=pack_arch, kernels=[kernel])])
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx11-generic"], ["gfx11-generic"]),
+            (["gfx942", "gfx11-generic"], ["gfx942", "gfx11-generic"]),
+        ],
+    )
+    def test_accepted_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx9-4-generic"], []),
+            ([], ["gfx9-4-generic"]),
+            (["gfx11-generic", "gfx1151"], []),
+            (["gfx1151", "gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], ["gfx1151", "gfx11-generic"]),
+            ([], ["gfx11-generic"]),
+            (["gfx942"], ["gfx11-generic"]),
+            (["gfx11-generic"], ["gfx1151"]),
+            (["gfx11-generic", "gfx12-generic"], ["gfx11-generic"]),
+        ],
+    )
+    def test_rejected_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], []),
+            ([], ["gfx11-generic"]),
+        ],
+    )
+    def test_rocke_under_a_generic_is_rejected(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch, kind="rocke"))
+
+    def test_known_generic_produces_no_unrecognised_arch_warning(self):
+        from codegen.config_loader import _check_arch_shape
+
+        assert _check_arch_shape(self._config(["gfx11-generic"], [])) == []
+
+    def test_an_expanded_subset_is_accepted_by_the_coverage_check(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        _check_kernel_arch_subset_of_pack(self._config(["gfx11-generic"], ["gfx1151"]))
+        with pytest.raises(ConfigError):
+            _check_kernel_arch_subset_of_pack(
+                self._config(["gfx11-generic"], ["gfx1250"])
+            )
 
 
 class TestArchShapeCheck:

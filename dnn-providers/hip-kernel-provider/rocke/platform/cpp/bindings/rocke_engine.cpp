@@ -52,6 +52,7 @@ extern "C" {
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
 #include "rocke/instance_gemm_universal.h"
+#include "rocke/instance_gfx950_block_scaled_gemm.h"
 #include "rocke/instance_grouped_gemm.h"
 #include "rocke/instance_matmul_nbits.h"
 #include "rocke/instance_mfma_gemm.h"
@@ -1031,6 +1032,63 @@ std::vector<std::string> mx_gemm_verify(const py::dict& d, const std::string& ar
                              rocke_build_mx_gemm_new(&b, &s, arch_or_default(arch)));
 }
 
+rocke_gfx950_block_scaled_gemm_spec_t gfx950_scaled_build_spec(const py::dict& d,
+                                                               std::deque<std::string>& store)
+{
+    auto s = rocke_gfx950_block_scaled_gemm_spec_default();
+    s.M = dict_int(d, "M", s.M);
+    s.N = dict_int(d, "N", s.N);
+    s.K = dict_int(d, "K", s.K);
+    s.block_k = dict_int(d, "block_k", s.block_k);
+    const char* fields[] = {"name", "dtype_a", "dtype_b", "dtype_c"};
+    const char** outputs[] = {&s.name, &s.dtype_a, &s.dtype_b, &s.dtype_c};
+    for(int i = 0; i < 4; ++i)
+    {
+        std::string v;
+        if(dict_str(d, fields[i], v))
+        {
+            store.push_back(v);
+            *outputs[i] = store.back().c_str();
+        }
+    }
+    return s;
+}
+std::string gfx950_scaled_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_SERIALIZE_BODY(
+        "rocke_engine.gfx950_block_scaled_gemm_serialize_ir",
+        rocke_gfx950_block_scaled_gemm_spec_t,
+        gfx950_scaled_build_spec,
+        rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch)));
+}
+std::vector<std::string> gfx950_scaled_verify(const py::dict& d, const std::string& arch)
+{
+    ROCKE_FAMILY_VERIFY_BODY(
+        "rocke_engine.gfx950_block_scaled_gemm_verify",
+        rocke_gfx950_block_scaled_gemm_spec_t,
+        gfx950_scaled_build_spec,
+        rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch)));
+}
+std::string gfx950_scaled_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    std::deque<std::string> store;
+    auto s = gfx950_scaled_build_spec(d, store);
+    rocke_ir_builder_t b;
+    auto* k = rocke_build_gfx950_block_scaled_gemm_new(&b, &s, arch_or_default(arch));
+    if(!k)
+    {
+        std::string err = rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(err);
+    }
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP] = {};
+    auto status = rocke_lower_kernel_to_llvm_ex(
+        k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof(err));
+    rocke_ir_builder_free(&b);
+    return take_lowered(status, ll, err, "gfx950_block_scaled_gemm");
+}
+
 /* ============================== mfma GEMM ============================= */
 
 rocke_mfma_gemm_spec_t mfma_build_spec(const py::dict& d, std::deque<std::string>& store)
@@ -1528,6 +1586,7 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     }
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
     s.groups = dict_int(d, "groups", s.groups);
+    s.group_merge = dict_int(d, "group_merge", s.group_merge);
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
@@ -3386,7 +3445,7 @@ rocke_fmha_mask_mode_t parse_fmha_mask(const std::string& s)
 {
     if(s == "causal")
         return ROCKE_FMHA_MASK_CAUSAL;
-    if(s == "sliding_window")
+    if(s == "window" || s == "sliding_window")
         return ROCKE_FMHA_MASK_SLIDING_WINDOW;
     if(s == "alibi")
         return ROCKE_FMHA_MASK_ALIBI;
@@ -3403,16 +3462,38 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
     };
     rocke_wmma_fmha_fwd_spec_t s = rocke_wmma_fmha_fwd_spec_default();
     s.head_size = dict_int(d, "head_size", s.head_size);
-    s.num_query_heads = dict_int(d, "num_query_heads", s.num_query_heads);
-    s.num_kv_heads = dict_int(d, "num_kv_heads", s.num_kv_heads);
     s.v_lds_stage = dict_bool(d, "v_lds_stage", s.v_lds_stage);
-    s.sliding_window = dict_int(d, "sliding_window", s.sliding_window);
+    s.query_tail = dict_bool(d, "query_tail", s.query_tail);
+    s.kv_tail = dict_bool(d, "kv_tail", s.kv_tail);
+    s.use_softcap = dict_bool(d, "use_softcap", s.use_softcap);
+    s.use_sinks = dict_bool(d, "use_sinks", s.use_sinks);
+    s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
+    s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
+    s.transposed_qk = dict_bool(d, "transposed_qk", s.transposed_qk);
+    s.block_n = dict_int(d, "block_n", s.block_n);
+    s.num_waves = dict_int(d, "num_waves", s.num_waves);
+    s.value_tile_size = dict_int(d, "value_tile_size", s.value_tile_size);
+    s.causal_tile_skip = dict_bool(d, "causal_tile_skip", s.causal_tile_skip);
+    s.v_head_size = dict_int(d, "v_head_size", s.v_head_size);
+    s.use_attn_bias = dict_bool(d, "use_attn_bias", s.use_attn_bias);
+    s.runtime_head_dims = dict_bool(d, "runtime_head_dims", s.runtime_head_dims);
     {
         std::string v;
         if(dict_str(d, "mask_mode", v))
             s.mask_mode = parse_fmha_mask(v);
+        if(dict_str(d, "dtype", v))
+            s.dtype = keep(v);
+        if(dict_str(d, "layout", v))
+            s.layout = keep(v);
+        if(dict_str(d, "kv_dtype", v))
+            s.kv_dtype = keep(v);
+        if(dict_str(d, "bias_dtype", v))
+            s.bias_dtype = keep(v);
         if(dict_str(d, "name", v))
             s.name = keep(v);
+        if(dict_str(d, "scheduler_strategy", v))
+            s.scheduler_strategy = keep(v);
     }
     return s;
 }
@@ -3786,6 +3867,10 @@ PYBIND11_MODULE(rocke_engine, m)
          &block_scale_gemm_lower_llvm,
          &block_scale_gemm_serialize_ir,
          &block_scale_gemm_verify);
+    reg3("gfx950_block_scaled_gemm",
+         &gfx950_scaled_lower_llvm,
+         &gfx950_scaled_serialize_ir,
+         &gfx950_scaled_verify);
     reg3("mx_gemm", &mx_gemm_lower_llvm, &mx_gemm_serialize_ir, &mx_gemm_verify);
     reg3("mfma_gemm", &mfma_gemm_lower_llvm, &mfma_gemm_serialize_ir, &mfma_gemm_verify);
     m.def("mfma_gemm_is_valid", &mfma_gemm_is_valid, py::arg("spec"), py::arg("arch") = "gfx950");

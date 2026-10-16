@@ -130,6 +130,7 @@ def build_conv(
     epilogue="default",
     groups=1,
     vector_size_c=None,
+    group_merge=1,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
@@ -155,6 +156,7 @@ def build_conv(
             epilogue=epilogue,
             groups=groups,
             vector_size_c=vector_size_c,
+            group_merge=group_merge,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -632,12 +634,12 @@ def build_attention_d256_gfx950(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx950_fast(problem):
+            if not _d256_gfx950_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 fast spec not selected under pinned arch {arch!r}; "
                     "would pin the fallback (no pad/interleave)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
                 raise RuntimeError(
                     "expected pad+interleave in the D256 fast spec; got "
@@ -667,12 +669,12 @@ def build_attention_d256_gfx942(arch):
 
         problem = _d256_problem()
         with _pinned_attention_arch(arch):
-            if not _d256_gfx942_fast(problem):
+            if not _d256_gfx942_fast(problem, arch):
                 raise RuntimeError(
                     f"D256 gfx942 fast route not selected under pinned arch "
                     f"{arch!r}; would pin the fallback (slow scalar path)"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             return build_gfx942_4warp_gqa(spec, arch=arch)
 
     return _build
@@ -718,7 +720,7 @@ def build_attention_d128_swa_fold_gfx942(arch):
                     f"GQA head-fold not selected under pinned arch {arch!r}; "
                     "would pin the unfolded kernel"
                 )
-            spec = _tiled_spec_from_problem(problem)
+            spec = _tiled_spec_from_problem(problem, arch)
             kernel = build_gfx942_4warp_gqa(spec, arch=arch)
             if not kernel.name.endswith("_4wgqa_fold"):
                 raise RuntimeError(
@@ -1285,6 +1287,52 @@ def build_streaming_copy(arch):
     return _build
 
 
+def build_warp_shuffle_xor_dpp_reduce(arch, masks):
+    """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
+    pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
+    exist for, so a change that alters the op's IR in both engines at once
+    still trips the golden. gfx9 uses masks 1, 2, 7, 15 (quad_perm x2,
+    row_half_mirror, row_mirror); a row_xmask target uses 1, 2, 4, 8."""
+
+    def _build():
+        from rocke.core.ir import I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_reduce_{arch}")
+        src = b.param("S", PtrType(I32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(I32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        acc = b.global_load(src, tid, I32, align=4)
+        for m in masks:
+            acc = b.add(acc, b.warp_shuffle_xor_dpp(acc, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
+def build_warp_shuffle_xor_dpp_masks_f32(arch):
+    """f32 shuffle by every register-only gfx9 mask (1, 2, 3, 7, 8, 15),
+    summed: pins each table entry and the f32 <-> i32 bitcast path."""
+
+    def _build():
+        from rocke.core.ir import F32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_warp_shuffle_xor_dpp_masks_f32_{arch}")
+        src = b.param("S", PtrType(F32, "global"), noalias=True, readonly=True)
+        dst = b.param("D", PtrType(F32, "global"), noalias=True)
+        tid = b.thread_id_x()
+        x = b.global_load(src, tid, F32, align=4)
+        acc = x
+        for m in (1, 2, 3, 7, 8, 15):
+            acc = b.fadd(acc, b.warp_shuffle_xor_dpp(x, m))
+        b.global_store(dst, tid, acc, align=4)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1741,6 +1789,84 @@ def cases():
             tile_k=32,
             pipeline="basic",
             epilogue="cshuffle",
+        ),
+    )
+
+    # Conv forward + merged groups (group_merge).
+    #
+    # Merging folds Gm conv groups into one GEMM so the vector-width picker
+    # sees Gm channels per group instead of 1. It is admissible only on
+    # depthwise shapes (cpg == kpg == 1), so these cases need their own
+    # problem: conv1/conv2 above are dense and would be rejected by the gate.
+    #
+    # conv_dw is depthwise -- C == K == groups == 64, so cpg == kpg == 1 and
+    # M == 2*14*14 == 392. The variants below span the axes that actually
+    # change emitted IR under merge, which is what makes the golden a
+    # regression gate rather than a single smoke hash:
+    #   - dw_unmerged is the group_merge=1 control. Without it a drift in the
+    #     merged hashes could not be attributed to the merge path rather than
+    #     to the depthwise path, which carried no coverage here at all.
+    #   - dw_unmerged_cshuffle pins the Gm=1 cshuffle store width: it derives
+    #     from kpg (_vec(1) = 1 here) rather than a fixed 8, which failed the
+    #     whole-vector bound and dropped every output. Python twin of parity
+    #     config 28.
+    #   - gm4/gm8/gm32 vary the shift and mask width (log2 Gm) of the merged
+    #     k decode that feeds both the A channel and the B-load diagonal.
+    #   - gm64 is Gm == groups: one merged group, but the grouped decode stays
+    #     engaged because an AOT binary serves every group count Gm divides.
+    #   - dw_gm4_direct pins vector_size_c=1 to reach _emit_direct_epilogue.
+    #     Merged kpg otherwise auto-derives vec_c > 1, which the validator
+    #     turns into a cshuffle requirement, so without the pin every merged
+    #     case here would exercise only the cshuffle epilogue.
+    # The gfx942 case checks that merging is arch-independent: it shares the
+    # emitter path with gfx950 and differs only in atom and tile shape.
+    conv_dw = (2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1, 64)
+    for tag, gm, epi, vec_c in (
+        ("dw_unmerged", 1, "default", None),
+        ("dw_unmerged_cshuffle", 1, "cshuffle", None),
+        ("dw_gm4_direct", 4, "default", 1),
+        ("dw_gm8_cshuffle", 8, "cshuffle", None),
+        ("dw_gm32_cshuffle", 32, "cshuffle", None),
+        ("dw_gm64_cshuffle", 64, "cshuffle", None),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n2h14c64k64r3g64/{tag}",
+            "gfx950",
+            build_conv(
+                f"irhash_conv_950_{tag}",
+                "gfx950",
+                conv_dw,
+                wave_size=64,
+                wtm=32,
+                wtn=32,
+                wtk=16,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline="mem",
+                epilogue=epi,
+                vector_size_c=vec_c,
+                group_merge=gm,
+            ),
+        )
+    add(
+        "conv",
+        "conv/gfx942/n2h14c64k64r3g64/dw_gm8_cshuffle",
+        "gfx942",
+        build_conv(
+            "irhash_conv_942_dw_gm8",
+            "gfx942",
+            conv_dw,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
+            tile_n=32,
+            tile_k=16,
+            epilogue="cshuffle",
+            group_merge=8,
         ),
     )
 
@@ -2582,6 +2708,23 @@ def cases():
             "gfx1201",
             h=24,
             w=24,
+            c=16,
+            k0=32,
+            k1=32,
+            pool_tile_h=4,
+            pool_tile_w=4,
+            epilogue="cshuffle",
+        ),
+    )
+    add(
+        "deep_fused_conv",
+        "deep/gfx12_generic/h16w16_k32",
+        "gfx12-generic",
+        build_deep(
+            "gfx1201",
+            "gfx12-generic",
+            h=16,
+            w=16,
             c=16,
             k0=32,
             k1=32,
@@ -3821,6 +3964,28 @@ def cases():
             _arch,
             build_streaming_copy(_arch),
         )
+
+    # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP
+    # encoding per mask; a row_xmask target (gfx1201) keeps 0x160 | mask.
+    for _arch in ("gfx942", "gfx950"):
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_reduce_i32",
+            _arch,
+            build_warp_shuffle_xor_dpp_reduce(_arch, (1, 2, 7, 15)),
+        )
+        add(
+            "crosslane",
+            f"crosslane/{_arch}/warp_shuffle_xor_dpp_masks_f32",
+            _arch,
+            build_warp_shuffle_xor_dpp_masks_f32(_arch),
+        )
+    add(
+        "crosslane",
+        "crosslane/gfx1201/warp_shuffle_xor_dpp_reduce_i32",
+        "gfx1201",
+        build_warp_shuffle_xor_dpp_reduce("gfx1201", (1, 2, 4, 8)),
+    )
 
     return out
 

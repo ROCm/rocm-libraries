@@ -230,7 +230,7 @@ Decide what the kernel computes before deciding how it should run.
   fields explicitly; e.g. `UnifiedAttention2DTiledSpec.dtype="bf16"`,
   `kv_storage_dtype="fp8e4m3"` for the FP8 KV cache path.
 - DSL dtype catalog: `I1`, `I8`, `I16`, `I32`, `I64`, `BF16`, `F16`,
-  `F32`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
+  `F32`, `F64`, `FP8E4M3`, `BF8E5M2` (see `core/ir.py:34-97`).
 - Quantization helpers in `helpers/quant.py` (`quant_max_abs`,
   `quantize_scalar_f32`, `dequantize_scalar_to_f32`, `quant_ir_type`,
   `ir_to_qdtype`). `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`.
@@ -242,6 +242,9 @@ Decide what the kernel computes before deciding how it should run.
   norm `<= 5e-3` (was 2.5e-3 before noise widening, see
   `notes/PROPOSALS_IMPLEMENTATION_REPORT.md::F2`), reduce `<= 1.5e-3`,
   gemm `<= 7e-2`).
+- fp64 kernels compute natively in f64 and are checked against a float64
+  reference (`tests/instances/differential/numeric.py`: elementwise
+  `<= 1e-12`, reduce `<= 1e-10`).
 - For fp16 inputs with fp32 accumulation over O(100) terms, expect
   errors near the fp16 ULP floor for correct kernels. Errors two
   orders of magnitude higher almost always indicate structural bugs
@@ -1828,6 +1831,7 @@ they exist, live under `instances/<arch>/<kernel>.py`) and read the
 | `block_q` | DirectConv | 16 / 4 | Q output rows per CTA | bigger ⇒ more LDS for input rows |
 | `block_groups` | DirectConv | 8 / 16 | Conv groups per CTA | Sweep ±1: 16c best was BLOCK_GROUPS=4, not 8 (§17.1) |
 | `groups` | conv_implicit_gemm | 1 | Grouped conv via descriptor `unmerge("group")` | `> 1` for ResNeXt / depthwise-style |
+| `group_merge` | conv_implicit_gemm (fwd), conv_implicit_gemm_wgrad | 1 | Folds `Gm` conv groups into one GEMM so the per-group channel count the vector-width picker sees becomes `Gm` instead of 1, restoring a wide load where the depthwise one was scalar. Fwd puts the group on GemmN and GemmK and masks off-diagonal **weights** on the B load, so the redundant work lands in idle MFMA N-lanes and costs no memory traffic; wgrad puts it on M and N instead | Depthwise only (`cpg == kpg == 1`), `wave_size == 64`. Must divide `groups` and fit `tile_n`. Fwd also excludes `async_dma`, pointwise (`Y == X == 1`) and 3-D; wgrad also excludes `split_k > 1` without `two_stage`. Larger `Gm` widens the load but adds masked compute, so the best degree is shape-dependent and **turns over** — sweep it rather than maxing it. Inert at `1`; see [`examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md`](../../python/rocke/examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md) |
 | `k0_k1_split` | conv_implicit_gemm | False | K0/K1 inner-dim split for `CoalescedTileLoader` | When C is the natural contiguous dim |
 | `n_acc_slots` (derived) | DirectConv | KH | Circular accumulators for row streaming | Conv 3×3 → 3 slots |
 

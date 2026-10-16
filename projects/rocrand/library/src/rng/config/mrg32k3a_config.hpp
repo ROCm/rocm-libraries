@@ -44,6 +44,8 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MRG32K3A, T>
             case target_arch::gfx908: return 1024;
             case target_arch::gfx906: return 256;
             case target_arch::gfx1150: return 1024;
+            case target_arch::gfx1170: return 1024;
+            case target_arch::gfx1171: return 1024;
             case target_arch::gfx1201: return 1024;
             case target_arch::gfx950: return 1024;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MRG32K3A, T>::threads;
@@ -64,6 +66,8 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MRG32K3A, T>
             case target_arch::gfx908: return 600;
             case target_arch::gfx906: return 2048;
             case target_arch::gfx1150: return 128;
+            case target_arch::gfx1170: return 128;
+            case target_arch::gfx1171: return 128;
             case target_arch::gfx1201: return 256;
             case target_arch::gfx950: return 512;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MRG32K3A, T>::blocks;
