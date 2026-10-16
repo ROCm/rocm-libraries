@@ -3538,7 +3538,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                     end = std::min(end, std::max(0, w - barrierReserve));
                                 else
                                     start = std::max(start, w);
-                            } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst)) {
+                            } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
+                                       !isDSRead(*deps.dag.nodes[m].inst)) {
                                 next.push_back(m);
                             }
                         }
