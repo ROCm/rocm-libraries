@@ -119,6 +119,10 @@ class TestIngestorConfigDerivation:
         config = make_minimal_config(packs=[make_pack(arch=["gfx1201", "gfx1200"])])
         assert config.device_fixture_arch == "gfx1201"
 
+    def test_device_fixture_arch_of_a_generic_pack_is_its_first_member(self):
+        config = make_minimal_config(packs=[make_pack(arch=["gfx11-generic"])])
+        assert config.device_fixture_arch == "gfx1100"
+
     def test_device_fixture_arch_falls_back_when_no_pack_names_one(self):
         config = make_minimal_config(packs=[make_pack()])
         assert not config.packs[0].arch

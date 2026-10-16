@@ -38,6 +38,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericTargets.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelDefinition.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelIngestorStateManager.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
@@ -194,3 +195,64 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_property(GLOBAL APPEND_STRING PROPERTY
                  HIPDNN_INSTALLED_CTEST_STAGING "${_disk_cache_installed_tests}")
 endif()
+
+# Validator tests for data/gpu_generic_targets.json; build tree only (not staged into the
+# installed CTestTestfile.cmake). PASS_REGULAR_EXPRESSION rather than WILL_FAIL so a crash
+# does not pass. CMake wraps messages at spaces, so spaces match any whitespace run.
+set(_generic_targets_check "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckGpuGenericTargets.cmake")
+
+add_test(
+    NAME hipdnn_gpu_generic_targets_accepts_real_table
+    COMMAND ${CMAKE_COMMAND} -DGENERIC_TARGETS_JSON=${HIPDNN_GPU_GENERIC_TARGETS_JSON_SOURCE} -P
+            ${_generic_targets_check}
+)
+set_tests_properties(
+    hipdnn_gpu_generic_targets_accepts_real_table PROPERTIES PASS_REGULAR_EXPRESSION
+                                                             "gpu_generic_targets: valid"
+)
+_apply_hipdnn_test_category_labels(hipdnn_gpu_generic_targets_accepts_real_table)
+
+# Registers a build-tree test: mutate the real table, expect the validator to reject it with expected_text.
+function(_hipdnn_add_generic_targets_rejection_test case op path value expected_text)
+    string(REPLACE " " "[ \n]+" expected_regex "${expected_text}")
+    set(test_name hipdnn_gpu_generic_targets_rejects_${case})
+    add_test(
+        NAME ${test_name}
+        COMMAND
+            ${CMAKE_COMMAND} -DGENERIC_TARGETS_JSON=${HIPDNN_GPU_GENERIC_TARGETS_JSON_SOURCE}
+            -DMUTATION_OP=${op} -DMUTATION_PATH=${path} "-DMUTATION_VALUE=${value}"
+            -DMUTATED_JSON=${CMAKE_CURRENT_BINARY_DIR}/generic_targets_cases/${case}.json -P
+            ${_generic_targets_check}
+    )
+    set_tests_properties(
+        ${test_name}
+        PROPERTIES PASS_REGULAR_EXPRESSION "${expected_regex}" FAIL_REGULAR_EXPRESSION
+                   "gpu_generic_targets: valid"
+    )
+    _apply_hipdnn_test_category_labels(${test_name})
+endfunction()
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generic_targets_cases")
+_hipdnn_add_generic_targets_rejection_test(not_json RAW "" "{ not json" "not valid JSON")
+_hipdnn_add_generic_targets_rejection_test(
+    wrong_schema_version SET_JSON schemaVersion 2 "'schemaVersion' must be 1, got '2'"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    empty_generics SET_JSON generics "{}" "'generics' must be non-empty"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    empty_members SET_JSON generics.gfx12-generic "[]"
+    "generics.gfx12-generic must list at least one member"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    duplicate_member SET_JSON generics.gfx12-generic "[\"gfx1200\",\"gfx1200\"]"
+    "member 'gfx1200' is listed twice in gfx12-generic"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    bad_generic_name SET_JSON generics "{\"gfx12generic\":[\"gfx1200\"]}"
+    "generic name 'gfx12generic' does not match"
+)
+_hipdnn_add_generic_targets_rejection_test(
+    bad_member SET_STRING generics.gfx12-generic.0 gfx12zz
+    "member 'gfx12zz' of gfx12-generic does not match"
+)
