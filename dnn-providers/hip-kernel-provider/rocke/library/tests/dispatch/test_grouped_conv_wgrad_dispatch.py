@@ -20,8 +20,10 @@ a match here proves the dispatch path launches a correct grid.
 from __future__ import annotations
 
 import math
+import os
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
@@ -31,7 +33,7 @@ from dispatch.grouped_convolution import (
     dispatch_conv_grouped,
 )
 from kernels.common.conv_implicit_gemm_wgrad import wgrad_atomic_epilogue_available
-from kernels.common.conv_split_k import resolve_conv_split_k
+from kernels.common.conv_split_k import ENV_CONV_SPLIT_K, resolve_conv_split_k
 
 
 def _wgrad(arch="gfx942", **kw):
@@ -742,10 +744,6 @@ class TestLaunchContractMatchesKernel(unittest.TestCase):
         self.assertEqual((r.grid[1], r.grid[0]), (1, 1))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestSmallDepthwiseDispatches(unittest.TestCase):
     """A depthwise wgrad whose reduction fits in one K tile still dispatches."""
 
@@ -757,3 +755,27 @@ class TestSmallDepthwiseDispatches(unittest.TestCase):
             ws = r.spec.to_wgrad_spec(_problem(r.request))
             self.assertEqual(ws.split_k, 1)
             self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+
+class TestCompileIdentity(unittest.TestCase):
+    """An auto spec's compile key names the binary the resolver launches."""
+
+    def _key(self, override):
+        req = _wgrad("gfx950", N=32, C=64, K=64, Hi=56, Wi=56, dtype="bf16")
+        with mock.patch.dict(os.environ, {ENV_CONV_SPLIT_K: override}):
+            r = dispatch_conv_grouped(req)
+            return r.spec, r.kernel_id.compile_key
+
+    def test_split_and_unsplit_binaries_get_different_keys(self):
+        spec_off, off = self._key("off")
+        spec_on, on = self._key("8")
+        self.assertEqual(spec_off, spec_on)  # same unresolved spec...
+        self.assertNotEqual(off, on)  # ...but a different binary
+
+    def test_the_degree_alone_does_not_change_the_key(self):
+        # The degree is the ks/ks_count kernarg: one binary serves both.
+        self.assertEqual(self._key("8")[1], self._key("16")[1])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2066,6 +2066,7 @@ def _build_wgrad_two_stage_one(args_tuple):
             tile_k=tile_k,
             block_size=warp_m * warp_n * target.wave_size,
             group_merge=group_merge,
+            ws_replicas=ws_replicas,
             split_k=split_k,
             reduction="workspace",
             allow_unsplit=False,
@@ -5080,6 +5081,7 @@ def _split_k_degrees(
     group_merge: int,
     two_stage: bool,
     degrees: tuple = _SPLIT_K_AUTO,
+    ws_replicas: int = 0,
 ) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with, largest first.
 
@@ -5116,6 +5118,7 @@ def _split_k_degrees(
                 tile_k=tile_k,
                 block_size=block_size,
                 group_merge=group_merge,
+                ws_replicas=ws_replicas,
                 reduction="workspace" if two_stage else "atomic",
                 allow_unsplit=False,
             ).split_k
@@ -5142,6 +5145,7 @@ def _runtime_split_ks(problem, ident, degrees: tuple = _SPLIT_K_AUTO) -> tuple:
         group_merge=max(1, ident.group_merge),
         two_stage=ident.two_stage,
         degrees=degrees,
+        ws_replicas=ident.ws_replicas,
     )
 
 

@@ -602,8 +602,11 @@ class ConvGroupedSpec:
 
         No split-K auto-resolution counterpart to :meth:`to_wgrad_spec`: dgrad's
         reduction is ``Y*X*K``, which is not the lopsided axis wgrad's ``N*Ho*Wo``
-        is, so the CK formula that rescues wgrad's grid does not apply and the
-        candidate pins a concrete degree instead.
+        is, so the candidate pins a concrete degree instead. A ``split_k=-1``
+        dgrad spec does resolve through the shared split-K resolver in the
+        builder and the benchmark, but the cost model behind it is fitted on
+        wgrad only, so dispatch keeps the pinned degree until a dgrad sweep
+        validates it.
         """
         assert self.direction == "dgrad", "to_dgrad_spec is only valid for dgrad specs"
         target = ArchTarget.from_gfx(self.arch)
@@ -665,6 +668,7 @@ def _resolve_wgrad_split_k(spec: ConvGroupedSpec, p: "ConvProblem") -> ConvSplit
         tile_k=spec.tile_k,
         block_size=_block(spec)[0],
         group_merge=max(1, int(spec.group_merge)),
+        ws_replicas=_WGRAD_WS_REPLICAS,
         split_k=spec.split_k,
     )
 
@@ -1739,7 +1743,17 @@ def _kernel_id(
     req: ConvGroupedRequest, candidate: KernelCandidate, spec: ConvGroupedSpec
 ) -> KernelId:
     request_hash = stable_json_hash(req.normalized(), n=16)
-    spec_hash = stable_json_hash(asdict(spec), n=16)
+    fields = asdict(spec)
+    if req.direction == "wgrad":
+        # An auto spec resolves, per problem, to one of three binaries (plain
+        # store, packed atomic, or the two-stage workspace ABI), so the
+        # resolved path is part of the compile identity. The degree is not:
+        # it is the ks/ks_count kernarg.
+        r = _resolve_wgrad_split_k(spec, _problem(req))
+        fields["resolved_reduction"] = (
+            "none" if r.split_k <= 1 else ("workspace" if r.two_stage else "atomic")
+        )
+    spec_hash = stable_json_hash(fields, n=16)
     return KernelId(
         op=f"conv_{req.direction}",
         family=candidate.family,

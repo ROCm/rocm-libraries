@@ -233,6 +233,7 @@ def build_implicit_gemm_conv_wgrad_two_stage(
             tile_k=spec.tile_k,
             block_size=spec.block_size,
             group_merge=spec.group_merge,
+            ws_replicas=spec.ws_replicas,
             reduction="workspace",
             allow_unsplit=False,
         )

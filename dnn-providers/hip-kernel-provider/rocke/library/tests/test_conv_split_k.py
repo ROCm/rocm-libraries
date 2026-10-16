@@ -393,3 +393,79 @@ def test_benchmark_workers_skip_combos_the_resolver_cannot_serve():
     tiny = ConvProblem(N=1, Hi=7, Wi=7, C=512, K=512, Y=3, X=3, pH=1, pW=1)
     combo = WgradCombo(64, 64, 64, 2, 2, 32, "mem", "default", False, -1)
     assert _build_wgrad_two_stage_one((tuple(combo), tiny, "bf16", "gfx950")) is None
+
+
+# Workspace bytes = groups * R * wg_M * wg_N * 4: R=8 fits the i32 ws_bytes
+# kernarg, R=16 does not.
+WIDE = ConvProblem(N=8, Hi=14, Wi=14, C=2048, K=2048, Y=3, X=3, pH=1, pW=1)
+
+
+def test_wide_problem_straddles_the_workspace_limit():
+    assert wgrad_workspace_nbytes(WIDE, 8) <= MAX_WGRAD_WS_BYTES
+    assert wgrad_workspace_nbytes(WIDE, 16) > MAX_WGRAD_WS_BYTES
+
+
+@pytest.mark.parametrize("split_k", [-1, 8])
+def test_pinned_workspace_keeps_its_size_limit(split_k):
+    with pytest.raises(ValueError, match="ws_bytes limit"):
+        _wgrad(WIDE, reduction="workspace", ws_replicas=16, split_k=split_k)
+    fits = _wgrad(
+        WIDE,
+        reduction="workspace",
+        ws_replicas=8,
+        split_k=split_k,
+        allow_unsplit=False,
+    )
+    assert fits.two_stage and fits.split_k > 1
+
+
+def test_auto_never_plans_a_workspace_its_replicas_overflow():
+    for split_k in (-1, 8):
+        r = _wgrad(WIDE, dtype="fp16", ws_replicas=16, split_k=split_k)
+        assert not r.two_stage
+
+
+def test_planner_rejects_a_batch_beyond_grid_z():
+    from rocke.helpers.split_k_planner import (
+        SplitKKernel,
+        SplitKProblem,
+        select_split_k_plan,
+        split_k_cost_model,
+    )
+
+    with pytest.raises(ValueError, match="gridDim.z"):
+        select_split_k_plan(
+            SplitKProblem(m=1, n=1, k=1, batch=MAX_GRID_DIM_Z + 1),
+            SplitKKernel(16, 16, 32, 1),
+            [],
+            split_k_cost_model("gfx950"),
+        )
+
+
+def test_two_stage_builder_spec_is_never_resolved_unsplit(monkeypatch):
+    # A two-stage spec is a split-K kernel; auto must not hand it degree 1.
+    from kernels.common import conv_split_k
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+    )
+
+    seen = {}
+    real = conv_split_k.resolve_conv_split_k
+
+    def spy(*args, **kw):
+        seen.update(kw)
+        return real(*args, **kw)
+
+    monkeypatch.setattr(conv_split_k, "resolve_conv_split_k", spy)
+    spec = WgradConvSpec(
+        problem=DENSE,
+        data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+        split_k=-1,
+        two_stage=True,
+        ws_replicas=4,
+    )
+    build_implicit_gemm_conv_wgrad(spec, arch="gfx950")
+    assert seen["allow_unsplit"] is False
+    assert seen["ws_replicas"] == 4

@@ -1985,7 +1985,10 @@ def build_implicit_gemm_conv_wgrad(
             tile_k=spec.tile_k,
             block_size=spec.block_size,
             group_merge=spec.group_merge,
+            ws_replicas=spec.ws_replicas,
             reduction="workspace" if spec.two_stage else "atomic",
+            # A two-stage spec is a split-K kernel: degree 1 would not validate.
+            allow_unsplit=not spec.two_stage,
         )
         spec = dc_replace(spec, split_k=resolved.split_k)
 

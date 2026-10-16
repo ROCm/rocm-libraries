@@ -333,6 +333,11 @@ def select_split_k_plan(
     k_iters = math.ceil(problem.k / kernel.tile_k)
     z_batch = problem.batch if problem.z_batch is None else problem.z_batch
     z_cap = MAX_GRID_DIM_Z // z_batch
+    if z_cap < 1:
+        raise ValueError(
+            f"no admissible split-K candidate: z_batch={z_batch} exceeds the "
+            f"gridDim.z limit {MAX_GRID_DIM_Z} even unsplit"
+        )
     cap = min(
         k_iters,
         z_cap,

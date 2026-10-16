@@ -142,11 +142,6 @@ def _atomic_reduction(dtype: str) -> SplitKReduction:
     return SplitKReduction("atomic", "fp32")
 
 
-_WORKSPACE = SplitKReduction(
-    "workspace", "fp32", workspace=True, workspace_copies=_DEFAULT_WS_REPLICAS
-)
-
-
 def _resolve_wgrad(
     p: ConvProblem,
     *,
@@ -157,19 +152,28 @@ def _resolve_wgrad(
     tile_k: int,
     block_size: int,
     group_merge: int,
+    ws_replicas: int,
     split_k: int,
     reduction: str,
     allow_unsplit: bool,
     env: Mapping[str, str],
 ) -> ConvSplitK:
     gm = max(1, group_merge)
+    ws_replicas = ws_replicas if ws_replicas > 0 else _DEFAULT_WS_REPLICAS
     grid_groups = max(1, p.groups // gm)
     z_cap = MAX_GRID_DIM_Z // grid_groups
     # Merged tiles cannot use the packed atomic: its epilogue has no way to
     # drop an off-diagonal group pair, so only the workspace carries the mask.
     atomic_ok = gm == 1 and wgrad_atomic_epilogue_available(p, dtype, None)[0]
     # Deliberately unmerged: the workspace is R copies of the true dW.
-    ws_ok = wgrad_workspace_nbytes(p, _DEFAULT_WS_REPLICAS) <= MAX_WGRAD_WS_BYTES
+    ws_ok = wgrad_workspace_nbytes(p, ws_replicas) <= MAX_WGRAD_WS_BYTES
+    if reduction == "workspace" and not ws_ok:
+        # Fixing the reduction does not lift its limit: the caller's two-stage
+        # binary cannot encode this workspace at any degree.
+        raise ValueError(
+            "wgrad split-K cannot be built: the workspace exceeds the i32 "
+            f"ws_bytes limit (ws_replicas={ws_replicas})"
+        )
 
     def _rule(requested: int, source: str) -> ConvSplitK:
         """The long-standing path choice for a given degree."""
@@ -178,7 +182,7 @@ def _resolve_wgrad(
             return ConvSplitK(1, False, requested, f"{source}: no split")
         if reduction == "atomic" or (reduction == "auto" and atomic_ok):
             return ConvSplitK(degree, False, requested, f"{source}: atomic")
-        if reduction == "workspace" or ws_ok:
+        if ws_ok:
             return ConvSplitK(degree, True, requested, f"{source}: workspace")
         return ConvSplitK(
             1, False, requested, f"{source}: workspace too large, no split"
@@ -210,8 +214,12 @@ def _resolve_wgrad(
     reductions = []
     if reduction in ("auto", "atomic") and atomic_ok:
         reductions.append(_atomic_reduction(dtype))
-    if reduction in ("auto", "workspace") and (ws_ok or reduction == "workspace"):
-        reductions.append(_WORKSPACE)
+    if reduction in ("auto", "workspace") and ws_ok:
+        reductions.append(
+            SplitKReduction(
+                "workspace", "fp32", workspace=True, workspace_copies=ws_replicas
+            )
+        )
     can_split = bool(reductions) and -(-k // tile_k) >= 2 and z_cap >= 2
     if not can_split:
         if not allow_unsplit:
@@ -320,6 +328,7 @@ def resolve_conv_split_k(
     tile_k: int,
     block_size: int,
     group_merge: int = 1,
+    ws_replicas: int = _DEFAULT_WS_REPLICAS,
     split_k: int = -1,
     reduction: str = "auto",
     allow_unsplit: bool = True,
@@ -335,6 +344,9 @@ def resolve_conv_split_k(
         tile_m, tile_n, tile_k: the kernel's block tile.
         block_size: threads per workgroup.
         group_merge: wgrad groups folded into one tile (1 = unmerged).
+        ws_replicas: wgrad only. Workspace copies of the two-stage kernel the
+            caller builds or holds; sizes the workspace and its setup cost
+            (<= 0: the builder default).
         split_k: ``-1`` resolves automatically; any other value is kept
             (wgrad clamps it to the gridDim.z budget).
         reduction: wgrad only. ``"auto"`` chooses between the packed atomic
@@ -372,6 +384,7 @@ def resolve_conv_split_k(
     return _resolve_wgrad(
         problem,
         group_merge=group_merge,
+        ws_replicas=ws_replicas,
         reduction=reduction,
         **common,
     )

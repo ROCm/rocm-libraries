@@ -486,9 +486,10 @@ def _decision_regret(decisions: list[_Decision], fill: float) -> np.ndarray:
     return np.array(r)
 
 
-def _legacy_decision_regret(decisions_kernels) -> np.ndarray:
+def _legacy_decision_regret(decisions_kernels, max_degree: int = 1024) -> np.ndarray:
     """The previous rule: the packed atomic whenever built, else the workspace,
-    at the CK degree -- timed at the best binary of that kind."""
+    at the CK degree -- timed at the best binary of that kind. A CK degree of 1
+    is the unsplit kernel; a decision without a timed unsplit one is skipped."""
     from rocke.helpers.split_k import select_split_k_wgrad
 
     r = []
@@ -510,11 +511,18 @@ def _legacy_decision_regret(decisions_kernels) -> np.ndarray:
             groups=p.batch,
             block_size=q.waves_per_block * 64,
         ).split_k
+        if ck <= 1:
+            unsplit = [
+                m.times[1] for m in members if m.reduction is None and 1 in m.times
+            ]
+            if unsplit:
+                r.append(min(unsplit) / best)
+            continue
         times = []
         for m in chosen:
-            opts = _feasible_times(m, 1024)
+            opts = _feasible_times(m, max_degree)
             if opts:
-                d = min(opts, key=lambda t: abs(math.log2(t) - math.log2(max(ck, 1))))
+                d = min(opts, key=lambda t: abs(math.log2(t) - math.log2(ck)))
                 times.append(opts[d])
         if times:
             r.append(min(times) / best)
@@ -551,7 +559,7 @@ def _sig(v: float) -> float:
     return float(f"{v:.6g}")
 
 
-def _model_of(x: dict):
+def _model_of(x: dict, max_degree: int = 1024):
     from rocke.helpers.split_k_planner import SplitKCostModel
 
     return SplitKCostModel(
@@ -564,11 +572,12 @@ def _model_of(x: dict):
             k.split(":")[1]: _sig(v) for k, v in x.items() if k.startswith("atomic:")
         },
         fill_bytes_per_latency=_sig(x["fill_bytes_per_latency"]),
+        max_split_k=max_degree,
     )
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
-    from rocke.helpers.split_k import select_split_k_wgrad
+    from rocke.helpers.split_k import _ARCH_NUM_CUS, select_split_k_wgrad
     from rocke.helpers.split_k_planner import predict_split_k_cost, split_k_cost_model
 
     kernels = _load(args.logs, args.fill_logs)
@@ -577,7 +586,23 @@ def cmd_fit(args: argparse.Namespace) -> int:
         return 1
     comp_all = _competitive(kernels, args.competitive)
     shapes = sorted({k.cmd for k in kernels})
-    start = split_k_cost_model(args.arch) or split_k_cost_model("gfx950")
+    # An unfitted arch starts from gfx950's fitted constants as a search seed,
+    # but its hardware facts are its own.
+    start = split_k_cost_model(args.arch)
+    if start is None:
+        num_cus = args.num_cus or _ARCH_NUM_CUS.get(args.arch.split(":", 1)[0])
+        if num_cus is None:
+            print(
+                f"unknown CU count for {args.arch!r}: pass --num-cus", file=sys.stderr
+            )
+            return 1
+        start = replace(
+            split_k_cost_model("gfx950"),
+            num_cus=num_cus,
+            max_waves_per_cu=args.max_waves_per_cu,
+        )
+    elif args.num_cus:
+        start = replace(start, num_cus=args.num_cus)
     x0 = _x_of(start)
 
     # Stage 1: degree. Held out by shape: every --holdout-th shape (fold 0),
@@ -620,9 +645,10 @@ def cmd_fit(args: argparse.Namespace) -> int:
     )
     ck_pred = np.abs(np.log2(c.degrees[None, :]) - np.log2(np.maximum(ck, 1))[:, None])
     ck_r, model_r, ck_u, model_u = [], [], 0, 0
+    fold_x: dict[int, dict] = {}
     for fold in range(args.holdout if args.cv else 1):
         test = np.isin(row_shape, shapes[fold :: args.holdout])
-        xf = fit_degree(~test & comp)
+        xf = fold_x[fold] = fit_degree(~test & comp)
         pred = _predict_curves(c, xf)
         ck_r.append(_curve_regret(c, ck_pred, test & comp))
         model_r.append(_curve_regret(c, pred, test & comp))
@@ -641,7 +667,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     # one held-out split is too noisy to judge on: every shape is held out
     # once across ``--holdout`` folds and the held-out regrets are pooled.
     comp_kernels = [k for k in kernels if comp_of[id(k)]]
-    decisions = _decisions(comp_kernels, _model_of(x))
+    decisions = _decisions(comp_kernels, _model_of(x, args.max_degree), args.max_degree)
     print(
         f"stage 2: {len(decisions)} main loops with more than one reduction, "
         f"{args.holdout}-fold cross-validated by shape"
@@ -655,18 +681,27 @@ def cmd_fit(args: argparse.Namespace) -> int:
         model_r, legacy_r = [], []
         for fold in range(args.holdout):
             out = set(shapes[fold :: args.holdout])
-            train_d = [d for d in decisions if d.shape not in out]
-            test_d = [d for d in decisions if d.shape in out]
+            # The degree constants of a fold are fitted without its shapes too,
+            # or the held-out decisions would see their own timings.
+            if fold not in fold_x:
+                fold_x[fold] = fit_degree(~np.isin(row_shape, list(out)) & comp)
+            fold_d = _decisions(
+                comp_kernels, _model_of(fold_x[fold], args.max_degree), args.max_degree
+            )
+            train_d = [d for d in fold_d if d.shape not in out]
+            test_d = [d for d in fold_d if d.shape in out]
             if not train_d or not test_d:
                 continue
             model_r.append(_decision_regret(test_d, fit_setup(train_d)))
-            legacy_r.append(_legacy_decision_regret([d.members for d in test_d]))
+            legacy_r.append(
+                _legacy_decision_regret([d.members for d in test_d], args.max_degree)
+            )
         print("  held-out decision regret, competitive main loops:")
         print(f"    previous rule {_summary(np.concatenate(legacy_r))}")
         print(f"    cost model    {_summary(np.concatenate(model_r))}")
         x["fill_bytes_per_latency"] = float(fit_setup(decisions))
 
-    fitted = _model_of(x)
+    fitted = _model_of(x, args.max_degree)
     # The vectorised stage-1 copy must choose what the production model chooses.
     vec = _picks(c, _predict_curves(c, _x_of(fitted)))
     for r, k in enumerate(c.rows):
@@ -719,6 +754,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ft.add_argument("--arch", default="gfx950")
     ft.add_argument("--max-degree", type=int, default=1024)
+    ft.add_argument(
+        "--num-cus",
+        type=int,
+        default=None,
+        help="CU count of --arch (default: the static table in rocke.helpers.split_k)",
+    )
+    ft.add_argument(
+        "--max-waves-per-cu",
+        type=int,
+        default=32,
+        help="hardware wave slots per CU, for an arch without a fitted model",
+    )
     ft.add_argument("--competitive", type=float, default=1.25)
     ft.add_argument("--holdout", type=int, default=4)
     ft.add_argument(

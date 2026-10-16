@@ -177,15 +177,20 @@ over every feasible degree:
 
 | | CK formula | cost model |
 |---|---|---|
-| mean percent of best | 89.5% | 96.6% |
+| mean percent of best | 89.5% | 96.8% |
 | median | 94.2% | 100% |
-| 10th percentile | 70.9% | 87.5% |
+| 10th percentile | 70.9% | 88.5% |
 | choices within 3% of best | 43% | 72% |
-| depthwise mean | 93.4% | 96.3% |
-| fp16 mean | 87.6% | 97.6% |
+| depthwise mean | 93.4% | 96.2% |
+| fp16 mean | 87.6% | 97.7% |
 
-Reduction and split-vs-unsplit decisions (same main loop, held out): mean
-percent of best 94.1% (previous rule) vs 97.4%; within 3% of best 46% vs 69%.
+Reduction and split-vs-unsplit decisions (same main loop, 17 shapes, held out
+with the degree and setup constants both fitted without the held-out shapes;
+the previous rule scored on the unsplit kernel where the CK degree is 1): mean
+percent of best 95.6% (previous rule) vs 97.5%; within 3% of best 67% vs 70%.
+The bootstrap intervals overlap, so on this set the reduction choice is no
+worse than the previous rule rather than clearly better; the gain is in the
+degree.
 
 End to end, the kernel the dispatcher selects, timed at the previous rule's
 choice and at the new one on 72 corpus shapes (median of two guarded passes):
@@ -225,9 +230,11 @@ python -m benchmarks.common.split_k_cost_fit fit --logs sweep_logs --arch gfx950
 
 ## Keep / revert / defer decisions
 
-- **Keep:** the cost model for gfx950 wgrad (degree and reduction), one resolver
+- **Keep:** the cost model for gfx950 wgrad (degree and reduction; the
+  reduction choice needs more side-by-side shapes to show a clear gain), one resolver
   for dispatch, builders and benchmark, the 16-bit atomic cap, the benchmark
   timing the resolver's degree and both reductions.
 - **Keep, unchanged:** the CK formula on arches without a fitted model.
-- **Defer:** fitting gfx942; modelling the sharp optima behind the remaining
+- **Defer:** fitting gfx942; a dgrad sweep before dgrad dispatch uses the
+  planner (it keeps its pinned degree until then); modelling the sharp optima behind the remaining
   regressions; stream-K as a third reduction choice.
