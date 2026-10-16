@@ -49,6 +49,8 @@ test_categories:
       # tools/CMakeLists.txt.
       - "hipdnn_descriptor_generator_pytest"
       - "hipdnn_ingestor_generator_pytest"
+      # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
+      - "hipdnn_gpu_generic_targets_.*"
 
   integration:
     description: "Current hipDNN integration-check coverage"
