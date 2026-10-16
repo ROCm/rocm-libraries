@@ -53,7 +53,7 @@ What is left out for now (called out explicitly):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterator, List, Literal, Optional, Sequence, Tuple
+from typing import Callable, Iterator, List, Literal, Optional, Sequence, Tuple
 
 from ...core.dtypes import dtype_info
 from ...core.tdm import build_tdm_descriptor_2d, encode_tdm_padding, tdm_padding_for_tile
@@ -282,6 +282,17 @@ class TraitSpec:
     # operands to an 8-byte load. Setting 2 reproduces that older emission.
     # No effect on 2-byte operands: f16/bf16 resolve to 2 either way.
     ab_load_elem_bytes: Optional[int] = None
+    # Split the per-K-tile workgroup barrier of the TDM ping-pong loop into its
+    # two halves. Each wave signals as soon as its last fragment read of the
+    # tile has drained (and, for the waves that issue the mover, once the next
+    # tile has landed), then runs the K-tile's final k-atom of WMMAs, and only
+    # waits at the top of the next iteration. The barrier skew between waves is
+    # absorbed by those WMMAs instead of stalling every wave at a full
+    # ``s_barrier``. Same hazards as the joint barrier: the wait still precedes
+    # both the refill of the buffer just read and the first read of the new
+    # tile. WMMA ``mem`` pipeline with ``tdm`` and ``tdm_depth == 2`` only.
+    # False (default) keeps the joint barrier and byte-identical output.
+    split_barrier: bool = False
 
 
 @dataclass(frozen=True)
@@ -719,6 +730,16 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
     if spec.trait.tdm_depth != 1 and not spec.trait.tdm:
         return False, "tdm_depth is only meaningful with tdm=True"
+    # The signal is raised from inside the WMMA phase of the depth-2 ping-pong
+    # loop. Any other loop shape would wait on a barrier nothing signals, which
+    # hangs the GPU rather than failing, hence the narrow gate.
+    if spec.trait.split_barrier:
+        if family != "wmma" or spec.trait.pipeline != "mem":
+            return False, "split_barrier needs the WMMA 'mem' pipeline"
+        if not spec.trait.tdm or spec.trait.tdm_depth != 2:
+            return False, "split_barrier needs tdm=True with tdm_depth=2"
+        if spec.trait.split_k != 1:
+            return False, "split_barrier does not support split_k"
 
     # Geometry divisibility.
     if t.tile_m % (t.warp_m * t.warp_tile_m):
@@ -1975,6 +1996,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         B_src: Value,
         iter_vars: Sequence[Value],
         lds_parity=0,
+        after_last_reads: Optional[Callable[[], None]] = None,
     ) -> List[Value]:
         """One K-tile of WMMA atoms, fully MMA-contract driven.
 
@@ -1983,6 +2005,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         intrinsic). The A map yields ``(row, k)`` and the B map ``(k, col)``;
         in both LDS tiles the M/N index is the row and K the column, so we read
         the M-coord from the A map and the N-coord (= ``col``) from the B map.
+
+        ``after_last_reads`` is emitted once the last k-atom's fragment loads
+        are issued and before its WMMAs -- the earliest point at which this
+        wave has no further reads of the tile (the split-barrier signal).
         """
         # Only slot 0 is read: the maps' K coords are K-contiguous across slots,
         # so slot 0 is the lane's fragment base and the loader walks K from
@@ -2050,6 +2076,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b_per_lane,
                     )
                 )
+            if after_last_reads is not None and kk == k_atoms - 1:
+                after_last_reads()
             flat = 0
             for mi in range(mfmas_m):
                 for ni in range(mfmas_n):
@@ -2477,6 +2505,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # Prologue: load tile 0 into half 0 (the slice base in split-K mode).
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
 
+        # Split barrier: every wait (each iteration's top, and the epilogue's)
+        # pairs with the signal raised one phase earlier -- the prologue's for
+        # the first iteration, then the one inside each iteration's WMMA phase.
+        # A signal follows the wave's own drains, so arriving at the wait means
+        # every wave has finished reading the buffer about to be refilled and
+        # the mover's fill of the tile about to be read has landed.
+        split = spec.trait.split_barrier
+        _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
+
+        def _signal_tile_done() -> None:
+            b.s_waitcnt(lgkmcnt=0)
+            b.s_wait_tensorcnt(0)
+            b.s_barrier_signal(_WG_SIGNAL)
+
+        if split:
+            b.s_wait_tensorcnt(0)
+            b.s_barrier_signal(_WG_SIGNAL)
+
         # Loop bounds: iterate k in [k_lo, k_hi - block_k), so the last tile
         # is handled by the epilogue (which doesn't need to issue a
         # next-tile load).
@@ -2507,7 +2553,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # MFMAs (its HBM transfer overlaps the matrix work). The prior
             # structure issued that write BEFORE draining, which both raced and
             # forced the extra barrier this collapses away.
-            if spec.trait.tdm:
+            if split:
+                b.s_barrier_wait(_WG_WAIT)
+            elif spec.trait.tdm:
                 # Only the current tile's two descriptors are outstanding at
                 # this point -- the next tile is issued after the drain -- so a
                 # full TENSORcnt drain still leaves the copy overlapped with
@@ -2518,12 +2566,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b.s_waitcnt(vmcnt=0, lgkmcnt=0)
                 b.s_barrier_bare()
             emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
+            if split:
+                new_accs = _emit_wmma_phase(
+                    A_smem,
+                    B_smem,
+                    acc_iter,
+                    lds_parity=parity,
+                    after_last_reads=_signal_tile_done,
+                )
+            else:
+                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
         # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
         final_parity = for_op.results[0]
-        if spec.trait.tdm:
+        if split:
+            b.s_barrier_wait(_WG_WAIT)
+        elif spec.trait.tdm:
             b.s_wait_tensorcnt(0)
             b.sync_lds_only()
         else:
