@@ -48,6 +48,16 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
 
+// Whether the K/V views take the NT_HT cache hint on gfx1250 (see
+// FmhaFwdKernel::kKVCoherence): TDM pipelines that stage K/V in their LDS arena,
+// fp16/bf16, head dims below 256, tiles of at most 64 rows.
+template <typename Pipeline>
+inline constexpr bool uses_kv_nt_ht_hint_v =
+    uses_qr_tdm_lds_arena_v<Pipeline> && Pipeline::kM0 <= 64 &&
+    Pipeline::BlockFmhaShape::kQKHeaddim < 256 &&
+    (std::is_same_v<typename Pipeline::KDataType, half_t> ||
+     std::is_same_v<typename Pipeline::KDataType, bf16_t>);
+
 // A helper struct for detecting n0loop
 template <typename T, typename = void>
 struct has_n0loop_flag : std::false_type
@@ -216,11 +226,12 @@ struct FmhaFwdKernel
     // LDS through the TDM and never reads them back through the vector path, so
     // allocating them in the near cache only evicts other data. NT_HT drops the
     // near-cache allocation and keeps K/V high priority in the far cache, where
-    // the m-tiles of one (batch, head) share them. Only the bm0 <= 64 tiles (short
-    // queries) take it: the bm0=128 tile of long sequences relies on K/V reuse in
-    // the near cache and is slower with the hint.
+    // the m-tiles of one (batch, head) share them. Only the bm0 <= 64 tiles take
+    // it: the bm0=128 tile of long sequences relies on K/V reuse in the near cache
+    // and is slower with the hint. Measured on fp16/bf16 below d256 only (d256 is
+    // neutral, fp8 unmeasured); see detail::uses_kv_nt_ht_hint_v.
 #if defined(__gfx125__)
-    static constexpr auto kKVCoherence = (kPipelineName == "qr_tdm" && FmhaPipeline::kM0 <= 64)
+    static constexpr auto kKVCoherence = detail::uses_kv_nt_ht_hint_v<FmhaPipeline>
                                              ? amd_buffer_coherence_enum::NT_HT
                                              : amd_buffer_coherence_enum::coherence_default;
 #else
