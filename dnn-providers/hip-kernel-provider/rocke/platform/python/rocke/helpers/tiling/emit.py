@@ -235,6 +235,45 @@ def _register_coord_offsets(
     return tuple(offsets)
 
 
+def _lane_base_index(
+    b: Any, window: TensorWindow, tile_desc: TileDesc, thread: Any
+) -> tuple[list[Any], Any]:
+    """Register 0's positions and element index -- the lane-only part of every register's address,
+    emitted ONCE per access. Returns ``(positions, index)``: the positions feed the per-register
+    positions (for the clip) and the index feeds :func:`_register_index`."""
+    coords = emit_coordinates_for_register(
+        b, tile_desc.layout, emit_lane_contributors(b, tile_desc.layout, thread), 0
+    )
+    positions = _positions(b, window, coords)
+    return positions, _address(b, window, positions)
+
+
+def _register_positions(
+    b: Any, tile_desc: TileDesc, base_positions: list[Any], register: int
+) -> list[Any]:
+    """The register's per-axis positions: the lane base positions plus the register's compile-time
+    coordinate offset on each axis (an axis with no offset reuses the base value)."""
+    deltas = _register_coord_offsets(tile_desc.layout, register)
+    return [
+        position if delta == 0 else b.add(position, b.const_i32(delta))
+        for position, delta in zip(base_positions, deltas, strict=True)
+    ]
+
+
+def _register_index(
+    b: Any, window: TensorWindow, tile_desc: TileDesc, base_index: Any, register: int
+) -> Any:
+    """The register's element index: the lane base index plus the register's compile-time coordinate
+    offset linearized by the tensor strides. Consecutive registers' indices then differ by a constant,
+    which the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
+    positions by linearity."""
+    deltas = _register_coord_offsets(tile_desc.layout, register)
+    offset = sum(
+        delta * window.tensor.strides[axis] for axis, delta in enumerate(deltas)
+    )
+    return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
+
+
 def _origin_misaligned(origin: Any, extent: int) -> bool:
     """True when `origin` is a COMPILE-TIME int NOT on the tile grid (`origin % extent != 0`): a tile
     placed there straddles a tile boundary and can overhang the tensor's far edge even when the extent
@@ -526,16 +565,11 @@ def store_fragment(
     # just the visible case. Bit-exact with the per-register reconstruction by linearity of _address. The
     # LDS path keeps the plain wrapper (its wide ds_write already vectorizes).
     base_positions: list[Any] = []
-    base_address: Any = None
+    base_index: Any = None
     if not lds:
-        base_coords = emit_coordinates_for_register(
-            b,
-            fragment.tile_desc.layout,
-            emit_lane_contributors(b, fragment.tile_desc.layout, thread),
-            0,
+        base_positions, base_index = _lane_base_index(
+            b, window, fragment.tile_desc, thread
         )
-        base_positions = _positions(b, window, base_coords)
-        base_address = _address(b, window, base_positions)
     for register in range(0, fragment.tile_desc.register_count, vw):
         if lds:
             coords = emit_tensor_coordinates(
@@ -565,19 +599,8 @@ def store_fragment(
                     vec = b.vec_insert(vec, el, i)
                 b.smem_store_vN(ptr, positions, vec, vw)
             continue
-        deltas = _register_coord_offsets(fragment.tile_desc.layout, register)
-        positions = [
-            (
-                base_positions[axis]
-                if d == 0
-                else b.add(base_positions[axis], b.const_i32(d))
-            )
-            for axis, d in enumerate(deltas)
-        ]
-        offset = sum(d * window.tensor.strides[axis] for axis, d in enumerate(deltas))
-        address = (
-            base_address if offset == 0 else b.add(base_address, b.const_i32(offset))
-        )
+        positions = _register_positions(b, fragment.tile_desc, base_positions, register)
+        address = _register_index(b, window, fragment.tile_desc, base_index, register)
         element = b.vec_extract(fragment.value, register)
         value = _cast_element(b, element, fragment.dtype, out_dtype)
         mask = _clip_mask(b, window, positions, fragment.tile_desc.shape)
