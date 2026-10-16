@@ -184,6 +184,11 @@ class AttentionRequest(OperatorRequest):
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
     # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
     emit_lse: bool = False
+    # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
+    # are the bucket maxima, and any multiple-of-16 widths up to them run at
+    # launch. Reported as the ``runtime_head_dims`` feature, so only candidates
+    # whose kernels implement it (RDNA WMMA) admit it.
+    runtime_head_dims: bool = False
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -264,6 +269,8 @@ class AttentionRequest(OperatorRequest):
             active.add("window_right")
         if self.emit_lse:
             active.add("lse")
+        if self.runtime_head_dims:
+            active.add("runtime_head_dims")
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
@@ -324,6 +331,11 @@ def _request_errors(
         errors.append(f"unsupported op {req.op!r}")
     if type(req.emit_lse) is not bool:
         errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
+    if type(req.runtime_head_dims) is not bool:
+        errors.append(
+            "runtime_head_dims must be a bool, got "
+            f"{type(req.runtime_head_dims).__name__}"
+        )
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -359,8 +371,17 @@ def _request_errors(
             errors.append(f"{field} must be -1 (unbounded) or a nonnegative I32")
     if explicit_left and int(req.sliding_window) != 0:
         errors.append("sliding_window cannot be combined with explicit window_left")
-    if explicit_left and mask_type != AttentionMaskType.SLIDING_WINDOW:
-        errors.append("explicit window_left requires mask_type=SLIDING_WINDOW")
+    # A causal mask plus a left bound is the cuDNN spelling of a causal sliding
+    # window: the bounds become (window_left, 0) on the causal diagonal.
+    if explicit_left and mask_type not in (
+        AttentionMaskType.SLIDING_WINDOW,
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    ):
+        errors.append(
+            "explicit window_left requires mask_type SLIDING_WINDOW, "
+            "TOP_LEFT_CAUSAL, or BOTTOM_RIGHT_CAUSAL"
+        )
     if explicit_right and mask_type not in (
         AttentionMaskType.NO_MASK,
         AttentionMaskType.SLIDING_WINDOW,
@@ -600,11 +621,12 @@ class AttentionTuningSpec:
     """Concrete dispatcher-owned spec for every executable tuned candidate.
 
     Generic production candidates intentionally return :class:`AttentionSpec`
-    and defer geometry. A unified tuning candidate or a dense candidate returns
-    this wrapper instead: the exact arch spec, builder choice, compile backend,
-    and optional 3D reduce spec are serializable and therefore participate in
-    dispatch/cache identity. ``path`` is ``"2d"`` / ``"3d"`` for the unified
-    tiled kernels and ``"dense"`` for the standalone dense kernel.
+    and defer geometry. A unified tuning candidate, a dense candidate or an RDNA
+    WMMA tuned candidate returns this wrapper instead: the exact arch spec,
+    builder choice, compile backend, and optional 3D reduce spec are
+    serializable and therefore participate in dispatch/cache identity. ``path``
+    is ``"2d"`` / ``"3d"`` for the unified tiled kernels, ``"dense"`` for the
+    standalone dense kernel and ``"wmma"`` for the RDNA WMMA forward kernel.
 
     It is also the whole launch contract the runtime needs:
     ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
@@ -679,6 +701,10 @@ class AttentionTuningSpec:
             return _dense_kernel_module(self.arch).build_attention_dense(
                 self.kernel_spec, arch=arch
             )
+        if self.path == "wmma":
+            from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+
+            return build_wmma_fmha_fwd(self.kernel_spec, arch=arch)
         if self.path == "3d":
             return build_explicit_attention_3d(
                 self.kernel_spec, self.reduce_spec, arch=arch
@@ -696,6 +722,18 @@ class AttentionTuningSpec:
         if self.path == "dense":
             # The dense spec bakes (or declares) its whole problem shape.
             return tuple(_dense_kernel_module(self.arch).attention_dense_grid(ks))
+        if self.path == "wmma":
+            # Runtime-shape kernel: the problem supplies rows, heads and batch.
+            from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid
+
+            return tuple(
+                wmma_fmha_fwd_grid(
+                    ks,
+                    seqlen_q=int(problem.max_seqlen_q),
+                    num_query_heads=int(problem.num_query_heads),
+                    batch=int(problem.num_seqs),
+                )
+            )
         if self.path == "3d":
             block_q = max(1, 16 // problem.num_queries_per_kv)
             qblocks = problem.total_q // block_q + problem.num_seqs
@@ -720,6 +758,8 @@ class AttentionTuningSpec:
             return tuple(
                 _dense_kernel_module(self.arch).attention_dense_block(self.kernel_spec)
             )
+        if self.path == "wmma":
+            return (int(self.kernel_spec.block_size), 1, 1)
         if self.path == "3d":
             return (64, 1, 1)
         if self.builder_kind == "gfx942_4warp_gqa":
