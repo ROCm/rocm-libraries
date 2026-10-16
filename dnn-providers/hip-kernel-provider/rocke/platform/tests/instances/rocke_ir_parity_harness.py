@@ -1350,6 +1350,37 @@ def build_streaming_copy(arch):
     return _build
 
 
+def build_f8f6f4_16x16x128(kind):
+    """One-wave K=128 f8f6f4 MFMA on gfx950. ``hero`` is the unscaled fp8 atom
+    (both scales literal 0); ``mx`` is the MX op with unit E8M0 scales. The
+    golden pins the shared declaration and the full call text at every flavor."""
+
+    def _build():
+        from rocke.core.ir import F32, I32, IRBuilder, PtrType
+
+        b = IRBuilder(f"irhash_f8f6f4_16x16x128_{kind}")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        pa = b.param("A", PtrType(I32, "global"), align=32)
+        pb = b.param("B", PtrType(I32, "global"), align=32)
+        pc = b.param("C", PtrType(F32, "global"), align=16)
+        tid = b.thread_id_x()
+        off8 = b.mul(tid, b.const_i32(8))
+        a = b.global_load_vN(pa, off8, I32, 8, align=32)
+        bb = b.global_load_vN(pb, off8, I32, 8, align=32)
+        acc = b.vector_splat(b.const_f32(0.0), 4)
+        if kind == "hero":
+            r = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
+        else:
+            r = b.mfma_scale_f32_16x16x128_f8f6f4(
+                a, bb, acc, b.const_i32(127), b.const_i32(127)
+            )
+        b.global_store_vN(pc, b.mul(tid, b.const_i32(4)), r, 4, align=16)
+        b.ret()
+        return b.kernel
+
+    return _build
+
+
 def build_warp_shuffle_xor_dpp_reduce(arch, masks):
     """16-lane i32 sum ``v = v + warp_shuffle_xor_dpp(v, m)`` over ``masks``:
     pins the per-target ``tile.dpp_xor`` encodings inside the reduction they
@@ -4198,6 +4229,16 @@ def cases():
             f"nontemporal/{_arch}/copy_bf16x8",
             _arch,
             build_streaming_copy(_arch),
+        )
+
+    # K=128 f8f6f4 MFMA (gfx950): the unscaled fp8 hero atom and the MX op share
+    # one declaration; the validity gate links both.
+    for _kind in ("hero", "mx"):
+        add(
+            "mma_atom",
+            f"mma_atom/gfx950/f8f6f4_16x16x128_{_kind}",
+            "gfx950",
+            build_f8f6f4_16x16x128(_kind),
         )
 
     # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP

@@ -1,0 +1,312 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""The K=128 f8f6f4 MFMA: the MX op and the unscaled fp8 hero atom.
+
+Both ops call ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``. The MX op passes
+real E8M0 scales. The hero atom passes literal 0 for both scales, and the
+backend then selects the unscaled instruction. LLVM 20, 22, 23 and 24 accept the
+same nine-argument, mangled form, so the text does not depend on the flavor.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import shutil
+import struct
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from rocke.core.backend import BackendError, _lower_via_cpp_engine
+from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir_serialize import serialize
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
+
+_NAME = "llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+_DECLARATION = (
+    f"declare <4 x float> @{_NAME}("
+    "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+    "i32 immarg, i32, i32 immarg, i32)"
+)
+# The hero call passes literal 0 for cbsz, blgp, opsel_a, scale_a, opsel_b, scale_b.
+_HERO_CALL_TAIL = "i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)"
+# The MX call passes cbsz, blgp, opsel_a, then scale_a, opsel_b, scale_b.
+_MX_CALL_TAIL = "i32 0, i32 0, i32 0, i32 {sa}, i32 0, i32 {sb})"
+
+
+def _kernel(kind: str, scales=(127, 127)) -> KernelDef:
+    """A one-wave kernel: C = A * B with K=128; A and B hold 32 fp8 bytes per lane."""
+    b = IRBuilder(f"f8f6f4_{kind}")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    pa = b.param("A", PtrType(I32, "global"), align=32)
+    pb = b.param("B", PtrType(I32, "global"), align=32)
+    pc = b.param("C", PtrType(F32, "global"), align=16)
+    tid = b.thread_id_x()
+    off8 = b.mul(tid, b.const_i32(8))
+    a = b.global_load_vN(pa, off8, I32, 8, align=32)
+    bb = b.global_load_vN(pb, off8, I32, 8, align=32)
+    acc = b.vector_splat(b.const_f32(0.0), 4)
+    if kind == "hero":
+        r = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
+    elif kind == "mx":
+        r = b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, acc, b.const_i32(scales[0]), b.const_i32(scales[1])
+        )
+    elif kind == "both":
+        r1 = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
+        r = b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, r1, b.const_i32(scales[0]), b.const_i32(scales[1])
+        )
+    else:
+        raise ValueError(kind)
+    b.global_store_vN(pc, b.mul(tid, b.const_i32(4)), r, 4, align=16)
+    b.ret()
+    return b.kernel
+
+
+def _lower(kernel: KernelDef, flavor: str) -> str:
+    return _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
+
+
+def _llvm_tool(name: str):
+    """Find an LLVM tool: ROCKE_LLVM_BIN, PATH, then ROCm installs (newest first)."""
+    exe = name + (".exe" if os.name == "nt" else "")
+    roots = []
+    if os.environ.get("ROCKE_LLVM_BIN"):
+        roots.append(Path(os.environ["ROCKE_LLVM_BIN"]))
+    for var in ("ROCM_PATH", "ROCM_HOME"):
+        if os.environ.get(var):
+            roots += [
+                Path(os.environ[var]) / "llvm" / "bin",
+                Path(os.environ[var]) / "lib" / "llvm" / "bin",
+            ]
+    for base in sorted(Path("/opt").glob("rocm*"), reverse=True):
+        roots += [base / "llvm" / "bin", base / "lib" / "llvm" / "bin"]
+    for root in roots:
+        cand = root / exe
+        if cand.is_file():
+            return str(cand)
+    return shutil.which(name)
+
+
+def _call_lines(ll: str):
+    return [ln for ln in ll.splitlines() if f"@{_NAME}(" in ln and " = call " in ln]
+
+
+def _declare_lines(ll: str):
+    return [
+        ln for ln in ll.splitlines() if ln.startswith("declare ") and "f8f6f4" in ln
+    ]
+
+
+class TestEmittedText(unittest.TestCase):
+    def test_hero_text_is_the_same_at_every_flavor(self):
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                ll = _lower(_kernel("hero"), flavor)
+                self.assertEqual(_declare_lines(ll), [_DECLARATION])
+                (call,) = _call_lines(ll)
+                self.assertTrue(call.endswith(_HERO_CALL_TAIL), call)
+
+    def test_mx_text_is_the_same_at_every_flavor(self):
+        tail = _MX_CALL_TAIL.format(sa=127, sb=127)
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                ll = _lower(_kernel("mx"), flavor)
+                self.assertEqual(_declare_lines(ll), [_DECLARATION])
+                (call,) = _call_lines(ll)
+                self.assertTrue(call.endswith(tail), call)
+
+    def test_both_ops_in_one_kernel_share_one_declaration(self):
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                ll = _lower(_kernel("both"), flavor)
+                self.assertEqual(_declare_lines(ll), [_DECLARATION])
+                self.assertEqual(len(_call_lines(ll)), 2)
+
+
+class TestEngineIdentity(unittest.TestCase):
+    def test_python_and_cpp_emit_the_same_bytes(self):
+        try:
+            _lower_via_cpp_engine(serialize(_kernel("hero")), "gfx950", "llvm20")
+        except BackendError as exc:
+            self.skipTest(f"C++ engine unavailable: {exc}")
+        for kind in ("hero", "mx", "both"):
+            kernel = _kernel(kind)
+            serialized = serialize(kernel)
+            for flavor in LLVM_FLAVORS:
+                with self.subTest(kind=kind, flavor=flavor):
+                    self.assertEqual(
+                        _lower_via_cpp_engine(serialized, "gfx950", flavor),
+                        _lower(kernel, flavor),
+                    )
+
+
+class TestToolchain(unittest.TestCase):
+    """Tests that need an LLVM toolchain. They skip when no tool exists."""
+
+    def test_verifier_accepts_every_kernel(self):
+        tool = _llvm_tool("llvm-as") or _llvm_tool("opt")
+        if tool is None:
+            self.skipTest("no llvm-as or opt found")
+        for kind in ("hero", "mx", "both"):
+            for flavor in LLVM_FLAVORS:
+                with (
+                    self.subTest(kind=kind, flavor=flavor),
+                    tempfile.TemporaryDirectory() as td,
+                ):
+                    src = Path(td) / "k.ll"
+                    src.write_text(_lower(_kernel(kind), flavor))
+                    cmd = (
+                        [tool, str(src), "-o", str(Path(td) / "k.bc")]
+                        if tool.endswith("llvm-as")
+                        else [tool, "-passes=verify", "-disable-output", str(src)]
+                    )
+                    proc = subprocess.run(
+                        cmd, capture_output=True, text=True, check=False
+                    )
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def _isa(self, kind: str, td: str, scales=(127, 127)) -> str:
+        clang = _llvm_tool("clang")
+        if clang is None:
+            self.skipTest("no clang found")
+        src = Path(td) / "k.ll"
+        src.write_text(_lower(_kernel(kind, scales), "llvm23"))
+        proc = subprocess.run(
+            [
+                clang,
+                "-x",
+                "ir",
+                "-O0",
+                "-nogpulib",
+                "-target",
+                "amdgcn-amd-amdhsa",
+                "-mcpu=gfx950",
+                "-S",
+                "-o",
+                "-",
+                str(src),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=td,
+            check=False,
+        )
+        if proc.returncode != 0:
+            self.skipTest(
+                f"clang cannot compile for gfx950: {proc.stderr.strip()[:120]}"
+            )
+        return proc.stdout
+
+    def test_hero_selects_the_unscaled_instruction(self):
+        with tempfile.TemporaryDirectory() as td:
+            asm = self._isa("hero", td)
+        self.assertIn("v_mfma_f32_16x16x128_f8f6f4", asm)
+        self.assertNotIn("v_mfma_scale_", asm)
+        self.assertNotIn("v_mfma_ld_scale_", asm)
+
+    def test_mx_selects_the_scaled_instruction(self):
+        with tempfile.TemporaryDirectory() as td:
+            asm = self._isa("mx", td)
+        self.assertIn("v_mfma_scale_f32_16x16x128_f8f6f4", asm)
+
+    def test_literal_zero_scales_on_the_mx_op_select_the_unscaled_instruction(self):
+        with tempfile.TemporaryDirectory() as td:
+            asm = self._isa("mx", td, scales=(0, 0))
+        self.assertIn("v_mfma_f32_16x16x128_f8f6f4", asm)
+        self.assertNotIn("v_mfma_scale_", asm)
+
+    def test_one_literal_zero_scale_keeps_the_scaled_instruction(self):
+        with tempfile.TemporaryDirectory() as td:
+            asm = self._isa("mx", td, scales=(0, 127))
+        self.assertIn("v_mfma_scale_f32_16x16x128_f8f6f4", asm)
+
+
+def _gfx950_device() -> bool:
+    try:
+        from rocke.runtime import hip_module as hip
+
+        return hip.get_device_count() > 0 and hip.get_device_arch(0) == "gfx950"
+    except Exception:  # noqa: BLE001 - any failure means "no usable device"
+        return False
+
+
+class TestGfx950Numerics(unittest.TestCase):
+    """A = B = fp8e4m3 1.0 and K = 128, so an unscaled result is 128."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not _gfx950_device():
+            raise unittest.SkipTest("no gfx950 device")
+        if _llvm_tool("clang") is None:
+            raise unittest.SkipTest("no clang found")
+
+    def _run(self, kind: str, scales=(127, 127)) -> float:
+        from rocke.runtime.hip_module import Runtime
+
+        rt = Runtime()
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "k.ll"
+            src.write_text(_lower(_kernel(kind, scales), "llvm23"))
+            co = Path(td) / "k.co"
+            proc = subprocess.run(
+                [
+                    _llvm_tool("clang"),
+                    "-x",
+                    "ir",
+                    "-O3",
+                    "-nogpulib",
+                    "-target",
+                    "amdgcn-amd-amdhsa",
+                    "-mcpu=gfx950",
+                    "-o",
+                    str(co),
+                    str(src),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=td,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            mod = rt.load_module(co.read_bytes())
+            fn = mod.get_function(f"f8f6f4_{kind}")
+            ones = bytes([0x38]) * (64 * 32)
+            pa, pb, pc = rt.alloc(len(ones)), rt.alloc(len(ones)), rt.alloc(64 * 16)
+            for p in (pa, pb):
+                rt.memcpy_h2d(
+                    p, (ctypes.c_ubyte * len(ones)).from_buffer_copy(ones), len(ones)
+                )
+            rt.memset(pc, 0xFF, 64 * 16)
+            rt.launch(fn, (1, 1, 1), (64, 1, 1), struct.pack("<QQQ", pa, pb, pc))
+            rt.sync()
+            out = (ctypes.c_ubyte * (64 * 16))()
+            rt.memcpy_d2h(out, pc, 64 * 16)
+            vals = struct.unpack("<256f", bytes(out))
+            for p in (pa, pb, pc):
+                rt.free(p)
+            mod.unload()
+        self.assertEqual(min(vals), max(vals), "lanes disagree")
+        return vals[0]
+
+    def test_hero_gives_128(self):
+        self.assertEqual(self._run("hero"), 128.0)
+
+    def test_mx_with_unit_scales_gives_128(self):
+        self.assertEqual(self._run("mx", (127, 127)), 128.0)
+
+    def test_mx_applies_the_e8m0_scale(self):
+        self.assertEqual(self._run("mx", (128, 127)), 256.0)
+        self.assertEqual(self._run("mx", (126, 127)), 64.0)
+
+    def test_a_literal_zero_scale_is_not_the_neutral_scale(self):
+        # One literal 0 keeps the scaled instruction; e = 0 means 2^-127.
+        self.assertAlmostEqual(self._run("mx", (0, 127)) / 2.0**-120, 1.0, places=5)
+
+
+if __name__ == "__main__":
+    unittest.main()

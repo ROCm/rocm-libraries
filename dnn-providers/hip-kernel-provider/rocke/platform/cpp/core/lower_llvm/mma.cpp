@@ -1320,30 +1320,31 @@ static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* o
 /* MX-scaled f8f6f4 / fp4 / fp6 / unscaled hero atoms                     */
 /* ====================================================================== */
 
-static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op)
+/* Declaration key of the K=128 f8f6f4 MFMA (A and B as <8 x i32>): the intrinsic
+ * name without the "llvm.amdgcn." prefix. Mirrors Python _F8F6F4_16X16X128_KEY. */
+#define ROCKE_F8F6F4_16X16X128_KEY "mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32"
+
+/* Shared emitter for the MX op and the hero atom (Python
+ * _emit_f8f6f4_16x16x128). A and B are bit-cast to <8 x i32> (32 fp8e4m3 bytes
+ * per lane). The call passes cbsz = blgp = 0 (fp8e4m3) and opsel 0. The scale
+ * operand texts are the MX scale values, or "0" for the hero atom. The backend
+ * selects the unscaled instruction only when both scale operands are literal 0. */
+static void emit_f8f6f4_16x16x128(rocke_lower_t* L,
+                                  const rocke_op_t* op,
+                                  const rocke_value_t* a,
+                                  const rocke_value_t* b,
+                                  const rocke_value_t* c,
+                                  const char* a_scale,
+                                  const char* b_scale,
+                                  const char* a_name,
+                                  const char* b_name)
 {
-    const rocke_value_t *a, *b, *c, *a_scale, *b_scale;
     const char *a_packed, *b_packed;
     const char *a_ty, *b_ty;
 
-    if(!rocke_ll_live(L))
-    {
-        return;
-    }
-    if(op->num_operands != 5)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    a_scale = op->operands[3];
-    b_scale = op->operands[4];
-    rocke_ll_need(L, "mfma.scale.f32.16x16x128.f8f6f4");
-
-    /* Normalise A / B to <8 x i32> (accept either packed or byte-vector). */
-    a_packed = rocke_ll_fresh(L, "mxa");
-    b_packed = rocke_ll_fresh(L, "mxb");
+    rocke_ll_need(L, ROCKE_F8F6F4_16X16X128_KEY);
+    a_packed = rocke_ll_fresh(L, a_name);
+    b_packed = rocke_ll_fresh(L, b_name);
     a_ty = rocke_ll_llvm_type(L, a->type);
     b_ty = rocke_ll_llvm_type(L, b->type);
     if(strcmp(a_ty, "<8 x i32>") != 0)
@@ -1364,34 +1365,42 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         b_packed = rocke_ll_operand(L, b);
     }
-    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM23)
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x float> "
+                   "@llvm.amdgcn." ROCKE_F8F6F4_16X16X128_KEY "("
+                   "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
+                   "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
+                   mma_result_name(L, op),
+                   a_packed,
+                   b_packed,
+                   rocke_ll_operand(L, c),
+                   a_scale,
+                   b_scale);
+}
+
+/* MX op: the f8f6f4 MFMA with in-instruction E8M0 scales. The instruction reads
+ * one E8M0 byte from each scale and multiplies by 2^(e - 127); e = 0 gives
+ * 2^-127, not 1.0. Both scale operands at literal 0 make the backend select the
+ * unscaled instruction instead. */
+static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L))
     {
-        rocke_ll_emitf(L,
-                       "  %s = call <4 x float> "
-                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
-                       mma_result_name(L, op),
-                       a_packed,
-                       b_packed,
-                       rocke_ll_operand(L, c),
-                       rocke_ll_operand(L, a_scale),
-                       rocke_ll_operand(L, b_scale));
+        return;
     }
-    else
+    if(op->num_operands != 5)
     {
-        rocke_ll_emitf(L,
-                       "  %s = call <4 x float> "
-                       "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                       "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
-                       mma_result_name(L, op),
-                       a_packed,
-                       b_packed,
-                       rocke_ll_operand(L, c),
-                       rocke_ll_operand(L, a_scale),
-                       rocke_ll_operand(L, b_scale));
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
     }
+    emit_f8f6f4_16x16x128(L,
+                          op,
+                          op->operands[0],
+                          op->operands[1],
+                          op->operands[2],
+                          rocke_ll_operand(L, op->operands[3]),
+                          rocke_ll_operand(L, op->operands[4]),
+                          "mxa",
+                          "mxb");
 }
 
 static void _op_tile_mfma_f32_16x16x128_fp4(rocke_lower_t* L, const rocke_op_t* op)
@@ -1495,14 +1504,13 @@ static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* o
 
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* UNSCALED fp8 16x16x128 hero atom (L6): reuse the f8f6f4 scaled intrinsic
-     * with both E8M0 scales pinned to 0 (2^0 == 1.0) so it is numerically a
-     * plain unscaled fp8 MFMA. Its dedicated 9-arg decl key preserves the
-     * LLVM20/22 MX-scaled declaration, which remains the 11-arg form. */
-    const rocke_value_t *a, *b, *c;
-    const char *a_packed, *b_packed;
-    const char *a_ty, *b_ty;
-
+    /* Unscaled fp8 16x16x128 hero atom: gfx950 has no unscaled intrinsic for the
+     * K=128 f8f6f4 MFMA, so the atom calls the scaled intrinsic with both scale
+     * operands at literal 0. The backend then selects the unscaled instruction
+     * v_mfma_f32_16x16x128_f8f6f4 (LLVM TableGen pattern
+     * UnscaledMFMAOptimizationPat; Composable Kernel relies on the same rule).
+     * The literal 0 marks "no scale". As an E8M0 value, 0 would mean 2^-127, so
+     * a loaded or computed 0 must never replace the literal here. */
     if(!rocke_ll_live(L))
     {
         return;
@@ -1511,41 +1519,15 @@ static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* 
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
     }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    rocke_ll_need(L, "mfma.f32.16x16x128.fp8.hero");
-    a_packed = rocke_ll_fresh(L, "a_fp8_128");
-    b_packed = rocke_ll_fresh(L, "b_fp8_128");
-    a_ty = rocke_ll_llvm_type(L, a->type);
-    b_ty = rocke_ll_llvm_type(L, b->type);
-    if(strcmp(a_ty, "<8 x i32>") != 0)
-    {
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to <8 x i32>", a_packed, a_ty, rocke_ll_operand(L, a));
-    }
-    else
-    {
-        a_packed = rocke_ll_operand(L, a);
-    }
-    if(strcmp(b_ty, "<8 x i32>") != 0)
-    {
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to <8 x i32>", b_packed, b_ty, rocke_ll_operand(L, b));
-    }
-    else
-    {
-        b_packed = rocke_ll_operand(L, b);
-    }
-    rocke_ll_emitf(L,
-                   "  %s = call <4 x float> "
-                   "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-                   "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                   "i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)",
-                   mma_result_name(L, op),
-                   a_packed,
-                   b_packed,
-                   rocke_ll_operand(L, c));
+    emit_f8f6f4_16x16x128(L,
+                          op,
+                          op->operands[0],
+                          op->operands[1],
+                          op->operands[2],
+                          "0",
+                          "0",
+                          "a_fp8_128",
+                          "b_fp8_128");
 }
 
 /* ====================================================================== */

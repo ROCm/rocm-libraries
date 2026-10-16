@@ -247,11 +247,13 @@ class MfmaAtom:
         ``f8f6f4`` instruction whose LLVM intrinsic is
         ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (there is NO plain
         ``mfma.f32.16x16x128.fp8.fp8`` — only the sparse ``smfmac`` and the
-        scaled ``f8f6f4`` exist). The lowering pins the in-instruction E8M0
-        scale operands to 0 (exponent 0 => scale factor 2^0 == 1.0), and
-        the format selectors ``cbsz=0`` / ``blgp=0`` (fp8e4m3 for both A
-        and B), making the instruction numerically equivalent to a plain
-        unscaled fp8 MFMA. This is the block-scale design's intended use:
+        scaled ``f8f6f4`` exist). The lowering passes literal 0 for both
+        scale operands. The backend then selects the unscaled instruction
+        ``v_mfma_f32_16x16x128_f8f6f4`` (LLVM pattern
+        ``UnscaledMFMAOptimizationPat``). The format selectors
+        ``cbsz=0`` / ``blgp=0`` choose fp8e4m3 for both A and B. A literal 0
+        marks "no scale". As an E8M0 value, 0 would mean 2^-127, so a loaded
+        or computed 0 must never replace the literal. This is the block-scale design's intended use:
         the per-block dequant is applied to the f32 accumulator afterward,
         NOT in-instruction.
 

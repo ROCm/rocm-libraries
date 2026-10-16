@@ -18,7 +18,7 @@ These MFMA atoms are the wave64 CDNA path (gfx942 / gfx950). The Python and C++ 
 | `bf16_32x32x16`  | 32x32x16 | `<8xbfloat>` | `<8xbfloat>` | `<16xfloat>` | 32x32      | gfx950+ | K-packed bf16 hero                 |
 | `fp8_16x16x32` / `bf8_16x16x32` | 16x16x32 | `<8xfp8e4m3>` / `<8xbf8e5m2>` | same | `<4xfloat>`  | 16x16 | gfx942+ | 8 f8 bytes/lane = `<2 x i32>` at the intrinsic boundary |
 | `fp8_32x32x16` / `bf8_32x32x16` | 32x32x16 | `<8xfp8e4m3>` / `<8xbf8e5m2>` | same | `<16xfloat>` | 32x32 | gfx942+ | f8/bf8 hero shape                  |
-| `fp8_16x16x128`  | 16x16x128 | `<32xfp8e4m3>` | `<32xfp8e4m3>` | `<4xfloat>` | 16x16   | gfx950  | Wide-K f8 throughput ceiling; lowers via the scaled `f8f6f4` intrinsic with the E8M0 scales pinned to 1.0 (numerically equal to a plain unscaled fp8 MFMA) |
+| `fp8_16x16x128`  | 16x16x128 | `<32xfp8e4m3>` | `<32xfp8e4m3>` | `<4xfloat>` | 16x16   | gfx950  | Wide-K f8 throughput ceiling; lowers via the scaled `f8f6f4` intrinsic with both scale operands at literal 0. The backend then selects the unscaled instruction. A literal E8M0 0 would mean 2^-127, so pass the literal, never a loaded 0 |
 | `fp4_16x16x128`  | 16x16x128 | 16 fp4 (i64) | 16 fp4 (i64) | `<4xfloat>` | 16x16    | gfx950  | MX fp4 atom; densest gfx950 MFMA shape |
 | `fp6_16x16x96`   | 16x16x96 | 12 fp6      | 12 fp6      | `<4xfloat>`  | 16x16        | gfx950  | MX fp6 atom                        |
 
