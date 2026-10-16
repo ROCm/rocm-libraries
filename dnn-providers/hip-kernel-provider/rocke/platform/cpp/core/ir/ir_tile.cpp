@@ -61,12 +61,17 @@ static int rocke_mma_c_frag_len(const char* op_id)
     return rocke_arch_mma_c_frag_len(op_id);
 }
 
-/* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
- * (target._op_id_c_dtype()[op_id] == "i32"). */
-static bool rocke_mma_is_int_acc(const char* op_id)
+/* Accumulator element type for op_id, from the arch catalog SSOT
+ * (target._op_id_c_dtype()[op_id]): i32 for integer WMMA, f64 for f64 MFMA,
+ * f32 otherwise. */
+static const rocke_type_t* rocke_mma_c_elem(const char* op_id)
 {
     const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
+    if(c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0)
+        return rocke_i32();
+    if(c_dtype != NULL && strcmp(c_dtype, "fp64") == 0)
+        return rocke_f64();
+    return rocke_f32();
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
@@ -585,7 +590,6 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            int num_extra)
 {
     int c_frag_len;
-    bool is_int_acc;
     const rocke_type_t* c_elem;
     const rocke_type_t* vt;
     const char* hint;
@@ -611,8 +615,7 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
     }
-    is_int_acc = rocke_mma_is_int_acc(op_id);
-    c_elem = is_int_acc ? rocke_i32() : rocke_f32();
+    c_elem = rocke_mma_c_elem(op_id);
     vt = rocke_vector_type(b, c_elem, c_frag_len);
     if(!vt)
     {

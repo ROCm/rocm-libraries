@@ -1795,7 +1795,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
+        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32, F64):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -2375,8 +2375,9 @@ class IRBuilder:
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x float>`` (the per-lane
-        accumulator length the atom produces). When ``op`` is an ``op_id``
+        The result vector type is ``<c_frag_len x acc>`` (the per-lane
+        accumulator length the atom produces; ``acc`` is f32, i32 for integer
+        WMMA atoms, or f64 for f64 MFMA atoms). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table;
         an emulated atom's op_id resolves through the physical atom it expands
         into.
@@ -2405,11 +2406,18 @@ class IRBuilder:
             else _mma_c_frag_len(op_id)
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else resolve from the arch SSOT via op_id.
+        # i32, f64 MFMA atoms in f64; everything else in f32. Prefer the atom's
+        # own c_dtype when ``op`` is an MmaOp, else resolve from the arch SSOT
+        # via op_id.
         c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
-        c_elem = I32 if is_int_acc else F32
+        if c_dtype is None:
+            c_dtype = _arch._op_id_c_dtype().get(op_id)
+        if c_dtype == "i32":
+            c_elem = I32
+        elif c_dtype == "fp64":
+            c_elem = F64
+        else:
+            c_elem = F32
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")

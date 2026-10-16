@@ -208,6 +208,26 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[2]));
         return ROCKE_OK;
     }
+    if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "f64x1 %s = {__builtin_amdgcn_mfma_f64_4x4x4f64(%s, %s, %s[0], 0, 0, 0)};",
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
+    if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
+    {
+        rocke_h_emitf(lw,
+                      "f64x4 %s = __builtin_amdgcn_mfma_f64_16x16x4f64(%s, %s, %s, 0, 0, 0);",
+                      rocke_h_name(lw, op->results[0]),
+                      rocke_h_name(lw, op->operands[0]),
+                      rocke_h_name(lw, op->operands[1]),
+                      rocke_h_name(lw, op->operands[2]));
+        return ROCKE_OK;
+    }
     if(rocke_gfx1250_scaled_wmma(op_id))
     {
         return h_emit_gfx1250_scaled_wmma(lw, op);
