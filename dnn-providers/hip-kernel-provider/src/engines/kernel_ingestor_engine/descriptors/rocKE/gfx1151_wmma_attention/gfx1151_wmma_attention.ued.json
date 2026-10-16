@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "820ef272-1eba-4b45-b285-b9052d41f147",
+  "name": "hipkernel:Gfx1151WmmaAttention",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx1151_wmma_attention.graph_match"
+  },
+  "metadata": "3cd28975-c675-4575-b00a-73c829e33f20",
+  "heuristic": "251327fd-eb3d-40a1-84e2-225af549bce1"
+}

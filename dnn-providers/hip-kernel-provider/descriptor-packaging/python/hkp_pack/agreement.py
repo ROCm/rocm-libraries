@@ -52,10 +52,6 @@ def complete_metadata(metadata, kmd):
     return result
 
 
-def overlap(left, right):
-    return not left or not right or bool(set(left) & set(right))
-
-
 def validate_consumer(consumer, kmd):
     required = {
         "engine_id",

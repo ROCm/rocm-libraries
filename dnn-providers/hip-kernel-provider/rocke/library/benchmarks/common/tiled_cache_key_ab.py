@@ -115,21 +115,21 @@ def _bootstrap(root: str, arch: str | None):
     return au
 
 
-def _route(au, problem) -> str | None:
+def _route(au, problem, arch: str) -> str | None:
     """Path ``run_unified_attention_torch(backend="auto")`` takes, or None for
     the scalar fallback (out of scope here)."""
     if problem.select_path() != "2d":
-        if au.supports_native_unified_attention_3d_tiled(problem)[0]:
+        if au.supports_native_unified_attention_3d_tiled(problem, arch)[0]:
             return "3d"
-    if au.supports_native_unified_attention_tiled(problem)[0]:
+    if au.supports_native_unified_attention_tiled(problem, arch)[0]:
         return "2d"
     return None
 
 
-def _key(au, problem, path: str):
+def _key(au, problem, path: str, arch: str):
     if path == "2d":
-        return au._tiled_cache_key(problem)
-    return au._tiled_3d_cache_key(problem)
+        return au._tiled_cache_key(problem, arch)
+    return au._tiled_3d_cache_key(problem, arch)
 
 
 def _short_hash(text: str) -> str:
@@ -171,22 +171,22 @@ def _ir_sweep(problem_cls, arch: str, num_cus: int) -> Iterator:
             )
 
 
-def _build_identity(au, problem, path: str) -> str:
+def _build_identity(au, problem, path: str, arch: str) -> str:
     """Full input of the binary: spec (raw num_seqs kept), builder, backend."""
     if path == "2d":
-        route = au._gfx942_4warp_route(problem)
+        route = au._gfx942_4warp_route(problem, arch)
         return repr(
             (
-                au._tiled_spec_from_problem(problem),
+                au._tiled_spec_from_problem(problem, arch),
                 route.cohort if route else "default",
-                au._select_2d_compile_backend(problem),
+                au._select_2d_compile_backend(problem, arch),
             )
         )
     return repr(
         (
-            au._tiled_3d_spec_from_problem(problem),
-            au._num_segments(problem),
-            au._select_3d_waves_per_eu(problem),
+            au._tiled_3d_spec_from_problem(problem, arch),
+            au._num_segments(problem, arch),
+            au._select_3d_waves_per_eu(problem, arch),
         )
     )
 
@@ -210,22 +210,22 @@ def _pool_lower(item) -> str:
 
     if path == "2d":
         _, build, _ = au._tiled_2d_impl(arch)
-        spec = au._tiled_spec_from_problem(problem)
-        route = au._gfx942_4warp_route(problem)
+        spec = au._tiled_spec_from_problem(problem, arch)
+        route = au._gfx942_4warp_route(problem, arch)
         kernels = [route.builder(spec, arch=arch) if route else build(spec, arch=arch)]
-        tag = au._select_2d_compile_backend(problem)
+        tag = au._select_2d_compile_backend(problem, arch)
     else:
         _, red_cls, build_seg, build_red, _ = au._tiled_3d_impl(arch)
         kernels = [
-            build_seg(au._tiled_3d_spec_from_problem(problem), arch=arch),
+            build_seg(au._tiled_3d_spec_from_problem(problem, arch), arch=arch),
             build_red(
                 red_cls(
                     head_size=problem.head_size,
                     num_query_heads=problem.num_query_heads,
                     num_kv_heads=problem.num_kv_heads,
                     dtype=problem.dtype,
-                    num_segments=au._num_segments(problem),
-                    waves_per_eu=au._select_3d_waves_per_eu(problem),
+                    num_segments=au._num_segments(problem, arch),
+                    waves_per_eu=au._select_3d_waves_per_eu(problem, arch),
                 ),
                 arch=arch,
             ),
@@ -248,10 +248,10 @@ def _worker_ir(args) -> None:
     rep_of_build: dict[str, tuple] = {}
     for problem in _ir_sweep(P, args.arch, args.num_cus):
         try:
-            path = _route(au, problem)
+            path = _route(au, problem, args.arch)
             if path is not None:
-                key = _key(au, problem, path)
-                build = _build_identity(au, problem, path)
+                key = _key(au, problem, path, args.arch)
+                build = _build_identity(au, problem, path, args.arch)
         except (ValueError, NotImplementedError):
             # Admitted by a gate but rejected by the spec builder; never launches.
             path = None
@@ -558,7 +558,7 @@ def _worker_ab(args) -> None:
     for idx, (label, problem) in enumerate(
         _ab_sweep(au.UnifiedAttentionProblem, arch, num_cus)
     ):
-        path = _route(au, problem)
+        path = _route(au, problem, arch)
         if path is None:
             continue
         gc.collect()
@@ -601,7 +601,7 @@ def _worker_ab(args) -> None:
         for _ in range(5):
             t0 = time.perf_counter()
             for _ in range(1000):
-                _key(au, problem, path)
+                _key(au, problem, path, arch)
             key_us.append((time.perf_counter() - t0) * 1e3)
         rows.append(
             dict(

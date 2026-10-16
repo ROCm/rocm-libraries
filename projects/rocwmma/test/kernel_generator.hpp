@@ -302,10 +302,12 @@ namespace rocwmma
                 // target can support this type, otherwise don't generate the kernel.
                 if constexpr((bool)ROCWMMA_ARCH_HOST)
                 {
-                    // Only gfx950 and gfx12 devices support f8
+                    // Only gfx950, gfx117x and gfx12 devices support f8
                     using DeviceInfo = HipDevice;
                     auto arch        = DeviceInfo::instance()->getGcnArch();
                     if(arch != DeviceInfo::hipGcnArch_t::GFX950
+                       && arch != DeviceInfo::hipGcnArch_t::GFX1170
+                       && arch != DeviceInfo::hipGcnArch_t::GFX1171
                        && arch != DeviceInfo::hipGcnArch_t::GFX1200
                        && arch != DeviceInfo::hipGcnArch_t::GFX1201
                        && arch != DeviceInfo::hipGcnArch_t::GFX1250)

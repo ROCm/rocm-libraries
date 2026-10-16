@@ -70,15 +70,11 @@ _ROUTING_ENV = (
 
 
 @pytest.fixture
-def pin_arch(monkeypatch):
-    """Pin the memoized arch (conftest restores it) and clear routing env."""
+def routing_env(monkeypatch):
+    """Clear the routing env knobs so selectors see production routing. The arch
+    is passed explicitly to every selector, never read from the device."""
     for var in _ROUTING_ENV:
         monkeypatch.delenv(var, raising=False)
-
-    def _pin(arch):
-        au._RESOLVED_ATTENTION_ARCH = arch
-
-    return _pin
 
 
 def _norm_spec(spec):
@@ -90,25 +86,25 @@ def _norm_spec(spec):
     return fields
 
 
-def _built_2d(problem):
-    route = au._gfx942_4warp_route(problem)
+def _built_2d(problem, arch):
+    route = au._gfx942_4warp_route(problem, arch)
     return dict(
-        spec=_norm_spec(au._tiled_spec_from_problem(problem)),
+        spec=_norm_spec(au._tiled_spec_from_problem(problem, arch)),
         builder=route.cohort if route is not None else "default",
-        backend=au._select_2d_compile_backend(problem),
+        backend=au._select_2d_compile_backend(problem, arch),
     )
 
 
-def _built_3d(problem):
+def _built_3d(problem, arch):
     return dict(
-        spec=_norm_spec(au._tiled_3d_spec_from_problem(problem)),
+        spec=_norm_spec(au._tiled_3d_spec_from_problem(problem, arch)),
         reduce=(
             problem.head_size,
             problem.num_query_heads,
             problem.num_kv_heads,
             problem.dtype,
-            au._num_segments(problem),
-            au._select_3d_waves_per_eu(problem),
+            au._num_segments(problem, arch),
+            au._select_3d_waves_per_eu(problem, arch),
         ),
     )
 
@@ -171,7 +167,7 @@ def _sweep(arch):
 
 @pytest.mark.parametrize("arch", ARCHES)
 @pytest.mark.parametrize("path", ("2d", "3d"))
-def test_key_matches_build_identity(pin_arch, arch, path):
+def test_key_matches_build_identity(routing_env, arch, path):
     """Key equality and build equality must coincide across the sweep.
 
     Equal key, different build: under-keying. This is the guard for the next
@@ -181,7 +177,6 @@ def test_key_matches_build_identity(pin_arch, arch, path):
     Equal build, different key: over-keying. A raw shape field, or a selector
     the arch's builder never reads, compiles duplicate binaries.
     """
-    pin_arch(arch)
     if path == "2d":
         supported = au.supports_native_unified_attention_tiled
         key_fn, built_fn = au._tiled_cache_key, _built_2d
@@ -193,12 +188,12 @@ def test_key_matches_build_identity(pin_arch, arch, path):
     key_of_build = {}
     checked = 0
     for problem in _sweep(arch):
-        if not supported(problem)[0]:
+        if not supported(problem, arch)[0]:
             continue
         try:
             # gfx1250's 3D key builds the spec itself, so it raises too.
-            key = key_fn(problem)
-            built = built_fn(problem)
+            key = key_fn(problem, arch)
+            built = built_fn(problem, arch)
         except (ValueError, NotImplementedError):
             # Admitted by the gate but rejected by the spec; never launches.
             continue
@@ -234,16 +229,15 @@ def test_key_matches_build_identity(pin_arch, arch, path):
 # ---------------------------------------------------------------------------
 
 
-def _assert_split(key_fn, built_fn, a, b, field):
-    assert built_fn(a)["spec"][field] != built_fn(b)["spec"][field]
-    assert key_fn(a) != key_fn(b)
+def _assert_split(key_fn, built_fn, a, b, field, arch):
+    assert built_fn(a, arch)["spec"][field] != built_fn(b, arch)["spec"][field]
+    assert key_fn(a, arch) != key_fn(b, arch)
 
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950", "gfx1250"))
-def test_search_bucket_edge_splits_2d_key(pin_arch, arch):
+def test_search_bucket_edge_splits_2d_key(routing_env, arch):
     # num_seqs 3 and 4 fall in different log2 search buckets (2 vs 3 iterations).
     # d64 GQA-8 (+ fp8 K/V on gfx1250): a geometry every arch's tiled 2D supports.
-    pin_arch(arch)
     base = dict(
         num_query_heads=64,
         num_kv_heads=8,
@@ -256,14 +250,13 @@ def test_search_bucket_edge_splits_2d_key(pin_arch, arch):
     )
     a = P(total_q=3 * 1024, num_seqs=3, **base)
     b = P(total_q=4 * 1024, num_seqs=4, **base)
-    _assert_split(au._tiled_cache_key, _built_2d, a, b, "binary_search_iters")
+    _assert_split(au._tiled_cache_key, _built_2d, a, b, "binary_search_iters", arch)
     # The trip count is a literal in the IR, so the binaries really differ.
     assert _lower_2d(a, arch, "llvm22") != _lower_2d(b, arch, "llvm22")
 
 
 @pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
-def test_search_bucket_edge_splits_3d_key(pin_arch, arch):
-    pin_arch(arch)
+def test_search_bucket_edge_splits_3d_key(routing_env, arch):
     base = dict(
         num_query_heads=32,
         num_kv_heads=8,
@@ -275,13 +268,13 @@ def test_search_bucket_edge_splits_3d_key(pin_arch, arch):
     )
     a = P(total_q=3, num_seqs=3, **base)
     b = P(total_q=4, num_seqs=4, **base)
-    _assert_split(au._tiled_3d_cache_key, _built_3d, a, b, "binary_search_iters")
+    _assert_split(au._tiled_3d_cache_key, _built_3d, a, b, "binary_search_iters", arch)
 
 
-def test_fp8_mfma_qk_kv_threshold_splits_key(pin_arch):
+def test_fp8_mfma_qk_kv_threshold_splits_key(routing_env):
     # T = 2 * block_size = 32 -> the K-in-LDS fp8 path turns off above
     # max_seqlen_k = 16 * T = 512. Nothing else in the key reads max_seqlen_k.
-    pin_arch("gfx950")
+    arch = "gfx950"
     base = dict(
         total_q=1,
         num_seqs=1,
@@ -295,15 +288,15 @@ def test_fp8_mfma_qk_kv_threshold_splits_key(pin_arch):
     )
     a = P(max_seqlen_k=512, **base)
     b = P(max_seqlen_k=513, **base)
-    assert au._enable_fp8_mfma_qk(a) and not au._enable_fp8_mfma_qk(b)
-    _assert_split(au._tiled_cache_key, _built_2d, a, b, "use_fp8_mfma_qk")
+    assert au._enable_fp8_mfma_qk(a, arch) and not au._enable_fp8_mfma_qk(b, arch)
+    _assert_split(au._tiled_cache_key, _built_2d, a, b, "use_fp8_mfma_qk", arch)
 
 
-def test_single_batch_interleave_splits_key(pin_arch):
+def test_single_batch_interleave_splits_key(routing_env):
     # The d128 single-batch cohort turns on the softmax/MFMA interleave; the
     # same shape at num_seqs=2 does not. The search bucket also separates this
     # pair, so the tail entry itself is pinned by the env-flip test below.
-    pin_arch("gfx950")
+    arch = "gfx950"
     base = dict(
         num_query_heads=8,
         num_kv_heads=8,
@@ -315,14 +308,16 @@ def test_single_batch_interleave_splits_key(pin_arch):
     )
     a = P(total_q=257, num_seqs=1, **base)
     b = P(total_q=514, num_seqs=2, **base)
-    _assert_split(au._tiled_cache_key, _built_2d, a, b, "use_softmax_mfma_interleave")
+    _assert_split(
+        au._tiled_cache_key, _built_2d, a, b, "use_softmax_mfma_interleave", arch
+    )
 
 
-def test_env_knob_flip_splits_single_batch_key(pin_arch, monkeypatch):
+def test_env_knob_flip_splits_single_batch_key(routing_env, monkeypatch):
     # Routing env knobs are read on every launch and can change mid-process.
     # q=257 under default env and q=1025 with both d128 knobs off resolve the
     # same geometry; only the single-batch tail separates their keys.
-    pin_arch("gfx950")
+    arch = "gfx950"
     base = dict(
         num_seqs=1,
         num_query_heads=8,
@@ -332,14 +327,14 @@ def test_env_knob_flip_splits_single_batch_key(pin_arch, monkeypatch):
         dtype="bf16",
     )
     a = P(total_q=257, max_seqlen_q=257, max_seqlen_k=257, **base)
-    key_a = au._tiled_cache_key(a)
-    spec_a = _built_2d(a)["spec"]
+    key_a = au._tiled_cache_key(a, arch)
+    spec_a = _built_2d(a, arch)["spec"]
     monkeypatch.setenv("HIPDNN_GFX950_D128_SMALL_TILE", "0")
     monkeypatch.setenv("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE", "off")
     b = P(total_q=1025, max_seqlen_q=1025, max_seqlen_k=1025, **base)
     field = "use_softmax_mfma_interleave"
-    assert spec_a[field] != _built_2d(b)["spec"][field]
-    assert key_a != au._tiled_cache_key(b)
+    assert spec_a[field] != _built_2d(b, arch)["spec"][field]
+    assert key_a != au._tiled_cache_key(b, arch)
 
 
 # ---------------------------------------------------------------------------
@@ -349,23 +344,23 @@ def test_env_knob_flip_splits_single_batch_key(pin_arch, monkeypatch):
 
 def _lower_2d(problem, arch, flavor):
     _, build, _ = au._tiled_2d_impl(arch)
-    spec = au._tiled_spec_from_problem(problem)
-    route = au._gfx942_4warp_route(problem)
+    spec = au._tiled_spec_from_problem(problem, arch)
+    route = au._gfx942_4warp_route(problem, arch)
     kernel = route.builder(spec, arch=arch) if route else build(spec, arch=arch)
     return _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
 
 
 def _lower_3d(problem, arch, flavor):
     _, reduce_spec_cls, build_seg, build_red, _ = au._tiled_3d_impl(arch)
-    seg = build_seg(au._tiled_3d_spec_from_problem(problem), arch=arch)
+    seg = build_seg(au._tiled_3d_spec_from_problem(problem, arch), arch=arch)
     red = build_red(
         reduce_spec_cls(
             head_size=problem.head_size,
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             dtype=problem.dtype,
-            num_segments=au._num_segments(problem),
-            waves_per_eu=au._select_3d_waves_per_eu(problem),
+            num_segments=au._num_segments(problem, arch),
+            waves_per_eu=au._select_3d_waves_per_eu(problem, arch),
         ),
         arch=arch,
     )
@@ -449,15 +444,14 @@ _SHARED_PAIRS = [
 @pytest.mark.parametrize(
     "arch,path,a,b", [p[1:] for p in _SHARED_PAIRS], ids=[p[0] for p in _SHARED_PAIRS]
 )
-def test_same_outputs_share_key_and_ir(pin_arch, arch, path, a, b, flavor):
-    pin_arch(arch)
+def test_same_outputs_share_key_and_ir(routing_env, arch, path, a, b, flavor):
     key_fn, lower = (
         (au._tiled_cache_key, _lower_2d)
         if path == "2d"
         else (au._tiled_3d_cache_key, _lower_3d)
     )
     assert a.num_seqs != b.num_seqs or a.max_seqlen_q != b.max_seqlen_q
-    assert key_fn(a) == key_fn(b)
+    assert key_fn(a, arch) == key_fn(b, arch)
     assert lower(a, arch, flavor) == lower(b, arch, flavor)
 
 
@@ -476,18 +470,18 @@ def test_shape_key_carries_batch_and_token_counts():
     assert au._shape_key(key, b) != au._shape_key(key, c)
 
 
-def test_launch_meta_separates_num_seqs_under_one_key(pin_arch):
+def test_launch_meta_separates_num_seqs_under_one_key(routing_env):
     # Same binary (one cache key) and same total_q, but the grid adds one
     # padding q-block per sequence, so the launch geometry must differ.
-    pin_arch("gfx950")
+    arch = "gfx950"
     base = dict(total_q=400, max_seqlen_q=100, max_seqlen_k=100, **_D64_GQA8)
     a = P(num_seqs=4, **base)
     b = P(num_seqs=7, **base)
-    key = au._tiled_cache_key(a)
-    assert key == au._tiled_cache_key(b)
+    key = au._tiled_cache_key(a, arch)
+    assert key == au._tiled_cache_key(b, arch)
     au._2D_LAUNCH_META.clear()
-    grid_a = au._get_2d_launch_meta(a, key).grid
-    grid_b = au._get_2d_launch_meta(b, key).grid
+    grid_a = au._get_2d_launch_meta(a, key, arch=arch).grid
+    grid_b = au._get_2d_launch_meta(b, key, arch=arch).grid
     assert grid_b[1] - grid_a[1] == b.num_seqs - a.num_seqs
 
 

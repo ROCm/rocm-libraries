@@ -51,6 +51,17 @@ rocke_value_t* rocke_b_const_f32(rocke_ir_builder_t* b, double value)
     return rocke_i_op1(b, ROCKE_OP_ARITH_CONSTANT, NULL, 0, rocke_f32(), &a, "c");
 }
 
+rocke_value_t* rocke_b_const_f64(rocke_ir_builder_t* b, double value)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_float(b, &a, "value", value);
+    rocke_attr_set_str(b, &a, "ity", "f64");
+    return rocke_i_op1(b, ROCKE_OP_ARITH_CONSTANT, NULL, 0, rocke_f64(), &a, "c");
+}
+
 rocke_value_t* rocke_b_fp16_zero(rocke_ir_builder_t* b)
 {
     rocke_attr_map_t a;
