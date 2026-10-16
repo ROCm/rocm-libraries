@@ -604,6 +604,16 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     ),
     "mfma.f32.16x16x8.xf32": "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8.xf32(<2 x float>, <2 x float>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)",
     "mfma.f32.32x32x4.xf32": "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)",
+    "mfma.f64.16x16x4f64": (
+        "declare <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+        "double, double, <4 x double>, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
+    "mfma.f64.4x4x4f64": (
+        "declare double @llvm.amdgcn.mfma.f64.4x4x4f64("
+        "double, double, double, "
+        "i32 immarg, i32 immarg, i32 immarg)"
+    ),
     "mfma.f32.16x16x4f32": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
         "float, float, <4 x float>, "
@@ -3740,6 +3750,37 @@ class _Lowerer:
             f"  {op.result.name} = call <{count} x float> @llvm.amdgcn.{intrinsic}("
             f"<2 x float> {a_cast}, <2 x float> {b_cast}, "
             f"<{count} x float> {self._operand(c)}, i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f64.16x16x4f64")
+        self._current().emit(
+            f"  {op.result.name} = call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
+            f"double {self._operand(a)}, "
+            f"double {self._operand(b)}, "
+            f"<4 x double> {self._operand(c)}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        a, b, c = op.operands
+        self._need("mfma.f64.4x4x4f64")
+        # The intrinsic takes and returns a scalar; the IR accumulator is <1 x double>.
+        c_elem = self._fresh("mfma_c")
+        d_elem = self._fresh("mfma_d")
+        self._current().emit(
+            f"  {c_elem} = extractelement <1 x double> {self._operand(c)}, i32 0"
+        )
+        self._current().emit(
+            f"  {d_elem} = call double @llvm.amdgcn.mfma.f64.4x4x4f64("
+            f"double {self._operand(a)}, "
+            f"double {self._operand(b)}, "
+            f"double {c_elem}, "
+            f"i32 0, i32 0, i32 0)"
+        )
+        self._current().emit(
+            f"  {op.result.name} = insertelement <1 x double> undef, double {d_elem}, i32 0"
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:

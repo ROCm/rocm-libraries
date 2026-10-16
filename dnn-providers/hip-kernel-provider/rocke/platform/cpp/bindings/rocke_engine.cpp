@@ -48,6 +48,7 @@ extern "C" {
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 #include "rocke/instance_conv_wgrad_workspace_reduce.h"
 #include "rocke/instance_deep_fused_conv_pool.h"
+#include "rocke/instance_f64_mma_probe.h"
 #include "rocke/instance_flatmm.h"
 #include "rocke/instance_gemm_multi_abd.h"
 #include "rocke/instance_gemm_multi_d.h"
@@ -3747,6 +3748,25 @@ PYBIND11_MODULE(rocke_engine, m)
         "engine_version",
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
+
+    m.def(
+        "f64_mma_probe_serialize_ir",
+        [](int m, int k) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("k") = 4);
 
     m.def(
         "tf32_mma_probe_serialize_ir",

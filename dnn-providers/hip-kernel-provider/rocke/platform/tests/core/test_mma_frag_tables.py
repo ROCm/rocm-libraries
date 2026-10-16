@@ -9,8 +9,8 @@ a bare ``op_id`` string via three pieces:
 
 * ``_mma_c_frag_len`` — accumulator fragment length, resolved from the arch SSOT
   ``core.arch.target._MMA_FRAGMENT_INFO`` (no ir-side copy);
-* ``_mma_c_is_int`` — whether the atom accumulates in i32, resolved from the JSON
-  catalog accumulator dtype (``target._op_id_c_dtype``);
+* ``_mma_c_dtype`` — the atom's accumulator dtype, resolved from the JSON
+  catalog (``target._op_id_c_dtype``);
 * ``_MMA_RESULT_HINT`` — the ir-side SSA result-name hints (naming only, kept in
   ir.py to preserve byte-identical value numbering).
 
@@ -36,7 +36,7 @@ from rocke.core.arch.target import (
 from rocke.core.ir import (
     _MMA_RESULT_HINT,
     _mma_c_frag_len,
-    _mma_c_is_int,
+    _mma_c_dtype,
 )
 
 
@@ -90,9 +90,10 @@ class TestMmaFragTables(unittest.TestCase):
             int_op_ids, "expected at least one i32-accumulator atom in the catalog"
         )
         for op_id in int_op_ids:
-            self.assertTrue(
-                _mma_c_is_int(op_id),
-                msg=f"{op_id!r} is i32 in the catalog but _mma_c_is_int disagrees",
+            self.assertEqual(
+                _mma_c_dtype(op_id),
+                "i32",
+                msg=f"{op_id!r} is i32 in the catalog but _mma_c_dtype disagrees",
             )
             self.assertGreater(
                 _mma_c_frag_len(op_id),
@@ -127,6 +128,8 @@ class TestMmaFragTables(unittest.TestCase):
         # Spot-check representative 16x16 vs 32x32 accumulator widths.
         self.assertEqual(_mma_c_frag_len("mfma_f32_16x16x16_f16"), 4)
         self.assertEqual(_mma_c_frag_len("mfma_f32_32x32x8_f16"), 16)
+        self.assertEqual(_mma_c_frag_len("mfma_f64_16x16x4_f64"), 4)
+        self.assertEqual(_mma_c_frag_len("mfma_f64_4x4x4_f64"), 1)
         self.assertEqual(_mma_c_frag_len("wmma_f32_16x16x16_f16"), 8)
 
 
