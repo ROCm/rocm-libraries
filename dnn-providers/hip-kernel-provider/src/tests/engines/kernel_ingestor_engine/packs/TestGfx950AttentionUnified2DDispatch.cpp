@@ -63,20 +63,21 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
     flatbuffers::FlatBufferBuilder b(4096);
 
     auto bshd = bshdStrides(HEADS_Q, SEQ, HEAD_SIZE);
-    auto bshd_kv = bshdStrides(HEADS_KV, SEQ, HEAD_SIZE);
-    std::vector<int64_t> qDims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
-    std::vector<int64_t> kvDims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
+    auto bshdKv = bshdStrides(HEADS_KV, SEQ, HEAD_SIZE);
+    const std::vector<int64_t> qDims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
+    const std::vector<int64_t> kvDims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
 
     // An extra BHSD tensor no node references, so a bound O token can be made to name a
     // real but wrongly-strided tensor (graph_match itself declines a BHSD O).
-    std::vector<int64_t> bhsd{BATCH * HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
+    const std::vector<int64_t> bhsd{
+        BATCH * HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
 
     auto qT = data_objects::CreateTensorAttributesDirect(
         b, Q_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd, &qDims, false);
     auto kT = data_objects::CreateTensorAttributesDirect(
-        b, K_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd_kv, &kvDims, false);
+        b, K_UID, nullptr, data_objects::DataType::BFLOAT16, &bshdKv, &kvDims, false);
     auto vT = data_objects::CreateTensorAttributesDirect(
-        b, V_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd_kv, &kvDims, false);
+        b, V_UID, nullptr, data_objects::DataType::BFLOAT16, &bshdKv, &kvDims, false);
     auto oT = data_objects::CreateTensorAttributesDirect(
         b, O_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd, &qDims, false);
     auto bhsdT = data_objects::CreateTensorAttributesDirect(
@@ -106,7 +107,7 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
     {
         tensors.push_back(bhsdT);
     }
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes{node};
+    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{node};
     auto graph = data_objects::CreateGraphDirect(b,
                                                  "gfx950_attention_unified_2d_dispatch",
                                                  data_objects::DataType::UNSET,
@@ -174,27 +175,34 @@ KernelDefinition
     kernel.source.symbol = "attention_unified_2d";
     {
         std::vector<KernelArgument> sig;
+        sig.reserve(18);
         for(int i = 0; i < 10; ++i)
+        {
             sig.push_back({"global_buffer", 8U, static_cast<uint32_t>(i * 8), ""});
+        }
         for(int i = 0; i < 5; ++i)
+        {
             sig.push_back({"by_value", 4U, static_cast<uint32_t>(80 + i * 4), ""});
+        }
         for(int i = 0; i < 3; ++i)
+        {
             sig.push_back({"by_value", 4U, static_cast<uint32_t>(100 + i * 4), ""});
+        }
         kernel.source.signature = sig;
     }
     kernel.originDirectory = "/nonexistent";
     kernel.treeRoot = "/nonexistent";
     kernel.metadata["dtype"] = std::string("BF16");
-    kernel.metadata["head_size"] = int64_t{HEAD_SIZE};
-    kernel.metadata["num_query_heads"] = int64_t{HEADS_Q};
-    kernel.metadata["num_kv_heads"] = int64_t{HEADS_KV};
-    kernel.metadata["block_size"] = int64_t{blockSize};
+    kernel.metadata["head_size"] = HEAD_SIZE;
+    kernel.metadata["num_query_heads"] = HEADS_Q;
+    kernel.metadata["num_kv_heads"] = HEADS_KV;
+    kernel.metadata["block_size"] = blockSize;
     kernel.metadata["sliding_window"] = int64_t{0};
     kernel.metadata["use_sinks"] = int64_t{0};
     kernel.metadata["num_seqs"] = int64_t{256};
-    kernel.metadata["tile_size"] = int64_t{blockSize};
-    kernel.metadata["num_warps"] = int64_t{numWarps};
-    kernel.metadata["block_m_per_warp"] = int64_t{blockMPerWarp};
+    kernel.metadata["tile_size"] = blockSize;
+    kernel.metadata["num_warps"] = numWarps;
+    kernel.metadata["block_m_per_warp"] = blockMPerWarp;
     kernel.metadata["use_mfma_32x32"] = int64_t{0};
     kernel.metadata["use_transposed_qk_32x32"] = int64_t{0};
     kernel.metadata["use_register_pv"] = int64_t{0};
@@ -233,7 +241,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, DispatchSymbolResolves)
 TEST(TestGfx950AttentionUnified2DDispatch, WorkspaceBytesIsNonZero)
 {
     registerNativeIngestorSymbols();
-    AttentionGraph ag;
+    const AttentionGraph ag;
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
     auto kernel = makeKernel();
@@ -244,7 +252,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, WorkspaceBytesIsNonZero)
 TEST(TestGfx950AttentionUnified2DDispatch, WorkspaceSizeMatchesGeometryComputation)
 {
     registerNativeIngestorSymbols();
-    AttentionGraph ag;
+    const AttentionGraph ag;
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
     auto kernel = makeKernel();
@@ -261,14 +269,14 @@ TEST(TestGfx950AttentionUnified2DDispatch, SynthesisedBlockTablesAreIdentityLayo
     // b * blocksPerSequence + j.  This is what a dense contiguous K/V already is.
     // A wrong table silently addresses wrong memory with no fault.
     registerNativeIngestorSymbols();
-    AttentionGraph ag;
+    const AttentionGraph ag;
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
     auto kernel = makeKernel();
 
     const auto layout = gfx950AttentionUnified2DWorkspace(BATCH, SEQ, SEQ, BLOCK_SIZE, "test");
     // Use a real heap buffer so the staged data can be inspected.
-    std::vector<std::byte> wsBuffer(static_cast<size_t>(layout.totalBytes), std::byte{0xAB});
+    const std::vector<std::byte> wsBuffer(static_cast<size_t>(layout.totalBytes), std::byte{0xAB});
 
     // Can't launch without a GPU, but we can inspect workspaceBytes consistency.
     // The handler prepares staged data during prepare(); verify indirectly via the
@@ -286,7 +294,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, SynthesisedBlockTablesAreIdentityLayo
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesNonBshdOutput)
 {
     registerNativeIngestorSymbols();
-    AttentionGraph ag(
+    const AttentionGraph ag(
         SCALE, data_objects::DiagonalAlignment::BOTTOM_RIGHT, /* withBhsdTensor= */ true);
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
@@ -306,7 +314,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, ScaleIsRoundTrippedThroughBitPattern)
     int32_t bitsExpected = 0;
     std::memcpy(&bitsExpected, &SCALE_ALT, sizeof(SCALE_ALT));
 
-    AttentionGraph ag(SCALE_ALT);
+    const AttentionGraph ag(SCALE_ALT);
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
     const auto bits = tryGetBoundInt(*bound, "gfx950_attention_unified_2d.scale_bits");
@@ -317,8 +325,8 @@ TEST(TestGfx950AttentionUnified2DDispatch, ScaleIsRoundTrippedThroughBitPattern)
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWithoutMatcherBindings)
 {
     registerNativeIngestorSymbols();
-    AttentionGraph ag;
-    BoundTokens emptyBound;
+    const AttentionGraph ag;
+    const BoundTokens emptyBound;
     auto kernel = makeKernel();
     const auto msg = prepareFailure(ag, emptyBound, kernel);
     EXPECT_NE(msg.find(MISSING_TOKEN_MARKER), std::string::npos)

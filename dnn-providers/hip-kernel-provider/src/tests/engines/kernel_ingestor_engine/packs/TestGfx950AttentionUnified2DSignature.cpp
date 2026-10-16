@@ -31,7 +31,6 @@ namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 // Symbol names match the installed descriptor files exactly.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL
@@ -76,13 +75,22 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     flatbuffers::FlatBufferBuilder b(4096);
 
-    constexpr int64_t Q_UID = 1, K_UID = 2, V_UID = 3, O_UID = 4;
-    constexpr int64_t BATCH = 2, HEADS_Q = 4, HEADS_KV = 4, SEQ = 256, HEAD_SIZE = 128;
+    constexpr int64_t Q_UID = 1;
+    constexpr int64_t K_UID = 2;
+    constexpr int64_t V_UID = 3;
+    constexpr int64_t O_UID = 4;
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t HEADS_KV = 4;
+    constexpr int64_t SEQ = 256;
+    constexpr int64_t HEAD_SIZE = 128;
 
-    std::vector<int64_t> dims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
-    std::vector<int64_t> strides{SEQ * HEADS_Q * HEAD_SIZE, HEAD_SIZE, HEADS_Q * HEAD_SIZE, 1};
-    std::vector<int64_t> kdims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
-    std::vector<int64_t> kstrides{SEQ * HEADS_KV * HEAD_SIZE, HEAD_SIZE, HEADS_KV * HEAD_SIZE, 1};
+    const std::vector<int64_t> dims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
+    const std::vector<int64_t> strides{
+        SEQ * HEADS_Q * HEAD_SIZE, HEAD_SIZE, HEADS_Q * HEAD_SIZE, 1};
+    const std::vector<int64_t> kdims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
+    const std::vector<int64_t> kstrides{
+        SEQ * HEADS_KV * HEAD_SIZE, HEAD_SIZE, HEADS_KV * HEAD_SIZE, 1};
 
     auto qT = CreateTensorAttributesDirect(
         b, Q_UID, nullptr, DataType::BFLOAT16, &strides, &dims, false);
@@ -111,8 +119,8 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
     auto node = CreateNodeDirect(
         b, "sdpa", DataType::FLOAT, NodeAttributes::SdpaAttributes, sdpaAttr.Union());
 
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors{qT, kT, vT, oT};
-    std::vector<flatbuffers::Offset<Node>> nodes{node};
+    const std::vector<flatbuffers::Offset<TensorAttributes>> tensors{qT, kT, vT, oT};
+    const std::vector<flatbuffers::Offset<Node>> nodes{node};
     auto graph = CreateGraphDirect(b,
                                    "gfx950_attention_unified_2d_signature",
                                    DataType::UNSET,
@@ -167,12 +175,12 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
     registerNativeIngestorSymbols();
 
     auto builder = buildAcceptedSdpaGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
-    MatchContext context{graph, 0, props};
+    const MatchContext context{graph, 0, props};
 
     auto matcher = GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER_SYMBOL));
     auto bound = (*matcher)(context);

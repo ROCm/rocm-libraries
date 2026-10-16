@@ -96,12 +96,12 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     auto qDims = std::vector<int64_t>{spec.batch, spec.headsQ, spec.seqQ, spec.headSize};
     auto kvDims = std::vector<int64_t>{spec.batch, spec.headsKv, spec.seqKv, spec.headSize};
 
-    auto dflt_q = bshdStrides(spec.headsQ, spec.seqQ, spec.headSize);
-    auto dflt_k = bshdStrides(spec.headsKv, spec.seqKv, spec.headSize);
-    const auto& qStrides = spec.qStrideOverride.empty() ? dflt_q : spec.qStrideOverride;
-    const auto& kStrides = spec.kStrideOverride.empty() ? dflt_k : spec.kStrideOverride;
-    const auto& vStrides = spec.vStrideOverride.empty() ? dflt_k : spec.vStrideOverride;
-    const auto& oStrides = spec.oStrideOverride.empty() ? dflt_q : spec.oStrideOverride;
+    auto defaultQStrides = bshdStrides(spec.headsQ, spec.seqQ, spec.headSize);
+    auto defaultKStrides = bshdStrides(spec.headsKv, spec.seqKv, spec.headSize);
+    const auto& qStrides = spec.qStrideOverride.empty() ? defaultQStrides : spec.qStrideOverride;
+    const auto& kStrides = spec.kStrideOverride.empty() ? defaultKStrides : spec.kStrideOverride;
+    const auto& vStrides = spec.vStrideOverride.empty() ? defaultKStrides : spec.vStrideOverride;
+    const auto& oStrides = spec.oStrideOverride.empty() ? defaultQStrides : spec.oStrideOverride;
 
     auto qT = data_objects::CreateTensorAttributesDirect(
         b, Q_UID, nullptr, spec.dtype, &qStrides, &qDims, false);
@@ -112,7 +112,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     auto oT = data_objects::CreateTensorAttributesDirect(
         b, O_UID, nullptr, spec.dtype, &oStrides, &qDims, false);
 
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{qT, kT, vT, oT};
+    const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{qT, kT, vT, oT};
 
     data_objects::SdpaAttributesBuilder sdpa(b);
     sdpa.add_q_tensor_uid(Q_UID);
@@ -195,12 +195,12 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
     auto builder = buildGraph(spec);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
-    MatchContext context{graph, 0, props};
+    const MatchContext context{graph, 0, props};
 
     auto matcher = GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER_SYMBOL));
     return (*matcher)(context);
@@ -235,14 +235,14 @@ KernelDefinition makeKernel(const std::string& dtype = "BF16",
     k.originDirectory = "/nonexistent";
     k.treeRoot = "/nonexistent";
     k.metadata["dtype"] = std::string(dtype);
-    k.metadata["head_size"] = int64_t{headSize};
-    k.metadata["num_query_heads"] = int64_t{numQHeads};
-    k.metadata["num_kv_heads"] = int64_t{numKvHeads};
-    k.metadata["block_size"] = int64_t{blockSize};
-    k.metadata["sliding_window"] = int64_t{slidingWindow};
-    k.metadata["use_sinks"] = int64_t{useSinks};
-    k.metadata["num_seqs"] = int64_t{numSeqs};
-    k.metadata["tile_size"] = int64_t{blockSize};
+    k.metadata["head_size"] = headSize;
+    k.metadata["num_query_heads"] = numQHeads;
+    k.metadata["num_kv_heads"] = numKvHeads;
+    k.metadata["block_size"] = blockSize;
+    k.metadata["sliding_window"] = slidingWindow;
+    k.metadata["use_sinks"] = useSinks;
+    k.metadata["num_seqs"] = numSeqs;
+    k.metadata["tile_size"] = blockSize;
     k.metadata["num_warps"] = int64_t{1};
     k.metadata["block_m_per_warp"] = int64_t{16};
     k.metadata["use_mfma_32x32"] = int64_t{0};
@@ -255,12 +255,12 @@ KernelDefinition makeKernel(const std::string& dtype = "BF16",
 bool matchesKernel(const GraphSpec& gs, const KernelDefinition& k)
 {
     auto builder = buildGraph(gs);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
-    MatchContext context{graph, 0, props};
+    const MatchContext context{graph, 0, props};
 
     auto matcher = GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER_SYMBOL));
     auto bound = (*matcher)(context);
