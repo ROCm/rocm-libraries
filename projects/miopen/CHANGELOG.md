@@ -49,9 +49,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
-* [API] Added `miopenGetLastForwardedError` (beta) in the new header `<miopen/hipdnn_forwarding.h>`,
-  which reports whether the calling thread's last MIOpen call was forwarded to hipDNN and failed.
-  Available only in builds configured with `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
