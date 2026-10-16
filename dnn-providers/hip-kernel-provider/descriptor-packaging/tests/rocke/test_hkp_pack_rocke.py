@@ -897,7 +897,7 @@ def test_unknown_target_is_rejected_at_load(tmp_path, target):
     kdp["kernelDescriptors"][0]["kernel_source"]["target"] = target
     root = _write_target_root(tmp_path, kdp)
     with pytest.raises(HkpPackError, match="invalid target"):
-        load_flat_input(root)
+        load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -906,7 +906,7 @@ def test_known_targets_load(tmp_path, target):
     root = _write_target_root(
         tmp_path, _target_kdp("pkg/sub/mod.py", ["gfx1151"], target)
     )
-    load_flat_input(root)
+    load_flat_input(root, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -927,7 +927,7 @@ def test_generic_target_records_compile_target_per_shard(
     restricted["kernel_source"]["spec"] = {"n": 2}
     kdp["kernelDescriptors"].append(restricted)
     root = _write_target_root(tmp_path, kdp)
-    flat = load_flat_input(root)
+    flat = load_flat_input(root, GENERIC_TARGETS)
 
     expected = {
         "gfx1151": ("gfx11-generic", {"ukd-target", "ukd-target-gfx11"}),
@@ -952,7 +952,7 @@ def test_generic_target_provenance_names_the_compile_target(
 ):
     """The shipped provenance tells a reader which processor the object was built
     for, and the compiler's evidence binds that same value to the shard."""
-    from hkp_pack import agreement, pipeline
+    from hkp_pack import agreement
 
     src = _write_stub_pkg(tmp_path, _TARGET_STUB, pkg="targetpkg_pack")
     monkeypatch.setenv("HKP_PACK_JOBS", "1")
@@ -966,7 +966,7 @@ def test_generic_target_provenance_names_the_compile_target(
     native["kernelDescriptors"][0]["kernel_source"]["spec"] = {"n": 3}
     (root / "native.kdp.json").write_text(json.dumps(native), encoding="utf-8")
 
-    pipeline.run_pipeline(
+    run_pipeline(
         source_root=root,
         arches=["gfx1151", "gfx1201"],
         out_root=tmp_path / "out",
