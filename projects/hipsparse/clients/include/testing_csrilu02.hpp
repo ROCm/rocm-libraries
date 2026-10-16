@@ -263,8 +263,8 @@ void testing_csrilu02(Arguments argus)
             hipsparseXcsrilu02(handle, m, nnz, descr, dval1, dptr, dcol, info, policy, dbuffer));
 
         int               hposition_1;
-        hipsparseStatus_t pivot_status_1;
-        pivot_status_1 = hipsparseXcsrilu02_zeroPivot(handle, info, &hposition_1);
+        hipsparseStatus_t pivot_status_1 = hipsparseXcsrilu02_zeroPivot(handle, info, &hposition_1);
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
         // Pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -276,9 +276,9 @@ void testing_csrilu02(Arguments argus)
             hipsparseXcsrilu02(handle, m, nnz, descr, dval2, dptr, dcol, info, policy, dbuffer));
 
         int               hposition_2;
-        hipsparseStatus_t pivot_status_2;
-        pivot_status_2 = hipsparseXcsrilu02_zeroPivot(handle, info, d_position);
+        hipsparseStatus_t pivot_status_2 = hipsparseXcsrilu02_zeroPivot(handle, info, d_position);
         CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
         // Copy output from device to CPU
         std::vector<T> result1(nnz);
@@ -301,15 +301,11 @@ void testing_csrilu02(Arguments argus)
 
         if(hposition_1 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
         if(hposition_2 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
