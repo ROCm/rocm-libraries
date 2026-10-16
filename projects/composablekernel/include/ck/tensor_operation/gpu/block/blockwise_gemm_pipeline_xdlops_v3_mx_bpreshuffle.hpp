@@ -182,7 +182,6 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx_bprehuffle<BlockGemmPipelineScheduler:
     static constexpr auto num_buffer_load_b_scale = NRepeat / NXdlPack * KRepeat / KXdlPack;
     static constexpr auto async_vmcnt =
         num_buffer_load_a_scale + num_buffer_load_b_scale + HotLoopInstList::B_Buffer_Load_Inst_Num;
-    static constexpr auto async_vmcnt_encoding = 3952 + async_vmcnt % 16 + async_vmcnt / 16 * 16384;
 
     __host__ static constexpr bool BlockHasHotloop(index_t num_loop)
     {
@@ -528,13 +527,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx_bprehuffle<BlockGemmPipelineScheduler:
             b_scale_grid_desc,
             make_multi_index(-NWaves * NRepeat / NXdlPack, KRepeat / KXdlPack, 0));
 
-#if defined(__gfx125__)
         //  Local prefetch 1, sync the async load
-        block_sync_lds_async_load();
-#else
-        __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
-        block_sync_lds();
-#endif
+        block_sync_lds_async_load<async_vmcnt>();
 
         static_ford<Sequence<LocalPrefetchStages, KRepeat>>{}([&](auto mk) {
             constexpr auto m0     = Number<mk[Number<0>{}]>{};
@@ -723,13 +717,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx_bprehuffle<BlockGemmPipelineScheduler:
 
                         if constexpr(m0.value == SwitchM)
                         {
-#if defined(__gfx125__)
                             // Sync Async LDS load
-                            block_sync_lds_async_load();
-#else
-                            __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
-                            block_sync_lds();
-#endif
+                            block_sync_lds_async_load<async_vmcnt>();
 
                             a_blockwise_copy.Run(a_grid_desc,
                                                  a_grid_buf,
@@ -906,13 +895,8 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx_bprehuffle<BlockGemmPipelineScheduler:
                 });
                 if constexpr(m0.value == SwitchM)
                 {
-#if defined(__gfx125__)
                     // Sync Async LDS load
-                    block_sync_lds_async_load();
-#else
-                    __builtin_amdgcn_s_waitcnt(async_vmcnt_encoding);
-                    block_sync_lds();
-#endif
+                    block_sync_lds_async_load<async_vmcnt>();
                 }
 
                 constexpr auto lds_buf = m0.value >= SwitchM ? I1 : I0;
