@@ -18,11 +18,21 @@
 # row-staged runtime row stream (stage_rows: odd W, 1x1 with a partial
 # row-staging pass, two q waves x two channel waves, H = 1); 28 LDS weights on
 # gfx942 and 29 a 5x5 filter (more than DCONV4C_MAX_TAPS taps) both reject.
+# Indices 30..44: the generic DirectConvSpec (build_direct_conv): the
+# fused-weight dgrad knobs (30..32: gathered, LDS-staged with the waves-per-EU
+# hint, plain preload; each with the row guard), the row-stream knobs (33..38:
+# prefetch, LDS-only barrier, XCD tiles, LDS pad, staged output, split M,
+# row exit, 5x5 and 1x1, gfx942), three rejects (39: LDS-staged weights and
+# 40: xcd_tiles on gfx942, 44: waves_m = 2 with kpg = 16) and develop's forms
+# (41: persistent grid with the runtime K loop, 42: waves_q = waves_k = 2,
+# 43: runtime channels).
 from _emit_common import run_emit
 from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConvProblem,
+    DirectConvSpec,
     DirectDepthwiseDgradWindowedSpec,
+    build_direct_conv,
     build_direct_conv_4c,
     build_direct_depthwise_dgrad_windowed,
 )
@@ -239,13 +249,61 @@ def _fourc_spec(idx: int):
     return spec, arch
 
 
+# Generic DirectConvSpec configs from index _GENERIC_CFG_BASE:
+# (N, H, W, groups, cpg, kpg, K, dtype, arch, knobs); square K x K filter with
+# "same" padding, stride 1.
+_GENERIC_CFG_BASE = _FOURC_CFG_BASE + len(_FOURC_CFGS)
+_FW = {"dgrad_fused_weights": True}
+_FWL = {"dgrad_fused_weights": True, "dgrad_weights_lds": True}
+_STREAM = {"prefetch_rows": 2, "lds_only_sync": True, "xcd_tiles": True}
+_GENERIC_CFGS = (
+    (2, 9, 17, 8, 16, 16, 3, "bf16", "gfx950", {"block_groups": 2, "row_guard": True, **_FW}),
+    (2, 9, 17, 8, 16, 16, 3, "fp16", "gfx950", {"block_groups": 2, "waves_per_eu": 4, "row_guard": True, **_FWL}),
+    (2, 9, 17, 4, 12, 20, 3, "fp16", "gfx950", {"block_groups": 2, "double_buffer": False, "preload_weights": True, "row_guard": True}),
+    (9, 10, 13, 32, 16, 16, 3, "bf16", "gfx950", {"block_groups": 2, "waves_per_eu": 4, "lds_pad": 8, "stage_out": True, "row_guard": True, **_FWL, **_STREAM}),
+    (8, 11, 19, 32, 16, 16, 3, "fp16", "gfx950", {"block_q": 32, "block_groups": 2, "block_h": 8, "lds_pad": 8, "row_guard": True, "row_exit": True, **_FWL, **_STREAM}),
+    (8, 7, 14, 16, 32, 32, 3, "bf16", "gfx950", {"block_groups": 1, "fold_k32": True, "waves_m": 2, "lds_pad": 8, "stage_out": True, **_FWL, **_STREAM}),
+    (2, 9, 14, 8, 8, 32, 5, "fp16", "gfx950", {"block_groups": 1, "block_h": 4, "prefetch_rows": 3, "lds_only_sync": True, "waves_m": 2, "stage_out": True, "row_guard": True, **_FW}),
+    (2, 6, 21, 8, 20, 8, 1, "bf16", "gfx950", {"block_groups": 4, "block_h": 32, "row_guard": True, "row_exit": True, **_FW}),
+    (2, 9, 17, 8, 16, 16, 3, "fp16", "gfx942", {"block_groups": 2, "block_h": 4, "prefetch_rows": 2, "lds_only_sync": True, "lds_pad": 8, "row_guard": True, **_FW}),
+    (2, 9, 17, 8, 16, 16, 3, "bf16", "gfx942", {"block_groups": 2, **_FWL}),
+    (9, 9, 17, 8, 16, 16, 3, "bf16", "gfx942", {"block_groups": 2, "xcd_tiles": True, **_FW}),
+    (2, 9, 17, 4, 16, 16, 3, "fp16", "gfx950", {"block_groups": 1, "block_h": 4, "persistent_grid": True, "runtime_k_loop": True, "persistent_rounds": 8}),
+    (2, 9, 17, 4, 32, 16, 3, "bf16", "gfx950", {"block_q": 32, "block_groups": 1, "waves_q": 2, "waves_k": 2}),
+    (2, 9, 17, 4, 24, 24, 3, "fp16", "gfx950", {"block_groups": 1, "block_h": 8, "runtime_channels": True, "k_atoms": 2, "m_tiles": 2}),
+    (2, 9, 17, 8, 16, 16, 3, "bf16", "gfx950", {"block_groups": 2, "waves_m": 2, **_FW}),
+)  # fmt: skip
+
+
+def _generic_spec(idx: int):
+    N, H, W, G, cpg, kpg, K, dtype, arch, knobs = _GENERIC_CFGS[idx]
+    problem = DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=G,
+        cpg=cpg,
+        kpg=kpg,
+        KH=K,
+        KW=K,
+        PAD=(K - 1) // 2,
+        stride=1,
+        dtype=dtype,
+    )
+    return DirectConvSpec(problem=problem, **knobs), arch
+
+
 def _build(spec, arch):
     if isinstance(spec, DirectConv4cSpec):
         return build_direct_conv_4c(spec, arch=arch)
+    if isinstance(spec, DirectConvSpec):
+        return build_direct_conv(spec, arch=arch)
     return build_direct_depthwise_dgrad_windowed(spec, arch=arch)
 
 
 def _spec(idx: int):
+    if _GENERIC_CFG_BASE <= idx < _GENERIC_CFG_BASE + len(_GENERIC_CFGS):
+        return _generic_spec(idx - _GENERIC_CFG_BASE)
     if _FOURC_CFG_BASE <= idx < _FOURC_CFG_BASE + len(_FOURC_CFGS):
         return _fourc_spec(idx - _FOURC_CFG_BASE)
     if not 0 <= idx < len(_WIN_CFGS):

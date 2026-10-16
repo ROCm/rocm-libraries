@@ -37,7 +37,7 @@
  *   build_direct_conv(spec, arch)            rocke_build_direct_conv
  *   build_direct_transpose_weights_dgrad     rocke_build_direct_transpose_weights_dgrad_new
  *   build_direct_reorganize_weights          rocke_build_direct_reorganize_weights_new
- *   (+ convenience: build -> lower .ll)      rocke_direct_conv_{16c,4c}_lower_to_llvm
+ *   (+ convenience: build -> lower .ll)      rocke_direct_conv_{,16c,4c}_lower_to_llvm
  *
  * SPEC AS EXPLICIT C STRUCTS. The frozen Python dataclasses become value
  * structs; rocke_direct_conv_problem_default() / rocke_direct_conv_16c_spec_default()
@@ -904,11 +904,29 @@ rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
  *      runtime_channels: bool = False
  *      k_atoms: int = 0
  *      m_tiles: int = 0
+ *      preload_weights: bool = False
+ *      dgrad_fused_weights: bool = False
+ *      dgrad_weights_lds: bool = False
+ *      waves_per_eu: int = 0
+ *      row_guard: bool = False
+ *      prefetch_rows: int = 0
+ *      lds_only_sync: bool = False
+ *      waves_m: int = 1
+ *      xcd_tiles: bool = False
+ *      lds_pad: int = 0
+ *      stage_out: bool = False
+ *      row_exit: bool = False
  *
  *  The forward kernel the MFMA dgrad pipeline runs on the transposed problem.
  *  With runtime_channels the per-group channel counts come from
  *  p_total_c / p_groups and p_total_k / p_groups; the binary bakes only the
  *  K-atom and M-tile counts (k_atoms / m_tiles) they round up to.
+ *
+ *  The fused-weight dgrad knobs (preload_weights, dgrad_fused_weights,
+ *  dgrad_weights_lds, waves_per_eu, row_guard) and the row-stream knobs
+ *  (prefetch_rows, lds_only_sync, waves_m, xcd_tiles, lds_pad, stage_out,
+ *  row_exit) are mirrored field for field; every knob defaults off, so a spec
+ *  that leaves them emits the kernel it emitted before they existed.
  * ===================================================================== */
 typedef struct rocke_direct_conv_spec
 {
@@ -928,20 +946,42 @@ typedef struct rocke_direct_conv_spec
     bool runtime_channels; /* default false */
     int k_atoms; /* default 0 -- runtime_channels only */
     int m_tiles; /* default 0 -- runtime_channels only */
+    bool preload_weights; /* default false -- waves_k == 1 prologue weight preload */
+    bool dgrad_fused_weights; /* default false -- gather the original dgrad W */
+    bool dgrad_weights_lds; /* default false -- stage W in LDS, transpose reads */
+    int waves_per_eu; /* default 0 -- > 0: amdgpu-waves-per-eu hint */
+    bool row_guard; /* default false -- skip the MFMAs of rows past p_Hi */
+    int prefetch_rows; /* default 0 -- input-row prefetch distance (0..3) */
+    bool lds_only_sync; /* default false -- LDS-only row barrier */
+    int waves_m; /* default 1 -- waves per group along the M-tiles */
+    bool xcd_tiles; /* default false -- XCD row-band workgroup remap */
+    int lds_pad; /* default 0 -- extra elements per staged input column */
+    bool stage_out; /* default false -- 16-byte stores via an LDS output tile */
+    bool row_exit; /* default false -- leave once the next flush is past p_Hi */
 } rocke_direct_conv_spec_t;
 
 /* DirectConvSpec with the dataclass defaults (problem == problem_default()). */
 rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void);
 
-/* @property threads_per_block -> block_groups * waves_q * waves_k * wave_size. */
+/* @property threads_per_block
+ *   -> block_groups * waves_q * waves_k * waves_m * wave_size. */
 int rocke_direct_conv_threads_per_block(const rocke_direct_conv_spec_t* spec);
+
+/* preload_weight_vgprs(spec): VGPRs per lane the waves_k == 1 preloaded /
+ * fused weight fragments keep live (waves_m must be >= 1). */
+int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec);
+
+/* direct_conv_lds_bytes(spec): LDS bytes build_direct_conv allocates. */
+long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec);
 
 /* kernel_name():
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
  *                    "db"|"sb", f"bh{block_h}", ["wq{waves_q}"], ["wk{waves_k}"],
  *                    ["rk"], ["k32"], ["bf16"],
- *                    [f"rtc_ka{k_atoms}_mt{m_tiles}"]) -- bracketed parts only
- *   when set. */
+ *                    [f"rtc_ka{k_atoms}_mt{m_tiles}"], ["pw"], ["fw"|"fwl"],
+ *                    ["we{n}"], ["pf{n}"], ["lso"], ["wm{n}"], ["xc"],
+ *                    ["lp{n}"], ["so"], ["rg"], ["rx"]) -- bracketed parts
+ *   only when set. */
 rocke_status_t
     rocke_direct_conv_kernel_name(const rocke_direct_conv_spec_t* spec, char* out, size_t out_cap);
 
@@ -1017,6 +1057,12 @@ rocke_status_t rocke_direct_conv_16c_lower_to_llvm(const rocke_direct_conv_16c_s
                                                    char* err,
                                                    size_t err_cap);
 
+rocke_status_t rocke_direct_conv_lower_to_llvm(const rocke_direct_conv_spec_t* spec,
+                                               const char* arch,
+                                               rocke_llvm_flavor_t flavor,
+                                               char** out_ll,
+                                               char* err,
+                                               size_t err_cap);
 rocke_status_t rocke_direct_conv_4c_lower_to_llvm(const rocke_direct_conv_4c_spec_t* spec,
                                                   const char* arch,
                                                   rocke_llvm_flavor_t flavor,
