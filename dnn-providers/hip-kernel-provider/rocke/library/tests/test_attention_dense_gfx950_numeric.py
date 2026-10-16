@@ -1792,5 +1792,77 @@ class TestDenseLseNumeric:
                     _DENSE_LAUNCHER_CACHE[key] = entry
 
 
+class TestDensePagedNumeric:
+    """Paged K/V (block_tables indirection) on the non-persistent dense body."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024)])
+    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window):
+        """A paged cache must give the same bits as the dense K/V it was scattered
+        from, and match the fp32 sliding-window reference.
+
+        The pages land at randomly permuted physical ids in a cache twice the
+        needed size, and every unused page is NaN. A wrong page index (the
+        per-wave ``tile_key // block_size`` lookup) or a wrong in-page row (the
+        per-row ``tile_key % block_size``) therefore reads either a NaN page or
+        the wrong keys, rather than a near miss the tolerance could absorb.
+        block_size 16/32/64 covers 4, 2 and 1 pages per 64-key tile.
+        """
+        import torch
+
+        hq, hkv, d, B = 16, 4, 128, 1
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+
+        q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+
+        npages = sq // block_size
+        num_kv_blocks = 2 * npages
+        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
+        k_cache = torch.full(
+            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        )
+        v_cache = torch.full_like(k_cache, float("nan"))
+        k_cache[phys] = k[0].view(npages, block_size, hkv, d)
+        v_cache[phys] = v[0].view(npages, block_size, hkv, d)
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+        kv_lens = torch.tensor([sq], device="cuda", dtype=torch.int32)
+
+        dense_spec = _spec(dtype, d, hq, hkv, False, sq=sq, sliding_window=window)
+        paged_spec = dataclasses.replace(
+            dense_spec, paged=True, block_size=block_size, num_kv_blocks=num_kv_blocks
+        )
+
+        dense_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=dense_spec, q=q, k=k, v=v, out=dense_out, scale=scale
+        )
+        paged_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=paged_spec,
+            q=q,
+            k=k_cache,
+            v=v_cache,
+            out=paged_out,
+            scale=scale,
+            block_tables=block_tables,
+            kv_lens=kv_lens,
+        )
+        torch.cuda.synchronize()
+
+        name = f"{dtype} pgd{block_size} sq{sq} swa{window}"
+        assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
+        assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        max_abs = (ref - paged_out.float()).abs().max().item()
+        assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

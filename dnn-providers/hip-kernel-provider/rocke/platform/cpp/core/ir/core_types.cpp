@@ -54,6 +54,7 @@ ROCKE_SCALAR_SINGLETON(rocke_bf16, ROCKE_SCALAR_BF16, "bf16")
 ROCKE_SCALAR_SINGLETON(rocke_f16, ROCKE_SCALAR_F16, "f16")
 ROCKE_SCALAR_SINGLETON(rocke_f32, ROCKE_SCALAR_F32, "f32")
 ROCKE_SCALAR_SINGLETON(rocke_tf32, ROCKE_SCALAR_TF32, "tf32")
+ROCKE_SCALAR_SINGLETON(rocke_f64, ROCKE_SCALAR_F64, "f64")
 ROCKE_SCALAR_SINGLETON(rocke_fp8e4m3, ROCKE_SCALAR_FP8E4M3, "fp8e4m3")
 ROCKE_SCALAR_SINGLETON(rocke_bf8e5m2, ROCKE_SCALAR_BF8E5M2, "bf8e5m2")
 
@@ -87,6 +88,8 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_tf32();
     if(strcmp(name, "f32") == 0)
         return rocke_f32();
+    if(strcmp(name, "f64") == 0)
+        return rocke_f64();
     if(strcmp(name, "fp8e4m3") == 0 || strcmp(name, "e4m3") == 0)
         return rocke_fp8e4m3();
     if(strcmp(name, "bf8e5m2") == 0)
@@ -113,6 +116,8 @@ const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype)
         return rocke_f16();
     if(strcmp(info->name, "fp32") == 0)
         return rocke_f32();
+    if(strcmp(info->name, "fp64") == 0)
+        return rocke_f64();
     return rocke_scalar_by_name(info->name);
 }
 
@@ -442,6 +447,14 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
     }
 }
 
+bool rocke_scheduler_strategy_is_valid(const char* strategy)
+{
+    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
+           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
+           || strcmp(strategy, "iterative-minreg") == 0
+           || strcmp(strategy, "iterative-maxocc") == 0;
+}
+
 /* ============================ OPCODE TABLE ============================== */
 
 /* Canonical dotted name per opcode, indexed by the enum value. Order MUST match
@@ -619,6 +632,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.ds_swizzle",
     "tile.mov_dpp8",
     "tile.quad_perm",
+    "tile.dpp_xor",
     "tile.wave_reduce",
     "tile.readlane",
     "tile.writelane",
@@ -687,7 +701,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* memref.* cross-workgroup synchronisation */
     "memref.fence",
     "memref.global_flag_store",
-    "memref.global_flag_wait_eq"};
+    "memref.global_flag_wait_eq",
+
+    "vector.undef",
+    "tile.buffer_load_f16_d16"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -884,6 +901,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* ds_swizzle        */ true,
     /* mov_dpp8          */ true,
     /* quad_perm         */ true,
+    /* dpp_xor           */ true,
     /* wave_reduce       */ true,
     /* readlane          */ true,
     /* writelane         */ true,
@@ -952,7 +970,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* memref.* cross-workgroup synchronisation (effectful) */
     /* memref.fence               */ false,
     /* memref.global_flag_store   */ false,
-    /* memref.global_flag_wait_eq */ false};
+    /* memref.global_flag_wait_eq */ false,
+
+    /* vector.undef               */ false,
+    /* tile.buffer_load_f16_d16   */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

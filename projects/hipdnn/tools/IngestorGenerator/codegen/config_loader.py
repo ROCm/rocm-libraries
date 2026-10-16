@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from . import generic_targets as gtmod
 from .models import (
     ARCH_BASE_ID_PATTERN,
     AUTHORED_TEST_SETS,
@@ -39,6 +40,7 @@ from .models import (
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
     PATH_STEM_PATTERN,
+    ROCKE_TARGETS,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -295,6 +297,14 @@ def load_config(path: Path) -> IngestorConfig:
                 (authored_source, authored_where),
             ):
                 _check_kernel_source_keys(source_keys, ks_raw["kind"], source_where)
+            if "target" in ks_raw and ks_raw["target"] not in ROCKE_TARGETS:
+                raise ConfigError(
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source.target is {ks_raw['target']!r}, which hkp_pack "
+                    f"does not compile for. Known targets: {list(ROCKE_TARGETS)} "
+                    f"('native' builds for the shard arch, 'generic' for its LLVM "
+                    f"generic processor)."
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
@@ -307,6 +317,7 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        target=ks_raw.get("target", ""),
                         file=ks_raw.get("file", ""),
                         symbol=ks_raw.get("symbol", ""),
                     ),
@@ -655,6 +666,37 @@ def _expand_one_variant_group(
                 f"instead of failing here."
             )
 
+    # Spec values every shape is crossed with, first axis outermost, so a list
+    # shared by every shape (a head-size bucket list) is stated once instead of
+    # being copied into one shape entry per value.
+    if group.get("shape_axes") is not None:
+        _require_mapping(group["shape_axes"], f"{where} shape_axes")
+    shape_axes = dict(group.get("shape_axes") or {})
+    for axis, values in shape_axes.items():
+        if axis in _SHAPE_CONTROL_KEYS or (
+            spec_order and axis not in spec_order and axis not in spec_defaults
+        ):
+            raise ConfigError(
+                f"{where} shape_axes names '{axis}', which is not a field named in "
+                f"this group's spec_order. An axis value is written into every "
+                f"shape's spec, so a control key or a misspelled field would change "
+                f"the binary the descriptor names."
+            )
+        if not isinstance(values, list) or not values:
+            raise ConfigError(
+                f"{where} shape_axes['{axis}'] must be a non-empty list of values, "
+                f"got {values!r}. An empty axis expands every shape to ZERO kernels "
+                f"instead of failing here."
+            )
+    axis_points = [
+        dict(zip(shape_axes, point))
+        for point in itertools.product(*shape_axes.values())
+    ]
+
+    # A group-level arch restricts every kernel the group expands to, the same
+    # as a hand-authored kernel's own `arch`: it must stay within the pack's,
+    # and an absent one inherits the pack's.
+    group_arch = _unique_arch(group.get("arch", []), f"{where} arch")
     expanded = []
     for index, shape in enumerate(group["shapes"]):
         shape_where = f"{where} shapes[{index}]"
@@ -686,17 +728,25 @@ def _expand_one_variant_group(
             _require_mapping(shape["resolved"], f"{shape_where} resolved")
         resolved = dict(shape.get("resolved") or {})
         ordinal = shape.get("ordinal", 0)
-        shape_spec = {
-            **spec_defaults,
-            **{
-                key: value
-                for key, value in shape.items()
-                if key not in _SHAPE_CONTROL_KEYS
-            },
-        }
-        for arm in knob_sets[set_name]:
-            expanded.append(
-                _expand_one_arm(
+        for point in axis_points:
+            overlap = sorted(set(point) & set(shape))
+            if overlap:
+                raise ConfigError(
+                    f"{shape_where} states {overlap}, which this group's shape_axes "
+                    f"already supply. Either the axis or the shape decides a field, "
+                    f"never both."
+                )
+            shape_spec = {
+                **spec_defaults,
+                **point,
+                **{
+                    key: value
+                    for key, value in shape.items()
+                    if key not in _SHAPE_CONTROL_KEYS
+                },
+            }
+            for arm in knob_sets[set_name]:
+                kernel = _expand_one_arm(
                     arm,
                     shape_spec,
                     resolved,
@@ -709,7 +759,9 @@ def _expand_one_variant_group(
                     shape_where,
                     kmd_field_names,
                 )
-            )
+                if group_arch:
+                    kernel["arch"] = list(group_arch)
+                expanded.append(kernel)
     return expanded
 
 
@@ -962,6 +1014,7 @@ _KNOWN_PACK = frozenset(
 _KNOWN_VARIANT_GROUP = frozenset(
     {
         "name",
+        "arch",
         "metadata",
         "knob_sets",
         "shapes",
@@ -969,6 +1022,7 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "policy_knobs",
         "spec_defaults",
         "spec_order",
+        "shape_axes",
     }
 )
 _KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
@@ -985,6 +1039,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_HIP: ("build",),
+    KERNEL_SOURCE_KIND_ROCKE: ("target",),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.
@@ -1364,19 +1419,106 @@ def _check_kernel_priority(config: IngestorConfig) -> None:
                 )
 
 
+def _generic_table() -> "gtmod.GenericTargets":
+    """The generic target table; a read failure is a ConfigError."""
+    try:
+        return gtmod.default_table()
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _check_arch_list_generics(archs: list, where: str, table) -> None:
+    """Per-list rules: no unknown generics, no generic beside its member or a generic sharing one."""
+    for entry in archs:
+        if gtmod.is_generic_shaped(entry) and not table.has(entry):
+            raise ConfigError(
+                f"{where}: arch entry '{entry}' is a generic target name absent "
+                f"from the generic target table {table.path} "
+                f"(known: {', '.join(table.names())})"
+            )
+    advice = (
+        "list one, or author two packs (an explicit override plus a generic "
+        "fallback are separate packs)"
+    )
+    for i, x in enumerate(archs):
+        for y in archs[i + 1 :]:
+            if table.has(x) and table.has(y):
+                shared = [m for m in table.members(x) if m in table.members(y)]
+                if shared:
+                    raise ConfigError(
+                        f"{where}: 'arch' lists '{x}' and '{y}': the two generics "
+                        f"share member {shared[0]}; {advice}"
+                    )
+                continue
+            generic, member = (x, y) if table.has(x) else (y, x)
+            if table.has(generic) and member in table.members(generic):
+                raise ConfigError(
+                    f"{where}: 'arch' lists '{x}' and '{y}': {generic} contains "
+                    f"{member}; {advice}"
+                )
+
+
+def _check_generic_arch(config: IngestorConfig) -> None:
+    """Pre-mint check #4a: the packer's generic-target rules (see descriptor-packaging/README.md)."""
+    table = _generic_table()
+    for pack in config.packs:
+        where = f"pack '{pack.name}'"
+        _check_arch_list_generics(pack.arch, where, table)
+        pack_generics = [a for a in pack.arch if gtmod.is_generic_shaped(a)]
+        for kernel in pack.kernels:
+            kernel_where = f"{where} kernel '{kernel.name}'"
+            _check_arch_list_generics(kernel.arch, kernel_where, table)
+            if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_ROCKE:
+                rocke_generics = [
+                    a
+                    for a in (pack_generics or kernel.arch)
+                    if gtmod.is_generic_shaped(a)
+                ]
+                if rocke_generics:
+                    raise ConfigError(
+                        f"{kernel_where}: rocKE does not support generic targets "
+                        f"yet (arch '{rocke_generics[0]}')"
+                    )
+            stamped = (
+                list(kernel.arch or pack.arch)
+                if kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
+                else list(kernel.arch)
+            )
+            for generic in stamped:
+                if gtmod.is_generic_shaped(generic) and generic not in pack.arch:
+                    raise ConfigError(
+                        f"{kernel_where}: declares generic target '{generic}' but "
+                        f"the pack does not list '{generic}'; it would ship in no "
+                        f"shard"
+                    )
+            if not pack_generics or not stamped:
+                continue
+            lists_all = all(g in stamped for g in pack_generics)
+            only_listed = all(a in pack.arch for a in stamped)
+            if not lists_all or not only_listed:
+                raise ConfigError(
+                    f"{where}: pack lists generic target(s) {pack_generics} (arch "
+                    f"{pack.arch}) but kernel '{kernel.name}' declares arch "
+                    f"{stamped}; a kernel under a generic pack must list every "
+                    f"generic of the KDP and only entries the KDP lists"
+                )
+
+
 def _check_kernel_arch_subset_of_pack(config: IngestorConfig) -> None:
     """Pre-mint check #4: a kernel's arch must be a subset of its pack's.
 
-    Mirrors ``DescriptorLoader.hpp``'s ``archCovers(pack.arch, kernel.arch)``.
-    An empty pack.arch covers everything; an empty kernel.arch inherits it.
+    Mirrors ``ingestor/DeviceProperties.hpp``'s ``archCovers`` over expanded device sets.
     """
+    table = _generic_table()
     for pack in config.packs:
         if not pack.arch:
             continue
         for kernel in pack.kernels:
             if not kernel.arch:
                 continue
-            reaching = [a for a in kernel.arch if a not in pack.arch]
+            reaching = [
+                a for a in kernel.arch if not gtmod.covers(pack.arch, [a], table)
+            ]
             if reaching:
                 raise ConfigError(
                     f"pack '{pack.name}' kernel '{kernel.name}' declares arch "
@@ -1396,6 +1538,7 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
     also raised via ``warnings.warn``.
     """
     messages: list[str] = []
+    table = _generic_table()
 
     def check_list(archs: list, where: str) -> None:
         for arch in archs:
@@ -1409,7 +1552,7 @@ def _check_arch_shape(config: IngestorConfig) -> list[str]:
                     f"parses fine and then declines on every device, logging "
                     f"exactly what a healthy cross-arch install logs."
                 )
-            if arch not in KNOWN_ARCH_BASE_IDS:
+            if arch not in KNOWN_ARCH_BASE_IDS and not table.has(arch):
                 message = (
                     f"{where} arch entry '{arch}' is well-formed but not a "
                     f"recognized gfx target id (e.g. a typo like 'gfx94' for "
@@ -1954,6 +2097,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.
     _check_kmd_default_values(config)
     _check_kernel_priority(config)
+    _check_generic_arch(config)
     _check_kernel_arch_subset_of_pack(config)  # #4
     warnings_out = _check_arch_shape(config)  # #5
 

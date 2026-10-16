@@ -425,6 +425,12 @@ validParameters = { # we need to make sure this matches develop
     #            boundary (needs PrefetchGlobalRead=2).
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
+    # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
+    # two N-halves in different LDS segments and let SIMD pair 1 (odd waves) read its B vIdx groups
+    # rotated by half (v -> (v + nV/2) mod nV), so the two LDS read ports never read the same
+    # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
+    #   0 = off (default), 1 = on.
+    "LDSSegmentBRotate": [0, 1],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

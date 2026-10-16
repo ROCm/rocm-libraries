@@ -346,6 +346,7 @@ class StateValues:
   startVgprPersistentConsts: int                 = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
+  startVgprInfCheck: int                 = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -472,6 +473,7 @@ class StateValues:
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
   doFullPackCodePrefetch: bool           = False
+  useTF32EmuInfSupport: bool             = False
   lockLdsReadTokenSwap: bool             = False
   useCommonSgprSwap: bool                = False
 
@@ -5266,6 +5268,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     return module
 
   ##############################################################################
+  # Create a Src vreg value for TF32 Inf check (v_cmp_class_f32)
+  # 0x204 selects +Inf (bit 9) and -Inf (bit 2) for v_cmp_class_f32.
+  ##############################################################################
+  def createTF32ClassSrc(self, kernel):
+    module = Module("TF32InfClassSrc")
+    module.addComment0("Create a Src vreg value for TF32 Inf check")
+    module.add(VMovB32(dst=vgpr(self.states.startVgprInfCheck), src="0x204", comment="inf check for cmp_class"))
+    return module
+
+  ##############################################################################
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
   def gsuMaskHex(self, kernel):
@@ -6384,6 +6396,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # MFMA F32XEmulation negative identity matrix
     if kernel["UseMFMAF32XEmulation"]:
       module.add(self.createNegIdentityMatrix(kernel))
+    # TF32 Emu Inf support: init the v_cmp_class_f32 source constant
+    if self.states.useTF32EmuInfSupport:
+      module.add(self.createTF32ClassSrc(kernel))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
@@ -8604,7 +8619,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             maxOffsetB = max(maxOffsetB, reachB)
 
         numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
-        numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+        # maxOffsetB is an extent (last byte is maxOffsetB-1), so an exact multiple of the reach needs no extra register.
+        # B-rotate asserts exactly two B local-read addresses, which this exposes at 128 KiB extents.
+        if kernel.get("LDSSegmentBRotate"):
+          numVgprMultiplierB = (maxOffsetB + maxLDSConstOffset - 1) // maxLDSConstOffset
+        else:
+          numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
         numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
         numVgprMultiplierMXSB = maxOffsetMXSB // maxLDSConstOffset + 1
         numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
@@ -9391,6 +9411,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       #         Wider local read case, we need TransposeCode=True
       #   False: Does not use interleave layout
       #         ider local read + index transpose case, this needs to be False
+      # TF32/F32X Inf support: gated by the F32XEmulationInfSupport hardware
+      # capability (on for gfx1250+, off for gfx950). Inf handling changes the
+      # numerical result, so it is a platform capability rather than a kernel
+      # parameter. Only meaningful under F32X emulation.
+      self.states.useTF32EmuInfSupport = bool(kernel["UseF32XEmulation"]) and bool(self.states.archCaps.get("F32XEmulationInfSupport", False))
+
       def initTF32Emu():
         # for UseF32XEmulation only
         if not kernel["UseF32XEmulation"]:
@@ -9531,6 +9557,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           kernel["UseMFMAF32XEmulation"] = False
           kernel["UseDot2F32XEmulation"] = True
 
+      # TF32 Emu Inf support: 1 vreg holding the v_cmp_class_f32 mask constant (0x204)
+      if self.states.useTF32EmuInfSupport:
+        self.states.startVgprInfCheck = vgprIdx
+        vgprIdx+=1
       # vreg allocation for UseMFMAF32XEmulation
       if kernel["UseMFMAF32XEmulation"]:
         vgprIdx = ((vgprIdx+1)//2)*2 #align 64 bit
@@ -9834,6 +9864,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
+    if kernel.get("LDSSegmentBRotate"):
+      # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0 (pair 0: +64K, pair 1: 64K - 2*S).
+      # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
+      self.defineSgpr("BRotateLRDelta", 1)
 
     if self.debugConfig.debugKernel:
       self.defineSgpr("AddressDbg", self.states.numSgprAddressDbg)
@@ -11186,6 +11220,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # PostMainLoopBarrierCheckAndReset
   # Rebuild SBarrier placement by memory-token read/write phase transitions.
   ##############################################################################
+  def _usesMainLoopTokenBarrierPlanner(self, kernel):
+    scheduleIterAlg = kernel.get("_ScheduleIterAlg", self.states.scheduleIterAlg)
+    stOptLevel = kernel.get("_StinkyTofuOptLevel", 0)
+    numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+    return scheduleIterAlg == 0 \
+      and (stOptLevel == 3 or dcpThickGateFromTokenPasses(kernel)) \
+      and kernel["enableTDMA"] and kernel["enableTDMB"] \
+      and numWaves > 1
+
+  def _needsSingleLoopPGRSync(self, kernel):
+    # PGL1+ and a pre-loop local-read transition drain tensorcnt and barrier
+    # before openLoop emits the one-tile escape. Only the unfenced PGL0 path
+    # with no prefetched local reads needs synchronization on the escape itself.
+    return self._usesMainLoopTokenBarrierPlanner(kernel) \
+      and kernel["PrefetchGL2"] == 0 \
+      and self.states.numItersPLR == 0
+
   def postMainLoopBarrierCheckAndReset(self, kernel, rootModule):
     """
     Rebuild SBarrier placement from dynamic memory-token usage:
@@ -11209,6 +11260,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
+    # Scalar PGR1 TDM requires a second authored barrier and tensor-counter
+    # drain. Decoupled PGR still needs its text- or token-based planner.
+    if kernel["PrefetchGlobalRead"] == 1 \
+       and decoupledThickGateRelaxation(kernel) is None:
+      print2("[postMainLoopBarrierCheckAndReset] skip: PGR1 TDM requires writer-authored synchronization")
+      return
+
     removedCount = 0
     insertedCount = 0
 
@@ -11221,7 +11279,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+        elif isinstance(item, SBarrier) \
+             and "-3" not in str(item).split("//", 1)[0] \
+             and "single-loop PGR bypass sync" not in str(item):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
