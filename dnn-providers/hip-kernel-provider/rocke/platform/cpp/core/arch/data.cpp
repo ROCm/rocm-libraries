@@ -920,9 +920,11 @@ static const rocke_layout_map_t lm_wmma_gfx1250_32_b
  *
  * `ati` = arch-target internal (see arch_target_internal.h): the naming prefix
  * reserved for storage private to this arch-target port, kept out of the public
- * rocke_ / rocke_arch_ namespace. This table is file-local static (only
- * rocke_arch_mma_c_frag_len below reads it), so it is not extern'd in the
- * internal header like the cross-bucket rocke_ati_ symbols are.
+ * rocke_ / rocke_arch_ namespace. This table is file-local static (only the
+ * rocke_arch_mma_c_frag_len lookup below reads it), so it is not extern'd in the
+ * internal header like the cross-bucket rocke_ati_ symbols are. It holds
+ * physical atoms only: an emulated atom's logical op_id has no row and resolves
+ * through the physical atom it expands into.
  *
  * NOTE (drift): this is still a hand-maintained mirror of the Python
  * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
@@ -997,6 +999,20 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
 };
 
+/* The frag-table row registered for op_id itself, or NULL. */
+static const rocke_ati_mma_frag_row_t* rocke_ati_mma_frag_row_for(const char* op_id)
+{
+    size_t i;
+    for(i = 0; i < sizeof(rocke_ati_mma_frag) / sizeof(rocke_ati_mma_frag[0]); ++i)
+    {
+        if(strcmp(rocke_ati_mma_frag[i].op_id, op_id) == 0)
+        {
+            return &rocke_ati_mma_frag[i];
+        }
+    }
+    return NULL;
+}
+
 /* =========================================================================
  * Per-arch rocke_mma_op_t[] catalogs (the embedded arch_specs.json mma rows,
  * enriched with frag lengths + layout-map pointers, mirroring _build_mma_op).
@@ -1010,6 +1026,12 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
  * Field order of rocke_mma_op_t:
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
+ *
+ * The trailing scale and emulation fields are left to zero-init below: every
+ * atom here is unscaled unless it spells its scale metadata, and every one is
+ * natively encoded (emulation_recipe NONE, see rocke_arch_mma_op_is_native). A
+ * row that is neither must spell its fields positionally through to the last one it needs
+ * -- C++ forbids mixing designated and positional initializers in one list.
  *
  * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
@@ -2110,6 +2132,67 @@ static const rocke_mma_op_t k_mma_gfx950[] = {
      NULL,
      NULL,
      NULL},
+    /* TF32 via BF16x3 emulation. No native encoding: each row issues three
+     * mfma_*_bf16 over a Dekker-style split of the fp32 payload of its TF32
+     * operands. Frag lengths, wave size and layout maps are inherited verbatim
+     * from the physical atom -- they are the *same* fragment, differing only in
+     * the element type handed to the instruction -- and
+     * tests/core/test_xf32_catalog_rows.py pins them equal to the bf16 rows
+     * above so the two cannot drift.
+     *
+     * These two rows must be spelled fully positionally, through
+     * emulation_physical_op_id: C++ forbids mixing designated and positional
+     * initializers in one braced-init-list, so reaching a trailing member means
+     * naming every member before it. The NULL/0/NONE run is the unscaled
+     * default that every other row gets from zero-init. */
+    {"mma",
+     "tf32",
+     "tf32",
+     "fp32",
+     16,
+     16,
+     32,
+     "mfma_f32_16x16x32_xf32",
+     8,
+     8,
+     4,
+     64,
+     &lm_mfma_16x16x32_a,
+     &lm_mfma_16x16x32_b,
+     &lm_mfma_16x16x32_c,
+     NULL,
+     NULL,
+     ROCKE_MMA_SCALE_NONE,
+     0,
+     0,
+     NULL,
+     NULL,
+     ROCKE_MMA_EMULATION_BF16X3,
+     "mfma_f32_16x16x32_bf16"},
+    {"mma",
+     "tf32",
+     "tf32",
+     "fp32",
+     32,
+     32,
+     16,
+     "mfma_f32_32x32x16_xf32",
+     8,
+     8,
+     16,
+     64,
+     &lm_mfma_32x32x16_a,
+     &lm_mfma_32x32x16_b,
+     &lm_mfma_32x32x16_c,
+     NULL,
+     NULL,
+     ROCKE_MMA_SCALE_NONE,
+     0,
+     0,
+     NULL,
+     NULL,
+     ROCKE_MMA_EMULATION_BF16X3,
+     "mfma_f32_32x32x16_bf16"},
 };
 
 /* ----------------------------- gfx1151 (RDNA3.5) ------------------------- */
@@ -2535,23 +2618,31 @@ constexpr auto k_mma_gfx1250 = make_gfx1250_catalog();
 
 int rocke_arch_mma_c_frag_len(const char* op_id)
 {
-    size_t i;
     if(!op_id)
     {
         return 0;
     }
-    for(i = 0; i < sizeof(rocke_ati_mma_frag) / sizeof(rocke_ati_mma_frag[0]); ++i)
+    const rocke_ati_mma_frag_row_t* row = rocke_ati_mma_frag_row_for(op_id);
+    if(!row)
     {
-        if(strcmp(rocke_ati_mma_frag[i].op_id, op_id) == 0)
-        {
-            return rocke_ati_mma_frag[i].c_frag_len;
-        }
+        /* Mirrors target._frag_info: an emulated atom has no fragment of its
+         * own and borrows the one belonging to the instruction it issues, so a
+         * bare logical op_id resolves through its physical atom. One hop only
+         * -- the catalog refuses an expansion chain. */
+        const char* physical = rocke_arch_mma_op_id_physical_op_id(op_id);
+        row = physical ? rocke_ati_mma_frag_row_for(physical) : NULL;
+    }
+    if(row)
+    {
+        return row->c_frag_len;
     }
     for(const auto& op : k_mma_gfx1250.ops)
     {
         if(strcmp(op.op_id, op_id) == 0)
             return op.c_frag_len;
     }
+    /* An atom with no fragment row at all -- the gfx950 scaled MFMAs -- takes its
+     * accumulator length from its catalog row. */
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx950");
     const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     if(atom)
@@ -2657,14 +2748,29 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
     {1024, 256, 0, 106},
 };
 
+/* gfx12-generic (RDNA4): the same WMMA atoms as gfx1201, so it shares that
+ * catalog. */
+static const rocke_arch_target_t k_target_gfx12_generic = {
+    "gfx12-generic",
+    "rdna",
+    "gfx12_rdna",
+    32,
+    65536,
+    6,
+    {k_mma_gfx1201, K_NUM(k_mma_gfx1201)},
+    {false, false, false, false, 4, 0, false, false, false, false},
+    {1024, 256, 0, 106},
+};
+
 /* =========================================================================
  * Shared registry + known-arches (sorted by gfx token).
  * =========================================================================
  *
  * Python known_arches() returns tuple(sorted(specs)); sorted() on the gfx
- * strings yields: "gfx11-generic", "gfx1151", "gfx1201", "gfx90a", "gfx942",
- * "gfx950". ('-' (0x2D) < '1' (0x31), so "gfx11-generic" sorts before
- * "gfx1151"; '0' < '4' so "gfx90a" sorts before "gfx942".)
+ * strings yields: "gfx11-generic", "gfx1151", "gfx12-generic", "gfx1201",
+ * "gfx1250", "gfx90a", "gfx942", "gfx950". ('-' (0x2D) < digits, so a generic
+ * name sorts before its family's processors; '0' < '4' so "gfx90a" sorts
+ * before "gfx942".)
  * The registry is kept in this same sorted order so rocke_known_arches can return
  * rocke_ati_known_arches directly.
  */
@@ -2672,6 +2778,7 @@ static const rocke_arch_target_t k_target_gfx11_generic = {
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
     {"gfx1151", &k_target_gfx1151},
+    {"gfx12-generic", &k_target_gfx12_generic},
     {"gfx1201", &k_target_gfx1201},
     {"gfx1250", &k_target_gfx1250},
     {"gfx90a", &k_target_gfx90a},
@@ -2680,15 +2787,43 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {NULL, NULL}, /* terminator */
 };
 
-const int rocke_ati_arch_registry_len = 7;
+const int rocke_ati_arch_registry_len = 8;
 
 const char* const rocke_ati_known_arches[] = {
     "gfx11-generic",
     "gfx1151",
+    "gfx12-generic",
     "gfx1201",
     "gfx1250",
     "gfx90a",
     "gfx942",
     "gfx950",
     NULL,
+};
+
+/* Mirror of arch_specs.json "generic_targets": each catalogued LLVM generic
+ * processor followed by the concrete processors that load its code objects. */
+static const char* const k_generic_gfx11_members[] = {
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1154",
+    NULL,
+};
+
+static const char* const k_generic_gfx12_members[] = {
+    "gfx1200",
+    "gfx1201",
+    NULL,
+};
+
+const rocke_ati_generic_row_t rocke_ati_generic_targets[] = {
+    {"gfx11-generic", k_generic_gfx11_members},
+    {"gfx12-generic", k_generic_gfx12_members},
+    {NULL, NULL}, /* terminator */
 };
