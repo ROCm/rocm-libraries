@@ -103,7 +103,7 @@ TEST(TestPluginSerialization, HooksRejectNullArguments)
     Context context;
     const uint8_t byte = 0;
     hipdnnPluginConstData_t serialized{&byte, 1};
-    hipdnnPluginConstData_t withoutBytes{nullptr, 0};
+    const hipdnnPluginConstData_t withoutBytes{nullptr, 0};
     hipdnnEnginePluginExecutionContext_t created = nullptr;
 
     EXPECT_EQ(hipdnnEnginePluginSerializeExecutionContext(nullptr, &context, &serialized),
