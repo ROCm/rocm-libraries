@@ -478,6 +478,26 @@ if(ROCM_LIBS_SUPERBUILD)
         )
     endif()
 
+    # Stage the workspace's fetched flatbuffers only when it was FETCHED. Its
+    # install rules need the flatbuffers library and flatc to be built first.
+    FetchContent_GetProperties(flatbuffers)
+    if(flatbuffers_POPULATED)
+        foreach(_flatbuffers_target IN ITEMS flatbuffers flatc)
+            if(TARGET ${_flatbuffers_target})
+                add_dependencies(example_plugin_hipdnn-staging-install ${_flatbuffers_target})
+            endif()
+        endforeach()
+        add_custom_command(
+            TARGET example_plugin_hipdnn-staging-install
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                    -DBUILD_DIR=${flatbuffers_BINARY_DIR}
+                    -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
+            COMMENT "Staging fetched flatbuffers for example_engine_plugin"
+        )
+    endif()
+
     list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake")
     list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}")
     list(APPEND _example_plugin_depends example_plugin_hipdnn-staging-install)
