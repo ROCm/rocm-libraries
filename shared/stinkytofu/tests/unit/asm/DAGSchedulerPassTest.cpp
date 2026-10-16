@@ -2565,7 +2565,7 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
     for (int v = 0; v < 2; ++v) {
         SetUp();
         for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
-        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
+        for (int i = 0; i < 48; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
@@ -2579,8 +2579,20 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
         pass->run(*func, ctx, am);
         shapes[v] = wdShape(mnemonicSequence(*bb));
     }
-    EXPECT_EQ(shapes[0], "WWWddddddWddWWWWWWWWWWWW");
-    EXPECT_EQ(shapes[1], "WWWddWdWWdWWdWWdWWdWWdWW");
+    auto longestRun = [](const std::string& s) {
+        size_t best = 0, run = 0;
+        for (char c : s) {
+            run = c == 'd' ? run + 1 : 0;
+            best = std::max(best, run);
+        }
+        return best;
+    };
+    // Greedy bursts the loads; the spread keeps them at most two to a window and finishes the
+    // last one about a ds return latency before the region's last WMMA.
+    EXPECT_GE(longestRun(shapes[0]), 5u) << shapes[0];
+    EXPECT_LE(longestRun(shapes[1]), 2u) << shapes[1];
+    EXPECT_EQ(std::count(shapes[1].begin(), shapes[1].end(), 'd'), 8);
+    EXPECT_LT(shapes[1].find_last_of('d') + 9, shapes[1].size()) << shapes[1];
 }
 
 // Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.

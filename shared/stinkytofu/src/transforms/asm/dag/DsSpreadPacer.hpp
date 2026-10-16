@@ -14,13 +14,16 @@ namespace stinkytofu {
 // Spreads a region's ds_loads evenly over the time the region has left, in cycles.
 //
 // The time left is what the WMMAs still to issue will take, less the cycles the last ds_load needs
-// to return before the region ends (`tailReserveCycles`) and the manual `toleranceCycles`. A
-// ds_load may issue once the clock is `gap` cycles past the previous ds_load, where
-//     gap = timeLeft / dsLeft.
-// Re-evaluated at every decision, the gap adapts: a held load (no credit, a dependency, a
-// barrier) makes the next gaps shorter, so the stream catches up evenly and the last ds_load
-// still issues its return latency before the region ends, instead of the backlog draining as a
-// burst at the tail.
+// to return before the region ends (`tailReserveCycles`) and the manual `toleranceCycles`. Each
+// issue sets the next allowed time one `gap` later,
+//     gap = timeLeft / dsLeft   (fractional),
+// counted from the previous allowed time, not from the actual issue: the clock moves in whole
+// WMMA windows, so a gap shorter than a window would otherwise round up to a full window every
+// time and the lost fraction would pile up into a burst at the region end. Counted from the
+// allowed time, the fraction accumulates into evenly spaced double issues instead. After a stall
+// at most one extra load goes back to back. The gap is re-derived at each issue, so a held load
+// (no credit, a dependency, a barrier) makes the following gaps shorter and the last ds_load still
+// issues its return latency before the region ends.
 //
 // A load whose first consumer WMMA needs it earlier than its turn has its own deadline,
 // consumerWindow * windowCycles - leadCycles after the region start; from then on it issues
@@ -36,7 +39,7 @@ class DsSpreadPacer {
         deadline_.clear();
         toleranceCycles_ = 0;
         tailReserveCycles_ = 0;
-        lastIssue_ = kNever;
+        nextAllowed_ = kNever;
         active_ = false;
         issueClocks_.clear();
     }
@@ -60,10 +63,10 @@ class DsSpreadPacer {
 
     // Cycles between two consecutive ds_loads when `wmmaCyclesLeft` cycles of WMMAs and `dsLeft`
     // ds_loads remain. 0 once there is nothing left to spread over (issue as soon as ready).
-    int gapCycles(int wmmaCyclesLeft, int dsLeft) const {
-        if (dsLeft <= 0) return 0;
+    double gapCycles(int wmmaCyclesLeft, int dsLeft) const {
+        if (dsLeft <= 0) return 0.0;
         const int budget = wmmaCyclesLeft - tailReserveCycles_ - toleranceCycles_;
-        return budget > 0 ? budget / dsLeft : 0;
+        return budget > 0 ? static_cast<double>(budget) / dsLeft : 0.0;
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -86,17 +89,22 @@ class DsSpreadPacer {
         return tailReserveCycles_;
     }
 
-    // Whether the ds_load may issue at region clock `clock`, with `wmmaCyclesLeft` cycles of WMMAs
-    // still to issue in the region and `dsLeft` ds_loads still to issue (this one included).
-    bool released(unsigned nodeId, int clock, int wmmaCyclesLeft, int dsLeft) const {
+    // Whether the ds_load may issue at region clock `clock`.
+    bool released(unsigned nodeId, int clock) const {
         if (!active_) return true;
         auto dl = deadline_.find(nodeId);
         if (dl != deadline_.end() && clock >= dl->second) return true;
-        return clock - lastIssue_ >= gapCycles(wmmaCyclesLeft, dsLeft);
+        return clock >= nextAllowed_;
     }
 
-    void noteIssue(int clock) {
-        lastIssue_ = clock;
+    // A ds_load issued at `clock`, with `wmmaCyclesLeft` cycles of WMMAs still to issue in the
+    // region and `dsLeft` ds_loads still to issue (this one included).
+    void noteIssue(int clock, int wmmaCyclesLeft, int dsLeft) {
+        const double gap = gapCycles(wmmaCyclesLeft, dsLeft);
+        // From the previous allowed time, but never more than one gap behind the clock: a stall
+        // lets one extra load go, not a burst. The first load only sets the pace.
+        nextAllowed_ =
+            nextAllowed_ == kNever ? clock + gap : std::max(nextAllowed_ + gap, double(clock));
         issueClocks_.push_back(clock);
     }
 
@@ -118,11 +126,11 @@ class DsSpreadPacer {
     }
 
    private:
-    static constexpr long long kNever = -(1LL << 40);  // no ds_load issued yet
+    static constexpr double kNever = -1e18;  // no ds_load issued yet
 
     std::unordered_map<unsigned, int> deadline_;
     std::vector<int> issueClocks_;
-    long long lastIssue_ = kNever;
+    double nextAllowed_ = kNever;
     int toleranceCycles_ = 0;
     int tailReserveCycles_ = 0;
     bool active_ = false;

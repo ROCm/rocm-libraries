@@ -1181,7 +1181,8 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
         dsReadInflight_.push(dsReadCreditLifetime());
-        dsSpread_.noteIssue(clock_);
+        dsSpread_.noteIssue(clock_, dsSpreadWmmaCyclesLeft(),
+                            dsTotalThisRegion_ - dsIssuedThisRegion_ + 1);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1624,8 +1625,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) {
-            if (!spread || dsSpread_.released(pickedDS->id, clock_, dsSpreadWmmaCyclesLeft(),
-                                              dsTotalThisRegion_ - dsIssuedThisRegion_)) {
+            if (!spread || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
