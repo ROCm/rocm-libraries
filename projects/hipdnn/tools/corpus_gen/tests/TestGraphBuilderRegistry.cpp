@@ -240,6 +240,40 @@ TEST(TestGraphBuilderRegistry, NamesTheBuilderItCannotFind)
     EXPECT_NE(built.error.find("noSuchBuilder"), std::string::npos);
 }
 
+TEST(TestGraphBuilderRegistry, AMoeModeThatNeedsIndexTensorsIsRefusedByName)
+{
+    // GATHER and SCATTER read token_index (and token_ks), which the builder cannot shape.
+    for(const std::string mode : {"GATHER", "SCATTER"})
+    {
+        auto moe = nlohmann::json::parse(R"({
+          "schema_version": "1.0", "operation": "moe",
+          "parameters": { "T": { "type": "int64" } },
+          "stratification_axis": "working_set", "regimes": {},
+          "graph_builder": { "function": "moeGroupedMatmul", "source": "x.hpp",
+            "arguments": [
+              { "name": "dataType", "kind": "constant", "constant": "half" },
+              { "name": "tokenDims", "kind": "expr", "value": [1, "$q.T", 32] },
+              { "name": "tokenStrides", "kind": "expr", "value": [2048, 32, 1] },
+              { "name": "weightDims", "kind": "expr", "value": [4, 32, 16] },
+              { "name": "weightStrides", "kind": "expr", "value": [512, 16, 1] },
+              { "name": "firstTokenOffsetDims", "kind": "expr", "value": [4, 1, 1] },
+              { "name": "firstTokenOffsetStrides", "kind": "expr", "value": [1, 1, 1] },
+              { "name": "outputDims", "kind": "expr", "value": [1, "$q.T", 16] },
+              { "name": "outputStrides", "kind": "expr", "value": [1024, 16, 1] },
+              { "name": "moeMode", "kind": "constant", "constant": "MODE" }
+            ] }
+        })");
+        moe["graph_builder"]["arguments"].back()["constant"] = mode;
+
+        const auto parsed = parseOperationMetadata(moe);
+        ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+        const auto built = buildGraphFor(*parsed.metadata, ProblemPoint{{"T", int64_t{64}}});
+
+        EXPECT_FALSE(built.ok()) << mode;
+        EXPECT_NE(built.error.find("not " + mode), std::string::npos) << built.error;
+    }
+}
+
 TEST(TestGraphBuilderRegistry, DeclinesAnIncompleteDeclaration)
 {
     // Adapters must not fill in what the declaration omits.

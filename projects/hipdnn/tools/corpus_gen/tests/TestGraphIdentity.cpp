@@ -176,3 +176,27 @@ TEST(TestGraphIdentity, BytesThatAreNotAGraphHaveNoContentKey)
     EXPECT_THROW(graphContentKey(reinterpret_cast<const uint8_t*>(text.data()), text.size()),
                  std::exception);
 }
+
+TEST(TestGraphIdentity, AGraphNameSpellsOutTheProblem)
+{
+    const ProblemPoint point{{"M", int64_t{64}}, {"dtype", std::string("fp16")}};
+    EXPECT_EQ(graphNameFor("matmul", "square", point), "matmul_square_M64_dtypefp16");
+}
+
+TEST(TestGraphIdentity, ALongGraphNameIsBoundedUniqueAndStable)
+{
+    // conv_bias_activation's every-parameter name ran to 260 bytes, past the file-name limit.
+    ProblemPoint point;
+    for(int i = 0; i < 40; ++i)
+    {
+        point.emplace("parameter_" + std::to_string(i), int64_t{1024});
+    }
+    auto other = point;
+    other["parameter_9"] = int64_t{2048}; // sorts late, inside the truncated tail
+
+    const auto name = graphNameFor("conv_bias_activation", "large", point);
+    EXPECT_LE(name.size(), MAX_GRAPH_NAME);
+    EXPECT_EQ(name.rfind("conv_bias_activation_large_parameter_", 0), 0U);
+    EXPECT_EQ(name, graphNameFor("conv_bias_activation", "large", point));
+    EXPECT_NE(name, graphNameFor("conv_bias_activation", "large", other));
+}

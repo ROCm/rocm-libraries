@@ -8,6 +8,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 
+#include <hipdnn_corpus_gen/CorpusOutput.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 
 #include <cstdint>
@@ -115,6 +116,39 @@ inline IdentifiedGraph stampGraphIdentity(const std::vector<uint8_t>& bytes,
             hipdnn_flatbuffers_sdk::utilities::formatUuid(identity),
             graphContentKey(stamped, builder.GetSize()),
             name};
+}
+
+/// The longest graph name. The name is a file stem (`<name>.fb`, `results/<name>.csv`), so
+/// it stays well under the 255-byte file-name limit of common filesystems.
+inline constexpr size_t MAX_GRAPH_NAME = 200;
+
+/// @brief The name the graph document carries: the operation, its regime, and its parameters.
+///
+/// Also the file stem, `--problem-id` and `<op>.problems.csv` key. Scoring and L2 collection
+/// join on this name alone, so it must be unique: every parameter is spelled out. A name
+/// longer than @ref MAX_GRAPH_NAME keeps its start and ends in a hash of the whole, so it
+/// stays unique and the same on every run.
+inline std::string
+    graphNameFor(const std::string& operation, const std::string& regime, const ProblemPoint& point)
+{
+    std::string name = operation;
+    if(!regime.empty())
+    {
+        name += "_" + regime;
+    }
+    for(const auto& parameter : point)
+    {
+        name += "_" + parameter.first + asText(parameter.second);
+    }
+    if(name.size() > MAX_GRAPH_NAME)
+    {
+        constexpr size_t HASH_LENGTH = 16;
+        const auto digest = hipdnn_plugin_sdk::uhd::sha256(
+            reinterpret_cast<const uint8_t*>(name.data()), name.size());
+        name = name.substr(0, MAX_GRAPH_NAME - HASH_LENGTH - 1) + "_"
+               + digest.substr(0, HASH_LENGTH);
+    }
+    return name;
 }
 
 } // namespace hipdnn_corpus_gen

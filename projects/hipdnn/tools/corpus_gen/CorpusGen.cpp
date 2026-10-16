@@ -56,25 +56,6 @@ using hipdnn_corpus_gen::asQueryColumns;
 using hipdnn_corpus_gen::ExplorationRequest;
 using hipdnn_corpus_gen::ProblemPoint;
 
-/// @brief The name the graph document carries: the operation, its regime, and its parameters.
-///
-/// Also the file stem, `--problem-id` and `<op>.problems.csv` key. Scoring and L2 collection
-/// join on this name alone, so it must be unique: every parameter is spelled out.
-std::string
-    graphNameFor(const std::string& operation, const std::string& regime, const ProblemPoint& point)
-{
-    std::string name = operation;
-    if(!regime.empty())
-    {
-        name += "_" + regime;
-    }
-    for(const auto& parameter : point)
-    {
-        name += "_" + parameter.first + hipdnn_corpus_gen::asText(parameter.second);
-    }
-    return name;
-}
-
 /// @brief Every engine the loaded plugins registered, as (id, name).
 ///
 /// Used to reject an unregistered engine: a misspelled name still hashes to a valid id and
@@ -1069,13 +1050,13 @@ int runGenerator(const std::vector<std::string>& args)
             const auto graph = hipdnn_corpus_gen::buildGraphFor(declaration->second, point);
             if(graph.ok())
             {
-                const auto id
-                    = hipdnn_corpus_gen::stampGraphIdentity(
-                          graph.bytes,
-                          graphNameFor(operation,
-                                       hipdnn_corpus_gen::regimeLabel(declaration->second, point),
-                                       point))
-                          .key;
+                const auto id = hipdnn_corpus_gen::stampGraphIdentity(
+                                    graph.bytes,
+                                    hipdnn_corpus_gen::graphNameFor(
+                                        operation,
+                                        hipdnn_corpus_gen::regimeLabel(declaration->second, point),
+                                        point))
+                                    .key;
                 held = excluded.count(id) > 0;
                 if(held)
                 {
@@ -1198,7 +1179,8 @@ int runGenerator(const std::vector<std::string>& args)
                             .emplace(key,
                                      hipdnn_corpus_gen::stampGraphIdentity(
                                          graph.bytes,
-                                         graphNameFor(result.operation, entry.regime, entry.point)))
+                                         hipdnn_corpus_gen::graphNameFor(
+                                             result.operation, entry.regime, entry.point)))
                             .first;
             }
             if(excluded.count(known->second.key) > 0)

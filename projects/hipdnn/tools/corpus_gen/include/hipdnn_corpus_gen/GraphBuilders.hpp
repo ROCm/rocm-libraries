@@ -1307,39 +1307,15 @@ inline GraphBytes blockScaleQuantize(const TensorSpec& x,
     return detail::finish(builder, "block_scale_quantize", types, tensors, nodes);
 }
 
-/// @brief Block-scale dequantize.
-inline GraphBytes blockScaleDequantize(const TensorSpec& x,
-                                       const TensorSpec& scale,
-                                       const TensorSpec& y,
-                                       const std::vector<int32_t>& blockSize,
-                                       bool negativeScale,
-                                       const GraphTypes& types)
-{
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors{
-        detail::addTensor(builder, x),
-        detail::addTensor(builder, scale),
-        detail::addTensor(builder, y)};
-
-    const auto node = fb::CreateBlockScaleDequantizeAttributesDirect(
-        builder, x.uid, scale.uid, y.uid, &blockSize, negativeScale);
-    std::vector<flatbuffers::Offset<fb::Node>> nodes{
-        fb::CreateNodeDirect(builder,
-                             "block_scale_dequantize",
-                             types.compute,
-                             fb::NodeAttributes::BlockScaleDequantizeAttributes,
-                             node.Union())};
-    return detail::finish(builder, "block_scale_dequantize", types, tensors, nodes);
-}
-
 // ---------------------------------------------------------------------------
 // Mixture of experts
 // ---------------------------------------------------------------------------
 
-/// @brief MoE grouped matmul.
+/// @brief MoE grouped matmul, @p mode NONE: GATHER and SCATTER also read routing index
+/// tensors this builder does not declare.
 ///
-/// Routing lives in the contents of `firstTokenOffset` and `tokenIndex`, which the graph does
-/// not declare; a measurement covers whatever routing the bench's buffers hold.
+/// Routing lives in the contents of `firstTokenOffset`, which the graph does not declare; a
+/// measurement covers whatever routing the bench's buffers hold.
 inline GraphBytes moeGroupedMatmul(const TensorSpec& token,
                                    const TensorSpec& weight,
                                    const TensorSpec& firstTokenOffset,

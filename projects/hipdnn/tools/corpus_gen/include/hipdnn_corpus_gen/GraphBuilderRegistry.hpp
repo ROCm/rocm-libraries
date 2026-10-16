@@ -1031,43 +1031,6 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                      ""};
          }},
 
-        {"blockScaleDequantize",
-         [](const ArgumentResolution& resolved) -> BuildResult {
-             const auto type = detail::dtype(resolved, "dataType");
-             const auto scaleType = detail::dtype(resolved, "scaleDataType");
-             if(!type.has_value())
-             {
-                 return {{}, "blockScaleDequantize needs dataType"};
-             }
-             const auto x = detail::tensorRole(resolved, 1, "x", *type);
-             const auto scale = detail::tensorRole(resolved, 2, "scale", scaleType.value_or(*type));
-             const auto y = detail::tensorRole(resolved, 3, "y", *type);
-             if(!x.has_value() || !scale.has_value() || !y.has_value())
-             {
-                 return {{},
-                         "blockScaleDequantize needs xDims/xStrides, scaleDims/scaleStrides, "
-                         "yDims/yStrides"};
-             }
-             const auto* block = detail::dims(resolved, "blockSize");
-             if(block == nullptr)
-             {
-                 return {{}, "blockScaleDequantize needs blockSize"};
-             }
-             std::vector<int32_t> blockSize;
-             blockSize.reserve(block->size());
-             for(const auto one : *block)
-             {
-                 blockSize.push_back(static_cast<int32_t>(one));
-             }
-             return {builders::blockScaleDequantize(*x,
-                                                    *scale,
-                                                    *y,
-                                                    blockSize,
-                                                    detail::flag(resolved, "negativeScale"),
-                                                    detail::graphTypesFrom(resolved, *type)),
-                     ""};
-         }},
-
         {"moeGroupedMatmul",
          [](const ArgumentResolution& resolved) -> BuildResult {
              const auto type = detail::dtype(resolved, "dataType");
@@ -1100,6 +1063,17 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                     mode))
              {
                  return {{}, "unknown MoE grouped matmul mode"};
+             }
+             if(mode != hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::NONE)
+             {
+                 // GATHER reads token_index and SCATTER token_index and token_ks, tensors
+                 // this builder declares no shape for; the graph would not deserialize.
+                 return {
+                     {},
+                     std::string("moeGroupedMatmul builds mode NONE only, not ")
+                         + hipdnn_flatbuffers_sdk::data_objects::EnumNameMoeGroupedMatmulMode(mode)
+                         + ": that mode needs routing index tensors this builder does not "
+                           "declare"};
              }
              return {builders::moeGroupedMatmul(
                          *token,
