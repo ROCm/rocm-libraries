@@ -5,11 +5,11 @@
 
 DSL counterpart of CK Tile's ``example/ck_tile/42_mx_gemm``. The MX
 GEMM uses the OCP MX-spec shared-exponent format: each 32-element
-mantissa block carries one 8-bit unbiased E8M0 scale, so the per-
+mantissa block carries one 8-bit biased E8M0 scale (bias 127), so the per-
 element math is::
 
  A_mantissa[i] = fp8_or_fp6_or_fp4 value
- A_scale[i // 32] = 8-bit unbiased exponent (E8M0)
+ A_scale[i // 32] = 8-bit unsigned biased exponent (E8M0)
  A_real[i] = A_mantissa[i] * 2^(A_scale[i // 32] - 127)
 
 Same for B. The kernel does an A * B^T contraction in f32 (the MX
@@ -273,8 +273,8 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
             b,
             b.global_load_i8(BScale, b_scale_off),
         )
-        # The MX-spec apply is ``elem * 2^(scale_unbiased - 127)``;
-        # mathematically equivalent to ``elem * 2^scale_unbiased / 2^127``
+        # The MX-spec apply is ``elem * 2^(scale_code - 127)``;
+        # mathematically equivalent to ``elem * 2^scale_code / 2^127``
         # and since a_scale / b_scale are already the post-decode f32
         # multipliers, the combined scale is just their product.
         ab_scale = b.fmul(a_scale, b_scale)
