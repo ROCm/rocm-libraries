@@ -202,7 +202,9 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             /* exclude 2 * padLength number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
+               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -546,7 +548,9 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
+               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -885,7 +889,9 @@ static inline RppStatus erode_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr 
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 24) * 24;
+            /* Note: AVX loop stores 32 bytes but advances by 24, creating 8-byte overrun.
+               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 24) * 24;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
@@ -1846,7 +1852,9 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+            /* Note: AVX loop stores 48 bytes but advances by 42, creating 6-byte overrun.
+               Subtract 6 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 6) / 14) * 14;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -1907,9 +1915,9 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
 
                     // convert result from pln to pkd format and store in output buffer
                     if constexpr (std::is_same<T, Rpp32f>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_f32pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_f32pkd3_avx, dstPtrTemp, pResult);
                     else if constexpr (std::is_same<T, Rpp16f>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_f16pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_f16pkd3_avx, dstPtrTemp, pResult);
 
                     dstPtrTemp += 42;
                 }
@@ -1931,7 +1939,9 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            /* Note: AVX loop stores 16 values but advances by 12, creating 4-value overrun.
+               Subtract 4 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)

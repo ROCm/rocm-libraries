@@ -101,9 +101,10 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
         if ((srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude 2 * padLength number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
-               computed using raw c code
-               For 3x3 kernel: process 16, store 14 (with safe partial stores), advance by 14 */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+               computed using raw c code */
+            /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
+               Subtract overshoot of 2 floats to prevent buffer overrun. */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -168,13 +169,13 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
                         // Store only 14 pixels to prevent thread buffer corruption
                         // Use safe store functions that write exactly 14 elements
                         if constexpr (std::is_same<T, Rpp32f>::value)
-                            rpp_store14_f32_to_f32_avx((Rpp32f*)dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f32_avx((Rpp32f*)dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp16f>::value)
-                            rpp_store14_f32_to_f16_avx((Rpp16f*)dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f16_avx((Rpp16f*)dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8s>::value)
-                            rpp_store14_f32_to_i8_avx((Rpp8s*)dstPtrTemp, pDst);
+                            rpp_store16_f32_to_i8_avx((Rpp8s*)dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8u>::value)
-                            rpp_store14_f32_to_u8_avx((Rpp8u*)dstPtrTemp, pDst);
+                            rpp_store16_f32_to_u8_avx((Rpp8u*)dstPtrTemp, pDst);
 
                         increment_row_ptrs(srcPtrTemp, kernelSize, 14);
                         dstPtrTemp += 14;
@@ -357,7 +358,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+            /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
+               Subtract overshoot of 2 floats to prevent buffer overrun. */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -424,13 +427,13 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
                     // Store only 14 pixels (42 bytes) to avoid buffer overrun in multithreading
                     // Use safe store functions that match the tested scalar loop logic
                     if constexpr (std::is_same<T, Rpp32f>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_f32pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_f32pkd3_avx, dstPtrTemp, pResult);
                     else if constexpr (std::is_same<T, Rpp16f>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_f16pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_f16pkd3_avx, dstPtrTemp, pResult);
                     else if constexpr (std::is_same<T, Rpp8u>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_u8pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp, pResult);
                     else if constexpr (std::is_same<T, Rpp8s>::value)
-                        rpp_simd_store(rpp_store42_f32pln3_to_i8pkd3_avx, dstPtrTemp, pResult);
+                        rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp, pResult);
                     dstPtrTemp += 42;
                 }
 #endif
@@ -456,7 +459,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            /* Note: AVX loop stores 16 values but advances by 12, creating 4-value overrun.
+               Subtract 4 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -603,7 +608,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte overrun).
+               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 8) * 8;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;

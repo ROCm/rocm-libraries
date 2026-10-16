@@ -174,7 +174,9 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+                /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
+               Subtract overshoot of 2 floats to prevent buffer overrun. */
+                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -241,13 +243,13 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                         pDst[1] = _mm256_min_ps(_mm256_max_ps(pDst[1], pMin), pMax);
 
                         if constexpr (std::is_same<T, Rpp32f>::value)
-                            rpp_store14_f32_to_f32_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f32_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp16f>::value)
-                            rpp_store14_f32_to_f16_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f16_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8s>::value)
-                            rpp_store14_f32_to_i8_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_i8_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8u>::value)
-                            rpp_store14_f32_to_u8_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_u8_avx(dstPtrTemp, pDst);
 
                         increment_row_ptrs(srcPtrTemp, kernelSize, 14);
                         dstPtrTemp += 14;
@@ -271,7 +273,9 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 14) * 14;
+                /* Note: AVX loop processes 14 floats per iteration but stores 16 floats.
+               Subtract overshoot of 2 floats to prevent buffer overrun. */
+                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 2) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -323,13 +327,13 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                         pDst[1] = _mm256_min_ps(_mm256_max_ps(pDst[1], pMin), pMax);
 
                         if constexpr (std::is_same<T, Rpp32f>::value)
-                            rpp_store14_f32_to_f32_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f32_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp16f>::value)
-                            rpp_store14_f32_to_f16_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_f16_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8s>::value)
-                            rpp_store14_f32_to_i8_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_i8_avx(dstPtrTemp, pDst);
                         else if constexpr (std::is_same<T, Rpp8u>::value)
-                            rpp_store14_f32_to_u8_avx(dstPtrTemp, pDst);
+                            rpp_store16_f32_to_u8_avx(dstPtrTemp, pDst);
 
                         increment_row_ptrs(srcPtrTemp, kernelSize, 14);
                         dstPtrTemp += 14;
@@ -359,7 +363,9 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                /* Note: AVX loop processes 12 floats per iteration but stores 16 floats.
+               Subtract overshoot of 4 floats to prevent buffer overrun. */
+                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
@@ -455,7 +461,9 @@ static inline RppStatus sobel_filter_host_tensor_impl(T* srcPtrImage, RpptDescPt
                 /* exclude 2 * padLength number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                 computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                /* Note: AVX loop processes 12 floats per iteration but stores 16 floats.
+               Subtract overshoot of 4 floats to prevent buffer overrun. */
+                Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 4) / 12) * 12;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     int vectorLoopCount = 0;
