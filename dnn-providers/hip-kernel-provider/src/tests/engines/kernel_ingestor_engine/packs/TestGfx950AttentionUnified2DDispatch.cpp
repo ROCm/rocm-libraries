@@ -13,7 +13,10 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -37,17 +40,17 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL
     = "hipkernel.gfx950_attention_unified2_d.graph_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified2_d.dispatch";
 
-constexpr int64_t Q_UID = 11, K_UID = 22, V_UID = 33, O_UID = 44;
+constexpr int64_t Q_UID = 11, K_UID = 22, V_UID = 33, O_UID = 44, BHSD_UID = 55;
 constexpr int64_t BATCH = 2, HEADS_Q = 32, HEADS_KV = 8, SEQ = 256, HEAD_SIZE = 128;
 constexpr int64_t BLOCK_SIZE = 16;
 constexpr float SCALE = 0.08838834764831843F;
 
+constexpr std::string_view O_TOKEN = "gfx950_attention_unified_2d.o.uid";
+
 constexpr const char* MISSING_TOKEN_MARKER = "missing bound token";
 constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
-constexpr const char* GEOMETRY_MARKER = "no usable block_m_per_warp";
-constexpr const char* NULL_WORKSPACE_MARKER = "null workspace";
 
-std::vector<int64_t> bshdStrides(int64_t b, int64_t h, int64_t s, int64_t d)
+std::vector<int64_t> bshdStrides(int64_t h, int64_t s, int64_t d)
 {
     return {s * h * d, d, h * d, 1};
 }
@@ -55,17 +58,18 @@ std::vector<int64_t> bshdStrides(int64_t b, int64_t h, int64_t s, int64_t d)
 flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
                                           data_objects::DiagonalAlignment alignment
                                           = data_objects::DiagonalAlignment::BOTTOM_RIGHT,
-                                          bool withBhsdO = false)
+                                          bool withBhsdTensor = false)
 {
     flatbuffers::FlatBufferBuilder b(4096);
 
-    auto bshd = bshdStrides(BATCH, HEADS_Q, SEQ, HEAD_SIZE);
-    auto bshd_kv = bshdStrides(BATCH, HEADS_KV, SEQ, HEAD_SIZE);
+    auto bshd = bshdStrides(HEADS_Q, SEQ, HEAD_SIZE);
+    auto bshd_kv = bshdStrides(HEADS_KV, SEQ, HEAD_SIZE);
     std::vector<int64_t> qDims{BATCH, HEADS_Q, SEQ, HEAD_SIZE};
     std::vector<int64_t> kvDims{BATCH, HEADS_KV, SEQ, HEAD_SIZE};
 
-    // Optionally give O a BHSD layout so prepare() rejects it.
-    std::vector<int64_t> bhsdO{BATCH * HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
+    // An extra BHSD tensor no node references, so a bound O token can be made to name a
+    // real but wrongly-strided tensor (graph_match itself declines a BHSD O).
+    std::vector<int64_t> bhsd{BATCH * HEADS_Q * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
 
     auto qT = data_objects::CreateTensorAttributesDirect(
         b, Q_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd, &qDims, false);
@@ -73,10 +77,10 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
         b, K_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd_kv, &kvDims, false);
     auto vT = data_objects::CreateTensorAttributesDirect(
         b, V_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd_kv, &kvDims, false);
-
-    const std::vector<int64_t>* oStrides = withBhsdO ? &bhsdO : &bshd;
     auto oT = data_objects::CreateTensorAttributesDirect(
-        b, O_UID, nullptr, data_objects::DataType::BFLOAT16, oStrides, &qDims, false);
+        b, O_UID, nullptr, data_objects::DataType::BFLOAT16, &bshd, &qDims, false);
+    auto bhsdT = data_objects::CreateTensorAttributesDirect(
+        b, BHSD_UID, nullptr, data_objects::DataType::BFLOAT16, &bhsd, &qDims, false);
 
     data_objects::SdpaAttributesBuilder sdpa(b);
     sdpa.add_q_tensor_uid(Q_UID);
@@ -98,9 +102,18 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
                                                sdpaAttr.Union());
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{qT, kT, vT, oT};
+    if(withBhsdTensor)
+    {
+        tensors.push_back(bhsdT);
+    }
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes{node};
-    auto graph = data_objects::CreateGraphDirect(
-        b, "gfx950_attention_unified_2d_dispatch", &tensors, &nodes);
+    auto graph = data_objects::CreateGraphDirect(b,
+                                                 "gfx950_attention_unified_2d_dispatch",
+                                                 data_objects::DataType::UNSET,
+                                                 data_objects::DataType::UNSET,
+                                                 data_objects::DataType::UNSET,
+                                                 &tensors,
+                                                 &nodes);
     b.Finish(graph);
     return b;
 }
@@ -108,17 +121,17 @@ flatbuffers::FlatBufferBuilder buildGraph(float scale = SCALE,
 struct AttentionGraph
 {
     flatbuffers::FlatBufferBuilder builder;
-    hipdnn_flatbuffers_sdk::GraphWrapper graph;
-    hipdnn_flatbuffers_sdk::DeviceProperties properties;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph;
+    DeviceProperties properties;
 
     explicit AttentionGraph(float scale = SCALE,
                             data_objects::DiagonalAlignment alignment
                             = data_objects::DiagonalAlignment::BOTTOM_RIGHT,
-                            bool withBhsdO = false)
-        : builder(buildGraph(scale, alignment, withBhsdO))
+                            bool withBhsdTensor = false)
+        : builder(buildGraph(scale, alignment, withBhsdTensor))
         , graph(builder.GetBufferPointer(), builder.GetSize())
         , properties([]() {
-            hipdnn_flatbuffers_sdk::DeviceProperties p;
+            DeviceProperties p;
             p.gcnArchName = "gfx950";
             p.warpSize = 64;
             return p;
@@ -148,9 +161,12 @@ KernelDefinition
     makeKernel(int64_t blockMPerWarp = 16, int64_t numWarps = 1, int64_t blockSize = BLOCK_SIZE)
 {
     KernelDefinition kernel;
-    kernel.kernelId.engineId = "00000000-0000-4000-8000-0000000000b1";
-    kernel.kernelId.packId = "00000000-0000-4000-8000-0000000000b2";
-    kernel.kernelId.kernelId = "00000000-0000-4000-8000-0000000000b3";
+    kernel.dispatchId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000b1");
+    kernel.packId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000b2");
+    kernel.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000b3");
     kernel.name = "attention_unified_2d.bf16_d128_hq32_kv8_bs16_t16_nw1_mw16.gfx950";
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.source.library = "there-is-no-archive-here.kpack";
@@ -270,17 +286,12 @@ TEST(TestGfx950AttentionUnified2DDispatch, SynthesisedBlockTablesAreIdentityLayo
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesNonBshdOutput)
 {
     registerNativeIngestorSymbols();
-    AttentionGraph ag(SCALE,
-                      data_objects::DiagonalAlignment::BOTTOM_RIGHT,
-                      /* withBhsdO= */ true);
+    AttentionGraph ag(
+        SCALE, data_objects::DiagonalAlignment::BOTTOM_RIGHT, /* withBhsdTensor= */ true);
     auto bound = bindingsFor(ag);
-    // graph_match may already reject this or may accept it (output layout checked in prepare)
-    if(!bound.has_value())
-    {
-        GTEST_SKIP() << "graph_match declined (output layout check moved there)";
-    }
-    auto kernel = makeKernel();
-    const auto msg = prepareFailure(ag, *bound, kernel);
+    ASSERT_TRUE(bound.has_value());
+    (*bound)[std::string(O_TOKEN)] = BHSD_UID;
+    const auto msg = prepareFailure(ag, *bound, makeKernel());
     EXPECT_NE(msg.find(OUTPUT_LAYOUT_MARKER), std::string::npos)
         << "Expected output-layout error, got: " << msg;
 }
@@ -298,9 +309,9 @@ TEST(TestGfx950AttentionUnified2DDispatch, ScaleIsRoundTrippedThroughBitPattern)
     AttentionGraph ag(SCALE_ALT);
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
-    const auto it = bound->find("gfx950_attention_unified_2d.scale_bits");
-    ASSERT_NE(it, bound->end());
-    EXPECT_EQ(it->second, static_cast<int64_t>(bitsExpected));
+    const auto bits = tryGetBoundInt(*bound, "gfx950_attention_unified_2d.scale_bits");
+    ASSERT_TRUE(bits.has_value());
+    EXPECT_EQ(*bits, static_cast<int64_t>(bitsExpected));
 }
 
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWithoutMatcherBindings)

@@ -12,7 +12,10 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
@@ -178,8 +181,13 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         nodes.push_back(node2);
     }
 
-    auto graph
-        = data_objects::CreateGraphDirect(b, "gfx950_attention_unified_2d_test", &tensors, &nodes);
+    auto graph = data_objects::CreateGraphDirect(b,
+                                                 "gfx950_attention_unified_2d_test",
+                                                 data_objects::DataType::UNSET,
+                                                 data_objects::DataType::UNSET,
+                                                 data_objects::DataType::UNSET,
+                                                 &tensors,
+                                                 &nodes);
     b.Finish(graph);
     return b;
 }
@@ -187,8 +195,9 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
     auto builder = buildGraph(spec);
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    hipdnn_flatbuffers_sdk::DeviceProperties props;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
     MatchContext context{graph, 0, props};
@@ -213,9 +222,11 @@ KernelDefinition makeKernel(const std::string& dtype = "BF16",
                             int64_t numSeqs = 256)
 {
     KernelDefinition k;
-    k.kernelId.engineId = "00000000-0000-4000-8000-0000000000a1";
-    k.kernelId.packId = "00000000-0000-4000-8000-0000000000a2";
-    k.kernelId.kernelId = "00000000-0000-4000-8000-0000000000a3";
+    k.dispatchId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000a1");
+    k.packId = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000a2");
+    k.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000000a3");
     k.name = "attention_unified_2d.bf16_d128_hq32_kv8_bs16_t16_nw1_mw16.gfx950";
     k.source.kind = KernelSourceKind::KPACK;
     k.source.library = "fake.kpack";
@@ -244,8 +255,9 @@ KernelDefinition makeKernel(const std::string& dtype = "BF16",
 bool matchesKernel(const GraphSpec& gs, const KernelDefinition& k)
 {
     auto builder = buildGraph(gs);
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    hipdnn_flatbuffers_sdk::DeviceProperties props;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
     MatchContext context{graph, 0, props};
@@ -256,7 +268,7 @@ bool matchesKernel(const GraphSpec& gs, const KernelDefinition& k)
     {
         return false;
     }
-    auto km = KernelMatchRegistry::resolve(std::string(KERNEL_MATCHER_SYMBOL));
+    auto km = KernelMatcherRegistry::resolve(std::string(KERNEL_MATCHER_SYMBOL));
     return (*km)(context, *bound, k);
 }
 
@@ -276,7 +288,7 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsTopLeftCausalWhenSeqLensEqua
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
-    s.rightBound = -1; // no right_bound => top-left path
+    // right_bound 0 (the default) with TOP_LEFT alignment is hipDNN's top-left causal mask.
     s.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
     // seqQ == seqKv, so top-left == bottom-right numerically
     EXPECT_TRUE(matchGraph(s).has_value());

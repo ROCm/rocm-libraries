@@ -11,7 +11,10 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -110,7 +113,13 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors{qT, kT, vT, oT};
     std::vector<flatbuffers::Offset<Node>> nodes{node};
-    auto graph = CreateGraphDirect(b, "gfx950_attention_unified_2d_signature", &tensors, &nodes);
+    auto graph = CreateGraphDirect(b,
+                                   "gfx950_attention_unified_2d_signature",
+                                   DataType::UNSET,
+                                   DataType::UNSET,
+                                   DataType::UNSET,
+                                   &tensors,
+                                   &nodes);
     b.Finish(graph);
     return b;
 }
@@ -119,9 +128,12 @@ flatbuffers::FlatBufferBuilder buildAcceptedSdpaGraph()
 KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
 {
     KernelDefinition kernel;
-    kernel.kernelId.engineId = "00000000-0000-4000-8000-000000000051";
-    kernel.kernelId.packId = "00000000-0000-4000-8000-000000000052";
-    kernel.kernelId.kernelId = "00000000-0000-4000-8000-000000000053";
+    kernel.dispatchId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000051");
+    kernel.packId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000052");
+    kernel.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000053");
     kernel.name = "attention_unified_2d.bf16_d128_hq4_kv4_bs16_t16_nw1_mw16.gfx950";
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.source.library = "there-is-no-archive-here.kpack";
@@ -155,8 +167,9 @@ std::string prepareFailure(const std::vector<KernelArgument>& recorded)
     registerNativeIngestorSymbols();
 
     auto builder = buildAcceptedSdpaGraph();
-    hipdnn_flatbuffers_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    hipdnn_flatbuffers_sdk::DeviceProperties props;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                                     builder.GetSize());
+    DeviceProperties props;
     props.gcnArchName = "gfx950";
     props.warpSize = 64;
     MatchContext context{graph, 0, props};
@@ -186,17 +199,6 @@ void expectRefused(const std::vector<KernelArgument>& recorded)
     const auto msg = prepareFailure(recorded);
     EXPECT_NE(msg.find(MISMATCH_MARKER), std::string::npos)
         << "Expected mismatch message containing '" << MISMATCH_MARKER << "', got: " << msg;
-}
-
-KernelArgument withArgument(std::size_t index, KernelArgument arg)
-{
-    auto abi = pythonAbi();
-    abi[index] = std::move(arg);
-    return {};
-    (void)index;
-    auto mod = pythonAbi();
-    mod[index] = std::move(arg);
-    return {};
 }
 
 std::vector<KernelArgument> withArg(std::size_t idx, KernelArgument arg)

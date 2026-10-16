@@ -313,44 +313,28 @@ TEST_F(TestGfx950AttentionUnified2DPacks, RanksThroughItsRegisteredScoreSymbol)
 {
     constexpr std::string_view EXPECTED_SCORE_SYMBOL
         = "hipkernel.gfx950_attention_unified2_d.score";
-    EXPECT_EQ(_set->engine.heuristic.payload, std::string(EXPECTED_SCORE_SYMBOL));
+    ASSERT_TRUE(_set->heuristic.has_value());
+    EXPECT_EQ(_set->heuristic->payload, std::string(EXPECTED_SCORE_SYMBOL));
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered(std::string(EXPECTED_SCORE_SYMBOL)));
 }
 
 TEST_F(TestGfx950AttentionUnified2DPacks, CarriesNoGraphScopedMatcher)
 {
-    for(const auto& pack : _set->packs)
-    {
-        for(const auto& matcher : pack.matchers)
-        {
-            EXPECT_NE(matcher.scope, ingestor::MatcherScope::Graph)
-                << "Unexpected graph-scoped matcher in pack '" << pack.name << "'";
-        }
-    }
+    EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
+    const auto graphScoped
+        = std::count_if(_set->matchers.begin(), _set->matchers.end(), [](const auto& matcher) {
+              return matcher.scope == ingestor::MatchScope::GRAPH;
+          });
+    EXPECT_EQ(graphScoped, 0);
 }
 
 TEST_F(TestGfx950AttentionUnified2DPacks, CarriesExactlyOneSharedKernelScopedMatcher)
 {
-    // Every pack should share a single kernel-scoped UMD; no pack-specific matchers.
-    for(const auto& pack : _set->packs)
-    {
-        std::size_t kernelScoped = 0;
-        for(const auto& matcher : pack.matchers)
-        {
-            if(matcher.scope == ingestor::MatcherScope::Kernel)
-            {
-                ++kernelScoped;
-            }
-        }
-        EXPECT_EQ(kernelScoped, 1U)
-            << "Pack '" << pack.name << "' should have exactly one kernel-scoped matcher";
-    }
-}
-
-TEST_F(TestGfx950AttentionUnified2DPacks, DeclaresTheExpectedWorkspacePolicy)
-{
-    // "derived" is the first nonzero-workspace engine in this provider.
-    EXPECT_EQ(_set->engine.workspacePolicy, std::string("derived"));
+    const auto kernelScoped
+        = std::count_if(_set->matchers.begin(), _set->matchers.end(), [](const auto& matcher) {
+              return matcher.scope == ingestor::MatchScope::KERNEL;
+          });
+    EXPECT_EQ(kernelScoped, 1);
 }
 
 } // namespace
