@@ -285,6 +285,26 @@ class SchedulerConfig:
         return numUnroll.get('A', 1) > 1 or numUnroll.get('B', 1) > 1
 
     @staticmethod
+    def _even_split_size(total: int, mn: int = 1) -> int:
+        """Half of `total`, rounded UP to the local-read granularity `mn`.
+
+        Feeding this to _normalize_partition_sizes splits `total` into an even
+        number of partitions (or a single one, when `total` is not a multiple of
+        `mn` and no split happens at all).
+
+        Partition-directed prefetch forms a cycle: partition pi local-reads the
+        operands for pi+1, and the last partition wraps to partition 0 of the
+        next DepthU.  The operand VGPR set is picked by partition-index parity,
+        so the cycle is 2-colourable only when its length is even.  Rounding the
+        half DOWN instead yields an odd three-way split whenever total/mn is odd
+        (6, 10, 14, 18 -> [2,2,2], [4,2,4], [6,2,6], [8,2,8]), and the last
+        partition would then prefetch into the set it is still reading.
+        """
+        mn = max(1, mn)
+        half = -(-total // 2)  # ceil(total / 2)
+        return max(1, min(total, ((half + mn - 1) // mn) * mn))
+
+    @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str,
                                    mn: int = 1, remainder_last: bool = False) -> List[int]:
         if isinstance(spec, (list, tuple)):

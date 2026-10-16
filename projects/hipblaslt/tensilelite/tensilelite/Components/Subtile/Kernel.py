@@ -1419,7 +1419,16 @@ def mainLoop(writer, kernel):
       schedulerDoubleBuffer = ('A', 'B')
       # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
       # grid (8x4 -> 4x2 for the 8-wave MI, 8x8 -> 4x4 for the 4-wave MI).
-      forcedPartition = (max(1, M // 2), max(1, N // 2))
+      #
+      # The half is rounded UP to the local-read granularity mn so that the
+      # split is always into an EVEN number of partitions -- the prefetch cycle
+      # is 2-coloured by partition-index parity and an odd cycle would make the
+      # last partition prefetch into the set it is still reading.  See
+      # MFMASchedulerConfig._even_split_size.
+      mnM = max(1, int(lrSAGran.mn) if lrSAGran else 1)
+      mnN = max(1, int(lrSBGran.mn) if lrSBGran else 1)
+      forcedPartition = (MFMASchedulerConfig._even_split_size(M, mnM),
+                         MFMASchedulerConfig._even_split_size(N, mnN))
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
