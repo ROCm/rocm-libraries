@@ -1,0 +1,30 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Shared workload for both clients. --freivalds selects compact validation;
+# --verify additionally compares the same output with a dense reference.
+Tests:
+- name: freivalds_cli
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  M: 131
+  N: 67
+  K: 200
+  lda: 137
+  ldb: 211
+  ldc: 139
+  ldd: 143
+  transA: N
+  transB: N
+  alpha: 2
+  beta: -2
+  batch_count: 3
+  initialization: rand_int
+  freivalds: 0
+  bounds_check: 0
+  unit_check: 1
+  validation_iters: 1
+  requested_solution_num: 1
+  iters: 1
+  cold_iters: 0

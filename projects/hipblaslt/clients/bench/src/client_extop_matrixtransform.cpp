@@ -23,11 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <algorithm>
+#include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <hipblaslt/hostnumerics/MatrixTransformReference.hpp>
 #include <hipblaslt_datatype2string.hpp>
-#include <hipblaslt_init.hpp>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -50,20 +51,43 @@ private:
 template <typename DType>
 struct TypedMatrixTransformIO : public MatrixTransformIO
 {
-    TypedMatrixTransformIO(int64_t m, int64_t n, int64_t b, hipblaslt_initialization initMethod)
+    // The extension API consumes device pointers, while HostNumerics owns only
+    // host storage. Allocate the three device buffers here, generate A and B as
+    // typed host Tensors using their actual layouts, and copy their encoded
+    // storage to the device. C is output-only and remains uninitialized.
+    TypedMatrixTransformIO(const roc::hostnumerics::Layout& aLayout,
+                           const roc::hostnumerics::Layout& bLayout,
+                           const roc::hostnumerics::Layout& outputLayout,
+                           hipblaslt_initialization         initMethod)
     {
-        auto        hipErr = hipMalloc(&this->a, m * n * b * sizeof(DType));
-        hipErr = hipMalloc(&this->b, m * n * b * sizeof(DType));
-        hipErr = hipMalloc(&this->c, m * n * b * sizeof(DType));
-        init(this->a, m * n * b, initMethod);
-        init(this->b, m * n * b, initMethod);
+        const auto   type     = hipblaslt::hostnumerics::scalarType<DType>();
+        const size_t aBytes   = roc::hostnumerics::storageBytesForLayout(type, aLayout);
+        const size_t bBytes   = roc::hostnumerics::storageBytesForLayout(type, bLayout);
+        const size_t cBytes   = roc::hostnumerics::storageBytesForLayout(type, outputLayout);
+        const auto   allocate = [](DType** pointer, size_t bytes) {
+            const hipError_t error = hipMalloc(pointer, bytes == 0 ? 1 : bytes);
+            if(error != hipSuccess)
+                throw std::runtime_error(std::string("hipMalloc failed: ")
+                                         + hipGetErrorString(error));
+        };
+        allocate(&this->a, aBytes);
+        allocate(&this->b, bBytes);
+        allocate(&this->c, cBytes);
+        initializeDeviceInput(this->a,
+                              aLayout,
+                              initMethod,
+                              hipblaslt::hostnumerics::initialization::OperandSequence::MatrixA);
+        initializeDeviceInput(this->b,
+                              bLayout,
+                              initMethod,
+                              hipblaslt::hostnumerics::initialization::OperandSequence::MatrixB);
     }
 
     ~TypedMatrixTransformIO() override
     {
-        auto        hipErr = hipFree(a);
-        hipErr = hipFree(b);
-        hipErr = hipFree(c);
+        auto hipErr = hipFree(a);
+        hipErr      = hipFree(b);
+        hipErr      = hipFree(c);
     }
 
     void* getBuf(size_t i) override
@@ -78,43 +102,23 @@ struct TypedMatrixTransformIO : public MatrixTransformIO
     }
 
 private:
-    void init(DType* buf, size_t len, hipblaslt_initialization initMethod)
+    void initializeDeviceInput(DType*                           buffer,
+                               const roc::hostnumerics::Layout& layout,
+                               hipblaslt_initialization         initialization,
+                               hipblaslt::hostnumerics::initialization::OperandSequence sequence)
     {
-        std::vector<DType> ref(len);
-
-        switch(initMethod)
-        {
-        case hipblaslt_initialization::rand_int:
-            hipblaslt_init<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::trig_float:
-            hipblaslt_init_cos<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::hpl:
-            hipblaslt_init_hpl<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::uniform_low_precision:
-            hipblaslt_init_low_precision<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::special:
-            hipblaslt_init_alt_impl_big<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        case hipblaslt_initialization::zero:
-            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill
-        // instead of silently skipping (ref would stay default-constructed).
-        case hipblaslt_initialization::integer_exact:
-        case hipblaslt_initialization::norm_dist:
-        case hipblaslt_initialization::uniform_01:
-        case hipblaslt_initialization::fp16_accumulator_probe:
-            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
-            break;
-        default:
-            break;
-        }
-
-        auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
+        const auto     type = hipblaslt::hostnumerics::scalarType<DType>();
+        const uint64_t seed = hipblaslt::hostnumerics::initialization::seedForSequence(
+            hipblaslt::hostnumerics::defaultInitializationSeed, sequence);
+        const auto recipe = hipblaslt::hostnumerics::initializationRecipe(
+            type, initialization, seed, hipblaslt::hostnumerics::TrigonometricComponent::Cosine);
+        const auto       generated = roc::hostnumerics::generate(type, layout, recipe);
+        const hipError_t error     = hipMemcpy(buffer,
+                                           generated.rawEncodedBackingStorage().data(),
+                                           generated.rawEncodedBackingStorage().size(),
+                                           hipMemcpyHostToDevice);
+        if(error != hipSuccess)
+            throw std::runtime_error(std::string("hipMemcpy failed: ") + hipGetErrorString(error));
     }
 
 private:
@@ -124,24 +128,36 @@ private:
 };
 
 using MatrixTransformIOPtr = std::unique_ptr<MatrixTransformIO>;
-MatrixTransformIOPtr makeMatrixTransformIOPtr(
-    hipDataType datatype, int64_t m, int64_t n, int64_t b, hipblaslt_initialization init)
+MatrixTransformIOPtr makeMatrixTransformIOPtr(hipDataType                      datatype,
+                                              const roc::hostnumerics::Layout& aLayout,
+                                              const roc::hostnumerics::Layout& bLayout,
+                                              const roc::hostnumerics::Layout& outputLayout,
+                                              hipblaslt_initialization         init)
 {
     if(datatype == HIP_R_32F)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtFloat>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtFloat>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_16F)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtHalf>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtHalf>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_16BF)
     {
-        return std::make_unique<TypedMatrixTransformIO<hipblasLtBfloat16>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<hipblasLtBfloat16>>(
+            aLayout, bLayout, outputLayout, init);
     }
     else if(datatype == HIP_R_8I)
     {
-        return std::make_unique<TypedMatrixTransformIO<int8_t>>(m, n, b, init);
+        return std::make_unique<TypedMatrixTransformIO<int8_t>>(
+            aLayout, bLayout, outputLayout, init);
+    }
+    else if(datatype == HIP_R_32I)
+    {
+        return std::make_unique<TypedMatrixTransformIO<int32_t>>(
+            aLayout, bLayout, outputLayout, init);
     }
     return nullptr;
 }
@@ -273,7 +289,8 @@ static int parseArguments(int                       argc,
                 {
                     const std::string initStr{argv[++i]};
 
-                    if(initStr != "rand_int" && initStr != "trig_float" && initStr != "hpl" && initStr != "special" && initStr != "zero")
+                    if(initStr != "rand_int" && initStr != "trig_float" && initStr != "hpl"
+                       && initStr != "special" && initStr != "zero")
                     {
                         std::cerr << "Invalid initialization type: " << initStr << '\n';
                         return EXIT_FAILURE;
@@ -300,237 +317,35 @@ int64_t getLeadingDimSize(int64_t numRows, int64_t numCols)
     return RowMaj ? numCols : numRows;
 }
 
-template <bool RowMaj>
-uint32_t getOffset(uint32_t row, uint32_t col, uint32_t ld)
+void validation(hipDataType                      datatype,
+                void*                            c,
+                void*                            a,
+                void*                            b,
+                float                            alpha,
+                float                            beta,
+                const roc::hostnumerics::Layout& aLayout,
+                const roc::hostnumerics::Layout& bLayout,
+                const roc::hostnumerics::Layout& outputLayout)
 {
-    if constexpr(RowMaj)
+    const roc::hostnumerics::ScalarType type = hipblaslt::hostnumerics::scalarType(datatype);
+    const auto readDeviceTensor = [&](void* pointer, const roc::hostnumerics::Layout& layout) {
+        std::vector<std::byte> storage(roc::hostnumerics::storageBytesForLayout(type, layout));
+        const hipError_t       error = hipMemcpyDtoH(storage.data(), pointer, storage.size());
+        if(error != hipSuccess)
+            throw std::runtime_error(std::string("hipMemcpyDtoH failed: ")
+                                     + hipGetErrorString(error));
+        return roc::hostnumerics::Tensor::takeOwnershipOfEncodedBackingStorage(
+            type, layout, std::move(storage));
+    };
+    const roc::hostnumerics::Tensor observed = readDeviceTensor(c, outputLayout);
+    const roc::hostnumerics::Tensor inputA   = readDeviceTensor(a, aLayout);
+    const roc::hostnumerics::Tensor inputB   = readDeviceTensor(b, bLayout);
+    const auto                      comparison
+        = hipblaslt::hostnumerics::referenceMatrixTransform(observed, inputA, inputB, alpha, beta);
+    if(!comparison.passed())
     {
-        return ld * row + col;
-    }
-    else
-    {
-        return ld * col + row;
-    }
-}
-
-template <typename DType, typename ScaleType, bool RowMajA, bool RowMajB, bool RowMajC>
-void cpuTransform(DType*       c,
-                  const DType* a,
-                  const DType* b,
-                  ScaleType    alpha,
-                  ScaleType    beta,
-                  bool         transA,
-                  bool         transB,
-                  uint32_t     m,
-                  uint32_t     n,
-                  uint32_t     ldA,
-                  uint32_t     ldB,
-                  uint32_t     ldC,
-                  uint32_t     batchSize,
-                  uint32_t     batchStride)
-{
-    for(uint32_t k = 0; k < batchSize; ++k)
-    {
-        const int64_t batchOffset = k * int64_t(batchStride);
-
-        for(uint32_t i = 0; i < m; ++i)
-        {
-            for(uint32_t j = 0; j < n; ++j)
-            {
-                const auto offsetA
-                    = transA ? getOffset<RowMajA>(j, i, ldA) : getOffset<RowMajA>(i, j, ldA);
-                const auto offsetB
-                    = transB ? getOffset<RowMajB>(j, i, ldB) : getOffset<RowMajB>(i, j, ldB);
-                const auto offsetC = getOffset<RowMajC>(i, j, ldC);
-                c[batchOffset + offsetC]
-                    = a[batchOffset + offsetA] * alpha + b[batchOffset + offsetB] * beta;
-            }
-        }
-    }
-}
-
-template <typename DType>
-void validation(void*    c,
-                void*    a,
-                void*    b,
-                float    alpha,
-                float    beta,
-                uint32_t m,
-                uint32_t n,
-                uint32_t ldA,
-                uint32_t ldB,
-                uint32_t ldC,
-                uint32_t batchSize,
-                uint32_t batchStride,
-                bool     rowMajA,
-                bool     rowMajB,
-                bool     rowMajC,
-                bool     transA,
-                bool     transB)
-{
-    using std::begin;
-    using std::end;
-    std::vector<float> hC(m * n * batchSize, 0);
-    std::vector<float> hA(m * n * batchSize, 0);
-    std::vector<float> hB(m * n * batchSize, 0);
-    std::vector<float> cpuRef(m * n * batchSize, 0);
-    std::vector<DType> dA(m * n * batchSize);
-    std::vector<DType> dB(m * n * batchSize);
-    std::vector<DType> dC(m * n * batchSize);
-    auto        hipErr = hipMemcpyDtoH(dA.data(), a, m * n * batchSize * sizeof(DType));
-    hipErr = hipMemcpyDtoH(dB.data(), b, m * n * batchSize * sizeof(DType));
-    hipErr = hipMemcpyDtoH(dC.data(), c, m * n * batchSize * sizeof(DType));
-
-    std::transform(begin(dC), end(dC), begin(hC), [](auto i) { return float(i); });
-
-    std::transform(begin(dA), end(dA), begin(hA), [](auto i) { return float(i); });
-
-    std::transform(begin(dB), end(dB), begin(hB), [](auto i) { return float(i); });
-
-    if(rowMajA && rowMajB && rowMajC)
-    {
-        cpuTransform<float, float, true, true, true>(cpuRef.data(),
-                                                     hA.data(),
-                                                     hB.data(),
-                                                     alpha,
-                                                     beta,
-                                                     transA,
-                                                     transB,
-                                                     m,
-                                                     n,
-                                                     ldA,
-                                                     ldB,
-                                                     ldC,
-                                                     batchSize,
-                                                     batchStride);
-    }
-    else if(!rowMajA && rowMajB && rowMajC)
-    {
-        cpuTransform<float, float, false, true, true>(cpuRef.data(),
-                                                      hA.data(),
-                                                      hB.data(),
-                                                      alpha,
-                                                      beta,
-                                                      transA,
-                                                      transB,
-                                                      m,
-                                                      n,
-                                                      ldA,
-                                                      ldB,
-                                                      ldC,
-                                                      batchSize,
-                                                      batchStride);
-    }
-    else if(rowMajA && !rowMajB && rowMajC)
-    {
-        cpuTransform<float, float, true, false, true>(cpuRef.data(),
-                                                      hA.data(),
-                                                      hB.data(),
-                                                      alpha,
-                                                      beta,
-                                                      transA,
-                                                      transB,
-                                                      m,
-                                                      n,
-                                                      ldA,
-                                                      ldB,
-                                                      ldC,
-                                                      batchSize,
-                                                      batchStride);
-    }
-    else if(rowMajA && rowMajB && !rowMajC)
-    {
-        cpuTransform<float, float, true, true, false>(cpuRef.data(),
-                                                      hA.data(),
-                                                      hB.data(),
-                                                      alpha,
-                                                      beta,
-                                                      transA,
-                                                      transB,
-                                                      m,
-                                                      n,
-                                                      ldA,
-                                                      ldB,
-                                                      ldC,
-                                                      batchSize,
-                                                      batchStride);
-    }
-    else if(!rowMajA && !rowMajB && rowMajC)
-    {
-        cpuTransform<float, float, false, false, true>(cpuRef.data(),
-                                                       hA.data(),
-                                                       hB.data(),
-                                                       alpha,
-                                                       beta,
-                                                       transA,
-                                                       transB,
-                                                       m,
-                                                       n,
-                                                       ldA,
-                                                       ldB,
-                                                       ldC,
-                                                       batchSize,
-                                                       batchStride);
-    }
-    else if(!rowMajA && rowMajB && !rowMajC)
-    {
-        cpuTransform<float, float, false, true, false>(cpuRef.data(),
-                                                       hA.data(),
-                                                       hB.data(),
-                                                       alpha,
-                                                       beta,
-                                                       transA,
-                                                       transB,
-                                                       m,
-                                                       n,
-                                                       ldA,
-                                                       ldB,
-                                                       ldC,
-                                                       batchSize,
-                                                       batchStride);
-    }
-    else if(rowMajA && !rowMajB && !rowMajC)
-    {
-        cpuTransform<float, float, true, false, false>(cpuRef.data(),
-                                                       hA.data(),
-                                                       hB.data(),
-                                                       alpha,
-                                                       beta,
-                                                       transA,
-                                                       transB,
-                                                       m,
-                                                       n,
-                                                       ldA,
-                                                       ldB,
-                                                       ldC,
-                                                       batchSize,
-                                                       batchStride);
-    }
-    else if(!rowMajA && !rowMajB && !rowMajC)
-    {
-        cpuTransform<float, float, false, false, false>(cpuRef.data(),
-                                                        hA.data(),
-                                                        hB.data(),
-                                                        alpha,
-                                                        beta,
-                                                        transA,
-                                                        transB,
-                                                        m,
-                                                        n,
-                                                        ldA,
-                                                        ldB,
-                                                        ldC,
-                                                        batchSize,
-                                                        batchStride);
-    }
-
-    for(size_t i = 0; i < cpuRef.size(); ++i)
-    {
-        if(cpuRef[i] != hC[i])
-        {
-            std::cerr << "cpuRef != hC at index " << i << ", " << cpuRef[i] << " != " << hC[i]
-                      << '\n';
-        }
+        hipblaslt::hostnumerics::reportMatrixTransformMismatches(std::cerr, comparison);
+        std::cerr << '\n';
     }
 }
 
@@ -593,10 +408,18 @@ int main(int argc, char** argv)
     auto             tA     = transA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
     auto             tB     = transB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
 
-    auto  inputs = makeMatrixTransformIOPtr(datatype, m, n, batchSize, init);
-    void* dA     = inputs->getBuf(0);
-    void* dB     = inputs->getBuf(1);
-    void* dC     = inputs->getBuf(2);
+    const auto referenceLayoutA = hipblaslt::hostnumerics::matrixTransformLayout(
+        m, n, batchSize, ldA, batchStride, rowMajA, transA);
+    const auto referenceLayoutB = hipblaslt::hostnumerics::matrixTransformLayout(
+        m, n, batchSize, ldB, batchStride, rowMajB, transB);
+    const auto referenceOutputLayout = hipblaslt::hostnumerics::matrixTransformLayout(
+        m, n, batchSize, ldC, batchStride, rowMajC, false);
+
+    auto inputs = makeMatrixTransformIOPtr(
+        datatype, referenceLayoutA, referenceLayoutB, referenceOutputLayout, init);
+    void* dA = inputs->getBuf(0);
+    void* dB = inputs->getBuf(1);
+    void* dC = inputs->getBuf(2);
 
     hipblasLtMatrixTransformDesc_t desc;
     auto                   hipblasLtErr = hipblasLtMatrixTransformDescCreate(&desc, scaleDatatype);
@@ -714,106 +537,15 @@ int main(int argc, char** argv)
 
     if(runValidation)
     {
-        if(datatype == HIP_R_32F)
-        {
-            validation<float>(dC,
-                              dA,
-                              dB,
-                              alpha,
-                              beta,
-                              m,
-                              n,
-                              ldA,
-                              ldB,
-                              ldC,
-                              batchSize,
-                              batchStride,
-                              rowMajA,
-                              rowMajB,
-                              rowMajC,
-                              transA,
-                              transB);
-        }
-        else if(datatype == HIP_R_16F)
-        {
-            validation<hipblasLtHalf>(dC,
-                                      dA,
-                                      dB,
-                                      alpha,
-                                      beta,
-                                      m,
-                                      n,
-                                      ldA,
-                                      ldB,
-                                      ldC,
-                                      batchSize,
-                                      batchStride,
-                                      rowMajA,
-                                      rowMajB,
-                                      rowMajC,
-                                      transA,
-                                      transB);
-        }
-        else if(datatype == HIP_R_16BF)
-        {
-            validation<hipblasLtBfloat16>(dC,
-                                          dA,
-                                          dB,
-                                          alpha,
-                                          beta,
-                                          m,
-                                          n,
-                                          ldA,
-                                          ldB,
-                                          ldC,
-                                          batchSize,
-                                          batchStride,
-                                          rowMajA,
-                                          rowMajB,
-                                          rowMajC,
-                                          transA,
-                                          transB);
-        }
-        else if(datatype == HIP_R_8I)
-        {
-            validation<int8_t>(dC,
-                               dA,
-                               dB,
-                               alpha,
-                               beta,
-                               m,
-                               n,
-                               ldA,
-                               ldB,
-                               ldC,
-                               batchSize,
-                               batchStride,
-                               rowMajA,
-                               rowMajB,
-                               rowMajC,
-                               transA,
-                               transB);
-        }
-        else if(datatype == HIP_R_32I)
-        {
-            validation<int32_t>(dC,
-                                dA,
-                                dB,
-                                alpha,
-                                beta,
-                                m,
-                                n,
-                                ldA,
-                                ldB,
-                                ldC,
-                                batchSize,
-                                batchStride,
-                                rowMajA,
-                                rowMajB,
-                                rowMajC,
-                                transA,
-                                transB);
-        }
+        validation(datatype,
+                   dC,
+                   dA,
+                   dB,
+                   alpha,
+                   beta,
+                   referenceLayoutA,
+                   referenceLayoutB,
+                   referenceOutputLayout);
     }
 
 releaseResource:

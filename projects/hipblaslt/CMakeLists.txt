@@ -29,6 +29,7 @@ include(GenerateExportHeader)
 include(CMakeDependentOption)
 
 include(fetch_rocm_cmake)
+include(hipblaslt_materialize_monorepo_paths)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
@@ -90,7 +91,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # amd-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
@@ -106,10 +106,6 @@ if(HIPBLASLT_ENABLE_HOST)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
-
-# mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
-cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Use mxDataGenerator for MX format data generation (clients/tests)." ON "NOT WIN32" OFF)
-message(STATUS "Enable mxDataGenerator for MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
@@ -170,22 +166,6 @@ if(HIPBLASLT_ENABLE_AMD_SMI)
     find_package(amd_smi REQUIRED)
 else()
     find_package(amd_smi)
-endif()
-
-if(HIPBLASLT_ENABLE_CLIENT)
-    # NOTE: CMake should automatically detect the Fortran compiler via standard CMake search paths.
-    # Unfortunately, TheRock for Windows will not compile without an explicit set here.
-    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-        set(CMAKE_Fortran_COMPILER  "gfortran")
-    endif()
-    enable_language(Fortran)
-
-    if(HIPBLASLT_ENABLE_BLIS)
-        find_package(BLIS REQUIRED)
-    endif()
-
-    # There is an implicit find_package(BLAS) when finding lapack
-    find_package(LAPACK REQUIRED)
 endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)
@@ -305,24 +285,123 @@ else()
     endblock()
 endif()
 
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    if(ROCM_LIBS_SUPERBUILD)
-        if(NOT TARGET roc::mxDataGeneratorPreSwizzle)
-            message(FATAL_ERROR "The ROCm libraries superbuild must provide the roc::mxDataGeneratorPreSwizzle target before configuring hipBLASLt.")
+set(_hipblaslt_hostnumerics_enabled FALSE)
+if(HIPBLASLT_ENABLE_CLIENT
+        OR TENSILELITE_ENABLE_CLIENT
+        OR TENSILELITE_ENABLE_HOST
+        OR TENSILELITE_BUILD_TESTING)
+    set(_hipblaslt_hostnumerics_enabled TRUE)
+endif()
+
+if(_hipblaslt_hostnumerics_enabled
+        AND NOT TARGET roc::hostnumerics)
+    set(_hipblaslt_hostnumerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/hostnumerics"
+    )
+    if(NOT EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
+        set(_hipblaslt_hostnumerics_components Operations)
+        if(HIPBLASLT_ENABLE_CLIENT)
+            list(APPEND _hipblaslt_hostnumerics_components BLAS)
         endif()
-    elseif(HIPBLASLT_ENABLE_THEROCK)
-        find_package(mxDataGenerator CONFIG REQUIRED)
-    elseif(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator/CMakeLists.txt")
-        block()
-            set(CMAKE_SKIP_INSTALL_RULES ON)
-            add_subdirectory(
-                "${ROCM_LIBRARIES_ROOT}/shared/mxdatagenerator"
-                "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
-                EXCLUDE_FROM_ALL)
-        endblock()
-    else()
-        find_package(mxDataGenerator CONFIG REQUIRED)
+        list(APPEND _hipblaslt_hostnumerics_components AMDGPULayout)
+        find_package(
+            HostNumerics
+            CONFIG
+            QUIET
+            COMPONENTS ${_hipblaslt_hostnumerics_components}
+        )
     endif()
+    if(NOT TARGET roc::hostnumerics
+            AND NOT EXISTS
+                "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
+        hipblaslt_materialize_monorepo_paths(
+            _hipblaslt_materialized_root
+            shared/hostnumerics
+        )
+        if(_hipblaslt_materialized_root)
+            set(_hipblaslt_hostnumerics_source
+                "${_hipblaslt_materialized_root}/shared/hostnumerics"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::hostnumerics
+            AND EXISTS "${_hipblaslt_hostnumerics_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOSTNUMERICS_BUILD_TESTING OFF)
+            set(HOSTNUMERICS_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
+            add_subdirectory(
+                "${_hipblaslt_hostnumerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    endif()
+    if(NOT TARGET roc::hostnumerics)
+        message(FATAL_ERROR
+            "hipBLASLt requires the standalone HostNumerics component. "
+            "Include shared/hostnumerics in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the HostNumerics package and add it to CMAKE_PREFIX_PATH."
+        )
+    endif()
+endif()
+if(_hipblaslt_hostnumerics_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND TARGET roc::hostnumerics
+        AND NOT TARGET roc::hostnumerics-blas
+        AND COMMAND hostnumerics_enable_blas_backend)
+    hostnumerics_enable_blas_backend()
+endif()
+if(_hipblaslt_hostnumerics_enabled
+        AND NOT TARGET roc::hostnumerics-amd-gpu-layout)
+    message(FATAL_ERROR
+        "hipBLASLt MX clients require the "
+        "roc::hostnumerics-amd-gpu-layout target."
+    )
+endif()
+if(_hipblaslt_hostnumerics_enabled
+        AND HIPBLASLT_ENABLE_CLIENT
+        AND NOT TARGET roc::hostnumerics-blas)
+    message(FATAL_ERROR
+        "hipBLASLt clients require the roc::hostnumerics-blas target."
+    )
+endif()
+
+if(_hipblaslt_hostnumerics_enabled)
+    foreach(_hostnumerics_target
+            hostnumerics
+            hostnumerics-blas
+            hostnumerics-amd-gpu-layout)
+        if(NOT TARGET ${_hostnumerics_target})
+            continue()
+        endif()
+
+        if(HIPBLASLT_ENABLE_ASAN OR HIPBLASLT_ENABLE_TSAN)
+            hipblaslt_target_configure_sanitizers(${_hostnumerics_target} PRIVATE)
+        elseif(TENSILELITE_ENABLE_HOST_ASAN)
+            target_compile_options(${_hostnumerics_target}
+                PRIVATE
+                    -fsanitize=address
+                    -fno-omit-frame-pointer
+            )
+        elseif(TENSILELITE_ENABLE_HOST_TSAN)
+            target_compile_options(${_hostnumerics_target}
+                PRIVATE
+                    -fsanitize=thread
+            )
+        endif()
+
+        if(HIPBLASLT_ENABLE_COVERAGE OR TENSILELITE_ENABLE_COVERAGE)
+            target_compile_options(${_hostnumerics_target}
+                PRIVATE
+                    -g
+                    -O0
+                    -fprofile-instr-generate
+                    -fcoverage-mapping
+            )
+        endif()
+    endforeach()
+    unset(_hostnumerics_target)
 endif()
 
 add_library(hipblaslt-headers INTERFACE)
@@ -381,22 +460,6 @@ elseif(WIN32)
         "llvm/bin directory) to embed version info.")
 endif()
 
-# `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
-# only built when at least one consumer needs it. tensilelite/client and
-# tensilelite/tests reach for it on the same condition, so we drive the
-# subdir from here to keep the dependency wiring close to the gate that
-# decides whether to build it at all.
-set(_hipblaslt_mxdatagen_enabled FALSE)
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR
-        AND (HIPBLASLT_ENABLE_CLIENT
-             OR TENSILELITE_ENABLE_CLIENT
-             OR TENSILELITE_BUILD_TESTING))
-    set(_hipblaslt_mxdatagen_enabled TRUE)
-endif()
-if(_hipblaslt_mxdatagen_enabled)
-    add_subdirectory(clients/common)
-endif()
-
 if(HIPBLASLT_ENABLE_HOST)
     if(LEGACY_HIPBLAS_DIRECT)
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
@@ -412,6 +475,9 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 endif()
 
+# hipBLASLt and TensileLite expose independent shared-library options. Keep
+# their target creation insulated from an enclosing superproject's
+# BUILD_SHARED_LIBS value; static exports have additional package dependencies.
 block(SCOPE_FOR VARIABLES)
     unset(CPACK_DEBIAN_PACKAGE_DEPENDS)
     unset(CPACK_RPM_PACKAGE_REQUIRES)
@@ -535,6 +601,9 @@ if(HIPBLASLT_ENABLE_DEVICE)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
+    if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
+        enable_testing()
+    endif()
     add_subdirectory(clients)
 endif()
 
@@ -895,49 +964,56 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
+    set(_hipblaslt_sample_targets
+        sample_hipblaslt_gemm
+        sample_hipblaslt_gemm_ext
+        sample_hipblaslt_gemm_batched
+        sample_hipblaslt_gemm_batched_ext
+        sample_hipblaslt_gemm_tuning_splitk_ext
+        sample_hipblaslt_gemm_bias
+        sample_hipblaslt_gemm_bias_ext
+        sample_hipblaslt_gemm_get_all_algos
+        sample_hipblaslt_gemm_get_all_algos_ext
+        sample_hipblaslt_gemm_get_algo_by_index_ext
+        sample_hipblaslt_gemm_alphavec_ext
+        sample_hipblaslt_gemm_gelu_aux_bias
+        sample_hipblaslt_gemm_gelu_aux_bias_ext
+        sample_hipblaslt_gemm_amax
+        sample_hipblaslt_gemm_amax_ext
+        sample_hipblaslt_gemm_amax_with_scale
+        sample_hipblaslt_gemm_amax_with_scale_ext
+        sample_hipblaslt_gemm_bgradb
+        sample_hipblaslt_gemm_ext_bgradb
+        sample_hipblaslt_gemm_dgelu_bgrad
+        sample_hipblaslt_gemm_dgelu_bgrad_ext
+        sample_hipblaslt_gemm_drelu_bgrad
+        sample_hipblaslt_gemm_drelu_bgrad_ext
+        sample_hipblaslt_gemm_is_tuned_ext
+        sample_hipblaslt_gemm_tuning_wgm_ext
+        sample_hipblaslt_gemm_with_scale_a_b
+        sample_hipblaslt_gemm_with_scale_a_b_ext
+        sample_hipblaslt_groupedgemm_ext
+        sample_hipblaslt_groupedgemm_fixed_mk_ext
+        sample_hipblaslt_groupedgemm_get_all_algos_ext
+        sample_hipblaslt_gemm_mix_precision
+        sample_hipblaslt_gemm_mix_precision_ext
+        sample_hipblaslt_gemm_mix_precision_with_amax_ext
+        sample_hipblaslt_gemm_attr_tciA_tciB
+        sample_hipblaslt_ext_op_layernorm
+        sample_hipblaslt_ext_op_amax
+        sample_hipblaslt_gemm_with_TF32
+        sample_hipblaslt_gemm_swizzle_a
+        sample_hipblaslt_gemm_bias_swizzle_a_ext
+        sample_hipblaslt_weight_swizzle_padding
+        sample_hipblaslt_gemm_swish_bias
+    )
+    # Samples install one directory deeper than targets covered by the global RPATH.
+    set_target_properties(${_hipblaslt_sample_targets}
+        PROPERTIES
+            INSTALL_RPATH "$ORIGIN/../../lib:$ORIGIN/../../llvm/lib"
+    )
     install(
-        TARGETS
-            sample_hipblaslt_gemm
-            sample_hipblaslt_gemm_ext
-            sample_hipblaslt_gemm_batched
-            sample_hipblaslt_gemm_batched_ext
-            sample_hipblaslt_gemm_tuning_splitk_ext
-            sample_hipblaslt_gemm_bias
-            sample_hipblaslt_gemm_bias_ext
-            sample_hipblaslt_gemm_get_all_algos
-            sample_hipblaslt_gemm_get_all_algos_ext
-            sample_hipblaslt_gemm_get_algo_by_index_ext
-            sample_hipblaslt_gemm_alphavec_ext
-            sample_hipblaslt_gemm_gelu_aux_bias
-            sample_hipblaslt_gemm_gelu_aux_bias_ext
-            sample_hipblaslt_gemm_amax
-            sample_hipblaslt_gemm_amax_ext
-            sample_hipblaslt_gemm_amax_with_scale
-            sample_hipblaslt_gemm_amax_with_scale_ext
-            sample_hipblaslt_gemm_bgradb
-            sample_hipblaslt_gemm_ext_bgradb
-            sample_hipblaslt_gemm_dgelu_bgrad
-            sample_hipblaslt_gemm_dgelu_bgrad_ext
-            sample_hipblaslt_gemm_drelu_bgrad
-            sample_hipblaslt_gemm_drelu_bgrad_ext
-            sample_hipblaslt_gemm_is_tuned_ext
-            sample_hipblaslt_gemm_tuning_wgm_ext
-            sample_hipblaslt_gemm_with_scale_a_b
-            sample_hipblaslt_gemm_with_scale_a_b_ext
-            sample_hipblaslt_groupedgemm_ext
-            sample_hipblaslt_groupedgemm_fixed_mk_ext
-            sample_hipblaslt_groupedgemm_get_all_algos_ext
-            sample_hipblaslt_gemm_mix_precision
-            sample_hipblaslt_gemm_mix_precision_ext
-            sample_hipblaslt_gemm_mix_precision_with_amax_ext
-            sample_hipblaslt_gemm_attr_tciA_tciB
-            sample_hipblaslt_ext_op_layernorm
-            sample_hipblaslt_ext_op_amax
-            sample_hipblaslt_gemm_with_TF32
-            sample_hipblaslt_gemm_swizzle_a
-            sample_hipblaslt_gemm_bias_swizzle_a_ext
-            sample_hipblaslt_weight_swizzle_padding
-            sample_hipblaslt_gemm_swish_bias
+        TARGETS ${_hipblaslt_sample_targets}
         RUNTIME
         COMPONENT samples
         DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"

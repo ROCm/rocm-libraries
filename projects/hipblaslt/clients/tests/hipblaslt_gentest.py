@@ -329,6 +329,11 @@ def gen_shape_combinations(M: List, N: List, K: List) -> Tuple[List, List, List]
 def write_test(test):
     """Write the test case out to the binary file if not seen already"""
 
+    unknown = set(test) - {name for name, _ in param['Arguments']._fields_}
+    if unknown:
+        sys.exit("Unknown test argument(s) in " + str(test.get('name', '')) +
+                 ": " + ", ".join(sorted(unknown)))
+
     # For each argument declared in arguments, we generate a positional
     # argument in the Arguments constructor. For strings, we pass the
     # value of the string directly. For arrays, we unpack their contents
