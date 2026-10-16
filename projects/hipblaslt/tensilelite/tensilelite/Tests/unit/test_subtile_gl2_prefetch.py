@@ -4,7 +4,7 @@
 """Unit tests for GL2 prefetch in the subtile LogicalScheduler.
 
 Tests the placement of GL2PrefetchOp / GL2PrefetchIncOp in the
-mainloop and preloop schedules for PrefetchGL2 = 0, 1, 2.
+mainloop and preloop schedules for PrefetchGL2 = 0..16.
 No GPU required -- tests the Python scheduler layer only.
 """
 
@@ -106,9 +106,19 @@ class TestGL2PrefetchScheduler:
         assert _count_ops(preloop, 'gl2_prefetch') == 2
         assert _count_ops(preloop, 'gl2_prefetch_inc') == 1
 
+    @pytest.mark.parametrize("pgl", range(1, 17))
+    def test_preloop_prefetch_count(self, pgl):
+        """PGL=N: preloop has N GL2 prefetches and N-1 incs."""
+        sched = LogicalScheduler(_make_config(pgl=pgl))
+        sched.build()
+        preloop = sched.build_preloop()
+
+        assert _count_ops(preloop, 'gl2_prefetch') == pgl
+        assert _count_ops(preloop, 'gl2_prefetch_inc') == pgl - 1
+
     def test_ngll_strips_prefetch(self):
         """NGLL should have no GL2 prefetch ops for any PGL value."""
-        for pgl in (1, 2):
+        for pgl in (1, 2, 16):
             sched = LogicalScheduler(_make_config(pgl=pgl))
             sched.build()
             ngll = sched.build_ngll()
@@ -118,7 +128,7 @@ class TestGL2PrefetchScheduler:
 
     def test_nll_strips_prefetch(self):
         """NLL should have no GL2 prefetch ops for any PGL value."""
-        for pgl in (1, 2):
+        for pgl in (1, 2, 16):
             sched = LogicalScheduler(_make_config(pgl=pgl))
             sched.build()
             nll = sched.build_nll()
