@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <map>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/core/Types.hpp"
@@ -51,10 +53,16 @@ class DsSpreadPacer {
     struct Load {
         unsigned nodeId;
         int consumerWindow;  // WMMA index of the first consumer, INT_MAX if none in the region
+        // The section the load lives in, between the workgroup barrier / tensor_load cuts it
+        // depends on and feeds: WMMA window the section opens, and the window it must be drained
+        // by (INT_MAX = the region end).
+        int startWindow = 0;
+        int endWindow = INT_MAX;
     };
 
     void reset() {
         deadline_.clear();
+        slot_.clear();
         pace_ = {};
         nextGroupAt_ = kNever;
         runLength_ = 0;
@@ -65,7 +73,7 @@ class DsSpreadPacer {
 
     // loads: the region's ds_loads in program order. startClock is the region clock at the plan.
     void plan(const std::vector<Load>& loads, const PassFeatureConfig::DsPace& pace,
-              int windowCycles, int leadCycles, int startClock = 0) {
+              int windowCycles, int leadCycles, int startClock = 0, int regionWindows = INT_MAX) {
         reset();
         if (loads.empty() || windowCycles <= 0) return;
         active_ = true;
@@ -76,6 +84,7 @@ class DsSpreadPacer {
             if (l.consumerWindow != INT_MAX)
                 deadline_[l.nodeId] = startClock + l.consumerWindow * windowCycles - leadCycles;
         }
+        planSections(loads, windowCycles, startClock, regionWindows);
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -94,13 +103,21 @@ class DsSpreadPacer {
         return pace_;
     }
 
+    // The clock a planned ds_load's group is due at; -1 when it has no section slot.
+    int slotOf(unsigned nodeId) const {
+        auto it = slot_.find(nodeId);
+        return it == slot_.end() ? -1 : it->second;
+    }
+
     // Whether the ds_load may issue at region clock `clock`.
     bool released(unsigned nodeId, int clock) const {
         if (!active_) return true;
         auto dl = deadline_.find(nodeId);
         if (dl != deadline_.end() && clock >= dl->second) return true;
         if (continuesGroup()) return true;
-        return clock >= nextGroupAt_ && (runLength_ == 0 || separatorsSinceDs_ >= pace_.separators);
+        auto slot = slot_.find(nodeId);
+        const double due = slot != slot_.end() ? static_cast<double>(slot->second) : nextGroupAt_;
+        return clock >= due && (runLength_ == 0 || separatorsSinceDs_ >= pace_.separators);
     }
 
     // A ds_load issued at region clock `clock`.
@@ -149,6 +166,32 @@ class DsSpreadPacer {
         return runLength_ > 0 && separatorsSinceDs_ == 0 && runLength_ < pace_.count;
     }
 
+    // Spreads each section's loads over the section: groups of `count`, one group every
+    // min(pace cycles, the section span / its groups), the first at the section's opening.
+    // A section too dense for the pace rate therefore finishes by its end cut instead of
+    // being held to the region-wide rate until the cut has to wait for it.
+    void planSections(const std::vector<Load>& loads, int windowCycles, int startClock,
+                      int regionWindows) {
+        std::map<std::pair<int, int>, std::vector<unsigned>> sections;
+        for (const Load& l : loads) {
+            const int end = std::min(l.endWindow, regionWindows);
+            sections[{l.startWindow, end}].push_back(l.nodeId);
+        }
+        for (const auto& [key, ids] : sections) {
+            const int n = static_cast<int>(ids.size());
+            const long long first = static_cast<long long>(startClock) + key.first * windowCycles;
+            const int groups = (n + pace_.count - 1) / pace_.count;
+            double period = pace_.cycles;
+            if (key.second != INT_MAX && key.second > key.first) {
+                const double span = static_cast<double>(key.second - key.first) * windowCycles;
+                period = pace_.cycles > 0 ? std::min<double>(pace_.cycles, span / groups) : 0.0;
+            }
+            for (int k = 0; k < n; ++k)
+                slot_[ids[k]] = static_cast<int>(first + (k / pace_.count) * period);
+        }
+    }
+
+    std::unordered_map<unsigned, int> slot_;
     std::unordered_map<unsigned, int> deadline_;
     std::vector<int> issueClocks_;
     PassFeatureConfig::DsPace pace_;

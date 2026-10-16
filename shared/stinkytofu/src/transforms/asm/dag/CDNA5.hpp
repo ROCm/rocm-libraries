@@ -530,6 +530,18 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int dsReadCyclesPerLoad() const {
         return std::max(0, getPassContext().getPassFeatureConfig().dagFeatures.dsReadCyclesPerLoad);
     }
+    // dsReadCyclesPerLoad() capped at the even spread of the region's `dsTotal` loads over its
+    // WMMAs: a ds-dense region overflows at an even pace instead of being held back until
+    // deadlines force a burst. The pace and the barrier windows must use the same rate.
+    int effectiveDsCyclesPerLoad(int dsTotal) const {
+        int cpl = dsReadCyclesPerLoad();
+        if (cpl > 0 && dsTotal > 0 && wmmaTotalThisRegion_ > 0) {
+            const long long even = static_cast<long long>(wmmaTotalThisRegion_) *
+                                   std::max(1, wmmaIssueConfig.latency) / dsTotal;
+            cpl = static_cast<int>(std::max<long long>(1, std::min<long long>(cpl, even)));
+        }
+        return cpl;
+    }
     // Cycles the TDM needs to land a tensor_load's data; 0 = off (the barrier windows follow the
     // even-spread density).
     int tensorLoadLandCycles() const {
@@ -1893,7 +1905,7 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     // The LDS returns ds_loads at a limited rate (DsReadCyclesPerLoad, what the old throttle
     // latency / queue depth expressed). That rate, not an even spread over the whole region, is
     // the density the ds_loads are issued at, so it sets the windows they take.
-    const int cyclesPerLoad = dsReadCyclesPerLoad();
+    const int cyclesPerLoad = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
     if (cyclesPerLoad > 0 && dsSpreadOn()) {
         const int window = std::max(1, wmmaIssueConfig.latency);
         return (dsLoadCount * cyclesPerLoad + window - 1) / window;
@@ -3479,9 +3491,48 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             return best;
         };
+        // The section of a ds_load: opened by the barrier whose data it reads (the latest cut it
+        // depends on), closed by the barrier it feeds (the earliest cut it must be drained
+        // before). Tensor_loads and workgroup barriers are the cuts; WMMA dependencies are not.
+        std::vector<std::vector<unsigned>> preds(deps.dag.nodes.size());
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
+            for (unsigned succ : deps.dag.graph[n]) preds[succ].push_back(n);
+        auto cutWindow = [&](unsigned n) {
+            auto th =
+                barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
+            return th == barrierWmmaThresholds_.end() ? -1 : th->second;
+        };
+        auto sectionOf = [&](unsigned id) {
+            int start = 0;
+            int end = INT_MAX;
+            for (const auto* edges : {&deps.dag.graph, &preds}) {
+                const bool forward = edges == &deps.dag.graph;
+                std::vector<unsigned> frontier{id};
+                for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
+                    std::vector<unsigned> next;
+                    for (unsigned n : frontier) {
+                        for (unsigned m : (*edges)[n]) {
+                            const int w = cutWindow(m);
+                            if (w >= 0) {
+                                if (forward)
+                                    end = std::min(end, std::max(0, w - barrierReserve));
+                                else
+                                    start = std::max(start, w);
+                            } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst)) {
+                                next.push_back(m);
+                            }
+                        }
+                    }
+                    frontier = std::move(next);
+                }
+            }
+            return std::make_pair(start, end);
+        };
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
-            if (isDSRead(*deps.dag.nodes[id].inst)) loads.push_back({id, consumerWindow(id)});
+            if (!isDSRead(*deps.dag.nodes[id].inst)) continue;
+            const auto [secStart, secEnd] = sectionOf(id);
+            loads.push_back({id, consumerWindow(id), secStart, secEnd});
         }
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         constexpr int kDsLeadWindows = 2;
@@ -3504,20 +3555,26 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // Issue at the LDS return rate: Y ds_loads per Y * cycles-per-load cycles.
         if (dsReadCyclesPerLoad() > 0 && dagFeatures.dsPaceCount <= 0 &&
             dagFeatures.dsPaceCycles < 0) {
-            pace.count =
-                std::max(1, (windowCycles + dsReadCyclesPerLoad() - 1) / dsReadCyclesPerLoad());
-            pace.cycles = pace.count * dsReadCyclesPerLoad();
+            const int cpl = effectiveDsCyclesPerLoad(static_cast<int>(loads.size()));
+            pace.count = std::max(1, (windowCycles + cpl - 1) / cpl);
+            pace.cycles = pace.count * cpl;
         }
         if (tensorLoadLandCycles() > 0) {
             pace.count = std::max(pace.count, dsDensityY_);
             pace.cycles = std::max(pace.cycles,
                                    dsDensityXWindows_ > 1 ? dsDensityXWindows_ * windowCycles : 0);
         }
-        dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_);
+        dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_,
+                       wmmaTotalThisRegion_);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
+        std::map<std::pair<int, int>, int> secCount;
+        for (const auto& l : loads) ++secCount[{l.startWindow, l.endWindow}];
+        for (const auto& kv : secCount)
+            PASS_DEBUG(std::cerr << "[CDNA5 dsSection] start=" << kv.first.first
+                                 << " end=" << kv.first.second << " loads=" << kv.second << "\n");
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
                              << wmmaTotalThisRegion_ << " separators=" << region.separatorTotal
                              << " paceCycles=" << dsSpread_.pace().cycles
