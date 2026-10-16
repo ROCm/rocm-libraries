@@ -27,6 +27,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -106,6 +107,10 @@ class GirSlotClasses {
         return it->second;
     }
 
+    bool contains(const GirFrame& frame, int storage) const {
+        return ids.find({frame, storage}) != ids.end();
+    }
+
    private:
     int find(int n) {
         while (parent[n] != n) n = parent[n] = parent[parent[n]];
@@ -117,6 +122,22 @@ class GirSlotClasses {
     std::map<int, int> tokenOf;
 };
 
+static const char* instMnemonic(const StinkyInstruction* inst) {
+    if (!inst || !inst->getHwInstDesc() || !inst->getHwInstDesc()->mnemonic) return "?";
+    return inst->getHwInstDesc()->mnemonic;
+}
+
+// Same generation GirFrameAnalysis feeds to concreteStorage.
+static int occurrenceGeneration(const GirAccessSpec& access, const GirFrame& frame) {
+    int generation = access.absoluteGeneration;
+    if (generation < 0) generation = frame.phaseOf(access.genId) + access.gdelta;
+    if (access.ring > 0) {
+        generation %= access.ring;
+        if (generation < 0) generation += access.ring;
+    }
+    return generation;
+}
+
 GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
     GirSlotTokens tokens;
     const auto& frames = AM.getResult<GirFrameAnalysis>(func);
@@ -124,15 +145,50 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
 
     GirSlotClasses classes;
     std::map<std::pair<const StinkyInstruction*, size_t>, int> accessNode;
+    struct SlotEvent {
+        bool newSlot = false;
+        bool joined = false;
+        int node = 0;
+        int firstNode = 0;
+    };
+    std::vector<SlotEvent> events;
+    events.reserve(frames.occurrences.size());
     for (const GirAccessOccurrence& occurrence : frames.occurrences) {
+        const bool newSlot = !classes.contains(occurrence.frame, occurrence.storage);
         const int n = classes.node(occurrence.frame, occurrence.storage);
         auto [it, fresh] = accessNode.try_emplace({occurrence.inst, occurrence.accessIndex}, n);
-        if (!fresh) classes.join(it->second, n);
+        SlotEvent event{newSlot, false, n, n};
+        if (!fresh) {
+            event.joined = true;
+            event.firstNode = it->second;
+            classes.join(it->second, n);
+        }
+        events.push_back(event);
     }
+    PASS_DEBUG(std::cerr << "[GirToken] occurrences=" << frames.occurrences.size() << "\n");
     // Numbered in occurrence order, which is deterministic; the map is only a lookup.
-    for (const GirAccessOccurrence& occurrence : frames.occurrences)
-        tokens[occurrence.inst].insert(
-            classes.token(accessNode.at({occurrence.inst, occurrence.accessIndex})));
+    for (size_t i = 0; i < frames.occurrences.size(); ++i) {
+        const GirAccessOccurrence& occurrence = frames.occurrences[i];
+        const int tokenId = classes.token(accessNode.at({occurrence.inst, occurrence.accessIndex}));
+        tokens[occurrence.inst].insert(tokenId);
+        const SlotEvent& event = events[i];
+        const GirAccessSpec* access = occurrence.accessIndex < frames.contract.accesses.size()
+                                          ? &frames.contract.accesses[occurrence.accessIndex]
+                                          : nullptr;
+        PASS_DEBUG(std::cerr << "[GirToken] " << instMnemonic(occurrence.inst)
+                             << " bb=" << (occurrence.block ? occurrence.block->getLabel() : "?")
+                             << " inst#" << occurrence.instructionIndex;
+                   if (access) {
+                       std::cerr << " action=" << access->actionId
+                                 << (access->isWrite ? " write" : " read")
+                                 << " operand=" << access->operand
+                                 << " gen=" << occurrenceGeneration(*access, occurrence.frame);
+                   } std::cerr
+                   << " storage=" << occurrence.storage << " node=" << event.node
+                   << (event.newSlot ? " slot=new" : " slot=shared");
+                   if (event.joined) std::cerr << " join=node" << event.firstNode;
+                   else std::cerr << " join=no"; std::cerr << " token=" << tokenId << "\n";);
+    }
 
     const auto& hazards = AM.getResult<GirFrameHazardAnalysis>(func);
     for (const GirFrameHazard& hazard : hazards.hazards) {
@@ -144,6 +200,9 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
             }
             const int producer = classes.token(classes.node(hazard.producerFrame, hazard.storage));
             const int consumer = classes.token(classes.node(hazard.consumerFrame, hazard.storage));
+            PASS_DEBUG(std::cerr << "[GirToken] fence anchor=" << instMnemonic(owner.anchor)
+                                 << " storage=" << hazard.storage << " producerToken=" << producer
+                                 << " consumerToken=" << consumer << "\n");
             for (const StinkyInstruction* piece : pieces) {
                 tokens[piece].insert(producer);
                 tokens[piece].insert(consumer);
@@ -151,6 +210,69 @@ GirSlotTokens collectGirSlotTokens(Function& func, AnalysisManager& AM) {
         }
     }
     return tokens;
+}
+
+// "sync LDS0" or "sync LDS0, sync LDS1" starting at \p i. \p end is one past the run.
+static bool matchSyncLdsRun(const std::string& text, size_t i, size_t& end) {
+    auto one = [&](size_t at, size_t& out) {
+        constexpr const char* kPrefix = "sync LDS";
+        constexpr size_t kPrefixLen = 8;
+        if (at + kPrefixLen > text.size() || text.compare(at, kPrefixLen, kPrefix) != 0)
+            return false;
+        size_t j = at + kPrefixLen;
+        if (j >= text.size() || text[j] < '0' || text[j] > '9') return false;
+        while (j < text.size() && text[j] >= '0' && text[j] <= '9') ++j;
+        out = j;
+        return true;
+    };
+    if (!one(i, end)) return false;
+    for (;;) {
+        size_t j = end;
+        while (j < text.size() && text[j] == ' ') ++j;
+        if (j >= text.size() || text[j] != ',') break;
+        ++j;
+        while (j < text.size() && text[j] == ' ') ++j;
+        size_t next = 0;
+        if (!one(j, next)) break;
+        end = next;
+    }
+    return true;
+}
+
+// Keep the rest of the comment. A "sync LDS<n>" run is replaced by the GIR tokens;
+// a comment with no such run gets the GIR text appended.
+static void setGirSyncComment(StinkyInstruction& inst, const std::set<int>& tokenIds) {
+    std::string gir;
+    for (int tokenId : tokenIds) {
+        if (!gir.empty()) gir += ", ";
+        gir += "GIR to sync LDS";
+        gir += std::to_string(tokenId);
+    }
+
+    auto* existing = inst.getModifier<CommentData>();
+    if (!existing) {
+        inst.addModifier<CommentData>(CommentData{gir});
+        return;
+    }
+
+    std::string rewritten;
+    bool replaced = false;
+    for (size_t i = 0; i < existing->comment.size();) {
+        size_t end = 0;
+        if (matchSyncLdsRun(existing->comment, i, end)) {
+            rewritten += gir;
+            i = end;
+            replaced = true;
+        } else {
+            rewritten.push_back(existing->comment[i]);
+            ++i;
+        }
+    }
+    if (!replaced) {
+        if (!rewritten.empty() && rewritten.back() != ' ') rewritten.push_back(' ');
+        rewritten += gir;
+    }
+    existing->comment = std::move(rewritten);
 }
 
 // The kinds the token branches below accept.
@@ -221,9 +343,11 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
 
         if (!enableMemoryTokenDependencies) continue;
         if (!inst->getModifier<MemTokenData>() && takesLdsToken(*inst)) {
-            if (auto slots = girTokens.find(inst); slots != girTokens.end())
+            if (auto slots = girTokens.find(inst); slots != girTokens.end()) {
                 inst->addModifier<MemTokenData>(
                     MemTokenData{std::vector<int>(slots->second.begin(), slots->second.end())});
+                setGirSyncComment(*inst, slots->second);
+            }
         }
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;
