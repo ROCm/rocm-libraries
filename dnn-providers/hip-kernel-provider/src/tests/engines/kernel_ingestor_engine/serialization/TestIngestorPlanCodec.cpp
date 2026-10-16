@@ -150,6 +150,18 @@ struct RawLaunchValue
     bool withData = true;
 };
 
+// The code bytes of every raw build.
+std::vector<uint8_t> rawCodeObject()
+{
+    return patternBytes(16, 0x55);
+}
+
+std::string rawCodeObjectSha256()
+{
+    const std::vector<uint8_t> code = rawCodeObject();
+    return utilities::sha256Hex(code.data(), code.size());
+}
+
 // The body fields a raw build can set to values that encodeIngestorPlan never writes.
 struct RawPlan
 {
@@ -158,7 +170,7 @@ struct RawPlan
     std::vector<int64_t> runtimePassByValueUids;
     std::vector<RawLaunchValue> values = {RawLaunchValue{"count"}};
     fb::SourceKind sourceKind = fb::SourceKind::EMBEDDED_SOURCE;
-    std::string sha256 = std::string(64, 'a');
+    std::string sha256 = rawCodeObjectSha256();
 };
 
 // Builds a sealed payload with the generated builder, without the writer's checks.
@@ -168,7 +180,7 @@ std::vector<uint8_t> buildRawPayload(const RawPlan& raw)
 
     const auto signature
         = builder.CreateVector(std::vector<flatbuffers::Offset<fb::KernelArgument>>{});
-    const std::vector<uint8_t> code = patternBytes(16, 0x55);
+    const std::vector<uint8_t> code = rawCodeObject();
     builder.ForceVectorAlignment(code.size(), sizeof(uint8_t), ALIGNMENT);
     const auto codeObject = builder.CreateVector(code);
     const auto symbol = builder.CreateString("raw_kernel");
@@ -432,8 +444,8 @@ bool decodeRefusesOrReadsAConsistentPayload(const std::vector<uint8_t>& payload)
 }
 
 // Every body byte in turn, flipped and sealed again, so the damage passes the digest and
-// reaches the verifier and the structure checks. A flip inside field data still decodes, and
-// a flip in an offset, a length or a vtable entry is refused.
+// reaches the verifier and the structure checks. A flip in most field data still decodes.
+// A flip in an offset, a length, a vtable entry, the kernel digest or the code bytes is refused.
 TEST(TestIngestorPlanCodec, RefusesOrReadsEveryResealedBodyByteFlip)
 {
     // Covers every body byte. A larger stride samples the body instead.
@@ -562,6 +574,23 @@ TEST(TestIngestorPlanCodec, RejectsAMalformedKernelDigest)
     upperCaseDigest.sha256 = std::string(64, 'A');
     expectDecodeRefusal(
         buildRawPayload(upperCaseDigest), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "kernel digest");
+}
+
+TEST(TestIngestorPlanCodec, RefusesAKernelDigestThatDoesNotMatchTheCodeObject)
+{
+    IngestorPlanPayload payload = makePayload(KernelSourceKind::KPACK);
+    const std::string otherDigest(64, 'a');
+    ASSERT_NE(payload.sha256, otherDigest);
+    payload.sha256 = otherDigest;
+
+    const std::string refusal = expectIngestorPlanRefusal(
+        [&]() { decode(encodeIngestorPlan(payload)); },
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+        "does not match the code object");
+    EXPECT_NE(refusal.find(otherDigest), std::string::npos) << refusal;
+    const std::string actual
+        = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
+    EXPECT_NE(refusal.find(actual), std::string::npos) << refusal;
 }
 
 TEST(TestIngestorPlanCodec, RejectsAnUnsetOrUnknownSourceKind)

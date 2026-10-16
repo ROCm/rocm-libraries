@@ -250,6 +250,10 @@ The body contains this data:
 The launch values are the inputs from which the dispatch handler calculates a launch. The payload
 does not hold calculated grid sizes or kernel argument values.
 
+A loaded plan runs the code it was saved with. Upgrading the provider does not change the kernel
+inside a saved plan, even when the upgrade fixes that kernel. To use the new kernel, build the plan
+again from its graph and save it.
+
 ### Versioning
 
 The current format version is 1.0. A reader reads a payload when these conditions are true:
@@ -304,8 +308,8 @@ The load hook then does these checks in this order. The first check that fails s
 7. The SHA-256 of the body is equal to the header value (`INVALID_VALUE`).
 8. The FlatBuffers verifier accepts the body, and the body has the `HKSP` identifier
    (`INVALID_VALUE`).
-9. The workspace size, the source kind, the kernel SHA-256 text and the launch values are valid
-   (`INVALID_VALUE`).
+9. The workspace size and the source kind are valid. The kernel SHA-256 text is valid and matches
+   the code object. The launch values are valid. Each of these refusals is `INVALID_VALUE`.
 10. The plan has no runtime pass-by-value tensors (`NOT_APPLICABLE`).
 11. The device of the handle can run the stored GPU target (`NOT_APPLICABLE`). A kpack target
     matches by prefix, as kpack archive entries do. Other source kinds need the exact target.

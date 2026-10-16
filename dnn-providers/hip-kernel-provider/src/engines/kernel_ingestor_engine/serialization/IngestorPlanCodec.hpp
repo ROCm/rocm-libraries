@@ -37,7 +37,8 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload);
 /// 2. The body size (`INVALID_VALUE`).
 /// 3. The body digest in the header (`INVALID_VALUE`).
 /// 4. The FlatBuffers verifier and the file identifier (`INVALID_VALUE`).
-/// 5. The structure rules that the verifier does not check (`INVALID_VALUE`).
+/// 5. The structure rules that the verifier does not check (`INVALID_VALUE`). One rule is
+///    that the kernel SHA-256 text is valid and matches the code object.
 /// 6. The runtime pass-by-value tensor list is empty (`NOT_APPLICABLE`).
 ///
 /// The caller runs the checks that need the provider: GPU, handler, signature and module

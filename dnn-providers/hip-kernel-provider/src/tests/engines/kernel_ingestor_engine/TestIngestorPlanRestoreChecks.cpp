@@ -31,6 +31,7 @@
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
+#include "utilities/Digest.hpp"
 
 /**
  * @file TestIngestorPlanRestoreChecks.cpp
@@ -108,9 +109,9 @@ IngestorPlanPayload validConvFwdPayload()
     payload.sourceKind = KernelSourceKind::KPACK;
     payload.symbol = "ConvFwd";
     payload.target = "gfx90a";
-    payload.sha256 = std::string(64, 'a');
     payload.recordedSignature = convFwdSignature();
     payload.codeObject = std::vector<uint8_t>(256, 0xAB);
+    payload.sha256 = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
     payload.providerVersion = "test";
     return payload;
 }

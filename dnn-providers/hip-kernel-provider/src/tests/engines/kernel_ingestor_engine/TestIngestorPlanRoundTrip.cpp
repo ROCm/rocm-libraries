@@ -25,6 +25,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvFwdPackedCase.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
+#include "utilities/Digest.hpp"
 
 /**
  * @file TestIngestorPlanRoundTrip.cpp
@@ -121,6 +122,7 @@ TEST(TestIngestorPlanRoundTrip, RefusesBytesTheDriverRejectsAtRestore)
     }
 
     payload.codeObject = std::vector<uint8_t>(256, 0xAB);
+    payload.sha256 = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
     const auto encoded = serialization::encodeIngestorPlan(payload);
     const Handle handle;
 

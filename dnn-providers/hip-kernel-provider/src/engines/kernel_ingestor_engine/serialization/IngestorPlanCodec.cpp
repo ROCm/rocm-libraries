@@ -355,6 +355,16 @@ CheckedFields checkIngestorPlanStructure(const fb::ExecutionPlan& plan)
                                + "' is not 64 lowercase hex characters");
     }
 
+    const auto& codeObject = *kernelImage.code_object();
+    const std::string actualSha256 = utilities::sha256Hex(codeObject.data(), codeObject.size());
+    if(actualSha256 != sha256)
+    {
+        refuseIngestorPlan(IngestorPlanRefusal::DAMAGED,
+                           "the kernel digest " + sha256
+                               + " does not match the code object, which hashes to "
+                               + actualSha256);
+    }
+
     fields.launchValues = readLaunchValues(*plan.dispatch_data());
     return fields;
 }
