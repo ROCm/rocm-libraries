@@ -53,12 +53,7 @@ def address_of(tensor: TensorDesc, position: tuple[int, ...]) -> int:
             f"address_of got {len(position)} coordinates but the tensor has rank {rank} -- "
             "give one int per tensor axis, in axis order"
         )
-    for axis, stride in enumerate(tensor.strides):
-        if stride < 0:
-            raise ValueError(
-                f"structured address needs non-negative strides; tensor axis {axis} has stride "
-                f"{stride}"
-            )
+    _require_nonnegative_strides(tensor)
     return sum(p * s for p, s in zip(position, tensor.strides))
 
 
@@ -73,3 +68,13 @@ def transform_address_of(
     _require_input_coordinates(graph, "transform_address_of", coords)
     _require_outputs_match_rank(graph, len(tensor.strides))
     return address_of(tensor, graph.evaluate(coords))
+
+
+def _require_nonnegative_strides(tensor: TensorDesc) -> None:
+    """Refuse a negative stride: the structured address splits into parts that are each >= 0."""
+    for axis, stride in enumerate(tensor.strides):
+        if stride < 0:
+            raise ValueError(
+                f"structured address needs non-negative strides; tensor axis {axis} has stride "
+                f"{stride}"
+            )

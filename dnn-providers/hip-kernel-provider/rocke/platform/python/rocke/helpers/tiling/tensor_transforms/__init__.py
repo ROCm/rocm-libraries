@@ -20,6 +20,9 @@ The door, one line per concept (``graph.py`` unless noted):
     ``RuntimeValue`` (``ranges.py``)   a runtime integer with its stated range and multiple-of
         fact, received from the tiling layer and passed on as a length; read-only (``.value`` is
         the IR value, ``str()`` its facts).
+    ``ElementAddress`` / ``UniformTerm`` (``emit.py``)   an emitted element address split into
+        wave-uniform terms (one per set of graph inputs), one per-lane part and a constant; read,
+        never built.
 
 The toolbox, for tests and custom memory code (``ranges.py``; pure Python, no IR; ranges are
 half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order):
@@ -30,11 +33,17 @@ half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order):
     ``address_of`` / ``transform_address_of`` (``address.py``)   a tensor's strides applied to
         a position (or to a graph's outputs for its inputs): the element address every emitted
         address is tested against.
+
+The emitting toolbox (``emit.py``; builder first, IR side effects; coordinates are plain i32 IR
+values or ints, one per graph input in ``inputs(...)`` order):
+    ``emit_coords``   every named coordinate of a graph as one emitted value.
+    ``emit_addresses``   one ``ElementAddress`` per access, all accesses over one shared table.
 """
 
 from __future__ import annotations
 
 from .address import address_of, transform_address_of
+from .emit import ElementAddress, UniformTerm, emit_addresses, emit_coords
 from .graph import (
     BroadcastParams,
     Edge,
@@ -76,6 +85,7 @@ __all__ = [
     "BroadcastParams",
     "CheckReason",
     "Edge",
+    "ElementAddress",
     "EmbedParams",
     "FreezeParams",
     "InputsDecl",
@@ -87,11 +97,14 @@ __all__ = [
     "SliceParams",
     "TransformGraph",
     "TransformType",
+    "UniformTerm",
     "UnmergeParams",
     "XorParams",
     "address_of",
     "broadcast",
     "embed",
+    "emit_addresses",
+    "emit_coords",
     "freeze",
     "graph_injective",
     "inputs",
