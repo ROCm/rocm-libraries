@@ -823,6 +823,11 @@ void testing_csrsm2(Arguments argus)
             hipMemcpy(&h_solve_pivot_2, d_solve_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host csrsm2
+        int             device_id;
+        hipDeviceProp_t device_prop{};
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
         host_csrsm2(m,
                     nrhs,
                     nnz,
@@ -839,7 +844,8 @@ void testing_csrsm2(Arguments argus)
                     uplo,
                     idx_base,
                     &h_analysis_pivot_gold,
-                    &h_solve_pivot_gold);
+                    &h_solve_pivot_gold,
+                    device_prop.warpSize);
 
         // Check pivots
         unit_check_general(1, 1, 1, &h_analysis_pivot_gold, &h_analysis_pivot_1);
