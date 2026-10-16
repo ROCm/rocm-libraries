@@ -3,6 +3,15 @@
 
 include(HostNumericsTestDependencies)
 include(GoogleTest)
+# Internal C++ result contracts cannot be exercised through the Python bindings.
+add_executable(hostnumerics-result-tests result_test.cpp)
+target_link_libraries(hostnumerics-result-tests PRIVATE roc::hostnumerics-core GTest::gtest_main)
+gtest_discover_tests(
+    hostnumerics-result-tests
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "hostnumerics-result."
+)
+
 set(HOSTNUMERICS_TEST_GTEST_SOURCE_DIR "${googletest_SOURCE_DIR}" PARENT_SCOPE)
 
 add_executable(
@@ -128,7 +137,7 @@ set_tests_properties(
 
 add_executable(
     hostnumerics-core-tests
-    result_test.cpp
+    result_integration_test.cpp
     layout_test.cpp
     core_test.cpp
     tensor_basics_test.cpp

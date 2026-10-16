@@ -88,3 +88,12 @@ gtest_discover_tests(
     DISCOVERY_MODE PRE_TEST
     TEST_PREFIX "hostnumerics-version-package-consumer."
 )
+
+# Internal C++ result contracts cannot be exercised through the Python bindings.
+add_executable(hostnumerics-result-tests "${HOSTNUMERICS_SOURCE_DIR}/tests/result_test.cpp")
+target_link_libraries(hostnumerics-result-tests PRIVATE roc::hostnumerics-core GTest::gtest_main)
+gtest_discover_tests(
+    hostnumerics-result-tests
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "hostnumerics-result."
+)
