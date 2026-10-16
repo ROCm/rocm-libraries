@@ -19,6 +19,7 @@
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
+#include "rocke/arch_target.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
 
@@ -194,6 +195,8 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACK
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
+    = {.gfx = "gfx12-generic", LL_BACKEND_RDNA_DEFAULTS};
 
 /* gfx1250 (Python Gfx1250Backend, which derives from Gfx12RdnaBackend). It is a
  * CDNA part programmed on the GFX12 model: wave32, WMMA-only, with the K=32
@@ -257,6 +260,10 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
     else if(strcmp(arch, "gfx11-generic") == 0)
     {
         base = &LL_BACKEND_GFX11_GENERIC;
+    }
+    else if(strcmp(arch, "gfx12-generic") == 0)
+    {
+        base = &LL_BACKEND_GFX12_GENERIC;
     }
     else if(strcmp(arch, "gfx1250") == 0)
     {
@@ -1793,9 +1800,7 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
     }
     const char* strategy = v->u.s;
-    if(strcmp(strategy, "max-ilp") != 0 && strcmp(strategy, "max-memory-clause") != 0
-       && strcmp(strategy, "iterative-ilp") != 0 && strcmp(strategy, "iterative-minreg") != 0
-       && strcmp(strategy, "iterative-maxocc") != 0)
+    if(!rocke_scheduler_strategy_is_valid(strategy))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,
@@ -1876,6 +1881,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             any_need = true;
         }
     }
+    /* dict.update appends override-only keys after the base keys. */
+    for(int i = 0; i < novr; ++i)
+    {
+        bool in_base = false;
+        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
+            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
+        if(!in_base && ll_need_has(L, ovr[i].key))
+        {
+            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            any_need = true;
+        }
+    }
     /* Dynamic decls not in either static table. */
     for(size_t i = 0; i < L->dyn_decls.len; i++)
     {
@@ -1942,9 +1959,13 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 
     /* attributes #0. */
     int max_wg = L->kernel ? rocke_kernel_max_workgroup_size(L->kernel) : 256;
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(L->backend->gfx);
+    if(target == NULL)
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "arch metadata not present for %s", L->backend->gfx);
+    int min_wg = target->wave_size < max_wg ? target->wave_size : max_wg;
     rocke_strbuf_append(out, "attributes #0 = { ");
     rocke_strbuf_append(out, "\"uniform-work-group-size\"=\"true\" ");
-    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"64,%d\"", max_wg);
+    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"%d,%d\"", min_wg, max_wg);
 
     if(L->kernel)
     {
