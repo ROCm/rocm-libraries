@@ -493,7 +493,7 @@ These apply to both `RaggedTensor<T>` and
      emits `{b, within-batch…}` indices and delegates the
      per-element offset back to `getIndex`.
 
-     A data hook is used rather than the earlier draft's literal
+     A data hook is used rather than a literal
      `virtual IndexType makeIndex(bool) const` because `IndexType`
      is scoped *inside* `ITensorIterator<IsConst>` and differs for
      the const/non-const iterators, so the non-templated `ITensor`
@@ -927,13 +927,13 @@ scope for this RFC.
 
 ### 4.10 Plan-layer construction and CPU reference impact
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The frontend → flatbuffer → backend → data-SDK plumbing
-> above (including `ragged_offset_multiplier`) is landed. Plan-layer consumption was built in the
-> GPU reference executor instead: `GpuSdpaRaggedFwdPlan` in
-> `dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/` and
-> `GpuFpReferenceSdpaRagged` in `dnn-providers/integration-tests/gpu-ref/`. `makeShallowITensor`
-> does not exist. The CPU-reference sketches below are not implemented.
+Not yet built. The CPU reference plan layer described in this
+section and in §4.10.1 (including `makeShallowITensor`) does not
+exist. Plan-layer consumption of ragged tensors lives in the GPU
+reference executor: `GpuSdpaRaggedFwdPlan` in
+`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`
+and `GpuFpReferenceSdpaRagged` in
+`dnn-providers/integration-tests/gpu-ref/`.
 
 The plan's `params` struct caches each ragged tensor's UID, that of
 its `ragged_offset` aux UID, and the primary's
@@ -1117,10 +1117,10 @@ the case.
 
 ### 4.11 Test-harness integration
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** `PreSuppliedInputs` was not built. Ragged SDPA tests use
-> integration-test bundles that carry `ragged_offset` data, for example
-> `dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged/` (#12738).
+Not yet built. `PreSuppliedInputs` does not exist. Ragged SDPA
+tests use integration-test bundles that carry `ragged_offset`
+data, for example
+`dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd/bf16/hd128_causal_ragged/`.
 
 #### 4.11.1 Pre-supplied input bundle
 
@@ -1485,10 +1485,10 @@ simpler SDK and harness.
 
 ### 6.3 Templating the ragged-tensor types on `IndexT`
 
-An earlier draft of this RFC parameterized both ragged-tensor
+An alternative design parameterizes both ragged-tensor
 types on the aux element type — `RaggedTensor<T, IndexT>` and
 `ShallowRaggedTensor<T, IndexT>` (defaulting to `int32_t`,
-permitting `int64_t`). The aux was then held as
+permitting `int64_t`). The aux is then held as
 `std::shared_ptr<TensorBase<IndexT>>`, with reads going through
 ordinary typed access.
 

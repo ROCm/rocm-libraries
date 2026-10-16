@@ -21,45 +21,39 @@
 
 ## 1. Executive Summary
 
-This RFC proposes per-engine behavior-note queries for hipDNN. A behavior note is advisory metadata reported by an engine, such as runtime compilation or an external library dependency. The first implementation will let users request behavior notes for a particular engine ID after an operation graph has been finalized.
+This RFC defines per-engine behavior-note queries for hipDNN. A behavior note is advisory metadata reported by an engine, such as runtime compilation or an external library dependency. Users request behavior notes for a particular engine ID after an operation graph is finalized.
 
-The proposed first API is:
+The native frontend API is:
 
 ```cpp
 Error Graph::get_behavior_notes_for_engine(int64_t engineId,
                                            std::vector<BehaviorNote>& notes) const;
 ```
 
-This RFC intentionally does not add graph-level filtering, plan-index note queries, numerical notes, or compiled execution-plan serialization changes. Behavior notes are engine/plugin metadata, not execution-plan payload.
+This RFC does not add graph-level filtering, plan-index note queries, numerical notes, or compiled execution-plan serialization changes to the native frontend `Graph`. Behavior notes are engine/plugin metadata, not execution-plan payload.
 
 ## 2. Problem Statement
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** This section describes the state before #7171. The
-> limitations listed here are now resolved.
-
-hipDNN currently reserves backend attribute/type IDs for behavior and numerical notes, but it does not expose behavior-note data from engines.
-
-Existing public backend constants:
+hipDNN reserves backend attribute and type IDs for behavior and numerical notes:
 
 - `HIPDNN_TYPE_BEHAVIOR_NOTE`
 - `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`
 - `HIPDNN_TYPE_NUMERICAL_NOTE`
 - `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`
 
-Current limitations:
+Without behavior-note support, these IDs carry no data:
 
-1. `EngineDescriptor` rejects `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`.
-2. There is no public shared `hipdnnBackendBehaviorNote_t` enum.
-3. `EngineDetails` contains only `engine_id` and `knobs`.
-4. The frontend has no `BehaviorNote` enum or per-engine note query.
-5. Python bindings do not expose behavior-note metadata.
+1. `EngineDescriptor` must return engine data for `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`.
+2. Backend and plugins need a shared `hipdnnBackendBehaviorNote_t` enum.
+3. `EngineDetails` must carry notes in addition to `engine_id` and `knobs`.
+4. The frontend needs a `BehaviorNote` enum and a per-engine note query.
+5. Python bindings must expose behavior-note metadata.
 
 Users need a way to inspect advisory behavior for a chosen engine before creating an execution plan, especially when selecting engines manually through `get_ranked_engine_ids()` and `create_execution_plan_ext()`.
 
 ## 3. Current System Overview
 
-The current engine path is:
+The engine path is:
 
 1. `EngineHeuristicDescriptor` asks `EnginePluginResourceManager::getApplicableEngineIds()` for candidate engine IDs.
 2. `EngineHeuristicDescriptor::getEngineConfigs()` creates `EngineConfigDescriptor` objects.
@@ -68,24 +62,13 @@ The current engine path is:
 
 `EngineDetails` is the correct metadata boundary for behavior notes because plugins already use it to report per-engine details such as knobs.
 
-cuDNN frontend supports broader note behavior, including candidate filtering through `select_behavior_notes()` and `deselect_behavior_notes()`. hipDNN will not implement that broader filtering in this RFC. The first hipDNN behavior is a direct per-engine query.
+cuDNN frontend supports broader note behavior, including candidate filtering through `select_behavior_notes()` and `deselect_behavior_notes()`. The native hipDNN `Graph` does not implement that filtering. Its behavior is a direct per-engine query. The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides the cuDNN-style calls on top of this query (see § 10).
 
 ## 4. Proposed Design
 
 ### 4.1 Public Types
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The backend and plugin SDK enums match the values below.
-> The frontend `BehaviorNote` in `frontend/include/hipdnn_frontend/Types.hpp` differs (#10226). It is
-> `enum class BehaviorNote : int32_t` with cuDNN-compatible values: `NOT_SET = 0`,
-> `RUNTIME_COMPILATION = 1`, `REQUIRES_FILTER_INT8x32_REORDER = 2`,
-> `REQUIRES_BIAS_INT8x32_REORDER = 3`, `SUPPORTS_CUDA_GRAPH_NATIVE_API = 4`,
-> `CUBLASLT_DEPENDENCY = 5`, then the hipDNN-only `REQUIRES_LAYOUT_TRANSFORM = 6`,
-> `SUPPORTS_GRAPH_CAPTURE = 7`, `EXTERNAL_LIBRARY_DEPENDENCY = 8`, and
-> `SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 9`. hipDNN engines do not emit the cuDNN-only values.
-> `fromHipdnnBehaviorNote()` maps backend values to frontend values.
-
-Add one backend public enum, duplicated in the plugin SDK for plugin use, for example:
+The backend has one public enum. The plugin SDK has a copy of it for plugin use:
 
 ```cpp
 typedef enum
@@ -106,20 +89,25 @@ The values must remain synchronized between:
 - `backend/include/HipdnnBackendBehaviorNote.h`
 - `plugin_sdk/include/hipdnn_plugin_sdk/BehaviorNote.h`
 
-Add one frontend wrapper enum:
+The frontend has one wrapper enum in `frontend/include/hipdnn_frontend/Types.hpp`. Its values match cuDNN `BehaviorNote_t` values, and the hipDNN-only notes follow them:
 
 ```cpp
-enum class BehaviorNote
+enum class BehaviorNote : int32_t
 {
-    RUNTIME_COMPILATION,
-    REQUIRES_LAYOUT_TRANSFORM,
-    SUPPORTS_GRAPH_CAPTURE,
-    EXTERNAL_LIBRARY_DEPENDENCY,
-    SUPPORTS_EXECUTION_PLAN_SERIALIZATION
+    NOT_SET = 0,
+    RUNTIME_COMPILATION = 1,
+    REQUIRES_FILTER_INT8x32_REORDER = 2,
+    REQUIRES_BIAS_INT8x32_REORDER = 3,
+    SUPPORTS_CUDA_GRAPH_NATIVE_API = 4,
+    CUBLASLT_DEPENDENCY = 5,
+    REQUIRES_LAYOUT_TRANSFORM = 6,
+    SUPPORTS_GRAPH_CAPTURE = 7,
+    EXTERNAL_LIBRARY_DEPENDENCY = 8,
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 9
 };
 ```
 
-The final names should follow hipDNN naming conventions. The enum set should stay small and only include notes with stable semantics.
+hipDNN engines do not emit the cuDNN-only values `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, and `CUBLASLT_DEPENDENCY`. `fromHipdnnBehaviorNote()` maps backend values to frontend values. The enum set stays small and only includes notes with stable semantics.
 
 ### 4.2 EngineDetails Metadata
 
@@ -344,22 +332,9 @@ Python tests:
 
 ## 10. Future Considerations
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The cuDNN compatibility shim
-> (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`, #10226) now provides
-> `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and
-> `get_behavior_notes_for_plan_at_index()`. The native `hipdnn_frontend::graph::Graph` does not.
-> The frontend also defines a `NumericalNote` enum for cuDNN API parity, but hipDNN does not report
-> numerical notes yet.
+The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and `get_behavior_notes_for_plan_at_index()`. `get_behavior_notes()` and `get_behavior_notes_for_plan_at_index()` call `get_behavior_notes_for_engine()`. The native `hipdnn_frontend::graph::Graph` does not provide these four functions.
 
-Future work may include:
-
-- `select_behavior_notes()` and `deselect_behavior_notes()` candidate filtering.
-- `get_behavior_notes()` for a selected plan.
-- `get_behavior_notes_for_plan_at_index()` if the frontend stores multiple candidate plans.
-- Numerical-note support using the same per-engine metadata pattern.
-
-These are not part of this RFC.
+The frontend defines a `NumericalNote` enum for cuDNN API parity. hipDNN does not report numerical notes: `EngineDescriptor` returns `HIPDNN_STATUS_NOT_SUPPORTED` for `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`. Numerical-note support can use the same per-engine metadata pattern.
 
 ## 11. Glossary
 

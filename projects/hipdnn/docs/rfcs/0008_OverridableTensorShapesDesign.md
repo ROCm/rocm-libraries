@@ -68,10 +68,8 @@ existing `hipdnnPluginGetApiVersion()` symbol. Graphs that do not opt
 into overrides impose no override-feature version requirement and
 continue to be served by existing plugins unchanged. Graphs using the
 Phase 1 override flag require plugins reporting
-`>= 1.1.0`; graphs using the Phase 2 per-tensor dynamic feature
-were planned to require `>= 1.2.0` (placeholders; `1.2.0` is now used
-by runtime pass-by-value, see [§4.5](#45-applicability-filtering)
-for the full rollout table). See
+`>= 1.1.0`. Phase 2 per-tensor dynamic features have no version
+assigned yet. See
 [§4.4](#44-plugin-sdk-extension) for the symbol-fallback behavior and
 [§4.5](#45-applicability-filtering) /
 [§6.7](#67-versioning-and-plugin-version-filtering) for the full
@@ -141,18 +139,16 @@ The hipDNN graph pipeline has four steps:
 
 ### 4.1 Graph flag
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The flag is `is_override_shape_enabled` in
-> `flatbuffers_sdk/schemas/graph.fbs`. PR #7279 also copies it into the execution plan
-> (`is_override_shape_enabled` in `execution_plan.fbs`). PR #8881 added the backend attribute
-> `HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT` (ID 310). This lets
-> plan-only (deserialized) graphs check the flag. The frontend setter and getter
-> are compiled only when `HIPDNN_ENABLE_SDPA` is defined.
-
 A graph-level boolean flag declares that the graph may receive
-execute-time overrides. The flatbuffer schema gains one defaulted bool, and
-the flag is wired through the existing C-API get/set attributes path
-for lowering and lifting.
+execute-time overrides. The flag is the defaulted bool
+`is_override_shape_enabled` in `flatbuffers_sdk/schemas/graph.fbs`.
+The backend copies it into the execution plan
+(`is_override_shape_enabled` in `execution_plan.fbs`), so plan-only
+(deserialized) graphs can check it through
+`HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT` (ID 310).
+The flag is wired through the existing C-API get/set attributes path
+for lowering and lifting. The frontend setter and getter are compiled
+only when `HIPDNN_ENABLE_SDPA` is defined.
 
 ```cpp
 class Graph {
@@ -172,15 +168,13 @@ by this RFC.
 
 ### 4.2 Frontend execute API
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** Both overloads and `OverrideEntry` are in
-> `frontend/include/hipdnn_frontend/Graph.hpp`. They return `Error` and are compiled
-> only when `HIPDNN_ENABLE_SDPA` is defined.
-
 `Graph::execute` gains an overload that takes override shapes and
 strides. Variant packs are runtime; the additions plumb a
 `tensorId → override shapes` and `tensorId → override strides` mapping
-through the existing variant-pack channel.
+through the existing variant-pack channel. Both overloads and
+`OverrideEntry` are in `frontend/include/hipdnn_frontend/Graph.hpp`.
+They return `Error` and are compiled only when `HIPDNN_ENABLE_SDPA` is
+defined.
 
 Two overload shapes are provided. The parallel-array form aligns with
 existing graph-runtime conventions:
@@ -347,69 +341,53 @@ symbol resolved.
 
 ### 4.5 Applicability filtering
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The mapping is
-> `hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion()` in
-> `plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`. Override graphs
-> require `K_OVERRIDE_EXECUTE_MIN_API_VERSION` (`1.1.0`). Later features took the
-> next minor versions: `1.2.0` runtime pass-by-value (RFC 0016), `1.3.0` ragged
-> tensors and non-default tensor alignment, `1.4.0` ragged offset multiplier. Phase 2
-> has no version assigned. The applicability filter in
-> `backend/src/plugin/EnginePluginResourceManager.cpp` also skips plugins that do not
-> export the override symbol when the graph flag is set, so `hasOverrideExecute()` is
-> checked at applicability time and again at dispatch. In-tree providers report
-> `1.2.0` but do not export the override symbol, so no in-tree engine serves an
-> override graph.
-
 The backend maps each graph to the minimum plugin API version it
-requires (see [§6.7](#67-versioning-and-plugin-version-filtering))
-and filters plugins against that mapping. The minimum is computed from
-the features the graph uses: a graph that does not opt into overrides
-imposes no override-feature requirement; a graph with the Phase 1
-override flag set requires `>= 1.1.0`; a graph that uses Phase 2
-per-tensor dynamic features requires `>= 1.2.0`.
+requires and filters plugins against that mapping. The mapping is
+`hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion()` in
+`plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`. The
+minimum is computed from the features the graph uses: a graph that does
+not opt into overrides imposes no override-feature requirement; a graph
+with the Phase 1 override flag set requires
+`K_OVERRIDE_EXECUTE_MIN_API_VERSION` (`1.1.0`). Other features use the
+next minor versions: `1.2.0` runtime pass-by-value (RFC 0016), `1.3.0`
+ragged tensors and non-default tensor alignment, `1.4.0` ragged offset
+multiplier. Phase 2 has no version assigned.
 
 The backend reads each plugin's `MAJOR.MINOR.PATCH` via the existing
 `hipdnnPluginGetApiVersion(const char**)` symbol and compares it
 using `hipdnn_data_sdk::utilities::Version`:
 
 ```cpp
-auto requiredVersion = computeMinimumPluginApiVersion(graph);
+auto requiredVersion = computeMinimumEnginePluginApiVersion(graph features);
 for (plugin in plugins) {
     if (Version{plugin.apiVersion()} < requiredVersion) continue;
+    if (overrideFlag && !plugin.hasOverrideExecute()) continue;
     if (plugin.isApplicable(graph)) result.push_back(plugin.engineId());
 }
 ```
 
 Plugins that do not export `hipdnnPluginGetApiVersion` fall back to
-`"1.0.0"` (the post-baseline default in `PluginCore.cpp`), so they
-remain eligible for non-override graphs but are treated as not
-implementing any of the override-feature contracts.
-
-**Versioning rollout.** Plugins are about to undergo a planned
-baseline bump to `1.0.0` (separate from this RFC); any plugin that
-does not declare an API version is treated as `1.0.0` thereafter.
-The plugin SDK API version reported by an override-capable provider
-then tracks the override feature in two further bumps:
+`K_ENGINE_PLUGIN_API_VERSION_BASELINE` (`1.0.0`, see
+`PluginBase::apiVersion()` in `PluginCore.cpp`), so they remain
+eligible for non-override graphs but are treated as not implementing
+any of the override-feature contracts. A plugin exports the symbol only
+when it includes `hipdnn_plugin_sdk/EnginePluginImpl.inl` and defines
+`HIPDNN_PLUGIN_API_VERSION`. The MIOpen and hip-kernel providers do
+this and report `1.2.0`. The hipBLASLt provider does not export the
+symbol, so it reads as `1.0.0`. No in-tree provider exports the
+override execute symbol, so no in-tree engine serves an override graph.
 
 | State | `apiVersion()` | Graphs eligible to be served |
 |-------|----------------|------------------------------|
 | Plugin not exporting symbol | `1.0.0` (fallback) | Non-override graphs only |
 | Pre-baseline exported symbol | `0.0.1` | Not eligible |
-| Baseline / current default | `1.0.0` | Non-override graphs only (existing plugins, no override capability) |
-| After Phase 1 ships  | `1.1.0` | Graphs with the override flag set |
-| After Phase 2 ships  | `1.2.0` | Graphs using `is_dynamic` / wildcard / stride-as-order |
+| Baseline | `1.0.0` | Non-override graphs only |
+| Phase 1 override capable | `>= 1.1.0` and exports the override symbol | Graphs with the override flag set |
 
-Each ship of an override-capable provider must bump
-`HIPDNN_PLUGIN_API_VERSION` to the value corresponding to the feature
-set it implements. The `1.1.0 → 1.2.0` step is a backwards-compatible
-minor addition; pre-existing 1.1.0 plugins continue to serve Phase 1
-graphs unchanged.
-
-The version numbers above (`1.0.0` / `1.1.0` / `1.2.0`) are the
-staged plugin API floors used by this rollout. Future releases may
-continue the same minor-version progression for additional optional
-plugin entry points.
+An override-capable provider must set `HIPDNN_PLUGIN_API_VERSION` to
+the value that matches the feature set it implements. Each step is a
+backwards-compatible minor addition; a `1.1.0` plugin continues to
+serve Phase 1 graphs.
 
 Graphs that do not opt in see no plugin-eligibility change; existing
 plugins continue to serve them. Graphs that opt in see only plugins
@@ -418,42 +396,33 @@ that meet the version requirement are still asked about applicability
 for all graphs that meet that requirement; the override execute entry
 itself is invoked only when the variant pack carries override attributes.
 
-Two filters compose: (a) the per-graph plugin-version filter runs at
-applicability time and is the primary gate; (b) `Graph::execute()`
-performs a light check that the override execute symbol is present on
-the chosen plugin before dispatch as a safety net. Caching
-applicability results across compiles is a likely future enhancement
-but is out of scope for this RFC.
+Two filters compose: (a) at applicability time the backend
+(`EnginePluginResourceManager.cpp`) applies the per-graph
+plugin-version filter and, when the graph flag is set, skips plugins
+that do not export the override symbol; (b) at dispatch the backend
+checks `hasOverrideExecute()` and the version floor again as a safety
+net. Caching applicability results across compiles is a likely future
+enhancement but is out of scope for this RFC.
 
 ### 4.6 Host dispatch logic
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The backend dispatch in
-> `EnginePluginResourceManager.cpp` first checks that the execution plan was built
-> with the override flag (else `HIPDNN_STATUS_NOT_SUPPORTED`, PR #8881). It also
-> checks that `OVERRIDE_UNIQUE_IDS` and `OVERRIDE_LENGTHS` have the same size and
-> that each length is positive and fits in `uint32_t`.
-
-The host dispatch path inspects the variant pack for the new
-`HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*_EXT` attributes and dispatches
-accordingly:
+The host dispatch path in `EnginePluginResourceManager.cpp` inspects
+the variant pack for the new `HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_*_EXT`
+attributes and dispatches accordingly:
 
 ```cpp
 extract { uids, ptrs } -> deviceBuffers[]
 extract optional { override_uids, override_shapes, override_strides, override_lengths }
 
 if (override attributes present) {
-    // The plugin API-version and hasOverrideExecute() checks are the
-    // dispatch-time safety net. The per-graph version filter at applicability
-    // time (§4.5) is the primary gate; these guards catch direct/serialized
-    // execution paths and plugins that report the right version but are
-    // missing the symbol.
-    if (plugin.apiVersion() < Version{"1.1.0"}) {
-        return HIPDNN_STATUS_NOT_SUPPORTED;
-    }
-    if (!plugin.hasOverrideExecute()) {
-        return HIPDNN_STATUS_NOT_SUPPORTED;
-    }
+    // Dispatch-time safety net. The per-graph filter at applicability
+    // time (§4.5) is the primary gate; these guards catch direct and
+    // serialized execution paths.
+    if (!plan.isOverrideShapeEnabled()) return HIPDNN_STATUS_NOT_SUPPORTED;
+    if (override_uids.size() != override_lengths.size()) return HIPDNN_STATUS_BAD_PARAM;
+    if (!plugin.hasOverrideExecute()) return HIPDNN_STATUS_NOT_SUPPORTED;
+    if (plugin.apiVersion() < Version{"1.1.0"}) return HIPDNN_STATUS_NOT_SUPPORTED;
+    // Each length must be positive and fit in uint32_t.
     plugin.executeOpGraphWithOverrides(...);
 } else {
     plugin.executeOpGraph(...);  // existing entry
@@ -600,13 +569,9 @@ no way to know it.
 
 ### 5.6 SDPA feature-flag mechanism
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The gate is the `HIPDNN_ENABLE_SDPA` CMake
-> option (default `OFF`) in `projects/hipdnn/CMakeLists.txt`. PR #6493 added it, PR #6622
-> reverted it, and PR #6647 relanded it.
-
-**Decision**: defer the gate to the SDPA team; this RFC introduces no
-new env var, CMake option, or runtime knob.
+**Decision**: reuse the SDPA gate; this RFC introduces no new env var,
+CMake option, or runtime knob. The gate is the `HIPDNN_ENABLE_SDPA`
+CMake option (default `OFF`) in `projects/hipdnn/CMakeLists.txt`.
 
 **Rationale**: SDPA is the immediate consumer and owns end-user
 surfacing of the feature. Coupling the override-execute gate to the
@@ -668,17 +633,14 @@ future consideration ([§10.5](#105-additional-deferred-work)).
 
 ## 6. Phase 2: Dynamic Tensors
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** Phase 2 is not built. The code has no
-> per-tensor `is_dynamic` field, no `mark_dynamic()`, and no `DYNAMIC_DIM`.
-> The `1.2.0` plugin API version planned for Phase 2 is now used by runtime
-> pass-by-value (RFC 0016). §6.1 to §6.10 remain the proposed design.
+Not yet built.
 
 This section specifies the **Phase 2** design committed by this RFC.
 Phase 2 builds on Phase 1's variant-pack override transport by adding
 a per-tensor `is_dynamic` flag declared at graph build time, with
 wildcard dim and stride-ordering semantics resolved at execute time
-through the Phase 1 transport.
+through the Phase 1 transport. The code has no per-tensor `is_dynamic`
+field, no `mark_dynamic()`, and no `DYNAMIC_DIM`.
 
 ### 6.1 Why Phase 2
 
@@ -802,8 +764,10 @@ until then engines that need them must either over-accept and report
 ### 6.7 Versioning and plugin-version filtering
 
 Phase 2's frontend/backend API additions are backwards-compatible
-extensions, so they ship as a **minor** plugin-SDK version bump (from
-1.1.0 to 1.2.0). The new schema field (`is_dynamic`) is additive
+extensions, so they ship as a **minor** plugin-SDK version bump. The
+version number is not assigned yet; `1.2.0` to `1.4.0` are taken by
+other features (see [§4.5](#45-applicability-filtering)). The new
+schema field (`is_dynamic`) is additive
 (see [§4.1](#41-graph-flag)); the new optional execute symbol is
 resolved per-symbol via `tryAssignSymbol`. There is no ABI break.
 
@@ -835,8 +799,8 @@ Because the change is non-breaking, migration is straightforward:
   path: rebuild against 1.1.0 headers, implement the override execute
   symbol, bump the reported version.
 - **Plugins adopting Phase 2 dynamic tensor features.** Bump their
-  reported version to 1.2.0 once they recognize `is_dynamic`,
-  wildcard dims, or stride-as-order.
+  reported version to the Phase 2 minimum once they recognize
+  `is_dynamic`, wildcard dims, or stride-as-order.
 
 No coordinated version bump across plugin / data / backend / frontend
 SDKs is needed for this work. Each plugin migrates on its own
@@ -942,11 +906,8 @@ older plugins never see a graph that uses stride-as-order.
 
 ## 8. Execution Plan
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** Steps 1 to 4 shipped in PR #7279, with the
-> plan-only flag check added in PR #8881. Steps 5 to 7 (Phase 2) are not started.
-
-Implementation plan for the work this RFC enables:
+Implementation plan for the work this RFC enables. Steps 1 to 4
+(Phase 1) are built. Steps 5 to 7 (Phase 2) are not yet built.
 
 ### Step 1: Phase 1 backend wiring
 
@@ -982,7 +943,7 @@ their round-trip tests.
 ### Step 6: Phase 2 version-filter extension and validation relaxation
 
 Extend the per-graph plugin-version filter (introduced in Step 2) to
-recognize the `1.2.0` requirement for graphs using `is_dynamic`
+recognize the Phase 2 minimum version for graphs using `is_dynamic`
 tensors, wildcard dims, or stride-as-order; per-op `validate()`
 "any-dynamic-operand" early-return for value-dependent checks.
 
@@ -1021,15 +982,12 @@ The plan exercises three categories:
 
 ### 9.2 Fake plugins enable end-to-end without real engines
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The fakes are
-> `tests/test_plugins/TestOverrideImplementingPlugin.cpp` and
-> `tests/test_plugins/TestOverrideOmittingPlugin.cpp`. A third fake,
-> `TestSecondOverridePlugin.cpp`, also implements the override symbol.
-
-Two fake plugins (one implementing
-`hipdnnEnginePluginExecuteOpGraphWithOverrides`, one omitting it) are
-loaded by the integration suite. They capture call sites and payload
+Two fake plugins (`tests/test_plugins/TestOverrideImplementingPlugin.cpp`
+implements `hipdnnEnginePluginExecuteOpGraphWithOverrides`,
+`tests/test_plugins/TestOverrideOmittingPlugin.cpp` omits it) are
+loaded by the integration suite. A third fake,
+`TestSecondOverridePlugin.cpp`, also implements the override symbol.
+The fakes capture call sites and payload
 contents for assertion, making it possible to test the full plumbing
 path (frontend overload through host dispatch into plugin entry)
 without any real engine implementation. The override-omitting fake
@@ -1070,9 +1028,7 @@ filtering or host dispatch:
 
 ### 9.5 Phase 2 test categories
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** None of these tests exist yet because
-> Phase 2 is not built.
+Not yet built.
 
 - **Round-trip** for `is_dynamic` through the flatbuffer schema, backend descriptor,
   and frontend pack/unpack.
@@ -1088,7 +1044,7 @@ filtering or host dispatch:
   bypasses value-dependent checks while a concrete-operand bad value
   still fails.
 - **Per-graph plugin-version filter**: a fake plugin reporting an
-  older version is filtered out for graphs requiring 1.2.0+, but
+  older version is filtered out for graphs requiring the Phase 2 minimum, but
   remains eligible for graphs that use no Phase-2 features.
 - **Stride-as-order validation**: a dynamic tensor declaring
   `strides == {3, 2, 1, 0}` (NCHW ordering) accepts execute-time

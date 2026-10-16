@@ -7,8 +7,8 @@ This directory holds the design documents (RFCs) for hipDNN. Each RFC has one st
 | Status | Meaning |
 |--------|---------|
 | `Planned` | The RFC is proposed or accepted. No implementation is merged. |
-| `In progress` | Part of the implementation is merged, or it is merged behind a flag or phase. Some design parts are not built. |
-| `Implemented` | The feature the RFC proposes is merged. The RFC may differ from the code in design details. Implementation notes record the differences. If a major part of the design is not built, use `In progress`. |
+| `In progress` | Part of the implementation is merged, or it is merged behind a flag or phase. Some design parts are not built and the RFC marks them `Not yet built.` |
+| `Implemented` | The feature the RFC proposes is merged, and the RFC text describes the current design. If a major part of the design is not built, use `In progress`. |
 | `Rejected / Replaced` | The design was not built, was dropped, or another RFC replaced it. The RFC links to the replacement when one exists. |
 
 Choose the status from the code, not from the RFC text.
@@ -25,12 +25,7 @@ Put this block directly under the title and the contributors line, before the ta
 
 For a replaced RFC, write `- **Status**: Rejected / Replaced by [RFC NNNN](./NNNN_Name.md)`.
 
-When code differs from a design section, add a note after the section heading:
-
-```markdown
-> [!NOTE]
-> **Implementation note (YYYY-MM-DD):** <what differs and where the code lives>
-```
+Write each RFC to describe the current design, as if it were a first draft. Do not add notes that compare the code with an earlier version of the RFC. Git history keeps those changes. Start the section of a design part that is not built with the sentence `Not yet built.` Use `> [!NOTE]` only for unexpected behavior that a reader must watch for.
 
 Update the status, the notes, and the verification date in the same change that changes the implementation state.
 
@@ -48,7 +43,7 @@ Update the status, the notes, and the verification date in the same change that 
 | [0008](./0008_OverridableTensorShapesDesign.md) | Overridable tensor shapes | In progress |
 | [0009](./0009_CompiledPlanSerialization.md) | Execution plan serialization | Implemented |
 | [0010](./0010_BehaviorNotes.md) | Per-engine behavior notes | Implemented |
-| [0011](./0011_GoldenReferenceValidation.md) | Golden reference validation | In progress |
+| [0011](./0011_BundleTestFramework.md) | Bundle test framework | In progress |
 | [0012](./0012_CuDNN_Shim.md) | cuDNN shim (reference: [0012 reference](./0012_CuDNN_Shim_Reference.md)) | In progress |
 | [0013](./0013_Autotune.md) | Autotuning | Implemented |
 | [0014](./0014_RaggedTensors.md) | Ragged tensors | In progress |

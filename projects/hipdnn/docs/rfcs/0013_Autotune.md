@@ -455,9 +455,6 @@ All filtering methods return `Graph&` for method chaining. They store criteria o
 
 ### 6.3 Autotuning API on Graph
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** `Graph` also has `autotuneExhaustiveSweep()` (#11099). It forces `TuneMode::EXHAUSTIVE` and `PrimingFailurePolicy::BENCHMARK_UNPRIMED`, ranks engines on `robustTimeMs`, and writes the engine order to an exact-match ranking cache keyed on graph and device. It reports the write result in `AutotuneCacheWriteOutcome`. See `Graph.hpp` and `docs/Environment.md`.
-
 Three groups of `autotune()` overloads (each with UID-based and tensor-attribute-based variants, 6 overloads total):
 
 **Compiled-plan overloads; hipDNN overloads with no workspace-size parameter (for compiled plans only):**
@@ -500,6 +497,19 @@ Error autotune(hipdnnHandle_t handle,
 Forward to the compiled-plan overloads with defaults (STANDARD, RUN_UNTIL_STABLE, no file output, no results). Compiled-plan path only.
 
 All overload groups benchmark execution plans and select the best. Subsequent `execute()` calls use the winning plan. Pass a non-null `results` pointer to get ranked results; omit or pass `nullptr` to discard them. If `storageConfig.filePath` is non-empty, results are also written to the config file.
+
+**Exhaustive sweep with cache write-back:**
+```cpp
+Error autotuneExhaustiveSweep(hipdnnHandle_t handle,
+                              const std::unordered_map<int64_t, void*>& variantPack,
+                              void* workspace,
+                              int64_t workspaceSize,
+                              AutotuneConfig config = {},
+                              const AutotuneStorageConfig& storageConfig = {},
+                              std::vector<AutotuneResult>* results = nullptr,
+                              AutotuneCacheWriteOutcome* cacheWriteOutcome = nullptr);
+```
+Runs `autotune()` with `config.mode = TuneMode::EXHAUSTIVE` and `config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED`. Other `config` fields stay as the caller set them. If `config.rankingFn` is empty, engines are ranked on `robustTimeMs`. `workspaceSize` must be >= 0. The function then writes the measured engine order to the exact-match ranking cache, keyed on graph and device. It writes only a full sweep: if `config.engineIdFilter`, `deselect_*()`, or a small `workspaceSize` keeps an applicable candidate out of the timing loop, it does not write. Pass a non-null `cacheWriteOutcome` to get the `AutotuneCacheWriteOutcome` of the write (`WRITTEN`, `UNCHANGED`, `DECLINED_DISABLED`, `DECLINED_UNKEYABLE`, `NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE`, or `NOT_ATTEMPTED_PARTIAL_SWEEP`). `HIPDNN_DISABLE_EXACT_ENGINE_CACHE` disables the cache; see `docs/Environment.md`.
 
 #### 6.3.1 Result coverage (every candidate produces exactly one result)
 

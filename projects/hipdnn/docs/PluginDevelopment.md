@@ -667,21 +667,20 @@ Unit tests focus on the internal implementation of your plugin components:
 
 ### Integration Tests
 
-Integration tests validate end-to-end functionality of your plugin:
+Integration tests validate end-to-end functionality of your plugin. They come in two kinds.
+
+**Graph correctness (shared suite).** Test that a graph runs on your engine and produces correct results with bundles in the shared integration test suite, not with plugin-local C++ tests. Add your provider as an engine lane and add or extend bundles and support claims. See [Adding tests](../../../dnn-providers/integration-tests/docs/adding-tests.md#add-an-engine-lane) and [Running the integration tests](../../../dnn-providers/integration-tests/docs/running-tests.md). The shared suite's C++ graph tests are kept for special cases and build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+
+**Provider-specific cases.** Keep tests for behavior that only your plugin has in `<plugin_root>/integration_tests/`:
 
 - **Location**: `<plugin_root>/integration_tests/`
-- **Purpose**: Validate correctness of graph execution and accuracy of results
+- **Purpose**: Validate plugin behavior that bundles cannot express
 - **Requirements**:
-  - Test complete operation graphs
-  - Validate against reference implementations
-  - Test different data types, layouts, dimensions, and edge-cases for each
   - Enable tests for all supported ASICs
   - GPU typically required for meaningful validation
   - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
     - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
     - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
-
-For a comprehensive example of an integration test, see: [`dnn-providers/integration-tests/src/integration-tests/batchnorm/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/integration-tests/src/integration-tests/batchnorm/IntegrationGpuBatchnormForwardInference.cpp)
 
 Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#principles).
 

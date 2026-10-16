@@ -2,15 +2,9 @@
 
 - Contributors: hipDNN maintainers
 - **Status**: Implemented
-- **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), #7975 added a graph-and-plan container, and #7182 removed the engine config from the restore hook. No shipped provider exports the plugin hooks; the fusilli sample was removed (#7806).
+- **Status notes**: Plan-only serialization shipped in #6970. The envelope later gained `is_override_shape_enabled` (#7279) and `tensor_alignments` (#8728), and #7975 added a graph-and-plan container. No shipped provider exports the plugin hooks; only the hipDNN test plugins implement them.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
-- Scope: frontend, backend, engine plugin API, fusilli sample implementation
-
-> **Note:** The fusilli sample implementation referenced throughout
-> this RFC was removed from rocm-libraries / TheRock after the design was
-> implemented. The serialization envelope and plugin-payload contract
-> described here remain authoritative; the fusilli code blocks are
-> retained as the original worked example.
+- Scope: frontend, backend, engine plugin API, test plugin implementation
 
 ## Summary
 
@@ -185,45 +179,16 @@ The descriptor stores enough state to execute without `EngineConfig -> Engine ->
 Execution reads the engine ID and execution context directly from the execution plan descriptor.
 This is what makes a graph-less restored plan executable.
 
-## Fusilli Implementation
+## Plugin Implementations
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The fusilli provider and its sample were removed (#7806).
-> No provider in `dnn-providers/` exports the serialization hooks today. The hipDNN test plugins
-> implement them in `tests/test_plugins/TestPluginCommon.hpp`. Round-trip coverage lives in
-> `frontend/tests/TestGraph.cpp`, `tests/frontend/IntegrationOverrideExecute.cpp`, and
-> `backend/tests/TestGraphAndPlanSerializationApi.cpp`.
+No provider in `dnn-providers/` exports the serialization hooks. The hipDNN test plugins implement
+them in `tests/test_plugins/TestPluginCommon.hpp`. Their `plugin_payload` is a fixed one-byte
+placeholder. The test plugins also advertise
+`HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`.
 
-The fusilli provider implements the optional plugin hooks as the sample backend. Its
-`plugin_payload` is fusilli-owned and starts with a small fusilli compatibility header:
-
-```text
-magic: "FUSPLAN\0"
-format_major: uint16
-format_minor: uint16
-payload_kind: uint32
-header_size: uint32
-payload_bytes: uint8[]
-```
-
-The initial `payload_kind` stores the hipDNN graph FlatBuffer bytes needed to reconstruct and
-compile a fusilli execution context. Fusilli rejects payloads with an unknown magic value, an
-unsupported major format version, an unsupported payload kind, or an empty/malformed payload before
-attempting graph import. This keeps the hipDNN envelope byte-level while giving fusilli an explicit
-breaking-change boundary for future native compiled-artifact serialization.
-
-The sample at
-`dnn-providers/fusilli-provider/test/integration/matmul/serialized_matmul.cpp`:
-
-1. Builds a simple matmul graph.
-2. Builds the compiled execution plan.
-3. Serializes the compiled plan.
-4. Deserializes it into a fresh frontend `Graph`.
-5. Executes with UID bindings.
-6. Validates the output against the CPU reference.
-
-This sample demonstrates the intended contract: the original graph performs compilation; the
-restored graph owns only an executable compiled plan.
+Round-trip coverage lives in `frontend/tests/TestGraph.cpp`,
+`tests/frontend/IntegrationOverrideExecute.cpp`, and
+`backend/tests/TestGraphAndPlanSerializationApi.cpp`.
 
 ## Current Limitations
 
@@ -255,7 +220,7 @@ unsupported or not-available status.
 ### Add File-Level Compatibility Tests
 
 Add integration tests that persist compiled-plan files across process boundaries and plugin
-versions once the fusilli payload compatibility policy is stable. The current unit coverage checks
+versions once a provider implements the serialization hooks. The current unit coverage checks
 malformed envelopes, missing and empty required fields, invalid workspace metadata, unsupported
 plugin serialization, and plugin callback failures.
 
@@ -264,11 +229,6 @@ plugin serialization, and plugin callback failures.
 Consider adding a small hipDNN-owned plugin identity section in a future envelope version. It should
 be used only for routing and diagnostics, not for structuring the plugin payload. A conservative
 first version could include plugin name, plugin version, and engine ID compatibility expectations.
-
-### Improve Fusilli Payload Stability
-
-The fusilli sample should eventually serialize a stable compiled artifact when fusilli exposes one.
-Until then, fusilli owns compatibility for its payload bytes and may reject incompatible payloads.
 
 ## Non-Goals
 

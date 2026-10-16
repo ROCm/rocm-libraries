@@ -112,8 +112,12 @@ stays a full provider, one per dependency. This complements build-time codegen.
 
 ### 1.1 What Ships Now Versus Later
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The single-kernel path ships, but every UMD, UDD, and UHD names a native C++ symbol (`matchSymbol`, `dispatchSymbol`, and a `NATIVE` UHD `payload` in `Descriptors.hpp`). The declarative criteria of RFC 0018 and the UDD formulas are not parsed yet. The `jsonexpr` interpreter in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr/` is not wired into the loader. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no adapter yet.
+The single-kernel path ships. In the shipped loader, every UMD, UDD, and UHD names a native C++
+symbol: a UMD `matchSymbol`, a UDD `dispatchSymbol`, and a `NATIVE` UHD `payload`
+(`Descriptors.hpp`). The declarative criteria of RFC 0018 and the UDD formulas are not yet built.
+The `jsonexpr` interpreter (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr/`) exists but
+the loader does not use it. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no
+adapter yet.
 
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
@@ -122,7 +126,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 | Match criteria: dtype, rank, dim value and relation, stride order, packed, divisibility, attribute value and set, optional-operand presence, graph structure, cross-tensor arithmetic, device property, bounded `or` ([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-criteria-vocabulary)); opcode is the engine's pattern, not a criterion | Yes | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
-| Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
+| Heuristic sources | `NATIVE` (a registered C++ score symbol). Not yet built: LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
@@ -683,8 +687,7 @@ kernel's catalog key and must be unique, by the KMD rule above.
 its one-of-each rationale are in [Section 1](#1-overview)). Every referenced descriptor is
 shared by ID across packs; only the child kernels are unique to this pack. A pack carries its
 own `id` and `name` like every other descriptor: the id is what a diagnostic names when a pack
-fails to load, and what `HIPDNN_DISABLE_KDPS` ([Section 10](#10-observability-and-diagnostics))
-accepts to pull one pack out of selection.
+fails to load.
 
 ```jsonc
 {
@@ -1328,8 +1331,11 @@ rules for drop-in packages.
 
 ## 7. Kernel Source
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** The runtime loader (`DescriptorLoader.hpp`) accepts the kinds `embedded_source`, `kpack`, `hsaco_file`, and `rocke_builder`. Only `embedded_source` and `kpack` have adapters. A `kpack` source also carries `toc_key`, `sha256`, and the packager-read `signature`, beside `library` and `symbol`. Authored `hip`, `hsaco`, and `rocke` sources are packed into kpack at build time (#10820, #11165, #12729).
+Authored `hip`, `hsaco`, and `rocke` sources are packed into kpack at build time. The runtime
+loader (`DescriptorLoader.hpp`) accepts the kinds `embedded_source`, `kpack`, `hsaco_file`, and
+`rocke_builder`. Only `embedded_source` and `kpack` have adapters; the loader rejects the other
+two as not yet implemented. A runtime `kpack` source carries `toc_key`, `sha256`, and the
+packager-read `signature`, in addition to `library` and `symbol`.
 
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
@@ -1746,11 +1752,11 @@ The provider surfaces:
   and measurable but the model cannot yet select it ([Section 16](#16-risks)). Without this an
   author has no way to distinguish a kernel waiting on a retrain from one the retrain already
   covered, and the two call for opposite fixes.
-- **Operator opt-out**: an engine, an individual kernel pack, or a single kernel can each be
-  disabled at runtime by id or name through an environment variable (`HIPDNN_DISABLE_ENGINES`,
-  `HIPDNN_DISABLE_KDPS`, and `HIPDNN_DISABLE_UKDS`; each takes a comma-separated, whitespace-trimmed
-  list of ids or names, and unmatched entries are skipped silently), removing a problematic engine,
-  pack, or kernel from selection without rebuilding or deleting files. The three levels form a
+- **Operator opt-out**: an engine can be disabled at runtime by id or name through the
+  `HIPDNN_DISABLE_ENGINES` environment variable (a comma-separated, whitespace-trimmed list of ids or
+  names; unmatched entries are skipped silently), removing a problematic engine from selection without
+  rebuilding or deleting files. Disabling an individual kernel pack (`HIPDNN_DISABLE_KDPS`) or a single
+  kernel (`HIPDNN_DISABLE_UKDS`) is not yet built. The three levels would form a
   coherent ladder from coarsest to finest: engine, then pack, then individual kernel. Pulling one
   misbehaving kernel is the most common production hotfix, and no mechanism reaches that
   granularity today: editing a shared matcher to exclude one kernel breaks every other pack that
@@ -1779,8 +1785,12 @@ operators use to work with these descriptors.
 
 ## 11. Tooling
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** Authoring and validation tools exist. `tools/IngestorGenerator` generates KMD/UED/UMD/UHD/UDD/KDP JSON and native stubs from YAML, and `tools/IngestorGenerator/ValidateDescriptors.cpp` validates descriptor sets. The agentic skill is `tools/ai/skills/hipdnn-ingestor-engine`. Packaging tools live in `dnn-providers/hip-kernel-provider/descriptor-packaging`.
+The authoring and validation tools are:
+
+- `tools/IngestorGenerator` generates KMD, UED, UMD, UHD, UDD, and KDP JSON and native stubs from
+  YAML. `tools/IngestorGenerator/ValidateDescriptors.cpp` validates descriptor sets.
+- The agentic authoring skill is `tools/ai/skills/hipdnn-ingestor-engine`.
+- The packaging tools are in `dnn-providers/hip-kernel-provider/descriptor-packaging`.
 
 The descriptor formats in this document are the base representation: precise, diffable, and
 machine-checkable, but low-level. Tooling grows around the format during rollout to handle
@@ -2000,7 +2010,7 @@ runs through the generic engine as an ordinary engine, producing the same `graph
 everything else consumes, so the existing correctness path applies unchanged: the plugin-agnostic
 integration harness ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) validates the generic
 engine against the CPU reference ([RFC 0001](0001_CpuGraphExecutorDesign.md)) with the
-golden-reference tolerance chain ([RFC 0011](0011_GoldenReferenceValidation.md)), and each
+golden-reference tolerance chain ([RFC 0011](0011_BundleTestFramework.md)), and each
 descriptor-backed engine carries support claims ([RFC 0015](0015_EngineSupportClaims.md)) like any
 other. New tests go into those tiers.
 
@@ -2032,8 +2042,12 @@ Four areas are new here:
 
 ### 14.2 Follow-up RFCs
 
-> [!NOTE]
-> **Implementation note (2026-10-15):** State of each row on `develop`. KDP + AOT packaging: implemented (kpack, #10820, #11165, #11144). UED + graph matching: [RFC 0020](0020_UniversalEngineDescriptor.md); only the `graph_match.native` arm is built. UMD + applicability: [RFC 0018](0018_UniversalMatchDescriptor.md); only native `matchSymbol` matchers are built. UHD + kernel selection: [RFC 0019](0019_UniversalHeuristicDescriptor.md); only `NATIVE` heuristics are built. UDD + dispatch and KMD + metadata schema: no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as `MetadataSchema`. Expression language: no RFC yet; the `jsonexpr` interpreter exists but is not wired into the loader. Shape matching, runtime drop-in, adapters, composition, and JIT: not started.
+The state of each row is: KDP + AOT packaging is built (kpack). For UED, UMD, and UHD, only the
+native arms are built (`graph_match.native`, `matchSymbol`, `NATIVE`). UDD + dispatch and KMD +
+metadata schema have no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as
+`MetadataSchema`. The expression language has no RFC yet; its `jsonexpr` interpreter exists but
+the loader does not use it. Shape matching, runtime drop-in, adapters, composition, and JIT are
+not yet built.
 
 The pieces this document frames but does not design land in focused follow-up RFCs, each bundling
 a descriptor format with the subsystem it drives. Together they form the planned series below.

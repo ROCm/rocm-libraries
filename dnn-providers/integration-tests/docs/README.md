@@ -17,7 +17,7 @@ Tool references are next to the tools:
 C++-to-bundle pipeline, `find_case.py`) and
 [`reference-data-scripts/README.md`](../reference-data-scripts/README.md)
 (golden-data generators and the bundle verifier). Design rationale is in RFC
-0006 (plugin-agnostic tests), RFC 0011 (golden reference validation) and RFC
+0006 (plugin-agnostic tests), RFC 0011 (bundle test framework) and RFC
 0015 (engine support claims) under `projects/hipdnn/docs/rfcs/`.
 
 ## Terms

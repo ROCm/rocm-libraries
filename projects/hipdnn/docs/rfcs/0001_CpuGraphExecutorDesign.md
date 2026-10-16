@@ -1,7 +1,7 @@
 # CPU Graph Executor Design Document
 
 - **Status**: Implemented
-- **Status notes**: The executor lives in `test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/` (namespaces `hipdnn_test_sdk::utilities` and `hipdnn_test_sdk::detail`), moved there in #3059. It now covers many more operations than the original three. A GPU reference executor with the same pattern lives in `dnn-providers/integration-tests/src/harness/gpu-graph-executor/`.
+- **Status notes**: The executor lives in `test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/` (namespaces `hipdnn_test_sdk::utilities` and `hipdnn_test_sdk::detail`). A GPU reference executor with the same pattern lives in `dnn-providers/integration-tests/src/harness/gpu-graph-executor/`.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
@@ -15,7 +15,7 @@
 8. [Supported Operations](#supported-operations)
 9. [Extension Guidelines](#extension-guidelines)
 10. [Performance & Usage Considerations](#performance--usage-considerations)
-11. [Future Work](#future-work)
+11. [GPU Reference Executor](#gpu-reference-executor)
 
 ## Executive Summary
 
@@ -266,9 +266,6 @@ While the CPU Graph Executor is primarily for reference and testing:
 4. **Usability**: Designed to operate using the same API as hipdnn backend so a single graph can be built and used for the real and reference executors interchangeably.
 5. **Performance**: Not performance optimized
 
-## Future Work
+## GPU Reference Executor
 
-1. **GPU Reference Executor**: Extend to support GPU reference execution
-
-> [!NOTE]
-> **Implementation note (2026-10-15):** A GPU reference executor exists. `GpuReferenceGraphExecutor` and its plan builders live in `dnn-providers/integration-tests/src/harness/gpu-graph-executor/`. It is part of the provider integration test harness, not the `test_sdk`.
+`GpuReferenceGraphExecutor` uses the same plan builder and signature key pattern to run reference graphs on the GPU. It and its plan builders live in `dnn-providers/integration-tests/src/harness/gpu-graph-executor/`. It is part of the provider integration test harness, not the `test_sdk`.
