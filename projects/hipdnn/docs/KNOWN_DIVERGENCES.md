@@ -154,3 +154,25 @@ DLL (Windows) or shared object (Linux) that includes the shim has its own copy.
 
 Impact: an error raised by shim code in one module is not visible to `cudnnGetLastErrorString`
 called from another module.
+
+### Parameter descriptors
+
+NaN propagation on pointwise and resample parameter descriptors is stored and ignored; hipDNN has
+no equivalent setting.
+
+### Operations
+
+Operation descriptors are validated at `cudnnBackendFinalize`. These differ from cuDNN:
+
+| Case | Shim behavior |
+|---|---|
+| `GEN_STATS`, `BN_FINALIZE_STATISTICS`, `BN_BWD_WEIGHTS`, `RNG`, `RESHAPE`, `PAGED_CACHE_LOAD` and other operation types the shim does not lower (including `BLOCK_SCALE_*` and `MOE_GROUPED_MATMUL*`, which hipDNN supports natively) | `NOT_SUPPORTED` at finalize, before any attribute check |
+| Alpha ≠ 1 or beta ≠ 0 on convolution, pointwise (`ALPHA1`, `ALPHA2`) or resample | `NOT_SUPPORTED`; hipDNN operations have no scaling factors |
+| Batch-norm inference and backward `EPSILON_DESC` | accepted but not used; hipDNN's inference takes inverse variance and its backward takes saved statistics, so neither needs epsilon |
+| Batch-norm backward without `MEAN_DESC` / `INV_VARIANCE_DESC` | `BAD_PARAM`; the saved statistics are required |
+| Running-statistic descriptors outside batch-norm training; `MEAN_DESC` on RMS norm | `NOT_SUPPORTED` |
+| Norm `INSTANCE`, `GROUP`, `ADA_LAYER` modes; peer statistics | `NOT_SUPPORTED` |
+| Max-pool backward resample without `IDXDESC` | `BAD_PARAM`; hipDNN needs the index tensor |
+| Backward resample `XDESC` / `YDESC` | `NOT_SUPPORTED`; hipDNN's backward resample has no such inputs |
+| Matmul M/N/K override descriptors | `NOT_SUPPORTED` |
+| A pointwise tensor slot the mode does not use (for example `TDESC` on a non-select mode, or `YDESC` on a backward activation) | `BAD_PARAM`; upstream builders never set these |
