@@ -24,6 +24,7 @@ TRIGGER_CI = SKILL_DIR / "scripts" / "trigger_ci.py"
 WORKFLOWS_DIR = TOOLS_AI_DIR.parents[3] / ".github" / "workflows"
 
 REPO = "ROCm/rocm-libraries"
+REPO_ARG = f"github.com/{REPO}"
 HEAD_SHA = "a" * 40
 OTHER_SHA = "b" * 40
 BASELINE_ID = 36880722738
@@ -58,9 +59,16 @@ class FakeGh:
         self.last_dispatch_id = 100
         # Workflow file name -> text served instead of the checkout's copy.
         self.workflows = {}
+        self.auth_error = ""
 
     def __call__(self, cmd, capture_output=False, text=False, check=False, **_):
         self.calls.append(cmd)
+        if cmd[0] == "gh":
+            _assert_on_github_com(cmd)
+        if cmd[:3] == ["gh", "auth", "status"] and self.auth_error:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr=self.auth_error
+            )
         if cmd[:2] == ["gh", "api"] and "/contents/.github/workflows/" in cmd[-1]:
             return self._workflow_file(cmd)
         stdout = self._answer(cmd)
@@ -82,9 +90,9 @@ class FakeGh:
             return ""
         if cmd[:3] == ["gh", "pr", "view"]:
             return json.dumps(self.pr_head)
-        if cmd[:2] == ["gh", "api"] and "/commits/" in cmd[2]:
+        if cmd[:2] == ["gh", "api"] and "/commits/" in cmd[4]:
             return HEAD_SHA
-        if cmd[:2] == ["gh", "api"] and "/actions/runs/" in cmd[2]:
+        if cmd[:2] == ["gh", "api"] and "/actions/runs/" in cmd[4]:
             return json.dumps(self.baseline)
         if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
             return json.dumps(self.active_runs)
@@ -105,6 +113,16 @@ class FakeGh:
         if cmd[0] == "git":
             return ""
         raise AssertionError(f"unexpected command: {cmd}")
+
+
+def _assert_on_github_com(cmd):
+    """Every gh call names github.com, so GH_HOST cannot send it elsewhere."""
+    if cmd[1] == "api":
+        assert cmd[2:4] == ["--hostname", "github.com"], cmd
+    elif cmd[1] == "auth":
+        assert cmd[-2:] == ["--hostname", "github.com"], cmd
+    else:
+        assert cmd[cmd.index("--repo") + 1] == REPO_ARG, cmd
 
 
 @pytest.fixture
@@ -163,6 +181,15 @@ def test_dispatch_needs_exactly_one_of_dry_run_and_yes(
 ):
     assert _exit_code(trigger_mod, monkeypatch, *MULTI_ARCH, *mode) == 2
     assert gh.dispatched == []
+
+
+def test_gh_auth_failure_shows_gh_error(trigger_mod, gh, monkeypatch, capsys):
+    gh.auth_error = "github.com\n  X Failed to log in to github.com account someone"
+    assert _exit_code(trigger_mod, monkeypatch, *MULTI_ARCH, "--dry-run") == 1
+    err = capsys.readouterr().err
+    assert "X Failed to log in to github.com account someone" in err
+    assert "gh auth login --hostname github.com" in err
+    assert len(gh.calls) == 1
 
 
 def test_input_without_default_is_required(trigger_mod, gh, monkeypatch, capsys):

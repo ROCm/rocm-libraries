@@ -36,7 +36,7 @@ Infer options from the user request:
 
 1. Locate this skill's helper directory. Skills are host-level, not tied to a repo checkout — **default to the script bundled with the skill you were invoked from** (`<skill-directory>/scripts/trigger_ci.py`), even when working inside a repo or worktree. Use the `projects/hipdnn/tools/ai/skills/hipdnn-trigger-ci/scripts` copy in a checkout only when actively developing this skill.
 
-2. Run from anywhere inside a rocm-libraries checkout (branch detection uses `git`). `gh` must be installed and authenticated (`gh auth status`); the script checks this before every subcommand, `--dry-run` included.
+2. Run from anywhere inside a rocm-libraries checkout (branch detection uses `git`). `gh` must be installed and authenticated to github.com (`gh auth status --hostname github.com`); the script checks this before every subcommand, `--dry-run` included. Every `gh` call names github.com, so `GH_HOST` or a GitHub Enterprise login does not redirect it.
 
 3. Dry-run the dispatch and show the user the printed command:
    ```bash

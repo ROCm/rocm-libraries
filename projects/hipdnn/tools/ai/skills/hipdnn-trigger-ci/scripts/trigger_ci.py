@@ -62,6 +62,9 @@ import time
 from urllib.parse import quote
 
 REPO = "ROCm/rocm-libraries"
+# gh follows GH_HOST and a GitHub Enterprise login otherwise, so name the host.
+HOST = "github.com"
+REPO_ARG = f"{HOST}/{REPO}"
 CANONICAL_REMOTE_URL = re.compile(
     r"github\.com[:/]ROCm/rocm-libraries(\.git)?/?$", re.IGNORECASE
 )
@@ -109,15 +112,24 @@ def run_cmd(cmd, check=True, capture=True):
     return result.stdout.strip() if capture else ""
 
 
+def gh_api(*args):
+    return ["gh", "api", "--hostname", HOST, *args]
+
+
 def check_gh_auth():
-    cmd = ["gh", "auth", "status"]
+    # Without --hostname, a problem with any other logged-in host fails this.
+    cmd = ["gh", "auth", "status", "--hostname", HOST]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError:
         exit_not_found(cmd)
     if result.returncode != 0:
+        details = (result.stderr or result.stdout).strip()
+        if details:
+            print(details, file=sys.stderr)
         print(
-            "error: gh is not authenticated. Run 'gh auth login' first.",
+            f"error: gh is not authenticated to {HOST}. "
+            f"Run 'gh auth login --hostname {HOST}' first.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -151,13 +163,11 @@ def current_git_branch():
 
 def workflow_text(workflow_file, ref):
     path = f".github/workflows/{workflow_file}"
-    cmd = [
-        "gh",
-        "api",
+    cmd = gh_api(
         "-H",
         "Accept: application/vnd.github.raw",
         f"repos/{REPO}/contents/{path}?ref={quote(ref, safe='')}",
-    ]
+    )
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError:
@@ -220,7 +230,7 @@ def pr_branch(pr_number):
                 "view",
                 str(pr_number),
                 "--repo",
-                REPO,
+                REPO_ARG,
                 "--json",
                 "headRefName,isCrossRepository",
             ]
@@ -256,7 +266,7 @@ def latest_run_id(workflow_file, ref):
             "run",
             "list",
             "--repo",
-            REPO,
+            REPO_ARG,
             "--workflow",
             workflow_file,
             "--branch",
@@ -290,7 +300,7 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
         "run",
         workflow_file,
         "--repo",
-        REPO,
+        REPO_ARG,
         "--ref",
         ref,
     ]
@@ -311,19 +321,19 @@ def dispatch_workflow(workflow_file, ref, inputs, dry_run=False):
     run_id = find_new_run(workflow_file, ref, before_id)
     if run_id:
         print(f" run {run_id}")
-        print(f"\n  Watch: gh run watch {run_id} --repo {REPO}")
-        print(f"  Logs:  gh run view {run_id} --repo {REPO} --log")
+        print(f"\n  Watch: gh run watch {run_id} --repo {REPO_ARG}")
+        print(f"  Logs:  gh run view {run_id} --repo {REPO_ARG} --log")
     else:
         print(" timed out")
         print(
-            f"\n  Check manually: gh run list --repo {REPO} "
+            f"\n  Check manually: gh run list --repo {REPO_ARG} "
             f"--workflow {workflow_file} --branch {ref} --limit 5"
         )
     return run_id
 
 
 def ref_head_sha(ref):
-    return run_cmd(["gh", "api", f"repos/{REPO}/commits/{ref}", "--jq", ".sha"])
+    return run_cmd(gh_api(f"repos/{REPO}/commits/{ref}", "--jq", ".sha"))
 
 
 def runs_cancelled_by_dispatch(workflow_file, sha):
@@ -337,7 +347,7 @@ def runs_cancelled_by_dispatch(workflow_file, sha):
             "run",
             "list",
             "--repo",
-            REPO,
+            REPO_ARG,
             "--workflow",
             workflow_file,
             "--commit",
@@ -360,13 +370,11 @@ def runs_cancelled_by_dispatch(workflow_file, sha):
 def check_reuse_baseline(run_id, workflow_file, ref, head_sha):
     run = json.loads(
         run_cmd(
-            [
-                "gh",
-                "api",
+            gh_api(
                 f"repos/{REPO}/actions/runs/{run_id}",
                 "--jq",
                 "{path, head_sha, status, repo: .head_repository.full_name}",
-            ]
+            )
         )
     )
     problems = []
@@ -399,7 +407,7 @@ def find_active_run(ref):
                 "run",
                 "list",
                 "--repo",
-                REPO,
+                REPO_ARG,
                 "--branch",
                 ref,
                 "--status",
@@ -526,7 +534,7 @@ def cmd_dispatch(args):
 
 def cmd_status(args):
     if args.pr and not args.branch:
-        cmd = ["gh", "pr", "checks", str(args.pr), "--repo", REPO]
+        cmd = ["gh", "pr", "checks", str(args.pr), "--repo", REPO_ARG]
         result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
         stderr = result.stderr.strip()
         # 0 = all passed, 8 = some pending. 1 covers both failing checks and
@@ -548,7 +556,7 @@ def cmd_status(args):
                 "run",
                 "list",
                 "--repo",
-                REPO,
+                REPO_ARG,
                 "--branch",
                 ref,
                 "--limit",
@@ -568,7 +576,7 @@ def cmd_watch(args):
             # Exit non-zero so "nothing to watch" is not read as a passing run.
             print(f"No active runs on '{ref}'.", file=sys.stderr)
             print(
-                f"Check: gh run list --repo {REPO} --branch {ref} --limit 5",
+                f"Check: gh run list --repo {REPO_ARG} --branch {ref} --limit 5",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -583,7 +591,7 @@ def cmd_watch(args):
                 "watch",
                 str(run_id),
                 "--repo",
-                REPO,
+                REPO_ARG,
                 "--exit-status",
             ]
         ).returncode
