@@ -111,12 +111,6 @@ StrictTypeLoader.add_implicit_resolver(
     list('tTfF')
 )
 
-try:
-    import msgpack
-except ImportError:
-    print("Message pack python library not detected. Must use YAML backend instead.")
-
-
 ###################
 # Writing functions
 ###################

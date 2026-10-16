@@ -10,6 +10,33 @@ string(REGEX MATCHALL "gfx[a-z0-9]+(-[a-z0-9]+)*" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 message(STATUS "Architectures to process: ${archs}")
 
+set(_extop_python_path_dirs "${ops_dir}")
+set(_extop_runtime_lib_dirs "")
+if(TARGET _rocisa)
+    list(APPEND _extop_python_path_dirs "$<TARGET_FILE_DIR:_rocisa>/..")
+    list(APPEND _extop_runtime_lib_dirs "$<TARGET_FILE_DIR:_rocisa>")
+endif()
+if(TARGET tensilelite_write)
+    list(APPEND _extop_python_path_dirs "$<TARGET_FILE_DIR:tensilelite_write>/..")
+    list(APPEND _extop_runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite_write>")
+endif()
+if(TARGET tensilelite-host)
+    list(APPEND _extop_runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
+endif()
+set(_extop_sanitizer_flags "")
+if(HIPBLASLT_ENABLE_ASAN
+        OR THEROCK_SANITIZER STREQUAL "ASAN"
+        OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    list(APPEND _extop_sanitizer_flags ASAN)
+elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
+    list(APPEND _extop_sanitizer_flags TSAN)
+endif()
+hipblaslt_make_python_command(_extop_python_command
+    PYTHONPATH_DIRS ${_extop_python_path_dirs}
+    RUNTIME_LIB_DIRS ${_extop_runtime_lib_dirs}
+    ${_extop_sanitizer_flags}
+)
+
 set(previous_target "")
 
 foreach(arch IN LISTS archs)
@@ -91,8 +118,9 @@ foreach(arch IN LISTS archs)
         DEPENDS
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
+            tensilelite_write
             ${previous_target}
-        COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
+        COMMAND ${_extop_python_command} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMAND ${CMAKE_COMMAND} -E rm -f "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat"
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat.zlib" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltExtOpLibrary_${arch}.dat.zlib"
