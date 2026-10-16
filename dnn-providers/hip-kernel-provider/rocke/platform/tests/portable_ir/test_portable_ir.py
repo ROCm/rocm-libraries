@@ -129,10 +129,16 @@ def test_replay_cli_resolution_does_not_require_a_shared_library(monkeypatch):
 # Discover through the importable package rather than a repository path. TheRock
 # relocates ``rocke`` beside the installed CTest metadata, where no
 # ``platform/python`` source layout exists.
+# ``test_hsaco_gate`` imports the HSACO parity driver, whose memory-capped
+# subprocess implementation uses Unix-only ``resource`` and ``os.fork``.
+# Keep the platform-independent portable-IR tests running on Windows, but do
+# not claim this Unix-specific HSACO gate is covered there until it has a
+# Windows-compatible subprocess implementation.
 _UNIT_MODULES = sorted(
     module.name
     for module in pkgutil.iter_modules(_unit_tests.__path__)
     if module.name.startswith("test_")
+    and not (os.name == "nt" and module.name == "test_hsaco_gate")
 )
 if not _UNIT_MODULES:
     raise RuntimeError("portable-IR unit package contains no test modules")
