@@ -3184,21 +3184,22 @@ class KernelWriterAssembly(KernelWriter):
 
       def calculateWG():
         #### calculate numWorkGroup ####
-        qReg = self.vgprPool.checkOut(4, tag="calculateWG_qReg")
-        dReg = qReg + 1
-        divReg = qReg + 2
-        rReg = qReg + 3
-        moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT0", comment="set MT0 into sgpr"))
-        moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+0"), comment="set Free0 size"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
-        moduleWg.add(VMovB32(dst=vgpr(divReg), src="MT1", comment="set MT1 into sgpr"))
-        moduleWg.add(VMovB32(dst=vgpr(dReg), src=sgpr("SizesFree+1"), comment="set Free1 size"))
-        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups0"), src=vgpr(qReg), comment="set back to numWorkGroup0"))
-        moduleWg.add(vectorUInt32CeilDivideAndRemainder(qReg=qReg, dReg=dReg, divReg=divReg, rReg=rReg, doRemainder=False))
-        if self.states.archCaps["TransOpWait"]:
-          moduleWg.add(SNop(waitState=0, comment="1 wait states"))
-        moduleWg.add(VReadfirstlaneB32(dst=sgpr("NumWorkGroups1"), src=vgpr(qReg), comment="set back to numWorkGroup1"))
-        self.vgprPool.checkIn(qReg)
+        rReg = self.sgprPool.checkOut(1, tag="calculateWG_rReg")
+        tmpSgpr = self.sgprPool.checkOutAligned(2, 2, tag="calculateWG_tmpSgpr", preventOverflow=0)
+        tmpSgprRes = ContinuousRegister(idx=tmpSgpr, size=2)
+        moduleWg.add(scalarStaticDivideAndRemainder(qReg="NumWorkGroups0", rReg=rReg, dReg="SizesFree+0",
+                                                     divisor=kernel["MacroTile0"], tmpSgprRes=tmpSgprRes, doRemainder=1))
+        # If remainder > 0, increment NumWorkGroups0 (ceiling division)
+        moduleWg.add(SCmpGtU32(src0=sgpr(rReg), src1=0, comment="Check if remainder > 0"))
+        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups0"), src0=sgpr("NumWorkGroups0"), src1=0, comment="Increment if remainder > 0"))
+
+        moduleWg.add(scalarStaticDivideAndRemainder(qReg="NumWorkGroups1", rReg=rReg, dReg="SizesFree+1",
+                                                     divisor=kernel["MacroTile1"], tmpSgprRes=tmpSgprRes, doRemainder=1))
+        # If remainder > 0, increment NumWorkGroups1 (ceiling division)
+        moduleWg.add(SCmpGtU32(src0=sgpr(rReg), src1=0, comment="Check if remainder > 0"))
+        moduleWg.add(SAddCU32(dst=sgpr("NumWorkGroups1"), src0=sgpr("NumWorkGroups1"), src1=0, comment="Increment if remainder > 0"))                                                     
+        self.sgprPool.checkIn(tmpSgpr)
+        self.sgprPool.checkIn(rReg)
 
       if self.states.numSgprPreload > 0:
         calculateWG()
