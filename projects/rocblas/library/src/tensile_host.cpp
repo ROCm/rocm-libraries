@@ -944,7 +944,7 @@ namespace
                         }
 #endif
                         rocblas_cerr << msg.str() << std::endl;
-                        throw std::runtime_error(msg.str());
+                        rocblas_abort();
                     }
                 }
             }
@@ -1121,11 +1121,10 @@ namespace
 
                 if(m_libraryMap.find(processor) == m_libraryMap.end())
                 {
-                    std::string errmsg = "\nrocBLAS error: Could not initialize Tensile library "
-                                        "for architecture: "
-                                        + processor;
-                    rocblas_cerr << errmsg << std::endl;
-                    throw std::runtime_error(errmsg);
+                    rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile library for "
+                                    "architecture: "
+                                 << processor << std::endl;
+                    rocblas_abort();
                 }
             }
 
@@ -1186,13 +1185,18 @@ namespace
             adapter = a.adapter.load(std::memory_order_relaxed);
             if(!adapter)
             {
-                // Allocate a new adapter using the current HIP device
-                adapter = new Tensile::hip::SolutionAdapter;
+                // Hold the new adapter in a unique_ptr so that if initialize()
+                // throws (e.g. a HIP error or code-object load failure) the
+                // adapter is freed during unwinding rather than leaked.
+                // Ownership transfers to a.adapter only after initialize()
+                // succeeds.
+                auto new_adapter = std::make_unique<Tensile::hip::SolutionAdapter>();
 
                 // Initialize the adapter and get the library (all of the same gfx use the same library)
-                a.library = host.initialize(*adapter, device);
+                a.library = host.initialize(*new_adapter, device);
 
                 // Atomically change the adapter stored for this device ID
+                adapter = new_adapter.release();
                 a.adapter.store(adapter, std::memory_order_release);
             }
         }
@@ -1212,20 +1216,20 @@ namespace
     {
         rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
                      << e.what() << std::endl;
-        throw;
+        rocblas_abort();
     }
     catch(const rocblas_status& status)
     {
         rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
                      << rocblas_status_to_string(status) << std::endl;
-        throw;
+        rocblas_abort();
     }
     catch(...)
     {
         rocblas_cerr
             << "\nrocBLAS error: Could not initialize Tensile host:\nUnknown exception thrown"
             << std::endl;
-        throw;
+        rocblas_abort();
     }
 
     /**************************************************************************
