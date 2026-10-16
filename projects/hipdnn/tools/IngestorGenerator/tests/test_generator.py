@@ -684,12 +684,16 @@ class TestSpecializationContractEmission:
         cross-reference a packed bundle carries (the UED's `id` and `metadata` among
         them) must be a UUID the packer resolves."""
         descriptors = _import_hkp_pack("descriptors")
-        if descriptors is None:
+        generic_targets = _import_hkp_pack("generic_targets")
+        if descriptors is None or generic_targets is None:
             pytest.skip("hkp_pack is not importable from this checkout")
         config = gfx950_attention_dense_config
         generator.render(config, tmp_path)
+        # The shipped generic target table, as the packer loads it at pack time.
         flat = descriptors.load_flat_input(
-            tmp_path / config.descriptor_dir, log=lambda _message: None
+            tmp_path / config.descriptor_dir,
+            generic_targets.GenericTargets.load(generic_targets.DEFAULT_TABLE_PATH),
+            log=lambda _message: None,
         )
         # A wrong root would load nothing and pass vacuously.
         assert flat.by_type("ued") and flat.by_type("kmd")
