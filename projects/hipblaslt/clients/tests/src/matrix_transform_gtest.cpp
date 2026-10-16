@@ -52,10 +52,10 @@ namespace
         virtual size_t elemNumBytes() const = 0;
 
     private:
-        MatrixTransformIO(const MatrixTransformIO&)            = delete;
-        MatrixTransformIO(MatrixTransformIO&&)                 = delete;
+        MatrixTransformIO(const MatrixTransformIO&) = delete;
+        MatrixTransformIO(MatrixTransformIO&&)      = delete;
         MatrixTransformIO& operator=(const MatrixTransformIO&) = delete;
-        MatrixTransformIO& operator=(MatrixTransformIO&&)      = delete;
+        MatrixTransformIO& operator=(MatrixTransformIO&&) = delete;
     };
 
     template <typename DType>

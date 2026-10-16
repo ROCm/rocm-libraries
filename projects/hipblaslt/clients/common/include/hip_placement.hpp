@@ -144,7 +144,7 @@ public:
             (void)hipMemAddressFree(m_reserved, m_reserved_bytes);
     }
 
-    PlacedRegion(const PlacedRegion&)            = delete;
+    PlacedRegion(const PlacedRegion&) = delete;
     PlacedRegion& operator=(const PlacedRegion&) = delete;
 
     void* ptr() const

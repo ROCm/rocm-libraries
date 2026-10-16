@@ -283,7 +283,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? ldb : 1;
         Tensor          result        = expectedD.shareStorageWithLayout(
             Layout(Shape{size_t(M), size_t(N)},
-                                   {1, ldd},
+                   {1, ldd},
                    ptrdiff_t(batch) * ptrdiff_t(dPlan.matrixElements)));
         Tensor a = hostA.shareStorageWithLayout(
             Layout(Shape{size_t(M), size_t(K)},

@@ -71,7 +71,7 @@ public:
         buffer = nullptr;
     }
 
-    HipDeviceBuffer(const HipDeviceBuffer&)            = delete;
+    HipDeviceBuffer(const HipDeviceBuffer&) = delete;
     HipDeviceBuffer& operator=(const HipDeviceBuffer&) = delete;
 
     // The moved-from buffer must forget its pointer, or its destructor would check guard pads
@@ -93,9 +93,9 @@ public:
             buffer = nullptr;
 
             d_vector_type::operator=(std::move(other));
-            numBytes = std::exchange(other.numBytes, 0);
-            placed   = std::move(other.placed);
-            buffer   = std::exchange(other.buffer, nullptr);
+            numBytes               = std::exchange(other.numBytes, 0);
+            placed                 = std::move(other.placed);
+            buffer                 = std::exchange(other.buffer, nullptr);
             other.reset_after_move();
         }
         return *this;
@@ -165,16 +165,16 @@ class HipHostBuffer
 public:
     HipHostBuffer(hipDataType dtype, std::size_t numElements)
         : buffer(std::make_shared<PooledHostMemory>(memory_pool<h_memory>::Get(
-              realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
-                                                    : realDataTypeSize(dtype))))
+            realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
+                                                  : realDataTypeSize(dtype))))
     {
     }
 
-    ~HipHostBuffer()                               = default;
-    HipHostBuffer(const HipHostBuffer&)            = delete;
-    HipHostBuffer(HipHostBuffer&&)                 = default;
+    ~HipHostBuffer()                    = default;
+    HipHostBuffer(const HipHostBuffer&) = delete;
+    HipHostBuffer(HipHostBuffer&&)      = default;
     HipHostBuffer& operator=(const HipHostBuffer&) = delete;
-    HipHostBuffer& operator=(HipHostBuffer&&)      = default;
+    HipHostBuffer& operator=(HipHostBuffer&&) = default;
 
     void* end()
     {
