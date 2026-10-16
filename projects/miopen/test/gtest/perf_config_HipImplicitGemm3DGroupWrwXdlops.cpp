@@ -12,9 +12,12 @@
 // deterministic mode, and needs a ROCm device plus the installed CK grouped-conv library
 // (GTEST_SKIP otherwise). It uses a canonical group=1, C=K=64 shape that CK should always
 // enumerate kernels for; a missing kernel fails the ASSERT on purpose, signalling a real
-// CK/applicability regression rather than a bad test shape. CPU_* checks the deterministic
-// and non-deterministic advance on the host by injecting valid_kernels directly -- no device
-// needed (same technique as perf_config_group_deterministic_set_next_value.cpp).
+// CK/applicability regression rather than a bad test shape.
+//
+// The host-only SetNextValue() advance checks for this config (single-kernel termination,
+// deterministic walk, non-deterministic coverage) live in
+// perf_config_group_deterministic_set_next_value.cpp, where they share the templated helpers
+// with the 2D grouped Bwd/Wrw configs.
 
 #include <gtest/gtest.h>
 #include <gtest/group_conv.hpp>
@@ -26,7 +29,6 @@
 
 #include "get_handle.hpp"
 
-#include <set>
 #include <string>
 
 namespace {
@@ -148,83 +150,3 @@ TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchS
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32,
                          ::testing::Values(0));
-
-// Deterministic walk: with three valid kernels, deterministic SetNextValue() must visit index 1
-// then index 2 before exhausting. The inverted-NextLinear bug exhausted after the first call.
-TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, WalksEveryKernelThenExhausts)
-{
-    const auto problem =
-        MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/true);
-
-    Config cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 0;
-    cfg.split_k       = 1;
-
-    ASSERT_TRUE(cfg.SetNextValue(problem));
-    EXPECT_EQ(cfg.index, 1);
-    EXPECT_EQ(cfg.split_k, 1);
-    EXPECT_EQ(cfg.kernel_id, "B+1");
-
-    ASSERT_TRUE(cfg.SetNextValue(problem));
-    EXPECT_EQ(cfg.index, 2);
-    EXPECT_EQ(cfg.split_k, 1);
-    EXPECT_EQ(cfg.kernel_id, "C+1");
-
-    EXPECT_FALSE(cfg.SetNextValue(problem));
-    EXPECT_EQ(cfg.index, 2) << "Exhaustion must leave the cursor on the last kernel, not wrap it";
-}
-
-// Hang regression: deterministic mode with exactly one valid kernel must terminate immediately.
-// The inverted bug fell through and could spin on a single-kernel index space.
-TEST(CPU_PerfConfig3DGroupWrwDeterministic_NONE, SingleKernelTerminates)
-{
-    const auto problem =
-        MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/true);
-
-    // One valid kernel: the seed is the whole search, so SetNextValue must report exhaustion
-    // immediately and leave the cursor untouched -- no re-emit, no step past index 0.
-    Config cfg(false);
-    cfg.valid_kernels = {"A"};
-    cfg.index         = 0;
-    cfg.split_k       = 1;
-    cfg.kernel_id     = cfg.valid_kernels.front() + "+1";
-
-    int iterations = 0;
-    while(cfg.SetNextValue(problem))
-    {
-        ++iterations;
-        ASSERT_LT(iterations, 10) << "SetNextValue looped instead of terminating";
-    }
-    EXPECT_EQ(iterations, 0);
-    EXPECT_EQ(cfg.index, 0);
-    EXPECT_EQ(cfg.split_k, 1);
-    EXPECT_EQ(cfg.kernel_id, "A+1");
-}
-
-// Non-deterministic smoke: the (untouched) non-deterministic branch must still terminate and
-// explore more than one (index, split_k) combination.
-TEST(CPU_PerfConfig3DGroupWrwNonDeterministic_NONE, VisitsMultipleValues)
-{
-    const auto problem =
-        MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/false);
-
-    Config cfg(false);
-    cfg.valid_kernels = {"A", "B", "C"};
-    cfg.index         = 0;
-    cfg.split_k       = 1;
-    cfg.kernel_id     = cfg.valid_kernels[cfg.index] + "+" + std::to_string(cfg.split_k);
-
-    std::set<int> visited_indices{cfg.index};
-    std::set<int> visited_split_ks{cfg.split_k};
-    int iterations = 0;
-    while(cfg.SetNextValue(problem))
-    {
-        visited_indices.insert(cfg.index);
-        visited_split_ks.insert(cfg.split_k);
-        ++iterations;
-        ASSERT_LT(iterations, 500) << "Non-deterministic SetNextValue did not terminate";
-    }
-    EXPECT_GT(visited_indices.size(), 1u);
-    EXPECT_GT(visited_split_ks.size(), 1u);
-}
