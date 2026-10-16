@@ -1,0 +1,51 @@
+# Lane: build and validate (`RUN`)
+
+Build what the change touches at `$HEAD` and run the tests that exercise it, following the PR's own instructions where it gives
+them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/SKILL.md) and
+[hipdnn-superbuild-test](../../hipdnn-superbuild-test/SKILL.md). Work in `$SCRATCH/RUN/`.
+
+## Steps
+
+1. **Checkout.** When this lane builds, use a full (non-sparse) worktree of `$HEAD` at `$SCRATCH/RUN/head`: tests resolve paths
+   against the repository root. Add a full worktree of `$BASE` at `$SCRATCH/RUN/base` only for a base reproduction (step 6). A
+   change that builds nothing (docs or tooling only) runs its read-only checks in `$REPO`. Never build in `$REPO` or `$REPO_BASE`.
+   Without a ROCm install, CMake, Ninja and a C++ toolchain, build nothing and record `no build available (<missing>)` under
+   **Coverage**; `defect` and `test-gap` candidates then stay `UNVERIFIED`.
+2. **Route by what changed.** Use the PR's stated steps if it gives them; otherwise:
+
+   | Changed | Build | Tests | Select |
+   |---|---|---|---|
+   | Core C++ or CMake, `projects/hipdnn/**` | Standalone `projects/hipdnn` build (`projects/hipdnn/docs/Building.md`, `projects/hipdnn/CMakePresets.json`) | CTest, gtest | `ctest -R <regex>` or `-L <label>`; `--gtest_filter=<pattern>` |
+   | Provider or integration tests, `dnn-providers/**` | hipdnn-superbuild | hipdnn-superbuild-test | Its component, scope and `--filter` inputs |
+   | Python bindings or wheel, `projects/hipdnn/python/**` | Superbuild with the bindings, then the wheel (`projects/hipdnn/python/README.md` § "Testing the Wheel") | pytest on `projects/hipdnn/python/frontend_wheel_package/tests` | `-k <expr>` or node ids; `-m "not gpu"` on the host |
+   | Other Python tooling with a `tests/` dir | None | That pytest suite (e.g. `projects/hipdnn/tools/DescriptorGenerator/tests`) | `-k`, node ids; markers from `pytest.ini`, `pyproject.toml` or `conftest.py` |
+   | AI skills, `projects/hipdnn/tools/ai/**` | None | `python3 projects/hipdnn/tools/ai/validate-skills.py`; pytest on `projects/hipdnn/tools/ai/tests` | Whole suite |
+   | Docs | Doxygen (`projects/hipdnn/Doxyfile`) for frontend API docs; Sphinx (`projects/hipdnn/docs/user-guides/conf.py`) for the user guide | Relative links and anchors in changed Markdown resolve | Changed files |
+   | Core C++ or CMake with new options or install rules | Also configure only: tests OFF, and the superbuild beside the standalone build | The configure exits 0 | — |
+   | ASAN | Host-only configure with `-DBUILD_ADDRESS_SANITIZER=ON`; device ASAN (Linux, `HSA_XNACK=1`) needs a GPU: an approval request (`projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md`, § "Sanitizers and platforms") | Host-runnable tests that exercise the ownership paths in question | `ctest -R <regex>` |
+   | Anything | — | `pre-commit run --files <changed files>` (hooks include `verify-support-claims`, `check-yaml`) | Changed files |
+
+   `<regex>`, `<label>`, `<pattern>` and `<expr>` come from step 3; `<changed files>` is the path list in `numstat.txt`. Enable
+   every option the change depends on and say which. Cap parallelism to what the host allows. Keep full logs in
+   `$SCRATCH/RUN/`; read only tails and error lines.
+3. **Select tests.** Only those that reach the changed files. Record each changed file's selected tests.
+4. **Registration.** Each new CTest test appears under its expected label: `ctest -N -L <label>`, or `ctest --show-only=json-v1`
+   for every test's labels. Core registers through `add_hipdnn_test` (`projects/hipdnn/cmake/Tests.cmake`); providers through
+   `add_unit_test_target`, `add_integration_test_target` (`dnn-providers/cmake/Tests.cmake`) and
+   `add_external_integration_test_target` (`dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake`). Install
+   with `cmake --install <build> --prefix $SCRATCH/RUN/prefix`; list installed core tests with
+   `ctest --test-dir $SCRATCH/RUN/prefix/bin/hipdnn -N`.
+5. **Run.** Run CPU-only selections locally. Put each GPU selection under **Approval requests**; run it only when re-dispatched
+   with it approved.
+6. **Failures.** Rerun each failing selection once at `$HEAD` to separate flaky from broken, then at `$BASE` in
+   `$SCRATCH/RUN/base`. A failure at both is pre-existing; attach both logs.
+7. **Account.** One row per suite under **Checked, no finding**: suite, arch, selected, passed, skipped, failed, engine, log; read
+   counts and the serving engine from the logs. Record build directories, install prefixes and binaries so verifiers reuse them.
+
+## Findings
+
+- PR steps that do not work as written (missing option, wrong target, missing dependency).
+- Build warnings introduced by the change in files it touches.
+- New tests not registered, not labeled, not installed, or skipped where they should run.
+- Failures introduced at `$HEAD`, with the `$HEAD` and `$BASE` logs.
+- Results that contradict the PR's testing claims.
