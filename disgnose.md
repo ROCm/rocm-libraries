@@ -108,7 +108,8 @@ cad1b08b loop with both fixes: sig(LDS1) @ instr 37 (wmma 1) .. wait(LDS1) @ 121
   | fix 1 (c91d4a9d7c) | 540/540, 22 of 22 runs | 6/6 |
   | fix 1 + 2 (47db0a41e9) | 540/540, 1 run | 6/6, 5 of 5 runs |
 
-- `cad1b08b_{bug,fixed}.s` and `90155ca0_{bug,fixed}.s` at the repo root: `_fixed` is fix 1 only.
+- `cad1b08b_*.s` and `90155ca0_*.s` at the repo root: `_bug` = mx128_rebase, `_fixed` = fix 1 only,
+  `_fixed2` = fix 1 + 2.
 
 ### Open items
 
