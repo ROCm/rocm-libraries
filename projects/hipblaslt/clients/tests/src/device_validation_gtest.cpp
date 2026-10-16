@@ -39,7 +39,7 @@ namespace
         {
             (void)hipStreamDestroy(value);
         }
-        Stream(const Stream&)            = delete;
+        Stream(const Stream&) = delete;
         Stream& operator=(const Stream&) = delete;
     };
 

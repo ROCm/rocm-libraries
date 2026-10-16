@@ -50,7 +50,7 @@ namespace
         {
             (void)hipFree(data);
         }
-        DeviceBytes(const DeviceBytes&)            = delete;
+        DeviceBytes(const DeviceBytes&) = delete;
         DeviceBytes& operator=(const DeviceBytes&) = delete;
     };
 
@@ -486,7 +486,7 @@ namespace
                                 epilogue.addendScale = hn::Tensor(beta);
                                 epilogue.addend      = c.shareStorageWithLayout(
                                     hn::Layout(hn::Shape{m, width},
-                                                    {1, ptrdiff_t(m)},
+                                               {1, ptrdiff_t(m)},
                                                batch * hostStrideC + col * m));
                                 if(!large)
                                     epilogue.bias = bias;

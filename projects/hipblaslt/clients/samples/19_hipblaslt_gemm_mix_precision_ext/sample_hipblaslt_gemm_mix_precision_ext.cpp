@@ -85,7 +85,7 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
         Tensor       c        = copyTensorFromEncodedStorage(cPtr + batchStrideC * b,
                                                 batchStrideC,
                                                 Layout(Shape{size_t(runner.m), size_t(runner.n)},
-                                                                    {1, static_cast<ptrdiff_t>(runner.m)}));
+                                                       {1, static_cast<ptrdiff_t>(runner.m)}));
         const Tensor product  = matmul(a, bTensor, ScalarType::Float32);
         const Tensor combined = product * (runner.alpha * scaleA)
                                 + c.copyConvertedTo(ScalarType::Float32) * runner.beta;

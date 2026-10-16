@@ -46,10 +46,10 @@ namespace TensileLite::Client::hostnumerics
 
     struct TranslatedGemmBatch
     {
-        TranslatedGemmBatch(TranslatedGemmBatch&&) noexcept            = default;
+        TranslatedGemmBatch(TranslatedGemmBatch&&) noexcept = default;
         TranslatedGemmBatch& operator=(TranslatedGemmBatch&&) noexcept = default;
 
-        TranslatedGemmBatch(const TranslatedGemmBatch&)            = delete;
+        TranslatedGemmBatch(const TranslatedGemmBatch&) = delete;
         TranslatedGemmBatch& operator=(const TranslatedGemmBatch&) = delete;
 
         roc::hostnumerics::MatmulOptions& matmulOptions()
@@ -160,7 +160,7 @@ namespace TensileLite::Client::hostnumerics
         GemmInvocationAdapter(GemmInvocationAdapter&&) noexcept;
         GemmInvocationAdapter& operator=(GemmInvocationAdapter&&) noexcept;
 
-        GemmInvocationAdapter(const GemmInvocationAdapter&)            = delete;
+        GemmInvocationAdapter(const GemmInvocationAdapter&) = delete;
         GemmInvocationAdapter& operator=(const GemmInvocationAdapter&) = delete;
 
         size_t batchCount() const;

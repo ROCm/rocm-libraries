@@ -108,7 +108,8 @@ int parseArgs(int                       argc,
 
 void reportComparison(const char* title, const roc::hostnumerics::ComparisonReport& comparison)
 {
-    std::cout << "----- " << title << " result" << " -----" << std::endl;
+    std::cout << "----- " << title << " result"
+              << " -----" << std::endl;
     std::cout << "status: " << (comparison.passed() ? "PASS" : "FAIL") << std::endl;
     std::cout << "compared: " << comparison.compared << std::endl;
     std::cout << "mismatches: " << comparison.mismatches << std::endl;
