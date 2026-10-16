@@ -552,7 +552,7 @@ def gfx950_dense_static_lds_bytes(
     group pad 8).
 
     ``wide_lds_dma=True`` uses the wide 8-rows-x-64-cols per slab-line layout
-    (see builder ~line 1699)::
+    (the ``wide_lds_dma`` K/V slab allocations in ``build_attention_dense``)::
 
         wide D128: K [2, D/64, BN/8, 64*8 + k_row_pad] +
                    V [2, D/64, BN/8, 64*8 + v_row_pad]
