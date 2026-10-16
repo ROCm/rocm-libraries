@@ -133,7 +133,10 @@
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */       \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */              \
-    X(DsSpreadToleranceCycles, int, -1)   /* < 0 = automatic */                                 \
+    X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */     \
+    X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */   \
+    X(DsPaceCount, int, -1)               /* Y: ds_loads per group; <= 0 = model */             \
+    X(DsPaceSeparators, int, -1)          /* real instrs between groups; < 0 = model */         \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
     X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */

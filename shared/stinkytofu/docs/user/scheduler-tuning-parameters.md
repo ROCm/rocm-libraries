@@ -92,14 +92,19 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Spread the region's ds_loads evenly over the time the region has left. A ds_load issues once `gap` cycles have passed since the previous one, where `gap = (cycles of WMMAs still to issue - ds return latency - tolerance) / ds_loads left`, re-evaluated at every decision, so a held load makes the next gaps shorter and the last ds_load still returns before the region ends. It also needs a free ds credit (`DsReadQueueDepth`). A load whose first consumer needs it sooner has its own deadline and issues then. Barrier ds_load windows use the same density. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
-| `DsSpreadToleranceCycles` | -1 → none | `--ds-spread-tolerance-cycles=N` | Extra cycles of lead for the spread: the last ds_load issues that many cycles earlier than the ds return latency alone requires. Larger = closer to greedy. |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Issue the region's ds_loads at their own pace, independent of the WMMA count: groups of `DsPaceCount` (Y) ds_loads, one group every `DsPaceCycles` (X) cycles of the region clock, and at least `DsPaceSeparators` real instructions (WMMA / VALU / SALU) emitted between two groups, so the spacing exists in the instruction stream and not only in the model. A ds_load whose first consumer needs it sooner has its own deadline and issues then. A region whose ds_loads cost more issue cycles than its WMMAs take lets released ds_loads issue outside the co-issue window. A held ds_load never holds a WMMA, so the WMMA queue stays fed. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
+| `DsSpreadToleranceCycles` | -1 → none | `--ds-spread-tolerance-cycles=N` | Extra lead handed to the pace model (`DsPaceRegion::toleranceCycles`). The default pace and the pace options do not use it. |
+| `DsPaceCycles` | -1 → model | `--ds-pace-cycles=N` | X: cycles between the starts of two ds_load groups. -1 = from `dsPaceModel`, else 0 (no cycle rate; only separators pace the loads). |
+| `DsPaceCount` | -1 → model | `--ds-pace-count=N` | Y: ds_loads per group. <= 0 = from `dsPaceModel`, else the fewest per group that lets the region's separators hold all its ds_loads (1 when they are plentiful), so a region with more ds_loads than separators spreads them evenly instead of draining the surplus at its end. |
+| `DsPaceSeparators` | -1 → model | `--ds-pace-separators=N` | Real instructions (WMMA / VALU / SALU) required between two groups. -1 = from `dsPaceModel`, else 1. 0 = pace by cycles only. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
 | `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
 | `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
 | `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
 
-A held ds_load is released early only when no WMMA is ready to issue in its place, or at its consumer deadline. With the debug
+A held ds_load is released early only when no WMMA is ready to issue in its place, or at its consumer deadline.
+
+**Pace model socket:** `PassFeatureConfig::dagFeatures.dsPaceModel` (a `std::function<DsPace(const DsPaceRegion&)>`, C++ only) sets X, Y and the separators per region from its stats (WMMAs, WMMA window, ds_loads, separator count, ds return latency, tolerance). There is no model yet; the options above override any field it returns. With the debug
 type `StinkyDAGSchedulerPass` enabled, each region logs the tail reserve and `gapCv`, the
 coefficient of variation of the gaps between its ds_loads (0 = perfectly even).
 

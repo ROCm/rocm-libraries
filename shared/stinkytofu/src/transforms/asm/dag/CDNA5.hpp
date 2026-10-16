@@ -431,12 +431,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return globalReadInflight_.full();
     }
 
-    // Cycles the region's WMMAs still to issue will take, less the cover the wave already has
-    // queued ahead of the pipe. The time the ds spread has left.
-    int dsSpreadWmmaCyclesLeft() const {
-        const int left = std::max(0, wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_);
-        return std::max(0, left * std::max(1, wmmaIssueConfig.latency) - queuedCoverCycles());
-    }
     bool dsSpreadOn() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.dsSpread;
     }
@@ -725,6 +719,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool wmmaRefilling_ = false;
     int wmmaRefillLeft_ = 0;
     DsSpreadPacer dsSpread_;
+    // The region's ds_loads cost more issue cycles than its WMMAs take, so they cannot all hide
+    // under a co-issue window: a ds_load the pace has released may issue outside one.
+    bool dsOverflow_ = false;
     // decidePromote() held a ready barrier back: the queued WMMA cover is below the barrier cover.
     bool barrierWaitsForCover_ = false;
 
@@ -968,7 +965,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
         PASS_DEBUG({
             if (dsSpreadOn() && dsSpread_.active())
                 std::cerr << "[CDNA5 dsSpread] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
-                          << " tailReserve=" << dsSpread_.tailReserveCycles()
+                          << " paceCycles=" << dsSpread_.pace().cycles
+                          << " paceCount=" << dsSpread_.pace().count
                           << " gapCv=" << dsSpread_.gapCv() << "\n";
         });
     }
@@ -979,6 +977,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
         if (waitAlu_) waitAlu_->commit(inst);
+        // Real instructions between ds_load groups: they move the hardware timeline on, which a
+        // clock advance with nothing emitted does not.
+        if (isDsSpreadSeparator(inst)) dsSpread_.noteSeparator();
+    }
+    static bool isDsSpreadSeparator(const StinkyInstruction& inst) {
+        return isMatrixInstruction(inst) || isVectorALU(inst) || isTranscendental(inst) ||
+               isScalarALU(inst);
     }
 };
 
@@ -1181,8 +1186,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
         dsReadInflight_.push(dsReadCreditLifetime());
-        dsSpread_.noteIssue(clock_, dsSpreadWmmaCyclesLeft(),
-                            dsTotalThisRegion_ - dsIssuedThisRegion_ + 1);
+        dsSpread_.noteIssue(clock_);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1624,7 +1628,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             dsCreditWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
-        if (fitsSchedulingBudget) {
+        if (fitsSchedulingBudget || (spread && dsOverflow_)) {
             if (!spread || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
@@ -3363,6 +3367,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
     logDsSpreadEvenness();
     dsSpread_.reset();
+    dsOverflow_ = false;
     if (dagFeatures.dsSpread) {
         std::vector<int> wmmaIndex(deps.dag.nodes.size(), INT_MAX);
         int wmmaOrdinal = 0;
@@ -3398,17 +3403,31 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         constexpr int kDsLeadWindows = 2;
-        // The last ds_load must return before the region ends, so it issues its credit lifetime
-        // ahead of the last WMMA.
-        dsSpread_.plan(loads, windowCycles, dagFeatures.dsSpreadToleranceCycles,
-                       kDsLeadWindows * windowCycles, dsReadCreditLifetime(), clock_);
-        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
-                             << " wmmas=" << wmmaTotalThisRegion_
-                             << " tailReserve=" << dsSpread_.tailReserveCycles()
-                             << " toleranceCycles=" << dsSpread_.toleranceCycles() << " startGap="
-                             << dsSpread_.gapCycles(wmmaTotalThisRegion_ * windowCycles,
-                                                    static_cast<int>(loads.size()))
-                             << "\n");
+        // The pace: Y ds_loads every X cycles. Each field comes from the options when set, else
+        // from the analysis model (dsPaceModel) when one is plugged in, else the default pace.
+        PassFeatureConfig::DsPaceRegion region;
+        region.wmmaTotal = wmmaTotalThisRegion_;
+        region.windowCycles = windowCycles;
+        region.dsTotal = static_cast<int>(loads.size());
+        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
+            region.separatorTotal += isDsSpreadSeparator(*deps.dag.nodes[id].inst);
+        region.tailReserveCycles = dsReadCreditLifetime();
+        region.toleranceCycles = std::max(0, dagFeatures.dsSpreadToleranceCycles);
+        PassFeatureConfig::DsPace pace = dagFeatures.dsPaceModel
+                                             ? dagFeatures.dsPaceModel(region)
+                                             : defaultDsPace(region, dagFeatures.dsPaceSeparators);
+        if (dagFeatures.dsPaceCycles >= 0) pace.cycles = dagFeatures.dsPaceCycles;
+        if (dagFeatures.dsPaceCount > 0) pace.count = dagFeatures.dsPaceCount;
+        if (dagFeatures.dsPaceSeparators >= 0) pace.separators = dagFeatures.dsPaceSeparators;
+        dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_);
+        dsOverflow_ = static_cast<long long>(loads.size()) *
+                          dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
+                      static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
+                             << wmmaTotalThisRegion_ << " separators=" << region.separatorTotal
+                             << " paceCycles=" << dsSpread_.pace().cycles
+                             << " paceCount=" << dsSpread_.pace().count
+                             << " paceSeparators=" << dsSpread_.pace().separators << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

@@ -9,25 +9,43 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/core/Types.hpp"
+
 namespace stinkytofu {
 
-// Spreads a region's ds_loads evenly over the time the region has left, in cycles.
+// The pace used when neither the options nor an analysis model (PassFeatureConfig::dsPaceModel)
+// set one: no cycle rate, only separators. Each group of ds_loads is followed by at least
+// `separators` real instructions, and a group carries as many ds_loads as the region's separators
+// need to hold them all, so a region with more ds_loads than separators spreads them evenly
+// instead of draining the surplus at its end.
+inline PassFeatureConfig::DsPace defaultDsPace(const PassFeatureConfig::DsPaceRegion& r,
+                                               int requestedSeparators) {
+    PassFeatureConfig::DsPace pace;
+    pace.cycles = 0;
+    pace.separators = requestedSeparators >= 0 ? requestedSeparators : 1;
+    pace.count = 1;
+    if (r.dsTotal > 0 && pace.separators > 0) {
+        const int groups = r.separatorTotal / pace.separators + 1;
+        pace.count = std::max(1, (r.dsTotal + groups - 1) / groups);
+    }
+    return pace;
+}
+
+// Issues a region's ds_loads at their own pace, independent of the WMMA count: groups of
+// `count` ds_loads, one group every `cycles` cycles of the region clock, and at least
+// `separators` real instructions (WMMA / VALU / SALU) between two groups. The instructions are
+// counted as they are emitted, so the spacing exists in the instruction stream and not only in
+// the model's clock; a ds_load following another with nothing in between would otherwise stall
+// on the hardware.
 //
-// The time left is what the WMMAs still to issue will take, less the cycles the last ds_load needs
-// to return before the region ends (`tailReserveCycles`) and the manual `toleranceCycles`. Each
-// issue sets the next allowed time one `gap` later,
-//     gap = timeLeft / dsLeft   (fractional),
-// counted from the previous allowed time, not from the actual issue: the clock moves in whole
-// WMMA windows, so a gap shorter than a window would otherwise round up to a full window every
-// time and the lost fraction would pile up into a burst at the region end. Counted from the
-// allowed time, the fraction accumulates into evenly spaced double issues instead. After a stall
-// at most one extra load goes back to back. The gap is re-derived at each issue, so a held load
-// (no credit, a dependency, a barrier) makes the following gaps shorter and the last ds_load still
-// issues its return latency before the region ends.
+// The next group is allowed `cycles` after the previous group's allowed time, not after its
+// actual issue: the clock moves in whole WMMA windows, and counting from the issue would round
+// every period up and let the lost cycles pile into a burst at the region end. A long stall
+// releases one group at once, not several.
 //
 // A load whose first consumer WMMA needs it earlier than its turn has its own deadline,
 // consumerWindow * windowCycles - leadCycles after the region start; from then on it issues
-// regardless of the gap, so one tight consumer does not open the gate for every other load.
+// regardless of the pace, so one tight consumer does not open the gate for every other load.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -37,36 +55,27 @@ class DsSpreadPacer {
 
     void reset() {
         deadline_.clear();
-        toleranceCycles_ = 0;
-        tailReserveCycles_ = 0;
-        nextAllowed_ = kNever;
+        pace_ = {};
+        nextGroupAt_ = kNever;
+        runLength_ = 0;
+        separatorsSinceDs_ = 0;
         active_ = false;
         issueClocks_.clear();
     }
 
     // loads: the region's ds_loads in program order. startClock is the region clock at the plan.
-    // tailReserveCycles: cycles the last ds_load needs to return before the region ends.
-    // manualToleranceCycles >= 0 adds that many cycles of lead on top of the tail reserve;
-    // < 0 adds none (the per-load deadlines being the only other early release).
-    void plan(const std::vector<Load>& loads, int windowCycles, int manualToleranceCycles,
-              int leadCycles, int tailReserveCycles, int startClock = 0) {
+    void plan(const std::vector<Load>& loads, const PassFeatureConfig::DsPace& pace,
+              int windowCycles, int leadCycles, int startClock = 0) {
         reset();
         if (loads.empty() || windowCycles <= 0) return;
         active_ = true;
-        toleranceCycles_ = std::max(0, manualToleranceCycles);
-        tailReserveCycles_ = std::max(0, tailReserveCycles);
+        pace_.cycles = std::max(0, pace.cycles);
+        pace_.count = std::max(1, pace.count);
+        pace_.separators = std::max(0, pace.separators);
         for (const Load& l : loads) {
             if (l.consumerWindow != INT_MAX)
                 deadline_[l.nodeId] = startClock + l.consumerWindow * windowCycles - leadCycles;
         }
-    }
-
-    // Cycles between two consecutive ds_loads when `wmmaCyclesLeft` cycles of WMMAs and `dsLeft`
-    // ds_loads remain. 0 once there is nothing left to spread over (issue as soon as ready).
-    double gapCycles(int wmmaCyclesLeft, int dsLeft) const {
-        if (dsLeft <= 0) return 0.0;
-        const int budget = wmmaCyclesLeft - tailReserveCycles_ - toleranceCycles_;
-        return budget > 0 ? static_cast<double>(budget) / dsLeft : 0.0;
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -81,12 +90,8 @@ class DsSpreadPacer {
         return active_;
     }
 
-    int toleranceCycles() const {
-        return toleranceCycles_;
-    }
-
-    int tailReserveCycles() const {
-        return tailReserveCycles_;
+    const PassFeatureConfig::DsPace& pace() const {
+        return pace_;
     }
 
     // Whether the ds_load may issue at region clock `clock`.
@@ -94,18 +99,28 @@ class DsSpreadPacer {
         if (!active_) return true;
         auto dl = deadline_.find(nodeId);
         if (dl != deadline_.end() && clock >= dl->second) return true;
-        return clock >= nextAllowed_;
+        if (continuesGroup()) return true;
+        return clock >= nextGroupAt_ && (runLength_ == 0 || separatorsSinceDs_ >= pace_.separators);
     }
 
-    // A ds_load issued at `clock`, with `wmmaCyclesLeft` cycles of WMMAs still to issue in the
-    // region and `dsLeft` ds_loads still to issue (this one included).
-    void noteIssue(int clock, int wmmaCyclesLeft, int dsLeft) {
-        const double gap = gapCycles(wmmaCyclesLeft, dsLeft);
-        // From the previous allowed time, but never more than one gap behind the clock: a stall
-        // lets one extra load go, not a burst. The first load only sets the pace.
-        nextAllowed_ =
-            nextAllowed_ == kNever ? clock + gap : std::max(nextAllowed_ + gap, double(clock));
+    // A ds_load issued at region clock `clock`.
+    void noteIssue(int clock) {
+        if (continuesGroup()) {
+            ++runLength_;
+        } else {
+            runLength_ = 1;
+            // From the previous allowed time, but never more than one period behind the clock.
+            nextGroupAt_ = nextGroupAt_ == kNever
+                               ? clock + pace_.cycles
+                               : std::max(nextGroupAt_ + pace_.cycles, static_cast<double>(clock));
+        }
+        separatorsSinceDs_ = 0;
         issueClocks_.push_back(clock);
+    }
+
+    // A WMMA / VALU / SALU instruction was emitted.
+    void noteSeparator() {
+        ++separatorsSinceDs_;
     }
 
     // Coefficient of variation of the gaps between consecutive ds_load issues (0 = perfectly
@@ -126,13 +141,20 @@ class DsSpreadPacer {
     }
 
    private:
-    static constexpr double kNever = -1e18;  // no ds_load issued yet
+    static constexpr double kNever = -1e18;  // no group started yet
+
+    // The ds_load right after another one, nothing emitted in between, joins its group while the
+    // group has room.
+    bool continuesGroup() const {
+        return runLength_ > 0 && separatorsSinceDs_ == 0 && runLength_ < pace_.count;
+    }
 
     std::unordered_map<unsigned, int> deadline_;
     std::vector<int> issueClocks_;
-    double nextAllowed_ = kNever;
-    int toleranceCycles_ = 0;
-    int tailReserveCycles_ = 0;
+    PassFeatureConfig::DsPace pace_;
+    double nextGroupAt_ = kNever;
+    int runLength_ = 0;
+    int separatorsSinceDs_ = 0;
     bool active_ = false;
 };
 
