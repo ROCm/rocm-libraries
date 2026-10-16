@@ -523,8 +523,8 @@ TEST_CASE("AddStreamK BasicStreamKLoad", "[streamk][kernel-graph][gpu]")
 
             auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
             auto res = compare(hostA, referenceA, tol);
-            CHECK(res.ok);
-            if(!res.ok)
+            CHECK(res.ok());
+            if(!res.ok())
             {
                 INFO(res.message());
             }

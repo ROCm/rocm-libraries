@@ -53,9 +53,6 @@ if(TENSILELITE_STANDALONE)
 
     find_package(hip REQUIRED)
     find_package(origami CONFIG REQUIRED)
-    if(TENSILELITE_ENABLE_MXDATAGENERATOR)
-        find_package(mxDataGenerator CONFIG REQUIRED)
-    endif()
 endif()
 
 if(NOT TENSILELITE_ENABLE_YAML)
@@ -179,6 +176,7 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
+            roc::hostnumerics-amd-gpu-layout
             ZLIB::ZLIB
     )
 

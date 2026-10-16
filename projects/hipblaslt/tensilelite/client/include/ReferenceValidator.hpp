@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include "ProgramOptions.hpp"
@@ -37,6 +36,10 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <roc/hostnumerics/freivalds.hpp>
+#include <roc/hostnumerics/operation_types.hpp>
+#include <span>
+#include <vector>
 
 namespace TensileLite
 {
@@ -46,8 +49,9 @@ namespace TensileLite
         class ReferenceValidator : public RunListener
         {
         public:
-            ReferenceValidator(po::variables_map const&                    args,
-                               std::vector<std::shared_ptr<DeviceContext>> devices);
+            ReferenceValidator(po::variables_map const&            args,
+                               std::shared_ptr<DataInitialization> dataInit,
+                               hipStream_t                         stream = nullptr);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -65,10 +69,11 @@ namespace TensileLite
             virtual void   setNumWarmupRuns(size_t count) override;
             virtual void   preWarmup() override;
             virtual void   postWarmup(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents) override;
-            virtual void   validateWarmups(std::vector<size_t> const& slots,
-                                           TimingEvents const&        startEvents,
-                                           TimingEvents const&        stopEvents) override;
+                                      TimingEvents const& stopEvents,
+                                      hipStream_t const&  stream) override;
+            virtual void   validateWarmups(std::shared_ptr<ProblemInputs> inputs,
+                                           TimingEvents const&            startEvents,
+                                           TimingEvents const&            stopEvents) override;
 
             virtual size_t numSyncs() override
             {
@@ -83,35 +88,30 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues() override {}
+            virtual void preEnqueues(hipStream_t const& stream) override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents) override
+                                      TimingEvents const& stopEvents,
+                                      hipStream_t const&  stream) override
             {
             }
-            virtual void validateEnqueues(std::vector<size_t> const& slots,
-                                          TimingEvents const&        startEvents,
-                                          TimingEvents const&        stopEvents) override;
+            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
+                                          TimingEvents const&            startEvents,
+                                          TimingEvents const&            stopEvents) override
+            {
+            }
 
-            bool validate(ContractionProblemGemm const& problem,
-                          ContractionInputs const&      reference,
-                          ContractionInputs const&      result);
+            bool validate(ContractionProblemGemm const&             problem,
+                          ContractionInputs const&                  reference,
+                          ContractionInputs const&                  result,
+                          const roc::hostnumerics::OutputSelection& outputSelection);
 
-            bool checkResults(TensorDescriptor const& tensor,
-                              void const*             refPtr,
-                              void const*             resPtr,
-                              size_t                  maxElements,
-                              bool                    isgpu,
-                              size_t                  validationStride,
-                              double                  threshold);
-
-            template <typename ValidType>
-            bool checkResultsTyped(TensorDescriptor const& tensor,
-                                   ValidType const*        reference,
-                                   ValidType const*        result,
-                                   size_t                  maxElement,
-                                   bool                    isgpu,
-                                   size_t                  validationStride,
-                                   double                  threshold);
+            bool checkResults(TensorDescriptor const&                   tensor,
+                              void const*                               refPtr,
+                              void const*                               resPtr,
+                              size_t                                    maxElements,
+                              bool                                      isgpu,
+                              const roc::hostnumerics::OutputSelection& outputSelection,
+                              double                                    threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,
@@ -121,20 +121,24 @@ namespace TensileLite
 
             virtual int error() const override;
 
-            std::shared_ptr<ProblemInputs> referenceInputs(size_t card) const
-            {
-                return m_referenceInputs[card];
-            }
-
         private:
+            void prepareFreivalds();
+            bool validateFreivalds(const ProblemInputs& inputs);
+            using FreivaldsBatch
+                = std::pair<roc::hostnumerics::FreivaldsPlan, roc::hostnumerics::Layout>;
+            std::vector<std::vector<FreivaldsBatch>> m_freivaldsPlans;
+            bool                                     m_freivalds = false;
+            hipStream_t                              m_stream    = nullptr;
+
             void allocateResultBuffer(size_t bytes);
 
             bool shouldSkipNullTensor(const std::string& tensorName,
-                                      bool hasNullPointer,
-                                      bool hasZeroElements) const;
+                                      bool               hasNullPointer,
+                                      bool               hasZeroElements) const;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
-            std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+            std::shared_ptr<DataInitialization>             m_dataInit;
+            std::shared_ptr<ProblemInputs>                  m_referenceInputs;
+            std::vector<roc::hostnumerics::OutputSelection> m_outputSelections;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
@@ -142,7 +146,6 @@ namespace TensileLite
             ContractionProblem* m_problem;
 
             bool m_enabled;
-            bool m_fusedA2A = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -167,9 +170,7 @@ namespace TensileLite
             bool   m_executedSolution  = false;
             size_t m_errorsReported    = 0;
 
-            bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
-            void validateSlots(std::vector<size_t> const& slots);
-            bool recvMatches(size_t dst, ContractionInputs const& inputs);
+            bool validateSolution(std::shared_ptr<ProblemInputs> inputs);
         };
     } // namespace Client
 } // namespace TensileLite

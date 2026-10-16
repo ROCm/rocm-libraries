@@ -29,7 +29,7 @@
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 
-#include "Reference.hpp"
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -38,7 +38,8 @@
 #include <cstddef>
 #include <thread>
 
-namespace {
+namespace
+{
     // Computes total bytes read/written for a GEMM problem instance (A/B reads + D writes),
     // plus additional traffic from optional tensors (C when beta!=0, E, bias, scaling tensors, MX scales).
     // Used for approximate bandwidth reporting in the client logger.
@@ -75,8 +76,8 @@ namespace {
         // Add E tensor bytes if enabled.
         if(gemm.useE())
         {
-          auto eDtypeInfo = DataTypeInfo::Get(gemm.e().dataType());
-          totalBytes += multiplyElementSize(M * N * numBatches, eDtypeInfo.elementSize);
+            auto eDtypeInfo = DataTypeInfo::Get(gemm.e().dataType());
+            totalBytes += multiplyElementSize(M * N * numBatches, eDtypeInfo.elementSize);
         }
 
         // Add bias vector bytes if enabled.
@@ -86,19 +87,22 @@ namespace {
         // Add scale tensor bytes if enabled.
         if(!gemm.useScaleAB().empty())
         {
-            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes();
-            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes();
+            totalBytes
+                += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes();
+            totalBytes
+                += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes();
         }
 
         if(gemm.useScaleCD())
         {
-            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEC].totalAllocatedBytes();
-            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALED].totalAllocatedBytes();
+            totalBytes
+                += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEC].totalAllocatedBytes();
+            totalBytes
+                += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALED].totalAllocatedBytes();
         }
 
         if(gemm.useScaleAlphaVec() != 0)
             totalBytes += gemm.scaleAlphaVec().totalAllocatedBytes();
-
 
         // Add MX scale tensor bytes if dtype is MX.
         if(gemm.mxTypeA() != rocisa::DataType::None && gemm.mxBlockA() > 0)
@@ -114,7 +118,6 @@ namespace {
         return totalBytes;
     }
 }
-
 
 namespace TensileLite
 {
@@ -249,11 +252,11 @@ namespace TensileLite
 
             {
                 ScopedTimer timer("post_solution_perf_calc");
-                bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
+                bool        sol_is_skipped = (m_skiprun_from_map || m_skip_slow_solution);
                 timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
-                                                                     / m_numEnqueuesInSolution
-                                                                 - m_flushTimeUs
-                                                           : std::numeric_limits<double>::quiet_NaN();
+                                                              / m_numEnqueuesInSolution
+                                                          - m_flushTimeUs
+                                                    : std::numeric_limits<double>::quiet_NaN();
 
                 ContractionSolution::ProjectedPerformance pp;
                 double                                    flopCount = 0;
@@ -274,8 +277,8 @@ namespace TensileLite
                 }
 
                 gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-                int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
-                int    usedCus     = std::min(tiles, perf.CUs);
+                int tiles   = pp.granularities.tilesPerCu * perf.CUs;
+                int usedCus = std::min(tiles, perf.CUs);
                 gflopsPerCu = gflops / usedCus;
 
                 if(!sol_is_skipped)
@@ -287,7 +290,7 @@ namespace TensileLite
                     }
                     else if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                     {
-                        for (const auto &gemm : problem->gemms)
+                        for(const auto& gemm : problem->gemms)
                             totalBytes += computeByteRWForGEMM(gemm);
                     }
                     else
