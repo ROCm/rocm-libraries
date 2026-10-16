@@ -1,0 +1,164 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --GirWaitCntInsertionPass --print-output
+#
+# Every GirWaitCntInsertionPass fixture in one file: the contract is MODULE scope, so one
+# block serves every function and the ids are offset by 100 per function to keep them
+# distinct.
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+gen 1  ring=2 entry=0
+gen 2  ring=2 entry=0
+gen 100  ring=2 entry=0
+incoming  dst=102 src=100 gen=100 value=0
+incoming  dst=102 src=101 gen=100 value=0
+gen 200  ring=4 entry=0
+gen 300  ring=2 entry=0
+incoming  dst=301 src=300 gen=300 value=0
+incoming  dst=301 src=301 gen=300 value=1 relative=1
+gen 400  ring=4 entry=0
+}
+
+#
+# The shape mab.yaml's steady loop actually has: ONE tensor_load_to_lds moves B, MXSA and MXSB
+# together (a fused copy group), so a single instruction carries three accesses on three rings.
+# A reader of any member must wait on that one copy, and a reader of an operand the group does
+# NOT carry must not.
+#
+# Taken from the real kernel, whose loop reads:
+#     s_wait_tensorcnt 2
+#     s_barrier_wait -1        // GIR fence: order B+MXSA+MXSB (RAW,WAR)
+#     tensor_load_to_lds ...   // GIR: copy B+MXSA+MXSB gen=0
+#
+# CHECK-LABEL: @gir_frame_waitcnt_fused_copy_group
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: "st.s_wait_tensorcnt"(1)
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: ds_load_b64
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @gir_frame_waitcnt_fused_copy_group() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = copy, access0_write = 1, access0_operand = 1, access0_ring = 2, access0_abs = 0, access1_write = 1, access1_operand = 2, access1_ring = 2, access1_abs = 0, access2_write = 1, access2_operand = 3, access2_ring = 2, access2_abs = 0 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 1, anchor = 0, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 0, kind = read, access0_write = 0, access0_operand = 3, access0_ring = 2, access0_abs = 0 } }
+}
+
+#
+# The prefetch guard: a short trip SKIPS the last peeled copy, so the two arms reach ^join with the
+# generation at DIFFERENT phases.  That is a phi, and the two `incoming` records are how the
+# contract states it -- one per arm, each naming the phase its predecessor delivers.
+#
+# The read in ^join consumes generation 0 either way, so the arm that filled it must be waited on
+# and the arm that did not must not invent a wait it cannot discharge.
+#
+# CHECK-LABEL: @gir_frame_waitcnt_guarded_prologue_join
+# CHECK: ^peel:
+# CHECK: tensor_load_to_lds
+# CHECK: ^skip:
+# CHECK-NOT: tensor_load_to_lds
+# CHECK: ^join:
+# CHECK-NEXT: "st.s_wait_tensorcnt"(0)
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_load_b64
+
+st.func @gir_frame_waitcnt_guarded_prologue_join() {
+^entry:
+  "st.s_cbranch_scc1"("skip", SCC0)
+  Successors: ^peel, ^skip
+^peel:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 100, anchor = 100, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 100 } }
+  "st.s_branch"("join")
+  Successors: ^join
+^skip:
+  "st.s_nop"(0) { mod.gir_action = { action = 101, anchor = 101, kind = other } }
+  "st.s_branch"("join")
+  Successors: ^join
+^join:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 102, anchor = 102, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 100 } }
+}
+
+#
+# The wait VALUE, not merely its presence.  Three copies are in flight on a ring of 4 and the read
+# consumes the FIRST of them, so the two issued after it may stay outstanding: the wait is
+# `s_wait_tensorcnt 2`, not a drain to 0.  A model that could not rank the copies would emit 0
+# here and serialize the pipeline -- which is what the number is protecting.
+#
+# `s_wait_tensorcnt 2` is a value the shipping mxf8 shapes really emit (mab.yaml's steady loop
+# waits at tensorcnt 2, 3 and 5).
+#
+# CHECK-LABEL: @gir_frame_waitcnt_inflight_depth
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: "st.s_wait_tensorcnt"(2)
+# CHECK-SAME: tlcnt = 2
+# CHECK-NEXT: ds_load_b64
+
+st.func @gir_frame_waitcnt_inflight_depth() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 200, anchor = 200, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 4, access0_abs = 0 } }
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 201, anchor = 200, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 4, access0_abs = 1 } }
+  "st.tensor_load_to_lds"(s[8:11], s[10:17]) { mod.gir_action = { action = 202, anchor = 200, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 4, access0_abs = 2 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 203, anchor = 200, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 4, access0_abs = 0 } }
+}
+
+#
+# GirWaitCntInsertionPass over a real pipelined loop: a ring-2 generation that ADVANCES once per
+# trip.  The loop's read is one generation behind its copy (`gdelta=1`), so it consumes the buffer
+# the PREVIOUS trip landed -- the wait it needs is on a copy that crossed the back edge, which is
+# the case a straight-line body cannot express.
+#
+# The wait is GRADED, not a drain: this trip's own copy may still be in flight, so retiring every
+# copy but the newest is exactly enough.
+#
+# The relative `incoming` rotates the phase across the back edge; the plain one pins the phase
+# the prologue arm delivers.  Without them the two predecessors of ^loop disagree and no single
+# placement is correct.
+#
+# CHECK-LABEL: @gir_frame_waitcnt_loop_rotation
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: "st.s_wait_tensorcnt"(1)
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_cbranch_scc1
+
+st.func @gir_frame_waitcnt_loop_rotation() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 300, anchor = 300, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[4:7], s[10:17]) { mod.gir_action = { action = 301, anchor = 301, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 300 } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 302, anchor = 301, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 300, access0_gdelta = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
+
+#
+# The WAR counterpart of the in-flight depth: three reads are outstanding and the copy overwrites
+# the buffer only the FIRST of them consumed, so the two issued after it may stay in flight and
+# the wait is `s_wait_dscnt 2`.  The shipping mxf8 shapes wait at dscnt 4, 12, 18, 24 and 28 for
+# the same reason -- the number IS the pipeline depth the model keeps.
+#
+# CHECK-LABEL: @gir_frame_waitcnt_war_retire_depth
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: "st.s_wait_dscnt"(2)
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: tensor_load_to_lds
+
+st.func @gir_frame_waitcnt_war_retire_depth() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 400, anchor = 400, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 4, access0_abs = 0 } }
+  v[2:3] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.gir_action = { action = 401, anchor = 400, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 4, access0_abs = 1 } }
+  v[4:5] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 32, gds = false }, mod.gir_action = { action = 402, anchor = 400, kind = read, access0_write = 0, access0_operand = 0, access0_ring = 4, access0_abs = 2 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 403, anchor = 400, kind = copy, access0_write = 1, access0_operand = 0, access0_ring = 4, access0_abs = 0 } }
+}

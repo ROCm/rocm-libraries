@@ -45,6 +45,9 @@
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/GirFencePlacementPass.hpp"
+#include "stinkytofu/transforms/asm/GirFrameContractImportPass.hpp"
+#include "stinkytofu/transforms/asm/GirWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -88,13 +91,18 @@ constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 /// bring-up phase. Once the pipeline stabilizes, pass selection should
 /// be controlled by OptLevel.
 void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptLevel optLevel,
-                            bool enableWaitCnt, bool runScheduler) {
+                            bool enableWaitCnt, bool runScheduler, bool disableWaitCntRemoval) {
     // Verify IR integrity before running any passes
     // This catches IR corruption early before it propagates through optimization
     pm.addPass(createStinkyIRVerifierPass());
 
     pm.addPass(createCFGBuilderPass());
-    if (enableWaitCnt) {
+    if (module.getModuleOptions().EnableGirFramePipeline)
+        pm.addPass(createGirFrameContractImportPass(module));
+    // Removal and insertion are separable: keeping the incoming waits lets a producer that already
+    // derived them hand them over, and insertion CREDITS them (`observedWaitDrains`) rather than
+    // duplicating.  Insertion still covers every edge the producer did not name.
+    if (enableWaitCnt && !disableWaitCntRemoval) {
         // Only O3 has the hazard pass that re-places xcnt. kmcnt and tensor keep
         // the defaults; RemoveWaitCntOptions documents why each is exempt.
         RemoveWaitCntOptions removeOptions;
@@ -106,7 +114,8 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     // addPeepholeOptPasses(pm, optLevel);
 
     // Instruction scheduling
-    pm.addPass(createStinkyBuildImplicitDependencyPass());
+    pm.addPass(
+        createStinkyBuildImplicitDependencyPass(!module.getModuleOptions().EnableGirFramePipeline));
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());
@@ -199,7 +208,14 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 // Same option as InsertClusterBarrierPass below (see
                 // cluster-barrier.md).
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
+                passFeatureConfig.dagFeatures.girFramePipeline =
+                    moduleOptions.EnableGirFramePipeline;
+                passFeatureConfig.dagFeatures.clusterBarrierTensorLoadDelayCycles =
+                    moduleOptions.EnableGirFramePipeline && moduleOptions.ClusterBarrier ? 200 : 0;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
+                passFeatureConfig.dagFeatures.lockWmmaOrder = moduleOptions.LockWmmaOrder;
+                passFeatureConfig.dagFeatures.lockDsReadProgramOrder =
+                    moduleOptions.LockDsReadProgramOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
                 passFeatureConfig.dagFeatures.dsSlotFirst = moduleOptions.DsSlotFirst;
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
@@ -224,17 +240,31 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                                               "loopWithPrefetch+noLoadLoopBody", debugStreams);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
-                                   runScheduler);
+                                   runScheduler, moduleOptions.DisableWaitCntRemoval);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
             if (moduleOptions.EnableWaitCntInsertion) {
+                const bool insertGirFrameWaits = moduleOptions.EnableGirFramePipeline &&
+                                                 moduleOptions.EnableGirFrameWaitCntInsertion;
+                if (insertGirFrameWaits) {
+                    // Placement first: the wait this fence carries is a residual measured at
+                    // wherever it ends up standing. Not gated on the scheduler -- it is the only
+                    // source of workgroup barriers now.
+                    innerPM.addPass(createGirFencePlacementPass());
+                }
                 WaitCntInsertionOptions waitCntOptions;
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
                 // A deep WMMA queue issues WMMAs back-to-back: one wait before the first.
                 waitCntOptions.mergeWaitsInWmmaRuns =
                     moduleOptions.WmmaQueueDepth > 1 && moduleOptions.WmmaQueueCoverCycles > 0;
+                waitCntOptions.disableTensorcntInsertion = moduleOptions.DisableTensorcntInsertion;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
-                if (runScheduler) innerPM.addPass(createRemoveDscntPass());
+                // Generic register waits change FIFO ranks. GIR storage waits must run afterwards
+                // so their graded dscnt/tensorcnt values credit the final wait stream rather than
+                // becoming stale when generic insertion adds an earlier, stricter wait.
+                if (insertGirFrameWaits) innerPM.addPass(createGirWaitCntInsertionPass());
+                if (runScheduler && !moduleOptions.EnableGirFramePipeline)
+                    innerPM.addPass(createRemoveDscntPass());
             }
 
             // The wait insertion above leaves each final wait immediately before the
@@ -412,6 +442,16 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                                                     module.getFunctions())) {
             pm.addPass(std::move(pass));
         }
+
+        // Whole-kernel scope, after every backend pass. Plugin passes registered
+        // here (e.g. the memtoken-IR structure dump) observe the final stream,
+        // including TDMLoadWaveSync barriers and SW-prefetch insertion.
+        //
+        // Inside this block, and before `pm` is moved into the adaptor below: the upstream
+        // patch placed it after the move, which is a use-after-move (the extension point's
+        // passes would be added to an emptied PassManager and never run).
+        PB.applyExtensionPoint(PipelineExtensionPoint::EndOfPipeline, pm, module);
+
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
     return true;

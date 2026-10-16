@@ -733,6 +733,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Per-region; reset each region.
     std::map<int, int> regLastTouch_;
     int clock_ = 0;
+    // End clock of each node issued in this region. GIR frame tensor-load delay nodes name a RAW
+    // placement by DAG id and measure their not-before floor from this real issue timeline.
+    std::unordered_map<unsigned, int> issuedEndClock_;
 
     // PipeOps hazard lanes, one per rule (empty for Cycles rules). Per reg key: the
     // pipe-op ordinal at which a rule.isProducer instruction last touched that register.
@@ -833,6 +836,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return clock_ < node->earliestClock;
     }
 
+    bool heldBackForTensorLoadDelay(const DAGNode* node) const {
+        if (node->tensorLoadDelayCycles <= 0 || node->tensorLoadDelayAnchorId == UINT_MAX)
+            return false;
+        auto anchor = issuedEndClock_.find(node->tensorLoadDelayAnchorId);
+        if (anchor == issuedEndClock_.end()) return true;
+        return clock_ < anchor->second + node->tensorLoadDelayCycles;
+    }
+
+    DAGNode* firstEligibleGlobalRead() const {
+        for (DAGNode* node : globalReadQueue)
+            if (!heldBackForTensorLoadDelay(node)) return node;
+        return nullptr;
+    }
+
     void noteSccChainIssue(DAGNode* node);
 
     std::map<int, int> crossBBDsResiduals_;
@@ -894,6 +911,24 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // (dagFeatures.waitAluHoldStrictCount). A filler it would put an s_wait_alu before is held, so
     // the DAG and the pass agree.
     std::unique_ptr<WaitAluTracker> waitAlu_;
+    // GIR inserts synchronization after scheduling, so its DS candidates have no physical
+    // barrier window to hold against. Defer only a strict wait-producing DS candidate to the
+    // ordinary fallback; weak waits must remain schedulable so in-place refills can overlap
+    // later WMMAs. No edge or fixed placement is introduced.
+    bool girDsWouldWaitAlu(const DAGNode* node) const {
+        if (node == nullptr || !waitAlu_ ||
+            !getPassContext().getPassFeatureConfig().dagFeatures.girFramePipeline)
+            return false;
+        const WaitAluNeed need = waitAlu_->query(*node->inst);
+        const int strict =
+            getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldStrictCount;
+        const bool wouldWait = (need.vaVdst >= 0 && need.vaVdst <= strict) ||
+                               (need.vmVsrc >= 0 && need.vmVsrc <= strict);
+        PASS_DEBUG(if (wouldWait) std::cerr << "[CDNA5 GIR DS wait-alu] hold dagId=" << node->id
+                                            << " va_vdst=" << need.vaVdst
+                                            << " vm_vsrc=" << need.vmVsrc << "\n");
+        return wouldWait;
+    }
     // A filler InsertWaitAlu would put a strict s_wait_alu before (count <=
     // waitAluHoldStrictCount; in multi-stage loops any vm_vsrc count) is held until the two
     // windows before the next s_barrier_wait, where the wave stalls anyway. Not held when it
@@ -1269,7 +1304,18 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
     touchOperands(*node->inst);
+    const int issueClock = clock_;
     updateWMMAStatus(node);
+    if (node->tensorLoadDelayCycles > 0) {
+        auto anchor = issuedEndClock_.find(node->tensorLoadDelayAnchorId);
+        PASS_DEBUG(std::cerr << "[CDNA5 RAW tensor delay] issue dagId=" << node->id
+                             << " clock=" << issueClock
+                             << " anchor=" << node->tensorLoadDelayAnchorId << " anchorClock="
+                             << (anchor == issuedEndClock_.end() ? -1 : anchor->second)
+                             << " realized="
+                             << (anchor == issuedEndClock_.end() ? -1 : issueClock - anchor->second)
+                             << " target=" << node->tensorLoadDelayCycles << "\n");
+    }
     stampDataReady(*node->inst);
     // Advance the tracked MSB bank; ops with no opinion (-1) leave it unchanged.
     if (node->requiredMsb != -1) currentMsb_ = node->requiredMsb;
@@ -1534,6 +1580,9 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
 // Find the WMMA in wmmaQueue with the smallest max data-ready latency (most
 // ready). Returns the node and its latency. Ties broken by DAG id (program
 // order).
+//
+// Under ModuleOptions::LockWmmaOrder the chain onInitRegion requests leaves at most
+// one WMMA ready, so this returns that one whatever the latency ranking says.
 std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     DAGNode* best = nullptr;
     std::tuple<int, int> bestKey{INT_MAX, 0};
@@ -1683,8 +1732,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             : 0;
     const bool warGateRelief = dsIssuedThisRegion_ < expectedDs;
     const bool warTooClose = !warGateRelief && pipeOpGateBlocks(pickedDS);
-    const bool dsBaseOk =
-        pickedDS && dsBudgetAllowsIssue && !warTooClose && !destOverlapsActiveWmmaSrc(pickedDS);
+    const bool dsBaseOk = pickedDS && dsBudgetAllowsIssue && !warTooClose &&
+                          !destOverlapsActiveWmmaSrc(pickedDS) && !girDsWouldWaitAlu(pickedDS);
     int dsThrottleWait = 0;
     bool dsProtect = false;
     if (dsBaseOk) {
@@ -1737,9 +1786,11 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         // carries that wait, so it ranks as a hidden-stall candidate and defers
         // behind free work (whatever fills the gap). It is still eligible when
         // nothing else can go, paying the remaining wait before issue.
-        DAGNode* gr = globalReadQueue.top();
-        consider(gr, kGlobalRead, getHazardWait(gr));
-        memWorkFitsWindow_ = true;
+        DAGNode* gr = firstEligibleGlobalRead();
+        if (gr != nullptr) {
+            consider(gr, kGlobalRead, getHazardWait(gr));
+            memWorkFitsWindow_ = true;
+        }
     }
     // SALU/other allows hidden stalls (see pickFreeBest); VALU stays
     // RAW-free-only.
@@ -1811,7 +1862,7 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
             kind = candKind;
     };
 
-    if (!globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
+    if (!globalReadQueue.empty()) consider(firstEligibleGlobalRead(), kGlobalRead);
     consider(pickedDS, kLocalRead);
     // Held work (prefetch lead, strict-wait hold) is skipped while anything else can go;
     // it is still taken last, so the fallback always makes progress.
@@ -1828,6 +1879,11 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
         if (!valuQueue.empty()) consider(valuQueue.top(), kValu);
         if (!prefetchQueue.empty()) consider(prefetchQueue.top(), kPrefetch);
     }
+
+    // The RAW-window premise normally leaves enough independent work to reach the floor. If all
+    // such work is exhausted, release the oldest held load rather than inventing unencoded idle
+    // cycles or deadlocking the topological schedule; end-to-end cycle checks diagnose a shortfall.
+    if (best == nullptr && !globalReadQueue.empty()) consider(globalReadQueue.top(), kGlobalRead);
 
     if (best == nullptr) return false;
     *outNode = best;
@@ -2387,6 +2443,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             nonWmmaIssuedThisRegion_++;
             if (isDSRead(*node->inst)) dsLoadIssuedThisRegion_++;
         }
+        if (node != nullptr) issuedEndClock_[node->id] = clock_;
         lastPickedNode_ = node;
         noteSccChainIssue(node);
         return node;
@@ -2398,9 +2455,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // point, no side effects here.
     decidePromote();
 
-    // Pre-compute the best DS read by dsReadPriority once for all phases.
+    // Pre-compute the best DS read by dsReadPriority once for all phases. GIR may defer a
+    // candidate when issuing it would require wait_alu, but that must not block every later,
+    // independent DS read. GIR waitcnt ranks are derived from the final issue order after
+    // scheduling, so a ready candidate may safely leapfrog a held one.
+    DAGNode* fallbackDS = nullptr;
     DAGNode* pickedDS = nullptr;
     for (DAGNode* n : localReadQueue) {
+        if (!fallbackDS || n->dsReadPriority < fallbackDS->dsReadPriority) fallbackDS = n;
+        if (girDsWouldWaitAlu(n)) continue;
         if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
     }
 
@@ -2615,7 +2678,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     DAGNode* fallback = nullptr;
     int fallbackKind = -1;
     int fallbackWait = 0;
-    if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
+    if (findOldestFallbackNonWmma(fallbackDS, &fallback, &fallbackKind, &fallbackWait)) {
         // RAW/hazard and credit-drain waits are real elapsed time. A DS throttle
         // wait is only pacing debt: real waits satisfy as much of it as they
         // cover, and any remainder advances only the independent throttle clock.
@@ -2903,6 +2966,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // new region starts with all regs "very old" (no spurious deferrals from a
     // prior region).
     regLastTouch_.clear();
+    issuedEndClock_.clear();
     // pipeOpGates_ NOT cleared here — they persist across regions (cleared per-BB). A later
     // WMMA region still needs them, and a WMMA-free region defers a gated ds_load to its end.
     clock_ = 0;
@@ -3547,6 +3611,41 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
         }
     }
+
+    // ModuleOptions::LockWmmaOrder / LockDsReadProgramOrder. Chain one kind in program order,
+    // so a caller that derived the issue order (LoopModel/GIR) gets that kind back verbatim.
+    // Ranking the READY nodes is not enough on its own: a node whose producer has not been
+    // picked yet is not in the queue at all, so a later one whose sources already issued is the
+    // only candidate and overtakes it. The edge keeps it out of the queue instead. Every edge
+    // points forward in the region, which a program-order DAG can never cycle with.
+    //
+    // This is NOT LockDsReadOrder. That one keys on the LDS memory token, chains only within one
+    // token, and sorts by dsReadPriority -- so it says nothing about A against B, and it goes
+    // silent entirely when the GIR frame pipeline leaves the token pseudo-registers unattached.
+    auto chainInProgramOrder = [&](bool (*selects)(const StinkyInstruction&), const char* what) {
+        StinkyInstruction* previous = nullptr;
+        unsigned chained = 0;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (instPtr == nullptr || !selects(*instPtr)) continue;
+            if (previous != nullptr) {
+                deps.requestedConstraints.emplace_back(previous, instPtr);
+                ++chained;
+            }
+            previous = instPtr;
+        }
+        PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion " << what << " lock] chained " << chained
+                             << " edges\n");
+        (void)what;
+        (void)chained;
+    };
+    if (dagFeatures.lockWmmaOrder)
+        chainInProgramOrder([](const StinkyInstruction& inst) { return isMatrixInstruction(inst); },
+                            "wmma");
+    // Loads only: a tensor_load is left free, so the global prefetch still floats to its lead.
+    if (dagFeatures.lockDsReadProgramOrder)
+        chainInProgramOrder([](const StinkyInstruction& inst) { return isDSRead(inst); },
+                            "ds_read");
 
     // Run after every barrier placement and normalization step so the analysis
     // sees the same final thresholds that the scheduler will enforce.

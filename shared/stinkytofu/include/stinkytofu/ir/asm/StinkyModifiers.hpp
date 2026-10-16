@@ -314,6 +314,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        GIR_ACTION,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1086,6 +1087,46 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+/// Stable identity of one physical realization of a finalized GIR action.
+/// What a GIR action does.  IR vocabulary, not analysis vocabulary: the modifier carries it, so
+/// it cannot live in the analysis header that consumes it.
+enum class GirActionKind : uint8_t { Other, Read, Copy, Fence, Wmma, WaitCnt };
+
+/// One shared-memory touch an instruction makes.  A fact ABOUT THE INSTRUCTION, so it rides on
+/// it rather than in a contract table keyed by action id.
+struct GirAccessData {
+    bool isWrite = false;
+    int operand = -1;  // id of the (operand, region) pair this names
+    int ring = 1;
+    int genId = -1;  // -1 = not bound to a generation
+    int gdelta = 0;
+    int absolute = -1;  // -1 = relative, not pinned
+    bool crossAgent = false;
+
+    bool operator==(const GirAccessData&) const = default;
+};
+
+/// The instruction's GIR identity and what it touches.  Survives rocisa conversion, logical
+/// lowering, CFG splitting, and scheduling; only the facts that belong to NO instruction (the
+/// generation table and the phi edges) stay in the module frame contract.
+struct GirActionData : public TypedModifier<GirActionData> {
+    static constexpr Modifier::Type Type = Modifier::Type::GIR_ACTION;
+
+    uint64_t actionId = 0;
+    uint64_t anchorAction = 0;
+    GirActionKind kind = GirActionKind::Other;
+    std::vector<GirAccessData> accesses;
+
+    explicit GirActionData(uint64_t actionId = 0, uint64_t anchorAction = 0,
+                           GirActionKind kind = GirActionKind::Other,
+                           std::vector<GirAccessData> accesses = {})
+        : TypedModifier<GirActionData>(),
+          actionId(actionId),
+          anchorAction(anchorAction),
+          kind(kind),
+          accesses(std::move(accesses)) {}
 };
 
 /// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.

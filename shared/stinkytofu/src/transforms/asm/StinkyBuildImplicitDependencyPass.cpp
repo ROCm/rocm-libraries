@@ -121,7 +121,8 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsSrc(inst, tokenId);
 }
 
-void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
+void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx,
+                               bool enableMemoryTokenDependencies) {
     const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -130,28 +131,33 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
         // Always attach implicit special registers (SCC/VCC/EXEC) declared by HW flags
         legalizeImplicitSpecialRegisters(inst, wavefrontSize);
 
+        if (!enableMemoryTokenDependencies) continue;
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;
         assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
 
-        if (isBarrier(*inst))
+        // `s_wait_tensorcnt` is a synchronization point that cuts no scheduling region, so it is
+        // the one the DAG cannot see without these pseudo-registers.
+        if (isBarrier(*inst) || inst->is(InstFlag::IF_WaitTensorCnt))
             processBarrier(*inst, *mt, bb.getLabel());
         else if (isTensorLoad(*inst) || isDSWrite(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());
         else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
             processLdsReader(*inst, *mt, bb.getLabel());
         else
-            // StinkyWaitCntInsertionPass tags s_wait_tensorcnt with MemTokenData,
-            // which would hit this assert — safe only because it runs strictly after
-            // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
+            // StinkyWaitCntInsertionPass tags s_waitcnt with MemTokenData, which would hit this
+            // assert — safe only because it runs strictly after this pass.
             assert(false &&
-                   "instruction has MemTokenData but is not a barrier, fence, "
+                   "instruction has MemTokenData but is not a barrier, fence, wait_tensorcnt, "
                    "tensor_load, ds_write, ds_read, or global_store_async_from_lds");
     }
 }
 
 class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
    public:
+    explicit StinkyBuildImplicitDependencyPass(bool enableMemoryTokenDependencies)
+        : enableMemoryTokenDependencies(enableMemoryTokenDependencies) {}
+
     static char ID;
 
     const char* getName() const override {
@@ -164,17 +170,21 @@ class StinkyBuildImplicitDependencyPass : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         for (BasicBlock& bb : func) {
-            if (passCtx.shouldProcessBasicBlock(bb)) setPseudoRegistersInBlock(bb, passCtx);
+            if (passCtx.shouldProcessBasicBlock(bb))
+                setPseudoRegistersInBlock(bb, passCtx, enableMemoryTokenDependencies);
         }
         return preserveCFGAnalyses();
     }
+
+   private:
+    bool enableMemoryTokenDependencies;
 };
 
 char StinkyBuildImplicitDependencyPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass() {
-    return std::make_unique<StinkyBuildImplicitDependencyPass>();
+std::unique_ptr<Pass> createStinkyBuildImplicitDependencyPass(bool enableMemoryTokenDependencies) {
+    return std::make_unique<StinkyBuildImplicitDependencyPass>(enableMemoryTokenDependencies);
 }
 }  // namespace stinkytofu

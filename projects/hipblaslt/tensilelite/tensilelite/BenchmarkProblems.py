@@ -924,6 +924,12 @@ def main(
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
 
+    # A schedule override is external to the Solution parameters used by cache.yaml. Force
+    # codegen so dumping sees every kernel and loading cannot reuse a pre-override code object.
+    if globalParameters.get("GIRScheduleDumpPath") \
+            or globalParameters.get("GIRScheduleLoadPath"):
+        useCache = False
+
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
 

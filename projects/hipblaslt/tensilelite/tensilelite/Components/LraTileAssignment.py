@@ -32,7 +32,41 @@ from rocisa.functions import vectorStaticRemainder, \
 from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
+from ..Lowering.lds_geometry import region_row_elems
+from .TDMSplit import split_of
 from dataclasses import dataclass
+
+
+def _rowElemsForRegion(writer, kernel, tP, ldsPad):
+    """The LENGTH OF ONE ROW of this operand's LDS image, in elements, made region-aware — the
+    per-lane read base's counterpart to the immediates `leaves.py` computes.
+
+    A row runs along the image's INNER axis, so the OUTER coordinate is what multiplies this
+    value, and which axis is which is layout-decided:
+
+        tile-major   `[unroll][free]`  : row = MacroTile, outer = unroll  (`strideUnroll`, `strideK`)
+        unroll-major `[free][unroll]`  : row = _DepthU,   outer = free    (`strideTile`)
+
+    The extent is therefore DERIVED here rather than passed in.  `mt` is right only on the
+    tile-major path; `LraTileAssignmentMFMA`'s unroll-major branch needs the other extent, and
+    handing it `mt` shortens the wrong number.  `enableLDSTr` implies
+    `not UnrollMajorLDS` (`Solution.isLDSTrEnabled` returns False for unroll-major), so the
+    transpose classes still get exactly the `mt` they asked for.
+
+    When a split PACKS its regions the row is only `extent / nsplit` long, so the outer
+    coordinate must step by the SHORTENED row.  Stepping the full one walks straight out of the
+    region -- the base steps by the full row while the read immediates have already been
+    shortened, so the two halves of one address sit in different frames and every lane with a
+    non-zero k component reads the wrong row.
+
+    Returns the unchanged `extent + ldsPad` whenever the regions are a contiguous continuation
+    rather than packed blocks, and for unsplit operands — `region_row_elems` decides that from
+    the (axis, layout) diagonal, which is the same call `leaves.py` makes for the immediates."""
+    tc = tP["tensorChar"]
+    nsplit, axis = split_of(kernel, tc)
+    unrollMajor = bool(kernel.get("UnrollMajorLDS%s" % tc, True))
+    extent = kernel["_DepthU%s" % tc] if unrollMajor else kernel["MacroTile%u" % tP["tile01Idx"]]
+    return region_row_elems(extent, ldsPad, unrollMajor, nsplit, axis)
 
 @dataclass
 class LraTilePropertiesMFMA(LraTileProperties):
@@ -196,7 +230,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
-        strideUnroll = mt + ldsPad
+        strideUnroll = _rowElemsForRegion(writer, kernel, tP, ldsPad)
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMA_tmpSgprInfo") as tmpSgprInfo:
@@ -347,7 +381,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
-        strideUnroll = mt + ldsPad
+        strideUnroll = _rowElemsForRegion(writer, kernel, tP, ldsPad)
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAB8_tmpSgprInfo") as tmpSgprInfo:
@@ -566,7 +600,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
 
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
-        strideUnroll = mt + ldsPad
+        strideUnroll = _rowElemsForRegion(writer, kernel, tP, ldsPad)
         strideWave   = matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAF4_tmpSgprInfo") as tmpSgprInfo:
@@ -665,7 +699,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
 
         # strider for each type of index
         mt           = kernel["MacroTile%u" % tile01]
-        strideUnroll = mt + ldsPad
+        strideUnroll = _rowElemsForRegion(writer, kernel, tP, ldsPad)
         strideWave   = kernel["MatrixInstM"] * vectorWidth
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMAF6_tmpSgprInfo") as tmpSgprInfo:
@@ -826,6 +860,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # strider for each type of index
         umlds            = kernel["UnrollMajorLDS%s" % tc]
         mt               = kernel["MacroTile%u" % tile01]
+        # THE ROW, REGION-AWARE.
+        rowElems         = _rowElemsForRegion(writer, kernel, tP, LdsPad)
         if ("MXS" in tc):
            subTc = tc[3]
            # MX scale LDS tile-stride, gated by MXScaleFormat:
@@ -840,15 +876,15 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         elif enableLDSTr:
            strideTile = 4
         else:
-           strideTile = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+           strideTile = rowElems if umlds else 1
         if isDTVAB:
           strideTile = 1 # DTV case. Actual stride will be applied later.
 
-        strideK = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
+        strideK = inputPerThread if umlds else rowElems * inputPerThread
         if enableLDSTr:
            if kernel["UseGeneralizedNLCOne%s"%tc] and perpStride > 1:
               strideK  = 8
-           strideK1 = mt+LdsPad
+           strideK1 = rowElems
         elif kernel["ProblemType"]["Sparse"]:
             if tP["isM"]:
                 strideK //= 4
@@ -857,12 +893,12 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             if umlds:
                 strideK = 16
             else:
-                strideK = (mt + LdsPad) * 16
+                strideK = rowElems * 16
         elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
             if umlds:
                 strideK = 4
             else:
-                strideK = (mt + LdsPad) * 4
+                strideK = rowElems * 4
         # sparse
         if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"]:
             if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isA"]) or tP["isM"]:

@@ -64,6 +64,15 @@ class StinkyAsmModuleWithAdapterSignature:
     def getModule(self) -> Any:
         return self._inner
 
+    def __getattr__(self, name: str) -> Any:
+        """Delegate anything not overridden to the wrapped module.
+
+        The explicit methods above exist to ADD behaviour; everything else on
+        ``StinkyAsmModule`` (setPluginDataStr, pass controls, ...) should reach it
+        unchanged rather than be enumerated one at a time.
+        """
+        return getattr(self._inner, name)
+
 
 def _convert_options(options: Any) -> dict:
     """Convert adaptor options dict to stinkytofu-binding-compatible dict.
