@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <roc/hostnumerics/version.hpp>
@@ -428,4 +429,27 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
     }
 }
 
+TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
+    std::vector<ptrdiff_t> strides{5, -1};
+    const Layout layout(Shape{2, 3}, strides, 2);
+    const Layout spanCopy(Shape{2, 3}, std::span<const ptrdiff_t>(strides), 2);
+    strides[0] = 9;
+    EXPECT_EQ(layout.stride(0), 5);
+    EXPECT_EQ(spanCopy, layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, std::array<ptrdiff_t, 2>{5, -1}, 2)), layout);
+    EXPECT_EQ((Layout(Shape{2, 3}, {5, -1}, 2)), layout);
+    EXPECT_EQ(Layout(Shape{}, {}), Layout{});
+    EXPECT_EQ(layout.elementOffset(std::array<size_t, 2>{1, 2}), 5);
+}
+
+TEST(LayoutCpp, ContiguousFailureIsReturnedBeforeBoundaryReporting) {
+    using namespace roc::hostnumerics::detail;
+    const auto result = tryContiguousLayout(Shape{std::numeric_limits<size_t>::max()}, false);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), LayoutError::ExtentOutOfRange);
+    const auto valid = tryContiguousLayout(Shape{2, 3}, false);
+    ASSERT_TRUE(valid);
+    EXPECT_EQ(valid->stride(0), 3);
+    EXPECT_EQ(valid->stride(1), 1);
+}
 }  // namespace
