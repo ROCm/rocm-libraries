@@ -239,16 +239,13 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     BatchnormKernelCompileOptions options(_params.x(),
-                                          _params.dx(),
+                                          _params.dy(),
                                           _params.savedMean(),
                                           _params.scale(),
                                           deviceProperties,
                                           activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix());
     options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix());
-    // Not using FP16 and BFP16 paths due to affine data type requirements
-    options.update("HIP_PLUGIN_USE_FP16", 0);
-    options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
     options.update("HIP_PLUGIN_BN_BATCHES", problem.batches());
     options.update("HIP_PLUGIN_BN_CHANNELS", problem.channels());

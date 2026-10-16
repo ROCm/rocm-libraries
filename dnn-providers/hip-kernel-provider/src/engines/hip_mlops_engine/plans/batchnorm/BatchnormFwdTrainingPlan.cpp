@@ -377,16 +377,15 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Prepare compilation options
     BatchnormKernelCompileOptions options(_trainingParams.x(),
-                                          _trainingParams.y(),
+                                          _trainingParams.optActivation().has_value()
+                                              ? _trainingParams.activationOut()
+                                              : _trainingParams.y(),
                                           _trainingParams.mean(),
                                           _trainingParams.scale(),
                                           deviceProperties,
                                           activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    // Not using FP16 and BFP16 paths due to affine data type requirements
-    options.update("HIP_PLUGIN_USE_FP16", 0);
-    options.update("HIP_PLUGIN_USE_BFP16", 0);
     options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
     options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
     options.update("HIP_PLUGIN_BN_VARIANT", variant);
