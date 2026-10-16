@@ -176,6 +176,7 @@ global_load_bf16(ptr, idx, align=2)
 global_load_f32(ptr, idx, align=4)
 global_load_i32(ptr, idx, align=4)
 global_load_i64(ptr, idx, align=8)
+global_load_f64(ptr, idx, align=8)
 global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)

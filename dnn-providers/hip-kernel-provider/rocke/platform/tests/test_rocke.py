@@ -32,6 +32,7 @@ from rocke import (
     BF8E5M2,
     F16,
     F32,
+    F64,
     FP8E4M3,
     I8,
     I16,
@@ -225,6 +226,7 @@ class TestCoreIR(unittest.TestCase):
             (F16, "global_load_f16", "half", 2),
             (BF16, "global_load_bf16", "bfloat", 2),
             (F32, "global_load_f32", "float", 4),
+            (F64, "global_load_f64", "double", 8),
             (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
             (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
         ]
@@ -1002,6 +1004,16 @@ class TestInstances(unittest.TestCase):
 # ---------------------------------------------------------------------
 
 
+def _scalar_f64_global_accesses(ll: str) -> list[str]:
+    """The scalar (not vector) f64 global load and store lines of ``ll``."""
+    return [
+        line.strip()
+        for line in ll.splitlines()
+        if "load double, ptr addrspace(1)" in line
+        or ("store double " in line and "ptr addrspace(1)" in line)
+    ]
+
+
 class TestElementwiseInstance(unittest.TestCase):
     def test_unary_builds(self):
         from rocke.instances import ElementwiseSpec, build_elementwise
@@ -1038,6 +1050,20 @@ class TestElementwiseInstance(unittest.TestCase):
         kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("fadd double", ll)
+
+    def test_f64_scalar_tail_is_8_byte_aligned(self):
+        # The scalar tail loads and stores claim the 8-byte element alignment,
+        # so their codegen does not depend on the target's unaligned-access
+        # mode. vec=2 add: two loads and one store per tail lane.
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="add", dtype="f64", vec=2))
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(kernel, arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 6)
+        for line in accesses:
+            self.assertTrue(line.endswith(", align 8"), line)
 
     def test_f64_abs_clears_the_sign_bit(self):
         # f64 abs is one sign-bit clear (llvm.fabs.f64), not max(x, -x), whose
@@ -1113,6 +1139,17 @@ class TestReduceInstance(unittest.TestCase):
             spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
             ll = lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
             self.assertIn("double", ll)
+
+    def test_f64_output_store_is_8_byte_aligned(self):
+        # The one f64 result store per row claims the 8-byte element alignment.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=4096, op="sum", dtype="f64", vec=2)
+        accesses = _scalar_f64_global_accesses(
+            lower_kernel_to_llvm(build_reduce2d(spec), arch="gfx950")
+        )
+        self.assertEqual(len(accesses), 1)
+        self.assertTrue(accesses[0].endswith(", align 8"), accesses[0])
 
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec

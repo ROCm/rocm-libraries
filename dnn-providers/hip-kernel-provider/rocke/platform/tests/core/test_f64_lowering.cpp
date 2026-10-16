@@ -10,12 +10,15 @@
  */
 
 #include "rocke/error.hpp"
+#include "rocke/instance_elementwise.h"
+#include "rocke/instance_reduce.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #define CHECK(expr)                                                 \
     do                                                              \
@@ -281,12 +284,73 @@ static int test_zero_vec_and_lds_load_admit_f64_and_i16()
     return 0;
 }
 
+/* Number of scalar f64 global loads and stores in `ll`, or -1 if any of them
+ * claims less than the 8-byte element alignment. */
+static int count_aligned_scalar_f64_global_accesses(const char* ll)
+{
+    const std::string text(ll);
+    const std::string aligned = ", align 8";
+    int count = 0;
+    size_t start = 0;
+    while(start < text.size())
+    {
+        size_t end = text.find('\n', start);
+        if(end == std::string::npos)
+            end = text.size();
+        const std::string line = text.substr(start, end - start);
+        const bool load = line.find("load double, ptr addrspace(1)") != std::string::npos;
+        const bool store = line.find("store double ") != std::string::npos
+                           && line.find("ptr addrspace(1)") != std::string::npos;
+        if(load || store)
+        {
+            if(line.size() < aligned.size()
+               || line.compare(line.size() - aligned.size(), aligned.size(), aligned) != 0)
+                return -1;
+            ++count;
+        }
+        start = end + 1;
+    }
+    return count;
+}
+
+/* The elementwise tail (two loads and one store per lane, vec=2) and the
+ * reduce output store claim 8-byte alignment, so they do not depend on the
+ * target's unaligned-access mode. */
+static int test_scalar_global_accesses_are_8_byte_aligned()
+{
+    char err[256];
+    char* llvm_text = NULL;
+
+    rocke_elementwise_spec_t ew = rocke_elementwise_spec_default();
+    ew.op = "add";
+    ew.dtype = "f64";
+    ew.vec = 2;
+    CHECK(rocke_elementwise_lower_to_llvm(
+              &ew, "gfx942", ROCKE_LLVM_FLAVOR_LLVM20, &llvm_text, err, sizeof(err))
+          == ROCKE_OK);
+    CHECK(count_aligned_scalar_f64_global_accesses(llvm_text) == 6);
+    std::free(llvm_text);
+
+    rocke_reduce2d_spec_t rd = rocke_reduce2d_spec_default();
+    rd.n_per_block = 4096;
+    rd.dtype = "f64";
+    rd.vec = 2;
+    llvm_text = NULL;
+    CHECK(rocke_reduce2d_lower_to_llvm(
+              &rd, "gfx942", ROCKE_LLVM_FLAVOR_LLVM20, &llvm_text, err, sizeof(err))
+          == ROCKE_OK);
+    CHECK(count_aligned_scalar_f64_global_accesses(llvm_text) == 1);
+    std::free(llvm_text);
+    return 0;
+}
+
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
        || test_fabs_stays_in_double() || test_vector_binops_use_float_ops() || test_conversions_lower_to_one_instruction_each()
        || test_conversions_reject_the_wrong_source_type()
-       || test_zero_vec_and_lds_load_admit_f64_and_i16())
+       || test_zero_vec_and_lds_load_admit_f64_and_i16()
+       || test_scalar_global_accesses_are_8_byte_aligned())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;
