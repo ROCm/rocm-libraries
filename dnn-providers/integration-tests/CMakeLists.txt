@@ -142,6 +142,40 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/integration-test-bundles/"
      DESTINATION "${CMAKE_BINARY_DIR}/lib/integration-test-bundles")
 
+# Optional dnn-benchmarking workload graphs. workloads/*.tar.gz.dvc pin archives
+# from the dnn-benchmarking repo; `dvc pull -R workloads` (run in this directory) fetches
+# them. Each pulled archive is extracted as plain graph .json files under the
+# bundle root (outside quick/standard/full), where discovery registers them as graph-only tests named
+# dnn_benchmarking_<archive>_<subdir>_<graph>. An archive whose top-level
+# folder repeats its own name (conv/ in conv.tar.gz) is flattened so the name is
+# not repeated. With nothing pulled this is a no-op.
+set(HIPDNN_IT_WORKLOAD_ROOT
+    "${CMAKE_BINARY_DIR}/lib/integration-test-bundles/dnn-benchmarking")
+file(REMOVE_RECURSE "${HIPDNN_IT_WORKLOAD_ROOT}")
+file(GLOB HIPDNN_IT_WORKLOAD_ARCHIVES "${CMAKE_CURRENT_SOURCE_DIR}/workloads/*.tar.gz")
+foreach(archive IN LISTS HIPDNN_IT_WORKLOAD_ARCHIVES)
+    get_filename_component(workload_name "${archive}" NAME_WE)
+    set(workload_dir "${HIPDNN_IT_WORKLOAD_ROOT}/${workload_name}")
+    file(MAKE_DIRECTORY "${workload_dir}")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xzf "${archive}"
+        WORKING_DIRECTORY "${workload_dir}"
+        RESULT_VARIABLE workload_extract_result)
+    if(NOT workload_extract_result EQUAL 0)
+        message(FATAL_ERROR "Failed to extract workload archive ${archive}")
+    endif()
+    if(IS_DIRECTORY "${workload_dir}/${workload_name}")
+        file(RENAME "${workload_dir}/${workload_name}" "${workload_dir}.flat")
+        file(REMOVE_RECURSE "${workload_dir}")
+        file(RENAME "${workload_dir}.flat" "${workload_dir}")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${archive}")
+endforeach()
+if(HIPDNN_IT_WORKLOAD_ARCHIVES)
+    list(LENGTH HIPDNN_IT_WORKLOAD_ARCHIVES workload_count)
+    message(STATUS "Integration tests: extracted ${workload_count} dnn-benchmarking workload archive(s)")
+endif()
+
 if(Python3_FOUND)
     add_test(
         NAME hipdnn_bundle_verifier_python_tests

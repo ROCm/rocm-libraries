@@ -56,3 +56,77 @@ rtol = 0.02
 archs   = ["gfx12"]
 filters = ["*MatmulBias*Fp16*"]
 reason  = "ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns no algorithms for FP16 with transA=T, transB=T and any bias-fused epilogue on gfx12"
+
+# dnn-benchmarking hipblaslt gemm workloads whose CPU reference verification is
+# estimated above 60 s (M*N*K*batch / 2.9e9 MAC/s, calibrated on
+# bf16_m10240_n5120_k5120 = 95 s). The GPU reference does not cover matmul, so
+# every gemm is verified on the CPU. The largest shape alone would take hours.
+[[test_skips]]
+filters = [
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m10240_n5120_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m14336_n16384_k6144",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m16384_n16384_k4096",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m16384_n4096_k13696",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m16384_n4096_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m2048_n2048_k65536",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m2048_n21504_k7168",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m2048_n27648_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m2048_n8192_k65536",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m3072_n49152_k12288",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m32768_n4544_k4544",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m49152_n10240_k10240",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m57344_n10240_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m65536_n3840_k1280",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m77824_n6656_k6656",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m8192_n16384_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m8192_n20480_k2560",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m8192_n2048_k65536",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m8192_n8192_k65536",
+    "dnn_benchmarking_hipblaslt_gemm.bf16_m8192_n8192_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_b96_m8640_n8640_k8640",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m10240_n5120_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m14336_n16384_k6144",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m16182_n16182_k16182",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m16384_n16384_k4096",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m16384_n4096_k13696",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m2048_n21504_k7168",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m2048_n27648_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m28000_n28000_k28000",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m3072_n49152_k12288",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m32768_n4544_k4544",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m49152_n10240_k10240",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m57344_n10240_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m65536_n3840_k1280",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m77824_n6656_k6656",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8096_n8096_k8096",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8192_n16384_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8192_n20480_k2560",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8192_n4096_k12288",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8192_n8192_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8192_n8192_k8960",
+    "dnn_benchmarking_hipblaslt_gemm.fp16_m8640_n8640_k8640",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m10240_n5120_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m14336_n16384_k6144",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m16384_n16384_k4096",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m16384_n4096_k13696",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m2048_n21504_k7168",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m2048_n27648_k5120",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m3072_n49152_k12288",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m32768_n4544_k4544",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m49152_n10240_k10240",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m57344_n10240_k8192",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m65536_n3840_k1280",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m77824_n6656_k6656",
+    "dnn_benchmarking_hipblaslt_gemm.fp32_m8192_n20480_k2560",
+]
+reason  = "CPU reference verification of this shape takes longer than 60 s"
+
+# dnn-benchmarking fp32 gemm workloads. hipBLASLt and the CPU reference accumulate
+# K terms in different orders, so large-K fp32 results differ by more than the
+# default atol=rtol=1e-5. Observed max abs diff grows with K: 9.3e-5 at K=6656
+# (fp32_m96_n6656_k6656, 0.7% of elements, |c|~5) and 6.5e-4 at K=24576
+# (fp32_m32_n8192_k24576). atol=1e-3 leaves ~1.5x over the worst.
+[[tolerance_overrides]]
+filters = ["dnn_benchmarking_hipblaslt_gemm.fp32_*"]
+atol = 1e-3
+rtol = 1e-4

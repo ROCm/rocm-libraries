@@ -299,6 +299,40 @@ device first — so it needs a GPU even where the reference does not. An explici
 `--validator auto` wins over the env var like any other value. Only the pass/fail
 call moves: a failure report is always built on the host from the read-back values.
 
+### Optional dnn-benchmarking workloads
+
+`workloads/*.tar.gz.dvc` pin graph archives from the
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) repo (created with
+`dvc import`). They are not fetched by default. To run them:
+
+```bash
+cd dnn-providers/integration-tests
+dvc pull -R workloads   # fetch the archives (gitignored)
+cmake ...               # re-run configure; archives are extracted into the build tree
+./bin/hipdnn_integration_tests --gtest_filter='dnn_benchmarking_*'
+```
+
+Configure extracts each archive to `integration-test-bundles/dnn-benchmarking/<name>/`
+in the build tree. Discovery registers every graph `.json` as a graph-only
+bundle test (outside the quick/standard/full tiers), verified against the
+reference executor. Nothing is committed to the bundle tree.
+
+They run in their own `dnn-benchmarking` category (label `dnn_benchmarking`) in
+each provider's `test_categories_integration.yaml`, not in `quick`, `standard`,
+`comprehensive` or `full`: `full` excludes `dnn_benchmarking_*`, because the
+suites take hours. MIOpen's category runs `conv`, `bnorm` and `rocke_conv`;
+hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
+`ctest -L dnn_benchmarking` in that provider's build, or with
+`--gtest_filter='dnn_benchmarking_*'`. `attn`, `norm`, `moe` and `rocke_sdpa` are
+not in any engine's category yet. The superbuild CI builds on a runner with no
+GPU, so it only proves the pointers fetch and the archives extract; no CI lane
+executes the category yet.
+
+hipBLASLt matmul graphs are verified on the CPU (the GPU reference does not cover
+matmul), at about 3 GMAC/s. `HIPBLASLT_ENGINE.toml` therefore skips the 55 shapes
+estimated above 60 s; the largest would take hours. To take newer workloads,
+run `dvc update workloads/*.dvc` and commit the changed pointers.
+
 ### Validating golden data itself
 
 The `hipdnn_golden_data_tests` binary runs a **separate suite** that recomputes each
