@@ -33,6 +33,7 @@ from .KernelWriterConversion import KernelWriterConversion
 from .KernelWriterActivationEnumHeader import KernelWriterActivationEnumHeader
 from .KernelWriterActivationFunction import KernelWriterActivationFunction
 from .KernelWriterReduction import KernelWriterReduction
+from .SolutionStructs.Problem import isF16Accumulation
 
 
 class KernelHelperEnum(IntEnum):
@@ -50,6 +51,9 @@ def conversionKernelNames(solution):
   conversionKernelNames = []
   loadVectorWidth = [1, 2] if solution["ProblemType"]["DataType"].isDouble() else [1, 2, 4]
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if isF16Accumulation(solution["ProblemType"]):
+    # GSU>1 is rejected for f16 accumulation, so there is nothing to reduce.
+    return conversionKernelNames
   if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
     # The GSU slices already produced the final D in place.
     return conversionKernelNames
@@ -163,6 +167,8 @@ def initConversionKernelObjects(solution, isaInfoMap):
     [1, 2] if solution["ProblemType"]["DataType"].numBytes() > 4 else [1, 2, 4]
   genPGRPostKernels = True
   gsuList = [internalParameters["GlobalSplitUPGR"]]
+  if isF16Accumulation(solution["ProblemType"]):
+    return conversionKernelObjects
   if solution["GlobalSplitUAlgorithm"] == "AtomicDest":
     # The GSU slices already produced the final D in place.
     return conversionKernelObjects

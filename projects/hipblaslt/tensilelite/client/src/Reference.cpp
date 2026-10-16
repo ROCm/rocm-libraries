@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <omp.h>
 #include <type_traits>
@@ -456,6 +457,106 @@ namespace TensileLite
             SaturateCast(Accumulator val)
         {
             return static_cast<T>(val);
+        }
+
+        template <typename T>
+        constexpr bool isEightBitFloat
+            = std::is_same<Float8, T>::value || std::is_same<BFloat8, T>::value
+              || std::is_same<Float8_fnuz, T>::value || std::is_same<BFloat8_fnuz, T>::value;
+
+        // f16 accumulation (Half alpha/beta/compute, 8-bit float MAC inputs).
+        template <typename Inputs>
+        constexpr bool isF16AccumulationGemm
+            = std::is_same<typename Inputs::AlphaType, Half>::value
+              && isEightBitFloat<typename Inputs::ComputeInputTypeA>
+              && isEightBitFloat<typename Inputs::ComputeInputTypeB>;
+
+        // The f16-accumulate WMMA rounds its accumulator once per 64 consecutive K: the x64 form is one
+        // 64-deep step and the x128 form two, each Half(C + exact sum of 64 products) rounded to nearest
+        // even with overflow to +-inf. Blocks start at k = 0 and a tail block is zero padded, so the
+        // reference does not depend on the WMMA K of a solution.
+        constexpr size_t f16AccumulationBlockK = 64;
+
+        // Half(a + b) with one rounding to nearest even (overflow to +-inf) for doubles a and b whose sum need not
+        // be exact in double: the exact error of the double sum decides a sum that lands exactly halfway between two
+        // Half values.
+        inline Half f16RoundSum(double a, double b)
+        {
+            double s   = a + b;
+            double bb  = s - a;
+            double err = (a - (s - bb)) + (b - bb);
+            Half   h   = static_cast<Half>(s);
+            if(err == 0 || !std::isfinite(s))
+                return h;
+            uint16_t u;
+            std::memcpy(&u, &h, sizeof(u));
+            double hv = static_cast<double>(h);
+            if(std::isinf(hv))
+            {
+                // 65520 rounds to inf as a tie; an error toward zero keeps 65504.
+                if(std::fabs(s) == 65520.0 && (err < 0) == (s > 0))
+                    u = (u & 0x8000) | 0x7bff;
+            }
+            else if(hv != s)
+            {
+                bool     up = s > hv;
+                uint16_t n  = hv == 0 ? (up ? 0x0001 : 0x8001) : ((up != bool(u & 0x8000)) ? u + 1 : u - 1);
+                Half     h2;
+                std::memcpy(&h2, &n, sizeof(n));
+                double h2v = static_cast<double>(h2);
+                if(s == (hv + h2v) / 2 && (err > 0) == (h2v > hv))
+                    u = n;
+            }
+            std::memcpy(&h, &u, sizeof(u));
+            return h;
+        }
+
+        // Products of 8-bit floats are exact in float and a block of them sums exactly in double.
+        inline Half f16AccumulationStep(Half acc, double blockSum)
+        {
+            return f16RoundSum(static_cast<double>(acc), blockSum);
+        }
+
+        // The single output conversion of every f16-accumulation reference result. Float8 maps +-inf (an f16
+        // overflow) to +-448 like a finite overflow and keeps NaN, as the kernel's clamp does.
+        template <typename DType, typename T>
+        inline DType f16AccumulationOutputCast(T result)
+        {
+            if constexpr(std::is_same<DType, Float8>::value)
+            {
+                float f = static_cast<float>(result);
+                if(std::isinf(f))
+                    return static_cast<Float8>(std::copysign(448.0f, f));
+                return SaturateCast<Float8>(f);
+            }
+            else
+                return SaturateCast<DType>(result);
+        }
+
+        // The f16-accumulation epilogue as the kernel computes it: Half and Float8 outputs scale by alpha and
+        // add beta*C in f16 (v_pk_mul_f16, v_pk_fma_f16); BFloat16 outputs widen to f32 first (v_mul_f32,
+        // v_fmac_f32), since a bf16 C can exceed the f16 range.
+        template <typename Inputs>
+        inline typename Inputs::DType
+            f16AccumulationEpilogue(Half acc, Half alpha, Half beta, typename Inputs::CType c)
+        {
+            using DType = typename Inputs::DType;
+            if constexpr(std::is_same<DType, BFloat16>::value)
+            {
+                float r = static_cast<float>(alpha) * static_cast<float>(acc);
+                if(beta != static_cast<Half>(0))
+                    r = std::fma(static_cast<float>(beta), static_cast<float>(c), r);
+                return f16AccumulationOutputCast<DType>(r);
+            }
+            else
+            {
+                // Products of two Half (or a Half and an 8-bit float) are exact in double.
+                Half r = static_cast<Half>(static_cast<double>(alpha) * static_cast<double>(acc));
+                if(beta != static_cast<Half>(0))
+                    r = f16RoundSum(static_cast<double>(static_cast<float>(c)) * static_cast<double>(beta),
+                                    static_cast<double>(r));
+                return f16AccumulationOutputCast<DType>(r);
+            }
         }
 
         template <typename Accumulator>
@@ -1167,6 +1268,16 @@ namespace TensileLite
                     + " D=" + TensileLite::ToString(problem.d().dataType());
                 return rejectFast(detail.c_str());
             }
+
+            // f16 accumulation rounds a Half accumulator once per 64 K; only the slow path models that.
+            auto isEightBitFloatType = [](rocisa::DataType t) {
+                return t == rocisa::DataType::Float8 || t == rocisa::DataType::BFloat8
+                       || t == rocisa::DataType::Float8_fnuz || t == rocisa::DataType::BFloat8_fnuz;
+            };
+            if(problem.computeType() == rocisa::DataType::Half && !problem.highPrecisionAccumulate()
+               && isEightBitFloatType(problem.computeInputTypeA())
+               && isEightBitFloatType(problem.computeInputTypeB()))
+                return rejectFast("f16_accumulation");
 
             constexpr size_t FAST_BLOCK_K = 8;
             size_t mxBlockA    = problem.mxBlockA();
@@ -1960,6 +2071,7 @@ namespace TensileLite
                 }
 
                 Accumulator value(0);
+                [[maybe_unused]] Half f16Acc(0);
 
                 // Check short-circuit for alpha = 0
                 if(std::get<typename Inputs::AlphaType>(inputs.alpha)
@@ -2005,6 +2117,40 @@ namespace TensileLite
                             = problem.mxBlockA() ? mxsa.strides()[boundIndices[0].a] : 0;
                         auto mxsbStride
                             = problem.mxBlockB() ? mxsb.strides()[boundIndices[0].b] : 0;
+
+                        if constexpr(isF16AccumulationGemm<Inputs>)
+                        {
+                            for(size_t i = 0; i < boundSize[0]; i += f16AccumulationBlockK)
+                            {
+                                size_t end = std::min<size_t>(i + f16AccumulationBlockK, boundSize[0]);
+                                double blockSum = 0;
+                                for(size_t idx = i; idx < end; idx++)
+                                {
+                                    size_t aI
+                                        = boundIndices[0].aMirror ? (boundSize[0] - idx - 1) : idx;
+                                    size_t bI
+                                        = boundIndices[0].bMirror ? (boundSize[0] - idx - 1) : idx;
+                                    blockSum += static_cast<double>(
+                                        multiply<Inputs,
+                                                 Accumulator,
+                                                 MathOpAccum,
+                                                 typename Inputs::AType,
+                                                 typename Inputs::BType,
+                                                 typename Inputs::ComputeInputTypeA,
+                                                 typename Inputs::ComputeInputTypeB>(
+                                            problem,
+                                            inputs,
+                                            aPtr,
+                                            bPtr,
+                                            aIndex + (aI * aStride),
+                                            bIndex + (bI * bStride),
+                                            aConjugate,
+                                            bConjugate));
+                                }
+                                f16Acc = f16AccumulationStep(f16Acc, blockSum);
+                            }
+                            continue;
+                        }
 
                         // innermost bound calculation:
                         size_t innerMXLoop = std::max<size_t>(
@@ -2067,6 +2213,16 @@ namespace TensileLite
 
                 auto cIndex = c.index(cCoord);
                 auto dIndex = d.index(dCoord);
+
+                if constexpr(isF16AccumulationGemm<Inputs>)
+                {
+                    dPtr[dIndex] = f16AccumulationEpilogue<Inputs>(
+                        f16Acc,
+                        std::get<typename Inputs::AlphaType>(inputs.alpha),
+                        std::get<typename Inputs::BetaType>(inputs.beta),
+                        cPtr[cIndex]);
+                    continue;
+                }
 
                 // Ensure zero*nan returns zero
                 Accumulator alpha = constVariantCast<Accumulator>(inputs.alpha);
@@ -2490,6 +2646,21 @@ namespace TensileLite
             case TypedGemm_F8_S_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F8_S_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8_B_H, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
             case TypedGemm_F8_H_S::TypeId():
@@ -2930,6 +3101,51 @@ namespace TensileLite
             case TypedGemm_F4B6_B_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F4B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F4_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F8_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4_H_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_H_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F4_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F8_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4_F8_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_F8_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F4_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F4_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F8_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F8_B_H, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4_B_H::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_B_H, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
 #endif // !_WIN32

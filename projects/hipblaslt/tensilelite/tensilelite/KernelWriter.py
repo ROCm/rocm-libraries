@@ -1571,6 +1571,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               instPerPackB = 44
             else:
               instPerPackB = 76
+        if kernel["ProblemType"]["DataTypeA"].isFloat4():
+          instPerPackA = self.numInstPerFp4Vgpr() * ceil(tPA["localReadInstruction"].blockWidth) \
+                         * self.states.numReadsIterCoalescedA if (iteration % self.states.numReadsIterCoalescedA == 0) else 0
+        if kernel["ProblemType"]["DataTypeB"].isFloat4():
+          instPerPackB = self.numInstPerFp4Vgpr() * ceil(tPB["localReadInstruction"].blockWidth) \
+                         * self.states.numReadsIterCoalescedB if (iteration % self.states.numReadsIterCoalescedB == 0) else 0
 
       instPerPackM = 0
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and not kernel["UnrollMajorLDSMetadata"]:
@@ -1668,7 +1674,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         packPreBItems = packPreB.flatitems()
 
         if packAItems:
-          if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
+          if self.isConvertedAfterDS(kernel, "A"):
             for n in range(instPerPackA):
               packINtemsA[0].append(packAItems.pop(0))
           else:
@@ -1695,7 +1701,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 break
 
         if packBItems:
-          if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
+          if self.isConvertedAfterDS(kernel, "B"):
             for n in range(instPerPackB):
               packINtemsB[0].append(packBItems.pop(0))
           else:
@@ -1714,7 +1720,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
         else:
           while packAItems or packMXSAItems:
-            if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
+            if self.isConvertedAfterDS(kernel, "A"):
               for n in range(instPerPackA):
                 if packAItems:
                   packINtemsA[0].append(packAItems.pop(0))
@@ -1743,7 +1749,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   else:
                     break
           while packMXSBItems or packBItems:
-            if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
+            if self.isConvertedAfterDS(kernel, "B"):
               for n in range(instPerPackB):
                 if packBItems:
                   packINtemsB[0].append(packBItems.pop(0))
@@ -2216,7 +2222,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               waitDsRead = SWaitCnt(dscnt=numDsInsts, comment="Wait for dependent lr")
               iterCode.add(waitDsRead)
         else:
-          if (kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"])) and not kernel["UseF32XEmulation"]:
+          if (kernel["UnrollMajorLDSB"] and not self.isConvertedAfterDS(kernel, "B")) and not kernel["UseF32XEmulation"]:
             if iteration == 0 and i == (kernel["MIWaveTileA"] // kernel["numSubTiles"]):
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
@@ -2787,7 +2793,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               localReads -= self.states.numReadsPerIterMetadata
 
           localReads += localReadsWaitcnt
-          if iteration == 0 and kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
+          if iteration == 0 and kernel["UnrollMajorLDSB"] and not self.isConvertedAfterDS(kernel, "B"):
             # We issued LR with A[0]->B[0]->A[1:]->B[1:] order.
             # We need to calculate how many B[N:] needed by 1st mfma.
             # If not UnrollMajorLDSB, we have packB which will be issued ahead.
@@ -9222,12 +9228,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.a.startVgprValuCvtTemp = -1
       self.states.b.startVgprValuCvtTemp = -1
       if kernel["ConvertAfterDS"]:
-        if ((tensorParametersA["bpe"] > tensorParametersA["bpeDS"]) and kernel["ProblemType"]["DataTypeA"].is8bitFloat()):
+        if ((tensorParametersA["bpe"] > tensorParametersA["bpeDS"]) and \
+            (kernel["ProblemType"]["DataTypeA"].is8bitFloat() or kernel["ProblemType"]["DataTypeA"].isFloat4())):
           self.states.a.startVgprValuCvtTemp = vgprIdx
-        if ((tensorParametersB["bpe"] > tensorParametersB["bpeDS"]) and kernel["ProblemType"]["DataTypeB"].is8bitFloat()):
+        if ((tensorParametersB["bpe"] > tensorParametersB["bpeDS"]) and \
+            (kernel["ProblemType"]["DataTypeB"].is8bitFloat() or kernel["ProblemType"]["DataTypeB"].isFloat4())):
           self.states.b.startVgprValuCvtTemp = vgprIdx
         if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
-          vgprIdx += 2
+          vgprIdx += self.numVgprCvtTemp(kernel)
 
       if kernel["ProblemType"]["Sparse"]:
         if kernel["DirectToVgprSparseMetadata"]:
@@ -10664,6 +10672,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return 1
     else:
       return kernel["ProblemType"][key].numBytes()
+
+  def numVgprCvtTemp(self, kernel):
+    # fp4 -> fp8 holds eight f16 values, or the decode temporaries and table, in four registers.
+    hasFP4 = kernel["ProblemType"]["DataTypeA"].isFloat4() or kernel["ProblemType"]["DataTypeB"].isFloat4()
+    return 4 if kernel["ConvertAfterDS"] and hasFP4 else 2
+
+  def numInstPerFp4Vgpr(self):
+    # Two converts, or the VALU decode where the target has no fp4 convert.
+    return 2 if self.states.archCaps.get("HasCvtScalePk8FP4", True) else 13
+
+  def isConvertedAfterDS(self, kernel, tc):
+    dataType = kernel["ProblemType"]["DataType%s"%tc]
+    return kernel["ConvertAfterDS"] and (dataType.isAnyFloat8() or dataType.isFloat4()) \
+      and dataType != kernel["ProblemType"]["MacDataType%s"%tc]
 
   ##############################################################################
   # Get Params For Tensor A/B

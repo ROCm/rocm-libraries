@@ -361,6 +361,16 @@ DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4", .format = WMMA
                       { MatrixFmtModifiers(FP4, FP4), 1, 8 } },
     .coissue = 0x00C8, .coissueOverride = { { MatrixFmtModifiers(FP4, FP4), 0x0008 } },
     .operand_fields = { {S0, .size=512}, {S1, .size=512} })
+DEF_BATCH(.format = WMMA_FLOAT8MIX_16x16x128, .flags = {WMMA_XDL},
+    VWmmaF1616x16x128Bf8Bf8Inst, "v_wmma_f16_16x16x128_bf8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Bf8Fp8Inst, "v_wmma_f16_16x16x128_bf8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Fp8Bf8Inst, "v_wmma_f16_16x16x128_fp8_bf8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+    VWmmaF1616x16x128Fp8Fp8Inst, "v_wmma_f16_16x16x128_fp8_fp8",
+        .operand_fields = { {D0, .size=128}, {S0, .size=512}, {S1, .size=512}, {S2, .size=128} },
+)
 
 // === gfx12-only WMMA (not available on gfx1250) ===
 // FIXME: These instructions exist in gfx12 but NOT in gfx1250.
@@ -1371,6 +1381,14 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
     .operand_fields = {
         {D0, vdst, vgpr, 128},
         {S0, src0, src_vgpr, 64},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtScalePk8F16Fp4Inst, "v_cvt_scale_pk8_f16_fp4",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 128},
+        {S0, src0, src_vgpr, 32},
         {S1, src1, src, 32},
     },
 )

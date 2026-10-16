@@ -24,6 +24,7 @@ from .ExecutionPolicy import isPersistent
 from .AsmAddressCalculation import AddrCalculation
 from .Common import DataDirection, isSubtileMultiDU
 from .Common.DataType import DataType
+from .KernelWriterModules import hasPackedAccumulators
 
 from math import ceil, trunc, modf
 from dataclasses import dataclass, field
@@ -125,7 +126,7 @@ class StoreState:
 
             if kernelWriter.states.serializedStore:
                 #self.numVgprPerValuC = kernel["MIRegPerOut"]
-                self.numVgprPerValuC = kernelWriter.states.bpeCinternal//kernelWriter.states.bpr # vgpr needed from register pool
+                self.numVgprPerValuC = 0.5 if hasPackedAccumulators(kernel) else kernelWriter.states.bpeCinternal//kernelWriter.states.bpr # vgpr needed from register pool
             else:
                 self.numVgprPerValuC = 0 # null since they are already declared in macro part of assembly kernel
 
@@ -134,7 +135,8 @@ class StoreState:
             # Really only used if gwvw=1 - edge cases
             # exception: data vgpr cannot be shared if UseInitialStridesCD is enabled and card enable EccHalf,
             #            since each buffer_load_short would overwrite undefined 16bit as zero.
-            self.halfDataRegPerVI = gwvw*self.numVgprsPerDataPerVI == 0.5 and not (kernel["ProblemType"]["UseInitialStridesCD"] and (kernelWriter.states.archCaps["HasEccHalf"] or not kernelWriter.states.asmCaps["HasWMMA_V1"])) and not (kernel["ProblemType"]["DestDataType"].numRegisters() == 0.25)
+            self.halfDataRegPerVI = gwvw*self.numVgprsPerDataPerVI == 0.5 and not (kernel["ProblemType"]["UseInitialStridesCD"] and (kernelWriter.states.archCaps["HasEccHalf"] or not kernelWriter.states.asmCaps["HasWMMA_V1"])) and not (kernel["ProblemType"]["DestDataType"].numRegisters() == 0.25) \
+                and not hasPackedAccumulators(kernel)
             # indicates the VGPRs index offset from LSU Reduction.
             # Used for multi-batch/Edge cases.
             self.lsuStartVgprOffset = 0
@@ -367,7 +369,7 @@ class StoreState:
 
         # Calculate numVgprsPerElement
         # print("numVgprsPerAddr=%u, numVgprsPerDataPerVI=%u, numVgprPerValuC=%u"%(self.cfg.numVgprsPerAddr, self.cfg.numVgprsPerDataPerVI, self.cfg.numVgprPerValuC))
-        self.numVgprsPerElement = self.cfg.numVgprPerValuC*gwvw + self.cfg.numVgprsPerAddr + int(ceil(self.cfg.numVgprsPerDataPerVI * gwvw))
+        self.numVgprsPerElement = int(ceil(self.cfg.numVgprPerValuC*gwvw)) + self.cfg.numVgprsPerAddr + int(ceil(self.cfg.numVgprsPerDataPerVI * gwvw))
         # TODO STREAM-K Update numVgprsPerElement for workspace
         if kernel["GroupLoadStore"] and kernel["ProblemType"]["UseBeta"]:
             self.numVgprsPerElement += self.cfg.numVgprsPerAddr
@@ -411,7 +413,7 @@ class StoreState:
         if self.cfg.numVgprsPerAddr > 1:
             self.align = max(self.align, self.cfg.numVgprsPerAddr)
         if self.cfg.numVgprPerValuC*gwvw > 1:
-            self.align = max(self.align, self.cfg.numVgprPerValuC*gwvw)
+            self.align = max(self.align, int(self.cfg.numVgprPerValuC*gwvw))
         if int(ceil(self.cfg.numVgprsPerDataPerVI * gwvw)) > 1:
             self.align = max(self.align, int(ceil(self.cfg.numVgprsPerDataPerVI * gwvw)))
 
@@ -567,8 +569,8 @@ class StoreState:
                     bestVw = kernel["StoreVectorWidth"]
 
                 if kernel["EnableMatrixInstruction"]:
-                    alignment = self.cfg.numVgprPerValuC * self.cfg.gwvw
-                    sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
+                    alignment = int(ceil(self.cfg.numVgprPerValuC * self.cfg.gwvw))
+                    sumIdx    = int(kw.vgprPool.checkOutAligned(alignment, alignment, "vgprValuC") // self.cfg.numVgprPerValuC)
                 else:
                     sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]
             self.elementSumIdx.append(sumIdx) # sumIdx is an element idx, need to div/2 for half
@@ -873,10 +875,10 @@ class StoreState:
                     bestVw = kernel["StoreVectorWidth"]
 
                 if kernel["EnableMatrixInstruction"]:
-                    alignment = self.cfg.numVgprPerValuC * self.cfg.gwvw
+                    alignment = int(ceil(self.cfg.numVgprPerValuC * self.cfg.gwvw))
                     #print(self.cfg.numVgprPerValuC, self.cfg.gwvw)
                     #exit(1)
-                    sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
+                    sumIdx    = int(kw.vgprPool.checkOutAligned(alignment, alignment, "vgprValuC") // self.cfg.numVgprPerValuC)
                 else:
                     sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]
             self.elementSumIdx.append(sumIdx) # sumIdx is an element idx, need to div/2 for half
@@ -1133,7 +1135,7 @@ class StoreState:
 
         if len(self.elementSumIdx) > 0 and self.lsu == 1:
             for i in self.elementSumIdx:
-                self.kernelWriter.vgprPool.checkIn(i * self.cfg.numVgprPerValuC)
+                self.kernelWriter.vgprPool.checkIn(int(i * self.cfg.numVgprPerValuC))
                 # print("checked in vgpr %u"%i)
             self.elementSumIdx = []
 

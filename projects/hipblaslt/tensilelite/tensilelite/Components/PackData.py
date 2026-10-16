@@ -31,13 +31,13 @@ from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCvtPkF32toBF16, VCvtPkF32toF16, VAndB32, \
                             VMovB32, VLShiftLeftB32, VCvtScalePk8F32toFP8, VCvtScalePk8F32toBF8, \
                             VCvtSRF32toFP8, VCvtScaleSRPkF32toFP8, VPrngB32, MacroInstruction, \
-                            VMaximumMinimumF32, VFmaPKF32
+                            VMaximumMinimumF32, VFmaPKF32, VMulF32, VMacF32, VCvtBF16toFP32
 from rocisa.functions import VSaturateCastInt
 from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common.DataType import DataType
 from ..Component import PackData
-from rocisa.instruction import ECvtF32toF16, t16
+from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, t16
 
 def formatting(idx, inputPrefix, prefixOffset):
     if inputPrefix:
@@ -205,6 +205,56 @@ class PackData_FLOAT8(PackData):
                 module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
                 module.add(VCvtPkF32toFP8(dst=vgpr(d), src0=vgpr(formatting(sumIdxV-1, inputPrefix, prefixOffset)), src1=vgpr(formatVgpr), vop3=VOP3PModifiers(op_sel=[0,0,pos])))
                 pos = int(not pos)
+        return module
+
+class PackData_F16toFLOAT8(PackData):
+    """
+    Packed f16 accumulators (f16 accumulation): element indices count halves, so
+    element e sits in half e%2 of VGPR e//2. Each value is widened to f32, clamped to
+    [Min, Max] unless it is NaN, and converted like PackData_FLOAT8; fp8 element vi
+    lands in byte vi%4 of VGPR destIdx//2 + vi//4, in place. The class mask is NaN
+    only, so an f16 overflow to +/-inf saturates to +/-448 instead of becoming NaN.
+    """
+    kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Half), "DestDataType": DataType(DataTypeEnum.Float8), "StochasticRounding": False}}
+    def __call__(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, tmpS01, laneSGPRC, inputPrefix="", prefixOffset=0):
+        vgprF32 = fp8CVTVgprStruct.vgprFp8F32Pair
+        module = Module("PackData f16 to float8")
+        for vi in range(0, gwvw):
+            f32 = vgprF32 + vi % 2
+            src = formatting(elementSumIdx // 2 + vi // 2, inputPrefix, prefixOffset)
+            module.add(ECvtF16toF32(dst=vgpr(f32), src=vgpr(src), sel=HighBitSel.HIGH if vi % 2 else HighBitSel.LOW, comment="f16 to f32"))
+            module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(f32), src1=vgpr(fp8CVTVgprStruct.vgprFp8NanInf), comment="Nan"))
+            module.add(VMed3F32(dst=vgpr(fp8CVTVgprStruct.vgprFp8Temp), src0=vgpr(f32), src1=vgpr(fp8CVTVgprStruct.vgprFp8Min), src2=vgpr(fp8CVTVgprStruct.vgprFp8Max)))
+            module.add(VCndMaskB32(dst=vgpr(f32), src0=vgpr(fp8CVTVgprStruct.vgprFp8Temp), src1=vgpr(f32), src2=sgpr(tmpS01,laneSGPRC)))
+            if vi % 2 == 1 or vi + 1 == gwvw:
+                d = formatting(destIdx // 2 + vi // 4, inputPrefix, prefixOffset)
+                module.add(VCvtPkF32toFP8(dst=vgpr(d), src0=vgpr(vgprF32), src1=vgpr(f32), vop3=VOP3PModifiers(op_sel=[0,0,(vi // 2) % 2])))
+        return module
+
+class PackData_F16toBF16(PackData):
+    """
+    Packed f16 accumulators (f16 accumulation) with bf16 output: element e sits in half e%2 of VGPR e//2.
+    Each value is widened to f32, scaled by alpha and accumulated with C*beta in f32, because a bf16 C can
+    exceed the f16 range; PackData_BF16 then converts it into the same half of the same VGPR, so the stores
+    are those of an f16 output. dataC is the first C VGPR when beta applies.
+    """
+    kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Half), "DestDataType": DataType(DataTypeEnum.BFloat16)}}
+    def __call__(self, gwvw, destIdx, elementSumIdx, bf16CVTVgprStruct, tmpS01, laneSGPRC, dataC=None, applyAlpha=True, inputPrefix="", prefixOffset=0):
+        f32 = bf16CVTVgprStruct.vgprF32Pair
+        alpha, beta = bf16CVTVgprStruct.vgprAlphaBeta, bf16CVTVgprStruct.vgprAlphaBeta + 1
+        module = Module("PackData f16 to bf16")
+        for vi in range(0, gwvw):
+            t = f32 + vi % 2
+            src = formatting(elementSumIdx // 2 + vi // 2, inputPrefix, prefixOffset)
+            module.add(ECvtF16toF32(dst=vgpr(t), src=vgpr(src), sel=HighBitSel.HIGH if vi % 2 else HighBitSel.LOW, comment="f16 to f32"))
+            if applyAlpha:
+                module.add(VMulF32(dst=vgpr(t), src0=vgpr(alpha), src1=vgpr(t), comment="*= alpha"))
+            if dataC is not None:
+                module.add(VCvtBF16toFP32(dst=vgpr(bf16CVTVgprStruct.vgprBf16Temp), src=vgpr(dataC + vi // 2), \
+                                          vgprMask=vgpr(bf16CVTVgprStruct.vgprBf16Mask), vi=vi))
+                module.add(VMacF32(dst=vgpr(t), src0=vgpr(bf16CVTVgprStruct.vgprBf16Temp), src1=vgpr(beta), comment="+= C*beta"))
+            if vi % 2 == 1 or vi + 1 == gwvw:
+                module.add(PackData_BF16()(vi % 2 + 1, destIdx // 2 + vi // 2, f32, bf16CVTVgprStruct, tmpS01, laneSGPRC))
         return module
 
 class PackData_FLOAT8_fnuz(PackData):

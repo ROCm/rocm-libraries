@@ -555,6 +555,16 @@ namespace TensileLite
         USERARGS = 2
     };
 
+    namespace
+    {
+        // Half-compute kernels hold alpha/beta as one packed f16 pair and test it for zero as one
+        // 32-bit word, which reads a pair of -0 halves as nonzero.
+        Half packedHalfScalar(Half value)
+        {
+            return value == Half(0) ? Half(0) : value;
+        }
+    }
+
     void setVariantToBuffer(ConstantVariant const& value,
                             void*                  buffer,
                             size_t                 bufferLength,
@@ -577,7 +587,7 @@ namespace TensileLite
         case rocisa::DataType::Half:
         {
             Half* fp16_buffer = (Half*)buffer;
-            *fp16_buffer      = *std::get_if<Half>(&value);
+            fp16_buffer[0] = fp16_buffer[1] = packedHalfScalar(*std::get_if<Half>(&value));
         }
         break;
         case rocisa::DataType::Int32:
@@ -1038,6 +1048,24 @@ namespace TensileLite
 
     namespace
     {
+        // Half-compute kernels read alpha and beta as one packed f16 pair. The typed append
+        // bypasses the 32-bit promotion that append() applies to the names "alpha"/"beta".
+        template <typename KA, typename V>
+        void appendAlphaOrBeta(KA&                args,
+                               std::string const& name,
+                               V const&           value,
+                               rocisa::DataType   type)
+        {
+            if(type == rocisa::DataType::Half)
+            {
+                Half const half = packedHalfScalar(constVariantCast<Half>(ConstantVariant(value)));
+                args.template append<Half>(name, half);
+                args.template append<Half>(name + "_2", half);
+            }
+            else
+                args.append(name, value, type);
+        }
+
         template <typename KA>
         void appendLegacyDataParallelSchedulingArgs(ContractionSolution const& solution,
                                                    ContractionSolution::Problem const& problem,
@@ -1305,18 +1333,10 @@ namespace TensileLite
 
         if(internalArgsSupport.version < 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
-
-            if(problem.alphaType() == rocisa::DataType::Half)
-                args.append("alpha_2", inputs.alpha, problem.alphaType());
+            appendAlphaOrBeta(args, "alpha", inputs.alpha, problem.alphaType());
 
             if(problemType.useBeta)
-            {
-                args.append("beta", inputs.beta, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", inputs.beta, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", inputs.beta, problem.betaType());
 
             if(sizeMapping.expertSchedulingMode > 0)
             {
@@ -1581,29 +1601,16 @@ namespace TensileLite
 
         if(internalArgsSupport.version >= 3)
         {
-            args.append("alpha", inputs.alpha, problem.alphaType());
-
-            if(problem.alphaType() == rocisa::DataType::Half)
-                args.append("alpha_2", inputs.alpha, problem.alphaType());
+            appendAlphaOrBeta(args, "alpha", inputs.alpha, problem.alphaType());
 
             // The beta slot is always emitted so the layout does not depend on UseBeta;
             // the kernel gates the beta math separately. Keep the "beta" name: append()
             // promotes small types to 32-bit only for names "alpha"/"beta", so a
             // differently named pad would be written at the wrong size.
             if(problemType.useBeta)
-            {
-                args.append("beta", inputs.beta, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", inputs.beta, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", inputs.beta, problem.betaType());
             else
-            {
-                args.append("beta", 0.0f, problem.betaType());
-
-                if(problem.betaType() == rocisa::DataType::Half)
-                    args.append("beta_2", 0.0f, problem.betaType());
-            }
+                appendAlphaOrBeta(args, "beta", 0.0f, problem.betaType());
 
             // ver3 places AddressWS after alpha/beta, see the StreamK block above.
             if(sizeMapping.isStreamK() && sizeMapping.streamKAtomic == 0)

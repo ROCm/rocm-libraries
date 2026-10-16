@@ -544,6 +544,9 @@ _validGEMMTypes = [
     ("B8", "B8", "H", "S"),
     ("F8", "B8", "H", "S"),
     ("B8", "F8", "H", "S"),
+    ("F8", "F8", "H", "H"),
+    ("F8", "F8", "F8", "H"),
+    ("F8", "F8", "B", "H"),
     ("B8", "B8", "B", "S"),
     ("H", "H", "F8", "S"),
     ("F8", "F8", "B", "S"),
@@ -714,6 +717,18 @@ _HPATypes = [
     ("B6", "F6", "F8", "S"),
     ("B6", "F6", "B8", "S"),
 ]
+
+# f16 accumulation types (HPA=F, Tc=H with 8-bit float MAC inputs); their names carry _TiToTc_ like the HPA types.
+_F16AccTypes = [
+    ("F8", "F8", "H", "H"),
+    ("F8", "F8", "F8", "H"),
+    ("F8", "F8", "B", "H"),
+]
+
+def isF16Accumulation(problemType) -> bool:
+  computeType = problemType.get("ComputeDataType")
+  return computeType is not None and computeType.isHalf() and not problemType["HighPrecisionAccumulate"] \
+    and problemType["MacDataTypeA"].is8bitFloat() and problemType["MacDataTypeB"].is8bitFloat()
 
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
@@ -944,6 +959,12 @@ class ProblemType(Mapping):
     # Modifying ComputeDataType for BBB+HPA: if (BBB+HPA), convert it to BBS_BH by setting ComputeDataType to S.
     if self["ComputeDataType"].isBFloat16() and self["DataType"].isBFloat16() and self["HighPrecisionAccumulate"]:
       printWarning("Inconsistent DataTypes: DataType == bf16, DestType == bf16, ComputeDataType == bf16, but HPA == True (BBB+HPA, no such a type); Converting BBB+HPA to BBS_BH by setting compute data type to f32.")
+      self["ComputeDataType"] = DataType('s')
+
+    # Modifying ComputeDataType for F8F8H+HPA: f16 compute means f16 accumulation, which is HPA == False.
+    if self["ComputeDataType"].isHalf() and self["MacDataTypeA"].is8bitFloat() and self["MacDataTypeB"].is8bitFloat() \
+        and self["HighPrecisionAccumulate"]:
+      printWarning("Inconsistent DataTypes: 8-bit float inputs with ComputeDataType == f16 and HPA == True (f16 accumulation needs HPA == False); Converting to f32 compute.")
       self["ComputeDataType"] = DataType('s')
 
     # Modifying ComputeDataType for I8I8I_BH: if (I8I8I8+HPA), convert it to I8I8I_BH by setting ComputeDataType to i.
@@ -1307,7 +1328,7 @@ class ProblemType(Mapping):
     # TODO: Distinguish all kernels by _TiToTc_ to be more consistent with rocblas
     gemmType = (self["MacDataTypeA"].toChar(), self["MacDataTypeB"].toChar(),
                 self["DestDataType"].toChar(), self["ComputeDataType"].toChar())
-    if gemmType in _HPATypes:
+    if gemmType in _HPATypes or gemmType in _F16AccTypes:
       name[-1] += "".join([self["DestDataType"].toChar(), self["ComputeDataType"].toChar()])
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
