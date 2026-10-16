@@ -411,7 +411,8 @@ TEST(PersistentArgumentLayout, DataParallelCustomDescriptorMatchesCompleteNormal
 }
 
 // The probe tail args are packed from internalArgsSupport alone, so a
-// DataParallel fixture with the probe bit set exercises the SK5 packing.
+// DataParallel fixture with the probe bit set exercises the packing of
+// StreamK hybrid-assignment kernels.
 TEST(PersistentArgumentLayout, OccupancyProbeAbsentWithoutSupportOrForGroupedGemm)
 {
     auto problem = persistentProblem();

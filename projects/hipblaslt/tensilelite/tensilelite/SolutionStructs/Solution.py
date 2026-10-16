@@ -293,8 +293,8 @@ def _supportStreamKPerTileExtraIters(state):
 def _supportOccupancyProbe(state):
   """Whether this solution's asm takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args.
 
-  Opt-in at build time (EmitOccupancyProbe); generated non-grouped SK5 (hybrid
-  assignment) kernels on gfx95x only, the arch the slot layout (SH == 0,
+  Opt-in at build time (EmitOccupancyProbe); generated non-grouped StreamK kernels
+  with hybrid work assignment on gfx95x only, the arch the slot layout (SH == 0,
   SE < 4, XCC < 8) is verified on.
   """
   return bool(globalParameters.get("EmitOccupancyProbe", False)) \
