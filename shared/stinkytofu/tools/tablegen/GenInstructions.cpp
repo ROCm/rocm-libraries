@@ -111,7 +111,9 @@ struct ArchDef {
 //   EncodeField  hardware encoding field (vdata, simm16, ssrc0, ...)
 //   Type         operand type           (vgpr, sreg, label, wait_alu, ...)
 //   Size         field size in bits (16, 32, 64, 128, ...) or M64
-//   Options      RW (read-write), M64 (64-bit lane mask, truncatable in wave32)
+//   Options      RW (read-write), M64 (64-bit lane mask, truncatable in wave32),
+//                SADDR_OFFSET (Size is the width with a null saddr; 32 bits when
+//                the instruction's saddr field holds a register)
 //
 // Partial override (in .operand_fields only) — inherits from format .fields
 // and selectively overrides individual properties by name:
@@ -122,6 +124,7 @@ struct OperandFieldEntry {
     bool isDest = false;
     bool isReadWrite = false;
     bool isM64 = false;
+    bool isSaddrOffset = false;
     std::string encodeField;  // "vdata", "vaddr", "rsrc", "soffset", "simm16", ...
     std::string fieldType;    // "vgpr", "sreg", "label", "wait_alu", ...
     int sizeBits = 0;
@@ -1301,7 +1304,7 @@ class DefTParser {
             }
 
             if (tokens.size() >= 4 && tokens[1].find('.') == std::string::npos) {
-                // Full entry: {D0, vdata, vgpr, 32 [, RW|M64]}
+                // Full entry: {D0, vdata, vgpr, 32 [, RW|M64|SADDR_OFFSET]}
                 // M64 can appear as the size field (implies 64) or as an option.
                 OperandFieldEntry e;
                 e.isDest = (!tokens[0].empty() && tokens[0][0] == 'D');
@@ -1318,6 +1321,8 @@ class DefTParser {
                         e.isReadWrite = true;
                     else if (tokens[ti] == "M64")
                         e.isM64 = true;
+                    else if (tokens[ti] == "SADDR_OFFSET")
+                        e.isSaddrOffset = true;
                 }
                 out.push_back(e);
             } else if (tokens.size() >= 2 && tokens[1].find('.') != std::string::npos) {
@@ -1492,7 +1497,7 @@ class InstructionCodeGen {
                     out << "    {" << encodeFieldToCpp(e.encodeField) << ", "
                         << fieldTypeToCpp(e.fieldType) << ", " << e.sizeBits << ", "
                         << (e.isDest ? 1 : 0) << ", " << (e.isReadWrite ? 1 : 0) << ", "
-                        << (e.isM64 ? 1 : 0) << "},\n";
+                        << (e.isM64 ? 1 : 0) << ", " << (e.isSaddrOffset ? 1 : 0) << "},\n";
                 }
                 out << "};\n\n";
             }
@@ -1541,7 +1546,7 @@ class InstructionCodeGen {
                     out << "    {" << encodeFieldToCpp(e.encodeField) << ", "
                         << fieldTypeToCpp(e.fieldType) << ", " << e.sizeBits << ", "
                         << (e.isDest ? 1 : 0) << ", " << (e.isReadWrite ? 1 : 0) << ", "
-                        << (e.isM64 ? 1 : 0) << "},\n";
+                        << (e.isM64 ? 1 : 0) << ", " << (e.isSaddrOffset ? 1 : 0) << "},\n";
                 }
                 out << "};\n\n";
             }

@@ -398,6 +398,69 @@ TEST(MUBUFVerificationTest, BufferLoadB32_WrongVdstType_Fails) {
 }
 
 // ==============================================================================
+// GLOBAL saddr addressing modes
+//
+// vaddr fields tagged SADDR_OFFSET (e.g. global_prefetch_b8: S0=vaddr(vgpr,64),
+// S1=saddr(sreg,64)) are a 64-bit address with a null saddr, or a 32-bit
+// offset from a register saddr. The width must match the mode exactly.
+// ==============================================================================
+
+namespace {
+void buildGlobalPrefetchB8(Function& func, const StinkyRegister& vaddr,
+                           const StinkyRegister& saddr) {
+    GfxArchID arch = getGfxArchID(12, 5, 0);
+    setFunctionArch(func, arch);
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, arch);
+
+    IsaOpcode opcode = getMnemonicToIsaOpcode("global_prefetch_b8", arch);
+    const HwInstDesc* desc = getMCIDByIsaOp(opcode, arch);
+    assert(desc && "global_prefetch_b8 not found for gfx1250");
+
+    StinkyInstruction* inst = builder.create(desc);
+    inst->addSrcReg(vaddr);
+    inst->addSrcReg(saddr);
+}
+}  // namespace
+
+// global_prefetch_b8 v[2:3], off
+TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_OffSaddr64BitVaddr_Passes) {
+    Function func("kernel");
+    buildGlobalPrefetchB8(func, vgpr(2, 2), StinkyRegister("off"));
+    std::string error = validateStinkyIR(func);
+    EXPECT_TRUE(error.empty()) << "64-bit vaddr with off saddr should pass, got: " << error;
+}
+
+// global_prefetch_b8 v2, s[62:63]
+TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_RegisterSaddr32BitVaddr_Passes) {
+    Function func("kernel");
+    buildGlobalPrefetchB8(func, vgpr(2), sgpr(62, 2));
+    std::string error = validateStinkyIR(func);
+    EXPECT_TRUE(error.empty()) << "32-bit vaddr with register saddr should pass, got: " << error;
+}
+
+// global_prefetch_b8 v2, off -- a null saddr needs the full 64-bit vaddr.
+TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_OffSaddr32BitVaddr_Fails) {
+    Function func("kernel");
+    buildGlobalPrefetchB8(func, vgpr(2), StinkyRegister("off"));
+    std::string error = validateStinkyIR(func);
+    EXPECT_FALSE(error.empty()) << "32-bit vaddr with off saddr should fail";
+    EXPECT_NE(error.find("src[0]"), std::string::npos) << "Error should mention src[0] (vaddr)";
+    EXPECT_NE(error.find("expected 2"), std::string::npos)
+        << "Error should mention expected width 2";
+}
+
+// global_prefetch_b8 v[2:3], s[62:63] -- a register saddr reads only a 32-bit offset.
+TEST(GlobalSaddrVerificationTest, GlobalPrefetchB8_RegisterSaddr64BitVaddr_Fails) {
+    Function func("kernel");
+    buildGlobalPrefetchB8(func, vgpr(2, 2), sgpr(62, 2));
+    std::string error = validateStinkyIR(func);
+    EXPECT_FALSE(error.empty()) << "64-bit vaddr with register saddr should fail";
+    EXPECT_NE(error.find("src[0]"), std::string::npos) << "Error should mention src[0] (vaddr)";
+    EXPECT_NE(error.find("expected 1"), std::string::npos)
+        << "Error should mention expected width 1";
+}
+// ==============================================================================
 // VOP3_2SRC shift verification (AIHPBLAS-4142)
 //
 // v_lshrrev_b64 / v_lshlrev_b16 are 2-source VALU shifts. They previously used
