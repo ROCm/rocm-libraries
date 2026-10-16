@@ -1335,7 +1335,9 @@ class TestCli:
         )
         out = tmp_path / "nested" / "SUPPORT_MATRIX.md"
         assert main(["--bundles-dir", str(bundle_root), "--output", str(out)]) == 0
-        assert out.read_text().startswith("# Combined Engine Support Matrix")
+        assert out.read_text(encoding="utf-8").startswith(
+            "# Combined Engine Support Matrix"
+        )
 
     def test_check_passes_on_a_fresh_file(
         self, bundle_root: Path, tmp_path: Path
@@ -1405,9 +1407,9 @@ class TestCli:
             bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
         )
         main(["--bundles-dir", str(bundle_root), "--output", str(out)])
-        first = out.read_text()
+        first = out.read_text(encoding="utf-8")
         main(["--bundles-dir", str(bundle_root), "--output", str(out)])
-        assert out.read_text() == first
+        assert out.read_text(encoding="utf-8") == first
 
 
 # --------------------------------------------------------------------------
@@ -1499,7 +1501,7 @@ class TestOverviewOnlyCli:
         assert main(["--bundles-dir", str(bundle_root), "--overview-only"]) == 0
         assert out.exists()
         assert not (out_dir / "SUPPORT_MATRIX.md").exists()
-        content = out.read_text()
+        content = out.read_text(encoding="utf-8")
         assert "<details>" not in content
 
     def test_overview_only_explicit_output(
@@ -1522,7 +1524,7 @@ class TestOverviewOnlyCli:
             == 0
         )
         assert out.exists()
-        assert "<details>" not in out.read_text()
+        assert "<details>" not in out.read_text(encoding="utf-8")
 
     def test_check_overview_only_uses_correct_regen_command(
         self, bundle_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]

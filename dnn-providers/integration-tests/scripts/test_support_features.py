@@ -84,7 +84,7 @@ def _schema_text(name: str) -> str:
     # The schemas are the denominator. Missing, every drift check would pass
     # vacuously, so this fails instead of skipping.
     assert path.is_file(), f"schema not found: {path}"
-    return re.sub(r"//[^\n]*", "", path.read_text())
+    return re.sub(r"//[^\n]*", "", path.read_text(encoding="utf-8"))
 
 
 def _block(text: str, keyword: str, name: str) -> str:
@@ -4960,7 +4960,7 @@ def _serialized_reduction_modes() -> dict[str, str]:
     )
     # Missing, the mode check would pass vacuously, as for the schemas.
     assert path.is_file(), f"serializer not found: {path}"
-    header = path.read_text()
+    header = path.read_text(encoding="utf-8")
     pairs = re.findall(r'\{ReductionMode::(\w+),\s*"(\w+)"\}', header)
     assert pairs, "the serializer's ReductionMode names were not found"
     return dict(pairs)
@@ -5302,7 +5302,9 @@ def _serialized_enum(name: str, header: str = "Common.hpp") -> dict[str, str]:
     )
     # Missing, the mode check would pass vacuously, as for the schemas.
     assert path.is_file(), f"serializer not found: {path}"
-    pairs = re.findall(rf'\{{{name}::(\w+),\s*"(\w+)"\}}', path.read_text())
+    pairs = re.findall(
+        rf'\{{{name}::(\w+),\s*"(\w+)"\}}', path.read_text(encoding="utf-8")
+    )
     assert pairs, f"the serializer's {name} names were not found"
     return dict(pairs)
 
