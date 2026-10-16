@@ -44,6 +44,8 @@ retune either decode mode or the GDN prefill path.
 | [`library/tests/test_gdn_decode_fused_gfx950_numeric.py`](../../../tests/test_gdn_decode_fused_gfx950_numeric.py) | On-device fused-mode output, state and conv-state correctness |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
 | [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
+| [`library/tests/test_gdn_decode_knobs.py`](../../../tests/test_gdn_decode_knobs.py) | CPU contract of the performance knobs: validation, `*_applies` predicates, name injectivity, emitted effect |
+| [`library/tests/test_gdn_decode_knobs_gfx950_numeric.py`](../../../tests/test_gdn_decode_knobs_gfx950_numeric.py) | On-device correctness of every knob on every registered tile (and every `BPV=1` fused tile) it applies to at the default heads, at head dims 64 and 256, `out_lds` at `DV` 256 / 512, and with f16 I/O and an f16 state |
 | [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds (Python lowering) |
 | [`library/tests/test_gdn_decode_ir_cpp_parity.py`](../../../tests/test_gdn_decode_ir_cpp_parity.py) | The C++ engine lowers every golden case to byte-identical LLVM IR |
 | [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
@@ -144,6 +146,18 @@ out_err, state_err = check(spec, batch=8)
 assert max(out_err, state_err) < TOL
 ```
 
+### Performance knobs
+
+Ten spec fields change how the warp-tiled kernel computes, not what it
+computes (the two state hints and `waves_per_eu` also apply on the reference
+path): `state_load_hint`, `state_store_hint`, `dpp_reduce`, `xcd_remap`,
+`stream_rows`, `interleave_cols`, `conv_once`, `norm_gate_once`, `out_lds` and
+`waves_per_eu`. Every one defaults to the code the kernel emitted before it
+existed, so a default spec keeps its name and its IR. Dispatch does not set
+them yet; build a spec directly to try one. Their rules and the tiles where
+each changes code are in
+[`ALGORITHM.md` §4.10](ALGORITHM.md#410-performance-knobs).
+
 ## Benchmark registered candidates
 
 The GDN benchmark asks the registry for every legal candidate. The default D128
@@ -205,6 +219,7 @@ CPU-only coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
   library/tests/test_gdn_decode_fused.py \
+  library/tests/test_gdn_decode_knobs.py \
   library/tests/test_gdn_decode_golden.py \
   library/tests/test_gdn_decode_prepare.py \
   library/tests/test_gdn_decode_ir_cpp_parity.py \
@@ -226,6 +241,7 @@ python3 -m pytest \
   library/tests/test_gdn_decode_gfx950_numeric.py \
   library/tests/test_kda_decode_gfx950_numeric.py \
   library/tests/test_gdn_decode_fused_gfx950_numeric.py \
+  library/tests/test_gdn_decode_knobs_gfx950_numeric.py \
   -m gpu
 ```
 

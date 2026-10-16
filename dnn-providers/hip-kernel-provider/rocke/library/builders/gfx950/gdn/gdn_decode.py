@@ -631,7 +631,9 @@ def run(spec: GdnDecodeSpec, inp, launcher: KernelLauncher, batch: int):
     return values["out"], values["state"]
 
 
-def check(spec: GdnDecodeSpec, batch: int, seed: int = 0) -> Tuple[float, float]:
+def check(
+    spec: GdnDecodeSpec, batch: int, seed: int = 0, *, disjoint_writes: bool = True
+) -> Tuple[float, float]:
     """Run and compare against the reference. Returns ``(out_err, state_err)``.
 
     ``state_err`` covers the WHOLE pool, not only the written pages: the pages
@@ -640,9 +642,11 @@ def check(spec: GdnDecodeSpec, batch: int, seed: int = 0) -> Tuple[float, float]
     the wrong slot -- the slot written checks out and the slot damaged is never
     looked at -- and a misplaced write is the failure mode a paged state pool
     invites. For ``fuse_conv`` specs it also covers the conv-state pool, by the
-    same written/untouched rule.
+    same written/untouched rule. ``disjoint_writes=False`` updates every
+    sequence in place (write slot == read slot); the default pool depth still
+    leaves ``batch + 1`` untouched pages.
     """
-    inp = make_inputs(spec, batch, seed=seed)
+    inp = make_inputs(spec, batch, seed=seed, disjoint_writes=disjoint_writes)
     ref_out, ref_state = ref_fp32(spec, inp)
     values = run_values(spec, inp, launcher_for(spec), batch)
     out_err = out_error(spec, values["out"], ref_out)
