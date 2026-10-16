@@ -136,11 +136,12 @@ class EqualityMatchingTest : public ::testing::Test
 protected:
     using Key      = std::array<int64_t, 3>;
     using Solution = std::shared_ptr<Tensile::ContractionSolution>;
-    using Table    = Tensile::Matching::DistanceMatchingTable<Key,
-                                                              Tensile::ContractionProblem,
-                                                              Solution,
-                                                              Solution,
-                                                              Tensile::Matching::Equality<Key>>;
+
+    using Table = Tensile::Matching::DistanceMatchingTable<Key,
+                                                           Tensile::ContractionProblem,
+                                                           Solution,
+                                                           Solution,
+                                                           Tensile::Matching::Equality<Key>>;
 
     Table    table;
     Solution first  = std::make_shared<Tensile::ContractionSolution>();
