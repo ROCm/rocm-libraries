@@ -13,7 +13,7 @@ hipCUB is a thin, header-only wrapper library for `rocPRIM <https://rocm.docs.am
 
 hipCUB has been updated to align with CCCL 3.0.3, establishing a dependency on libhipcxx and adopting the changes made in upstream CUB. See :doc:`about/hipCUB-cccl-updates` for migration guidance.
 
-The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl/hipccl3/hipcub.
+The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipcub.
 
 .. grid:: 2
 

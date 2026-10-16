@@ -13,6 +13,7 @@ from rocke.core.arch import (
     arch_from_isa,
     base_arch_from_target_id,
     compiler_target_from_target_id,
+    generic_arch_from_target_id,
     known_arches,
     target_id_from_isa,
 )
@@ -96,12 +97,27 @@ def test_gfx11_generic_catalog_selection_is_independent_of_target_suffixes(
     assert compiler_target_from_target_id(target_id) == compiler_target
 
 
-@pytest.mark.parametrize("target_id", ["gfx1170", "gfx1200", "gfx1101_bad"])
-def test_nonmembers_do_not_use_the_gfx11_generic_catalog_row(
+@pytest.mark.parametrize("target_id", ["gfx1170", "gfx1101_bad"])
+def test_nonmembers_do_not_use_a_generic_catalog_row(
     target_id: str,
 ) -> None:
     expected = "gfx1101" if target_id == "gfx1101_bad" else target_id
     assert base_arch_from_target_id(target_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("target_id", "base", "compiler_target"),
+    [
+        ("gfx1200", "gfx12-generic", "gfx1200"),
+        ("gfx1200-strict:xnack-", "gfx12-generic", "gfx1200:xnack-"),
+        ("gfx1201", "gfx1201", "gfx1201"),
+    ],
+)
+def test_gfx12_processors_without_a_row_use_the_generic_catalog_row(
+    target_id: str, base: str, compiler_target: str
+) -> None:
+    assert base_arch_from_target_id(target_id) == base
+    assert compiler_target_from_target_id(target_id) == compiler_target
 
 
 @pytest.mark.parametrize(
@@ -124,6 +140,39 @@ def test_arch_target_uses_base_architecture_rows() -> None:
         ArchTarget.from_gfx("gfx1250-strict")
 
 
+@pytest.mark.parametrize(
+    ("target_id", "generic"),
+    [
+        ("gfx1100", "gfx11-generic"),
+        ("gfx1103:xnack-", "gfx11-generic"),
+        ("gfx1151", "gfx11-generic"),
+        ("gfx1153-strict", "gfx11-generic"),
+        ("gfx11-generic", "gfx11-generic"),
+        ("gfx1010", None),
+        ("gfx942", None),
+        ("gfx11000", None),
+        ("", None),
+    ],
+)
+def test_generic_arch_covers_family_members(target_id: str, generic) -> None:
+    assert generic_arch_from_target_id(target_id) == generic
+
+
+def test_generic_targets_are_catalogued_and_disjoint() -> None:
+    from rocke.core.arch.target import _load_generic_targets
+
+    seen = set()
+    for generic, members in _load_generic_targets().items():
+        target = ArchTarget.from_gfx(generic)
+        assert members and seen.isdisjoint(members)
+        seen.update(members)
+        for member in members:
+            if member in known_arches():
+                member_target = ArchTarget.from_gfx(member)
+                assert member_target.target_family == target.target_family
+                assert member_target.wave_size == target.wave_size
+
+
 def test_cpp_target_identity_matches_python() -> None:
     """Compare the native CTest executable with Python when a build is supplied."""
     executable = os.environ.get("ROCKE_ARCH_TARGET_TEST_EXE")
@@ -135,6 +184,11 @@ def test_cpp_target_identity_matches_python() -> None:
         "gfx1170",
         "gfx1101_bad",
         "gfx00a",
+        "gfx1100",
+        "gfx1102",
+        "gfx1154",
+        "gfx1200",
+        "gfx1010",
         "unexpected-target",
         "",
         "gfx",
@@ -161,6 +215,7 @@ def test_cpp_target_identity_matches_python() -> None:
                 base_arch_from_target_id(target),
                 compiler_target_from_target_id(target),
                 arch_from_isa(isa),
+                generic_arch_from_target_id(target) or "-",
             )
         )
     assert actual == expected
