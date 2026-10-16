@@ -41,32 +41,36 @@ using DeviceConvBwdWeightInstance =
         1,                    // NumGemmKPrefetchStage
         256,                  // TileLoadThreadGroupSize
         256,                  // TileMathThreadGroupSize
-        64,                   // MPerBlock
-        64,                   // NPerBlock
-        32,                   // K0PerBlock
+        128,                  // MPerBlock
+        128,                  // NPerBlock
+        128,                  // K0PerBlock
         8,                    // K1
-        32,                   // MPerXdl
-        32,                   // NPerXdl
-        1,                    // MXdlPerWave
-        1,                    // NXdlPerWave
-        S<4, 32, 2>,          // ABlockTransferThreadClusterLengths_K0_M_K1
-        S<2, 0, 1>,           // ABlockTransferThreadClusterArrangeOrder
-        S<1, 0, 2>,           // ABlockTransferSrcAccessOrder
+        16,                   // MPerXdl
+        16,                   // NPerXdl
+        4,                    // MXdlPerWave
+        4,                    // NXdlPerWave
+        S<2, 16, 8>,          // ABlockTransferThreadClusterLengths_K0_M_K1
+        S<0, 2, 1>,           // ABlockTransferThreadClusterArrangeOrder
+        S<0, 2, 1>,           // ABlockTransferSrcAccessOrder
         1,                    // ABlockTransferSrcVectorDim
-        2,                    // ABlockTransferSrcScalarPerVector
-        4,                    // ABlockTransferDstScalarPerVector_K1
-        false,                // ABlockLdsAddExtraM
-        S<4, 32, 2>,          // BBlockTransferThreadClusterLengths_K0_N_K1
-        S<2, 0, 1>,           // BBlockTransferThreadClusterArrangeOrder
-        S<1, 0, 2>,           // BBlockTransferSrcAccessOrder
+        8,                    // ABlockTransferSrcScalarPerVector
+        8,                    // ABlockTransferDstScalarPerVector_K1
+        true,                 // ABlockLdsAddExtraM
+        S<2, 16, 8>,          // BBlockTransferThreadClusterLengths_K0_N_K1
+        S<0, 2, 1>,           // BBlockTransferThreadClusterArrangeOrder
+        S<0, 2, 1>,           // BBlockTransferSrcAccessOrder
         1,                    // BBlockTransferSrcVectorDim
-        2,                    // BBlockTransferSrcScalarPerVector
-        4,                    // BBlockTransferDstScalarPerVector_K1
-        false,                // BBlockLdsAddExtraN
+        8,                    // BBlockTransferSrcScalarPerVector
+        8,                    // BBlockTransferDstScalarPerVector_K1
+        true,                 // BBlockLdsAddExtraN
         1,                    // CShuffleMXdlPerWavePerShuffle
-        1,                    // CShuffleNXdlPerWavePerShuffle
+        2,                    // CShuffleNXdlPerWavePerShuffle
         S<1, 32, 1, 8>,       // CBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
-        2>;                   // CBlockTransferScalarPerVector_NWaveNPerXdl
+        8,                    // CBlockTransferScalarPerVector_NWaveNPerXdl
+        F16,
+        F16,
+        1,
+        true>;
 
 template <ck::index_t NDimSpatial>
 using HostConvBwdWeightInstance = ck::tensor_operation::host::ReferenceConvBwdWeight<NDimSpatial,
@@ -91,9 +95,9 @@ int main(int argc, char* argv[])
 
     switch(conv_param.num_dim_spatial_)
     {
-    case 1: return !run_grouped_conv_bwd_weight<1>(config, conv_param);
+    // case 1: return !run_grouped_conv_bwd_weight<1>(config, conv_param);
     case 2: return !run_grouped_conv_bwd_weight<2>(config, conv_param);
-    case 3: return !run_grouped_conv_bwd_weight<3>(config, conv_param);
+    // case 3: return !run_grouped_conv_bwd_weight<3>(config, conv_param);
     default: break;
     }
 
