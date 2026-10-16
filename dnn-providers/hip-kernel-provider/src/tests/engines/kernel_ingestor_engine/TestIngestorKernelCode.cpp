@@ -3,13 +3,18 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -748,6 +753,9 @@ public:
     // When true, the load step returns no program and no kernel.
     bool loadsNothing = false;
 
+    // The load step sleeps this long before it records the load.
+    std::chrono::milliseconds loadDelay{0};
+
 protected:
     hipError_t queryDeviceArch(int deviceOrdinal, std::string& reportedArch) const override
     {
@@ -758,7 +766,11 @@ protected:
                                 const std::string& label,
                                 int deviceOrdinal) const override
     {
-        loads.push_back(StoredLoad{code.codeObject, code.symbol, label, deviceOrdinal});
+        std::this_thread::sleep_for(loadDelay);
+        {
+            const std::lock_guard<std::mutex> lock(_loadsMutex);
+            loads.push_back(StoredLoad{code.codeObject, code.symbol, label, deviceOrdinal});
+        }
         if(loadsNothing)
         {
             return Resolved{};
@@ -769,6 +781,33 @@ protected:
 
 private:
     std::map<int, std::string> _architectures;
+    // Keeps the record of loads intact when several threads load at the same time.
+    mutable std::mutex _loadsMutex;
+};
+
+// Opens a start gate and joins every started thread when it goes out of scope.
+struct ThreadGateCloser
+{
+    std::mutex& gateMutex;
+    std::condition_variable& gate;
+    bool& released;
+    std::vector<std::thread>& threads;
+
+    ~ThreadGateCloser()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(gateMutex);
+            released = true;
+        }
+        gate.notify_all();
+        for(auto& thread : threads)
+        {
+            if(thread.joinable())
+            {
+                thread.join();
+            }
+        }
+    }
 };
 
 SavedKernelCode storedKpackCode(const std::string& target)
@@ -817,6 +856,103 @@ TEST(TestIngestorKernelCodeReload, ReusesTheEntryOfAKnownDevice)
     // Only the new device loads the stored bytes, and only once.
     ASSERT_EQ(code.loads.size(), 1U);
     EXPECT_EQ(code.loads[0].deviceOrdinal, 1);
+}
+
+TEST(TestIngestorKernelCodeReload, LoadsANewDeviceOnceWhenManyThreadsAskAtOnce)
+{
+    const std::string target = "gfx942:sramecc+:xnack-";
+    FakeStoredCode code(storedKpackCode(target), {{0, target}, {1, target}}, 0);
+    // A slow load keeps the first caller inside the load while the other callers arrive.
+    code.loadDelay = std::chrono::milliseconds(5);
+
+    constexpr int THREAD_COUNT = 16;
+    std::vector<int> ordinals(THREAD_COUNT);
+    std::vector<const compilation::IRunnableKernel*> got(THREAD_COUNT, nullptr);
+
+    // Each thread checks in and waits. The test thread releases all of them only after
+    // every thread has checked in.
+    std::mutex gateMutex;
+    std::condition_variable gate;
+    int checkedIn = 0;
+    bool released = false;
+
+    std::vector<std::exception_ptr> errors(THREAD_COUNT);
+
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    {
+        const ThreadGateCloser closer{gateMutex, gate, released, threads};
+        for(int i = 0; i < THREAD_COUNT; ++i)
+        {
+            // Every fourth thread asks for the device that is already loaded.
+            ordinals[static_cast<size_t>(i)] = (i % 4 == 0) ? 0 : 1;
+            threads.emplace_back([&, i]() {
+                {
+                    std::unique_lock<std::mutex> lock(gateMutex);
+                    ++checkedIn;
+                    gate.notify_all();
+                    gate.wait(lock, [&]() { return released; });
+                }
+                const auto index = static_cast<size_t>(i);
+                try
+                {
+                    got[index] = &code.kernelFor(ordinals[index]);
+                }
+                catch(...)
+                {
+                    errors[index] = std::current_exception();
+                }
+            });
+        }
+
+        std::unique_lock<std::mutex> lock(gateMutex);
+        gate.wait(lock, [&]() { return checkedIn == THREAD_COUNT; });
+    }
+
+    for(size_t i = 0; i < errors.size(); ++i)
+    {
+        if(errors[i] == nullptr)
+        {
+            continue;
+        }
+        try
+        {
+            std::rethrow_exception(errors[i]);
+        }
+        catch(const std::exception& e)
+        {
+            ADD_FAILURE() << "thread " << i << " threw: " << e.what();
+        }
+        catch(...)
+        {
+            ADD_FAILURE() << "thread " << i << " threw a non-standard exception";
+        }
+    }
+    ASSERT_FALSE(::testing::Test::HasFailure());
+
+    ASSERT_EQ(code.loads.size(), 1U);
+    EXPECT_EQ(code.loads[0].deviceOrdinal, 1);
+    for(const auto& load : code.loads)
+    {
+        EXPECT_NE(load.deviceOrdinal, 0);
+    }
+
+    const compilation::IRunnableKernel* newDeviceKernel = nullptr;
+    for(size_t i = 0; i < got.size(); ++i)
+    {
+        ASSERT_NE(got[i], nullptr) << "thread " << i;
+        if(ordinals[i] != 1)
+        {
+            continue;
+        }
+        if(newDeviceKernel == nullptr)
+        {
+            newDeviceKernel = got[i];
+        }
+        EXPECT_EQ(got[i], newDeviceKernel) << "thread " << i;
+    }
+    ASSERT_NE(newDeviceKernel, nullptr);
+    EXPECT_EQ(dynamic_cast<const CountingKernel&>(*newDeviceKernel).ordinal(), 1);
 }
 
 TEST(TestIngestorKernelCodeReload, RefusesADeviceThatCannotRunTheExactTarget)
