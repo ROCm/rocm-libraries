@@ -30,7 +30,7 @@ import verify_variant_sets as gate_module  # noqa: E402
 
 sys.path.insert(0, str(gate_module._agreement_python_root()))
 
-from hkp_pack import agreement  # noqa: E402
+from hkp_pack import agreement, provenance_sidecar  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
 from hkp_pack.kpack_resolver import load_kpack  # noqa: E402
 
@@ -143,6 +143,22 @@ def _kdp(descriptors, ident=_KDP_ID, engine=_UED_ID, arch=None) -> dict:
     return doc
 
 
+def _write_kdp(path: Path, doc: dict) -> None:
+    """Write `doc` as hkp_pack ships a KDP: each inline UKD's provenance goes to the
+    `<name>.kdp.provenance.json.gz` sidecar beside it, and the packer's marker into
+    its directory; `doc` is left unchanged."""
+    doc = copy.deepcopy(doc)
+    name, data = provenance_sidecar.detach(path.name, doc)
+    path.with_name(name).write_bytes(data)
+    path.with_name(provenance_sidecar.PACKED_MARKER).write_bytes(b"")
+    path.write_text(json.dumps(doc))
+
+
+def _read_kdp(path: Path) -> dict:
+    """A KDP written by `_write_kdp`, its UKDs' sidecar provenance reattached."""
+    return provenance_sidecar.attach(path, json.loads(path.read_text()))
+
+
 @pytest.fixture
 def gate(tmp_path):
     """A working gate environment: an id-wired bundle and a nesting pair."""
@@ -152,9 +168,7 @@ def gate(tmp_path):
     def write(tag: str, descriptors: list[dict], fields=None, arch=None) -> Path:
         root = tmp_path / tag
         root.mkdir(parents=True, exist_ok=True)
-        (root / "test_engine.kdp.json").write_text(
-            json.dumps(_kdp(descriptors, arch=arch))
-        )
+        _write_kdp(root / "test_engine.kdp.json", _kdp(descriptors, arch=arch))
         (root / "test_engine.ued.json").write_text(json.dumps(_ued()))
         (root / "test_engine.kmd.json").write_text(json.dumps(_kmd(fields)))
         return root
@@ -198,6 +212,98 @@ class TestModeIsAlwaysStated:
         assert "--mode" in result.stderr
 
 
+class TestEachRootReadsItsOwnProvenanceRoot:
+    """`--provenance-root LABEL=DIR` names where one root's sidecars live; the marker
+    beside each descriptor, not the flag, says whether the root is packed."""
+
+    @staticmethod
+    def run(gate, *flags):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(_TOOL),
+                "small",
+                "small",
+                "big",
+                "big",
+                "--mode",
+                "structural",
+                *flags,
+            ],
+            cwd=gate.tmp,
+            capture_output=True,
+            text=True,
+        )
+
+    @staticmethod
+    def move_sidecar(gate, label):
+        sidecar = (
+            gate.tmp / label / provenance_sidecar.sidecar_name("test_engine.kdp.json")
+        )
+        (gate.tmp / f"provenance_{label}").mkdir()
+        sidecar.rename(gate.tmp / f"provenance_{label}" / sidecar.name)
+
+    @pytest.mark.parametrize(
+        "flags, message",
+        [
+            (["--provenance-root", "small"], "'small' is not LABEL=DIR"),
+            (["--provenance-root", "=p"], "'=p' is not LABEL=DIR"),
+            (["--provenance-root", "ghost=p"], "--provenance-root names label 'ghost'"),
+        ],
+        ids=["no-equals", "no-label", "unknown-provenance-label"],
+    )
+    def test_a_malformed_provenance_root_is_a_usage_error(self, gate, flags, message):
+        result = self.run(gate, *flags)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert message in result.stderr
+
+    def test_each_label_reads_its_own_provenance_root(self, gate):
+        """`big` holds a kernel `small` lacks, so crossing the roots binds a KDP to the
+        other pack's sidecar; a gate reading one label's root for all fails the
+        paired run the same way."""
+        for label in ("small", "big"):
+            self.move_sidecar(gate, label)
+
+        def roots(*pair):
+            flags = []
+            for label, directory in zip(("small", "big"), pair):
+                flags += ["--provenance-root", f"{label}={gate.tmp / directory}"]
+            return self.run(gate, "--profile", str(gate.profile), *flags)
+
+        paired = roots("provenance_small", "provenance_big")
+        crossed = roots("provenance_big", "provenance_small")
+        missing = roots()
+        assert paired.returncode == 0, paired.stdout + paired.stderr
+        assert crossed.returncode == 1, crossed.stdout + crossed.stderr
+        assert "'id-k_sq8192' has no entry in the sidecar" in crossed.stderr
+        assert missing.returncode == 1, missing.stdout + missing.stderr
+        assert "has no provenance sidecar" in missing.stderr
+
+    def test_a_provenance_root_for_an_unmarked_root_is_refused(self, gate):
+        """Its sidecar waits under the provenance root, so a gate taking the flag to
+        mean packed would pass."""
+        self.move_sidecar(gate, "small")
+        (gate.tmp / "small" / provenance_sidecar.PACKED_MARKER).unlink()
+        result = self.run(
+            gate,
+            "--profile",
+            str(gate.profile),
+            "--provenance-root",
+            f"small={gate.tmp / 'provenance_small'}",
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "usage error: --provenance-root" in result.stderr
+        assert "test_engine.kdp.json" in result.stderr
+
+    def test_an_authored_root_beside_a_packed_one(self, gate):
+        kdp = gate.tmp / "small" / "test_engine.kdp.json"
+        kdp.with_name(provenance_sidecar.sidecar_name(kdp.name)).unlink()
+        kdp.with_name(provenance_sidecar.PACKED_MARKER).unlink()
+        kdp.write_text(json.dumps(_kdp(gate.small)))
+        result = self.run(gate, "--profile", str(gate.profile))
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
 class TestGatePasses:
     """The control: every failure assertion below is worthless without this."""
 
@@ -219,8 +325,8 @@ class TestTheSchemaIsReachedByReference:
 
     def test_a_kdp_whose_engine_matches_nothing_fails_naming_the_hop(self, gate):
         root = gate.write("dangling_engine", gate.small)
-        (root / "test_engine.kdp.json").write_text(
-            json.dumps(_kdp(gate.small, engine="no-such-ued"))
+        _write_kdp(
+            root / "test_engine.kdp.json", _kdp(gate.small, engine="no-such-ued")
         )
         result = gate.run("bad", "dangling_engine")
         assert result.returncode == 1
@@ -252,7 +358,7 @@ class TestTheSchemaIsReachedByReference:
         root = gate.write("stem_only", gate.small)
         doc = _kdp(gate.small)
         doc.pop("engine")
-        (root / "test_engine.kdp.json").write_text(json.dumps(doc))
+        _write_kdp(root / "test_engine.kdp.json", doc)
         result = gate.run("bad", "stem_only")
         assert result.returncode == 1
         assert "engine" in (result.stdout + result.stderr)
@@ -310,8 +416,9 @@ class TestGateCatchesEachDefect:
 class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
     """The loader assembles ONE catalog per engine per device, so the identity is
     engine-wide and carries the effective architecture: an identical tuple in a gfx942
-    and a gfx950 pack is legal, while an overlap -- including a wildcard over a concrete
-    arch -- drops the engine."""
+    and a gfx950 pack is legal, while two packs that compete at the same arch tier drop the
+    engine. A wildcard over a concrete arch, or a generic over a member, sit at
+    different tiers and do not compete."""
 
     def _two_packs(self, gate, tag, left_arch, right_arch):
         root = gate.tmp / tag
@@ -334,7 +441,6 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         self._two_packs(gate, "disjoint", ["gfx942"], ["gfx950"])
         result = gate.run("d", "disjoint", profiled=False)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "loader-tuple" not in result.stdout
 
     def test_equal_tuples_overlapping_on_one_arch_collide(self, gate):
         self._two_packs(gate, "overlap", ["gfx942", "gfx950"], ["gfx950"])
@@ -343,11 +449,27 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         assert "loader-tuple collisions" in result.stdout
         assert "gfx950" in result.stdout
 
-    def test_a_wildcard_arch_overlaps_a_concrete_one(self, gate):
-        """An absent arch list is "every device", so it meets the concrete pack on that
-        pack's own device."""
-        self._two_packs(gate, "wildcard", None, ["gfx950"])
-        result = gate.run("w", "wildcard", profiled=False)
+    @pytest.mark.parametrize(
+        ("left_arch", "right_arch"),
+        [
+            (None, ["gfx950"]),
+            (["gfx11-generic"], ["gfx1151"]),
+        ],
+    )
+    def test_a_better_tier_does_not_collide_with_a_worse_one(
+        self, gate, left_arch, right_arch
+    ):
+        self._two_packs(gate, "outranked", left_arch, right_arch)
+        result = gate.run("o", "outranked", profiled=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize(
+        ("left_arch", "right_arch"),
+        [(["gfx11-generic"], ["gfx11-generic"]), (None, None)],
+    )
+    def test_two_packs_tied_at_one_tier_collide(self, gate, left_arch, right_arch):
+        self._two_packs(gate, "tied", left_arch, right_arch)
+        result = gate.run("t", "tied", profiled=False)
         assert result.returncode == 1, result.stdout
         assert "loader-tuple collisions" in result.stdout
 
@@ -407,14 +529,13 @@ class TestGateRefusesAmbiguity:
         (root / "second_engine.kmd.json").write_text(
             json.dumps(_kmd(ident="kmd-second"))
         )
-        (root / "second_engine.kdp.json").write_text(
-            json.dumps(
-                _kdp(
-                    [_descriptor("k_other", 1024)],
-                    ident="kdp-second",
-                    engine="ued-second",
-                )
-            )
+        _write_kdp(
+            root / "second_engine.kdp.json",
+            _kdp(
+                [_descriptor("k_other", 1024)],
+                ident="kdp-second",
+                engine="ued-second",
+            ),
         )
         result = gate.run("multi", "multi", profiled=False)
         assert result.returncode == 1
@@ -667,7 +788,7 @@ def packed(tmp_path):
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(docs["kmd"]))
         (root / "test_engine.ued.json").write_text(json.dumps(docs["ued"]))
-        (root / "test_engine.kdp.json").write_text(json.dumps(docs["kdp"]))
+        _write_kdp(root / "test_engine.kdp.json", docs["kdp"])
         return root
 
     return build
@@ -814,7 +935,7 @@ class TestFullModeChecksTheProducingBuildRecord:
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
         (root / "test_engine.ued.json").write_text(json.dumps(ued))
-        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        _write_kdp(root / "test_engine.kdp.json", kdp)
         failures, _ = _run_full(root)
         assert not failures, failures
 
@@ -841,7 +962,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
         root.mkdir(parents=True, exist_ok=True)
         (root / "test_engine.kmd.json").write_text(json.dumps(kmd))
         (root / "test_engine.ued.json").write_text(json.dumps(ued))
-        (root / "test_engine.kdp.json").write_text(json.dumps(kdp))
+        _write_kdp(root / "test_engine.kdp.json", kdp)
         return root
 
     def test_it_is_reported_rather_than_failed(self, tmp_path):
@@ -887,11 +1008,11 @@ class TestFullModeReportsAKernelWithNothingToBind:
         so the stamp is the only thing separating the origin cases."""
         root = self.tree(tmp_path, [], tag)
         path = root / "test_engine.kdp.json"
-        doc = json.loads(path.read_text())
+        doc = _read_kdp(path)
         provenance = doc["kernelDescriptors"][0]["provenance"]
         assert "effective_spec" not in provenance
         provenance["origin_kind"] = origin_kind
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         return root
 
     def test_a_rocke_origin_cannot_waive_its_own_evidence(
@@ -938,7 +1059,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
         origin at all, so reading rocKE out of the absence would fail them over evidence
         they were never asked to produce."""
         root = self.tree(tmp_path, [], "absent_origin")
-        doc = json.loads((root / "test_engine.kdp.json").read_text())
+        doc = _read_kdp(root / "test_engine.kdp.json")
         assert "origin_kind" not in doc["kernelDescriptors"][0]["provenance"]
         failures, unverified = self.verdict(root)
         assert failures == []
@@ -959,6 +1080,35 @@ class TestFullModeCannotPassOnANarrowedRun:
         assert "NOT RUN" in out
         assert code == 1, out
         assert "GATE PASSED" not in out
+
+
+class TestFullModeReadsAnInstalledTree:
+    def test_the_arch_probe_reads_the_provenance_root(
+        self, packed, tmp_path, monkeypatch, capsys
+    ):
+        """Full mode resolves the arch from the first root before checking any, so
+        that read needs the root's sidecars too. The fixture declares no vocabulary,
+        so a run that reads its sidecars ends narrowed (NOT RUN), not passed."""
+        monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
+        root = packed(tag="installed")
+        provenance = tmp_path / "provenance"
+        provenance.mkdir()
+        sidecar = root / provenance_sidecar.sidecar_name("test_engine.kdp.json")
+        sidecar.rename(provenance / sidecar.name)
+        code = gate_module.main(
+            [
+                "set",
+                str(root),
+                "--mode",
+                "full",
+                "--provenance-root",
+                f"set={provenance}",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert "no provenance sidecar" not in captured.out + captured.err
+        assert "NOT RUN" in captured.out, captured.out + captured.err
+        assert code == 1
 
 
 class TestStructuralModeNeverClaimsCompiledAgreement:
@@ -1013,18 +1163,18 @@ def real_archive():
 
     kpack, compression = load_kpack(python_dir)
 
-    def write(root):
+    def write(root, arch=_ARCH):
         path = root / "kpack" / "test.kpack"
         path.parent.mkdir(parents=True, exist_ok=True)
         archive = kpack.PackedKernelArchive(
             group_name="test",
-            gfx_arch_family=_ARCH,
-            gfx_arches=[_ARCH],
+            gfx_arch_family=arch,
+            gfx_arches=[arch],
             compressor=compression.ZstdCompressor(compression_level=3),
         )
         archive.add_kernel(
             archive.prepare_kernel(
-                relative_path="v0", gfx_arch=_ARCH, hsaco_data=_PAYLOAD, metadata={}
+                relative_path="v0", gfx_arch=arch, hsaco_data=_PAYLOAD, metadata={}
             )
         )
         archive.finalize_archive()
@@ -1169,8 +1319,8 @@ class TestRealArchiveSelectedConsumer:
         (root / "sibling.ued.json").write_text(json.dumps(sibling_engine))
         selected_path = root / "test_engine.kdp.json"
         sibling_path = root / "sibling.kdp.json"
-        selected_path.write_text(json.dumps(selected))
-        sibling_path.write_text(json.dumps(sibling))
+        _write_kdp(selected_path, selected)
+        _write_kdp(sibling_path, sibling)
         write_archive(root)
         control = self.run(root, python_dir, tmp_path)
         assert control.returncode == 0, control.stdout + control.stderr
@@ -1180,8 +1330,8 @@ class TestRealArchiveSelectedConsumer:
         # second KDP that declares nothing. The bytes and UKD binding still agree.
         selected.pop("provenance")
         agreement.publish(ukd, observations, agreement.canonical_records(records[1:]))
-        selected_path.write_text(json.dumps(selected))
-        sibling_path.write_text(json.dumps(sibling))
+        _write_kdp(selected_path, selected)
+        _write_kdp(sibling_path, sibling)
         result = self.run(root, python_dir, tmp_path)
         assert result.returncode == 1, result.stdout + result.stderr
         assert "no specialization declaration" in result.stdout
@@ -1190,19 +1340,52 @@ class TestRealArchiveSelectedConsumer:
         write_archive, python_dir = real_archive
         root = TestFullModeReportsAKernelWithNothingToBind.tree(tmp_path, [], "hip")
         path = root / "test_engine.kdp.json"
-        doc = json.loads(path.read_text())
+        doc = _read_kdp(path)
         ukd = doc["kernelDescriptors"][0]
         ukd["provenance"]["origin_kind"] = "hip"
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         write_archive(root)
         control = self.run(root, python_dir, tmp_path)
         assert control.returncode == 0, control.stdout + control.stderr
         assert "NOT VERIFIED HERE" in control.stdout
 
         ukd["kernel_source"]["kind"] = "hip"
-        path.write_text(json.dumps(doc))
+        _write_kdp(path, doc)
         result = self.run(root, python_dir, tmp_path)
         assert result.returncode == 1, result.stdout + result.stderr
         assert "packed dialect" in result.stdout
         structural = self.run(root, python_dir, tmp_path, mode="structural")
         assert structural.returncode == 0, structural.stdout + structural.stderr
+
+
+@pytest.mark.needs_rocm_kpack
+class TestAGenericDocumentIsReadWithItsGenericArchiveKey:
+    """A generic copy's archive is keyed by the generic's name."""
+
+    @staticmethod
+    def _entry(arch):
+        ukd = _packed_ukd()
+        ukd["arch"] = arch
+        return type(
+            "Entry", (), {"ukd": ukd, "arch": arch, "origin_dir": None, "inline": False}
+        )
+
+    def test_a_generic_document_is_read_with_its_generic_archive_key(
+        self, tmp_path, real_archive
+    ):
+        write_archive, python_dir = real_archive
+        write_archive(tmp_path, "gfx11-generic")
+
+        table = gate_module.gtmod.GenericTargets.load(
+            gate_module.gtmod.DEFAULT_TABLE_PATH
+        )
+        payloads = gate_module.Payloads(python_dir, table)
+
+        generic = self._entry(["gfx11-generic"])
+        generic.origin_dir = str(tmp_path)
+        assert payloads.read(generic, "gfx1151") == _PAYLOAD
+
+        member = self._entry(["gfx1151"])
+        member.origin_dir = str(tmp_path)
+        with pytest.raises(gate_module.GateError):
+            payloads.read(member, "gfx1151")

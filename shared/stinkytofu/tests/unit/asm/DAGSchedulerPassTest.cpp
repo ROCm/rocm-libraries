@@ -22,9 +22,13 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <sstream>
+#include <string_view>
+#include <vector>
 
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -171,11 +175,33 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    void runPassWithUnrollGemm() {
+    // Run with a ds-cap mode (plus optional extra tweaks) and return the
+    // StinkyDAGSchedulerPass debug trace.
+    std::string runWithDsCapMode(PassFeatureConfig::DsIssueCapMode mode,
+                                 const std::function<void(PassFeatureConfig&)>& tweak = {}) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsIssueCapMode = mode;
+        if (tweak) tweak(pfc);
+        ctx.setPassFeatureConfig(pfc);
+        PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+        std::ostringstream captured;
+        std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+        pass->run(*func, ctx, am);
+        std::cerr.rdbuf(oldBuf);
+        PassManagerDebugConfig::clearDebugOnly();
+        return captured.str();
+    }
+
+    // barrierHalfSlack < 0 leaves DagFeatures' default (0).
+    void runPassWithUnrollGemm(int barrierHalfSlack = -1) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        if (barrierHalfSlack >= 0) pfc.dagFeatures.barrierHalfSlack = barrierHalfSlack;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -975,6 +1001,95 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
+// Windows that miss each other still have the 2+2+1 separation budget free, so
+// each signal/wait pair is spread by 2 WMMA windows. The after pair's wait
+// moves later; the before pair's signal moves earlier. Proportional placement
+// is the case that keeps a pair on one threshold.
+TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairSpreadsSignalAndWait) {
+    bb->addSuccessor(bb);
+
+    // One token-0 ds_load consumed by the first WMMA, then independent WMMAs,
+    // so the after window stays near the front. The token-1 ds_load and its
+    // consumer sit at the end, so the before window stays near the back.
+    // 1 + 22 + 1 = 24 WMMAs: after threshold 9, before threshold 17, and
+    // 17 >= 9 + 5 so Layer 2 reports no overlap.
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    StinkyInstruction* afterConsumer =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    for (int i = 0; i < 22; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    StinkyInstruction* beforeConsumer =
+        createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+
+    runPassWithUnrollGemm(/*barrierHalfSlack=*/2);
+
+    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
+    ASSERT_NE(overlaps, nullptr);
+    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
+    EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, afterWait)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 2) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait)) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 2) << scheduleOrder(*bb);
+    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
+    EXPECT_GE(positionOf(*bb, afterConsumer), 0);
+    EXPECT_GE(positionOf(*bb, beforeConsumer), 0);
+}
+
+// BarrierHalfSlack=0 makes separationSlack 1 and does not move either half,
+// so a non-overlapping pair stays on one threshold and issues together.
+TEST_F(DAGSchedulerPassTest, BarrierHalfSlackZeroKeepsNonOverlappingPairTogether) {
+    bb->addSuccessor(bb);
+
+    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    for (int i = 0; i < 22; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
+    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
+    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
+    createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+
+    runPassWithUnrollGemm(/*barrierHalfSlack=*/0);
+
+    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
+        int count = 0;
+        bool started = false;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (inst == to) return started ? count : -1;
+            if (started && isMatrixInstruction(*inst)) ++count;
+            if (inst == from) started = true;
+        }
+        return -1;
+    };
+
+    EXPECT_EQ(positionOf(*bb, afterWait), positionOf(*bb, afterSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 0) << scheduleOrder(*bb);
+    EXPECT_EQ(positionOf(*bb, beforeWait), positionOf(*bb, beforeSignal) + 1) << scheduleOrder(*bb);
+    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 0) << scheduleOrder(*bb);
+}
+
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
     bb->addSuccessor(bb);
 
@@ -1455,6 +1570,73 @@ TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
 }
 
 // ---------------------------------------------------------------------------
+// Property: evenSpreadFillers spreads SALU fillers one per WMMA window.
+//
+// Region: 4 independent WMMAs + 4 independent SALUs, so the quota is
+// ceil(4 / 4) = 1 filler per window.
+//   off: the first WMMA's window stays open for its full co-issue length, so
+//        the scheduler packs several SALUs into it and starves later windows.
+//   on:  each window closes after 1 SALU and the next WMMA issues, giving
+//        wmma, s, wmma, s, ... with at most 1 SALU between WMMAs.
+// Run with and without the hide-budget prescan, which production enables and
+// which separately demands non-WMMA work per window.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, EvenSpreadFillersPlacesOneSaluPerWmmaWindow) {
+    auto saluCountsBetweenWmmas = [&](bool evenSpread, bool hideBudgetPrescan) {
+        am.clear();
+        func = std::make_unique<Function>("even_spread");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        for (int i = 0; i < 4; ++i)
+            createWmmaScaleF8(/*destStart=*/12 + i * 16, /*src0Start=*/200 + i * 16);
+        for (int i = 0; i < 4; ++i) {
+            AsmIRBuilder builder(*bb, arch);
+            StinkyInstruction* s = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+            s->addDestReg(StinkyRegister("s", 100 + i, 1));
+            s->addSrcReg(StinkyRegister("s", 0, 1));
+            s->addSrcReg(StinkyRegister("s", 1, 1));
+        }
+        const int before = countStinkyInstructions(*bb);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.evenSpreadFillers = evenSpread;
+        pfc.dagFeatures.enableWmmaHideBudgetPrescan = hideBudgetPrescan;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        EXPECT_EQ(countStinkyInstructions(*bb), before) << "must not drop instructions";
+
+        // counts[k] = SALUs issued after WMMA #k and before WMMA #k+1.
+        std::vector<int> counts;
+        for (const IRBase& ir : *bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr || inst->getHwInstDesc() == nullptr) continue;
+            if (isMatrixInstruction(*inst))
+                counts.push_back(0);
+            else if (!counts.empty() &&
+                     std::string_view(inst->getHwInstDesc()->mnemonic).rfind("s_", 0) == 0)
+                ++counts.back();
+        }
+        return counts;
+    };
+
+    for (bool prescan : {false, true}) {
+        SCOPED_TRACE(prescan ? "hide-budget prescan on" : "hide-budget prescan off");
+        const std::vector<int> off = saluCountsBetweenWmmas(/*evenSpread=*/false, prescan);
+        EXPECT_GT(*std::max_element(off.begin(), off.end()), 1)
+            << "baseline packs several SALUs into one window (else this test proves nothing)";
+
+        const std::vector<int> on = saluCountsBetweenWmmas(/*evenSpread=*/true, prescan);
+        EXPECT_EQ(on, (std::vector<int>{1, 1, 1, 1}))
+            << "each WMMA window must get exactly its quota of 1 SALU";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Property: per-WMMA-window DS cap — after a WMMA fires,
 // at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
 // because back-to-back ds_load issue cost doubles.
@@ -1587,6 +1769,78 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_SpanDefaultsToTheRegionsRealWmmaLatency
     const int span = std::stoi(captured.str().substr(spanPos + 5));
     EXPECT_EQ(span, 4) << "an FP4/FP4 WMMA costs {1,4} (Gfx1250Instructions.def); the cap "
                           "span must take that real latency, not the arch fallback of 8";
+}
+
+// DsIssueCapMode: Sliding (default) and Periodic both enforce "at most
+// dsReadPerCap ds_loads per dsIssueCapSpanCycles"; they differ only in when an
+// issued ds_load stops counting.
+// Only 0 (sliding) and 1 (periodic) exist; anything else is rejected, not read as periodic.
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_RejectsAnUnknownValue) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsIssueCapMode = static_cast<PassFeatureConfig::DsIssueCapMode>(2);
+    ctx.setPassFeatureConfig(pfc);
+    EXPECT_DEATH(pass->run(*func, ctx, am),
+                 "dsIssueCapMode must be 0 \\(sliding\\) or 1 \\(periodic\\); got 2");
+}
+
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_DefaultIsSliding) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    const std::string trace = runWithDsCapMode(PassFeatureConfig{}.dagFeatures.dsIssueCapMode);
+    EXPECT_NE(trace.find("mode=sliding"), std::string::npos) << trace;
+}
+
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_PeriodicIsReportedAndHonorsSpan) {
+    createMovableDsLoad(0, 80, 1);
+    createWmmaScaleF8(/*destStart=*/100, /*src0Start=*/0);
+    const std::string trace =
+        runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Periodic,
+                         [](PassFeatureConfig& p) { p.dagFeatures.dsIssueCapSpanCycles = 32; });
+    EXPECT_NE(trace.find("span=32 mode=periodic"), std::string::npos) << trace;
+}
+
+// Either mode caps a back-to-back ds_load run at dsReadPerCap while fillers are
+// left to run in the wait (a cap wait emits no instruction, so a tail of only
+// ds_loads is not a run), with the queue throttle out of the way (latency 1).
+// Periodic: when the next ds_load would open a new period right after a ds_load,
+// a free non-ds instruction goes first -- here the only one is a WMMA, which the
+// capped ds_load used to hold back by counting as pending fill work.
+TEST_F(DAGSchedulerPassTest, DsIssueCapPeriodic_NonDsSeparatesPeriods) {
+    for (int i = 0; i < 12; i++) createMovableDsLoad(i * 4, 80, i + 1);
+    for (int i = 0; i < 4; i++) createWmmaF32_16x16x16_bf16(200 + 8 * i, 300 + 8 * i);
+    runWithDsCapMode(PassFeatureConfig::DsIssueCapMode::Periodic, [](PassFeatureConfig& p) {
+        p.dagFeatures.dsReadPerCap = 4;
+        p.dagFeatures.dsIssueCapSpanCycles = 8;
+        p.dagFeatures.dsReadQueueDepth = 16;
+        p.dagFeatures.dsReadThrottleLatency = 1;
+    });
+    std::string shape;
+    for (const std::string& m : mnemonicSequence(*bb))
+        shape += m.find("wmma") != std::string::npos ? 'W' : (m == "ds_load_b128" ? 'd' : '?');
+    EXPECT_EQ(shape, "WddddWddddWddddW");
+}
+
+TEST_F(DAGSchedulerPassTest, DsIssueCapMode_BothModesBoundTheBurst) {
+    for (auto mode : {PassFeatureConfig::DsIssueCapMode::Sliding,
+                      PassFeatureConfig::DsIssueCapMode::Periodic}) {
+        SetUp();
+        for (int i = 0; i < 12; i++) createMovableDsLoad(i * 4, 80, i + 1);
+        for (int i = 0; i < 48; i++) createVAddInBlock(bb, arch, 60 + i, 100 + i, 180 + i);
+        runWithDsCapMode(mode, [](PassFeatureConfig& p) {
+            p.dagFeatures.dsReadPerCap = 4;
+            p.dagFeatures.dsIssueCapSpanCycles = 16;
+            p.dagFeatures.dsReadQueueDepth = 16;
+            p.dagFeatures.dsReadThrottleLatency = 1;
+        });
+        EXPECT_LE(maxConsecutiveDsLoads(*bb), 4)
+            << (mode == PassFeatureConfig::DsIssueCapMode::Periodic ? "periodic" : "sliding");
+        EXPECT_EQ(mnemonicSequence(*bb).size(), 60u) << "no instruction may be lost";
+    }
 }
 
 // Same scenario, FP8/FP8 operands: no costOverride entry matches, so the
@@ -2005,6 +2259,43 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+// ---------------------------------------------------------------------------
+// Property: dsSlotFirst. In a saturated ds stream (ds_loads >= 2 per WMMA) a ds_load that
+// still fits the window goes before fillers; its throttle wait is charged to the ds
+// scheduling budget. Same region as DsReadThrottle_Depth1_SeparatesEveryLoad: off, the
+// fillers separate every ds_load; on, the ds_loads keep their slots back to back.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, DsSlotFirst_SaturatedStreamKeepsDsSlotsOverFillers) {
+    auto maxRun = [&](bool dsSlotFirst) {
+        am.clear();
+        func = std::make_unique<Function>("ds_slot_first");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 1;
+        pfc.dagFeatures.dsReadThrottleLatency = 8;
+        pfc.dagFeatures.dsReadDrainLatency = 8;
+        pfc.dagFeatures.dsReadThrottleTransitionFactor = 0.5;
+        pfc.dagFeatures.dsReadThrottleTransitionEntries = -1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.dsSlotFirst = dsSlotFirst;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        return maxConsecutiveDsReads(mnemonicSequence(*bb));
+    };
+    EXPECT_EQ(maxRun(/*dsSlotFirst=*/false), 1) << "off: fillers separate every ds_load";
+    EXPECT_GE(maxRun(/*dsSlotFirst=*/true), 2) << "on: ds_loads keep their slots over fillers";
 }
 
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_UsesIndependentWmmaSchedulingBudget) {
@@ -2951,4 +3242,86 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     int beforeCount = countStinkyInstructions(*body);
     runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
+}
+
+// WMMA issue queue. Registers stay below v256 (one VGPR MSB bank).
+namespace {
+// "W" for a WMMA, "d" for a ds_load, "." for anything else.
+std::string wdShape(const std::vector<std::string>& seq) {
+    std::string s;
+    for (const std::string& m : seq) {
+        s += m.find("wmma") != std::string::npos ? 'W' : m.find("ds_load") == 0 ? 'd' : '.';
+    }
+    return s;
+}
+}  // namespace
+
+// The queue model needs depth > 1 and a cover > 0. With either one off the schedule is the
+// original single-window one, whatever the other queue field says.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_OffIsTheOriginalSchedule) {
+    struct Variant {
+        int depth, cover;
+    };
+    const Variant variants[] = {{0, 0}, {8, 0}, {1, 32}, {1, 0}};
+    std::string shapes[4];
+    for (int v = 0; v < 4; ++v) {
+        SetUp();
+        for (int i = 0; i < 6; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 6; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadThrottleLatency = 1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.wmmaQueueDepth = variants[v].depth;
+        pfc.dagFeatures.wmmaQueueCoverCycles = variants[v].cover;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    for (int v = 1; v < 4; ++v) EXPECT_EQ(shapes[0], shapes[v]) << "variant " << v;
+    // While ds_loads are ready each WMMA window is filled, so the first two are not adjacent.
+    EXPECT_NE(shapes[0].substr(0, 2), "WW") << shapes[0];
+}
+
+// A long queue run (more than 64 cycles of pipe window) keeps every instruction and
+// issues all WMMAs: exercises the window compaction.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_LongRunKeepsEveryInstruction) {
+    for (int i = 0; i < 24; i++) createWmmaF32_16x16x16_bf16(8 * (i % 12), 100 + 8 * i);
+    for (int i = 0; i < 12; i++) createMovableDsLoad(400 + i * 4, 80, i + 1);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'W'), 24) << shape;
+    EXPECT_EQ(std::count(shape.begin(), shape.end(), 'd'), 12) << shape;
+}
+
+// Depth 4, cover 16: ds_loads go while at least 16 cycles of WMMA work are queued, and the
+// next WMMA goes first once less is, so the queue never runs dry.
+TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWddddddWddWWWW");
 }

@@ -11,6 +11,7 @@ and 1 distinct. Verifies:
   3. verify_migration round-trip passes for all 3
   4. import_graph detects an exact duplicate (skip) and a new case (append)
   5. import_graph round-trip refusals name the mismatch and write nothing
+  6. place_bundles keeps manual cases of an existing sweep on regeneration
 
 No C++ binary needed — everything is pure Python on synthetic data.
 
@@ -19,7 +20,9 @@ Usage::
     python3 test_migration.py [-v]
 """
 
+import copy
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -171,6 +174,63 @@ def test_place_and_verify():
         print("  PASS: place_and_verify")
 
 
+def test_place_keeps_manual_cases():
+    """Regenerating a sweep keeps its manual cases, or refuses and writes nothing.
+
+    A manual case (metadata.generator == "manual") has no C++ test behind it, so
+    no capture reproduces it. A rerun of place_bundles over the same tree must
+    keep it. One that no longer fits the template fails the run and leaves the
+    sweep as it was.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        bundle_dir = tmp / "bundles"
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp32", "small_fp32", g1)
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp16", "small_fp16", g2)
+        place = [
+            sys.executable,
+            str(SCRIPT_DIR / "place_bundles.py"),
+            "--capture-dir",
+            str(capture_dir),
+            "--output-dir",
+            str(bundle_dir),
+        ]
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        (sweep_path,) = bundle_dir.rglob("sweep.json")
+
+        sweep = json.loads(sweep_path.read_text())
+        manual = copy.deepcopy(sweep["cases"][0])
+        manual["id"] = "runtime_scalar"
+        manual["tensor_patches"] = [
+            {"uid": 0, "set": {"is_runtime_pass_by_value": True}, "remove": []}
+        ]
+        manual["metadata"] = {"format_version": 1, "generator": "manual"}
+        sweep["cases"].append(manual)
+        sweep_path.write_text(json.dumps(sweep, indent=2) + "\n")
+
+        r = run(place)
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+        cases = json.loads(sweep_path.read_text())["cases"]
+        assert len(cases) == 3, [c["id"] for c in cases]
+        assert cases[-1] == manual, f"manual case changed or dropped: {cases}"
+
+        # A manual case missing a template tensor cannot be expanded any more.
+        sweep = json.loads(sweep_path.read_text())
+        sweep["cases"][-1]["values"]["tensors"].pop()
+        stale = json.dumps(sweep, indent=2) + "\n"
+        sweep_path.write_text(stale)
+
+        r = run(place, check=False)
+        assert r.returncode == 1, f"expected failure:\n{r.stderr}"
+        assert "'runtime_scalar' does not fit" in r.stderr, r.stderr
+        assert sweep_path.read_text() == stale, "sweep must be left unchanged"
+        print("  PASS: place_keeps_manual_cases")
+
+
 def test_import_dedup():
     """import_graph detects exact dups and appends new cases."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -260,6 +320,219 @@ def test_import_dedup():
         ), f"expected 2 cases after append, got {len(sweep['cases'])}"
 
         print("  PASS: import_dedup")
+
+
+def test_import_append_preserves_case_fields():
+    """Appending a new case must not drop existing keys like golden/
+    tensor_patches, nor an unrelated top-level sweep key (mirrors
+    integration-test-bundles/quick/BatchnormFwdInference/Inference/sweep.json,
+    whose cases carry a 'golden' key alongside values/metadata).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        sweep["note"] = "hand-authored top-level key"
+        sweep["cases"][0]["golden"] = {"path": "golden/g1/tensors.dvc"}
+        sweep["cases"][0]["tensor_patches"] = {"1": {"seed": 7}}
+        with open(sweep_path, "w") as f:
+            json.dump(sweep, f, indent=2)
+            f.write("\n")
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"append import failed: {r.stderr}"
+        assert "appended" in r.stderr
+
+        with open(sweep_path) as f:
+            after = json.load(f)
+        assert (
+            after["note"] == "hand-authored top-level key"
+        ), "unknown top-level sweep key must survive an append"
+        assert len(after["cases"]) == 2
+        assert after["cases"][0]["golden"] == {
+            "path": "golden/g1/tensors.dvc"
+        }, "existing case's golden must survive an append"
+        assert after["cases"][0]["tensor_patches"] == {
+            "1": {"seed": 7}
+        }, "existing case's tensor_patches must survive an append"
+        print("  PASS: import_append_preserves_case_fields")
+
+
+def test_import_new_topology_never_clobbers():
+    """A second, structurally distinct graph whose derived directory already
+    holds a sweep must land in a fresh directory, following place_bundles.py's
+    Default/Variant2/... convention; the original template/sweep survive
+    byte-identical.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Matmul", [0, 1], [2, 3], [3, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"first import failed: {r.stderr}"
+
+        default_dir = bundle_dir / "quick" / "Matmul" / "Default"
+        assert (default_dir / "sweep.json").exists(), r.stderr
+        before_template = (default_dir / "graph.template.json").read_bytes()
+        before_sweep = (default_dir / "sweep.json").read_bytes()
+
+        # Same op and same rank (-> same preferred "Default" topo name), but
+        # an extra unconnected tensor gives it a different skeleton hash, so
+        # it is NOT a structural match and must take the new-topology path.
+        g2 = _make_graph("Matmul", [0, 1, 2], [2, 3], [3, 1], "float")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"second import failed: {r.stderr}"
+        assert "created new bundle" in r.stderr, r.stderr
+
+        variant_dir = bundle_dir / "quick" / "Matmul" / "Variant2"
+        assert (
+            variant_dir / "sweep.json"
+        ).exists(), f"expected a fresh Variant2 dir, not a clobber:\n{r.stderr}"
+        assert (
+            default_dir / "graph.template.json"
+        ).read_bytes() == before_template, "Default template must be untouched"
+        assert (
+            default_dir / "sweep.json"
+        ).read_bytes() == before_sweep, "Default sweep must be untouched"
+        print("  PASS: import_new_topology_never_clobbers")
+
+
+def test_import_new_topology_case_id_is_descriptive():
+    """A brand-new topology's sole case gets a real id, not the literal
+    'case' -- the id doubles as the gtest name."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"import failed: {r.stderr}"
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        case_id = sweep["cases"][0]["id"]
+        assert (
+            case_id != "case"
+        ), f"new-topology case id must be descriptive, got {case_id!r}"
+        assert re.match(r"^[a-z0-9_]+$", case_id), case_id
+        print("  PASS: import_new_topology_case_id_is_descriptive")
+
+
+def test_import_support_json_sidecar():
+    """Every sweep import_graph creates or touches gets an empty canonical
+    support.json that verify_support_claims.verify_all() accepts; an existing
+    support.json is never modified.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    import verify_support_claims
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        # New topology -> gets a fresh, empty, canonical support.json.
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"seed import failed: {r.stderr}"
+        assert "created empty support.json" in r.stderr, r.stderr
+
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        support_path = sweep_path.parent / "support.json"
+        assert support_path.exists()
+        raw = support_path.read_bytes()
+        assert raw == b'{\n  "claims": {},\n  "version": 1\n}\n', raw
+        assert b"\r\n" not in raw, "support.json must use LF line endings"
+
+        with open(sweep_path) as f:
+            case_id = json.load(f)["cases"][0]["id"]
+
+        # Overwrite with a hand-written, valid, non-empty claims sidecar; an
+        # append into this same sweep must leave it byte-for-byte alone.
+        hand_written = (
+            json.dumps(
+                {
+                    "claims": {
+                        "SOME_ENGINE": [
+                            {"cases": [case_id], "support": {"gfx90a": ["linux"]}}
+                        ]
+                    },
+                    "version": 1,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+        support_path.write_bytes(hand_written)
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0, f"append import failed: {r.stderr}"
+        assert "created empty support.json" not in r.stderr, r.stderr
+        assert (
+            support_path.read_bytes() == hand_written
+        ), "an existing support.json must never be modified"
+
+        errors = verify_support_claims.verify_all(bundle_dir)
+        assert not errors, f"verify_support_claims flagged our output:\n{errors}"
+        print("  PASS: import_support_json_sidecar")
+
+
+def test_import_generator_metadata_default():
+    """metadata['generator'] defaults to 'import_graph.py'; an explicit
+    --meta generator=... wins, and a missing reference_source warns."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g1", g1, bundle_dir)
+        assert r.returncode == 0, f"default-generator import failed: {r.stderr}"
+        sweep_path = next(bundle_dir.rglob("sweep.json"))
+        with open(sweep_path) as f:
+            sweep = json.load(f)
+        assert sweep["cases"][0]["metadata"]["generator"] == "import_graph.py"
+        assert (
+            "reference_source in metadata" in r.stderr
+        ), "a missing --meta reference_source must warn"
+
+        bundle_dir2 = tmp / "bundles2"
+        bundle_dir2.mkdir()
+        g2 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(
+            tmp,
+            "g2",
+            g2,
+            bundle_dir2,
+            "--meta",
+            "generator=custom_gen",
+            "--meta",
+            "reference_source=unit-test",
+        )
+        assert r.returncode == 0, f"explicit-generator import failed: {r.stderr}"
+        sweep_path2 = next(bundle_dir2.rglob("sweep.json"))
+        with open(sweep_path2) as f:
+            sweep2 = json.load(f)
+        assert sweep2["cases"][0]["metadata"]["generator"] == "custom_gen"
+        assert (
+            "reference_source in metadata" not in r.stderr
+        ), "an explicit reference_source must not warn"
+        print("  PASS: import_generator_metadata_default")
 
 
 def test_round_trip_expansion():
@@ -1006,6 +1279,212 @@ def test_diff_coverage_suite_qualified_join():
         print("  PASS: diff_coverage_suite_qualified_join")
 
 
+def _retier_graph_template(clip):
+    return {
+        "name": "g",
+        "io_data_type": "${case.io_data_type}",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+            }
+        ],
+        "nodes": [{"type": "PointwiseAttributes", "inputs": {"relu_lower_clip": clip}}],
+    }
+
+
+def _retier_case(case_id, clip_attr=None):
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {"uid": 0, "dims": [1, 2], "strides": [2, 1], "data_type": "float"}
+        ],
+    }
+    if clip_attr is not None:
+        values["attributes"] = {"relu_lower_clip": clip_attr}
+    return {
+        "id": case_id,
+        "values": values,
+        "metadata": {"format_version": 1, "notes": case_id},
+    }
+
+
+def _retier_write(root, tier, template, cases, claims):
+    d = root / tier / "Op" / "Default"
+    d.mkdir(parents=True)
+    for name, obj in (
+        ("graph.template.json", template),
+        ("sweep.json", {"version": 1, "cases": cases}),
+        ("support.json", {"version": 1, "claims": claims}),
+    ):
+        with open(d / name, "w") as f:
+            json.dump(obj, f, indent=2)
+
+
+def _retier_load(root, tier):
+    d = root / tier / "Op" / "Default"
+    return {
+        n: json.load(open(d / n))
+        for n in ("graph.template.json", "sweep.json", "support.json")
+    }
+
+
+def test_retier_bundles():
+    """Moving cases between tiers keeps every case's expanded graph and claims.
+
+    The quick template hard-codes relu_lower_clip while the full template takes it
+    from the case, so a case moving from quick to a tier that uses the full
+    template has to gain the literal as an explicit attribute. Cases that stay put,
+    single-graph bundles and per-engine claims must come through unchanged, and a
+    plan that loses or duplicates a case must be refused before anything is written.
+    """
+    script = SCRIPT_DIR / "retier_bundles.py"
+    win = {"gfx1151": ["windows"]}
+    lin = {"gfx942": ["linux"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(
+            root,
+            "quick",
+            _retier_graph_template(None),
+            [_retier_case("a"), _retier_case("b")],
+            {
+                "MIOPEN_ENGINE": [
+                    {"cases": ["a"], "support": win},
+                    {"cases": ["b"], "support": lin},
+                ]
+            },
+        )
+        _retier_write(
+            root,
+            "full",
+            _retier_graph_template("${case.attributes.relu_lower_clip}"),
+            [_retier_case("0c", clip_attr=0.5)],
+            {"MIOPEN_ENGINE": [{"cases": ["0c"], "support": win}]},
+        )
+        single = root / "quick" / "Op2" / "nchw" / "fp32" / "Small"
+        single.mkdir(parents=True)
+        with open(single / "Small.json", "w") as f:
+            json.dump({"name": "s"}, f)
+        with open(single / "Small.meta.json", "w") as f:
+            json.dump({"format_version": 1}, f)
+
+        asg = Path(tmp) / "asg.json"
+
+        def write_assignments(rows):
+            with open(asg, "w") as f:
+                json.dump(
+                    [dict(current_tier=t, key=k, proposed_tier=n) for t, k, n in rows],
+                    f,
+                )
+
+        plan = [
+            ("quick", "Op/Default/a", "standard"),
+            ("quick", "Op/Default/b", "quick"),
+            ("full", "Op/Default/0c", "quick"),
+            ("quick", "Op2/nchw/fp32/Small", "full"),
+        ]
+
+        # A case without an assignment is refused and nothing is written.
+        write_assignments(plan[:-1])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "no assignment" in r.stderr, r.stderr
+        assert (single / "Small.json").is_file() and not (root / "standard").exists()
+
+        # Two copies of one id may not land in the same sweep.
+        dup = root / "full" / "Op" / "Default"
+        sweep = json.load(open(dup / "sweep.json"))
+        sweep["cases"].append(_retier_case("a", clip_attr=1.0))
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+        write_assignments(plan + [("full", "Op/Default/a", "standard")])
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "twice" in r.stderr, r.stderr
+        sweep["cases"].pop()
+        json.dump(sweep, open(dup / "sweep.json", "w"))
+
+        write_assignments(plan)
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ]
+        )
+        assert r.returncode == 0, r.stderr
+        assert "identical before and after" in r.stdout, r.stdout
+
+        std, quick = _retier_load(root, "standard"), _retier_load(root, "quick")
+        assert not (root / "full" / "Op").exists(), "emptied tier dir should be removed"
+        assert (
+            root / "full" / "Op2" / "nchw" / "fp32" / "Small" / "Small.meta.json"
+        ).is_file()
+        assert not single.exists()
+        # Unified template: the placeholder form, in every tier.
+        placeholder = "${case.attributes.relu_lower_clip}"
+        for tier_files in (std, quick):
+            assert (
+                tier_files["graph.template.json"]["nodes"][0]["inputs"][
+                    "relu_lower_clip"
+                ]
+                == placeholder
+            )
+        # "a" came from the literal-null template and carries it explicitly.
+        (case_a,) = std["sweep.json"]["cases"]
+        assert case_a["id"] == "a" and case_a["values"]["attributes"] == {
+            "relu_lower_clip": None
+        }
+        # "0c" kept its own value; "b" (stayed) gained the explicit null.
+        by_id = {c["id"]: c for c in quick["sweep.json"]["cases"]}
+        assert by_id["0c"]["values"]["attributes"] == {"relu_lower_clip": 0.5}
+        assert by_id["b"]["values"]["attributes"] == {"relu_lower_clip": None}
+        # Claims follow their case: b and 0c have different arch maps, so two groups.
+        groups = quick["support.json"]["claims"]["MIOPEN_ENGINE"]
+        assert {tuple(g["cases"]): g["support"] for g in groups} == {
+            ("b",): lin,
+            ("0c",): win,
+        }
+        # Canonical text: "0c" arrived after "b" but sorts first, and the sidecar
+        # tools refuse any file whose groups are not in sorted-first-case order.
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_sidecar import parse
+
+        for tier in ("quick", "standard"):
+            path = root / tier / "Op" / "Default" / "support.json"
+            parse(path, path.read_text("utf-8"))
+        assert std["support.json"]["claims"]["MIOPEN_ENGINE"] == [
+            {"cases": ["a"], "support": win}
+        ]
+        print("  PASS: retier_bundles")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -1015,7 +1494,13 @@ def main() -> int:
         test_round_trip_expansion,
         test_case_ids,
         test_place_and_verify,
+        test_place_keeps_manual_cases,
         test_import_dedup,
+        test_import_append_preserves_case_fields,
+        test_import_new_topology_never_clobbers,
+        test_import_new_topology_case_id_is_descriptive,
+        test_import_support_json_sidecar,
+        test_import_generator_metadata_default,
         test_inputs_uid_canonicalized_by_name,
         test_import_inputs_uid_canonicalized_by_name,
         test_roundtrip_mismatch_walk,
@@ -1024,6 +1509,7 @@ def main() -> int:
         test_import_absent_vs_literal_marker,
         test_import_new_template_failure_diagnostics,
         test_diff_coverage_suite_qualified_join,
+        test_retier_bundles,
     ]
 
     for t in tests:

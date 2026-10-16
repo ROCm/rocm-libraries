@@ -42,11 +42,11 @@ cmake_minimum_required(VERSION 3.25.2)
 # --- hipCCL umbrella version ---
 # Versions the hipCCL umbrella only - the CPack package and
 # find_package(hipccl) - NOT the individual components, which keep their own
-# 4.7.0 line (see the Component versioning note below). Deliberately kept
-# identical to hipccl3's HIPCCL_VERSION so that CI or other tooling built
-# against one layout's version number doesn't need to special-case the other.
-set(HIPCCL_VERSION_MAJOR 0)
-set(HIPCCL_VERSION_MINOR 1)
+# 4.x line (see the Component versioning note below). hipccl2 is the CCCL
+# 2.x snapshot, so this tracks the CCCL 2.8 line (matching
+# HIPCUB_CCCL_VERSION_*); hipccl3 is versioned 3.0.0 for the CCCL 3.0 line.
+set(HIPCCL_VERSION_MAJOR 2)
+set(HIPCCL_VERSION_MINOR 8)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 
@@ -69,7 +69,7 @@ include(install_legacy_header_symlink)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# NOTE(hipccl2): temporary migration aid, default OFF. Pre-hipccl code doing
+# NOTE(hipccl2): temporary migration aid, default ON. Pre-hipccl code doing
 # `#include <rocprim/...>` (etc.) against a plain `-I<prefix>/include` breaks
 # once headers move to include/hipccl/rocprim above. When enabled, installs a
 # relative symlink at <prefix>/include/<component> pointing back into
@@ -79,7 +79,7 @@ set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
 # rocm-cmake's rocm_install_symlink_subdir(). Intended to be removed once
 # downstream consumers have migrated - not a permanent feature.
 option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
-    "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" OFF)
+    "Install compatibility symlinks at the old, pre-hipccl flat include paths (temporary migration aid)" ON)
 
 # --- Documentation ---
 # NOTE(hipccl2): ../docs is shared with hipccl3 (it documents the hipCCL
@@ -178,6 +178,38 @@ rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNT
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
+
+# --- Supersession of the standalone component packages ---
+#
+# TODO(hipccl): confirm whether this block is actually needed, and delete it
+# if not - it is currently believed to be inert. See hipccl3's root
+# CMakeLists.txt for the full rationale and status; this mirrors it.
+#
+# In short: where hipCCL is packaged under a *flat* <prefix>, it ships
+# <prefix>/lib/cmake/{rocprim,hipcub,rocthrust}/ (each component's own
+# rocm_export_targets() output, which must keep shipping so
+# hipccl-config.cmake can delegate to find_package(<component> CONFIG)) and,
+# when HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS is ON, the compatibility
+# symlinks at <prefix>/include/{rocprim,hipcub,thrust} - paths that
+# standalone rocprim-dev/hipcub-dev/rocthrust-dev packages also own.
+# Conflicts forces those to be removed explicitly rather than allowing a
+# half-migrated install. Unversioned, because the retirement is one-way.
+#
+# Status (2026-09-30): TheRock's own packages built from this branch do not
+# carry this metadata and install under a version-scoped prefix
+# (/opt/rocm/core-<ver>), where no such collision arises. This is therefore
+# expected to matter only if a flat-prefix packaging path is also shipped.
+#
+# Both naming layers are listed; the amdrocm-ccl-* entries are the weakest
+# (that bundle is version-scoped and never shipped, so the conflict could be
+# a false positive) and are the first to drop if this is trimmed.
+set(HIPCCL_SUPERSEDED_DEB_PACKAGES "rocprim-dev, hipcub-dev, rocthrust-dev, amdrocm-ccl-dev")
+set(HIPCCL_SUPERSEDED_RPM_PACKAGES "rocprim-devel, hipcub-devel, rocthrust-devel, amdrocm-ccl-devel")
+
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_DEB_PACKAGES}")
+set(CPACK_RPM_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
+set(CPACK_RPM_DEVEL_PACKAGE_CONFLICTS "${HIPCCL_SUPERSEDED_RPM_PACKAGES}")
 
 rocm_create_package(
     NAME hipccl

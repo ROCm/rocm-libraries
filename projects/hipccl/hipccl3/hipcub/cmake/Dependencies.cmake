@@ -404,7 +404,18 @@ if(USER_BUILD_TEST)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main ALIAS gtest_main)
   else()
-    find_package(GTest REQUIRED)
+    # NOTE(hipccl3): only look GTest up if we don't already have the target.
+    # Reaching this else() means GTest::GTest or GTest::gtest already exists -
+    # but it may have been created by a *sibling* project's FetchContent
+    # rather than by the find_package(GTest QUIET) above. In the unified
+    # hipCCL build rocPRIM is add_subdirectory()'d before hipCUB and fetches
+    # googletest, so by the time this runs the targets exist while GTest is
+    # not installed on the system at all - an unguarded
+    # find_package(GTest REQUIRED) here then fails the entire configure with
+    # -DBUILD_TEST=ON even though usable targets are already present.
+    if(NOT TARGET GTest::GTest)
+      find_package(GTest REQUIRED)
+    endif()
 
     if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
       add_library(GTest::GTest ALIAS GTest::gtest)
@@ -415,7 +426,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_MINIMUM_VERSION 3.0.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()

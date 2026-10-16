@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import generic_targets as gtmod
+
 #: KMD field types the loader accepts (``DescriptorLoader.hpp``'s ``MetadataField``).
 KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list")
 
@@ -14,7 +16,8 @@ KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list"
 #: ``kernel_source`` key names, the ``kind`` vocabulary and the consumer.
 #: ``direct_load`` is read by ``DescriptorLoader.hpp`` from the installed
 #: ``test_descriptors/`` tree; ``packaged`` is read by ``hkp_pack``, which
-#: compiles the kernel and rewrites the descriptor to ``kind: kpack``.
+#: compiles ``hip``/``rocke`` kernels, packs an ``hsaco`` code object as-is
+#: without compiling, and rewrites the descriptor to ``kind: kpack``.
 DIALECT_DIRECT_LOAD = "direct_load"
 DIALECT_PACKAGED = "packaged"
 DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
@@ -38,6 +41,13 @@ KERNEL_SOURCE_KIND_HIP = "hip"
 KERNEL_SOURCE_KIND_ROCKE = "rocke"
 KERNEL_SOURCE_KIND_HSACO = "hsaco"
 
+#: ``rocke`` ``kernel_source.target`` values, matching ``hkp_pack``'s
+#: ``ROCKE_TARGETS`` exactly: compile for the shard arch itself, or for its LLVM
+#: generic processor.
+ROCKE_TARGET_NATIVE = "native"
+ROCKE_TARGET_GENERIC = "generic"
+ROCKE_TARGETS: tuple[str, ...] = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
+
 #: Every kind either dialect's format accepts, emittable here or not.
 KERNEL_SOURCE_KINDS: tuple[str, ...] = (
     KERNEL_SOURCE_KIND_EMBEDDED,
@@ -52,7 +62,11 @@ KERNEL_SOURCE_KINDS: tuple[str, ...] = (
 #: Kinds each dialect emits. Anything else is a ConfigError naming the dialect.
 EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
     DIALECT_DIRECT_LOAD: (KERNEL_SOURCE_KIND_EMBEDDED,),
-    DIALECT_PACKAGED: (KERNEL_SOURCE_KIND_HIP, KERNEL_SOURCE_KIND_ROCKE),
+    DIALECT_PACKAGED: (
+        KERNEL_SOURCE_KIND_HIP,
+        KERNEL_SOURCE_KIND_ROCKE,
+        KERNEL_SOURCE_KIND_HSACO,
+    ),
 }
 
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
@@ -104,8 +118,15 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
         "gfx1100",
         "gfx1101",
         "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
         "gfx1200",
         "gfx1201",
+        "gfx1250",
+        "gfx1250-strict",
     }
 )
 
@@ -189,6 +210,16 @@ class KernelSource:
     #: ``hkp_pack`` hydrates it with ``Spec(**fields)``, so every non-defaulted
     #: field must be present.
     spec: dict = field(default_factory=dict)
+    #: ``packaged`` / ``rocke``: the processor ``hkp_pack`` compiles for, one
+    #: of `ROCKE_TARGETS`. ``native`` is the shard arch; ``generic`` is the shard
+    #: arch's LLVM generic processor (``gfx11-generic`` ...), so one object
+    #: serves the family. Empty omits the key, which ``hkp_pack`` reads as
+    #: ``native``.
+    target: str = ""
+    #: ``packaged`` / ``hsaco``: a prebuilt code object's path relative to the
+    #: descriptor naming it, and its kernel symbol.
+    file: str = ""
+    symbol: str = ""
 
     def as_document(self) -> dict:
         """The ``kernel_source`` JSON object for this kind, and nothing more.
@@ -210,12 +241,17 @@ class KernelSource:
                 "build": self.build,
             }
         if self.kind == KERNEL_SOURCE_KIND_ROCKE:
-            return {
+            document = {
                 "kind": self.kind,
                 "source": self.source,
                 "builder": self.builder,
-                "spec": self.spec,
             }
+            if self.target:
+                document["target"] = self.target
+            document["spec"] = self.spec
+            return document
+        if self.kind == KERNEL_SOURCE_KIND_HSACO:
+            return {"kind": self.kind, "file": self.file, "symbol": self.symbol}
         raise ValueError(
             f"kernel_source kind '{self.kind}' has no emitter; the config "
             f"loader should have rejected it before generation"
@@ -374,9 +410,13 @@ class IngestorConfig:
     def device_fixture_arch(self) -> str:
         """Architecture named by the emitted matcher-test device fixture: the
         first pack's first arch, or `DEFAULT_FIXTURE_ARCH` when the config
-        restricts none."""
+        restricts none; a generic stands for its first member."""
         first_pack_arch = self.packs[0].arch if self.packs else []
-        return first_pack_arch[0] if first_pack_arch else DEFAULT_FIXTURE_ARCH
+        if not first_pack_arch:
+            return DEFAULT_FIXTURE_ARCH
+        first = first_pack_arch[0]
+        table = gtmod.default_table()
+        return table.members(first)[0] if table.has(first) else first
 
     @property
     def device_fixture_wave_size(self) -> int:

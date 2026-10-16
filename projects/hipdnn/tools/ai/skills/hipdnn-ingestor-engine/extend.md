@@ -12,8 +12,8 @@ KMD whose filename does not follow the individual packs.
 
 Preserve old names, UUIDs, symbols, references and native hooks; only genuinely new
 objects get new IDs. Compare completed, KMD-typed metadata across the whole engine:
-conflicting tuples on overlapping effective architectures fail, equal tuples on disjoint
-architectures are legal. New topology, layouts, attributes or feature combinations
+equal tuples fail only when they compete at the same arch tier on a device; disjoint
+architectures or different tiers (explicit over generic over empty) are legal. New topology, layouts, attributes or feature combinations
 reopen [graph-contract.md](graph-contract.md), even for a "variant".
 
 A new variant can be one added KDP entry or a standalone UKD reference, with no new
@@ -67,9 +67,10 @@ The one registration a generated engine needs is the **kernel source**, and only
 
 | Group | Kinds | What happens |
 |---|---|---|
-| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. The packer has exactly these two producer arms; anything else reaches its unsupported-kind raise. No CMake registration. |
+| Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory; see [hsaco kernels and `arch`](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch). |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
-| Runtime descriptor forms | `hsaco`, `kpack` | Written *by* the packer, never authored. `hsaco` is its intermediate between compile and archive; `kpack` is the shipped runtime form. |
+| Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 
 ```cmake
 # In P/src/tests/CMakeLists.txt, beside base's existing calls. Required ONLY for
@@ -98,6 +99,11 @@ suites are compiled into. An addition under an uncensused suite states its inven
 through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
 eligibility. Device proof must explicitly select and numerically verify the new
 candidate; passing the unchanged default is not extension acceptance.
+
+A new architecture is probed automatically, and a new compile path or `spec` value is
+packed by the automatic probe's default sample. When the addition needs a specific UKD
+(a value combination the sweep does not guarantee) packed on every PR, add its name to the
+integration's named probe `UKDS`. Run the `hkp-probe-*` entries as in RUNBOOK's final step.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5

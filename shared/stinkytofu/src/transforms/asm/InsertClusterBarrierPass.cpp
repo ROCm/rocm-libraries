@@ -47,6 +47,11 @@ namespace {
 constexpr int kClusterBarrierId = -3;
 constexpr int kWorkgroupBarrierId = -1;
 constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
+/// Appended to the original loop-head name. Wave 0's latch targets this, so
+/// later trips do not re-run the entrance check. RegionClonePass recognizes
+/// the same suffix when it decides where the loop ends.
+constexpr const char* kWave0HeadSuffix = "_CBWave0";
+constexpr const char* kWaveNzLabelInfix = "_CBWaveNz_";
 constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
 constexpr const char* kDrainBypassLabelSuffix = "_skipCBWait";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
@@ -312,6 +317,17 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
         GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
     StinkyInstruction* lblInst = irBuilder.create(&labelMCID, anchor);
     lblInst->addModifier<LabelData>(LabelData{labelName, /*alignment=*/1});
+}
+
+/// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
+/// the loop entrance, so this site must not clobber SCC again.
+void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                                          GfxArchID archId) {
+    const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
+    assert(signalDesc && "Cluster-barrier signal opcode is not supported on this architecture");
+    StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
+    signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
+    signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});
 }
 
 void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId) {
@@ -1274,14 +1290,246 @@ bool emitLoopCarriedCompensation(StinkyInstruction* loopHead, const std::string&
     return true;
 }
 
+enum class Rule3HandshakeKind { Full, SignalOnly, WaitOnly };
+
+bool isSplitWaveLoopHeadName(const std::string& name) {
+    if (name.ends_with(kWave0HeadSuffix)) return true;
+    // Loop 1's head uses the same prefix as a wave gate, so the token checker
+    // follows only the wave-0 fall-through. A signal's own skip label is not a
+    // loop head: nothing branches back to it.
+    return name.rfind(kSkipLabelPrefix, 0) == 0;
+}
+
+Rule3HandshakeKind handshakeKindFor(const StinkyInstruction* head) {
+    if (head == nullptr) return Rule3HandshakeKind::Full;
+    const auto* labelData = head->getModifier<LabelData>();
+    if (labelData == nullptr) return Rule3HandshakeKind::Full;
+    if (labelData->label.ends_with(kWave0HeadSuffix)) return Rule3HandshakeKind::SignalOnly;
+    if (labelData->label.rfind(kSkipLabelPrefix, 0) == 0) return Rule3HandshakeKind::WaitOnly;
+    return Rule3HandshakeKind::Full;
+}
+
+void rewriteMappedLabels(StinkyInstruction& inst,
+                         const std::unordered_map<std::string, std::string>& labelMap) {
+    if (auto* labelData = inst.getModifier<LabelData>()) {
+        auto found = labelMap.find(labelData->label);
+        if (found != labelMap.end()) labelData->label = found->second;
+    }
+    const auto& srcs = inst.getSrcRegs();
+    for (std::size_t i = 0; i < srcs.size(); ++i) {
+        if (srcs[i].dataType != StinkyRegister::Type::LiteralString) continue;
+        auto found = labelMap.find(srcs[i].getLiteralString());
+        if (found == labelMap.end()) continue;
+        inst.setSrcReg(i, StinkyRegister(found->second));
+    }
+}
+
+void deleteOrphanIR(IRBase* node) {
+    IntrusiveListAllocTraits<IRBase>::deleteNode(node);
+}
+
+/// Label that a conditional latch falls into, when the very next instruction
+/// is that label. Empty when the fall-through is some other instruction.
+std::string fallThroughLabelAfter(StinkyInstruction* latch) {
+    BasicBlock* parent = latch->getParent();
+    if (parent == nullptr) return {};
+    for (auto it = std::next(BasicBlock::iterator(latch)); it != parent->end(); ++it) {
+        // Directives such as .align are not instructions, so one cast skips them.
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (!isLabel(*inst)) return {};
+        const auto* labelData = inst->getModifier<LabelData>();
+        return (labelData != nullptr) ? labelData->label : std::string{};
+    }
+    return {};
+}
+
+/// Outermost Rule 3 loops in \p bb. An inner head is dropped because copying
+/// the outer body already copies it.
+std::vector<StinkyInstruction*> collectOuterRule3LoopHeads(BasicBlock& bb) {
+    std::vector<StinkyInstruction*> heads;
+    std::unordered_set<StinkyInstruction*> seenTriggers;
+    auto segBegin = bb.begin();
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst)) {
+            segBegin = std::next(it);
+            continue;
+        }
+        if (!isTensorLoad(*inst)) continue;
+        StinkyInstruction* trigger = findPrecedingWorkgroupBarrierSignalInSegment(segBegin, inst);
+        if (trigger == nullptr || !seenTriggers.insert(trigger).second) continue;
+        if (isImmediatelyPrecededByClusterBarrierWait(trigger)) continue;
+        StinkyInstruction* head = findEnclosingLoopHead(trigger);
+        if (head == nullptr) continue;
+        const auto* labelData = head->getModifier<LabelData>();
+        if (labelData == nullptr || isSplitWaveLoopHeadName(labelData->label)) continue;
+        if (std::find(heads.begin(), heads.end(), head) == heads.end()) heads.push_back(head);
+    }
+
+    std::vector<StinkyInstruction*> outer;
+    for (StinkyInstruction* head : heads) {
+        bool inner = false;
+        for (StinkyInstruction* other : heads) {
+            if (other == head) continue;
+            StinkyInstruction* otherLatch = findLatchBranchFor(other);
+            if (otherLatch == nullptr) continue;
+            bool sawHead = false;
+            for (auto it = BasicBlock::iterator(other); it != bb.end(); ++it) {
+                if (it.getNodePtr() == head) sawHead = true;
+                if (it.getNodePtr() == otherLatch) {
+                    inner = sawHead;
+                    break;
+                }
+            }
+            if (inner) break;
+        }
+        if (!inner) outer.push_back(head);
+    }
+    return outer;
+}
+
+/// Duplicate \p loopHead's body and select a copy from the wave id.
+///
+///     label_Loop:
+///       s_cmp_eq_u32 s[sgprWaveIdx], 0
+///       s_cbranch_scc0 label_skipCBPreSignal_<hash>   // other waves -> loop 1
+///     label_Loop_CBWave0:                             // wave 0, signal only
+///       <original body, latch retargeted here>
+///       s_branch <exit>
+///     label_skipCBPreSignal_<hash>:                  // loop 1, wait only
+///       <copy, every internal label renamed>
+///     <exit>
+///
+/// SCC live at the entrance keeps the original single loop: the compare would
+/// clobber it. A head this function already produced is left alone.
+void splitLoopBodyByWave(StinkyInstruction* loopHead, BasicBlock& bb, GfxArchID archId) {
+    const auto* headData = loopHead->getModifier<LabelData>();
+    if (headData == nullptr || isSplitWaveLoopHeadName(headData->label)) return;
+    StinkyInstruction* latch = findLatchBranchFor(loopHead);
+    if (latch == nullptr) return;
+
+    std::vector<IRBase*> body;
+    for (auto it = std::next(BasicBlock::iterator(loopHead)); it != bb.end(); ++it) {
+        body.push_back(it.getNodePtr());
+        if (it.getNodePtr() == latch) break;
+    }
+    if (body.empty() || body.back() != latch) return;
+
+    StinkyInstruction* entryInst = nullptr;
+    for (IRBase* node : body) {
+        entryInst = dyn_cast<StinkyInstruction>(node);
+        if (entryInst != nullptr) break;
+    }
+    if (entryInst == nullptr || isSccLiveIn(entryInst)) return;
+
+    const std::string headName = headData->label;
+    const std::string wave0Name = headName + kWave0HeadSuffix;
+    const std::string waveNzName = std::string(kSkipLabelPrefix) + makeRandomHash();
+    const std::string tag = makeRandomHash();
+
+    std::unordered_map<std::string, std::string> labelMap;
+    labelMap.emplace(headName, waveNzName);
+    for (IRBase* node : body) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (inst == nullptr || !isLabel(*inst)) continue;
+        const auto* labelData = inst->getModifier<LabelData>();
+        if (labelData == nullptr || labelData->label.empty()) continue;
+        if (labelMap.contains(labelData->label)) continue;
+        labelMap.emplace(labelData->label, labelData->label + kWaveNzLabelInfix + tag);
+    }
+
+    std::vector<IRBase*> copies;
+    copies.reserve(body.size());
+    for (IRBase* node : body) {
+        IRBase* copied = node->clone();
+        if (copied == nullptr) {
+            for (IRBase* orphan : copies) deleteOrphanIR(orphan);
+            return;
+        }
+        if (auto* inst = dyn_cast<StinkyInstruction>(copied)) rewriteMappedLabels(*inst, labelMap);
+        copies.push_back(copied);
+    }
+
+    bool emitJoin = false;
+    std::string joinLabel = fallThroughLabelAfter(latch);
+    if (joinLabel.empty() && !isUnconditionalBranch(*latch)) {
+        joinLabel = headName + "_CBWaveJoin";
+        emitJoin = true;
+    }
+
+    AsmIRBuilder irBuilder(bb, archId);
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+    const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+    const HwInstDesc* jumpDesc = getMCIDByUOp(GFX::s_branch, archId);
+    assert(cmpDesc && brDesc && jumpDesc &&
+           "Wave-split loop opcodes are not supported on this architecture");
+
+    // Inserted before the same anchor, last call lands closest to it, so create
+    // the label, then the branch, then the compare.
+    StinkyInstruction* wave0Lbl = irBuilder.create(&labelMCID, body.front());
+    wave0Lbl->addModifier<LabelData>(LabelData{wave0Name, /*alignment=*/1});
+
+    StinkyInstruction* brInst = irBuilder.create(brDesc, wave0Lbl);
+    brInst->addSrcReg(StinkyRegister(waveNzName));
+    brInst->addModifier<LabelData>(LabelData{waveNzName});
+    brInst->addModifier<CommentData>(CommentData{"Execute cluster barrier signal for waveID 0"});
+
+    StinkyInstruction* cmpInst = irBuilder.create(cmpDesc, brInst);
+    cmpInst->addDestReg(StinkyRegister::getSCCRegister());
+    cmpInst->addSrcReg(makeSymbolicSgpr(kWaveIdxSymbol));
+    cmpInst->addSrcReg(StinkyRegister(0));
+    cmpInst->addModifier<CommentData>(CommentData{"Check for waveID 0"});
+
+    for (IRBase* node : body) {
+        auto* inst = dyn_cast<StinkyInstruction>(node);
+        if (inst == nullptr || !isBranch(*inst)) continue;
+        if (getBranchTarget(*inst) == headName) retargetBranch(*inst, wave0Name);
+    }
+
+    // Captured once. Later insertions land immediately in front of this node,
+    // so `latch`'s new successor is not the original follower.
+    auto follower = std::next(BasicBlock::iterator(latch));
+    IRBase* succ = (follower == bb.end()) ? nullptr : follower.getNodePtr();
+    auto insertBeforeSucc = [&](IRBase* node) {
+        if (succ != nullptr)
+            bb.insertIR(BasicBlock::iterator(succ), node);
+        else
+            bb.insertIR(bb.end(), node);
+    };
+
+    if (!isUnconditionalBranch(*latch)) {
+        StinkyInstruction* skip =
+            (succ != nullptr) ? irBuilder.create(jumpDesc, succ) : irBuilder.create(jumpDesc);
+        skip->addSrcReg(StinkyRegister(joinLabel));
+        skip->addModifier<LabelData>(LabelData{joinLabel});
+        skip->addModifier<CommentData>(CommentData{"wave 0 falls out of the loop"});
+    }
+
+    StinkyInstruction* nzLbl =
+        (succ != nullptr) ? irBuilder.create(&labelMCID, succ) : irBuilder.create(&labelMCID);
+    nzLbl->addModifier<LabelData>(LabelData{waveNzName, /*alignment=*/1});
+    for (IRBase* copied : copies) insertBeforeSucc(copied);
+    if (emitJoin) {
+        StinkyInstruction* join =
+            (succ != nullptr) ? irBuilder.create(&labelMCID, succ) : irBuilder.create(&labelMCID);
+        join->addModifier<LabelData>(LabelData{joinLabel, /*alignment=*/1});
+    }
+}
+
 class InsertClusterBarrierPassImpl : public Pass {
    public:
     static char ID;
 
-    InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles)
+    InsertClusterBarrierPassImpl(bool streamKMulticast, int pgrValue, int rule3SignalLeadCycles,
+                                 bool splitWaveLoop)
         : streamKMulticast_(streamKMulticast),
           pgrValue_(pgrValue),
-          rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)) {}
+          rule3SignalLeadCycles_(std::max(0, rule3SignalLeadCycles)),
+          splitWaveLoop_(splitWaveLoop) {}
 
     const char* getName() const override {
         return "Insert Cluster Barrier";
@@ -1336,6 +1584,13 @@ class InsertClusterBarrierPassImpl : public Pass {
         }
 
         for (BasicBlock& bb : func) {
+            // Duplicate first, so the scan below sees a wave-0 body and a copy.
+            // Each copy then gets its own handshake: signal only, or wait only.
+            if (splitWaveLoop_) {
+                for (StinkyInstruction* head : collectOuterRule3LoopHeads(bb))
+                    splitLoopBodyByWave(head, bb, archId);
+            }
+
             // Collect every trigger in the block before any search runs. A scan that
             // climbs across a back edge walks into handshakes that come later in
             // program order, and it may only stop at their barriers if it already
@@ -1418,7 +1673,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                 std::string exitLabel;
                 PreLoopSignalAnchor preLoopSignal;
             };
-            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*>> pending;
+            std::vector<std::tuple<StinkyInstruction*, IRBase*, IRBase*, Rule3HandshakeKind>>
+                pending;
             std::vector<LoopCompensation> hoistedLoops;
             std::unordered_map<StinkyInstruction*, size_t> hoistedHeads;
             for (const TriggerSite& site : triggers) {
@@ -1467,7 +1723,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                                 "spot for the compensating signal");
                     }
                 }
-                pending.emplace_back(trigger, found.anchor, site.waitAnchor);
+                pending.emplace_back(trigger, found.anchor, site.waitAnchor,
+                                     handshakeKindFor(head));
             }
 
             StinkyInstruction* tailTL = nullptr;
@@ -1498,7 +1755,7 @@ class InsertClusterBarrierPassImpl : public Pass {
                 StinkyInstruction* tailPairedSignal =
                     findPrecedingWorkgroupBarrierSignalInSegment(bb.begin(), tailWait);
                 bool conflictsWithRule3 = false;
-                for (const auto& [trigger, _sig, _wait] : pending) {
+                for (const auto& [trigger, _sig, _wait, _kind] : pending) {
                     if (tailPairedSignal != nullptr && trigger == tailPairedSignal) {
                         conflictsWithRule3 = true;
                         break;
@@ -1512,8 +1769,17 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (pending.empty() && tailTL == nullptr && tailWait == nullptr) continue;
 
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, signalAnchor, waitAnchor] : pending) {
-                insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+            for (const auto& [trigger, signalAnchor, waitAnchor, kind] : pending) {
+                if (kind == Rule3HandshakeKind::SignalOnly) {
+                    insertBareClusterBarrierSignalBefore(signalAnchor, irBuilder, archId);
+                    insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
+                                                   archId);
+                } else if (kind == Rule3HandshakeKind::WaitOnly) {
+                    insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder,
+                                                   archId);
+                } else {
+                    insertRule3HandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId);
+                }
                 (void)trigger;
             }
             // kRule3CrossLoop true only: drain / skipCBWait for hoisted loops.
@@ -1560,6 +1826,7 @@ class InsertClusterBarrierPassImpl : public Pass {
     const bool streamKMulticast_ = false;
     const int pgrValue_ = 1;
     const int rule3SignalLeadCycles_ = 100;
+    const bool splitWaveLoop_ = false;
 };
 
 char InsertClusterBarrierPassImpl::ID = 0;
@@ -1567,9 +1834,10 @@ char InsertClusterBarrierPassImpl::ID = 0;
 }  // namespace
 
 std::unique_ptr<Pass> createInsertClusterBarrierPass(bool streamKMulticast, int pgrValue,
-                                                     int rule3SignalLeadCycles) {
+                                                     int rule3SignalLeadCycles,
+                                                     bool splitWaveLoop) {
     return std::make_unique<InsertClusterBarrierPassImpl>(streamKMulticast, pgrValue,
-                                                          rule3SignalLeadCycles);
+                                                          rule3SignalLeadCycles, splitWaveLoop);
 }
 
 namespace cluster_barrier {

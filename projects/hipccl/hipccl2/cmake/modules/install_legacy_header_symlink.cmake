@@ -45,27 +45,45 @@
 # directory-level symlink is both correct for this narrower case and cheaper
 # (one filesystem entry instead of one per header file).
 function(hipccl_install_legacy_header_symlink SUBDIR)
-    if(CMAKE_HOST_WIN32)
-        # Windows doesn't reliably support symlinks without elevated
-        # privileges/developer mode, so fall back to a recursive copy - still
-        # gives old-style `#include <rocprim/...>` resolution, just without
-        # the "it's the same file on disk" property a symlink would have.
-        set(HIPCCL_SYMLINK_CMD "file(COPY \${SRC} DESTINATION \${DEST_PARENT})")
-    else()
-        # -f: replace an existing file/symlink at DEST.
-        # -n: treat DEST as a normal path even if it is itself a symlink to a
-        #     directory, so re-running install doesn't nest the new link
-        #     inside the previous one.
-        set(HIPCCL_SYMLINK_CMD "execute_process(COMMAND ln -sfn \${SRC_REL} \${DEST})")
-    endif()
-
     # NOTE: ${CMAKE_INSTALL_INCLUDEDIR} and ${SUBDIR} are intentionally
     # expanded now, at configure time (matching how CMake itself resolves a
     # relative install(DESTINATION) argument) - only $ENV{DESTDIR} and
     # ${CMAKE_INSTALL_PREFIX} are escaped, so they're re-evaluated at install
     # time instead, honoring `cmake --install --prefix <path>` and staged
     # (DESTDIR-based) installs the same way CMake's own install() rules do.
-    set(HIPCCL_INSTALL_CMD "
+    #
+    # file(CREATE_LINK) is used rather than `execute_process(COMMAND ln ...)`
+    # so that failures are actually detectable: RESULT is "0" on success or an
+    # error string otherwise, whereas the bare `ln` call reported nothing and a
+    # failed link (read-only prefix, insufficient privileges) produced a
+    # successful-looking install with no symlink.
+    #
+    # On Windows, file(CREATE_LINK) can report success for this relative
+    # directory target yet yield a broken file-type link (a forward-slash
+    # relative target does not resolve, and the link is not made a directory
+    # link), which then fails with WinError 123 in any tool that opens or copies
+    # it. More fundamentally, symlinks are optional on Windows (they need
+    # Developer Mode or a privilege) and ROCm packages must work without them,
+    # so Windows hosts never get a link: the headers are copied. Elsewhere, a
+    # link that fails the IS_DIRECTORY check falls back to a copy.
+    #
+    # The platform is chosen here, at configure time, with two separate
+    # install(CODE) bodies. Do not interpolate a TRUE/FALSE flag into the
+    # generated script instead: it runs without this project's policy settings,
+    # so under CMP0012 OLD (CMake < 4.0) a literal TRUE in if() is not read as a
+    # constant and the wrong branch is taken.
+    if(CMAKE_HOST_WIN32)
+        install(CODE "
+            set(SRC \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/${SUBDIR})
+            get_filename_component(DEST_PARENT \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/.. ABSOLUTE)
+            file(MAKE_DIRECTORY \${DEST_PARENT})
+            message(STATUS \"legacy header copy: \${DEST_PARENT}/${SUBDIR} (Windows: symlinks are not used)\")
+            file(COPY \${SRC} DESTINATION \${DEST_PARENT})
+        ")
+        return()
+    endif()
+
+    install(CODE "
         set(SRC \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/${SUBDIR})
         get_filename_component(DEST_PARENT \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/.. ABSOLUTE)
         set(DEST \${DEST_PARENT}/${SUBDIR})
@@ -82,8 +100,18 @@ function(hipccl_install_legacy_header_symlink SUBDIR)
                 file(REMOVE \${DEST})
             endif()
             message(STATUS \"legacy header symlink: \${DEST} -> \${SRC_REL}\")
-            ${HIPCCL_SYMLINK_CMD}
+            file(CREATE_LINK \${SRC_REL} \${DEST} RESULT _hipccl_link_result SYMBOLIC)
+            if(NOT _hipccl_link_result STREQUAL \"0\" OR NOT IS_DIRECTORY \${DEST})
+                if(IS_SYMLINK \${DEST})
+                    file(REMOVE \${DEST})
+                endif()
+                message(WARNING
+                    \"legacy header symlink: no usable link at \${DEST} \"
+                    \"(result: '\${_hipccl_link_result}') - copying the headers \"
+                    \"there instead. Unlike a symlink, the copy will not pick \"
+                    \"up later changes to \${SRC}.\")
+                file(COPY \${SRC} DESTINATION \${DEST_PARENT})
+            endif()
         endif()
     ")
-    install(CODE "${HIPCCL_INSTALL_CMD}")
 endfunction()

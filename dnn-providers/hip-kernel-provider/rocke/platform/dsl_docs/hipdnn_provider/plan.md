@@ -385,13 +385,18 @@ kernel (`bake_off_implicit_gemm.py:16–17`). Tolerable for an
 integration test; the second invocation hits the JIT cache and is
 sub-millisecond.
 
-**Launch ABI:** 6 kernel args — `A_ptr, B_ptr, D_ptr` (FP16 globals)
-plus `A_bytes, B_bytes, D_bytes` (i32). Grid is 2D over `(num_pid_n,
-num_pid_m, 1)` where `num_pid_m = ceil((N·Ho·Wo)/tile_m)` and
-`num_pid_n = ceil(K/tile_n)`. Block size: `warp_m · warp_n ·
-wave_size`. All of this is derivable from the spec at JIT time and
-emitted by the DSL into the kernel artifact's launch metadata — the C++
-side does not hard-code it.
+**Launch ABI:** the kernel is AOT-compiled and shape-generic, so the
+shape travels as kernargs: `A_ptr, B_ptr, D_ptr` (FP16 globals) and
+`A_bytes, B_bytes, D_bytes` (i32), then the conv problem block
+(extents, strides, padding, dilation, groups, per-group channels, GEMM
+dims, operand strides, magic-division constants and the tile counts),
+in the order of `kernels.common.conv_abi.conv_arg_names("fwd")` (C++:
+`rocke_conv_arg_names`). `ConvArgs.from_problem(...)` computes every
+value on the host. Grid is `(num_pid_n, num_pid_m, groups)` where
+`num_pid_m = ceil((N·Ho·Wo)/tile_m)` and `num_pid_n = ceil(kpg/tile_n)`.
+Block size: `warp_m · warp_n · wave_size`. All of this is recorded in
+the kernel artifact's launch metadata (`args_signature`) — the C++ side
+does not hard-code it.
 
 ### Spec mirroring scope
 

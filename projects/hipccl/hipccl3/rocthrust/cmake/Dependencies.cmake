@@ -9,6 +9,13 @@
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
 
+# NOTE: rocThrust and rocPRIM share CMake options for building tests, benchmarks
+#        and examples. Until that's not fixed, we have to save/restore them.
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  set(${SHARED_OPTION} OFF)
+endforeach()
+
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
@@ -307,7 +314,7 @@ if(${ROCTHRUST_USE_LIBHIPCXX})
 endif()
 
 # Test dependencies
-if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
+if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Test (https://github.com/google/googletest)
     find_package(GTest QUIET)
@@ -330,7 +337,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        release-1.11.0
+        GIT_TAG        v1.17.0
       )
     endif()
     set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
@@ -347,7 +354,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     FetchContent_Declare(
       TBB
       GIT_REPOSITORY      https://github.com/oneapi-src/oneTBB.git
-      GIT_TAG             1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
+      GIT_TAG             v2023.0.0
       INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb
       CMAKE_ARGS          -DCMAKE_CXX_COMPILER=g++ -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
       LOG_CONFIGURE       TRUE
@@ -413,7 +420,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Benchmark dependencies
-if(BUILD_BENCHMARK)
+if(USER_BUILD_BENCHMARK)
+  # NOTE(hipccl3): Google Benchmark is not fetched. The benchmarks use shared/primbench.
+
   # rocRAND (https://github.com/ROCm/rocm-libraries)
   fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH MIN_ROCRAND_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
 
@@ -432,6 +441,8 @@ if(BUILD_BENCHMARK)
 
     # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
     # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
+    set(_ROCTHRUST_SAVED_BUILD_BENCHMARK "${BUILD_BENCHMARK}")
+    set(_ROCTHRUST_SAVED_BUILD_TEST "${BUILD_TEST}")
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
     
@@ -445,10 +456,19 @@ if(BUILD_BENCHMARK)
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
-    set(BUILD_BENCHMARK ON)
-    set(BUILD_TEST ON)
+    set(BUILD_BENCHMARK "${_ROCTHRUST_SAVED_BUILD_BENCHMARK}")
+    set(BUILD_TEST "${_ROCTHRUST_SAVED_BUILD_TEST}")
+
+    unset(_ROCTHRUST_SAVED_BUILD_BENCHMARK)
+    unset(_ROCTHRUST_SAVED_BUILD_TEST)
+
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
   endif()
 endif()
+
+# Restore user global state
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+endforeach()
