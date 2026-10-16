@@ -1170,8 +1170,38 @@ struct UniversalGemmBasePolicy
                 constexpr index_t pad_interval = (banks_per_mblk < get_n_lds_banks())
                                                      ? constexpr_log2_floor(get_n_lds_banks()) - 1
                                                      : constexpr_log2_floor(banks_per_mblk) - 1;
+                // The data mover inserts this pad every 2^(pad_interval+1) dwords.
+                // Keep that interval when it already lands on the LDS row. A 192-element
+                // bf16 row is 96 dwords and the field becomes 5 (128 elements), so use the
+                // largest power-of-two dword count that divides the row instead.
+                constexpr bool legacy_fits = pad_interval >= 0 && pad_interval <= 7;
+                constexpr index_t pad_stride =
+                    legacy_fits ? (1 << (pad_interval + 1)) * BytesPerDword / DataTypeSize * PackedSize
+                                : 0;
+                constexpr index_t layer_required =
+                    get_n_lds_banks() * BytesPerDword / MNPerBlock / DataTypeSize * PackedSize;
+                constexpr index_t layer = max(1, layer_required);
+                constexpr index_t lds_period =
+                    (pad_stride > MNPerBlock) ? MNPerBlock * layer
+                    : (pad_stride > 0 && MNPerBlock % pad_stride == 0) ? pad_stride
+                                                                       : 0;
+                constexpr bool pad_matches_row = legacy_fits && lds_period == pad_stride;
 
-                return make_tuple(number<true>{}, number<pad_amount>{}, number<pad_interval>{});
+                if constexpr(pad_matches_row)
+                {
+                    return make_tuple(number<true>{}, number<pad_amount>{}, number<pad_interval>{});
+                }
+                else
+                {
+                    constexpr index_t divisor        = banks_per_mblk & -banks_per_mblk;
+                    constexpr index_t interval_dwords = divisor > 256 ? 256 : divisor;
+                    static_assert(interval_dwords >= 2 && banks_per_mblk % interval_dwords == 0,
+                                  "TDM pad interval must be a power-of-two dword count that "
+                                  "divides the tile");
+                    constexpr index_t dividing_interval = constexpr_log2_floor(interval_dwords) - 1;
+                    return make_tuple(
+                        number<true>{}, number<pad_amount>{}, number<dividing_interval>{});
+                }
             }
         }
         else
@@ -1190,8 +1220,34 @@ struct UniversalGemmBasePolicy
             // padding
             // ...
             constexpr index_t pad_amount = banks_per_128b - 1;
+            // Keep the log2 interval when it equals the LDS row. K=192 bf16 does not
+            // divide the 128-element interval, so count every 64 elements instead.
+            constexpr bool legacy_fits = pad_interval >= 0 && pad_interval <= 7;
+            constexpr index_t pad_stride =
+                legacy_fits ? (1 << (pad_interval + 1)) * BytesPerDword / DataTypeSize * PackedSize
+                            : 0;
+            constexpr index_t layer_required = get_n_lds_banks() * get_n_dwords_per_128b() /
+                                               KPerBlock / DataTypeSize * PackedSize;
+            constexpr index_t layer      = max(1, layer_required);
+            constexpr index_t lds_period = KPerBlock * layer;
+            constexpr bool pad_matches_row =
+                legacy_fits && pad_stride > 0 && lds_period == pad_stride;
 
-            return make_tuple(number<true>{}, number<pad_amount>{}, number<pad_interval>{});
+            if constexpr(pad_matches_row)
+            {
+                return make_tuple(number<true>{}, number<pad_amount>{}, number<pad_interval>{});
+            }
+            else
+            {
+                constexpr index_t divisor         = banks_per_kblk & -banks_per_kblk;
+                constexpr index_t interval_dwords = divisor > 256 ? 256 : divisor;
+                static_assert(interval_dwords >= 2 && banks_per_kblk % interval_dwords == 0,
+                              "TDM pad interval must be a power-of-two dword count that divides "
+                              "the K tile");
+                constexpr index_t dividing_interval = constexpr_log2_floor(interval_dwords) - 1;
+                return make_tuple(
+                    number<true>{}, number<pad_amount>{}, number<dividing_interval>{});
+            }
         }
     }
 
@@ -1234,6 +1290,8 @@ struct UniversalGemmBasePolicy
                 constexpr index_t KLdsLayerRequired =
                     get_n_lds_banks() * BytesPerDword / MPerBlock / DataTypeSize * PackedSize;
                 constexpr auto KLdsLayer = max(1, KLdsLayerRequired);
+                static_assert(MPerBlock * KLdsLayer == PaddingStride,
+                              "TDM transpose pad interval must cover the stacked M rows");
 
                 constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
                     make_tuple(number<KPerBlock / KLdsLayer>{},
@@ -1264,6 +1322,8 @@ struct UniversalGemmBasePolicy
             }
             else
             {
+                static_assert(MPerBlock % PaddingStride == 0,
+                              "TDM transpose pad interval must divide the M tile");
                 constexpr auto MLdsLayer          = MPerBlock / PaddingStride;
                 constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
                     make_tuple(number<KPerBlock * MLdsLayer>{},
@@ -1335,6 +1395,8 @@ struct UniversalGemmBasePolicy
                 constexpr index_t KLdsLayerRequired =
                     get_n_lds_banks() * BytesPerDword / NPerBlock / DataTypeSize * PackedSize;
                 constexpr auto KLdsLayer = max(1, KLdsLayerRequired);
+                static_assert(NPerBlock * KLdsLayer == PaddingStride,
+                              "TDM transpose pad interval must cover the stacked N rows");
 
                 constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
                     make_tuple(number<KPerBlock / KLdsLayer>{},
@@ -1365,6 +1427,8 @@ struct UniversalGemmBasePolicy
             }
             else
             {
+                static_assert(NPerBlock % PaddingStride == 0,
+                              "TDM transpose pad interval must divide the N tile");
                 constexpr auto NLdsLayer          = NPerBlock / PaddingStride;
                 constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
                     make_tuple(number<KPerBlock * NLdsLayer>{},
