@@ -1834,7 +1834,8 @@ void CDNA5ReadyQueue::decidePromote() {
                 // The WMMAs queued behind the barrier hide its stall: refill first.
                 if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
                     const int latency = wmmaQueue.top()->inst->latencyCycles;
-                    if (queuedCoverCycles() < wmmaBarrierCover(latency)) {
+                    // At the run limit the barrier ends the run instead of waiting for more cover.
+                    if (!wmmaRunAtLimit_ && queuedCoverCycles() < wmmaBarrierCover(latency)) {
                         barrierWaitsForCover_ = true;
                         continue;
                     }
@@ -2355,8 +2356,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // must fire now; the non-promoted phases below gate themselves off via
     // isPromote(), and the promoted node issues through its own phase — one entry
     // point, no side effects here.
-    decidePromote();
     wmmaRunAtLimit_ = wmmaRun_ >= kWmmaRunMax;
+    decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
     // A load the spread gate holds does not stand in for the ones it releases: its section may
