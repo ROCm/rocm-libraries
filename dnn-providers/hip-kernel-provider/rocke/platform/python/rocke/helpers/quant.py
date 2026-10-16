@@ -185,9 +185,11 @@ def quantize_scalar_f32(
     The clamp is redundant for fp8/bf8 (the AMDGPU hardware already
     saturates on conversion), but it's a cheap two-op ``v_med3_f32``
     that keeps the f32 path interpretable in IR dumps and matches the
-    CK Tile reference's saturation semantics exactly for the i8 path
-    (where ``v_cvt_pk_i16_i32`` does *not* saturate without the
-    explicit clamp).
+    CK Tile reference's saturation semantics exactly for the i8 path.
+    The i8 pack instruction ``v_cvt_pk_i16_i32`` saturates to the i16
+    range on its own (measured on gfx90a), but the clamp stays: it
+    states the i8 saturation in the IR itself, so the result does not
+    depend on which instructions the backend picks for the pack.
 
     ``inv_scale`` is in the *natural* direction (``inv_scale = 1 / scale``
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
@@ -210,12 +212,13 @@ def quantize_scalar_f32(
     c_pos = b.const_f32(qmax)
     c_neg = b.const_f32(-qmax)
     scaled = b.fmul(x_f32, inv_scale)
-    # P55: when ``skip_clamp_on_pack`` is set and the target is fp8 /
-    # bf8, drop the explicit ``v_med3_f32`` clamp because the AMDGPU
+    # When ``skip_clamp_on_pack`` is set and the target is fp8 / bf8,
+    # drop the explicit ``v_med3_f32`` clamp because the AMDGPU
     # ``cvt.pk.fp8.f32`` / ``cvt.pk.bf8.f32`` instructions already
-    # saturate the input on conversion. For ``i8`` we keep the clamp:
-    # ``v_cvt_pk_i16_i32`` does not saturate so the explicit
-    # ``smax`` / ``smin`` chain is required for correctness.
+    # saturate the input on conversion. For ``i8`` we keep the clamp
+    # even though ``v_cvt_pk_i16_i32`` saturates (to the i16 range,
+    # measured on gfx90a): the clamp keeps the i8 path's saturation
+    # semantics in the IR, independent of the pack instruction.
     if skip_clamp_on_pack and canon in ("fp8e4m3", "bf8e5m2"):
         if canon == "fp8e4m3":
             return b.cvt_f32_to_fp8(scaled)
