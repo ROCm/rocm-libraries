@@ -5486,9 +5486,10 @@ class _Lowerer:
         callers reach the full 64-bit range needed for >4 GiB KV
         caches that would otherwise OOB-zero at the tail.
 
-        Flags = 0x00027000 -- the rsrc DWORD3 word that gives
-        "32-bit-uint, structured buffer, bounds-checked"; matches CK
-        Tile's hardcoded value.
+        Flags = the target ISA backend's ``buffer_rsrc_word3`` -- the rsrc
+        DWORD3 that makes the descriptor bounds-checked. Its encoding is
+        ISA-specific (``0x00027000`` on gfx9, ``0x31014000`` on gfx11 /
+        gfx12); the HIP lowering takes the same word from the same backend.
         """
         self._need("make.buffer.rsrc.p1")
         ptr, num_bytes = op.operands
