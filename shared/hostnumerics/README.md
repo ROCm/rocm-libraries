@@ -458,12 +458,13 @@ coordinate conversion retain their logical shape semantics.
 
 Named methods use nonnegative dimension numbers, coordinates, and range bounds:
 `extent`, `project`, `element_count_in_range`, and the `order` arguments do not
-normalize negative axes. Construction stores the extents without checking their
-product. Counts and coordinate conversions check the arithmetic they need, so
-`Shape([SIZE_MAX, 2]).linear_index([0, 1])` can return `1` even though its total
-count is too large for `size_t` and `coordinates(1)` cannot compute that count.
-Here `SIZE_MAX` is the maximum value of `size_t`. A zero extent makes the full
-count zero, including when other extents would produce an overflowing product.
+normalize negative axes. Construction requires the full element count to fit in
+`size_t`, so `Shape([SIZE_MAX, 2])` fails immediately. Here `SIZE_MAX` is the
+maximum value of `size_t`. A zero extent makes the full count zero, so
+`Shape([SIZE_MAX, 2, 0])` remains valid. A subrange count can still overflow, and
+projection or slicing that removes the zero can fail when constructing the new
+Shape. Index conversions validate their arguments before computing the result;
+in-bounds coordinates in a nonempty Shape cannot overflow a logical index.
 
 ## Internal C++ results
 
