@@ -80,6 +80,7 @@ def validate_attention_request_types(request):
             "use_softcap",
             "use_attn_bias",
             "emit_lse",
+            "runtime_head_dims",
             "window_bottom_right",
         ),
         require_attention_bool,

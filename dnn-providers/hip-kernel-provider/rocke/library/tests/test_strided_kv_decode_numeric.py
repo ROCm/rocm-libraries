@@ -258,7 +258,6 @@ def test_strided_kv_decode(
         max_seqlen_k=capacity,
         dtype=dtype,
         sliding_window=window,
-        clamp_arch=arch,
         target_ctas=8,
     )
     stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
@@ -427,7 +426,6 @@ def test_decode_concurrent_workspace(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch=arch,
         target_ctas=8,
     )
     requests, expected = [], []
@@ -594,7 +592,6 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype=dtype,
-            clamp_arch=arch,
             target_ctas=8,
         ),
         "q": q_host.cuda(),

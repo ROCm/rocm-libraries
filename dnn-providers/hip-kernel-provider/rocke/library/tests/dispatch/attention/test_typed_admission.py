@@ -463,7 +463,14 @@ def test_explicit_window_types_before_selection(field, subtests):
 
 
 @pytest.mark.parametrize(
-    "field", ["use_softcap", "use_attn_bias", "emit_lse", "window_bottom_right"]
+    "field",
+    [
+        "use_softcap",
+        "use_attn_bias",
+        "emit_lse",
+        "window_bottom_right",
+        "runtime_head_dims",
+    ],
 )
 def test_extended_request_flags_before_selection(field, subtests):
     for value in BAD_BOOLS:
