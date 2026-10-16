@@ -371,7 +371,7 @@ namespace
         arg.lda[0]              = 288;
         arg.ldb[0]              = 32;
         arg.ldc[0] = arg.ldd[0] = 288;
-        arg.fast_check          = 0;
+        arg.freivalds           = 0;
         // This NN case used to allocate 512 scale bytes for A and write 2304.
         // Call the shared client entry so removing or moving its guard is observable.
         expect_preswizzled_layout_error(arg, "scaleA=1001 requires transA=T");
@@ -390,7 +390,7 @@ namespace
         arg.lda[0]              = 32;
         arg.ldb[0]              = 288;
         arg.ldc[0] = arg.ldd[0] = 32;
-        arg.fast_check          = 0;
+        arg.freivalds           = 0;
         // A has its supported orientation, so it cannot mask a missing B check.
         expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
     }

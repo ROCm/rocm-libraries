@@ -1266,8 +1266,9 @@ namespace TensileLite
                                                       DataTypeInfo::Get(p.first).elementSize);
 
                     std::stringstream ss;
-                    ss << "[" << tensorIdx << "]" << "Failed to allocate gpu input " << it.name
-                       << " type(" << DataTypeInfo::Get(p.first).abbrev
+                    ss << "[" << tensorIdx << "]"
+                       << "Failed to allocate gpu input " << it.name << " type("
+                       << DataTypeInfo::Get(p.first).abbrev
                        << "), element size: " << DataTypeInfo::Get(p.first).elementSize
                        << ", element length: " << pUnit.maxElements;
 

@@ -74,7 +74,9 @@
 #if defined(GOOGLE_TEST) || defined(HIPBLASLT_BENCH)
 #undef stdout
 #undef stderr
-#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv clearenv fcloseall ecvt fcvt sleep abort strsignal
+#pragma GCC poison cout cerr clog stdout stderr gets puts putchar fputs fprintf printf sprintf    \
+    vfprintf vprintf vsprintf perror strerror strtok gmtime ctime asctime localtime tmpnam putenv \
+        clearenv fcloseall ecvt fcvt sleep abort strsignal
 #else
 // Suppress warnings about hipMalloc(), hipFree() except in hipblaslt-test and hipblaslt-bench
 #undef hipMalloc
@@ -138,10 +140,10 @@ public:
 
     ~hipblaslt_local_handle();
 
-    hipblaslt_local_handle(const hipblaslt_local_handle&)            = delete;
-    hipblaslt_local_handle(hipblaslt_local_handle&&)                 = delete;
+    hipblaslt_local_handle(const hipblaslt_local_handle&) = delete;
+    hipblaslt_local_handle(hipblaslt_local_handle&&)      = delete;
     hipblaslt_local_handle& operator=(const hipblaslt_local_handle&) = delete;
-    hipblaslt_local_handle& operator=(hipblaslt_local_handle&&)      = delete;
+    hipblaslt_local_handle& operator=(hipblaslt_local_handle&&) = delete;
 
     // Allow hipblaslt_local_handle to be used anywhere hipblasLtHandle_t is expected
     operator hipblasLtHandle_t&()
@@ -189,7 +191,7 @@ public:
         reset();
     }
 
-    hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&)            = delete;
+    hipblaslt_local_matrix_layout(const hipblaslt_local_matrix_layout&) = delete;
     hipblaslt_local_matrix_layout& operator=(const hipblaslt_local_matrix_layout&) = delete;
 
     hipblaslt_local_matrix_layout(hipblaslt_local_matrix_layout&& other) noexcept
@@ -282,7 +284,7 @@ public:
         reset();
     }
 
-    hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&)            = delete;
+    hipblaslt_local_matmul_descr(const hipblaslt_local_matmul_descr&) = delete;
     hipblaslt_local_matmul_descr& operator=(const hipblaslt_local_matmul_descr&) = delete;
 
     hipblaslt_local_matmul_descr(hipblaslt_local_matmul_descr&& other) noexcept
@@ -346,10 +348,10 @@ public:
             hipblasLtMatmulPreferenceDestroy(this->m_pref);
     }
 
-    hipblaslt_local_preference(const hipblaslt_local_preference&)            = delete;
-    hipblaslt_local_preference(hipblaslt_local_preference&&)                 = delete;
+    hipblaslt_local_preference(const hipblaslt_local_preference&) = delete;
+    hipblaslt_local_preference(hipblaslt_local_preference&&)      = delete;
     hipblaslt_local_preference& operator=(const hipblaslt_local_preference&) = delete;
-    hipblaslt_local_preference& operator=(hipblaslt_local_preference&&)      = delete;
+    hipblaslt_local_preference& operator=(hipblaslt_local_preference&&) = delete;
 
     hipblasStatus_t status()
     {
