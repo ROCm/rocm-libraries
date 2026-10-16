@@ -3494,9 +3494,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // The section of a ds_load: opened by the barrier whose data it reads (the latest cut it
         // depends on), closed by the barrier it feeds (the earliest cut it must be drained
         // before). Tensor_loads and workgroup barriers are the cuts; WMMA dependencies are not.
-        std::vector<std::vector<unsigned>> preds(deps.dag.nodes.size());
+        auto preds = deps.dag.graph;
+        for (auto& edges : preds) edges.clear();
         for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
-            for (unsigned succ : deps.dag.graph[n]) preds[succ].push_back(n);
+            for (unsigned succ : deps.dag.graph[n]) preds[succ].insert(n);
+        const auto& predsRef = preds;
         auto cutWindow = [&](unsigned n) {
             auto th =
                 barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
@@ -3505,7 +3507,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         auto sectionOf = [&](unsigned id) {
             int start = 0;
             int end = INT_MAX;
-            for (const auto* edges : {&deps.dag.graph, &preds}) {
+            for (const auto* edges : {&deps.dag.graph, &predsRef}) {
                 const bool forward = edges == &deps.dag.graph;
                 std::vector<unsigned> frontier{id};
                 for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
