@@ -29,7 +29,7 @@ def verify_lds_roundtrip(pipeline: Any, space_id: int, *, tile_k: int) -> list[i
     writes ``oth`` while the same-iteration read reads ``cur`` -- pairing those would be a silent bug).
 
     Rank-2 ``(K, free)``: axis 1 is the free axis, and its length spans every buffer half; invoke once
-    per squeezed batch slice for N-D. Each read element is checked by its index and reported by its
+    per batch slice for N-D. Each read element is checked by its index and reported by its
     carried ``(K, free)`` positions.
     ``tile_k`` pins the K-loop iteration for the resolver (from the render context). Returns the list of
     verified halves; raises :class:`RoundTripError` naming the first offending read.

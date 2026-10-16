@@ -9,7 +9,7 @@ LDS access one element index, ``sum(position * stride)``, exactly as for global 
 check:
 
 - the emitted index, evaluated per lane from the real IR, for a padded K-contiguous buffer, an
-  N-contiguous ``(N, K)`` buffer and a pinned stage of a rank-3 buffer;
+  N-contiguous ``(N, K)`` buffer and a stage of a rank-3 buffer positioned by its origin;
 - each refusal: a buffer that is not flat, holds another element type or is smaller than the
   descriptor's span; the built-in swizzle on a buffer whose stride-1 axis is not last;
   ``TensorDesc.element_span`` on a negative stride;
@@ -100,13 +100,20 @@ def _lds_indices(kernel, lane: int) -> list[tuple[str, tuple[int, ...]]]:
 
 
 def _expected_indices(tile, origin, strides, n_runs, lane):
-    """The flat index of each register run start: sum((origin + coordinate) * stride)."""
+    """The flat index of each register run start: sum((origin + coordinate) * stride) over the
+    tile's axes -- the window's LAST axes -- plus origin * stride of each leading axis.
+    """
     run = tile.register_count // n_runs
+    lead = len(origin) - len(tile.shape)
     out = []
     for register in range(0, tile.register_count, run):
         coords = emit_tensor_coordinates(NumBuilder(lane), tile.layout, lane, register)
+        tile_terms = sum(
+            (o + c) * s
+            for o, c, s in zip(origin[lead:], coords, strides[lead:], strict=True)
+        )
         out.append(
-            sum((o + c) * s for o, c, s in zip(origin, coords, strides, strict=True))
+            tile_terms + sum(o * s for o, s in zip(origin[:lead], strides[:lead]))
         )
     return out
 
@@ -124,7 +131,7 @@ def _load_then_store(window, tile, *, buffer_elements=None, swizzle=False):
     return b.kernel
 
 
-def _check_indices(window, tile, flat_origin_offset=0):
+def _check_indices(window, tile):
     kernel = _load_then_store(window, tile)
     smem_ops = [
         op for op in kernel.body.ops if op.name.startswith("tile.smem_load")
@@ -134,12 +141,9 @@ def _check_indices(window, tile, flat_origin_offset=0):
         accesses = _lds_indices(kernel, lane)
         loads = [idx[0] for name, idx in accesses if "load" in name]
         stores = [idx[0] for name, idx in accesses if "store" in name]
-        expected = [
-            flat_origin_offset + e
-            for e in _expected_indices(
-                tile, window.origin, window.tensor.strides, len(loads), lane
-            )
-        ]
+        expected = _expected_indices(
+            tile, window.origin, window.tensor.strides, len(loads), lane
+        )
         assert loads == expected, f"lane {lane}"
         assert stores == expected, f"lane {lane}"
 
@@ -156,13 +160,17 @@ def test_n_contiguous_index_is_n_plus_k_times_n_length() -> None:
     _check_indices(make_window(td, (16, 0)), _TILE_RUN_AXIS0)
 
 
-def test_pinned_stage_adds_index_times_stage_stride() -> None:
-    # Two (rows, K) stages of 16 x 24 elements; pinning stage 1 adds 1 * 384 to every index.
-    td = make_tensor_desc(
-        (2, 16, 16), (384, 24, 1), F16, ("batch", "free", "contraction")
-    )
-    window = make_window(td, (0, 0, 0)).at_index(0, 1)
-    _check_indices(window, _TILE_RUN_AXIS1, flat_origin_offset=384)
+def test_stage_origin_adds_index_times_stage_stride() -> None:
+    # Two (rows, K) stages of 16 x 24 elements. A rank-2 tile covers the last two axes; the stage is
+    # the leading axis, positioned by its origin: stage 1 adds 1 * 384 to every index.
+    td = make_tensor_desc((2, 16, 16), (384, 24, 1), F16)
+    window = make_window(td, (1, 0, 0))
+    _check_indices(window, _TILE_RUN_AXIS1)
+    stage_0 = _load_then_store(make_window(td, (0, 0, 0)), _TILE_RUN_AXIS1)
+    stage_1 = _load_then_store(window, _TILE_RUN_AXIS1)
+    for lane in range(_WAVE):
+        expected = [(name, (i + 384,)) for name, (i,) in _lds_indices(stage_0, lane)]
+        assert _lds_indices(stage_1, lane) == expected, f"lane {lane}"
 
 
 def test_lds_index_is_a_lane_base_plus_a_constant_per_register_run() -> None:
@@ -292,7 +300,6 @@ def test_lds_tile_desc_keeps_the_buffer_order_addresses(
     row = buffers * free_ext
     assert td.lengths == (row, k_ext)
     assert td.strides == (1, row)
-    assert td.axis_roles is None
     # The buffer-order layout this replaces: (K, free) extents from the swapped tile, row stride
     # buffers * free_ext, element (k, f) at k * row + f, k_ext * row elements.
     assert desc_extents(coop.swap_dims(0, 1), lanes) == (k_ext, free_ext)
@@ -327,6 +334,24 @@ def test_lds_verbs_check_the_tile_against_the_descriptor_lengths() -> None:
         "cooperative LDS read addresses (16, 16) but the LDS tensor descriptor has lengths (16, 8) "
         "-- the cooperative LDS access would run outside the buffer (unclipped by design). "
         "Describe the buffer with lengths that cover the tile, per axis."
+    )
+
+
+def test_lds_verbs_check_a_staged_tile_against_the_last_axes() -> None:
+    # A (stages, rows, K) buffer read with a rank-2 tile: the tile covers the last two axes, so its
+    # extents are checked against their lengths and the stage is positioned by the origin.
+    b = IRBuilder("lds_fit_stages")
+    tid = b.thread_id_x()
+    td = make_tensor_desc((2, 16, 16), (256, 16, 1), F16)
+    lds = b.smem_alloc(td.dtype, [td.element_span])
+    fragment = lds_read(b, lds, td, (1, 0, 0), _TILE_RUN_AXIS1, tid, n_lanes=_WAVE)
+    lds_store(b, lds, td, (0, 0, 0), fragment, tid, n_lanes=_WAVE)
+    short = make_tensor_desc((2, 16, 8), (128, 8, 1), F16)
+    with pytest.raises(ValueError) as info:
+        lds_read(b, lds, short, (1, 0, 0), _TILE_RUN_AXIS1, tid, n_lanes=_WAVE)
+    assert str(info.value).startswith(
+        "cooperative LDS read addresses (16, 16) but the LDS tensor descriptor has lengths "
+        "(2, 16, 8) -- "
     )
 
 
@@ -542,13 +567,13 @@ def test_lds_round_trip_places_elements_by_strides(dtype: str, case: str) -> Non
 @pytest.mark.parametrize("dtype", ["f16", "f32"])
 def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
     # Two stages of a (free, K) = (32, 16) tile, staged [stage][K][free]: the LDS descriptor is
-    # (stages, free, K) with strides (K * F, 1, F). Each stage is selected by pinning axis 0 (an int
-    # for stage 0, a runtime value for stage 1) and read with an un-swapped (free, K) tile.
+    # (stages, free, K) with strides (K * F, 1, F). The (free, K) tiles cover the last two axes; each
+    # stage is positioned by the origin of the leading axis (an int for stage 0, a runtime value for
+    # stage 1) and read with an un-swapped (free, K) tile.
     ir = _IR[dtype]
     stages, free, k = 2, 32, 16
-    roles = ("batch", "free", "contraction")
-    global_td = make_tensor_desc((stages, free, k), (free * k, k, 1), ir, roles)
-    lds_td = make_tensor_desc((stages, free, k), (k * free, 1, free), ir, roles)
+    global_td = make_tensor_desc((stages, free, k), (free * k, k, 1), ir)
+    lds_td = make_tensor_desc((stages, free, k), (k * free, 1, free), ir)
     store_tile = make_tile_desc(
         shape=[free, k], thread_tile=[1, 8], thread_dist=[32, 2], wave_size=_WAVE
     )
@@ -562,8 +587,8 @@ def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
         runtime_stage = b.add(b.const_i32(0), b.const_i32(1))
         return [
             (
-                make_window(global_td, (0, 0, 0)).at_index(0, stage),
-                make_window(lds_td, (0, 0, 0)).at_index(0, stage),
+                make_window(global_td, (stage, 0, 0)),
+                make_window(lds_td, (stage, 0, 0)),
             )
             for stage in (0, runtime_stage)
         ]

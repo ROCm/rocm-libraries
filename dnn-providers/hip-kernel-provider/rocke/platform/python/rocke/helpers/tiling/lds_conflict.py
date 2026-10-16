@@ -536,6 +536,9 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
     # The run's elements step along the innermost register axis, which the contiguous-run rule only
     # widens when it is the stride-1 axis (a run of one element never steps).
     run_axis = tile_desc.layout.register_to_rh_major[-1] - 1 if vw > 1 else None
+    # A swizzle sees every tensor axis's position, leading axes (their origins) first, as in
+    # _lds_index; the carried positions are the tile axes'.
+    leading = list(origin[: tensor.rank - len(tile_desc.shape)])
     accesses = []
     for lane in range(n_lanes):
         nb = NumBuilder(lane)
@@ -543,7 +546,7 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
         for reg0 in range(0, tile_desc.register_count, vw):
             positions = _register_positions(nb, tile_desc, base_positions, reg0)
             if lds_swizzle:
-                positions = swizzle(nb, positions)
+                positions = swizzle(nb, leading + positions)[len(leading) :]
             index = _lds_index(
                 nb,
                 window,
@@ -1112,12 +1115,15 @@ def store_datum(
     # Restarting the phase index at 0 per run made instruction 1 OVERWRITE instruction 0's entries, so
     # every consumer of this map (`_locate_collision`, the 3-panel renderer) silently analyzed the LAST
     # instruction while claiming to show the store. Identical numbering for a single-run descriptor.
+    # A sub-dword access (vw < per_dword, e.g. an f16 store narrowed to one element by an odd outer
+    # stride) still touches one dword, as `_dwords` counts it.
+    dwords_per_access = max(1, vw // per_dword)
     next_phase = defaultdict(int)
     for ac in sorted(acc, key=lambda x: (x["lane"], x["reg0"])):
         d0 = ac["base"] // per_dword
         ph0 = next_phase[ac["lane"]]
-        next_phase[ac["lane"]] += vw // per_dword
-        for i in range(vw // per_dword):
+        next_phase[ac["lane"]] += dwords_per_access
+        for i in range(dwords_per_access):
             row, column = ac["element_positions"][per_dword * i]
             datum[(ac["lane"], ph0 + i)] = (row, column, d0 + i, (d0 + i) % a.NB)
     return acc, vw, datum

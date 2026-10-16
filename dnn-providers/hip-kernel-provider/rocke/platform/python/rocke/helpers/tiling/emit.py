@@ -179,26 +179,75 @@ def _as_value(b: Any, x: Any) -> Any:
     return b.const_i32(x) if isinstance(x, int) else x
 
 
+def _leading_rank(window: TensorWindow, tile_rank: int) -> int:
+    """How many leading tensor axes a rank-``tile_rank`` tile leaves to the window origin. A tile
+    covers the window's LAST axes, so tile axis ``i`` is tensor axis ``_leading_rank + i``.
+    """
+    return window.tensor.rank - tile_rank
+
+
+def _check_tile_rank(verb: str, window: TensorWindow, tile_desc: TileDesc) -> None:
+    """Fail fast unless the tile fits the window: a rank-t tile covers the window's last t axes."""
+    tile_rank, window_rank = len(tile_desc.shape), window.tensor.rank
+    if tile_rank > window_rank:
+        raise ValueError(
+            f"{verb}: the tile has rank {tile_rank} but the window has rank {window_rank} -- a "
+            f"rank-t tile covers the window's last t axes, so t <= r"
+        )
+
+
+def _check_leading_bounds(verb: str, window: TensorWindow, tile_desc: TileDesc) -> None:
+    """Fail fast on a clip bound for a leading axis. A leading axis has tile extent 1, so a tile is
+    wholly inside or wholly outside any bound on it; the clip only masks a tile that partly overhangs,
+    and keeping a tile off positions wholly outside is the caller's job on every axis. A bound there
+    would mask nothing, so it is refused rather than ignored."""
+    if window.bounds is None:
+        return
+    lead = _leading_rank(window, len(tile_desc.shape))
+    clipped = [axis for axis in range(lead) if window.bounds[axis] is not None]
+    if clipped:
+        raise ValueError(
+            f"{verb}: the window bounds axis {clipped[0]}, a leading axis of this rank-"
+            f"{len(tile_desc.shape)} tile -- a leading axis is placed by its origin and is never "
+            f"clipped; pass None for it and keep the origin inside the tensor (guard the index "
+            f"before the access if it can fall outside)"
+        )
+
+
 def _positions(b: Any, window: TensorWindow, coords: tuple[Any, ...]) -> list[Any]:
-    """Per-axis GLOBAL position = origin + coord (the basis of both the address and the clip)."""
+    """Per-tile-axis GLOBAL position = origin + coord (the basis of both the address and the clip).
+    Tile axis ``i`` lies on tensor axis ``_leading_rank + i``, so it takes that axis's origin.
+    """
+    lead = _leading_rank(window, len(coords))
     return [
-        b.add(_as_value(b, window.origin[axis]), coord)
+        b.add(_as_value(b, window.origin[lead + axis]), coord)
         for axis, coord in enumerate(coords)
     ]
 
 
-def _address(b: Any, window: TensorWindow, positions: list[Any]) -> Any:
-    """The strided element address from precomputed positions: sum(position * stride), plus the
-    fixed offset of any batch axes already reduced away by ``TensorWindow.at_index`` (``pinned``).
+def _address(
+    b: Any,
+    window: TensorWindow,
+    positions: list[Any],
+    leading_positions: list[Any] | None = None,
+) -> Any:
+    """The strided element index from the tile axes' precomputed positions: ``sum(position *
+    stride)`` over the tile axes in axis order, then ``position * stride`` of each leading axis in
+    axis order. A leading axis's position is its origin (the tile covers one index of it) unless
+    ``leading_positions`` gives it (a swizzle may move it, see :func:`_lds_index`).
     """
+    lead = _leading_rank(window, len(positions))
+    if leading_positions is None:
+        leading_positions = [_as_value(b, window.origin[axis]) for axis in range(lead)]
+    strides = window.tensor.strides
     address: Any = None
     for axis, position in enumerate(positions):
-        stride = window.tensor.strides[axis]
+        stride = strides[lead + axis]
         term = position if stride == 1 else b.mul(position, b.const_i32(stride))
         address = term if address is None else b.add(address, term)
-    for index, stride in window.pinned:
-        pos = _as_value(b, index)
-        term = pos if stride == 1 else b.mul(pos, b.const_i32(stride))
+    for axis, position in enumerate(leading_positions):
+        stride = strides[axis]
+        term = position if stride == 1 else b.mul(position, b.const_i32(stride))
         address = term if address is None else b.add(address, term)
     return address
 
@@ -293,8 +342,9 @@ def _register_index(
     which the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
     positions by linearity."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
+    lead = _leading_rank(window, len(deltas))
     offset = sum(
-        delta * window.tensor.strides[axis] for axis, delta in enumerate(deltas)
+        delta * window.tensor.strides[lead + axis] for axis, delta in enumerate(deltas)
     )
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
@@ -309,33 +359,29 @@ def _origin_misaligned(origin: Any, extent: int) -> bool:
     return isinstance(origin, int) and origin % extent != 0
 
 
-def _loads_as_operand(tensor: Any) -> bool:
-    """True when `tensor` is loaded as a TYPED MMA OPERAND -- it declares axis roles AND carries a
-    CONTRACTION axis. A positional tensor (no roles) or an OUTPUT tensor whose roles are all `free`
-    (a C reload, (M, N)) is NOT an operand, so the rank-2 (free, contraction) gate must not fire for it.
-    """
-    return tensor.axis_roles is not None and "contraction" in tensor.axis_roles
-
-
 def _clip_mask(
     b: Any, window: TensorWindow, positions: list[Any], tile_shape: tuple[int, ...]
 ) -> Any:
-    """In-bounds predicate (i1) for an element at `positions`, or `None` when no axis needs a
-    compare. The per-axis upper bound defaults to ``window.tensor.lengths`` and is overridden by
-    ``window.bounds`` (a `None` entry keeps the length). Predicate = AND over checked axes of
+    """In-bounds predicate (i1) for an element at the tile axes' `positions`, or `None` when no axis
+    needs a compare. The per-axis upper bound defaults to ``window.tensor.lengths`` and is overridden
+    by ``window.bounds`` (a `None` entry keeps the length). Predicate = AND over checked axes of
     ``position < bound``. A tile-aligned compile-time bound AT a grid-aligned origin can NEVER overhang,
     so it is SKIPPED at build time -- an aligned kernel emits no compare and stays byte-identical to
-    no-clip; a compile-time MID-TILE origin is NOT skipped (it could straddle the boundary).
+    no-clip; a compile-time MID-TILE origin is NOT skipped (it could straddle the boundary). Only the
+    tile axes are checked: a leading axis (tile extent 1, positioned by its origin) is not clipped.
     """
+    lead = _leading_rank(window, len(positions))
     mask: Any = None
-    for axis, position in enumerate(positions):
+    for tile_axis, position in enumerate(positions):
+        axis = lead + tile_axis
         bound = window.bounds[axis] if window.bounds is not None else None
         if bound is None:
             bound = window.tensor.lengths[axis]
+        extent = tile_shape[tile_axis]
         if (
             isinstance(bound, int)
-            and bound % tile_shape[axis] == 0
-            and not _origin_misaligned(window.origin[axis], tile_shape[axis])
+            and bound % extent == 0
+            and not _origin_misaligned(window.origin[axis], extent)
         ):
             continue
         in_axis = b.cmp_lt(position, _as_value(b, bound))
@@ -373,16 +419,24 @@ def _contiguous_run(
     the verbs check that the flat buffer holds the descriptor's whole span (:func:`_check_lds_buffer`)
     and LDS accesses are unclipped, so the gate applies to global only. Because both spaces address
     an element by ``sum(position * stride)``, consecutive registers of a run on a stride-1 axis are
-    consecutive elements in LDS exactly as in global memory."""
+    consecutive elements in LDS exactly as in global memory.
+
+    The width must also divide every OTHER stride, leading axes included: a run then starts at a
+    multiple of the width whatever the positions on the other axes, so the ``align`` the access claims
+    holds (an odd batch stride would otherwise start a wide run mid-vector)."""
     layout = tile_desc.layout
     if dtype.name not in _WIDE_OK:
         return 1
     majors, minors = layout.register_to_rh_major, layout.register_to_rh_minor
     if not majors:
         return 1
-    axis = majors[-1] - 1  # innermost register bucket's X-dim -> tensor axis
-    if axis < 0 or window.tensor.strides[axis] != 1:
+    lead = _leading_rank(window, len(tile_desc.shape))
+    tile_axis = majors[-1] - 1  # innermost register bucket's X-dim -> tile axis
+    strides = window.tensor.strides
+    run_axis = lead + tile_axis
+    if tile_axis < 0 or strides[run_axis] != 1:
         return 1
+    other_strides = [stride for axis, stride in enumerate(strides) if axis != run_axis]
     if not is_lds:
         # Fully-in-bounds gate (global only): a wide load is UNMASKED, so it is safe only if the tile
         # overhangs NO axis it spans -- not just the stride-1 run axis. A wide K-run at a fixed but
@@ -393,28 +447,29 @@ def _contiguous_run(
         # the tile grid: a COMPILE-TIME mid-tile origin is caught (it could straddle the boundary and
         # overhang); a runtime (SSA) origin is TRUSTED grid-aligned (every caller: block_id*tile). This
         # is a PARTIAL guard -- an SSA mid-tile origin (attention) is not caught; that is DEFERRED with
-        # attention support (see _origin_misaligned).
-        if len(tile_desc.shape) != len(window.tensor.lengths):
-            raise ValueError(
-                f"tile rank {len(tile_desc.shape)} != tensor rank {len(window.tensor.lengths)} -- "
-                f"the wide-load bounds check needs matching ranks (reduce an N-D tensor with at_index)"
-            )
-        for ax in range(len(window.tensor.lengths)):
+        # attention support (see _origin_misaligned). Only the tile axes are checked: a leading axis
+        # is positioned by its origin and not clipped, exactly as in _clip_mask.
+        for tile_axis, extent in enumerate(tile_desc.shape):
+            ax = lead + tile_axis
             clip = (
                 window.bounds[ax]
                 if window.bounds is not None and window.bounds[ax] is not None
                 else window.tensor.lengths[ax]
             )
-            if not (isinstance(clip, int) and clip % tile_desc.shape[ax] == 0):
+            if not (isinstance(clip, int) and clip % extent == 0):
                 return 1
-            if _origin_misaligned(window.origin[ax], tile_desc.shape[ax]):
+            if _origin_misaligned(window.origin[ax], extent):
                 return 1
     length = layout.bucket_length(majors[-1], minors[-1])
     max_vw = (
         16 // _BYTE_WIDTH[dtype.name]
     )  # one load = dwordx4 = 16 bytes; longer runs -> N loads
     for vw in (16, 8, 4, 2):
-        if vw <= max_vw and length % vw == 0:
+        if (
+            vw <= max_vw
+            and length % vw == 0
+            and all(stride % vw == 0 for stride in other_strides)
+        ):
             return vw
     return 1
 
@@ -481,12 +536,19 @@ def _lds_index(
     emitted once per access) plus the register's compile-time offset: consecutive runs differ by a
     constant, which the backend folds into the instruction offset and pairs into ``ds_read2`` /
     ``ds_write2``. A swizzle is not linear, so a swizzled run rebuilds its positions, swizzles them
-    and linearises the result (``base_index`` is unused then)."""
+    and linearises the result (``base_index`` is unused then).
+
+    The swizzle sees the position on EVERY tensor axis, leading axes (their origins) first, so an
+    element's swizzled address does not depend on the rank of the tile that reaches it.
+    """
     if not lds_swizzle:
         return _register_index(b, window, tile_desc, base_index, register)
     coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
+    lead = _leading_rank(window, len(coords))
+    leading = [_as_value(b, window.origin[axis]) for axis in range(lead)]
     swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
-    return _address(b, window, swizzle(b, _positions(b, window, coords)))
+    swizzled = swizzle(b, leading + _positions(b, window, coords))
+    return _address(b, window, swizzled[lead:], swizzled[:lead])
 
 
 def _checked_lds_base_index(
@@ -552,14 +614,13 @@ def load_fragment(
     (``b.smem_alloc(td.dtype, [td.element_span])``) and the descriptor is its layout: the buffer must
     be rank 1, hold the tensor's dtype and hold its span (refused otherwise); LDS loads are unclipped.
     `pad` default `0`; a non-zero `constant(value)` fill is reserved. `coherency` reserved.
+
+    A rank-t tile covers the window's last t axes (t <= the window's rank, refused otherwise); each
+    leading axis is read at its origin.
     """
+    _check_tile_rank("load_fragment", window, tile_desc)
+    _check_leading_bounds("load_fragment", window, tile_desc)
     dtype = window.tensor.dtype
-    # N-D boundary gate: a tensor loaded as a typed MMA OPERAND must be the rank-2 one-free-one-
-    # contraction (EITHER order -- A is (M,K), B is (K,N)) an operand requires -- reduce batch axes
-    # (at_index / squeeze) BEFORE loading. A positional rank-2 tensor (no roles) and an OUTPUT tensor
-    # (roles all "free", a C reload) are NOT operands, so the gate does not fire for them.
-    if _loads_as_operand(window.tensor):
-        window.tensor.assert_mma_operand()
     align = _align_of(dtype)
     lds = _is_lds(ptr)
     vw = _contiguous_run(tile_desc, window, dtype, lds)  # >1 -> one wide load per run
@@ -597,16 +658,8 @@ def load_fragment(
             loaded = b.global_load(ptr, address, dtype, align=align)
         else:
             if pad != 0:
-                # The clip pad must be the compute stage's additive IDENTITY. On a CONTRACTION-axis
-                # operand (a MAC input) that identity is 0 -- a non-zero pad would add phantom terms
-                # to the sum. Forbid it outright; a general per-stage pad (e.g. -inf for max) is
-                # reserved for the reduction stages (Step 7).
-                roles = window.tensor.axis_roles
-                if roles is not None and "contraction" in roles:
-                    raise ValueError(
-                        f"non-zero clip pad on a contraction-axis operand corrupts the MAC -- the "
-                        f"additive identity is 0 (pad={pad!r})"
-                    )
+                # Only a zero clip pad is implemented; a per-stage pad (e.g. -inf for a max) is
+                # reserved for the reduction stages.
                 raise NotImplementedError(
                     f"non-zero clip pad (non-GEMM stage identity) is reserved for the reduction "
                     f"stages -- pad={pad!r}"
@@ -637,8 +690,11 @@ def store_fragment(
     a clip, OOB global writes are **dropped** (guarded by ``scf_if``); C2's branchless buffer
     ``_OOB_SENTINEL`` drop is the reserved efficient path. LDS stores address the flat buffer through
     the window's strides, exactly like global stores, after the same buffer checks as
-    :func:`load_fragment` (unclipped).
+    :func:`load_fragment` (unclipped). A rank-t fragment covers the window's last t axes, as in
+    :func:`load_fragment`.
     """
+    _check_tile_rank("store_fragment", window, fragment.tile_desc)
+    _check_leading_bounds("store_fragment", window, fragment.tile_desc)
     out_dtype = window.tensor.dtype
     align = _align_of(out_dtype)
     lds = _is_lds(ptr)

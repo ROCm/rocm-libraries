@@ -166,11 +166,14 @@ def _fit_or_raise(
     LDS accesses are UNCLIPPED by design, so an out-of-range index is not masked -- it reads another
     workgroup's memory. Checked per axis (a product check hides compensating per-axis errors). This is
     an EXTENT-vs-lengths check (`origin` unchecked): it polices full-tile SIZING, not a within-buffer
-    buffer-index bug -- the multi-buffer geometry closes that by construction.
+    buffer-index bug -- the multi-buffer geometry closes that by construction. The tile covers the
+    descriptor's LAST axes (a staged buffer's leading stage axis is positioned by the origin), so its
+    extents are checked against those axes' lengths.
     """
     ext = desc_extents(tile_desc, n_lanes)
     lengths = tuple(lds_tensor_desc.lengths)
-    if len(ext) != len(lengths) or any(e > n for e, n in zip(ext, lengths)):
+    covered = lengths[len(lengths) - len(ext) :]
+    if len(ext) > len(lengths) or any(e > n for e, n in zip(ext, covered)):
         raise ValueError(
             f"{what} addresses {ext} but the LDS tensor descriptor has lengths {lengths} -- "
             f"the cooperative LDS access would run outside the buffer (unclipped by design). "
