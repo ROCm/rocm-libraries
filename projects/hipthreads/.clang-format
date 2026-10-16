@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 120
+AlwaysBreakTemplateDeclarations: Yes
+IndentPPDirectives: AfterHash
+IndentAccessModifiers: True
+AccessModifierOffset: -2

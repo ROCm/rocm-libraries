@@ -110,6 +110,13 @@ class TestLoadConvolutionFwd:
         assert convolution_fwd_config.infer_properties is not None
         assert convolution_fwd_config.infer_properties.strategy == "stub"
 
+    def test_generate_node_defaults_true(self, convolution_fwd_config):
+        assert convolution_fwd_config.frontend.generate_node is True
+
+    def test_moe_disables_node_generation(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        assert config.frontend.generate_node is False
+
     def test_validation(self, convolution_fwd_config):
         assert convolution_fwd_config.validation is not None
         assert "x" in convolution_fwd_config.validation.required_input_tensors
@@ -358,6 +365,92 @@ class TestTestDataParsing:
 
     def test_tensor_const_prefix(self, convolution_fwd_config):
         assert convolution_fwd_config.test_data.tensor_const_prefix == "K_FPROP_"
+
+    def test_moe_routing_tensor_data_types(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        tensor_configs = config.test_data.tensor_configs
+        assert tensor_configs["first_token_offset"].data_type == "INT32"
+        assert tensor_configs["token_index"].data_type == "INT32"
+        assert tensor_configs["token_ks"].data_type == "INT32"
+
+    def test_moe_mode_integration_scenarios_cover_all_modes(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        scenarios = config.mode_integration_scenarios
+
+        assert [scenario.mode for scenario in scenarios] == [
+            "NONE",
+            "GATHER",
+            "SCATTER",
+        ]
+        assert scenarios[0].provided_optional_inputs == ["token_index", "token_ks"]
+        assert scenarios[0].expected_optional_inputs == []
+        assert scenarios[1].expected_optional_inputs == ["token_index"]
+        assert scenarios[2].expected_optional_inputs == ["token_index", "token_ks"]
+        assert scenarios[2].scalar_overrides == {"top_k": 2}
+        assert scenarios[2].expected_scalar_values == {"top_k": 2}
+
+    def test_moe_mode_integration_scenarios_require_all_executable_modes(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        config.mode_integration_scenarios.pop()
+
+        with pytest.raises(ConfigError, match="missing.*SCATTER"):
+            _validate_config(config)
+
+    def test_moe_mode_rules_define_canonical_descriptor_footprints(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        rules = {rule.mode: rule for rule in config.mode_rules}
+
+        assert set(rules) == {"NONE", "GATHER", "SCATTER"}
+        assert rules["NONE"].required_optional_tensors == []
+        assert rules["GATHER"].required_optional_tensors == ["token_index"]
+        assert rules["SCATTER"].required_optional_tensors == [
+            "token_index",
+            "token_ks",
+        ]
+        assert rules["SCATTER"].serialized_scalars == ["top_k"]
+
+        scatter_top_k = rules["SCATTER"].scalar_constraints[0]
+        assert scatter_top_k.field == "top_k"
+        assert scatter_top_k.minimum == 1
+        assert scatter_top_k.maximum_tensor == "weight"
+        assert scatter_top_k.maximum_dimension == 0
+
+    def test_moe_frontend_sentinel_preserves_cudnn_default(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        mode = config.mode_fields[0]
+        values = {value.name: value for value in mode.enum_def.values}
+
+        assert mode.frontend_sentinel_only is True
+        assert mode.default_value == "MoeGroupedMatmulMode::NONE"
+        assert mode.mode_converter_returns_optional is True
+        assert mode.emit_mode_sentinel_check is False
+        assert values["NOT_SET"].sentinel is True
+        assert values["NONE"].value == 0
+        assert values["NONE"].effective_frontend_value == 1
+
+    def test_moe_mode_rules_require_every_executable_mode(self, load_test_config):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        config.mode_rules.pop()
+
+        with pytest.raises(ConfigError, match="mode_rules must cover.*SCATTER"):
+            _validate_config(config)
+
+    def test_moe_mode_rules_require_baseline_without_optional_tensors(
+        self, load_test_config
+    ):
+        config = load_test_config("moe_grouped_matmul.yaml")
+        for rule in config.mode_rules:
+            if not rule.required_optional_tensors:
+                rule.required_optional_tensors = ["token_index"]
+
+        with pytest.raises(
+            ConfigError, match="at least one mode with no required optional tensors"
+        ):
+            _validate_config(config)
 
 
 # ---------------------------------------------------------------------------

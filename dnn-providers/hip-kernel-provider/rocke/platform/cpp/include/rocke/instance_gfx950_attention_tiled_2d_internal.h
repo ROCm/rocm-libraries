@@ -133,6 +133,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     /* Lever-3 (CK-Tile-derived) sched_barrier fence after the QK MFMA cluster. */
     bool USE_SCHED_BARRIER;
     int SCHED_BARRIER_MASK;
+    /* STEP 2 lever: softmax<->MFMA interleave via iglp_opt at the loop top.
+     * modes 0/1 emit iglp_opt(mode); mutually exclusive with USE_SCHED_BARRIER. */
+    bool USE_SOFTMAX_INTERLEAVE;
+    int SOFTMAX_INTERLEAVE_MODE;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV;
     bool REGISTER_PV, USE_MFMA_32X32, TRANSPOSED_QK_32X32;

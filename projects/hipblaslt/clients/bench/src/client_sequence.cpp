@@ -475,14 +475,17 @@ int main(int argc, char** argv)
                + layer[i].m * layer[i].n * type2Size(layer[i].problem.getTypeD()) + size_bias;
     }
     // Calculating block count
-    int32_t max_iters   = max(cold_iters, iters);
-    int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
+    auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
+        rv.gs.adaptive, rv.gs.max_iters, cold_iters, iters, rotating, totalRotatingSizeNeeded);
+    int32_t block_count = plan.block_count;
     if(rotating > 0)
     {
         std::cout << "Rotating buffer " << (float)rotating / (1024 * 1024) << " MiB. "
                   << "Needed Size: " << (float)totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
-                  << "Needed block count: " << block_count << " (Capped to max iters: " << max_iters
-                  << ")" << std::endl;
+                  << "Needed block count: " << block_count;
+        if(plan.capped)
+            std::cout << " (Capped to max iters: " << plan.iter_cap << ")";
+        std::cout << std::endl;
     }
 
     hipStream_t       stream;

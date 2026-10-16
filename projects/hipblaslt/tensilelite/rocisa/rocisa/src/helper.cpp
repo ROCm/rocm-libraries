@@ -225,6 +225,13 @@ std::string demangle(const char* name)
     return result;
 }
 
+std::string nullDevicePath()
+{
+    // Not plain "NUL": LLVM turns a relative path under a long working directory
+    // into a \\?\ path, where NUL is an ordinary file name.
+    return "\\\\.\\NUL";
+}
+
 #else
 // POSIX implementation.
 #include <sys/wait.h>
@@ -255,7 +262,9 @@ std::pair<int, std::string> run(const std::vector<char*>& cmd, const std::string
         close(p[0]);
         execvp(cmd[0], cmd.data());
         perror("execvp");
-        exit(1);
+        // 127 is the conventional "command not found" status; _exit (not exit) is
+        // required in a forked child to avoid re-running the parent's atexit handlers.
+        _exit(127);
     }
     else
     {
@@ -286,6 +295,11 @@ std::string demangle(const char* name)
     result                = (status == 0) ? demangled : name;
     free(demangled);
     return result;
+}
+
+std::string nullDevicePath()
+{
+    return "/dev/null";
 }
 
 #endif // POSIX

@@ -19,9 +19,9 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
-    , _w(miopen_utils::createTensor(tensorMap, convAttr.w_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, activAttr.out_0_tensor_uid()))
+    , _x(miopen_utils::createPaddedTensor(tensorMap, convAttr.x_tensor_uid()))
+    , _w(miopen_utils::createPaddedTensor(tensorMap, convAttr.w_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, activAttr.out_0_tensor_uid()))
 {
     using namespace miopen_utils;
 
@@ -48,11 +48,11 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
 
         if(biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid())
         {
-            _bias = createTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
+            _bias = createPaddedTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
         }
         else if(biasAttr->in_1_tensor_uid().value() == convAttr.y_tensor_uid())
         {
-            _bias = createTensor(tensorMap, biasAttr->in_0_tensor_uid());
+            _bias = createPaddedTensor(tensorMap, biasAttr->in_0_tensor_uid());
         }
         else
         {
@@ -193,7 +193,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
         });
 
     auto wBuffer
-        = miopen_utils::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
 
     int opIdx = 0;
     miopenFusionOpDescriptor_t convoOp;
@@ -206,7 +206,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.bias().has_value())
     {
-        auto biasBuffer = miopen_utils::findDeviceBuffer(
+        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.bias().value().uid(), deviceBuffers, numDeviceBuffers);
 
         miopenFusionOpDescriptor_t biasOp;
@@ -236,9 +236,9 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
     }
 
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
-        = miopen_utils::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
     THROW_ON_MIOPEN_FAILURE(miopenExecuteFusionPlan_v2(handle.miopenHandle,
                                                        _fusePlanDesc.get(),

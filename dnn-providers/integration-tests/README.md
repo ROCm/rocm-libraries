@@ -1,129 +1,62 @@
 # Integration Tests
 
 Integration tests validate hipDNN provider plugins (engine libraries such as
-`libmiopen_plugin.so` or `libhipblaslt_plugin.so`) by running graphs through
-the plugin and comparing results against a reference executor.
+`libmiopen_plugin.so` or `libhipblaslt_plugin.so`). Each test builds a graph,
+runs it through the engine of the plugin, and compares the result against a
+reference.
 
-## Quick Start
+This directory builds one binary, `hipdnn_integration_tests`. Each provider
+(miopen-provider, hipblaslt-provider, hip-kernel-provider, …) runs it against
+its own plugin, so **one set of graph tests runs against every engine**. The
+tests are data (bundles under `integration-test-bundles/`), not code. C++ tests
+exist only for what a bundle cannot express.
+
+**Documentation: start at [`docs/README.md`](docs/README.md).** It describes
+the file formats, how to run the tests and read their output, and how to add
+tests and support claims. It also lists what each message from a run asks you
+to do.
+
+## Quick start
+
+Run these commands from the repository root of a superbuild built in `build/`:
 
 ```bash
-# Standalone build — point to the plugin explicitly
-./bin/hipdnn_integration_tests \
-  --test-article /path/to/libmiopen_plugin.so
+# One provider's quick tier
+ctest --test-dir build/dnn-providers/miopen-provider -L quick -V
 
-# Superbuild — plugin discovery is automatic
-./bin/hipdnn_integration_tests
+# Or the whole lane for one engine
+cmake --build build --target miopen-provider-external-integration-check
 ```
 
-## Test Tiers
+Read the `TEST COVERAGE SUMMARY` and `SUPPORT CLAIM SUMMARY` that the run
+prints. Do not read only the exit code. See
+[Reading the output](docs/running-tests.md#reading-the-output).
 
-| Tier | GTest prefix | Shape catalog | CI cadence | Timeout |
-|------|-------------|---------------|------------|---------|
-| Smoke | `Smoke` *(or no prefix)* — **catch-all** | `getSmall*()` + standalone tests | Every commit / PR | 600s (10 min) |
-| Standard | `Standard` | `getMedium*()` | PR gate | 1800s (30 min) |
-| Comprehensive | `Comprehensive` | `getLargeEdge*()` | Nightly | 3600s (60 min) |
-| Full | `Full` | `getLargeStress*()` | Weekly | 7200s (120 min) |
-
-Timeouts can be overridden per binary via `SMOKE_TIMEOUT`, `STANDARD_TIMEOUT`,
-`COMPREHENSIVE_TIMEOUT`, and `FULL_TIMEOUT` arguments to
-`add_tiered_test_target()`.
-
-### Smoke is a catch-all
-
-The smoke ctest entry uses an exclusion filter
-(`-Standard*:Comprehensive*:Full*`). Every test that does **not** start with
-`Standard`, `Comprehensive`, or `Full` runs in smoke automatically:
-
-```cpp
-// Runs in smoke — has Smoke prefix
-INSTANTIATE_TEST_SUITE_P(Smoke, MyFixture, ...);
-
-// Also runs in smoke — no tier prefix, caught by the exclusion filter
-TEST(MyFeature, BasicBehavior) { ... }
-TEST_F(MyFixture, EdgeCase) { ... }
-```
-
-If smoke starts timing out, a large shape is missing its tier prefix.
-
-### How tiers cascade
-
-Each higher ctest label includes all lower tiers:
+## Layout
 
 ```
-ctest -L quick           →  [smoke]
-ctest -L standard        →  [smoke + standard]
-ctest -L comprehensive   →  [smoke + standard + comprehensive]
-ctest -L full            →  [smoke + standard + comprehensive + full]
+integration-test-bundles/   the bundle tree: {tier}/{Op}/... graphs, sweeps, sidecars
+docs/                       the documentation
+src/                        the harness and the binaries' entry points
+src/integration-tests/      C++ integration tests (mostly opt-in)
+tests/                      harness unit tests; tests/gpu-ref/ reference-executor tests
+cmake/                      add_external_integration_test_target() for providers
+migration-scripts/          capture/import tooling (import_graph.py, find_case.py, ...)
+reference-data-scripts/     golden-data generators and verify_golden_bundles.py
+scripts/                    verify_support_claims.py, harvest_support_claims.py (+ support_sidecar.py)
 ```
 
-> **Note:** The ctest label uses `quick` for the smoke tier
-> (backlog: rename to `smoke` for consistency).
+## See also
 
-## Running Tests
+- [RFC 0006 — Plugin-Agnostic Integration Tests](../../projects/hipdnn/docs/rfcs/0006_PluginAgnosticIntegrationTests.md)
+- [RFC 0011 — Golden Reference Validation](../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md)
+- [RFC 0015 — Engine Support Claims](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md)
 
-| Method | Command | Use case |
-|--------|---------|----------|
-| ctest | `ctest -L quick` | CI and local tier runs |
-| ninja | `ninja unit-check` / `ninja check` | Local shortcut (smoke / all) |
-| Direct | `./bin/hipdnn_gpu_ref_tests --gtest_filter="Smoke*"` | Debugging a specific test |
+## Project policies
 
-> **GTest filter syntax:** `-Standard*:Comprehensive*:Full*` uses a single
-> leading dash. In GTest, only the first `-` starts the negative section.
-> Using `:-` between patterns does **not** negate — the dash becomes literal.
+This suite is part of the hipDNN project. Shared project documentation and
+policies are maintained in hipDNN:
 
-## Adding a New Operation
-
-### Directory layout
-
-```
-tests/
-  gpu_ref/
-    ConvShapeCase.hpp              # Shape struct + byTag()
-    ConvShapeCatalog.hpp           # getSmall/getMedium/getLargeEdge/getLargeStress
-    TestGpuFpReferenceConvolution.cpp
-  my_new_op/
-    MyNewOpShapeCase.hpp
-    MyNewOpShapeCatalog.hpp
-    TestMyNewOp.cpp
-```
-
-### Step 1 — CMake registration
-
-Register the test binary in `tests/CMakeLists.txt`:
-
-```cmake
-add_tiered_test_target(hipdnn_my_new_op_tests ${CMAKE_CURRENT_BINARY_DIR})
-```
-
-### Step 2 — Shape catalog
-
-Create a shape catalog following the tier pattern in
-[`tests/gpu_ref/ConvShapeCatalog.hpp`](tests/gpu_ref/ConvShapeCatalog.hpp).
-
-### Step 3 — C++ test tiers
-
-New parameterized test suites **must** define all four tiers:
-
-```cpp
-INSTANTIATE_TEST_SUITE_P(Smoke,         MyNewOp2dTestFp32, ::testing::ValuesIn(getSmallCases()),     byTag());
-INSTANTIATE_TEST_SUITE_P(Standard,      MyNewOp2dTestFp32, ::testing::ValuesIn(getMediumCases()),    byTag());
-INSTANTIATE_TEST_SUITE_P(Comprehensive, MyNewOp2dTestFp32, ::testing::ValuesIn(getLargeEdgeCases()), byTag());
-INSTANTIATE_TEST_SUITE_P(Full,          MyNewOp2dTestFp32, ::testing::ValuesIn(getLargeStressCases()), byTag());
-```
-
-`byTag()` uses the shape's `tag` field as the test name so failures show
-`Smoke/MyOp2dTestFp32.Runs/n8c64k32_f3x3_s1_p1` instead of `.../7`.
-
-### Adding a new convolution shape
-
-Add to the appropriate function in
-[`tests/gpu_ref/ConvShapeCatalog.hpp`](tests/gpu_ref/ConvShapeCatalog.hpp).
-Existing `INSTANTIATE_TEST_SUITE_P` calls pick up new shapes automatically.
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| `Engine 'X' is not loaded` | Pass `--test-article /path/to/plugin.so`, or run from a superbuild |
-| Smoke tier timing out | A shape is missing its tier prefix — check `INSTANTIATE_TEST_SUITE_P` prefixes |
-| `No tests matched the filter` | Use a single `-` for negative filters: `-Standard*:Comprehensive*:Full*` |
+- [hipDNN Overview](../../projects/hipdnn/README.md)
+- [Contributing Guidelines](../../projects/hipdnn/CONTRIBUTING.md)
+- [Security Policy](../../projects/hipdnn/SECURITY.md)

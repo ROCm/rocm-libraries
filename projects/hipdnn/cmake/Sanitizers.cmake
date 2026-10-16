@@ -35,14 +35,45 @@ if(BUILD_ADDRESS_SANITIZER)
         else()
             set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
             set(SANITIZER_LINK_FLAGS    -fsanitize=address -fno-omit-frame-pointer)
+            # The MSVC STL emits /INFERASANLIBS + /DEFAULTLIB:stl_asan.lib for ASAN container
+            # annotations, but the x64 MSVC toolset does not ship stl_asan.lib (x86 only), so the
+            # link fails. Disabling STL annotation drops that dependency; heap/stack/global/UAF
+            # detection is unaffected (only intra-container red zones are lost).
+            add_compile_definitions(_DISABLE_STL_ANNOTATION)
 
-            # -print-resource-dir is clang-specific; only query it for non-MSVC compilers.
-            execute_process(
-                COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
-                OUTPUT_VARIABLE CLANG_RESOURCE_DIR
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-            )
-            link_directories(${CLANG_RESOURCE_DIR}/lib/windows)
+            block(SCOPE_FOR VARIABLES PROPAGATE TEST_ENVIRONMENT_MODIFICATION)
+                # Test executables dynamically load DLLs that are not on the default Windows search
+                # path, so prepend the directories that hold them: the ASAN runtime
+                # (clang_rt.asan_dynamic-x86_64.dll, in the clang resource dir under lib/windows),
+                # the freshly built backend/plugin DLLs (in the build bin dir), and the ROCm runtime
+                # that MIOpen pulls in (MIOpen.dll, hiprtc*.dll, rocblas.dll, in
+                # <ROCM_CMAKE_PATH>/bin). None of these exist in a default search location, so the
+                # prepend makes them discoverable. Test registration applies this via CTest's
+                # ENVIRONMENT_MODIFICATION (see add_hipdnn_test). path_list_prepend uses the host
+                # path separator and the *runtime* PATH, avoiding the ';' collision and
+                # configure-time-frozen-PATH problems of a literal PATH= entry.
+                execute_process(
+                    COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+                    OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                )
+                file(TO_CMAKE_PATH "${CLANG_RESOURCE_DIR}/lib/windows" _asan_runtime_dir)
+                file(TO_CMAKE_PATH "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}" _build_bin_dir)
+                set(TEST_ENVIRONMENT_MODIFICATION
+                    "PATH=path_list_prepend:${_asan_runtime_dir}"
+                    "PATH=path_list_prepend:${_build_bin_dir}"
+                )
+
+                set(_rocm_root "${ROCM_CMAKE_PATH}")
+                if(NOT _rocm_root)
+                    set(_rocm_root "${ROCM_PATH}")
+                endif()
+                if(_rocm_root)
+                    file(TO_CMAKE_PATH "${_rocm_root}/bin" _rocm_bin_dir)
+                    list(APPEND TEST_ENVIRONMENT_MODIFICATION
+                         "PATH=path_list_prepend:${_rocm_bin_dir}")
+                endif()
+            endblock()
         endif()
 
         add_compile_options(${SANITIZER_COMPILE_FLAGS})
@@ -116,17 +147,39 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
     findandcheckllvmsymbolizer()
 
+    # Redirect MIOpen's kernel cache to a build-local dir, isolated from the developer's real
+    # ~/.miopen and cleared once per ctest run (Tests.cmake registers the clearing fixture from this
+    # variable) so a stale/poisoned entry cannot mask a failure across runs.
+    set(HIPDNN_TEST_MIOPEN_CACHE_DIR "${CMAKE_BINARY_DIR}/miopen_test_cache")
+
+    # SKIP_IF_ASAN() -- named here on purpose, because an audit for tests held back by a known ASAN
+    # error greps for that token and would otherwise never reach this mechanism.
+    #
+    # Suppressions for interceptor-detected errors in upstream libraries come from
+    # __asan_default_suppressions() in test_sdk/src/AsanDefaultSuppressions.cpp, compiled into each
+    # test executable, so they apply to an installed or relocated tree with no file to locate. Its
+    # suppression list is the second place an unfixed ASAN error can be parked, alongside any
+    # SKIP_IF_ASAN() call sites; audit both.
+    #
+    # ASAN_OPTIONS is deliberately not set here, so a developer's own value survives (ctest's
+    # ENVIRONMENT property assigns unconditionally). It cannot switch these suppressions off,
+    # though: a user-supplied suppressions file is ADDED to them rather than replacing them, and no
+    # ASan flag disables them. Seeing the suppressed errors needs an edit to
+    # AsanDefaultSuppressions.cpp and a rebuild.
+
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
     # ASAN_SYMBOLIZER_PATH is set to the LLVM symbolizer to make the output from leak detection
     # more readable.
     if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
         set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}" "HSA_XNACK=1"
+                             "MIOPEN_CUSTOM_CACHE_DIR=${HIPDNN_TEST_MIOPEN_CACHE_DIR}"
                              # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
         )
     else()
         # HOST_ASAN only needs the symbolizer, not HSA_XNACK
         set(TEST_ENVIRONMENT "ASAN_SYMBOLIZER_PATH=${CMAKE_SYMBOLIZER}"
+                             "MIOPEN_CUSTOM_CACHE_DIR=${HIPDNN_TEST_MIOPEN_CACHE_DIR}"
                              # "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
         )
     endif()

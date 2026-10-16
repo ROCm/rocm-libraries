@@ -66,7 +66,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.6.0")
+set(VERSION_STRING "3.8.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -89,6 +89,9 @@ option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
+
+# Feature flags
+option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -115,41 +118,24 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-# Deprecated USE_CUDA option
-if(DEFINED USE_CUDA)
-  if(USE_CUDA)
-    set(ENV{HIP_PLATFORM} nvidia)
-    set(HIP_PLATFORM nvidia CACHE STRING "HIP platform (e.g., amd or nvidia)")
-    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
-  else()
-    set(ENV{HIP_PLATFORM} amd)
-    set(HIP_PLATFORM amd CACHE STRING "HIP platform (e.g., amd or nvidia)")
-    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
-  endif()
+# USE_CUDA: build hipSOLVER for the CUDA backend using nvcc directly.
+# Replaces the old hipcc/hipconfig-based HIP_PLATFORM flow.
+option(USE_CUDA "Build hipSOLVER for the CUDA backend using nvcc directly (no hipcc)" OFF)
+
+# Legacy compatibility: honour HIP_PLATFORM=nvidia so existing CUDA CI jobs
+# that have not yet been updated to pass -DUSE_CUDA=ON continue to work.
+if(NOT USE_CUDA AND "${HIP_PLATFORM}" STREQUAL "nvidia")
+  set(USE_CUDA ON CACHE BOOL "Build hipSOLVER for the CUDA backend" FORCE)
+  message(STATUS "USE_CUDA: enabled via legacy HIP_PLATFORM=nvidia")
 endif()
 
-# Hip headers required of all clients; clients use hip to allocate device memory
-find_package(hip CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+find_package(hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
 
-# support for cuda backend with hip < 6.0
-if(NOT hip_FOUND)
-    find_package(HIP MODULE REQUIRED)
-    list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
-    set(ENV{HIP_PLATFORM} nvidia)
-    if (NOT HIP_PLATFORM)
-      set(HIP_PLATFORM nvidia)
-    endif()
-else()
-    if(NOT HIP_PLATFORM)
-      set(HIP_PLATFORM amd)
-    endif()
-endif()
-
-if(HIP_PLATFORM STREQUAL nvidia)
+if(USE_CUDA)
   find_package(CUDA REQUIRED)
 endif()
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
     # TODO: This LAPACK dependency is only required to support geev
     # It should be removed once geev is implemented in rocSOLVER
     option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
@@ -187,6 +173,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DBUILD_LAPACK_DEPRECATED=OFF
             -DBUILD_TESTING=OFF
             -DBUILD_BENCHMARKS=OFF
+            # Use OpenBLAS's suppression of unused/uninitialized C warnings.
+            -DQUIET_MAKE=ON
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
             -DCMAKE_C_VISIBILITY_PRESET=hidden
@@ -212,8 +200,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
         endif()
 
-        # Force GENERIC target to ensure binaries work on all CPUs
-        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        # Force GENERIC target to ensure binaries work on all CPUs.
+        # OpenBLAS lacks a KERNEL.generic file for POWER, so fall back
+        # to the base POWER target on ppc64le (see OpenBLAS#5987).
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=POWER8)
+        else()
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        endif()
 
         # Downgrade incompatible-pointer-types errors to warnings when using Clang
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -358,9 +352,9 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
 endif()
 
 # Package specific CPACK vars
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.36.0)
+  set(rocsolver_minimum 3.38.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
@@ -409,7 +403,7 @@ endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 # Give hipsolver compiled for CUDA backend a different name
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   set(package_name hipsolver)
 else()
   set(package_name hipsolver-alt)

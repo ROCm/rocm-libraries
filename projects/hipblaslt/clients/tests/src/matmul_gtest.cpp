@@ -27,6 +27,7 @@
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
 #include "testing_matmul.hpp"
+#include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
 #include <type_traits>
@@ -35,6 +36,94 @@
 
 namespace
 {
+
+    void expect_preswizzled_layout_error(const Arguments& arg, const char* expected)
+    {
+        try
+        {
+            testing_matmul_with_bias(arg,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_32F,
+                                     HIP_R_32F,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_8F_E4M3,
+                                     HIP_R_32F,
+                                     HIP_R_32F);
+            FAIL() << "Expected " << expected;
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(), expected);
+        }
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'N';
+        arg.transB              = 'N';
+        arg.M[0]                = 288;
+        arg.N[0]                = 32;
+        arg.K[0]                = 32;
+        arg.lda[0]              = 288;
+        arg.ldb[0]              = 32;
+        arg.ldc[0] = arg.ldd[0] = 288;
+        arg.fast_check          = 0;
+        // This NN case used to allocate 512 scale bytes for A and write 2304.
+        // Call the shared client entry so removing or moving its guard is observable.
+        expect_preswizzled_layout_error(arg, "scaleA=1001 requires transA=T");
+    }
+
+    TEST(PreswizzledScaleLayout, smoke_rejects_transposed_B)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        arg.transA              = 'T';
+        arg.transB              = 'T';
+        arg.M[0]                = 32;
+        arg.N[0]                = 288;
+        arg.K[0]                = 32;
+        arg.lda[0]              = 32;
+        arg.ldb[0]              = 288;
+        arg.ldc[0] = arg.ldd[0] = 32;
+        arg.fast_check          = 0;
+        // A has its supported orientation, so it cannot mask a missing B check.
+        expect_preswizzled_layout_error(arg, "scaleB=1001 requires transB=N");
+    }
+
+    TEST(FastCheckMx_pre_checkin, unsupported_transpose_layouts_are_refused)
+    {
+        Arguments arg{};
+        arg.init();
+        arg.initialization = hipblaslt_initialization::integer_exact;
+        arg.fast_check     = 1;
+        arg.batch_count    = 1;
+        arg.M[0] = arg.N[0] = 64;
+        arg.K[0]            = 256;
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Block_32_UE8M0;
+        for(char a : {'N', 'T', 'C'})
+            for(char b : {'N', 'T', 'C'})
+            {
+                arg.transA = a;
+                arg.transB = b;
+                auto why   = fast_check_unsupported_reason(arg,
+                                                         HIPBLASLT_BATCH_MODE_STRIDED,
+                                                         false,
+                                                         HIP_R_8F_E4M3,
+                                                         HIP_R_8F_E5M2,
+                                                         HIP_R_32F,
+                                                         HIP_R_32F);
+                if(a == 'T' && b == 'N')
+                    EXPECT_TRUE(why.empty()) << why;
+                else
+                    EXPECT_NE(why.find("transA=T and transB=N"), std::string::npos)
+                        << a << b << ": " << why;
+            }
+    }
 
     // ----------------------------------------------------------------------------
     // matmul
@@ -48,6 +137,8 @@ namespace
                 testing_matmul(arg);
             else if(!strcmp(arg.function, "matmul_bad_arg"))
                 testing_matmul_bad_arg(arg);
+            else if(!strcmp(arg.function, "matmul_batch_offset"))
+                testing_matmul_batch_offset(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -64,7 +155,8 @@ namespace
         // Filter for which functions apply to this suite
         static bool function_filter(const Arguments& arg)
         {
-            return !strcmp(arg.function, "matmul") || !strcmp(arg.function, "matmul_bad_arg");
+            return !strcmp(arg.function, "matmul") || !strcmp(arg.function, "matmul_bad_arg")
+                   || !strcmp(arg.function, "matmul_batch_offset");
         }
 
         // Google Test name suffix based on parameters
@@ -167,6 +259,10 @@ namespace
 
                 if(arg.c_equal_d)
                     name << "_C_EQUAL_D";
+                if(arg.placement[0])
+                    name << "_PLACE_" << arg.placement;
+                if(arg.integer_exact_pattern[0])
+                    name << "_IE_" << arg.integer_exact_pattern;
                 // grouped gemm only supports ext
                 if(arg.use_ext || arg.grouped_gemm > 0)
                     name << "_APIExt";
@@ -191,6 +287,7 @@ namespace
     TEST_P(matmul_test, matmul)
     {
         SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
+        SKIP_UNLESS_SELECTED_BY_FILTER();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);

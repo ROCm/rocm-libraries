@@ -342,6 +342,14 @@ Real precisions gemm only: &real_precisions_gemm_only
   - &double_precision
     { a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_r , scale_type: f64_r}
 
+# Floating-point only (no int): for special-FP tests (zero, +/-0, +/-Inf, NaN). f16, bf16, f32, TF32, f64.
+Floating point precisions for special FP tests: &floating_point_precisions_special_fp
+  - *hpa_half_precision
+  - *hpa_bf16_precision
+  - *single_precision
+  - *xf32_precision
+  - *double_precision
+
 Real mix precisions: &real_mix_precisions_fnuz
   - &fp8fp16_fnuz_precision_dst_fp16
     { a_type: f8_fnuz_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_f16_r, scale_type: f32_r}
@@ -595,8 +603,13 @@ Arguments:
   - ldc: c_int64*32
   - ldd: c_int64*32
   - lde: c_int64*32
+  - a2a_extent: c_int64
   - batch_count: c_int32
   - batch_mode: c_int32
+  - batch_offset_a: c_int64
+  - batch_offset_b: c_int64
+  - batch_offset_c: c_int64
+  - batch_offset_d: c_int64
   - iters: c_int32
   - cold_iters: c_int32
   - warmup_time: c_float
@@ -629,10 +642,19 @@ Arguments:
   - threads: c_uint16
   - streams: c_uint16
   - devices: c_uint8
+  - a2a_world: c_uint8
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
   - ulp_check: c_int8
+  - fast_check: c_int8
+  - placement: c_char*16
+  - placement_offset: c_size_t
+  - fast_check_repeat: c_int32
+  - fast_check_inject: c_int32
+  - requires_streamk: c_int8
+  - integer_exact_pattern: c_char*16
+  - allow_no_solution: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -724,17 +746,31 @@ Defaults:
   transB: '*'
   batch_count: 1
   batch_mode: 0
+  batch_offset_a: 0
+  batch_offset_b: 0
+  batch_offset_c: 0
+  batch_offset_d: 0
   HMM: false
   pad: 4096
   threads: 0
   streams: 0
   devices: 0
+  a2a_world: 1
+  a2a_extent: 0
   gpu_arch: ''
   gpu_arch_exclude: ''
   norm_check: 0
   allclose_check: 0
   unit_check: 1
   ulp_check: 0
+  fast_check: 0
+  placement: ''
+  placement_offset: 0
+  fast_check_repeat: 1
+  fast_check_inject: -1
+  requires_streamk: 0
+  integer_exact_pattern: ''
+  allow_no_solution: 0
   timing: 0
   iters: 10
   cold_iters: 2

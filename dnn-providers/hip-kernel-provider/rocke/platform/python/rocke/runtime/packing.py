@@ -81,6 +81,67 @@ def pack_args(
     return struct.pack("".join(fmt_parts), *packed)
 
 
+def compile_packer(signature: Sequence[Mapping[str, Any]]):
+    """Precompile a hot-path kernarg packer for a fixed ``signature``.
+
+    Returns ``packer(values) -> bytes`` that is **byte-identical** to
+    :func:`pack_args` for the same signature, but hoists the invariant
+    work (type dispatch, alignment padding, format-string build, and
+    ``struct`` format compile) out of the per-call path, leaving only
+    the per-call work that genuinely varies: reading each value and
+    coercing it by kind. ``struct`` already caches recently used
+    formats, so the saving is the layout reconstruction around that
+    compile rather than the compile itself. The signature is immutable
+    per kernel, so a launcher can build this once at construction and
+    reuse it; the effect is proportionally largest where per-launch
+    host work is smallest.
+    """
+    _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
+        "i32": ("i", 4, 4),
+        "i64": ("q", 8, 8),
+        "f32": ("f", 4, 4),
+    }
+    fmt_parts: List[str] = ["<"]
+    # plan: (name, kind) with kind in {"ptr", "f32", "int"} -- the only
+    # per-call work is reading values[name] and coercing by kind.
+    plan: List[Tuple[str, str]] = []
+    offset = 0
+    for arg in signature:
+        name = str(arg["name"])
+        ty = str(arg["type"])
+        if ty.startswith("ptr<"):
+            fmt_char, size, align, kind = "Q", 8, 8, "ptr"
+        elif ty in _TY_FMT:
+            fmt_char, size, align = _TY_FMT[ty]
+            kind = "f32" if ty == "f32" else "int"
+        else:
+            raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
+        pad = (-offset) % align
+        if pad:
+            fmt_parts.append(f"{pad}x")
+            offset += pad
+        fmt_parts.append(fmt_char)
+        plan.append((name, kind))
+        offset += size
+    packer_struct = struct.Struct("".join(fmt_parts))
+
+    def packer(values: Mapping[str, Any]) -> bytes:
+        out: List[Any] = []
+        for name, kind in plan:
+            if name not in values:
+                raise KeyError(f"missing kernel arg {name!r}")
+            v = values[name]
+            if kind == "ptr":
+                out.append(_as_ptr(v))
+            elif kind == "f32":
+                out.append(float(v))
+            else:
+                out.append(int(v))
+        return packer_struct.pack(*out)
+
+    return packer
+
+
 def pack_args_kernelparams(
     signature: Sequence[Mapping[str, Any]], values: Mapping[str, Any]
 ) -> List[Any]:
@@ -128,6 +189,14 @@ def _as_ptr(v: Any) -> int:
         return v
     if hasattr(v, "data_ptr"):
         return int(v.data_ptr())
+    # DeviceMem (RAII over hipMalloc, runtime.launcher) exposes its raw device
+    # pointer via a ptr() method. Accepting it here lets the torch-free numpy /
+    # manifest path pass a DeviceMem straight into a launcher's values dict, so
+    # the async path's retain_for_stream() keeps the RAII buffer alive until the
+    # stream drains -- closing the workspace-lifetime race by construction.
+    ptr = getattr(v, "ptr", None)
+    if callable(ptr):
+        return int(ptr())
     if v is None:
         return 0
     raise TypeError(f"cannot convert {type(v).__name__} to device pointer")

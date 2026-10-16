@@ -3,7 +3,7 @@
 """Attention parity gate for the library attention harness.
 
 Spawns ``python -m builders.common.parity_fmha_extended --arch ARCH`` and
-checks that all cases pass (or legitimately skip on gfx942).  This mirrors
+checks that all cases pass (or legitimately skip on gfx942). This mirrors
 the structure of :class:`TestNumericVerification.test_extended_parity` in
 ``platform/tests/instances/test_rocke_numeric.py`` but targets the library
 attention harness which is now the correct home for FMHA / Sage / Sparse

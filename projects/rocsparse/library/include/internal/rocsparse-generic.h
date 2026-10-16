@@ -29,6 +29,8 @@
 #ifndef ROCSPARSE_GENERIC_H
 #define ROCSPARSE_GENERIC_H
 
+#include "rocsparse/rocsparse-config.h"
+
 #include "generic/rocsparse_axpby.h"
 #include "generic/rocsparse_check_spmat.h"
 #include "generic/rocsparse_dense_to_sparse.h"
@@ -42,14 +44,18 @@
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
 #include "generic/rocsparse_spic0.h"
-#ifdef ROCSPARSE_WITH_ILDLT0
-#include "generic/rocsparse_spildlt0.h"
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
+#include "generic/rocsparse_spmat_scale.h"
 #endif
+#include "generic/rocsparse_spildlt0.h"
 #include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"
 #include "generic/rocsparse_spsm.h"
+#if defined(ROCSPARSE_WITH_SPSORT)
+#include "generic/rocsparse_spsort.h"
+#endif
 #include "generic/rocsparse_spsv.h"
 #include "generic/rocsparse_sptrsm.h"
 #include "generic/rocsparse_sptrsv.h"

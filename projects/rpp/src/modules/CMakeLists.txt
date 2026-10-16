@@ -52,6 +52,11 @@ endfunction()
 
 ## Disable FMA for tensor sources that require precise math behavior.
 function(add_fma_property)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+        set(RPP_NO_FMA_FLAG -mno-fma)
+    else()
+        set(RPP_NO_FMA_FLAG -ffp-contract=off)
+    endif()
     set_source_files_properties(tensor/rppt_tensor_audio_augmentations.cpp
                                 tensor/rppt_tensor_statistical_operations.cpp
                                 tensor/cpu/kernel/non_silent_region_detection.cpp
@@ -69,7 +74,7 @@ function(add_fma_property)
                                 tensor/cpu/kernel/tensor_stddev.cpp
                                 tensor/cpu/kernel/normalize.cpp
                                 tensor/cpu/kernel/threshold.cpp
-                                PROPERTIES COMPILE_FLAGS -mno-fma)
+                                PROPERTIES COMPILE_FLAGS ${RPP_NO_FMA_FLAG})
 endfunction()
 
 set(CPPFILES "handle_api.cpp" "handle_host.cpp")
@@ -96,8 +101,6 @@ if( "${BACKEND}" STREQUAL "HIP")
     endif()
     message("-- ${Green}HIP kernels added${ColourReset}")
 
-    # Set compiler flags
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_HIPCC_FLAGS}")
     add_fma_property()
 
     # Add HIP specific includes
@@ -136,6 +139,10 @@ target_include_directories( ${PROJECT_NAME}
         ${RPP_SOURCE_DIR}/src/include/tensor
         ${INCLUDE_LIST}
 )
+
+if(RPP_SIMDE_TARGET)
+    target_link_libraries(${PROJECT_NAME} PUBLIC ${RPP_SIMDE_TARGET})
+endif()
 
 if( "${BACKEND}" STREQUAL "HIP")
     target_include_directories(${PROJECT_NAME}

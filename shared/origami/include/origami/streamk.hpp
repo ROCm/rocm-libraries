@@ -67,14 +67,12 @@ ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection_t grid selection algorithm (@see origami::grid_selection_t)
- * @param max_cus Maximum number of CUs to use.
  * @return size_t Dimensions of the grid launched.
  */
 ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
-                        grid_selection_t algorithm,
-                        size_t max_cus = 0);
+                        grid_selection_t algorithm);
 
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.

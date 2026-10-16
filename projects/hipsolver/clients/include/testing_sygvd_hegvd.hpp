@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename T, typename U>
 void sygvd_hegvd_checkBadArgs(const hipsolverHandle_t   handle,
@@ -727,14 +728,14 @@ void sygvd_hegvd_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         sygvd_hegvd_initData<false, true, T>(
             handle, itype, evect, n, dA, lda, stA, dB, ldb, stB, bc, hA, hB, A, B, false, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_sygvd_hegvd(API,
                               handle,
                               itype,
@@ -753,9 +754,9 @@ void sygvd_hegvd_getPerfData(const hipsolverHandle_t   handle,
                               lwork,
                               dInfo.data(),
                               bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T>
@@ -926,7 +927,7 @@ void testing_sygvd_hegvd(Arguments& argus)
         //                                      argus.singular);
 
         // // collect performance data
-        // if(argus.timing)
+        // if(argus.timing && hot_calls > 0)
         //     sygvd_hegvd_getPerfData<API, T>(handle,
         //                                         itype,
         //                                         evect,
@@ -1010,7 +1011,7 @@ void testing_sygvd_hegvd(Arguments& argus)
                                          argus.singular);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvd_hegvd_getPerfData<API, T>(handle,
                                             itype,
                                             evect,

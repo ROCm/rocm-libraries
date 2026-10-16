@@ -60,6 +60,22 @@ EXCL_STOP_PATTERN = re.compile(r'(LCOV|GCOV|GCOVR)_EXCL_STOP')
 EXCL_LINE_PATTERN = re.compile(r'(LCOV|GCOV|GCOVR)_EXCL_LINE')
 
 
+# Whole-file (SF section) exclusions. Any LCOV source-file section whose path
+# matches one of these is dropped entirely, so the coverage report tracks only
+# the rocSPARSE library. This removes the client test-harness / host-reference
+# sources that get pulled in once the unit-test binaries are added as llvm-cov
+# objects. Extend the list if other non-library paths show up (e.g. rocprim or
+# gtest headers, /opt/rocm/...).
+SECTION_EXCLUDE_PATTERNS = [
+    re.compile(r'(^|/)clients/'),
+]
+
+
+def is_excluded_section(source_file: str) -> bool:
+    """True if an entire SF section should be dropped (non-library source)."""
+    return any(p.search(source_file) for p in SECTION_EXCLUDE_PATTERNS)
+
+
 def get_excluded_lines(source_file: str) -> set:
     """
     Parse a source file and return the set of line numbers that should be excluded.
@@ -111,6 +127,8 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
     """
     lines_removed = 0
     files_processed = 0
+    files_excluded = 0
+    skip_section = False
     current_source_file = None
     excluded_lines_cache = {}
     # Track function names whose FN: record was dropped, so the matching
@@ -155,6 +173,13 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
             
             # End-of-record: adjust FNF/FNH for the just-finished section.
             if line == 'end_of_record':
+                if skip_section:
+                    # Drop the terminator of an excluded (non-library) section.
+                    skip_section = False
+                    excluded_function_names = set()
+                    fn_records_dropped = 0
+                    fnda_hits_dropped = 0
+                    continue
                 flush_section_counters()
                 excluded_function_names = set()
                 output_lines.append(line)
@@ -167,11 +192,26 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
                 flush_section_counters()
                 excluded_function_names = set()
                 current_source_file = line[3:]
+                # Drop entire sections for non-library sources so the report
+                # tracks only the rocSPARSE library.
+                if is_excluded_section(current_source_file):
+                    skip_section = True
+                    files_excluded += 1
+                    # Also drop a per-record 'TN:' header that belongs to this
+                    # excluded section, so no orphan line is left behind.
+                    if output_lines and output_lines[-1].startswith('TN:'):
+                        output_lines.pop()
+                    continue
+                skip_section = False
                 if current_source_file not in excluded_lines_cache:
                     excluded_lines_cache[current_source_file] = get_excluded_lines(current_source_file)
                     if excluded_lines_cache[current_source_file]:
                         files_processed += 1
                 output_lines.append(line)
+                continue
+            
+            # Inside an excluded section: drop every record until end_of_record.
+            if skip_section:
                 continue
             
             # Filter line data (DA:line_number,count)
@@ -240,7 +280,7 @@ def filter_lcov_file(input_path: str, output_path: str) -> tuple:
         for line in output_lines:
             f.write(line + '\n')
     
-    return lines_removed, files_processed
+    return lines_removed, files_processed, files_excluded
 
 
 def main():
@@ -255,12 +295,13 @@ def main():
         print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
     
-    lines_removed, files_processed = filter_lcov_file(input_path, output_path)
+    lines_removed, files_processed, files_excluded = filter_lcov_file(input_path, output_path)
     
     print(f"Filtered LCOV coverage file:")
     print(f"  Input:  {input_path}")
     print(f"  Output: {output_path}")
     print(f"  Files with exclusions: {files_processed}")
+    print(f"  Non-library files dropped: {files_excluded}")
     print(f"  Lines/branches removed: {lines_removed}")
 
 

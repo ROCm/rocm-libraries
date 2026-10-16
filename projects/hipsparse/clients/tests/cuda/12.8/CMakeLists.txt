@@ -49,6 +49,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_const_dnvec_descr.cpp
     test_const_spmat_descr.cpp
     test_const_spvec_descr.cpp
+    test_dense_to_sparse_bell_no_set_pointers.cpp
     test_dense_to_sparse_coo.cpp
     test_dense_to_sparse_csc.cpp
     test_dense_to_sparse_csr.cpp
@@ -61,6 +62,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
+    test_sddmm_batched_csr.cpp
     test_sddmm_csr_reuse_descr.cpp
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
@@ -84,8 +86,10 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmv_sell.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp
+    test_spsm_csr_reuse_descr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
+    test_spsv_csr_reuse_descr.cpp
     test_spvec_descr.cpp
     test_spvv.cpp
 )
@@ -138,6 +142,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_prune_dense2csr_by_percentage.yaml
     # Generic
     cuda/12.8/test_axpby.yaml
+    cuda/12.8/test_dense_to_sparse_bell_no_set_pointers.yaml
     cuda/12.8/test_dense_to_sparse_coo.yaml
     cuda/12.8/test_dense_to_sparse_csc.yaml
     cuda/12.8/test_dense_to_sparse_csr.yaml
@@ -148,6 +153,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_sddmm_coo_aos.yaml
     cuda/12.8/test_sddmm_csc.yaml
     cuda/12.8/test_sddmm_csr.yaml
+    cuda/12.8/test_sddmm_batched_csr.yaml
     cuda/12.8/test_sddmm_csr_reuse_descr.yaml
     cuda/12.8/test_sparse_to_dense_coo.yaml
     cuda/12.8/test_sparse_to_dense_csc.yaml
@@ -170,6 +176,8 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_spmv_sell.yaml
     cuda/12.8/test_spsm_coo.yaml
     cuda/12.8/test_spsm_csr.yaml
+    cuda/12.8/test_spsm_csr_reuse_descr.yaml
     cuda/12.8/test_spsv_coo.yaml
     cuda/12.8/test_spsv_csr.yaml
+    cuda/12.8/test_spsv_csr_reuse_descr.yaml
     cuda/12.8/test_spvv.yaml)

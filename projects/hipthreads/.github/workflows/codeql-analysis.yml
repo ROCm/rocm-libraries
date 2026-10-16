@@ -1,0 +1,64 @@
+name: "CodeQL Analysis"
+
+on:
+    push:
+        branches: [ "develop" ]
+    pull_request:
+        branches: [ "develop" ]
+
+jobs:
+    analyze:
+        name: Analyze
+        if: github.repository == 'ArchSWTech/gpulib'
+        runs-on: gpu-thread-code-scan
+        permissions:
+            actions: read
+            contents: read
+            security-events: write
+        
+        steps:
+        -   name: Checkout repository
+            uses: actions/checkout@v4
+        
+        -   name: Install Dependencies
+            run: |
+                sudo apt-get update
+                sudo apt-get install -y --fix-missing wget gnupg2
+                wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+                echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/latest/ jammy main" | sudo tee /etc/apt/sources.list.d/rocm.list
+                echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 1001" | sudo tee /etc/apt/preferences.d/rocm.pref
+                sudo apt-get update
+                sudo apt-get install -y --fix-missing g++ cmake rocm-dev git
+            
+        -   name: Install libhipcxx
+            run: |
+                # Clone libhipcxx
+                git clone https://github.com/ROCm/libhipcxx.git
+                cd libhipcxx
+                
+                # Build and install
+                mkdir build && cd build
+                cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+                      -DLIBCUDACXX_ENABLE_LIBCUDACXX_TESTS=OFF ..
+                make -j$(nproc)
+                sudo make install
+                
+                # Verify installation
+                echo "libhipcxx installed to /opt/rocm"
+                ls -la /opt/rocm/include/hip/std/ || echo "Warning: libhipcxx headers not found"
+            
+        -   name: Initialize CodeQL
+            uses: github/codeql-action/init@v3
+            with:
+                languages: cpp
+                queries: ./codeql-amd-checks.qls
+        
+        -   name: Build Project
+            run: |
+                cmake -S . -B build
+                cmake --build build
+            
+        -   name: Perform CodeQL Analysis
+            uses: github/codeql-action/analyze@v3
+            with:
+                category: "/language:cpp"

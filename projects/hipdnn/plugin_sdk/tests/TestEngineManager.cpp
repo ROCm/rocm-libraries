@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -15,7 +16,6 @@ using namespace hipdnn_test_sdk::utilities;
 using ::testing::NiceMock;
 using ::testing::Return;
 
-// Define test handle, settings, and execution context structs for testing
 struct TestHandle
 {
 };
@@ -31,7 +31,6 @@ struct TestContext
 namespace
 {
 
-// Test engine that inherits from IEngine with configurable behavior
 class TestEngine : public IEngine<TestHandle, TestSettings, TestContext>
 {
 public:
@@ -83,7 +82,6 @@ private:
     size_t _workspaceSize;
 };
 
-// Define type alias for readability
 using TestEngineManager = EngineManager<TestHandle, TestSettings, TestContext>;
 
 std::unique_ptr<TestEngine>
@@ -120,6 +118,63 @@ TEST(TestEngineManager, AddMultipleEngines)
 
     auto engineIds = manager.getAllEngineIds();
     EXPECT_EQ(engineIds.size(), 3u);
+}
+
+/// Two engines hashing onto one id is an authoring collision (RFC 0003); the manager keeps
+/// the incumbent and logs the loser rather than dropping it silently. This is not the
+/// descriptor rule -- RFC 0020 §10.2.1 drops every UED in a name collision before
+/// construction -- but the backstop for collisions that rule can't see, e.g. two
+/// hand-written engines.
+TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
+    manager.addEngine(createTestEngine(1, true, 4096));
+
+    auto engineIds = manager.getAllEngineIds();
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 1);
+
+    // The point of this assertion: the old bare `emplace` would also pass everything above.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "already registered"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate is discarded"));
+
+    // The incumbent is the one still answering, not the arrival that lost the insert.
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
+    ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
+    EXPECT_EQ(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), 2048u);
+}
+
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateWhenTheCallerSuppliesAName)
+{
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048), "hipkernel:ConvFwd");
+    manager.addEngine(createTestEngine(1, true, 4096), "hipkernel:ConvFwd");
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "hipkernel:ConvFwd"));
+
+    // The name joins the id rather than replacing it: the id is what greps against the
+    // admission logs.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "0x0000000000000001"));
+}
+
+TEST(TestEngineManager, AddEngineNamesTheDiscardedDuplicateFromTheRegistryWhenNoNameIsGiven)
+{
+    using hipdnn_data_sdk::utilities::formatEngineIdHex;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 2048));
+    manager.addEngine(createTestEngine(MIOPEN_ENGINE_ID, true, 4096));
+
+    // No name was declared, so this one comes from the static registry.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "MIOPEN_ENGINE"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, formatEngineIdHex(MIOPEN_ENGINE_ID)));
 }
 
 TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)

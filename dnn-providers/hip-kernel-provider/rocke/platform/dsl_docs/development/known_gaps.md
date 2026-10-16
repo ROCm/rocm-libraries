@@ -26,9 +26,9 @@ gate is fully green. They fall into three kinds:
    would *diverge* from Python and break byte-identity. They are intentionally
    left as-is and are *not* listed here.
 2. **Unreachable / dead branches in this codegen-only library** — code paths
-   whose producers (HIP runtime, device tensors, RDNA-only or gfx1250-only
-   backends) do not exist in the C engine's current scope, so the branch can
-   never be hit by a supported build. These are documented as named gaps below.
+   whose producers (HIP runtime, device tensors) do not exist in the C engine's
+   current scope, so the branch can never be hit by a supported build. These are
+   documented as named gaps below.
 3. **Host-orchestration not yet ported** — the fused-MoE end-to-end forward
    path, which depends on a HIP runtime that this codegen-only engine does not
    carry. This is the **largest single gap** and is described first.
@@ -66,22 +66,108 @@ fabricate device behavior** in the codegen library.
 
 ---
 
-## 2. LLVM lowering — gfx1250 WMMA op-id families
+## 2. gfx1250 instance builders (the ISA backend is ported; the builders are not)
 
-**Subsystem:** `core/lower_llvm/`
+**Subsystem:** `cpp/instances/`
 
-| File | What's missing | Why blocked |
-|---|---|---|
-| `core/lower_llvm/mma.cpp` | The C `WMMA_SPECS` / `WMMA_INT_SPECS` tables omit the Python `_GFX1250_WMMA` (16x16x32 f16/bf16) and `_GFX1250_WMMA_FP8` (16x16x64 fp8/bf8) op-id families. The WMMA op-id fallthrough currently rejects them as "unsupported RDNA WMMA op". |
+The gfx1250 **ISA backend is ported** — `LL_BACKEND_GFX1250` in
+`core/lower_llvm/core.cpp` carries the split wait counters, the async-LDS
+counter, the element-typed `ds_load_tr16_b128` opcodes and the K=32 / K=64 WMMA
+atoms, and the differential lane (`ROCKE_BACKEND=both`) holds every gfx1250
+kernel to byte-identity. `CPP_UNPORTED_ARCHES` is empty as a result.
 
-**Why blocked:** there is no gfx1250 entry in the C backend resolver
-(`rocke_ll_backend_for`). A gfx1250 build is rejected up front with `ROCKE_ERR_KEY`,
-so these op-ids are unreachable through the C lowerer. The rejection is faithful
-for the supported RDNA3/RDNA4 set.
+What remains is a different axis: there is no `cpp/instances/gfx1250/` to mirror
+`python/rocke/instances/gfx1250/` (wmma_gemm, block_scaled_gemm,
+fused_moe_mega_wmma, the Qwen3 day-0 kernels). So gfx1250 kernels are authored in
+Python and lowered by the C++ engine, rather than being built by C++ instance
+builders the way gfx1151 / gfx1201 / gfx942 / gfx950 kernels can be.
 
-**What unblocks it:** porting the gfx1250 ISA backend (split wait-counters +
-57-bit SRD word3) into `rocke_ll_backend_for`, then adding the two op-id families
-to the WMMA spec tables.
+**Consequence:** gfx1250 has no *instance-builder* family in the byte-identity
+gate, because those families compare a C++ builder against its Python twin and
+there is no C++ builder to compare. The gfx1250 **lowerer** is in the gate
+regardless: the `gfx1250_lowering` family
+(`tests/instances/parity/gfx1250_lowering_emit.{c,py}`) builds the same kernel
+from each language's IR builder and byte-compares the lowered `.ll`, one config
+per place `Gfx1250Backend` diverges from its parent, each paired with its gfx950
+twin so a lowering that ignored the backend fails on one side of the pair.
+
+**What unblocks it:** porting the gfx1250 instance builders, then registering the
+families in `cpp/bindings/prove_parity_binding.py`.
+
+**Still inherited placeholders in the ISA backend:** the buffer SRD word3 and the
+gfx11 `s_waitcnt` *layout*, exactly as in Python's `Gfx1250Backend`. The gfx1250
+57-bit SRD is deferred; the waitcnt layout is unreachable because
+`emits_legacy_s_waitcnt` is false. Both are faithful mirrors, not C++-side debt.
+`s_buffer_prefetch_data` consumes a `buffer_rsrc` value and so carries the same
+word3 placeholder; it is a hint, so a wrong word3 loses the prefetch rather
+than the result. `isa_features/data_prefetch_verify.py` passes on a gfx1250
+device with exact results, so `has_scalar_data_prefetch` and
+`has_global_prefetch` are set for gfx1250. The run shows only that results are
+unchanged; it does not show that a prefetch reached the cache.
+
+**Workgroup clusters are device-verified through the Python runtime.** The five
+`gpu.cluster_*` reads and `tile.cluster_barrier` lower identically in both
+engines and `isa_features/cluster_ids_verify.py` pins their ISA. The
+`cluster_dims` kernel attr lowers to `"amdgpu-cluster-dims"` in both engines and
+reaches the code-object `.cluster_dims` metadata. On a gfx1250 device, both
+functional checks pass through `Runtime.launch(..., cluster=)`: a plain launch
+behaves as a 1x1x1 cluster (ids 0, max ids 0, `cluster_size` 1), and a 2x2x1
+cluster launch reports the ids the host reference derives from the launch
+shape. `has_cluster_launch` is set for gfx1250. Other limits:
+
+- Only the Python `Runtime.launch` path has run on a device.
+  `LaunchConfig.cluster` and the portable-IR plan's `cluster` are covered by
+  host-side tests only. The hipDNN provider does not launch clustered kernels.
+- The probe runs `cluster_barrier` and the kernel completes, but no check
+  depends on its ordering.
+
+- `hip_module.Runtime.launch` checks the cluster shape and grid divisibility,
+  but not that the shape matches the kernel's `.cluster_dims`; only
+  `KernelLauncher` and the portable-IR plan compare the two.
+- No launch path checks uniform work-group size, LDS, or occupancy against the
+  cluster; a cluster that cannot be co-scheduled is left to the driver.
+- `lower_hip.py` ignores `cluster_dims`, so the HIP-source path cannot express a
+  clustered kernel.
+- The C JSON importer and recipe VM reject a malformed int-list kernel attr, an
+  array under any tag other than `"l"`, and a `cluster_dims` without the `"l"`
+  tag. Other non-array values under a list key (`agpr_alloc` as a string) keep
+  their own tag, and the recipe VM still ignores non-int scalar kernel attrs.
+- Only the combined `s.cluster.barrier` is exposed; split cluster arrive/wait on
+  barrier id -3 is deferred, because only one wave per workgroup may signal it.
+
+**Cluster multicast loads have no production user.** `tile.cluster_load`
+(b32/b64/b128) and `tile.cluster_load_async_to_lds` (b8/b32/b64/b128) lower
+identically in both engines, and `isa_features/multicast_verify.py` pins their
+ISA. Its three functional runs (multicast groups of 1, 2, and 4 workgroups in a
+4x1x1 cluster) pass on a gfx1250 device, which confirms the mask semantics and
+the async-to-LDS delivery, so `has_multicast_load` is set for gfx1250. No
+gfx1250 instance uses multicast yet. The ops check the mask type but not that
+it is wave-uniform or that it selects only workgroups inside the launched
+cluster; both are left to the caller.
+
+**TDM has a descriptor builder but no production user.**
+`IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
+D# groups, and `isa_features/tdm_verify.py` runs a real global -> LDS -> global
+round trip with a padded row pitch. That round trip passes on a gfx1250 device,
+so `has_tdm` is set for gfx1250, but no gfx1250 instance uses TDM yet. Other
+limits:
+
+- Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
+  rank, gather, or iteration.
+- The multicast `workgroup_mask` is packed but never launched.
+- LDS padding is exposed only through the raw `pad_interval` and
+  `pad_amount` fields.
+
+**The block-scaled GEMM prefetch flag is correctness-verified only.**
+`BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch
+ops. Its LLVM and flag-on/flag-off ISA are pinned by
+`tests/core/test_gfx1250_prefetch_users.py` and
+`isa_features/prefetch_users_verify.py`. On a gfx1250 device the flag-on
+kernels match the reference and the flag-off kernels bit for bit on the
+`wmma`, `wmma_scale`, and `wmma_scale16` paths, and `gemm/block_scaled_gemm_verify.py
+--prefetch` passes every scale case. No run has measured the effect on
+performance, so the flag stays opt-in rather than following
+`has_scalar_data_prefetch`.
 
 ---
 

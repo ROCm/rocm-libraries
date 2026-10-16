@@ -91,9 +91,9 @@ def _use_combo_policy(shape, sliding_window: int) -> bool:
 
 
 class RockeComboBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120) -> None:
+    def __init__(self, *, compile_backend: str = "llvm", num_cus: int = 120) -> None:
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple[Any, ...], tuple[Any, Any]] = {}
 
     def _problem(self, shape, sliding_window: int):
@@ -115,7 +115,7 @@ class RockeComboBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=False,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
         )
 
@@ -349,7 +349,7 @@ def main() -> int:
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cap-blocks", type=int, default=65536)
-    parser.add_argument("--num-sms", type=int, default=120)
+    parser.add_argument("--num-cus", type=int, default=120)
     parser.add_argument("--compile-backend", choices=("llvm",), default="llvm")
     parser.add_argument(
         "--shape-utils-path",
@@ -403,7 +403,7 @@ def main() -> int:
 
     bench = RockeComboBench(
         compile_backend=args.compile_backend,
-        num_sms=args.num_sms,
+        num_cus=args.num_cus,
     )
     results: list[dict[str, Any]] = []
     for index, shape in enumerate(shapes, 1):

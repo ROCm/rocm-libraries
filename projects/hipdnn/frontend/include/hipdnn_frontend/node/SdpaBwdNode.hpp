@@ -25,11 +25,12 @@ namespace hipdnn_frontend::graph
  * - Softmax statistics (logsumexp) from the forward pass
  *
  * The backward pass uses the flash attention algorithm to compute:
- *   dV = softmax(Q * K^T / sqrt(d_k))^T * dO
- *   dP = dO * V^T         (where P = softmax(Q * K^T / sqrt(d_k)))
+ *   dV = softmax(scale * Q * K^T)^T * dO
+ *   dP = dO * V^T         (where P = softmax(scale * Q * K^T))
  *   dS = P * (dP - rowsum(dO * O))
- *   dQ = dS * K / sqrt(d_k)
- *   dK = dS^T * Q / sqrt(d_k)
+ *   dQ = scale * dS * K
+ *   dK = scale * dS^T * Q
+ * where scale is the attention scale, 1.0 (no scaling) when none is set.
  */
 class SdpaBwdNode : public BaseNode<SdpaBwdNode, NodeType::SDPA_BWD>
 {
@@ -44,6 +45,10 @@ public:
 
     Error pre_validate_node() const override
     {
+        HIPDNN_RETURN_IF_TRUE(attributes.hasUnsupportedUsage(),
+                              ErrorCode::INVALID_VALUE,
+                              attributes.getUnsupportedReason());
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();
@@ -339,8 +344,14 @@ public:
                                               "type"));
         }
 
-        // Rule 10: Optional attention scale must be a scalar tensor
+        // Rule 10: attn_scale may be given as a tensor or a baked value, not both
         const auto scale = attributes.get_attn_scale();
+        HIPDNN_RETURN_IF_TRUE(
+            scale && attributes.attn_scale_value.has_value(),
+            ErrorCode::INVALID_VALUE,
+            "SdpaBwdNode: attn_scale tensor and attn_scale_value cannot both be set");
+
+        // Rule 10b: Optional attention scale must be a scalar tensor
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));

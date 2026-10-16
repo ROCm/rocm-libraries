@@ -25,6 +25,8 @@ from rocisa.container import sgpr, vgpr
 from copy import deepcopy
 import math
 
+import pytest
+
 def test_instruction_common():
     from rocisa.instruction import SMovB32
 
@@ -428,6 +430,72 @@ def test_instruction_scalar_float():
         assert b.comment == "orig"
         assert "// orig" in str(b)
         assert "// mutated" not in str(b)
+
+
+def test_instruction_vmax_f16_true16():
+    # Regression for the true16 (real-true16) activation-clamp defect.
+    #
+    # On a NoSDWA target (isaVersion 11/12) the v_max_f16 activation clamp must
+    # be emitted in true16 form, binding a half-word selector (.l) to every
+    # register operand via the NoSDWA-gated t16() helper. The abs() source keeps
+    # its suffix *inside* the closing paren: abs(v[..].l) is valid,
+    # abs(v[..]).l is not.
+    #
+    # Assertions are substring/regex based to stay agnostic to the ~50-column
+    # comment padding, matching test_instruction_swait_xcnt / _global_wb.
+    import os
+    import re
+    import shutil
+
+    import rocisa
+    from rocisa.container import vgpr
+    from rocisa.enum import HighBitSel
+    from rocisa.instruction import VMaxF16, t16
+
+    # Initialize a NoSDWA gfx11 ISA so t16() selects the true16 path. Resolve
+    # the assembler via ROCM_PATH first (matching test_mubuf.py::_isa_context) so
+    # this works when ROCm's bin dir is not on PATH (common in CI / Windows).
+    isa = (11, 0, 0)
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
+    ri = rocisa.rocIsa.getInstance()
+    ri.init(isa, assembler, False)
+    ri.setKernel(isa, 32)
+    assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
+
+    try:
+        low = HighBitSel.LOW
+
+        # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+        inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                       t16(vgpr("Value+0", isAbs=True), low))
+        s = str(inst)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
+            s,
+        ), f"activation clamp not in true16 form: {s!r}"
+        # The suffix must be inside the abs() paren, never outside it.
+        assert "abs(v[vgprValue+0].l)" in s
+        assert "abs(v[vgprValue+0]).l" not in s
+        # And it must not be the bare fake16 form.
+        assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
+
+        # Plain register sources (the merge_sum shape): every operand gets .l.
+        inst2 = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
+                        t16(vgpr("OutputB"), low))
+        s2 = str(inst2)
+        assert re.search(
+            r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
+            s2,
+        ), f"merge clamp not in true16 form: {s2!r}"
+    finally:
+        legacy = (9, 4, 2)
+        ri.init(legacy, assembler, False)
+        ri.setKernel(legacy, 64)
 
 
 if __name__ == "__main__":

@@ -58,6 +58,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <string>
 #include <type_traits>
@@ -337,6 +338,14 @@ namespace
         else if(deviceString.find("gfx1153") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1153;
+        }
+        else if(deviceString.find("gfx1170") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1170;
+        }
+        else if(deviceString.find("gfx1171") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1171;
         }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
@@ -619,6 +628,44 @@ namespace
         return inputs;
     }
 
+    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
+    {
+        // need to ensure tensile indices not so large as to already be into sign bit
+
+        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
+    }
+
+    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
+    {
+        return -(idx + 1)
+               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
+    }
+
+    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
+    {
+        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
+    }
+
+    static std::optional<int> map_index_override_to_tensile(int idx)
+    {
+        // Override files hold either the rocblas indices reported by
+        // rocblas_gemm_ex_get_solutions, which are biased and negative for Tensile
+        // solutions, or raw one based Tensile indices as written by older tuning runs.
+        if(rocblas_tensile_index(idx))
+            return map_index_rocblas_to_tensile(idx);
+
+        if(idx > 0)
+            return idx - 1; // 1 based to 0 based
+
+        // The reserved indices name a rocBLAS kernel rather than a Tensile solution, so
+        // there is nothing to override. rocblas-gemm-tune does not emit them, but a
+        // hand written file may, and skipping one leaves the rest of the file in place.
+        rocblas_cerr << "\nrocBLAS warning: ignoring override file solution index " << idx
+                     << ". It names no Tensile solution." << std::endl;
+
+        return std::nullopt;
+    }
+
     /**************************************************
      * The TensileHost struct interfaces with Tensile *
      **************************************************/
@@ -821,6 +868,18 @@ namespace
             static std::string base_path;
             static int         determined_path{determine_tensile_base_path(base_path)};
 
+            // The device predicate name stays `processor` (matches the physical
+            // device for Tensile solution selection); the catalog key may diverge
+            // to select the strict device library by GPU revision. The strict
+            // variant is the base arch with a "-strict" suffix.
+            std::string catalog_key    = processor;
+            std::string strict_catalog = processor + "-strict";
+            if(rocblas_internal_is_strict_target(deviceId)
+               && TestPath(base_path + "/" + strict_catalog))
+            {
+                catalog_key = strict_catalog;
+            }
+
             path = base_path;
             // Probe subdirectories from most-specific to least-specific so that shard
             // overlays compose correctly regardless of how TheRock splits arch builds:
@@ -831,29 +890,29 @@ namespace
             std::string xnack_mode   = rocblas_internal_get_xnack_mode();
             if(!xnack_mode.empty())
             {
-                std::string processor_xnack = processor + "-" + xnack_mode;
+                std::string processor_xnack = catalog_key + "-" + xnack_mode;
                 if(TestPath(path + "/" + processor_xnack))
                 {
                     path += "/" + processor_xnack;
                     found_subdir = true;
                 }
             }
-            if(!found_subdir && TestPath(path + "/" + processor))
-                path += "/" + processor;
+            if(!found_subdir && TestPath(path + "/" + catalog_key))
+                path += "/" + catalog_key;
 
 #ifdef TENSILE_YAML
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".yaml";
 #else
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".dat";
 #endif
             if(!TestPath(tensileLibraryPath))
             {
                 tensile_lazy_load_enabled = false;
 
 #ifdef TENSILE_YAML
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".yaml";
 #else
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".dat";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".dat";
 #endif
                 if(!TestPath(tensileLibraryPath))
                 {
@@ -934,7 +993,7 @@ namespace
             if(!tensile_lazy_load_enabled || rocblas_initialize_called())
             {
                 // only load modules for the current architecture
-                auto dir = path + "/*" + processor + "*co";
+                auto dir = path + "/*" + catalog_key + "*co";
 
                 // Get current xnack mode
                 std::string xnack = rocblas_internal_get_xnack_mode();
@@ -962,7 +1021,9 @@ namespace
                         // Skip experimental libraries
                         if(codeObjectFile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(codeObjectFile.c_str()));
+                        THROW_IF_HIP_ERROR_MESSAGE(
+                            adapter.loadCodeObjectFile(codeObjectFile.c_str()),
+                            "loading code object: " + codeObjectFile);
                     } while(FindNextFileA(hfine, &finddata));
                 }
                 else
@@ -982,7 +1043,8 @@ namespace
                             continue;
                         if(cofile.find("Experimental") != std::string::npos)
                             continue;
-                        THROW_IF_HIP_ERROR(adapter.loadCodeObjectFile(cofile));
+                        THROW_IF_HIP_ERROR_MESSAGE(adapter.loadCodeObjectFile(cofile),
+                                                   "loading code object: " + cofile);
                     }
                 }
                 else if(g == GLOB_NOMATCH)
@@ -1013,8 +1075,10 @@ namespace
             }
 
             {
-                // initialize adapter for lazy loading or experimental code objects
-                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(processor, path));
+                // initialize adapter for lazy loading or experimental code objects.
+                // Uses catalog_key (not processor) because the helper kernel's on-disk
+                // name carries the compiler-target arch, i.e. the -strict variant under strict.
+                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(catalog_key, path));
 
                 // Load library for this specific architecture if not already loaded
 
@@ -1076,7 +1140,8 @@ namespace
                 auto                        archLib = m_libraryMap[processor];
                 if(archLib)
                 {
-                    bool success = archLib->setOverridesFromFile(*hardware, overridePath);
+                    bool success = archLib->setOverridesFromFile(
+                        *hardware, overridePath, map_index_override_to_tensile);
                     if(!success)
                     {
                         rocblas_cerr << "\nrocBLAS warning: One or more problem overrides failed "
@@ -1148,6 +1213,12 @@ namespace
                      << e.what() << std::endl;
         rocblas_abort();
     }
+    catch(const rocblas_status& status)
+    {
+        rocblas_cerr << "\nrocBLAS error: Could not initialize Tensile host:\n"
+                     << rocblas_status_to_string(status) << std::endl;
+        rocblas_abort();
+    }
     catch(...)
     {
         rocblas_cerr
@@ -1169,24 +1240,6 @@ namespace
         {
             rocblas_cerr << std::endl << msg << std::endl;
         }
-    }
-
-    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
-    {
-        // need to ensure tensile indices not so large as to already be into sign bit
-
-        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
-    }
-
-    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
-    {
-        return -(idx + 1)
-               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
-    }
-
-    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
-    {
-        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
     }
 
 } // namespace
@@ -1235,17 +1288,36 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) >= 4)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        // TODO remove after tuning
-        if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        // gfx950: Tensile remains the default only for SGEMM (real f32).
+        // TODO remove after SGEMM is supported
+        if constexpr(std::is_same<Ti, float>::value)
         {
-            return false;
+            if(arch == 950)
+                return false;
+        }
+
+        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
+        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
+        // TODO remove after all types are supported
+        if(arch == 942)
+        {
+            if constexpr(sizeof(Ti) == 2)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 304)
+                    return false;
+            }
+            else if constexpr(!std::is_same<Ti, double>::value)
+            {
+                return false;
+            }
         }
     }
 
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
+    return prob.handle->tryHipBLASLt();
 #else
     return false;
 #endif

@@ -289,8 +289,22 @@ struct GridwiseMoeGemmBlockScale
     static constexpr auto BlockSizeNumber = Number<BlockSize>{};
 
     using mfma_selector = MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB>;
+
+    // KPack must satisfy KPack/KGroup = 16/sizeof(B) so that each thread's NkSwizzle slot
+    // matches exactly one 16-byte memory load (= BK1 elements) in the B-preshuffle path.
+    // On gfx1250 the default double-rate instruction has k_per_blk > 16/sizeof(B), which
+    // would give KPack/KGroup > BK1 and break the preshuffle layout. Use the single-rate
+    // instruction's k_per_blk only for computing KPack to enforce this constraint.
+    // KGroup, KLane, and KPerXdlops still derive from the original (double-rate) mfma_selector.
+#if defined(__gfx125__)
+    using preshuffle_mfma_selector =
+        MfmaSelector<ComputeTypeA, MPerXdl, NPerXdl, ComputeTypeB, true>;
+    static constexpr index_t KPack = math::max(math::lcm(AK1Number, BK1Number),
+                                               preshuffle_mfma_selector::selected_mfma.k_per_blk);
+#else
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
+#endif
     static constexpr index_t KGroup = []() {
 #if defined(__gfx125__)
         // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
@@ -1140,9 +1154,12 @@ struct GridwiseMoeGemmBlockScale
                                BElementwiseOperation b_element_op,
                                CElementwiseOperation c_element_op)
     {
-        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
-                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
-                      "non-blockscale gridwise_moe_gemm.");
+        static_assert(ActivationOperation == Activation::gelu_and_mul ||
+                          ActivationOperation == Activation::silu_and_mul ||
+                          ActivationOperation == Activation::swiglustep_and_mul ||
+                          ActivationOperation == Activation::gelu_tanh_and_mul,
+                      "gridwise_moe_gemm_blockscale only supports gelu_and_mul, silu_and_mul, "
+                      "swiglustep_and_mul and gelu_tanh_and_mul.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -1642,6 +1659,23 @@ struct GridwiseMoeGemmBlockScale
                                 tensor_operation::element_wise::Gelu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
+                            else if(ActivationOperation == Activation::gelu_tanh_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                c_thread_buf(cidx) = gate * up;
+                            }
                         }
                         else
                         {
@@ -1697,9 +1731,12 @@ struct GridwiseMoeGemmBlockScale
                                     BElementwiseOperation b_element_op,
                                     CElementwiseOperation c_element_op)
     {
-        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
-                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
-                      "non-blockscale gridwise_moe_gemm.");
+        static_assert(ActivationOperation == Activation::gelu_and_mul ||
+                          ActivationOperation == Activation::silu_and_mul ||
+                          ActivationOperation == Activation::swiglustep_and_mul ||
+                          ActivationOperation == Activation::gelu_tanh_and_mul,
+                      "gridwise_moe_gemm_blockscale only supports gelu_and_mul, silu_and_mul, "
+                      "swiglustep_and_mul and gelu_tanh_and_mul.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -2188,6 +2225,23 @@ struct GridwiseMoeGemmBlockScale
                                     up *= 16;
                                 }
                                 tensor_operation::element_wise::Gelu{}(gate, gate);
+                                c_thread_buf(cidx) = gate * up;
+                            }
+                            else if(ActivationOperation == Activation::gelu_tanh_and_mul)
+                            {
+                                float gate = c_thread_buf[cidx];
+                                float up   = c_thread_buf_up[cidx];
+                                if constexpr(MulRoutedWeight)
+                                {
+                                    gate = gate * topk_weight;
+                                    up   = up * topk_weight;
+                                }
+                                if constexpr(is_same_v<remove_cvref_t<BDataType>, pk_i4_t>)
+                                {
+                                    gate *= 16;
+                                    up *= 16;
+                                }
+                                tensor_operation::element_wise::FastGelu{}(gate, gate);
                                 c_thread_buf(cidx) = gate * up;
                             }
                         }

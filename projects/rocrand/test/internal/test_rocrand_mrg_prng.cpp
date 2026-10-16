@@ -59,7 +59,10 @@ using mrg_generator_prng_offset_tests_types = ::testing::Types<
     generator_prng_offset_tests_params<float, mrg32k3a_generator, ROCRAND_ORDERING_PSEUDO_DEFAULT>,
     generator_prng_offset_tests_params<float, mrg32k3a_generator, ROCRAND_ORDERING_PSEUDO_DYNAMIC>>;
 
-INSTANTIATE_TYPED_TEST_SUITE_P(rocrand_mrg, generator_prng_tests, mrg_generator_prng_tests_types);
+INSTANTIATE_TYPED_TEST_SUITE_P(rocrand_mrg,
+                               generator_prng_tests,
+                               mrg_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(rocrand_mrg,
                                generator_prng_continuity_tests,
@@ -138,7 +141,7 @@ struct mrg_prng_engine_tests : public ::testing::Test
 
 using mrg_prng_engine_tests_types = ::testing::Types<mrg31k3p_generator, mrg32k3a_generator>;
 
-TYPED_TEST_SUITE(mrg_prng_engine_tests, mrg_prng_engine_tests_types);
+TYPED_TEST_SUITE(mrg_prng_engine_tests, mrg_prng_engine_tests_types, generator_type_test_name);
 
 TYPED_TEST(mrg_prng_engine_tests, discard_test)
 {

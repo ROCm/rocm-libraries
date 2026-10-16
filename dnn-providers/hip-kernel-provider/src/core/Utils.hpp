@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <cstdint>
 #include <unordered_map>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 /**
  * @brief Macro that returns and prints info log on passing provided condition.
@@ -57,10 +60,6 @@ struct ActivationParams
 
 ActivationParams
     parseActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
-
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers);
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t,

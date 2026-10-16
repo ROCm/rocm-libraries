@@ -26,7 +26,7 @@ from .Common import architectureMap, gfxArch, printExit, printWarning, versionIs
 from .SolutionStructs import Solution, ProblemSizes, ProblemType
 from . import __version__
 from . import SolutionLibrary
-from .Utilities.ConditionalImports import yamlLoader, yamlDumper
+from .Utilities.ConditionalImports import SafeLoader, yamlDumper
 
 from typing import NamedTuple, Optional
 
@@ -120,7 +120,7 @@ def writeSolutions(filename, problemSizes, solutions, cache=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, yamlLoader)
+        data = yaml.load(f, SafeLoader)
     return data
 
 

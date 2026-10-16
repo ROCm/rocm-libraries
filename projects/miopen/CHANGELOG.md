@@ -3,6 +3,144 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.2 for ROCm 10.2.0
+
+### Resolved Issues
+* [Conv] Fixed the 2D grouped CK xdlops convolution solvers (forward/backward-data/backward-weights)
+  skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue` returned the first config
+  unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and the first applicable CK
+  instance was never tuned.
+* [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
+  and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
+  elements, which produced incorrect results. Such tensors are now rejected with
+  `miopenStatusBadParm`.
+* [Conv] Fixed a `ConvHipConv` crash on gfx1250 for grouped convolutions with more than
+  65535 group-batch tiles, and an LDS race in its gfx1250 direct kernel
+  (hipconv v0.3.2).
+* [Conv] Fixed `ConvHipConv` losing its tuned config on a perf-db reload, which could fail
+  execution with "not enough workspace for direct kernel" after an exhaustive Find. Records
+  now carry the hipconv minor version, and records from another version are discarded.
+* [Conv] Fixed incorrect backward-weights results from the `ConvHipConv` gfx950 direct kernel
+  for configurations with `waves_q == 1`, where the LDS staging tile was reused across filter
+  positions without cross-lane ordering.
+* [Conv] Fixed up to 8x slower `ConvHipConv` `direct`, `direct_l1` and `direct_wgrad` kernels
+  under ROCm 10.1's full AMDGCN link-time optimization default by building the hipconv device
+  targets with `-fno-offload-lto`.
+* [Conv] Fixed a multi-node data-parallel training throughput regression on gfx942 by excluding
+  the backward-pass GEMM solvers for single-group 1x1 stride-1 pad-0 NHWC convolutions with a
+  batch size below 4.
+* [Conv] Fixed invalid Composable Kernel (CK) perf-config entries in the gfx1201 and gfx1100
+  system databases that MIOpen could not resolve, which caused a fallback to untuned defaults.
+* [BatchNorm] Fixed just-in-time compilation failures for the batch normalization kernels on
+  non-GFX9 targets by restricting the Welford reduction's DPP inline assembly to GFX9 instead
+  of a per-architecture denylist.
+* Fixed an out-of-bounds write in `miopenLoadSolution` when a serialized solution carries more
+  than three kernel work dimensions; such solutions are now rejected.
+* Fixed a `uint64_t` typedef conflict between `miopen_cstdint.hpp` and the system `<stdint.h>`
+  that broke runtime kernel compilation on LP64 Linux.
+* [Conv] Fixed `TransposedConvWinoRageRxS<2,3>` being unreachable: it was registered in the solver registry and explicitly instantiated but missing from both Find solver lists, so it could never be enumerated or selected for NHWC convolutions.
+
+### Added
+* [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
+  kernels to the `ConvHipConv` solver (hipconv v0.3.1).
+* [Conv] Added gfx950 patch-embedding kernels (fp16/bf16), gfx950 TF32 kernels for dense
+  and depthwise forward/backward-data and dense backward-weights, and gfx1250 depthwise
+  backward-weights kernels (fp16/bf16) to the `ConvHipConv` solver (hipconv v0.3.2).
+* [Conv] Added a gfx1250 dense backward-weights kernel (fp16/bf16) to the `ConvHipConv`
+  solver (hipconv v0.4.0).
+* [Conv] Added NHWC (channel-last) support to the GEMM convolution solvers, together with the
+  im2col and col2im kernels the layout requires.
+* [Conv] Added cross-architecture AI heuristics for immediate mode (`MIOPEN_FIND_MODE=2`): a
+  LightGBM ranker selects the solver and a per-solver model selects its performance config,
+  extending data-driven selection to the Navi architectures.
+* [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
+
+### Changed
+* [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
+  of rank greater than 6, matching `miopenReduceTensor`.
+* [Reduce] Invalid arguments to the reduction API (mismatched descriptors, unsupported types,
+  undersized workspace or indices buffers) now return `miopenStatusBadParm` instead of
+  `miopenStatusUnknownError`.
+* [Conv] `ConvHipConv` is held out of the AI performance-config picker and uses its own default
+  config until the model is retrained against the current hipconv config vocabulary.
+* [Conv] Large forward and backward-data convolutions are no longer gated off CK by tensor byte
+  span. The 32-bit byte-offset overflow that motivated the gate is fixed in CK itself, so these
+  problems can again use the faster int32 CK instances.
+* [Conv] Relaxed the ASM-GTC NHWC large-tensor guard for forward and backward-data. Those kernels address a full 4 GiB window per dispatch slice and advance the base pointer per batch-split, so the input and output bounds were redundant; what remains is a bound on the per-group weight size. Backward-weights keeps the stricter int32 bound, because 292 of its 900 kernels ignore the batch-split dimension (#11805). This restores 8,978 forward and backward-data entries across the six system find-databases that the guard's first revision removed.
+
+### Optimized
+* [Conv] Optimized the `ConvDirectNaiveConv` solver with per-direction kernel files, float
+  accumulators for fp32/fp16/bf16 inputs, spatial tiling and a bfloat16 path, for 2-35x
+  speedups on representative model shapes.
+* Optimized the kernel cache by reusing cached database connections instead of opening and
+  closing SQLite on every binary load or store.
+
+### Removed
+* [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
+* [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
+* [Conv] Removed the gfx803 find-database files.
+
+## MIOpen 3.6.1 for ROCm 10.1.0
+
+### Resolved Issues
+* [Conv] Fixed silently incorrect results from the grouped backward-weights CK xdlops solver when a tensor's element extent exceeds INT_MAX but its individual lengths and strides still fit int32; such problems now use a large-tensor (int64) CK instance instead of overflowing int32 indexing.
+* [Conv] Fixed a HIPRTC compilation failure in the ConvDepthwiseFwd3D (gfx942/gfx950) FP16/BFP16 solver.
+* [BatchNorm] Fixed MIOpen#3900 by implementing Welford's algorithm in FwdTrainSpatial variant 1
+* [Conv] Fixed a batch-split miscalculation that produced incorrect results for large backward-weights (WrW) tensors.
+* [Conv] Fixed a convolution failure on XNACK-unsupported gfx9 APUs (gfx902, gfx909, gfx90c).
+* [BatchNorm] Fixed a device heap-buffer-overflow in the forward spatial `FinalMeanVariance` kernel.
+* [Conv] Fixed incorrect `SetNextValue` polarity in deterministic mode for the grouped backward-data and backward-weights CK solvers.
+* [LRN][LayerNorm] Fixed grid alignment and out-of-bounds thread access on gfx1250.
+* [Conv] Removed stale gfx950 grouped backward-weights SystemDB entries that caused suboptimal solver selection.
+* [Conv][Windows] Fixed system-database path resolution to use the MIOpen module location.
+* [Conv] Fixed system-database fallback so MI308X (gfx942) resolves to a usable tuned database.
+* Fixed JSON performance logs (`MIOPEN_PERFORMANCE_LOGS`) dropping the last solver evaluated during Find, so naive convolution solvers are no longer omitted.
+* Fixed a build failure when compiling against GCC 15's libstdc++ under C++20.
+
+### Added
+
+* Added support for building kernels with debug symbols. Set `MIOPEN_DEBUG_SYMBOLS_KERNEL=1` to add debug symbols.
+* [BatchNorm] Implements Welford's algorithm for calculating variance in FwdTrainSpatial variant 1
+* [RNN] Added a fused single-layer LSTM forward-inference kernel, gated behind `MIOPEN_DEBUG_RNN_FUSED_INFERENCE` (disabled by default).
+* [Conv] Added a naive reference kernel enabling 3D INT8 forward convolution.
+* [Conv] Added the `ConvHipConv` solver backed by vendored hipconv kernels.
+* [Conv] Added float8 vector type support and deduplicated the shared math kernels.
+* [Conv] Added validated gfx1151 and gfx1200 (Navi) SystemDBs so immediate-mode lookups use tuned entries instead of generic heuristics.
+* [Conv] Added `MIOPEN_DEBUG_DISABLE_SYSTEM_DB` and `MIOPEN_DEBUG_DISABLE_USER_DB` runtime environment variables to disable the system and user databases.
+* [Conv] Enabled Composable Kernel (CK) depthwise convolution on RDNA wave32 GPUs.
+
+### Changed
+* [Conv] Pruned ASM-GTC NHWC entries from the gfx908, gfx90a, gfx942, and gfx950 system find-databases for shapes the new large-tensor guard rejects, so immediate-mode lookups no longer resolve to a solver that is gated off at runtime. This removes 12,907 entries across the six databases, 4,668 of them rank-1, and empties 81 keys.
+* [Conv] Enabled the Winograd Rage RxS f2x3 solver on gfx950 and updated the gfx942 kernels to v4_6_1/v4_9_1.
+* [Conv] Updated the 3D AI heuristics (solver selection) for gfx942 and gfx950.
+
+### Optimized
+* [Conv] Use a single GEMM for point (1x1) output convolutions in all three directions (forward, backward-data, and backward-weights) for both 2D and 3D.
+* [Conv] Optimized the naive backward-data convolution kernel by widening its work group to 1024 threads.
+
+### Removed
+* Removed disabled convolution solver `ConvCkIgemmFwdV6r1DlopsNchw`.
+* Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV1R1Xdlops`.
+* Removed disabled convolution solver `ConvHipImplicitGemmBwdDataV4R1`.
+
+## MIOpen 3.6.0 for ROCm 10.0.0
+### Added
+* [Conv] Added gfx950 (MI350X/MI355X) 7x7 depthwise forward and backward-data convolution support (fp16/bf16), fixing a slow fallback-to-naive-kernel regression in ConvNeXt-style depthwise convolutions.
+
+### Changed
+* [Conv] Restored gfx12x support in the Winograd Rage solver, recovering performance that regressed when earlier gfx12 support was reverted.
+* [Conv] Refreshed the gfx1100, gfx1102, and gfx1201 (Navi) SystemDBs with updated tuned find/perf-database entries.
+* [Conv] Refreshed the gfx950 SystemDB with additional tuned entries to cover more models.
+* [Conv] Naive convolution solvers are now time-bounded during find when a non-naive solver has already succeeded. The warmup run is launched on a separate stream with a budget of 3x the best non-naive time; if it exceeds this budget the solver is skipped. Set `MIOPEN_NAIVE_TIMEOUT=0` to disable this behavior.
+
+### Resolved Issues
+* [BatchNorm] Fixed an off-by-stride indexing bug in the backward CalcStats mean/variance remainder loop that caused a ~1% systematic bias in NCHW batch normalization backward results.
+* [Conv][gfx1250] Fixed an integer overflow in tensor operation kernels for large allocations that could cause memory access faults.
+* [Conv] Fixed a naive convolution solver failure mode where a global work size of 2^32 or more work-items silently failed to launch and left a stale HIP error visible after Find returned success; such launches are now rejected up front.
+
+### Removed
+* Removed the OpenCL (OCL) backend; MIOpen now supports the HIP backend only.
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
@@ -12,13 +150,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Changed
 * [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
-* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
 * [Conv] Refreshed the gfx942 SystemDB with updated tuned entries from recent perf-eval runs.
 * [Conv] Refined the 2D AI heuristics (Tunanet solver selection and kernel-tuning-network candidate ranking) with feature-engineered inputs for gfx942 and gfx950, improving selection for grouped implicit-GEMM convolutions.
 
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 * [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
+* [Conv] Gated the unmaintained ASM-GTC NHWC solvers (`ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`, `ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC` and `ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC`) off tensors whose size in bytes exceeds the int32 addressable range, preventing them from being selected and silently returning incorrect results on large convolutions.
 * [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
 * Fixed a thread-safety issue where concurrent access to the AI-heuristic model caches was not guarded by a mutex.
 * [Conv] Fixed Composable Kernel (CK) grouped-convolution solvers not always being registered in host code.

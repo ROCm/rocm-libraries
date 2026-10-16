@@ -697,6 +697,14 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("cotenant-cus",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_cus())->default_value(0),
+         "Cotenant workgroup count on a separate stream; 0 (default) disables it. Must not exceed the device CU count. With max occupancy > 1, workgroups may share CUs.")
+
+        ("cotenant-max-occupancy",
+         value<int32_t>(&hipblaslt_bench_options::cotenant_max_occupancy())->default_value(1),
+         "Cotenant LDS-based workgroups-per-CU limit, 1-64 (default: 1).")
+
         ("sm_count_target",
          value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
          "Target compute-unit (CU) count for the matmul kernel selection and "
@@ -705,10 +713,23 @@ try
 
         ("streamk_tile_scheduling",
          value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
-         "Select the StreamK=5 tile scheduling sub-path via the "
+         "Legacy alias for hybrid_assignment_policy via the "
          "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
          "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
-         "leaves the attribute unset so the library default (auto) applies.")
+         "leaves the attribute unset so the library default applies.")
+
+        ("hybrid_assignment_policy",
+         value<std::string>(&hipblaslt_bench_options::hybrid_assignment_policy_str())->default_value(""),
+         "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. "
+         "Default preserves the existing behavior, including the heuristic with a positive sm_count_target. "
+         "This option does not select a kernel family.")
+
+        ("uniform_summation_order",
+         value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
+         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
+         "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
+         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
 
         ("help,h", "produces this help message")
 
@@ -872,36 +893,58 @@ try
         return 1;
     }
 
+    if(const auto err = hipblaslt_cotenant::validate_options(
+           hipblaslt_bench_options::cotenant_cus(),
+           hipblaslt_bench_options::cotenant_max_occupancy());
+       !err.empty())
+    {
+        hipblaslt_cerr << err << std::endl;
+        return 1;
+    }
+
     if(hipblaslt_bench_options::sm_count_target() < 0)
     {
         hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
         return 1;
     }
 
-    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
-    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
-    // means "unset": leave the attribute untouched so the library default applies.
-    {
-        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+    // Empty string stays unset (-1). off|0, on|1, and optionally auto|2.
+    auto parseModeFlag = [](std::string mode, bool allowAuto, const char* err) -> int32_t {
         std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
         });
-        int32_t resolved = -1;
         if(mode.empty())
-            resolved = -1;
-        else if(mode == "off" || mode == "0")
-            resolved = 0;
-        else if(mode == "on" || mode == "1")
-            resolved = 1;
-        else if(mode == "auto" || mode == "2")
-            resolved = 2;
-        else
-        {
-            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
-                           << std::endl;
+            return -1;
+        if(mode == "off" || mode == "0")
+            return 0;
+        if(mode == "on" || mode == "1")
             return 1;
-        }
-        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+        if(allowAuto && (mode == "auto" || mode == "2"))
+            return 2;
+        hipblaslt_cerr << err << std::endl;
+        return -2;
+    };
+
+    try
+    {
+        hipblaslt_bench_options::streamk_tile_scheduling_mode()
+            = hipblaslt_bench_options::resolve_hybrid_assignment_policy(
+                hipblaslt_bench_options::hybrid_assignment_policy_str(),
+                hipblaslt_bench_options::streamk_tile_scheduling_mode_str());
+    }
+    catch(std::invalid_argument const& error)
+    {
+        hipblaslt_cerr << error.what() << std::endl;
+        return 1;
+    }
+
+    {
+        const int32_t resolved = parseModeFlag(hipblaslt_bench_options::uniform_summation_order_str(),
+                                               false,
+                                               "uniform_summation_order must be one of off|0, on|1.");
+        if(resolved == -2)
+            return 1;
+        hipblaslt_bench_options::uniform_summation_order() = resolved;
     }
 
     // transfer local variable state
@@ -976,8 +1019,13 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
+    if(hipblaslt_bench_options::cotenant_cus() > props.multiProcessorCount)
+        throw std::invalid_argument("cotenant-cus must not exceed the device CU count ("
+                                    + std::to_string(props.multiProcessorCount) + ").");
+
     auto perf_monitor = EfficiencyMonitor::create();
-    perf_monitor->setDeviceId(device_id);
+    if(perf_monitor->enabled())
+        perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -1238,6 +1286,11 @@ try
     return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
+{
+    hipblaslt_cerr << exp.what() << std::endl;
+    return -1;
+}
+catch(const std::runtime_error& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;

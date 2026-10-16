@@ -25,7 +25,7 @@ left_nav_title = f"hipFFT {version_number} Documentation"
 # for PDF output on Read the Docs
 project = "hipFFT Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -40,4 +40,18 @@ external_projects_current_project = "hipfft"
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
+# Theme-related settings
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipfft/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True

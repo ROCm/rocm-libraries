@@ -22,7 +22,12 @@ interchangeable engines:
   - ``"both"``    run both engines and assert they agree, returning the
                   Python result on success and raising a precise diff on
                   mismatch. Use this as a differential gate while the two
-                  engines are being kept in lock-step.
+                  engines are being kept in lock-step. ``both`` NEVER falls
+                  back to Python: if the C++ engine cannot lower the kernel
+                  the call raises (:class:`BackendCoverageGap` for an arch on
+                  the named unported list, the engine's own error otherwise).
+                  Returning the Python result there would report an
+                  uncompared kernel as parity-verified.
 
 Backend selection
 -----------------
@@ -100,6 +105,33 @@ class BackendMismatch(AssertionError):
     Carries a precise, human-readable diff describing which artifact
     (serialized IR or lowered ``.ll``) diverged and where.
     """
+
+
+class BackendCoverageGap(BackendError):
+    """Raised by ``"both"`` mode for a kernel the C++ engine cannot lower yet.
+
+    Distinct from :class:`BackendMismatch` (the engines produced different IR)
+    and from a plain engine error (an unexpected failure): this names a gap we
+    already know about and track in :data:`CPP_UNPORTED_ARCHES`. ``both`` still
+    refuses to return the Python result -- the caller gets an exception, not
+    silently-unverified IR. The test layer turns this into a visible *skip* so
+    the gap is counted in the run summary instead of passing as a green
+    parity check.
+    """
+
+
+# Arches the Python engine lowers but the C++ engine has no ISA backend for.
+# This is the ONE place the gap is named; ``both`` consults it to classify an
+# engine failure as a known gap rather than an unexpected error, and the test
+# layer reports those as skips. Removing an entry here is what "ported" means:
+# the differential lane then holds the arch to full byte-identity.
+#
+# Empty: every arch Python lowers, the C++ engine lowers too, and the
+# differential lane holds all of them to byte-identity. gfx1250 was the last
+# entry and came off when ``LL_BACKEND_GFX1250`` landed in
+# cpp/core/lower_llvm/core.cpp. Do not add an arch here to quiet a divergence
+# on one the engine already supports -- that is a regression, not a gap.
+CPP_UNPORTED_ARCHES: Tuple[str, ...] = ()
 
 
 def resolve_backend(backend: Optional[str] = None) -> str:
@@ -225,18 +257,17 @@ def _lower_via_cpp_engine(
     Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
     the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
     before handing it to the engine, rather than passing ``""`` (engine
-    AUTO). The C99 engine's own AUTO resolver only consults
-    ``$ROCKE_LLVM_FLAVOR`` -> ``/opt/rocm/.info/version`` -> default
-    llvm22; it cannot portably introspect ``torch.version.hip``. The Python
-    autodetector adds the torch step in between, which is what the bundled
-    comgr actually keys off. Resolving here makes ``backend="cpp"`` pick the
-    SAME flavor as ``backend="python"`` on a torch-rocm box where
-    ``/opt/rocm`` is absent or a different vintage; without it the two
-    backends emit non-byte-identical IR unless ``ROCKE_LLVM_FLAVOR`` is
-    forced. An explicit ``llvm_flavor`` argument still overrides. On a
-    torch-less box the torch step returns ``None`` and the Python resolver
-    falls through to ``/opt/rocm`` / default exactly as the engine would,
-    so behaviour is unchanged.
+    AUTO). Python queries the COMGR handle retained by its runtime, while
+    standalone native AUTO discovers and queries its own retained candidate.
+    Passing the Python-resolved flavor keeps ``backend="cpp"`` and
+    ``backend="python"`` aligned with the compiler selected by the Python
+    runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
+    argument still overrides automatic selection and supports offline emission.
+    Both core resolvers reject automatic selection when compiler evidence is
+    unavailable; offline emission requires an explicit flavor.
+    A native caller that owns a separate compilation stage must
+    pass a flavor matching its compiler; native AUTO does not share its private
+    handle with that stage.
 
     Raises :class:`BackendError` if the engine extension is unavailable.
     """
@@ -251,9 +282,9 @@ def _lower_via_cpp_engine(
     # contract is backend-INDEPENDENT: backend="cpp" must reject a bad flavor with
     # the same ValueError as backend="python"/"both", not the engine's RuntimeError
     # (which only surfaces once the rocke_engine .so is on the path).
-    from .lower_llvm import LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22
+    from .lower_llvm import LLVM_FLAVORS
 
-    if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
+    if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
@@ -297,7 +328,13 @@ def lower_kernel_via_backend(
         genuinely expected.
       - ``"both"``   -> lower with both and assert byte-equality, returning the
         Python result (the differential oracle). A mismatch raises
-        :class:`BackendMismatch`.
+        :class:`BackendMismatch`. There is **no fallback in this mode**: if the
+        C++ engine cannot lower the kernel, the call raises
+        :class:`BackendCoverageGap` for an arch named in
+        :data:`CPP_UNPORTED_ARCHES` and re-raises the engine's own error
+        otherwise. Returning the Python result on engine failure would hand
+        back IR that nothing compared while the caller asked for a comparison,
+        which is exactly the vacuous green this mode exists to prevent.
     """
     chosen = resolve_backend()
 
@@ -320,10 +357,30 @@ def lower_kernel_via_backend(
             _record_fallback(name, f"{type(e).__name__}: {e}")
             return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
-    # both: differential gate.
+    # both: differential gate, and the one mode that never falls back. Handing
+    # back ``py_ll`` when the C++ engine failed would report a kernel nothing
+    # compared as parity-verified -- the precise failure this mode exists to
+    # catch -- so every cpp-side failure propagates. A failure on an arch named
+    # in CPP_UNPORTED_ARCHES is re-raised as BackendCoverageGap so the test
+    # layer can count it as a skip; anything else surfaces unchanged, including
+    # ValueError (both engines validate an explicit flavor against the same
+    # table, so one rejecting what the other accepted is a real defect).
     py_ll = python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
     ir_text = serialize(kernel)
-    cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+    try:
+        cpp_ll = _lower_via_cpp_engine(ir_text, _arch, llvm_flavor)
+    except ValueError:
+        raise
+    except BaseException as e:  # noqa: BLE001 -- includes BackendError
+        if _arch in CPP_UNPORTED_ARCHES:
+            raise BackendCoverageGap(
+                f"the C++ engine has no ISA backend for {_arch}, so kernel "
+                f"'{name}' cannot be cross-checked: {type(e).__name__}: {e}. "
+                f"This arch is listed in backend.CPP_UNPORTED_ARCHES; port it "
+                f"to remove the gap. ROCKE_BACKEND=both will not substitute "
+                f"the Python result for an uncompared kernel."
+            ) from e
+        raise
     if py_ll != cpp_ll:
         raise BackendMismatch(
             f"python vs cpp engine disagree for kernel '{name}' on {_arch}:\n"
@@ -777,6 +834,7 @@ def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
         pW=p.pW,
         dH=p.dH,
         dW=p.dW,
+        groups=getattr(p, "groups", 1),
     )
     for f in ("Di", "Z", "sD", "pD", "dD"):
         v = getattr(p, f, None)
@@ -812,6 +870,9 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         chiplet_chunk_size=spec.chiplet_chunk_size,
         k0_k1_split=spec.k0_k1_split,
         groups=spec.groups,
+        # Changes the emitted kernel and its launch grid; dropped, the engine
+        # would build an unmerged kernel under a merged spec's name and grid.
+        group_merge=getattr(spec, "group_merge", 1),
     )
     # dtype_* and the vector-size/optional knobs are merge-target additions
     # (#8624); forward them only when this branch's spec exposes them so the
@@ -851,6 +912,8 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
             KW=p.KW,
             PAD=p.PAD,
             stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
         ),
         name=spec.name,
         block_q=spec.block_q,
@@ -862,6 +925,46 @@ def conv_direct_grouped_spec_to_dict(spec: Any, kind: str) -> Dict[str, Any]:
         if v is not None:
             d[f] = v
     return d
+
+
+def conv_direct_nongrouped_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectNongroupedConvSpec` -> flat dict (problem nested, dtype included).
+    ``iglp`` / ``waves_per_eu`` are forwarded as-is; ``None`` means "knob off"."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        tile_h=spec.tile_h,
+        tile_w=spec.tile_w,
+        tile_k=spec.tile_k,
+        ck=spec.ck,
+        waves_m=spec.waves_m,
+        waves_n=spec.waves_n,
+        atom=spec.atom,
+        wave_size=spec.wave_size,
+        lds_pad=spec.lds_pad,
+        chiplet_swizzle=spec.chiplet_swizzle,
+        swizzle_wgm=spec.swizzle_wgm,
+        chiplet_chunk=spec.chiplet_chunk,
+        num_xcds=spec.num_xcds,
+        double_buffer=spec.double_buffer,
+        iglp=spec.iglp,
+        waves_per_eu=spec.waves_per_eu,
+    )
 
 
 def img2col_spec_to_dict(spec: Any) -> Dict[str, Any]:
@@ -1369,7 +1472,7 @@ def lower_conv_implicit_gemm(
     """Lower an :class:`ImplicitGemmConvSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.conv_implicit_gemm import build_implicit_gemm_conv
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
         from .lower_llvm import lower_kernel_to_llvm
 
         k = build_implicit_gemm_conv(spec, arch=arch)
@@ -1408,7 +1511,7 @@ def lower_conv_direct_grouped(
     ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
@@ -1439,6 +1542,43 @@ def lower_conv_direct_grouped(
     )
 
 
+def lower_conv_direct_nongrouped(
+    spec: Any,
+    *,
+    arch: str = "gfx950",
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DirectNongroupedConvSpec` (the ``groups == 1`` direct conv)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_nongrouped import build_direct_conv_nongrouped
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_conv_nongrouped(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_nongrouped_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_nongrouped",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_nongrouped_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_nongrouped_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
 def lower_img2col(
     spec: Any,
     *,
@@ -1449,7 +1589,7 @@ def lower_img2col(
     """Lower an :class:`Img2ColSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.img2col import build_img2col
+        from kernels.common.img2col import build_img2col
         from .lower_llvm import lower_kernel_to_llvm
 
         k = build_img2col(spec, arch=arch)
@@ -1486,7 +1626,7 @@ def lower_deep_fused_conv_pool(
     """Lower a :class:`DeepFusedConvPoolSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.deep_fused_conv_pool import (
+        from kernels.common.deep_fused_conv_pool import (
             build_deep_fused_conv_pool,
         )
         from .lower_llvm import lower_kernel_to_llvm

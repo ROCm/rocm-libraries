@@ -82,6 +82,17 @@ Here are some common ways to build the dependencies, library, and client:
    "``inv build --install-deps --clients``", "Install system dependencies and build the library and client."
    "``inv build --clients``", "Build the library and client. Assumes dependencies are already installed."
    "``inv build --install-deps --clients --install-pkg``", "Build everything and install the hipBLASLt package."
+   "``inv build --clients --fortran-compiler gfortran``", "Build the library and client using gfortran instead of auto-detected ROCm flang."
+
+Client builds require a Fortran compiler because they link LAPACK.
+``inv build --clients`` passes ``-DCMAKE_Fortran_COMPILER`` (and the same
+value to the ``deps`` CMake when ``--install-deps`` is used). The compiler is
+taken from ``--fortran-compiler`` if given, otherwise ``FC``, otherwise
+``CMAKE_Fortran_COMPILER``, otherwise ROCm ``flang`` under ``--rocm-path`` /
+``ROCM_PATH`` / ``/opt/rocm`` (``llvm/bin/flang``, ``bin/amdflang``,
+``bin/flang``, then ``flang`` on ``PATH``), otherwise ``gfortran`` on
+``PATH``. Invoke exits if none of those are found.
+Without ``--clients``, Fortran is not enabled.
 
 Static library
 --------------

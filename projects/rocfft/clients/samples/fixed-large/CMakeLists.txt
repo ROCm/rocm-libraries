@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -87,14 +87,6 @@ foreach( sample ${sample_list} )
                         RUNTIME_OUTPUT_DIRECTORY 
                         ${FIXED_LARGE_OUT_DIR})
 
-  if( CUDA_FOUND )
-    target_include_directories( ${sample}
-      PRIVATE
-        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-        $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-      )
-    target_compile_definitions( ${sample} PRIVATE __HIP_PLATFORM_NVCC__ )
-  endif( )
-  target_link_libraries( ${sample} PRIVATE ${ROCFFT_CLIENTS_HOST_LINK_LIBS} )
+  target_link_libraries( ${sample} PRIVATE hip::host )
 
 endforeach( )

@@ -2,6 +2,39 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB 4.7.1 for ROCm 10.2
+
+### Fixed
+
+* Memory leak in device_reduce unit test.
+* Incorrect benchmark measurements for block_run_length_encode and block_histogram.
+
+### Upcoming changes
+
+* This project location will be deprecated in ROCm 10.3.  See the new hipCCL project folder at https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipccl.
+
+## hipCUB 4.7.0 for ROCm 10.1
+
+### Changed
+
+* Benchmarking now uses primbench for its benchmarks instead of Google Benchmark.
+  * See `shared/primbench/README.md` for its documentation.
+
+## hipCUB 4.6.0 for ROCm 10.0
+ 
+### Added
+ 
+* Return value checks for assorted locations in the codebase that were previously missing.
+ 
+### Fixed
+ 
+* DeviceSegmentedRadixSort test failure when using hipMallocManaged with size 0.
+* Fixed uninitialized automatic variable bug in BlockReduce.
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
+
 ## hipCUB 4.5.0 for ROCm 7.14
 
 ### Added

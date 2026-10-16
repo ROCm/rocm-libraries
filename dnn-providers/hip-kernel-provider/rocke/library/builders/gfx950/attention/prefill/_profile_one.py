@@ -68,7 +68,7 @@ problem = UnifiedAttentionProblem(
     use_alibi=False,
     use_qq_bias=False,
     use_fp8=False,
-    num_sms=256,
+    num_cus=256,
 )
 out = torch.empty_like(data["query"])
 st = torch.cuda.current_stream().cuda_stream

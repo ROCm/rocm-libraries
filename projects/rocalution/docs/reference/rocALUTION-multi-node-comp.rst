@@ -26,7 +26,7 @@ This document describes all the base objects (matrices and vectors) for computat
 
 To each compute node, one or more accelerators can be attached. The compute node could be any kind of shared-memory (single, dual, quad CPU) system, details on a single-node can be found in :ref:`single-node`.
 
-.. note:: 
+.. note::
 
   The memory of accelerator and host are physically different. All nodes can communicate with each other via network.
 
@@ -63,28 +63,30 @@ Each object contains two local sub-objects. The global matrix stores interior an
 
 Parallel manager
 ================
-.. doxygenclass:: rocalution::ParallelManager
+
+The :cpp:class:`rocalution::ParallelManager` class manages the global communication pattern between processes.
+For the full API, see the :ref:`api` page.
 
 The parallel manager class hosts the following functions:
 
-.. doxygenfunction:: rocalution::ParallelManager::SetMPICommunicator
-.. doxygenfunction:: rocalution::ParallelManager::Clear
-.. doxygenfunction:: rocalution::ParallelManager::GetGlobalNrow
-.. doxygenfunction:: rocalution::ParallelManager::GetGlobalNcol
-.. doxygenfunction:: rocalution::ParallelManager::GetLocalNrow
-.. doxygenfunction:: rocalution::ParallelManager::GetLocalNcol
-.. doxygenfunction:: rocalution::ParallelManager::GetNumReceivers
-.. doxygenfunction:: rocalution::ParallelManager::GetNumSenders
-.. doxygenfunction:: rocalution::ParallelManager::GetNumProcs
-.. doxygenfunction:: rocalution::ParallelManager::SetGlobalNrow
-.. doxygenfunction:: rocalution::ParallelManager::SetGlobalNcol
-.. doxygenfunction:: rocalution::ParallelManager::SetLocalNrow
-.. doxygenfunction:: rocalution::ParallelManager::SetLocalNcol
-.. doxygenfunction:: rocalution::ParallelManager::SetBoundaryIndex
-.. doxygenfunction:: rocalution::ParallelManager::SetReceivers
-.. doxygenfunction:: rocalution::ParallelManager::SetSenders
-.. doxygenfunction:: rocalution::ParallelManager::ReadFileASCII
-.. doxygenfunction:: rocalution::ParallelManager::WriteFileASCII
+- :cpp:func:`rocalution::ParallelManager::SetMPICommunicator`
+- :cpp:func:`rocalution::ParallelManager::Clear`
+- :cpp:func:`rocalution::ParallelManager::GetGlobalNrow`
+- :cpp:func:`rocalution::ParallelManager::GetGlobalNcol`
+- :cpp:func:`rocalution::ParallelManager::GetLocalNrow`
+- :cpp:func:`rocalution::ParallelManager::GetLocalNcol`
+- :cpp:func:`rocalution::ParallelManager::GetNumReceivers`
+- :cpp:func:`rocalution::ParallelManager::GetNumSenders`
+- :cpp:func:`rocalution::ParallelManager::GetNumProcs`
+- :cpp:func:`rocalution::ParallelManager::SetGlobalNrow`
+- :cpp:func:`rocalution::ParallelManager::SetGlobalNcol`
+- :cpp:func:`rocalution::ParallelManager::SetLocalNrow`
+- :cpp:func:`rocalution::ParallelManager::SetLocalNcol`
+- :cpp:func:`rocalution::ParallelManager::SetBoundaryIndex`
+- :cpp:func:`rocalution::ParallelManager::SetReceivers`
+- :cpp:func:`rocalution::ParallelManager::SetSenders`
+- :cpp:func:`rocalution::ParallelManager::ReadFileASCII`
+- :cpp:func:`rocalution::ParallelManager::WriteFileASCII`
 
 To setup a parallel manager, the required information is:
 

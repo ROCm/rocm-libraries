@@ -1,0 +1,40 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --SwInstructionPrefetchRelDynamicPass --AccumulateInstructionSizeDebugPass 2>&1
+#
+# SwInstructionPrefetchRelDynamicPass: getpc forward-window redirect.
+#
+# A PC-relative address is built by s_getpc_b64 followed by relocation-carrying
+# scalar adds. Inserting an s_prefetch_inst_pc_rel BETWEEN s_getpc_b64 and its
+# fixup adds would shift the fixups relative to the getpc anchor and corrupt the
+# computed PC. The pass therefore protects a forward window of N real
+# instructions starting at s_getpc_b64: when a grid point P(k) lands inside that
+# window, the prefetch is REDIRECTED to just BEFORE s_getpc_b64 so the
+# getpc -> add chain stays contiguous.
+#
+# Layout: v_add [0,4); .align pads to 32628; s_getpc_b64 [32628,32632) is placed
+# just below P(0)=32640 with its add fixups crossing the grid point, so the
+# per-BB anchor grid point at 32640 falls inside the getpc window and triggers
+# the redirect.
+
+#--- getpc window redirect: wait + prefetch land BEFORE s_getpc_b64, chain stays intact.
+# The XNACK s_wait_xcnt 0 (4 B) precedes the redirected prefetch, so both sit before s_getpc_b64
+# and the getpc -> add fixup chain remains contiguous.
+# CHECK-LABEL: [.align 32628 padding=
+# CHECK: {{.*}}total=32632 bytes{{.*}}s_wait_xcnt{{.*}}(0)
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32644 bytes{{.*}}s_getpc_b64
+# The getpc -> add fixup chain must be contiguous (no prefetch spliced inside it).
+# CHECK-NOT: s_prefetch_inst_pc_rel
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_add_u32
+# CHECK: {{.*}}total=32652 bytes{{.*}}s_add_u32
+# CHECK: {{.*}}total=32656 bytes{{.*}}v_add_f32
+# CHECK: [AccumulateInstructionSizePass] total size = 32656 bytes
+
+st.func @getpc_window_redirect() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.asm_directive"(".align", "32628")
+  s[0:1] = "st.s_getpc_b64"() { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 4) { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_u32"(s0, 8) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+}

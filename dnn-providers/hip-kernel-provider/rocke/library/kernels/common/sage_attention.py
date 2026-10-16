@@ -532,7 +532,12 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
         c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
 
         def _k_block_scale_transform(
-            b: IRBuilder, score: Value, kt: Value, _row_in_atom: int
+            b: IRBuilder,
+            score: Value,
+            kt: Value,
+            _row_in_atom: int,
+            _query_pos: Value,
+            _key_pos: Value,
         ) -> Value:
             """Apply ``k_scale[k_block_idx(kt)]`` to one per-lane score.
 
@@ -726,9 +731,9 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         """
         if is_i4:
             byte_off = _magic_div(b, lane_d_base, 2)  # = tid
-            packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
+            packed_k = b.global_load_i8(K, b.add(k_row_base, byte_off))
             lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
-            packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
+            packed_v = b.global_load_i8(V, b.add(v_row_base, byte_off))
             v_lo, v_hi = _codebook_i4_pair_to_f32(b, cb_v, packed_v)
             return [lo_k, hi_k], [v_lo, v_hi]
         k_lane = _load_kv_lane_f32(

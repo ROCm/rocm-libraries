@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "rocke/arena.h"
+#include "rocke/dtypes.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -52,8 +53,16 @@ ROCKE_SCALAR_SINGLETON(rocke_i64, ROCKE_SCALAR_I64, "i64")
 ROCKE_SCALAR_SINGLETON(rocke_bf16, ROCKE_SCALAR_BF16, "bf16")
 ROCKE_SCALAR_SINGLETON(rocke_f16, ROCKE_SCALAR_F16, "f16")
 ROCKE_SCALAR_SINGLETON(rocke_f32, ROCKE_SCALAR_F32, "f32")
+ROCKE_SCALAR_SINGLETON(rocke_tf32, ROCKE_SCALAR_TF32, "tf32")
+ROCKE_SCALAR_SINGLETON(rocke_f64, ROCKE_SCALAR_F64, "f64")
 ROCKE_SCALAR_SINGLETON(rocke_fp8e4m3, ROCKE_SCALAR_FP8E4M3, "fp8e4m3")
 ROCKE_SCALAR_SINGLETON(rocke_bf8e5m2, ROCKE_SCALAR_BF8E5M2, "bf8e5m2")
+
+ROCKE_SCALAR_SINGLETON(rocke_fp4e2m1, ROCKE_SCALAR_FP4E2M1, "fp4e2m1")
+ROCKE_SCALAR_SINGLETON(rocke_fp6e2m3, ROCKE_SCALAR_FP6E2M3, "fp6e2m3")
+ROCKE_SCALAR_SINGLETON(rocke_fp6e3m2, ROCKE_SCALAR_FP6E3M2, "fp6e3m2")
+ROCKE_SCALAR_SINGLETON(rocke_e8m0, ROCKE_SCALAR_E8M0, "e8m0")
+ROCKE_SCALAR_SINGLETON(rocke_e5m3, ROCKE_SCALAR_E5M3, "e5m3")
 
 #undef ROCKE_SCALAR_SINGLETON
 
@@ -75,13 +84,41 @@ const rocke_type_t* rocke_scalar_by_name(const char* name)
         return rocke_bf16();
     if(strcmp(name, "f16") == 0)
         return rocke_f16();
+    if(strcmp(name, "tf32") == 0)
+        return rocke_tf32();
     if(strcmp(name, "f32") == 0)
         return rocke_f32();
-    if(strcmp(name, "fp8e4m3") == 0)
+    if(strcmp(name, "f64") == 0)
+        return rocke_f64();
+    if(strcmp(name, "fp8e4m3") == 0 || strcmp(name, "e4m3") == 0)
         return rocke_fp8e4m3();
     if(strcmp(name, "bf8e5m2") == 0)
         return rocke_bf8e5m2();
+    if(strcmp(name, "fp4e2m1") == 0)
+        return rocke_fp4e2m1();
+    if(strcmp(name, "fp6e2m3") == 0)
+        return rocke_fp6e2m3();
+    if(strcmp(name, "fp6e3m2") == 0)
+        return rocke_fp6e3m2();
+    if(strcmp(name, "e8m0") == 0)
+        return rocke_e8m0();
+    if(strcmp(name, "e5m3") == 0)
+        return rocke_e5m3();
     return NULL;
+}
+
+const rocke_type_t* rocke_dtype_to_ir_type(const char* dtype)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    if(!info)
+        return NULL;
+    if(strcmp(info->name, "fp16") == 0)
+        return rocke_f16();
+    if(strcmp(info->name, "fp32") == 0)
+        return rocke_f32();
+    if(strcmp(info->name, "fp64") == 0)
+        return rocke_f64();
+    return rocke_scalar_by_name(info->name);
 }
 
 /* VectorType(elem, count) -> "vec<{elem}x{count}>" */
@@ -131,9 +168,10 @@ const rocke_type_t*
     return t;
 }
 
-/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>" */
-const rocke_type_t*
-    rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank)
+/* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>"
+ * `exclusive` is kept OUT of the name (default 0 stays byte-identical). */
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive)
 {
     rocke_type_t* t;
     int* shape_copy = NULL;
@@ -146,6 +184,9 @@ const rocke_type_t*
     if(!elem)
         return (const rocke_type_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "smem_type: NULL element type");
+    if(exclusive != 0 && exclusive != 1)
+        return (const rocke_type_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "smem_type: exclusive must be 0 or 1, got %d", exclusive);
     if(rank < 0)
         rank = 0;
 
@@ -166,6 +207,7 @@ const rocke_type_t*
     t->elem = elem;
     t->shape = shape_copy;
     t->rank = rank;
+    t->smem_exclusive = exclusive; /* guarded to 0/1 above */
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
@@ -405,6 +447,14 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
     }
 }
 
+bool rocke_scheduler_strategy_is_valid(const char* strategy)
+{
+    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
+           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
+           || strcmp(strategy, "iterative-minreg") == 0
+           || strcmp(strategy, "iterative-maxocc") == 0;
+}
+
 /* ============================ OPCODE TABLE ============================== */
 
 /* Canonical dotted name per opcode, indexed by the enum value. Order MUST match
@@ -470,6 +520,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
 
     /* math.* */
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",
@@ -480,6 +531,11 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* gpu.* */
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.cluster_id",
+    "gpu.cluster_workgroup_id",
+    "gpu.cluster_workgroup_max_id",
+    "gpu.cluster_workgroup_flat_id",
+    "gpu.cluster_workgroup_max_flat_id",
 
     /* memref.* */
     "memref.global_load",
@@ -491,6 +547,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_atomic_add",
     "memref.global_atomic_add_f32",
     "memref.global_atomic_add_pk_bf16",
+    "memref.global_atomic_add_pk_f16",
     "memref.cooperative_global_store",
 
     /* vector.* */
@@ -536,6 +593,12 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_load_lds",
     "tile.async_buffer_load_lds",
     "tile.async_buffer_load_lds_addr",
+    "tile.buffer_load_lds_async",
+    "tile.global_load_async_to_lds",
+    "tile.global_store_async_from_lds",
+    "tile.global_load_tr16_b128",
+    "tile.tensor_load_to_lds",
+    "tile.tensor_store_from_lds",
     "tile.buffer_rsrc",
     "tile.buffer_load_f16",
     "tile.buffer_load_vN_f16",
@@ -566,6 +629,20 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.ds_bpermute",
     "tile.ds_bpermute_b64",
     "tile.ds_swizzle_xor",
+    "tile.ds_swizzle",
+    "tile.mov_dpp8",
+    "tile.quad_perm",
+    "tile.dpp_xor",
+    "tile.wave_reduce",
+    "tile.readlane",
+    "tile.writelane",
+    "tile.permlane16",
+    "tile.permlane64",
+    "tile.alignbyte",
+    "tile.s_wqm",
+    "tile.av_load_b128",
+    "tile.av_store_b128",
+    "tile.s_alloc_vgpr",
     "tile.mov_dpp",
     "tile.permlane32_swap",
     "tile.perm_b32",
@@ -581,16 +658,53 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.sync_lds_only",
     "tile.s_barrier_bare",
     "tile.s_waitcnt",
+    "tile.s_wait_asynccnt",
+    "tile.s_wait_tensorcnt",
+    "tile.s_barrier_signal",
+    "tile.s_barrier_wait",
+    "tile.s_barrier_init",
+    "tile.s_barrier_signal_var",
+    "tile.s_barrier_join",
+    "tile.s_wakeup_barrier",
+    "tile.s_barrier_leave",
+    "tile.asyncmark",
+    "tile.wait_asyncmark",
+    "tile.s_wait_event",
+    "tile.s_prefetch_inst",
+    "tile.s_setreg",
+    "tile.s_prefetch_data",
+    "tile.s_buffer_prefetch_data",
+    "tile.global_prefetch",
+    "tile.flat_prefetch",
+    "tile.cluster_barrier",
+    "tile.cluster_load",
+    "tile.cluster_load_async_to_lds",
+    "tile.global_ptr_to_i64",
     "tile.s_setprio",
     "tile.iglp_opt",
     "tile.sched_barrier",
     "tile.sched_group_barrier",
 
+    /* tile.* exec-mask (wavelet pipeline, MFMA path) */
+    "tile.exec_and_saveexec",
+    "tile.exec_xor",
+    "tile.exec_or_saveexec",
+    "tile.exec_or",
+
     /* scf.* / cf.* */
     "scf.for",
     "scf.if",
+    "scf.if_else",
     "scf.yield",
-    "cf.return"};
+    "cf.return",
+
+    /* memref.* cross-workgroup synchronisation */
+    "memref.fence",
+    "memref.global_flag_store",
+    "memref.global_flag_wait_eq",
+
+    "vector.undef",
+    "tile.buffer_load_f16_d16"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -675,6 +789,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
 
     /* math.* */
     /* math.exp2     */ true,
+    /* math.exp2_fast*/ true,
     /* math.log2     */ true,
     /* math.rcp      */ true,
     /* math.rcp_fast */ true,
@@ -685,6 +800,11 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* gpu.* */
     /* gpu.thread_id */ true,
     /* gpu.block_id  */ true,
+    /* gpu.cluster_id                    */ true,
+    /* gpu.cluster_workgroup_id          */ true,
+    /* gpu.cluster_workgroup_max_id      */ true,
+    /* gpu.cluster_workgroup_flat_id     */ true,
+    /* gpu.cluster_workgroup_max_flat_id */ true,
 
     /* memref.* (all effectful) */
     /* global_load                  */ false,
@@ -696,6 +816,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_atomic_add            */ false,
     /* global_atomic_add_f32        */ false,
     /* global_atomic_add_pk_bf16    */ false,
+    /* global_atomic_add_pk_f16     */ false,
     /* cooperative_global_store     */ false,
 
     /* vector.* */
@@ -741,6 +862,12 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_load_lds            */ false,
     /* async_buffer_load_lds      */ false,
     /* async_buffer_load_lds_addr */ false,
+    /* buffer_load_lds_async      */ false,
+    /* global_load_async_to_lds   */ false,
+    /* global_store_async_from_lds*/ false,
+    /* global_load_tr16_b128      */ false,
+    /* tensor_load_to_lds         */ false,
+    /* tensor_store_from_lds      */ false,
     /* buffer_rsrc                */ false,
     /* buffer_load_f16            */ false,
     /* buffer_load_vN_f16         */ false,
@@ -771,6 +898,20 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* ds_bpermute       */ true,
     /* ds_bpermute_b64   */ false,
     /* ds_swizzle_xor    */ true,
+    /* ds_swizzle        */ true,
+    /* mov_dpp8          */ true,
+    /* quad_perm         */ true,
+    /* dpp_xor           */ true,
+    /* wave_reduce       */ true,
+    /* readlane          */ true,
+    /* writelane         */ true,
+    /* permlane16        */ true,
+    /* permlane64        */ true,
+    /* alignbyte         */ true,
+    /* s_wqm             */ true,
+    /* av_load_b128      */ true,
+    /* av_store_b128     */ false,
+    /* s_alloc_vgpr      */ false,
     /* mov_dpp           */ false,
     /* permlane32_swap   */ true,
     /* perm_b32          */ true,
@@ -786,16 +927,53 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* sync_lds_only        */ false,
     /* s_barrier_bare       */ false,
     /* s_waitcnt            */ false,
+    /* s_wait_asynccnt      */ false,
+    /* s_wait_tensorcnt     */ false,
+    /* s_barrier_signal     */ false,
+    /* s_barrier_wait       */ false,
+    /* s_barrier_init       */ false,
+    /* s_barrier_signal_var */ false,
+    /* s_barrier_join       */ false,
+    /* s_wakeup_barrier     */ false,
+    /* s_barrier_leave      */ false,
+    /* asyncmark            */ false,
+    /* wait_asyncmark       */ false,
+    /* s_wait_event         */ false,
+    /* s_prefetch_inst      */ false,
+    /* s_setreg             */ false,
+    /* s_prefetch_data      */ false,
+    /* s_buffer_prefetch_data */ false,
+    /* global_prefetch      */ false,
+    /* flat_prefetch        */ false,
+    /* cluster_barrier      */ false,
+    /* cluster_load         */ false,
+    /* cluster_load_async_to_lds */ false,
+    /* global_ptr_to_i64    */ true,
     /* s_setprio            */ false,
     /* iglp_opt             */ false,
     /* sched_barrier        */ false,
     /* sched_group_barrier  */ false,
 
+    /* tile.* exec-mask (effectful: modify SGPR exec register) */
+    /* exec_and_saveexec  */ false,
+    /* exec_xor           */ false,
+    /* exec_or_saveexec   */ false,
+    /* exec_or            */ false,
+
     /* scf.* / cf.* (control flow, effectful) */
-    /* scf.for    */ false,
-    /* scf.if     */ false,
-    /* scf.yield  */ false,
-    /* cf.return  */ false};
+    /* scf.for      */ false,
+    /* scf.if       */ false,
+    /* scf.if_else  */ false,
+    /* scf.yield    */ false,
+    /* cf.return    */ false,
+
+    /* memref.* cross-workgroup synchronisation (effectful) */
+    /* memref.fence               */ false,
+    /* memref.global_flag_store   */ false,
+    /* memref.global_flag_wait_eq */ false,
+
+    /* vector.undef               */ false,
+    /* tile.buffer_load_f16_d16   */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

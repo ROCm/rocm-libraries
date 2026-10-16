@@ -1,7 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN, used under the MIT license.
+// Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   samples/cpp/utils/helpers.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file cudnn.h
@@ -27,6 +33,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_runtime_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
+#include <hipdnn_compatibility/cudnn/detail/logging_bridge.h>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
@@ -42,6 +49,13 @@ using cudnnHandle_t = ::hipdnnHandle_t;
 
 static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
               "cudnnHandle_t must alias the hipDNN handle type");
+
+/// @brief Opaque CUDA-graph handle placeholder for compile-only error stubs.
+///
+/// The cuDNN-shim graph-capture methods are unsupported at runtime; this alias
+/// exists only so v9 source naming `cudaGraph_t` compiles without pulling CUDA
+/// runtime headers into the shim umbrella.
+using cudaGraph_t = void*;
 
 // Only the C-API types the v9 graph API actually references are declared here
 // (cudnnHandle_t, plus cudnnStatus_t from cudnn_status.h). Other cuDNN C-API
@@ -61,6 +75,7 @@ extern "C" {
 /// @brief Create a cuDNN/hipDNN handle. Mirrors NVIDIA `cudnnCreate`.
 inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
 {
+    hipdnn_frontend::compatibility::cudnn_frontend::detail::configureHipdnnLoggingFromCudnnEnv();
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->create(handle));
 }
@@ -97,6 +112,12 @@ inline const char* cudnnGetErrorString(cudnnStatus_t status)
 inline size_t cudnnGetVersion(void)
 {
     return CUDNN_VERSION;
+}
+
+/// @brief Return the claimed CUDA-runtime version. Mirrors NVIDIA `cudnnGetCudartVersion`.
+inline size_t cudnnGetCudartVersion(void)
+{
+    return CUDNN_CUDART_VERSION;
 }
 
 } // extern "C"

@@ -1,0 +1,85 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_bfp16_nhwc_c2d207",
+          "2_3_1_1_fp16_nchw_8f4b95",
+          "2_3_1_1_fp32_nhwc_norlo_norslope_rhi6",
+          "2_3_3_1_1_bfp16_ncdhw_361751",
+          "2_3_3_1_1_fp16_ndhwc_rlo0_norslope_norhi",
+          "2_3_3_1_1_fp32_ncdhw_rlo0p1_norslope_rhi0p5",
+          "2_3_3_1_1_fp32_ndhwc_bf1c2e"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_fp32_nhwc_norlo_norslope_rhi6",
+          "2_3_1_bfp16_nlc",
+          "2_3_1_fp16_ncl",
+          "2_3_3_1_1_fp16_ndhwc_rlo0_norslope_norhi",
+          "2_3_3_1_1_fp32_ncdhw_rlo0p1_norslope_rhi0p5"
+        ],
+        "support": {
+          "gfx1030": [
+            "windows"
+          ],
+          "gfx1101": [
+            "linux"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

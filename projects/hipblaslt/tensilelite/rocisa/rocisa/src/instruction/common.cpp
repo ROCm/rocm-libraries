@@ -636,6 +636,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBfmB32& self, nb::dict&) { return new rocisa::SBfmB32(self); });
 
+    nb::class_<rocisa::SBfmB64, rocisa::CommonInstruction>(m_common, "SBfmB64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SBfmB64& self, nb::dict&) { return new rocisa::SBfmB64(self); });
+
     nb::class_<rocisa::SFlbitI32B32, rocisa::CommonInstruction>(m_common, "SFlbitI32B32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -876,6 +888,14 @@ void common_inst(nb::module_ m_common)
         .def("__str__", &rocisa::_SWaitStorecnt::toString)
         .def("__deepcopy__", [](const rocisa::_SWaitStorecnt& self, nb::dict&) {
             return new rocisa::_SWaitStorecnt(self);
+        });
+
+    nb::class_<rocisa::_SWaitAsynccnt, rocisa::Instruction>(m_common, "_SWaitAsynccnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("asynccnt") = -1, nb::arg("comment") = "")
+        .def("getParams", &rocisa::_SWaitAsynccnt::getParams)
+        .def("__str__", &rocisa::_SWaitAsynccnt::toString)
+        .def("__deepcopy__", [](const rocisa::_SWaitAsynccnt& self, nb::dict&) {
+            return new rocisa::_SWaitAsynccnt(self);
         });
 
     nb::class_<rocisa::_SWaitLoadcnt, rocisa::Instruction>(m_common, "_SWaitLoadcnt")
@@ -1122,13 +1142,46 @@ void common_inst(nb::module_ m_common)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
              nb::arg("src1"),
+             nb::arg("vop3")    = std::nullopt,
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VAddPKF32& self, nb::dict&) { return new rocisa::VAddPKF32(self); });
+
+    nb::class_<rocisa::_VFmaPKF32, rocisa::CommonInstruction>(m_common, "_VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::_VFmaPKF32& self, nb::dict&) {
+            return new rocisa::_VFmaPKF32(self);
+        });
+
+    nb::class_<rocisa::VFmaPKF32, rocisa::CompositeInstruction>(m_common, "VFmaPKF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VFmaPKF32& self, nb::dict&) { return new rocisa::VFmaPKF32(self); });
 
     nb::class_<rocisa::VAdd3U32, rocisa::CommonInstruction>(m_common, "VAdd3U32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -1792,6 +1845,22 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VMed3F32& self, nb::dict&) { return new rocisa::VMed3F32(self); });
 
+    nb::class_<rocisa::VMaximumMinimumF32, rocisa::CommonInstruction>(m_common,
+                                                                      "VMaximumMinimumF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMaximumMinimumF32& self, nb::dict&) {
+            return new rocisa::VMaximumMinimumF32(self);
+        });
+
     nb::class_<rocisa::VMinF16, rocisa::CommonInstruction>(m_common, "VMinF16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -1937,6 +2006,21 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCndMaskB32& self, nb::dict&) {
             return new rocisa::VCndMaskB32(self);
+        });
+
+    nb::class_<rocisa::VCndMaskB16, rocisa::CommonInstruction>(m_common, "VCndMaskB16")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2")    = std::make_shared<rocisa::VCC>(),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCndMaskB16& self, nb::dict&) {
+            return new rocisa::VCndMaskB16(self);
         });
 
     nb::class_<rocisa::VLShiftLeftB16, rocisa::CommonInstruction>(m_common, "VLShiftLeftB16")

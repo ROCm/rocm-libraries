@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,8 @@ namespace rocsparse
                                                  int64_t                   n,
                                                  int64_t                   k,
                                                  int64_t                   nnz,
+                                                 int64_t                   batch_count,
+                                                 int64_t                   offsets_batch_stride_A,
                                                  const rocsparse_mat_descr descr,
                                                  const void*               csr_val,
                                                  const void*               csr_row_ptr,
@@ -164,6 +166,8 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
                                            int64_t                   n,
                                            int64_t                   k,
                                            int64_t                   nnz,
+                                           int64_t                   batch_count,
+                                           int64_t                   offsets_batch_stride_A,
                                            const rocsparse_mat_descr descr,
                                            rocsparse_datatype        csr_val_datatype,
                                            const void*               csr_val,
@@ -171,13 +175,43 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
                                            const void*               csr_row_ptr,
                                            rocsparse_indextype       csr_col_ind_indextype,
                                            const void*               csr_col_ind,
-                                           void*                     temp_buffer)
+                                           const rocsparse::spmm_default_alg_info* alg_info,
+                                           void*                                   temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // Resolve the format default to a concrete load-balanced algorithm. The
+    // structural profile is the only expensive input; it is computed here, on the
+    // non-capturing analysis stage (a device reduction + a synchronizing copy),
+    // and cached so the compute stage can re-run the pure selector launch-free.
+    if(alg == rocsparse_csrmm_alg_default && alg_info != nullptr && alg_info->profile != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
+            handle, csr_row_ptr_indextype, m, nnz, csr_row_ptr, *alg_info->profile));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmm_select_default_alg(trans_A,
+                                                alg_info->is_batched,
+                                                handle->properties.multiProcessorCount,
+                                                *alg_info->profile,
+                                                alg));
+    }
+
     rocsparse::csrmm_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis_find(
         &f, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(
-        handle, trans_A, alg, m, n, k, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans_A,
+                                alg,
+                                m,
+                                n,
+                                k,
+                                nnz,
+                                batch_count,
+                                offsets_batch_stride_A,
+                                descr,
+                                csr_val,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                temp_buffer));
     return rocsparse_status_success;
 }

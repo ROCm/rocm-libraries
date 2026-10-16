@@ -164,7 +164,7 @@ struct TestValidHandle
 
     void setStream(hipStream_t /*stream*/) {}
 
-    TestEngineManager& getEngineManager()
+    TestEngineManager& getEngineManager() const
     {
         return container->getEngineManager();
     }

@@ -174,6 +174,26 @@ template <typename T>
 void cpu_geqrf(int m, int n, T* A, int lda, T* ipiv, T* work, int sizeW, int* info);
 
 template <typename T>
+void cpu_geqlf(int m, int n, T* A, int lda, T* ipiv, T* work, int sizeW, int* info);
+
+template <typename T>
+void cpu_gelqf(int m, int n, T* A, int lda, T* ipiv, T* work, int sizeW, int* info);
+
+template <typename T>
+void cpu_gerqf(int m, int n, T* A, int lda, T* ipiv, T* work, int sizeW, int* info);
+
+template <typename T>
+void cpu_larft(hipsolverDirectMode_t direct,
+               hipsolverStorevMode_t storev,
+               int                   n,
+               int                   k,
+               T*                    V,
+               int                   ldv,
+               T*                    tau,
+               T*                    T_,
+               int                   ldt);
+
+template <typename T>
 void cpu_gesv(int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);
 
 template <typename T, typename W>
@@ -219,6 +239,9 @@ void cpu_gesvdx(hipsolverEigMode_t leftv,
 
 template <typename T>
 void cpu_getrf(int m, int n, T* A, int lda, int* ipiv, int* info);
+
+template <typename T>
+void cpu_getri(int n, T* A, int lda, int* ipiv, T* work, int lwork, int* info);
 
 template <typename T>
 void cpu_getrs(hipsolverOperation_t trans,
@@ -345,3 +368,6 @@ void cpu_sytrf(
 template <typename T>
 void cpu_sytrs(
     hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);
+
+template <typename T>
+void cpu_trtri(hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, T* A, int lda, int* info);

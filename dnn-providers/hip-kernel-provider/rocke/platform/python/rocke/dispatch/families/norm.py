@@ -15,9 +15,9 @@ LDS-tree reduction, so the support predicate is occupancy / vector-width driven
 instances' own ``is_valid_spec`` is the source of truth for that predicate; this
 family wraps it.
 
-These kernels are arch-family agnostic (they run on both CDNA and RDNA), so
-there is no ``arch_family`` gate -- only the per-arch LDS / thread checks the
-instance validators already encode.
+These kernels are arch agnostic (they run on both CDNA and RDNA, at both wave
+sizes), so every candidate declares every known target and the narrowing is done
+by the per-arch LDS / thread checks the instance validators already encode.
 
 Selection: a request carries ``(rows, cols)``. ``cols`` is the per-row width
 ``N``; ``n_per_block`` is fixed to ``cols`` (one CTA spans the whole row). The
@@ -31,10 +31,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
-from ...core.arch import ArchTarget
+from ...core.arch import ArchTarget, known_arches
 from ...instances.common import layernorm2d as _ln
 from ...instances.common import rmsnorm2d as _rms
 from ..core import (
+    Capability,
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
@@ -42,6 +43,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 _FAMILY = "norm2d"
@@ -72,6 +74,20 @@ class NormRequest(OperatorRequest):
         d["kind"] = self.kind.lower()
         return d
 
+    def dims(self) -> dict[str, int]:
+        return {"rows": int(self.rows), "cols": int(self.cols)}
+
+
+NORM_DIM_VOCABULARY = ("rows", "cols")
+
+# Norm kernels are genuinely portable: they derive ``wave_size`` from the target
+# and use an LDS-tree reduction rather than an MMA atom, so one candidate serves
+# both wave sizes. This is the documented exception to the wave-size consistency
+# invariant, which exists to catch MMA kernels that bake a wave size into their
+# geometry. The per-arch LDS / max-threads checks in the instance validators are
+# what actually narrow this list per request.
+_NORM_ARCHES = known_arches()
+
 
 def _norm_dtype(dtype: str) -> str:
     d = dtype.lower()
@@ -98,16 +114,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     except KeyError as e:
         errors.append(str(e))
     return errors
-
-
-def _selector_matches(req: NormRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
 
 
 def _make_spec(req: NormRequest, *, block_size: int, vec: int):
@@ -150,14 +156,14 @@ def _make_candidate(
         assert isinstance(req, NormRequest)
         if req.kind.lower() != kind:
             return False, f"candidate kind {kind!r} != request kind {req.kind!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         spec = _make_spec(req, block_size=block_size, vec=vec)
         return _is_valid(req, spec)
 
     def select(req: OperatorRequest):
-        ok, why = support(req)
+        ok, why = candidate.admits(req)
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, NormRequest)
@@ -170,14 +176,28 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=NORM_ABI_VERSION,
         priority=priority,
-        supports=support,
+        capability=Capability(arches=_NORM_ARCHES, dtypes=("f16", "bf16")),
+        _supports=support,
         select_spec=select,
         signature=lambda _spec: (),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
-        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
     )
     return candidate
+
+
+def _build(spec, _arch: str):
+    """Both norm builders take only a spec.
+
+    Norm derives its wave size from the spec rather than the target, which is
+    the same property that lets one candidate declare every arch (section 10),
+    so there is no arch to pass down.
+    """
+    if isinstance(spec, _rms.RMSNorm2DSpec):
+        return _rms.build_rmsnorm2d(spec)
+    return _ln.build_layernorm2d(spec)
 
 
 def _grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
@@ -187,7 +207,9 @@ def _grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
 
 
 def _build_registry() -> CandidateRegistry:
-    reg = CandidateRegistry(_FAMILY)
+    reg = CandidateRegistry(
+        _FAMILY, dim_vocabulary=NORM_DIM_VOCABULARY, require_build=True
+    )
     # Priority order = largest block_size first, then widest vec, so the
     # highest-throughput candidate that the arch accepts wins under ``auto``.
     cands = []
@@ -226,18 +248,30 @@ def _kernel_id(req: NormRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_norm_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered norm candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_norm` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.combos(req)
+
+
 def norm_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in NORM_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return NORM_REGISTRY.sweep_space(req)
+
+
+def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible norm2d kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

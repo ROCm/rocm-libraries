@@ -45,6 +45,7 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: API reference
 
+    * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
     * :doc:`rocRAND precision support <api-reference/data-type-support>`
     * :ref:`cpp-api`
     * :ref:`python-api`

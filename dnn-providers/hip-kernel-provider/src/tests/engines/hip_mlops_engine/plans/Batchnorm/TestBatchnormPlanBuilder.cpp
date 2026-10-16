@@ -86,6 +86,19 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidFwdTrainingGraph
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();

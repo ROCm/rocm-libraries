@@ -29,7 +29,9 @@ Examples:
         configs/default_config.json --devices 4 --csv out.csv
 
 When no config is given the driver uses the chosen variant's
-``configs/default_ci_config.json`` (a small CI-sized sweep);
+``configs/default_ci_config.json`` (a small CI-sized sweep), or
+``configs/default_ci_config_<dtype>.json`` when one exists for --dtype (fp32
+needs its own warp tiles);
 ``configs/default_config.json`` is the full sweep, and the JSON used by nightly
 tests is intended to drop into the same ``configs/`` directory.
 """
@@ -39,7 +41,6 @@ import csv
 import json
 import os
 import queue
-import re
 import subprocess
 import sys
 import threading
@@ -47,11 +48,21 @@ import time
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
+_COMMON_DIR = _THIS_DIR.parent / "common"
 _DISPATCHER_ROOT = _THIS_DIR.parents[2] / "dispatcher"
 sys.path.insert(0, str(_DISPATCHER_ROOT / "python"))
+sys.path.insert(0, str(_DISPATCHER_ROOT / "codegen"))
+sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
-from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
+from gemm_utils import (  # noqa: E402
+    _resolve_arch,
+    expand_sweep,
+    setup_multiple_gemm_dispatchers,
+)
+from ctypes_utils import listed_warp_tiles  # noqa: E402
+from gemm_vector_fallback import VectorFallback, add_vector_fallback_arg  # noqa: E402
+from smi_utils import detect_gpu_ids  # noqa: E402
 
 # Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
 # configs in this op's flat ``configs/`` directory (matching the fmha/grouped_conv
@@ -62,12 +73,49 @@ from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E4
 VARIANT_CONFIGS = {
     "gemm_universal": "configs",
     "gemm_multi_d": "gemm_multi_d/configs",
+    "gemm_multi_abd": "gemm_multi_abd/configs",
     "gemm_preshuffle": "gemm_preshuffle/configs",
     "grouped_gemm": "grouped_gemm/configs",
 }
 DEFAULT_VARIANT = "gemm_universal"
-CI_CONFIG_NAME = "default_ci_config.json"
+
+# CI sweep config lookup, most specific first. An arch or dtype whose warp
+# tiles or pipelines differ from the default CI sweep ships its own file next to
+# it (e.g. default_ci_config_gfx1250_fp32.json); adding one is a data-only change.
+CI_CONFIG_NAMES = (
+    "default_ci_config_{arch}_{dtype}.json",
+    "default_ci_config_{arch}.json",
+    "default_ci_config_{dtype}.json",
+    "default_ci_config.json",
+)
+# A dtype without a CI config of its own falls back to its family's file, tried
+# right after its own name at each level (bf8 lists the same warp tiles as fp8
+# on every arch, so default_ci_config_gfx1250_fp8.json serves bf8 too).
+CI_CONFIG_DTYPE_ALIAS = {"bf8": "fp8"}
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
+
+# Map the driver's --variant (a configs-dir selector) onto the single codegen/
+# runtime variant token understood by expand_sweep / unified_gemm_codegen /
+# GemmKernelConfig.variant. Every --variant choice must have an entry here.
+CODEGEN_VARIANT = {
+    "gemm_universal": "standard",
+    "gemm_multi_d": "multi_d",
+    "gemm_multi_abd": "multi_abd",
+    "gemm_preshuffle": "preshuffle",
+    "grouped_gemm": "grouped",
+}
+
+# Some variants only support a subset of dtypes/layouts. The preshuffle op
+# (tile_engine gemm_preshuffle) supports fp16/bf16/fp8/bf8 and rcr ONLY; the
+# multi_d / multi_abd bridge runners are fp16 only (gemm_utils rejects others).
+VARIANT_SUPPORTED_DTYPES = {
+    "gemm_preshuffle": ("fp16", "bf16", "fp8", "bf8"),
+    "gemm_multi_d": ("fp16",),
+    "gemm_multi_abd": ("fp16",),
+}
+VARIANT_SUPPORTED_LAYOUTS = {
+    "gemm_preshuffle": ("rcr",),
+}
 
 # Fallback problem set if a variant ships no example_problems.json.
 DEFAULT_PROBLEMS = [
@@ -77,39 +125,25 @@ DEFAULT_PROBLEMS = [
     {"M": 257, "N": 257, "K": 257},
 ]
 
-SUPPORTED_DTYPES = ("fp16", "bf16")
+SUPPORTED_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8")
+
+# --verify relative tolerance per dtype. fp32 is held to a few hundred fp32 ulps,
+# well below one fp16 ulp (2**-10), so a kernel that silently computes in a
+# narrower type fails verification instead of passing the fp16 tolerance.
+# The fp32 accumulation error grows about as sqrt(K): the worst max_rel at the
+# default problems (K <= 4096) is about 9x below the bound, which leaves room up
+# to K of roughly 256k; pass --verify-tol for larger K.
+DEFAULT_VERIFY_TOL = 2e-2
+VERIFY_TOL = {"fp32": 256 * 2.0**-23}
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
-SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr")
+# The 4-char codes (rcrr, ...) are the multi_abd A,B,E,D layouts; TE gemm_multi_abd
+# only supports rcrr today.
+SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr", "rcrr", "rrrr", "crrr", "ccrr")
 
 
 def detect_devices():
     """Return a list of visible GPU id strings (best-effort)."""
-    env = os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get(
-        "CUDA_VISIBLE_DEVICES"
-    )
-    if env:
-        ids = [d.strip() for d in env.split(",") if d.strip() != ""]
-        if ids:
-            return ids
-    try:
-        out = subprocess.check_output(
-            ["rocm-smi", "--showid"], stderr=subprocess.DEVNULL, text=True
-        )
-        ids = sorted(set(re.findall(r"GPU\[(\d+)\]", out)), key=int)
-        if ids:
-            return ids
-    except Exception:
-        pass
-    try:
-        out = subprocess.check_output(
-            ["amd-smi", "list"], stderr=subprocess.DEVNULL, text=True
-        )
-        ids = re.findall(r"^GPU:\s*(\d+)", out, re.MULTILINE)
-        if ids:
-            return ids
-    except Exception:
-        pass
-    return ["0"]
+    return detect_gpu_ids()
 
 
 def resolve_devices(spec):
@@ -134,18 +168,24 @@ def resolve_devices(spec):
         # do not invent additional ids beyond what's visible.
         if len(detected) >= n:
             return detected[:n]
-        if os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get("CUDA_VISIBLE_DEVICES"):
+        if os.environ.get("HIP_VISIBLE_DEVICES") or os.environ.get(
+            "CUDA_VISIBLE_DEVICES"
+        ):
             return detected
         return [str(i) for i in range(n)]
     return [spec]
 
 
-def resolve_configs(args):
+def resolve_configs(args, arch):
     """Resolve positional configs -> concrete list of config paths."""
     if args.configs:
         return args.configs
-    cfg = _THIS_DIR / VARIANT_CONFIGS[args.variant] / CI_CONFIG_NAME
-    return [str(cfg)]
+    cfg_dir = _THIS_DIR / VARIANT_CONFIGS[args.variant]
+    alias = CI_CONFIG_DTYPE_ALIAS.get(args.dtype, args.dtype)
+    names = [n.format(arch=arch, dtype=d)
+             for n in CI_CONFIG_NAMES for d in (args.dtype, alias)]
+    return [str(next((cfg_dir / n for n in names if (cfg_dir / n).exists()),
+                     cfg_dir / names[-1]))]
 
 
 def load_problems(path, variant):
@@ -170,10 +210,19 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
     prob_idx, prob_dict, batch = unit
     M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
 
-    items = [
-        {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
-        for _, cfg, lib in batch
-    ]
+    def _item(cfg, lib):
+        it = {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
+        # N2: carry the multi_abd layout + per-group element-wise ops from the
+        # config object so the worker's numpy reference uses the real ops/layout
+        # instead of parsing (and defaulting) the kernel name.
+        if getattr(cfg, "variant", "standard") == "multi_abd":
+            it["layout4"] = cfg.layout4
+            it["a_elementwise_op"] = cfg.a_elementwise_op
+            it["b_elementwise_op"] = cfg.b_elementwise_op
+            it["cde_elementwise_op"] = cfg.cde_elementwise_op
+        return it
+
+    items = [_item(cfg, lib) for _, cfg, lib in batch]
     payload = json.dumps(
         {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
     )
@@ -203,7 +252,9 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             try:
                 result = json.loads(line)
             except json.JSONDecodeError:
-                lines.append(f"  [gpu{device_id}] Warning: bad result line: {line[:50]}")
+                lines.append(
+                    f"  [gpu{device_id}] Warning: bad result line: {line[:50]}"
+                )
                 n_fail += 1
                 continue
             bidx = result.get("idx", 0)
@@ -218,9 +269,7 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
                     else:
                         status = "MISMATCH"
                         mismatch = True
-                extra = (
-                    f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
-                )
+                extra = f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
                 lines.append(
                     f"  [gpu{device_id}] {cfg.name:<58} {result['ms']:>10.3f} "
                     f"{result['tflops']:>10.2f} {status:>8}{extra}"
@@ -277,7 +326,9 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="GEMM Benchmark Sweep (via Dispatcher)")
+    parser = argparse.ArgumentParser(
+        description="GEMM Benchmark Sweep (via Dispatcher)"
+    )
     parser.add_argument(
         "configs",
         nargs="*",
@@ -289,7 +340,12 @@ def main():
         choices=tuple(VARIANT_CONFIGS),
         help="GEMM variant (selects the configs/ directory)",
     )
-    parser.add_argument("--arch", default="gfx942")
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="GPU arch (e.g. gfx942/gfx950). Auto-detected via rocminfo when "
+        "omitted; never silently defaulted to a specific GPU.",
+    )
     parser.add_argument(
         "--dtype",
         default="fp16",
@@ -302,6 +358,23 @@ def main():
         choices=SUPPORTED_LAYOUTS,
         help=f"A/B/C layout (supported: {', '.join(SUPPORTED_LAYOUTS)})",
     )
+    # Multi-ABD only: per-group element-wise ops + tensor counts. These override
+    # (are merged into) any multi_abd_config block in the config JSON so a single
+    # non-PassThrough kernel can be driven + verified without editing configs.
+    # Valid ops mirror the Old-TE gemm_multi_abd instance builder.
+    _MABD_OPS = ("PassThrough", "AddScale", "MultiDMultiply", "MultiDAdd")
+    parser.add_argument("--multi-abd-num-a", type=int, default=None,
+                        help="multi_abd: number of A tensors (default: config/2)")
+    parser.add_argument("--multi-abd-num-b", type=int, default=None,
+                        help="multi_abd: number of B tensors (default: config/2)")
+    parser.add_argument("--multi-abd-num-d", type=int, default=None,
+                        help="multi_abd: number of D tensors (default: config/2)")
+    parser.add_argument("--multi-abd-a-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: A element-wise op (default: config/PassThrough)")
+    parser.add_argument("--multi-abd-b-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: B element-wise op (default: config/PassThrough)")
+    parser.add_argument("--multi-abd-cde-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: CDE element-wise op (default: config/PassThrough)")
     parser.add_argument("--problems", default=None, help="JSON file of M,N,K problems")
     parser.add_argument("--csv", type=str, default="gemm_results.csv")
     parser.add_argument("--workers", type=int, default=8, help="Parallel build workers")
@@ -322,7 +395,10 @@ def main():
         "--kernel-timeout", type=int, default=30, help="Per-kernel timeout (s)"
     )
     parser.add_argument(
-        "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+        "--max-kernels",
+        type=int,
+        default=0,
+        help="Limit to first N kernels plus their vector-width variants (0=all)",
     )
     parser.add_argument(
         "--verify",
@@ -333,12 +409,18 @@ def main():
     parser.add_argument(
         "--verify-tol",
         type=float,
-        default=2e-2,
-        help="Relative tolerance for --verify (default 2e-2, suits fp16)",
+        default=None,
+        help=f"Relative tolerance for --verify (default per dtype: {VERIFY_TOL}, "
+        f"else {DEFAULT_VERIFY_TOL}); the fp32 default holds up to K of about "
+        "256k, raise it for larger K",
     )
+    add_vector_fallback_arg(parser)
     args = parser.parse_args()
+    if args.verify_tol is None:
+        args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
 
-    config_paths = resolve_configs(args)
+    arch = _resolve_arch(args.arch)
+    config_paths = resolve_configs(args, arch)
     devices = resolve_devices(args.devices)
 
     # ========================================================================
@@ -350,16 +432,103 @@ def main():
     print(f"  Variant: {args.variant}")
     print(f"  Configs: {', '.join(config_paths)}")
 
+    if args.variant == "grouped_gemm":
+        print(
+            "  ERROR: grouped_gemm is not supported by this driver; "
+            "use tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py"
+        )
+        return 1
+    codegen_variant = CODEGEN_VARIANT[args.variant]
+    # Per-variant dtype/layout guards (e.g. preshuffle is rcr-only, no fp32).
+    ok_dtypes = VARIANT_SUPPORTED_DTYPES.get(args.variant)
+    if ok_dtypes and args.dtype not in ok_dtypes:
+        print(
+            f"  ERROR: variant {args.variant} supports dtypes {ok_dtypes}, "
+            f"got {args.dtype!r}"
+        )
+        return 1
+    ok_layouts = VARIANT_SUPPORTED_LAYOUTS.get(args.variant)
+    if ok_layouts and args.layout not in ok_layouts:
+        print(
+            f"  ERROR: variant {args.variant} supports layouts {ok_layouts}, "
+            f"got {args.layout!r}"
+        )
+        return 1
+    # Multi-ABD needs the 4-char (A,B,E,D) layout; if the user left the 3-char
+    # default in place, extend it (D defaults to the C/E layout).
+    sweep_layout = args.layout
+    if codegen_variant == "multi_abd" and len(sweep_layout) == 3:
+        sweep_layout = sweep_layout + sweep_layout[2]
+    # multi_abd supports only the 'rcrr' layout today; reject anything else up
+    # front instead of silently building an unsupported/divergent kernel.
+    if codegen_variant == "multi_abd" and sweep_layout != "rcrr":
+        raise SystemExit(
+            f"multi_abd supports only the 'rcrr' layout today, got {sweep_layout!r}"
+        )
+
+    # Multi-ABD element-wise ops / tensor counts: CLI overrides win over the
+    # config; otherwise expand_sweep falls back to any multi_abd_config block in
+    # the JSON and finally to the Old-TE 2/2/2 all-PassThrough default.
+    mabd_kwargs = {}
+    if codegen_variant == "multi_abd":
+        if args.multi_abd_num_a is not None:
+            mabd_kwargs["num_a_tensors"] = args.multi_abd_num_a
+        if args.multi_abd_num_b is not None:
+            mabd_kwargs["num_b_tensors"] = args.multi_abd_num_b
+        if args.multi_abd_num_d is not None:
+            mabd_kwargs["num_d_tensors"] = args.multi_abd_num_d
+        if args.multi_abd_a_op is not None:
+            mabd_kwargs["a_elementwise_op"] = args.multi_abd_a_op
+        if args.multi_abd_b_op is not None:
+            mabd_kwargs["b_elementwise_op"] = args.multi_abd_b_op
+        if args.multi_abd_cde_op is not None:
+            mabd_kwargs["cde_elementwise_op"] = args.multi_abd_cde_op
+
+    # Reject a dtype the arch cannot generate with a clear message, instead of
+    # letting every config be silently dropped by the warp-tile validator.
+    dtype_key, table_key, warp_tiles = listed_warp_tiles(
+        arch, args.dtype, variant=codegen_variant
+    )
+    if not warp_tiles:
+        print(
+            f"  ERROR: dtype {args.dtype} is not supported on {arch} for variant "
+            f"{args.variant}: no warp tiles listed for {dtype_key} in {table_key}"
+        )
+        return 1
+
+    problems = load_problems(args.problems, args.variant)
+    vfb = VectorFallback(
+        problems, args.layout, args.dtype, codegen_variant, args.no_vector_fallback,
+        args.tune_c_vector_width,
+    )
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
-            expand_sweep(cfg_path, args.arch, dtype=args.dtype, layout=args.layout)
+            expand_sweep(
+                cfg_path,
+                arch,
+                dtype=args.dtype,
+                layout=sweep_layout,
+                variant=codegen_variant,
+                mabd_cli_overrides=(mabd_kwargs or None),
+                **vfb.expand_kwargs,
+                **mabd_kwargs,
+            )
         )
+    vfb.report_rejects()
 
-    if args.max_kernels > 0:
-        all_configs = all_configs[: args.max_kernels]
+    all_configs = vfb.limit_base_kernels(all_configs, args.max_kernels)
 
     print(f"  Expanded configs: {len(all_configs)}")
+    if not all_configs:
+        print(
+            f"  ERROR: 0 configs expanded for dtype {args.dtype} on {arch} "
+            f"(layout {sweep_layout}); no config in {', '.join(config_paths)} "
+            f"passes the {arch} checks (listed {dtype_key} warp tiles: "
+            f"{warp_tiles}; pipeline, layout and tile-size gates)"
+        )
+        return 1
     print(f"  Build workers: {args.workers}")
 
     t0 = time.perf_counter()
@@ -372,6 +541,7 @@ def main():
     built_kernels = [
         (cfg, lib) for cfg, lib in zip(all_configs, lib_paths) if lib is not None
     ]
+    vfb.report_builds(all_configs, lib_paths)
 
     # Dedupe by .so path (distinct configs can map to the same physical kernel).
     seen_libs = set()
@@ -402,12 +572,9 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    problems = load_problems(args.problems, args.variant)
-    print(f"  Problems: {len(problems)}")
-    print(
-        f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
-        f"{len(built_kernels) * len(problems)}"
-    )
+    # Pair each problem only with kernels whose vector widths it can satisfy
+    # (without the fallback, keep the old all-pairs behaviour).
+    pairs = vfb.pairs(problems, built_kernels)
 
     # ========================================================================
     # Phase 3: Benchmark across all visible GPUs (subprocess isolation, batched)
@@ -446,14 +613,10 @@ def main():
     # Build a single work queue of (prob_idx, prob_dict, kernel-batch) units and
     # fan them out across device-pinned worker threads.
     work_q = queue.Queue()
-    for prob_idx, prob in enumerate(problems):
+    for prob_idx, (prob, idx) in enumerate(zip(problems, pairs)):
         prob_dict = {"M": int(prob["M"]), "N": int(prob["N"]), "K": int(prob["K"])}
-        for start in range(0, len(built_kernels), args.batch_size):
-            end = min(start + args.batch_size, len(built_kernels))
-            batch = [
-                (start + j, cfg, lib)
-                for j, (cfg, lib) in enumerate(built_kernels[start:end])
-            ]
+        for start in range(0, len(idx), args.batch_size):
+            batch = [(i, *built_kernels[i]) for i in idx[start : start + args.batch_size]]
             work_q.put((prob_idx, prob_dict, batch))
 
     io_lock = threading.Lock()
@@ -503,7 +666,7 @@ def main():
     print(f"  Successful measurements: {stats['measurements']}")
     print(f"  Failed measurements: {stats['failures']}")
     print(f"  Output: {csv_path}")
-    return 0
+    return 1 if stats["failures"] else 0
 
 
 if __name__ == "__main__":

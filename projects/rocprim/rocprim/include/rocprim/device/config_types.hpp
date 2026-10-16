@@ -31,6 +31,7 @@
 #include <type_traits>
 
 #include <cassert>
+#include <cstring>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -185,8 +186,12 @@ enum class target_arch : unsigned int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
+    gfx1250 = 1250,
+    gfx1250_strict = 1250,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
@@ -206,10 +211,11 @@ enum class gen
     cdna2,
     cdna3,
     cdna4,
+    cdna5,
     rdna1,
     rdna2,
     rdna3,
-    rdna4,
+    rdna4
 };
 
 enum class gpu
@@ -227,7 +233,8 @@ enum class gpu
     mi300a,
     mi308x,
     mi325x,
-    mi350x
+    mi350x,
+    mi455x
 };
 
 constexpr gen gen_from_target_arch(target_arch i)
@@ -252,15 +259,19 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1150:
         case target_arch::gfx1151:
         case target_arch::gfx1152:
-        case target_arch::gfx1153: return gen::rdna3;
+        case target_arch::gfx1153:
+        case target_arch::gfx1170:
+        case target_arch::gfx1171: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
+        case target_arch::gfx1250: return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
 }
 
 constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
+    std::make_tuple<std::string_view, gpu>("MI455X", gpu::mi455x),
     std::make_tuple<std::string_view, gpu>("MI350X", gpu::mi350x),
     std::make_tuple<std::string_view, gpu>("MI325X", gpu::mi325x),
     std::make_tuple<std::string_view, gpu>("MI308X", gpu::mi308x),
@@ -326,8 +337,12 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1151);
     ROCPRIM_RETURN_IF_ARCH(gfx1152);
     ROCPRIM_RETURN_IF_ARCH(gfx1153);
+    ROCPRIM_RETURN_IF_ARCH(gfx1170);
+    ROCPRIM_RETURN_IF_ARCH(gfx1171);
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
+    ROCPRIM_RETURN_IF_ARCH(gfx1250);
+    ROCPRIM_RETURN_IF_ARCH(gfx1250_strict);
 
     return target_arch::unknown;
 }
@@ -369,7 +384,14 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
         return result;
     }
 
-    arch = parse_gcn_arch(device_props.gcnArchName);
+    // `gfx1250-strict` isn't valid C++ syntax, so if gcnArchName is `gfx1250-strict`, it will be converted to `gfx1250_strict` in parse_gcn_arch.
+    char* arch_name = device_props.gcnArchName;
+    char hyphen = '-';
+    char underscore = '_';
+    char* arch_name_end = arch_name + std::strlen(arch_name);
+    std::replace(arch_name, arch_name_end, hyphen, underscore);
+
+    arch = parse_gcn_arch(arch_name);
     arch_cache[device_id].exchange(arch, std::memory_order_relaxed);
 
     return hipSuccess;
@@ -571,6 +593,21 @@ struct comp_targets
     {
         (f(Ts{}), ...);
     }
+
+    template<typename F>
+    static constexpr hipError_t select(target selected, F f)
+    {
+        auto result = hipErrorUnknown;
+        for_each(
+            [&](auto t)
+            {
+                if(target{t} == selected)
+                {
+                    result = f(t);
+                }
+            });
+        return result;
+    }
 };
 
 constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknown)
@@ -592,6 +629,7 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
         case gen::cdna2:
         case gen::cdna3:
         case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::cdna5:
         case gen::rdna1:
         case gen::rdna2:
         case gen::rdna3:
@@ -609,7 +647,7 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
  */
 constexpr target_arch device_target_arch()
 {
-#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
+#if defined(__amdgcn_processor__)
     // The terminating zero is not counted in the length of the string
     return get_target_arch_from_name(__amdgcn_processor__,
                                      sizeof(__amdgcn_processor__) - sizeof('\0'));
@@ -822,6 +860,88 @@ hipError_t execute_launch_plan(
     const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
+}
+
+template<class Config, class Target>
+struct launch_manager
+{
+    template<class ConfigSelector,
+             template<class, class, class> class LaunchSelector = default_config_static_selector,
+             class Kernel>
+    launch_plan<Kernel> make_launch_plan(Kernel kernel) const
+    {
+        return {trampoline_kernel<Config, ConfigSelector, Kernel, Target, LaunchSelector>, kernel};
+    }
+
+    template<class ConfigSelector,
+             template<class, class, class> class LaunchSelector = default_config_static_selector,
+             class Kernel>
+    hipError_t execute_launch_plan(
+        Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream) const
+    {
+        const auto launch_plan = make_launch_plan<ConfigSelector, LaunchSelector>(kernel);
+        launch_plan.launch(grid_size, block_size, shmem, stream);
+        return hipGetLastError();
+    }
+};
+
+template<class Config, class Targets, class Visitor>
+hipError_t visit_config(const hipStream_t stream, Visitor visitor)
+{
+    // The hardware target that is attached on this stream.
+    const target target_current = target(stream);
+
+    // The target that most closely resembles our current hardware target.
+    // This target will be the one used to select the config.
+    const target config_target = most_common_config<Targets>(target_current);
+
+    // Convert 'config_target' to constexpr by unrolling 'Targets' and selecting the one that matches.
+    return Targets::select(
+        config_target,
+        [&](auto selected_config_target)
+        {
+            // This is an instance of 'comp_target', which is only interesting as a type.
+            using SelectedConfigTarget = decltype(selected_config_target);
+
+            using Launcher = launch_manager<Config, SelectedConfigTarget>;
+
+            // Extract the targeted wavefront of this config. It may be a fallback config
+            // with unknown wavefront size.
+            constexpr arch::wavefront::target selected_config_wavefront
+                = get_wavefront_size(SelectedConfigTarget::g);
+
+            // Check if we have matched with a tuned config.
+            if constexpr(selected_config_wavefront != arch::wavefront::target::dynamic)
+            {
+                // We have to convert the wavefront target to a compile time type s.t. we can consume it in a constexpr manner.
+                return visitor(
+                    Launcher{},
+                    Config{},
+                    SelectedConfigTarget{},
+                    std::integral_constant<arch::wavefront::target, selected_config_wavefront>{});
+            }
+            else
+            {
+                // The fallback config may be either wavefront target size. We must therefore emit both branches if we want
+                // to consume the wavefront size as a compile time constant.
+                using wavefront_variants = constexpr_value_variant<arch::wavefront::target,
+                                                                   arch::wavefront::target::size64,
+                                                                   arch::wavefront::target::size32>;
+                const auto dynamic_wavefront_target
+                    = wavefront_variants::create(target_current.warp_size == ROCPRIM_WARP_SIZE_64
+                                                     ? arch::wavefront::target::size64
+                                                     : arch::wavefront::target::size32);
+                return std::visit(
+                    [&](auto wavefront_target)
+                    {
+                        return visitor(Launcher{},
+                                       Config{},
+                                       SelectedConfigTarget{},
+                                       wavefront_target);
+                    },
+                    dynamic_wavefront_target);
+            }
+        });
 }
 
 } // end namespace detail

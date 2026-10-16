@@ -6,12 +6,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from typing import Tuple
 
 from ...core.arch import ArchTarget
 from ...helpers.split_k import select_split_k
 from ...instances.common.gemm_universal import UniversalGemmSpec
-from ..core import KernelCandidate, OperatorRequest
+from ..core import OperatorRequest, normalize_selector
 
 
 @dataclass(frozen=True)
@@ -43,16 +42,18 @@ class GemmRequest(OperatorRequest):
         d["spec_id"] = normalize_selector(self.spec_id)
         return d
 
+    def dims(self) -> dict[str, int]:
+        return {"M": int(self.M), "N": int(self.N), "K": int(self.K)}
+
+
+GEMM_DIM_VOCABULARY = ("M", "N", "K")
+
 
 def normalize_dtype(dtype: str) -> str:
     d = dtype.lower()
     if d in ("f16", "half"):
         return "fp16"
     return d
-
-
-def normalize_selector(value: str) -> str:
-    return value.strip().lower()
 
 
 def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
@@ -94,24 +95,6 @@ def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
     return errors
 
 
-def arch_family_supported(req: GemmRequest, arch_family: str) -> Tuple[bool, str]:
-    """Gate a GEMM candidate to its intended arch family (``cdna`` or ``rdna``).
-
-    ``ArchTarget.family`` is the SSOT split (``cdna`` for gfx90a/gfx942/gfx950,
-    ``rdna`` for gfx11xx/gfx12xx). Candidates are tuned for one micro-arch family
-    only; this predicate keeps an RDNA candidate from matching a CDNA request
-    just because the rebuilt spec happens to satisfy the generic config checks
-    (and vice versa).
-    """
-    target = ArchTarget.from_gfx(req.arch)
-    if target.family != arch_family:
-        return False, (
-            f"{arch_family!r}-family candidate does not support "
-            f"{target.family!r}-family arch {req.arch}"
-        )
-    return True, "ok"
-
-
 def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
     """Return ``spec`` with a split-K degree chosen for ``req`` on its arch.
 
@@ -138,13 +121,3 @@ def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpe
     if decision.split_k <= 1:
         return spec
     return replace(spec, trait=replace(spec.trait, split_k=decision.split_k))
-
-
-def selector_matches(req: GemmRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = normalize_selector(req.algorithm)
-    spec_id = normalize_selector(req.spec_id)
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"

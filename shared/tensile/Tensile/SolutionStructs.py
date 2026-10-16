@@ -25,7 +25,7 @@
 from .Common import assignParameterRequired, assignParameterWithDefault, \
                     defaultProblemType, defaultSolution, \
                     globalParameters, \
-                    isGfx12, \
+                    isGfx12, isGfx117, \
                     tPrint, printExit, printWarning, \
                     validActivationFormats, validConvolutionConfig, \
                     validMFMA, validWMMA, validParameters, validWeightFormats, \
@@ -2407,9 +2407,9 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        # gfx12 WMMA uses the generic MI formula above. Older WMMA paths keep
-        # the historical full-K input packing.
-        if not isGfx12(isa):
+        # gfx117/gfx12 WMMA uses the generic MI formula above. Older WMMA paths
+        # keep the historical full-K input packing.
+        if not (isGfx12(isa) or isGfx117(isa)):
           state['MIInputPerThread'] = state["MatrixInstruction"][2]
 
     else:
@@ -2624,7 +2624,13 @@ class Solution(collections.abc.Mapping):
 
     numBytes = state["ProblemType"]["DataType"].numBytes()
     numBytesPerLoad = int(state["GlobalLoadVectorWidth%c"%tc] * numBytes)
-    # DTLx2 and DTLx4 for gfx950
+    # x2 (b64/dwordx2) DirectToLds has no valid hardware instruction: the lds
+    # modifier is only legal on the x1 (dword) and x4 (dwordx4) buffer loads.
+    # Reject so the kernel falls back to the non-DTL load path.
+    if numBytesPerLoad == 8:
+      reject(state, "DirectToLds not supported for b64 (x2) buffer loads")
+      return False
+    # x4 (b128) DirectToLds only where supported; x1 (4 bytes) always ok
     if not globalParameters["ArchCaps"][isa]["HasDTLx4"]:
       if numBytesPerLoad != 4:
         reject(state, "DirectToLds can only be used with buffer loads requiring 1 register")

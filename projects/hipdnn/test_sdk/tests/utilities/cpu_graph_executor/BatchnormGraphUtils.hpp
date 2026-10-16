@@ -13,15 +13,16 @@ namespace hipdnn_sdk_test_utils
 {
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildBatchnormTrainGraph(
         BatchnormTrainTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType meanVarianceDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
-        bool useOptionalTensors)
+        bool useOptionalTensors,
+        bool runtimeEpsilon = false,
+        bool runtimeMomentum = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormTrainTest");
@@ -55,12 +56,18 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
@@ -77,12 +84,18 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     if(useOptionalTensors)
     {
         auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-        momentumTensor->set_uid(uid++)
-            .set_name("MomentumTensor")
-            .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-            .set_dim({1})
-            .set_stride({1})
-            .set_value(0.1);
+        momentumTensor->set_uid(uid++).set_name("MomentumTensor").set_dim({1}).set_stride({1});
+        if(runtimeMomentum)
+        {
+            // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+            // from the variant pack at execute.
+            momentumTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+                .set_as_runtime_parameter();
+        }
+        else
+        {
+            momentumTensor->set_data_type(hipdnn_frontend::DataType::DOUBLE).set_value(0.1);
+        }
         momentumTensorAttr = momentumTensor;
 
         auto prevRunningMeanAttr = hipdnn_frontend::graph::makeTensorAttributes(
@@ -258,7 +271,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInference
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
     const std::vector<int64_t>& dims,
     const hipdnn_data_sdk::utilities::TensorLayout& layout,
-    bool isOutputVirtual = false)
+    bool isOutputVirtual = false,
+    bool runtimeEpsilon = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceWithVarianceTest");
@@ -315,12 +329,18 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInference
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(varianceAttr));
 
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    epsilonTensor->set_uid(uid++)
-        .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_dim({1})
-        .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+    epsilonTensor->set_uid(uid++).set_name("EpsilonTensor").set_dim({1}).set_stride({1});
+    if(runtimeEpsilon)
+    {
+        // Pure runtime pass-by-value: FLOAT scalar, no baked value; resolved
+        // from the variant pack at execute.
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT).set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilonTensor->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_value(static_cast<float>(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON));
+    }
 
     hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_inference_with_variance");
@@ -349,8 +369,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInference
 }
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildBatchnormBwdGraph(
         BatchnormBwdTensorBundle<InputType, ScaleBiasType, MeanVarianceType>& tensorBundle,
         hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,

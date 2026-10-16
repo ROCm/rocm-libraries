@@ -6,15 +6,73 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+
+* Support added for the gfx1250-strict architecture.
+
 ### Changed
 
-* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage. 
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
 
 ### Removed
 ### Optimized
+
+* Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
+
 ### Resolved issues
+
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
+* Improved kernel launches to detect invalid launch configuration.
+* Fixed sparse functions potentially not using the stream set in the handle.
+
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.37.0 for ROCm 10.1.0
+
+### Added
+
+* 2-stage reduction to tridiagonal in the Hermitian eigensolver (SYEVD/HEEVD) and generalized Hermitian eigensolver (SYGVD/HEGVD).
+* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
+    - CHOLQR (with batched and strided\_batched versions)
+    - CHOLQR_64 (with batched and strided\_batched versions)
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+* 64-bit APIs for existing functions:
+    - LARFT_64
+
+### Optimized
+
+* Improved the performance of sygst/hegst.
+
+
+
+## rocSOLVER 3.36.0 for ROCm 10.0.0
+
+### Added
+
+* 64-bit APIs for the symmetric/Hermitian eigensolvers
+    * SYEV_64 and HEEV_64 (with batched and strided\_batched versions)
+    * SYEVD_64 and HEEVD_64 (with batched and strided\_batched versions)
+* Support added for the gfx1250 architecture.
+
+### Changed
+
+* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage.
+
+### Known issues
+
+* The 64-bit eigensolver APIs (SYEV_64, HEEV_64, SYEVD_64, HEEVD_64) require the matrix
+  dimensions `n` and `lda` to fit within a 32-bit integer, because their internal tridiagonal
+  reduction and back-transformation steps remain 32-bit.
 
 
 

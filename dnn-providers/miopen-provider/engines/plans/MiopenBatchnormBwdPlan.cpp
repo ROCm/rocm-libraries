@@ -18,22 +18,22 @@ BatchnormBwdParams::BatchnormBwdParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
-    , _dy(miopen_utils::createBatchnormTensor(tensorMap, attributes.dy_tensor_uid()))
-    , _dx(miopen_utils::createBatchnormTensor(tensorMap, attributes.dx_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _dscale(miopen_utils::createBatchnormTensor(tensorMap, attributes.dscale_tensor_uid()))
-    , _dbias(miopen_utils::createBatchnormTensor(tensorMap, attributes.dbias_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _dy(miopen_utils::createPaddedTensor(tensorMap, attributes.dy_tensor_uid()))
+    , _dx(miopen_utils::createPaddedTensor(tensorMap, attributes.dx_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _dscale(miopen_utils::createPaddedTensor(tensorMap, attributes.dscale_tensor_uid()))
+    , _dbias(miopen_utils::createPaddedTensor(tensorMap, attributes.dbias_tensor_uid()))
 {
     if(attributes.mean_tensor_uid().has_value())
     {
         _optMean
-            = miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid().value());
+            = miopen_utils::createPaddedTensor(tensorMap, attributes.mean_tensor_uid().value());
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _optInvVariance = miopen_utils::createBatchnormTensor(
+        _optInvVariance = miopen_utils::createPaddedTensor(
             tensorMap, attributes.inv_variance_tensor_uid().value());
     }
 }
@@ -47,28 +47,27 @@ BatchnormBwdParams::BatchnormBwdParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
-    , _dx(miopen_utils::createBatchnormTensor(tensorMap,
-                                              batchnormBackwardAttributes.dx_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap,
-                                                 batchnormBackwardAttributes.scale_tensor_uid()))
-    , _dscale(miopen_utils::createBatchnormTensor(tensorMap,
-                                                  batchnormBackwardAttributes.dscale_tensor_uid()))
-    , _dbias(miopen_utils::createBatchnormTensor(tensorMap,
-                                                 batchnormBackwardAttributes.dbias_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
+    , _dy(miopen_utils::createPaddedTensor(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
+    , _dx(miopen_utils::createPaddedTensor(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap,
+                                              batchnormBackwardAttributes.scale_tensor_uid()))
+    , _dscale(miopen_utils::createPaddedTensor(tensorMap,
+                                               batchnormBackwardAttributes.dscale_tensor_uid()))
+    , _dbias(miopen_utils::createPaddedTensor(tensorMap,
+                                              batchnormBackwardAttributes.dbias_tensor_uid()))
     , _optActivation(pointwiseAttributes)
-    , _optBias(miopen_utils::createBatchnormTensor(tensorMap,
-                                                   batchnormInferenceAttributes.bias_tensor_uid()))
+    , _optBias(miopen_utils::createPaddedTensor(tensorMap,
+                                                batchnormInferenceAttributes.bias_tensor_uid()))
 {
     if(batchnormBackwardAttributes.mean_tensor_uid().has_value())
     {
-        _optMean = miopen_utils::createBatchnormTensor(
+        _optMean = miopen_utils::createPaddedTensor(
             tensorMap, batchnormBackwardAttributes.mean_tensor_uid().value());
     }
     if(batchnormBackwardAttributes.inv_variance_tensor_uid().has_value())
     {
-        _optInvVariance = miopen_utils::createBatchnormTensor(
+        _optInvVariance = miopen_utils::createPaddedTensor(
             tensorMap, batchnormBackwardAttributes.inv_variance_tensor_uid().value());
     }
 }
@@ -152,29 +151,29 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
     const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
 
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto dyBuffer
-        = miopen_utils::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
     auto dxBuffer
-        = miopen_utils::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = miopen_utils::findDeviceBuffer(_params.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer
-        = miopen_utils::findDeviceBuffer(_params.dscale().uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer
-        = miopen_utils::findDeviceBuffer(_params.dbias().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.dx().uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.scale().uid(), deviceBuffers, numDeviceBuffers);
+    auto dscaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dscale().uid(), deviceBuffers, numDeviceBuffers);
+    auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _params.dbias().uid(), deviceBuffers, numDeviceBuffers);
 
     hipdnnPluginDeviceBuffer_t meanBuffer = {0, nullptr};
     if(_params.optMean().has_value())
     {
-        meanBuffer = miopen_utils::findDeviceBuffer(
+        meanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optMean().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
     hipdnnPluginDeviceBuffer_t invVarianceBuffer = {0, nullptr};
     if(_params.optInvVariance().has_value())
     {
-        invVarianceBuffer = miopen_utils::findDeviceBuffer(
+        invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optInvVariance().value().uid(), deviceBuffers, numDeviceBuffers);
     }
 
@@ -185,7 +184,7 @@ void BatchnormBwdPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.optActivation().has_value() && _params.optBias().has_value())
     {
-        auto biasBuffer = miopen_utils::findDeviceBuffer(
+        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.optBias().value().uid(), deviceBuffers, numDeviceBuffers);
         biasDescriptor = _params.optBias().value().tensorDescriptor();
         biasPtr = biasBuffer.ptr;

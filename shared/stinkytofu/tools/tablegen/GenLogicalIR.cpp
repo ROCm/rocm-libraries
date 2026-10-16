@@ -125,6 +125,10 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& b,\n";
     out << "        const StinkyRegister* acc2 = nullptr,\n";
     out << "        bool neg = false,\n";
+    out << "        const std::string& matrixAFmt = \"\",\n";
+    out << "        const std::string& matrixBFmt = \"\",\n";
+    out << "        bool scaled = false,\n";
+    out << "        bool scaleOperands = false,\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MFMA);\n";
@@ -137,7 +141,7 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        \n";
     out << "        // Create and set special data\n";
     out << "        auto* data = new MFMAData(instType, accType, m, n, k, blocks, mfma1k, "
-           "neg);\n";
+           "neg, matrixAFmt, matrixBFmt, scaled, scaleOperands);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
@@ -169,6 +173,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& mxsb,\n";
     out << "        bool reuseA = false,\n";
     out << "        bool reuseB = false,\n";
+    out << "        const std::string& matrixAFmt = \"\",\n";
+    out << "        const std::string& matrixBFmt = \"\",\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MXMFMA);\n";
@@ -184,7 +190,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        // Create and set special data\n";
     out << "        auto* data = new MXMFMAData(instType, accType, mxScaleATypeStr, "
            "mxScaleBTypeStr,\n";
-    out << "                                    m, n, k, block, reuseA, reuseB);\n";
+    out << "                                    m, n, k, block, reuseA, reuseB, matrixAFmt, "
+           "matrixBFmt);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
@@ -329,6 +336,10 @@ static bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"Label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"IntrinsicCall\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"SWaitAlu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"SchedulingFence\";\n";
 
     out << "    default:\n";
     out << "        return \"INVALID\";\n";
@@ -359,6 +370,10 @@ static bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"intrinsic_call\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"s_wait_alu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"scheduling_fence\";\n";
 
     out << "    default:\n";
     out << "        return \"invalid\";\n";
@@ -585,6 +600,10 @@ static bool genIRClasses(const std::string& outdir) {
     out << "        case logical::VMulPKF32:\n";
     out << "        case logical::VMovB64:\n";
     out << "        case logical::VLShiftLeftOrB32:\n";
+    out << "        case logical::SAddU64:\n";
+    out << "        case logical::VAddNCU64:\n";
+    out << "        case logical::VAddLShiftLeftU32:\n";
+    out << "        case logical::VLShiftLeftAddU32:\n";
     out << "            return true;\n";
     out << "        default:\n";
     out << "            return false;\n";

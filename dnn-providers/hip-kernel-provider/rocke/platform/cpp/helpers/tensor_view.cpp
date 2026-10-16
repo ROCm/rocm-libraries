@@ -311,7 +311,7 @@ rocke_value_t* rocke_tensor_view_load_vec(rocke_ir_builder_t* b,
         return NULL;
     }
     off = rocke_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16"))
+    if(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16") || rocke_tv_name_is(dt, "f64"))
         return rocke_b_global_load_vN(b, v->base, off, dt, n, 0);
     if(rocke_tv_name_is(dt, "f32"))
     {
@@ -509,6 +509,34 @@ void rocke_tile_window_store_vec(rocke_ir_builder_t* b,
     if(!rocke_tile_window_global_indices(b, w, local_indices, num_indices, gidx))
         return;
     rocke_tensor_view_store_vec(b, w->view, gidx, w->rank, value, n);
+}
+
+void rocke_tile_window_load_vec_scalars(rocke_ir_builder_t* b,
+                                        const rocke_tile_window_t* w,
+                                        rocke_value_t* const* local_indices,
+                                        int num_indices,
+                                        int n,
+                                        rocke_value_t** out)
+{
+    /* Python TileWindow.load_vec_scalars:
+     *   if n == 1:
+     *       return [self.load_scalar(b, *local_indices)]
+     *   v = self.load_vec(b, *local_indices, n=n)
+     *   return [b.vec_extract(v, i) for i in range(n)]
+     */
+    int i;
+    if(b == NULL || w == NULL || w->view == NULL || out == NULL)
+        return;
+    if(n == 1)
+    {
+        out[0] = rocke_tile_window_load_scalar(b, w, local_indices, num_indices);
+        return;
+    }
+    {
+        rocke_value_t* v = rocke_tile_window_load_vec(b, w, local_indices, num_indices, n);
+        for(i = 0; i < n; ++i)
+            out[i] = rocke_b_vec_extract(b, v, i);
+    }
 }
 
 rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,
@@ -747,6 +775,37 @@ rocke_status_t rocke_make_naive_tensor_view_packed(rocke_tensor_view_t* out,
     /* Python make_naive_tensor_view_packed:
      *   return make_global_view(base, shape, dtype)   # packed row-major */
     return rocke_make_global_view(out, base, shape, rank, dtype, NULL);
+}
+
+rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
+                                      rocke_tensor_view_t* out,
+                                      const rocke_type_t* dtype,
+                                      const int* shape,
+                                      int rank,
+                                      const char* name_hint,
+                                      const rocke_stride_t* strides /* NULL => packed */,
+                                      int exclusive)
+{
+    /* Python make_lds_view (with the ``exclusive`` passthrough):
+     *   smem = b.smem_alloc(dtype, list(shape), name_hint=name_hint,
+     *                       exclusive=exclusive)
+     *   desc = packed(shape, dtype) if strides is None else with_strides(...)
+     *   return TensorView(base=smem, desc=desc, addr_space="lds")
+     */
+    rocke_status_t st;
+    rocke_value_t* smem;
+    if(b == NULL || out == NULL)
+        return ROCKE_ERR_VALUE;
+    smem = rocke_b_smem_alloc_ex(b, dtype, shape, rank, name_hint, exclusive);
+    if(strides == NULL)
+        st = rocke_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    else
+        st = rocke_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
+    if(st != ROCKE_OK)
+        return st;
+    out->base = smem;
+    out->addr_space = ROCKE_ADDR_LDS;
+    return ROCKE_OK;
 }
 
 rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,

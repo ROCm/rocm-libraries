@@ -20,6 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+if(NOT WIN32)
+  find_package(amd_smi REQUIRED)
+endif()
+
 option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
 option(BENCHMARK_AUTOTUNED_TYPES_ONLY "Benchmark autotuned types only, which lowers the benchmarking runtime" OFF)
 
@@ -211,6 +215,7 @@ add_rocprim_benchmark(benchmark_device_segmented_radix_sort_keys.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_pairs.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_reduce.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_scan.cpp)
+add_rocprim_benchmark(benchmark_device_segmented_topk_air.cpp)
 add_rocprim_benchmark(benchmark_device_topk_air.cpp)
 add_rocprim_benchmark(benchmark_device_transform.cpp)
 add_rocprim_benchmark(benchmark_device_transform_pointer.cpp)
@@ -219,4 +224,5 @@ add_rocprim_benchmark(benchmark_warp_exchange.cpp)
 add_rocprim_benchmark(benchmark_warp_reduce.cpp)
 add_rocprim_benchmark(benchmark_warp_scan.cpp)
 add_rocprim_benchmark(benchmark_warp_sort.cpp)
+add_rocprim_benchmark(benchmark_warp_sort_stable.cpp)
 add_rocprim_benchmark(benchmark_device_memory.cpp)

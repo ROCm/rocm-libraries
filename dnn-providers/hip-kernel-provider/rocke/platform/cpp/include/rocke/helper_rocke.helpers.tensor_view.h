@@ -225,6 +225,16 @@ void rocke_tile_window_store_vec(rocke_ir_builder_t* b,
                                  rocke_value_t* value,
                                  int n);
 
+/* TileWindow.load_vec_scalars(b, *local_indices, n): vector load split into
+ * ``n`` scalars in the window's own dtype (no f32 promotion). Writes them to
+ * out[0..n) (caller-provided, length >= n). */
+void rocke_tile_window_load_vec_scalars(rocke_ir_builder_t* b,
+                                        const rocke_tile_window_t* w,
+                                        rocke_value_t* const* local_indices,
+                                        int num_indices,
+                                        int n,
+                                        rocke_value_t** out);
+
 /* TileWindow.load_scalar(b, *local_indices). */
 rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,
                                              const rocke_tile_window_t* w,
@@ -284,6 +294,18 @@ rocke_status_t rocke_make_lds_view(rocke_ir_builder_t* b,
                                    int rank,
                                    const char* name_hint,
                                    const rocke_stride_t* strides /* NULL => packed */);
+
+/* Like rocke_make_lds_view but forwards `exclusive` to smem_alloc (cshuffle
+ * no-alias mode): the smem-pool packer gives the buffer its own byte range.
+ * rocke_make_lds_view is rocke_make_lds_view_ex(..., exclusive=0). */
+rocke_status_t rocke_make_lds_view_ex(rocke_ir_builder_t* b,
+                                      rocke_tensor_view_t* out,
+                                      const rocke_type_t* dtype,
+                                      const int* shape,
+                                      int rank,
+                                      const char* name_hint,
+                                      const rocke_stride_t* strides /* NULL => packed */,
+                                      int exclusive);
 
 /* ----------------------------------------- compute-promoting (f32) peers */
 

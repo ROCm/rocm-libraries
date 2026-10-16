@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -83,6 +84,12 @@ namespace
     };
 
     template <>
+    struct TypeTraits<double>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Double;
+    };
+
+    template <>
     struct TypeTraits<TensileLite::Half>
     {
         static constexpr rocisa::DataType value = rocisa::DataType::Half;
@@ -94,7 +101,6 @@ namespace
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
     };
 
-#ifdef TENSILE_USE_FP8_BF8
     template <>
     struct TypeTraits<TensileLite::Float8>
     {
@@ -118,7 +124,6 @@ namespace
     {
         static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
     };
-#endif
 
 #ifndef _WIN32
     template <>
@@ -140,6 +145,12 @@ namespace
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    //
+    // Template parameters:
+    //   AccumT         — accumulation type (float or double)
+    //   OperandMathOpT — per-operand math type used immediately before multiply.
+    //                    XFloat32, for example, truncates float operands to a
+    //                    10-bit mantissa.
     //
     // When both MX operand descriptors are populated, the K-reduction is
     // block-structured: accumulate min(mxA.block, mxB.block) products, then
@@ -163,12 +174,10 @@ namespace
         case rocisa::DataType::Float:    return [](float v) { return v; };
         case rocisa::DataType::Half:     return &quantizeThroughNarrow<TensileLite::Half>;
         case rocisa::DataType::BFloat16: return &quantizeThroughNarrow<TensileLite::BFloat16>;
-#ifdef TENSILE_USE_FP8_BF8
         case rocisa::DataType::Float8:        return &quantizeThroughNarrow<TensileLite::Float8>;
         case rocisa::DataType::BFloat8:       return &quantizeThroughNarrow<TensileLite::BFloat8>;
         case rocisa::DataType::Float8_fnuz:   return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
         case rocisa::DataType::BFloat8_fnuz:  return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
-#endif
         default:
             throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
         }
@@ -224,22 +233,23 @@ namespace
     }
 #endif
 
-    void columnMajorGemm(const float*   a,
-                         const float*   b,
-                         const float*   c,
-                         float*         d,
+    template <typename AccumT = float, typename OperandMathOpT = AccumT>
+    void columnMajorGemm(const AccumT*  a,
+                         const AccumT*  b,
+                         const AccumT*  c,
+                         AccumT*        d,
                          size_t         m,
                          size_t         n,
                          size_t         k,
                          bool           transA,
                          bool           transB,
-                         float          alpha,
-                         float          beta,
-                         const float*   biasVec       = nullptr,
-                         const float*   scaleAlphaVec = nullptr,
+                         AccumT         alpha,
+                         AccumT         beta,
+                         const AccumT*  biasVec       = nullptr,
+                         const AccumT*  scaleAlphaVec = nullptr,
                          ActivationType activation    = ActivationType::None,
-                         const float*   scaleAVec     = nullptr,
-                         const float*   scaleBVec     = nullptr,
+                         const AccumT*  scaleAVec     = nullptr,
+                         const AccumT*  scaleBVec     = nullptr,
                          int            factorDim     = 0,
                          QuantizeFn     quantizeA     = nullptr,
                          QuantizeFn     quantizeB     = nullptr
@@ -274,7 +284,7 @@ namespace
         {
             for(size_t j = 0; j < n; j++)
             {
-                float sum = 0.0f;
+                AccumT sum = AccumT(0);
 
 #ifndef _WIN32
                 // MX scale tensor layout follows the ContractionProblem tensor
@@ -294,15 +304,17 @@ namespace
                         std::min(mxA.block, mxB.block));
                     for(size_t lBase = 0; lBase < k; lBase += step)
                     {
-                        float blockSum = 0.0f;
+                        AccumT blockSum = AccumT(0);
                         for(size_t t = 0; t < step; t++)
                         {
                             size_t l    = lBase + t;
-                            float  aVal = a[i * strideAM + l * strideAK];
-                            float  bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = quantizeA(aVal);
-                            if(quantizeB) bVal = quantizeB(bVal);
-                            blockSum += aVal * bVal;
+                            AccumT aVal = a[i * strideAM + l * strideAK];
+                            AccumT bVal = b[l * strideBK + j * strideBN];
+                            if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                            if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                            blockSum
+                                += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
+                                   * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
                         }
 
                         size_t blkA = lBase / static_cast<size_t>(mxA.block);
@@ -313,8 +325,9 @@ namespace
                         size_t mxsbIdx = j * mxB.strideFree
                                         + blkB * mxB.strideKBlock;
 
-                        float mxScale = static_cast<float>(mxA.scale[mxsaIdx])
-                                      * static_cast<float>(mxB.scale[mxsbIdx]);
+                        AccumT mxScale
+                            = static_cast<AccumT>(static_cast<float>(mxA.scale[mxsaIdx]))
+                            * static_cast<AccumT>(static_cast<float>(mxB.scale[mxsbIdx]));
                         sum += blockSum * mxScale;
                     }
                 }
@@ -323,29 +336,37 @@ namespace
                 {
                     for(size_t l = 0; l < k; l++)
                     {
-                        float aVal = a[i * strideAM + l * strideAK];
-                        float bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = quantizeA(aVal);
-                        if(quantizeB) bVal = quantizeB(bVal);
-                        sum += aVal * bVal;
+                        AccumT aVal = a[i * strideAM + l * strideAK];
+                        AccumT bVal = b[l * strideBK + j * strideBN];
+                        if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                        if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                        sum += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
+                               * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
                     }
                 }
 
-                float effectiveAlpha = alpha;
+                AccumT effectiveAlpha = alpha;
                 if(scaleAVec)
-                    effectiveAlpha *= scaleAVec[i];
+                    effectiveAlpha *= static_cast<AccumT>(scaleAVec[i]);
                 if(scaleBVec)
-                    effectiveAlpha *= scaleBVec[j];
+                    effectiveAlpha *= static_cast<AccumT>(scaleBVec[j]);
                 if(scaleAlphaVec)
-                    effectiveAlpha *= scaleAlphaVec[factorDim == 0 ? i : j];
+                    effectiveAlpha *= static_cast<AccumT>(
+                        scaleAlphaVec[factorDim == 0 ? i : j]);
 
-                float result = effectiveAlpha * sum + beta * c[i + j * m];
+                AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
 
                 if(biasVec)
-                    result += biasVec[i];
+                    result += static_cast<AccumT>(biasVec[i]);
 
                 if(activation == ActivationType::Relu)
-                    result = std::max(0.0f, result);
+                {
+                    result = std::max(AccumT(0), result);
+                }
+                else
+                {
+                    assert(activation == ActivationType::None);
+                }
 
                 d[i + j * m] = result;
             }
@@ -369,6 +390,7 @@ int runGemm(size_t         m,
             float          alpha,
             float          beta,
             bool           validate,
+            bool           injectValidationFailure,
             bool           tryFastPath,
             bool           useBias,
             ActivationType activation,
@@ -379,7 +401,8 @@ int runGemm(size_t         m,
             rocisa::DataType   computeInputB = rocisa::DataType::None,
             int                mxBlockA      = 0,
             int                mxBlockB      = 0,
-            size_t             batchCount    = 1)
+            size_t             batchCount    = 1,
+            bool               isTF32        = false)
 {
     if(batchCount == 0)
     {
@@ -390,8 +413,6 @@ int runGemm(size_t         m,
     constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
     if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
     if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
-    static_assert(std::is_same<AccumulateT, float>::value,
-                  "Currently only float accumulation is supported");
 
 #ifndef _WIN32
     constexpr bool isInputAFP4 = std::is_same_v<InputAT, Float4x2>;
@@ -466,14 +487,17 @@ int runGemm(size_t         m,
     size_t ldb        = transB ? n : k;
     size_t ldc        = m;
 
+    // C/D and alpha/beta types: use AccumulateT's DataType
+    constexpr rocisa::DataType accumDtypeEnum = TypeTraits<AccumulateT>::value;
+
     // Define the contraction problem (geometry, strides, types)
     ContractionProblemGemm contraction
         = ContractionProblemGemm::GEMM_Strides(transA,
                                                transB,
                                                dtypeEnumA,
                                                dtypeEnumB,
-                                               rocisa::DataType::Float,
-                                               rocisa::DataType::Float,
+                                               accumDtypeEnum,
+                                               accumDtypeEnum,
                                                m,
                                                n,
                                                k,
@@ -490,8 +514,11 @@ int runGemm(size_t         m,
 
     contraction.setComputeInputTypeA(computeInputA);
     contraction.setComputeInputTypeB(computeInputB);
-    contraction.setAlphaType(rocisa::DataType::Float);
-    contraction.setBetaType(rocisa::DataType::Float);
+    contraction.setAlphaType(accumDtypeEnum);
+    contraction.setBetaType(accumDtypeEnum);
+
+    if(isTF32)
+        contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
     // Allocate host memory for inputs and outputs. Each batch slice is packed.
     size_t numA = m * k;
@@ -513,10 +540,10 @@ int runGemm(size_t         m,
         storageB = numB * batchCount;
     }
 
-    std::vector<InputAT> a(storageA);
-    std::vector<InputBT> b(storageB);
-    std::vector<float>   c(numC * batchCount);
-    std::vector<float>   d(numC * batchCount);
+    std::vector<InputAT>     a(storageA);
+    std::vector<InputBT>     b(storageB);
+    std::vector<AccumulateT> c(numC * batchCount);
+    std::vector<AccumulateT> d(numC * batchCount);
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -609,40 +636,41 @@ int runGemm(size_t         m,
         initOperand(a, quantizesA);
         initOperand(b, quantizesB);
     }
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<float>(randomGen()); });
+    std::generate(c.begin(), c.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
 
-    // Optional feature buffers
-    std::vector<float> biasVec;
-    std::vector<float> scaleAlphaVecBuf;
+    // Optional feature buffers — typed as AccumulateT so the slow path's
+    // GetValue(alphaType, ...) reads the correct byte width.
+    std::vector<AccumulateT> biasVec;
+    std::vector<AccumulateT> scaleAlphaVecBuf;
 
     if(useBias)
     {
         biasVec.resize(m);
-        std::generate(biasVec.begin(), biasVec.end(), randomGen);
+        std::generate(biasVec.begin(), biasVec.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
         contraction.setUseBias(1);
-        contraction.setBias(rocisa::DataType::Float, m, m);
+        contraction.setBias(accumDtypeEnum, m, m);
     }
 
     if(useScaleAlphaVec)
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), randomGen);
+        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
         contraction.setUseScaleAlphaVec(1);
-        contraction.setScaleAlphaVec(rocisa::DataType::Float, scaleAlphaVecLen, factorDim);
+        contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
 
     // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
     // Excludes 0 and ±1 so missing/incorrect scaling is never masked.
     std::uniform_int_distribution<int> scaleDis(2, 100);
-    auto scaleGen = [&]() {
-        float sign = binary_distribution(gen) ? 1.0f : -1.0f;
-        int mag    = scaleDis(gen);
-        return sign * static_cast<float>(mag);
+    auto scaleGen = [&]() -> AccumulateT {
+        AccumulateT sign = binary_distribution(gen) ? AccumulateT(1) : AccumulateT(-1);
+        int         mag  = scaleDis(gen);
+        return sign * static_cast<AccumulateT>(mag);
     };
 
-    std::vector<float> scaleABuf;
-    std::vector<float> scaleBBuf;
+    std::vector<AccumulateT> scaleABuf;
+    std::vector<AccumulateT> scaleBBuf;
 
     if(useScaleAB == "Scalar")
     {
@@ -653,8 +681,8 @@ int runGemm(size_t         m,
         // m_useScaleAB is still empty.
         // See: https://github.com/ROCm/rocm-libraries/issues/6541
         contraction.setUseScaleAB("Scalar");
-        contraction.setScaleA(rocisa::DataType::Float, 1);
-        contraction.setScaleB(rocisa::DataType::Float, 1);
+        contraction.setScaleA(accumDtypeEnum, 1);
+        contraction.setScaleB(accumDtypeEnum, 1);
     }
     else if(useScaleAB == "Vector")
     {
@@ -663,8 +691,8 @@ int runGemm(size_t         m,
         std::generate(scaleABuf.begin(), scaleABuf.end(), scaleGen);
         std::generate(scaleBBuf.begin(), scaleBBuf.end(), scaleGen);
         contraction.setUseScaleAB("Vector");
-        contraction.setScaleA(rocisa::DataType::Float, m);
-        contraction.setScaleB(rocisa::DataType::Float, n);
+        contraction.setScaleA(accumDtypeEnum, m);
+        contraction.setScaleB(accumDtypeEnum, n);
     }
 
     if(activation != ActivationType::None)
@@ -712,7 +740,9 @@ int runGemm(size_t         m,
     }
 #endif
 
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), alpha, beta);
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(),
+                             static_cast<AccumulateT>(alpha),
+                             static_cast<AccumulateT>(beta));
     inputs.bias          = useBias ? biasVec.data() : nullptr;
     inputs.scaleAlphaVec = useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr;
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
@@ -745,28 +775,38 @@ int runGemm(size_t         m,
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
 
+    if(injectValidationFailure)
+    {
+        if(d.empty())
+        {
+            std::cerr << "Error: cannot inject validation failure into empty D" << std::endl;
+            return 1;
+        }
+        d[0] += static_cast<AccumulateT>(16.0);
+    }
+
     if(validate)
     {
         std::cout << "Validating..." << std::endl;
 
-        // Convert inputs to f32 for the golden reference comparison.
+        // Convert inputs to AccumulateT for the golden reference comparison.
         // For batched problems, A/B/C are batchCount slices of size numA/numB/numC
         // (column-major packed; batch stride = numA / numB / numC).
         size_t totalA = numA * batchCount;
         size_t totalB = numB * batchCount;
         size_t totalC = numC * batchCount;
 
-        std::vector<float> aF32, bF32;
+        std::vector<AccumulateT> aRef, bRef;
 
 #ifndef _WIN32
         if constexpr(isFP4)
         {
-            aF32.resize(totalA);
+            aRef.resize(totalA);
             for(size_t i = 0; i < totalA; i++)
-                aF32[i] = a[i / 2].getElement(i % 2);
-            bF32.resize(totalB);
+                aRef[i] = static_cast<AccumulateT>(a[i / 2].getElement(i % 2));
+            bRef.resize(totalB);
             for(size_t i = 0; i < totalB; i++)
-                bF32[i] = b[i / 2].getElement(i % 2);
+                bRef[i] = static_cast<AccumulateT>(b[i / 2].getElement(i % 2));
         }
         else if constexpr(std::is_same_v<InputAT, Float4x2> || std::is_same_v<InputBT, Float4x2>)
         {
@@ -775,16 +815,16 @@ int runGemm(size_t         m,
         else
 #endif
         {
-            aF32.resize(totalA);
+            aRef.resize(totalA);
             for(size_t i = 0; i < totalA; i++)
-                aF32[i] = static_cast<float>(a[i]);
-            bF32.resize(totalB);
+                aRef[i] = static_cast<AccumulateT>(a[i]);
+            bRef.resize(totalB);
             for(size_t i = 0; i < totalB; i++)
-                bF32[i] = static_cast<float>(b[i]);
+                bRef[i] = static_cast<AccumulateT>(b[i]);
         }
 
-        std::vector<float> cF32(c.begin(), c.end());
-        std::vector<float> dRef(d.size());
+        std::vector<AccumulateT> cRef(c.begin(), c.end());
+        std::vector<AccumulateT> dRef(d.size());
 
         // If the storage type is wider than the compute-input type, the GPU
         // (and slow-path validator) quantize the operand down before the MAC.
@@ -816,64 +856,79 @@ int runGemm(size_t         m,
 #endif
 
         // Run the golden reference per-batch.
-        for(size_t batch = 0; batch < batchCount; ++batch)
-        {
-            const float* aPtr = aF32.data() + batch * numA;
-            const float* bPtr = bF32.data() + batch * numB;
-            const float* cPtr = cF32.data() + batch * numC;
-            float*       dPtr = dRef.data() + batch * numC;
+        // When isTF32, use XFloat32 as OperandMathOpT so the golden ref
+        // truncates each A/B element to 10-bit mantissa before multiply.
+        auto runGoldenRef = [&](auto mathOpTag) {
+            using MathOpT = decltype(mathOpTag);
+            for(size_t batch = 0; batch < batchCount; ++batch)
+            {
+                const AccumulateT* aPtr = aRef.data() + batch * numA;
+                const AccumulateT* bPtr = bRef.data() + batch * numB;
+                const AccumulateT* cPtr = cRef.data() + batch * numC;
+                AccumulateT*       dPtr = dRef.data() + batch * numC;
 
-            columnMajorGemm(aPtr,
-                            bPtr,
-                            cPtr,
-                            dPtr,
-                            m,
-                            n,
-                            k,
-                            transA,
-                            transB,
-                            (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
-                            beta,
-                            useBias ? biasVec.data() : nullptr,
-                            useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
-                            activation,
-                            (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
-                            (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                            factorDim,
-                            quantA,
-                            quantB
+                columnMajorGemm<AccumulateT, MathOpT>(
+                    aPtr,
+                    bPtr,
+                    cPtr,
+                    dPtr,
+                    m,
+                    n,
+                    k,
+                    transA,
+                    transB,
+                    static_cast<AccumulateT>(
+                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
+                    static_cast<AccumulateT>(beta),
+                    useBias ? biasVec.data() : nullptr,
+                    useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
+                    activation,
+                    (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
+                    (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
+                    factorDim,
+                    quantA,
+                    quantB
 #ifndef _WIN32
-                            ,
-                            MXGemmOperand{
-                                (isFP4 && mxBlockA > 0)
-                                    ? mxsa.data() + batch * mxsaBatchStride
-                                    : nullptr,
-                                mxBlockA,
-                                mxsaStrideM,
-                                mxsaStrideKBlk},
-                            MXGemmOperand{
-                                (isFP4 && mxBlockB > 0)
-                                    ? mxsb.data() + batch * mxsbBatchStride
-                                    : nullptr,
-                                mxBlockB,
-                                mxsbStrideN,
-                                mxsbStrideKBlk}
+                    ,
+                    MXGemmOperand{
+                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
+                        mxBlockA,
+                        mxsaStrideM,
+                        mxsaStrideKBlk},
+                    MXGemmOperand{
+                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
+                        mxBlockB,
+                        mxsbStrideN,
+                        mxsbStrideKBlk}
 #endif
-                            );
-        }
+                );
+            }
+        };
 
-        // Compare results — FP4 with MX scales needs wider tolerance
-        float tolerance = isFP4 ? 0.5f : 0.05f;
+        if(isTF32)
+            runGoldenRef(XFloat32{});
+        else
+            runGoldenRef(AccumulateT{});
 
-        bool  allClose = true;
-        float maxDiff  = 0.0f;
+        // Compare results — reduced-precision types need wider tolerance.
+        // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
+        double tolerance = [&]() {
+            if(isFP4)
+                return 0.5;
+            if(isTF32)
+                return 1.0;
+            return 0.05;
+        }();
+
+        bool   allClose = true;
+        double maxDiff  = 0.0;
 
         for(size_t i = 0; i < totalC; i++)
         {
-            float valDut = static_cast<float>(d[i]);
-            float valRef = dRef[i];
-            float diff   = std::abs(valDut - valRef);
-            maxDiff      = std::max(maxDiff, diff);
+            double valDut = static_cast<double>(d[i]);
+            double valRef = static_cast<double>(dRef[i]);
+            double diff   = std::abs(valDut - valRef);
+            maxDiff       = std::max(maxDiff, diff);
 
             if(diff > tolerance)
             {
@@ -912,12 +967,13 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
+        "injectValidationFailure", po::value<bool>()->default_value(false), "Perturb D before validation (negative-test hook)")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
@@ -969,12 +1025,10 @@ int main(int argc, char* argv[])
         if(s == "tf32")           { out = rocisa::DataType::Float;        return true; }
         if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
         if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
-#ifdef TENSILE_USE_FP8_BF8
         if(s == "f8")             { out = rocisa::DataType::Float8;       return true; }
         if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
         if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
         if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
-#endif
 #ifndef _WIN32
         if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
 #endif
@@ -990,20 +1044,38 @@ int main(int argc, char* argv[])
         std::cerr << "Unknown computeInputB: " << computeInputBStr << std::endl;
         return 1;
     }
-    bool        validate         = vm["validate"].as<bool>();
-    bool        tryFastPath      = vm["tryFastPath"].as<bool>();
-    bool        useBias          = vm["bias"].as<bool>();
-    std::string activationStr    = vm["activation"].as<std::string>();
-    bool        useScaleAlphaVec = vm["scaleAlphaVec"].as<bool>();
-    int         factorDim        = vm["factorDim"].as<int>();
-    std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
-    int         mxBlockA         = vm["mxBlockA"].as<int>();
-    int         mxBlockB         = vm["mxBlockB"].as<int>();
-    size_t      batchCount       = vm["batchCount"].as<size_t>();
+    bool        validate                 = vm["validate"].as<bool>();
+    bool        injectValidationFailure  = vm["injectValidationFailure"].as<bool>();
+    bool        tryFastPath              = vm["tryFastPath"].as<bool>();
+    bool        useBias                  = vm["bias"].as<bool>();
+    std::string activationStr            = vm["activation"].as<std::string>();
+    bool        useScaleAlphaVec         = vm["scaleAlphaVec"].as<bool>();
+    int         factorDim                = vm["factorDim"].as<int>();
+    std::string useScaleAB               = vm["useScaleAB"].as<std::string>();
+    int         mxBlockA                 = vm["mxBlockA"].as<int>();
+    int         mxBlockB                 = vm["mxBlockB"].as<int>();
+    size_t      batchCount               = vm["batchCount"].as<size_t>();
+    const bool  typeAIsTF32              = (typeAStr == "tf32");
+    const bool  typeBIsTF32              = (typeBStr == "tf32");
+    const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
+
+    if(typeAIsTF32 != typeBIsTF32)
+    {
+        std::cerr << "Error: tf32 is an F32 math-op mode and must be used for both "
+                  << "inputs or neither (typeA=" << typeAStr << ", typeB=" << typeBStr
+                  << ")" << std::endl;
+        return 1;
+    }
 
     if(mxBlockA < 0 || mxBlockB < 0)
     {
         std::cerr << "Error: mxBlockA/mxBlockB must be non-negative" << std::endl;
+        return 1;
+    }
+
+    if(injectValidationFailure && !validate)
+    {
+        std::cerr << "Error: --injectValidationFailure requires --validate" << std::endl;
         return 1;
     }
     // One-sided MX is rejected (see review #1). When either per-side flag is
@@ -1055,11 +1127,21 @@ int main(int argc, char* argv[])
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
-              << " FastPath=" << tryFastPath << std::endl;
+              << " FastPath=" << tryFastPath;
+    if(isTF32)
+        std::cout << " MathOp=XFloat32";
+    std::cout << std::endl;
 
     // Dispatcher: pick A storage type, then B storage type. Each leaf calls
     // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
     // bugs in the fast-path validator (e.g. F8N x Half).
+    // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
+    auto resolveAccumStorage = [](std::string& s) {
+        if(s == "tf32") s = "f32";
+    };
+    resolveAccumStorage(typeAStr);
+    resolveAccumStorage(typeBStr);
+
     auto dispatchB = [&](auto aTag) -> int {
         using AT = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
@@ -1075,20 +1157,25 @@ int main(int argc, char* argv[])
             }
             else
 #endif
-            return runGemm<AT, BT>(
-                m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount);
+            {
+                // Promote AccumulateT to double when both A and B storage are double (f64).
+                using AccT = std::conditional_t<
+                    std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
+                return runGemm<AT, BT, AccT>(
+                    m, n, k, transA, transB, alpha, beta,
+                    validate, injectValidationFailure, tryFastPath,
+                    useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
+                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
+            }
         };
         if(typeBStr == "f32")        return callB(float{});
+        if(typeBStr == "f64")        return callB(double{});
         if(typeBStr == "f16")        return callB(Half{});
         if(typeBStr == "bf16")       return callB(BFloat16{});
-#ifdef TENSILE_USE_FP8_BF8
         if(typeBStr == "f8")         return callB(Float8{});
         if(typeBStr == "bf8")        return callB(BFloat8{});
         if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
         if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
-#endif
 #ifndef _WIN32
         if(typeBStr == "f4")         return callB(Float4x2{});
 #endif
@@ -1099,14 +1186,13 @@ int main(int argc, char* argv[])
     try
     {
         if(typeAStr == "f32")        return dispatchB(float{});
+        if(typeAStr == "f64")        return dispatchB(double{});
         if(typeAStr == "f16")        return dispatchB(Half{});
         if(typeAStr == "bf16")       return dispatchB(BFloat16{});
-#ifdef TENSILE_USE_FP8_BF8
         if(typeAStr == "f8")         return dispatchB(Float8{});
         if(typeAStr == "bf8")        return dispatchB(BFloat8{});
         if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
         if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
-#endif
 #ifndef _WIN32
         if(typeAStr == "f4")         return dispatchB(Float4x2{});
 #endif

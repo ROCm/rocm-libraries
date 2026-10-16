@@ -22,12 +22,14 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 
+#include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -77,8 +79,9 @@ class CFGBuilderPassImpl : public Pass {
     }
 
     void splitAtLabels(Function& func, BasicBlock* flatBB) {
-        // Find all label positions
+        // Find all label positions, and record existing label names.
         std::vector<BasicBlock::iterator> splitPositions;
+        std::unordered_set<std::string> usedNames;
         for (auto it = flatBB->begin(); it != flatBB->end(); ++it) {
             StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (!inst) {
@@ -87,6 +90,7 @@ class CFGBuilderPassImpl : public Pass {
 
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 splitPositions.push_back(it);
+                if (auto* ld = inst->getModifier<LabelData>()) usedNames.insert(ld->label);
             } else if (isBranch(*inst) && inst->getNext()) {
                 auto itNext = std::next(it);
                 while (itNext != flatBB->end() &&
@@ -104,6 +108,15 @@ class CFGBuilderPassImpl : public Pass {
 
         assert(!splitPositions.empty() && "No labels found? This should not happen.");
 
+        // Return candidate if free, else append "_<k>" until unique.
+        auto uniquify = [&usedNames](std::string candidate) {
+            if (usedNames.insert(candidate).second) return candidate;
+            for (int k = 1;; ++k) {
+                std::string alt = candidate + "_" + std::to_string(k);
+                if (usedNames.insert(alt).second) return alt;
+            }
+        };
+
         // For each label, create a new BasicBlock
         std::string labelName = flatBB->getLabel();
         int count = 0;
@@ -113,18 +126,24 @@ class CFGBuilderPassImpl : public Pass {
                 continue;
             }
             StinkyInstruction* inst = cast<StinkyInstruction>(splitPos.getNodePtr());
+            std::string bbName;
             if (inst->getUnifiedOpcode() == GFX::LABEL) {
                 // Get the label name
                 auto labelData = inst->getModifier<LabelData>();
                 labelName = labelData ? labelData->label : "";
                 count = 0;
+                bbName = labelName;
             } else {
+                // Split piece: build "<base>_<N>", uniquify, and carry the
+                // result forward so the next piece chains off the assigned name.
                 labelName += "_";
                 labelName += std::to_string(++count);
+                labelName = uniquify(labelName);
+                bbName = labelName;
             }
 
             // Create a new BasicBlock for this label
-            BasicBlock* newBB = func.createBasicBlock(labelName);
+            BasicBlock* newBB = func.createBasicBlock(bbName);
 
             // Determine the range of IR to move
             auto startIt = splitPos;
@@ -154,8 +173,11 @@ class CFGBuilderPassImpl : public Pass {
         // Build a map of label names to BasicBlocks
         std::unordered_map<std::string, BasicBlock*> labelMap;
         for (BasicBlock& bb : func) {
-            if (!bb.getLabel().empty()) {
-                labelMap[bb.getLabel()] = &bb;
+            if (bb.getLabel().empty()) continue;
+            if (!labelMap.try_emplace(bb.getLabel(), &bb).second) {
+                std::cerr << "duplicate label-block name: " << bb.getLabel() << "\n";
+                STINKY_UNREACHABLE(
+                    "duplicate label-block name in CFG — branch resolution ambiguous");
             }
         }
 

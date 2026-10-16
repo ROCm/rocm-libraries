@@ -49,7 +49,14 @@ struct ORIGAMI_EXPORT context_t {
   size_t num_wgs                 = 0;
   size_t num_timesteps           = 0;
 
+  /// Tile-scheduling mode.
+  hybrid_mode_t tile_schedule = hybrid_mode_t::none;
+
   /// Hardware-derived values.
+  /// Number of compute units usable for this problem. Equals hardware.N_CU
+  /// unless problem.num_cus caps it lower (@see origami::problem_t::num_cus).
+  /// This is the effective CU count the whole model schedules against.
+  size_t n_cu                 = 0;
   size_t active_cus           = 0;
   double mem_bw_limited       = 0.0;
   double write_mem_bw_limited = 0.0;
@@ -59,6 +66,9 @@ struct ORIGAMI_EXPORT context_t {
   size_t k_iters           = 0;
   size_t tile_elements     = 0;
   double output_tile_bytes = 0.0;
+
+  /// Per-operand DRAM traffic (cache/mem model input).
+  operand_traffic_t traffic{};
 
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
@@ -115,13 +125,17 @@ ORIGAMI_EXPORT double calculate_output_utilization(const problem_t& problem,
 
 /**
  * @brief This function rounds the number of elements up to the smallest value whose total size
- * (given the element bit-width) is an exact multiple of a 128-byte memory transaction.
+ * (given the element bit-width) is an exact multiple of a `transaction_bytes` memory transaction.
  *
  * @param elements Macro tile dimension
  * @param element_size_bits size in bits
+ * @param transaction_bytes memory transaction granularity in bytes (e.g. 128 for an L1 line,
+ *                          64 for a DRAM sector)
  * @return size_t
  */
-ORIGAMI_EXPORT size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
+ORIGAMI_EXPORT size_t round_elements_to_NB(size_t elements,
+                                           size_t element_size_bits,
+                                           size_t transaction_bytes);
 
 /**
  * @brief Fast WGM prediction based on last-XCD L2 working set minimization.
@@ -150,7 +164,6 @@ ORIGAMI_EXPORT workgroup_mapping_t predict_workgroup_mapping(const problem_t& pr
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection Different algorithms to select the grid size for kernel execution.
- * @param max_cus maximum number of CU's
  * @return tuple<reduction_t, size_t, size_t, size_t, size_t>
  *         (reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
  */
@@ -158,8 +171,7 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
-    grid_selection_t grid_selection,
-    size_t max_cus);
+    grid_selection_t grid_selection);
 
 /**
  * @brief Check if MT fits in LDS
@@ -439,7 +451,8 @@ ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
 ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
-                                const context_t& context);
+                                const context_t& context,
+                                double* scalar_store_fraction = nullptr);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.
@@ -494,13 +507,17 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param max_cus
+ * @param non_temporal_a_available Whether a candidate reads operand A
+ * non-temporally. Defaults to keeping the filter on.
+ * @param non_temporal_b_available Whether a candidate reads operand B
+ * non-temporally. Defaults to keeping the filter on.
  * @return double Latency in cycles.
  */
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
-                             size_t max_cus);
+                             bool non_temporal_a_available = true,
+                             bool non_temporal_b_available = true);
 
 }  // namespace gemm
 }  // namespace origami

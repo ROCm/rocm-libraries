@@ -266,7 +266,12 @@ namespace TensileLite
             SolutionVector<MySolution> rv, solutions;
             const bool                 debug   = Debug::Instance().printPropertyEvaluation();
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
-            const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
+
+            const auto forceDynamic = Debug::Instance().streamK5ForceMode();
+            const bool effectiveDynamic = 
+                (forceDynamic == 1) ||
+                (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
+            const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
 
             // false in case of early return;
             lastFindTopRetAll = false;

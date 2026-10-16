@@ -13,56 +13,30 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
 
 /* ===================================================================== */
-/*  target-neutral MMA metadata (mirrors the module-level tables in       */
-/*  ir.py: _MMA_C_FRAG_LEN, _MMA_C_INT_OP_IDS, _MMA_RESULT_HINT).         */
+/*  target-neutral MMA metadata                                          */
 /* ===================================================================== */
-
-typedef struct
-{
-    const char* op_id;
-    int c_frag_len;
-} rocke_mma_frag_row_t;
-
-/* op_id -> per-lane accumulator/result fragment length. */
-static const rocke_mma_frag_row_t ROCKE_MMA_C_FRAG_LEN[] = {
-    {"mfma_f32_16x16x4_f32", 4},
-    {"mfma_f32_32x32x2_f32", 16},
-    {"mfma_f32_16x16x16_f16", 4},
-    {"mfma_f32_16x16x32_f16", 4},
-    {"mfma_f32_16x16x16_bf16", 4},
-    {"mfma_f32_16x16x32_bf16", 4},
-    {"mfma_f32_16x16x32_fp8", 4},
-    {"mfma_f32_16x16x32_bf8", 4},
-    {"mfma_f32_32x32x8_f16", 16},
-    {"mfma_f32_32x32x16_f16", 16},
-    {"mfma_f32_32x32x8_bf16", 16},
-    {"mfma_f32_32x32x16_bf16", 16},
-    {"mfma_f32_32x32x16_fp8", 16},
-    {"mfma_f32_32x32x16_bf8", 16},
-    {"mfma_f32_4x4x4_f16", 4},
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
-    {"mfma_f32_16x16x128_fp8", 4},
-    {"mfma_scale_f32_16x16x128_f8f6f4", 4},
-    {"wmma_f32_16x16x16_f16", 8},
-    {"wmma_f32_16x16x16_bf16", 8},
-    {"wmma_i32_16x16x16_iu8", 8},
-    {"wmma_i32_16x16x16_iu4", 8},
-    {"wmma_gfx12_f32_16x16x16_f16", 8},
-    {"wmma_gfx12_f32_16x16x16_bf16", 8},
-};
-
-/* op_ids that accumulate in i32 (integer WMMA atoms). */
-static const char* const ROCKE_MMA_C_INT_OP_IDS[] = {
-    "wmma_i32_16x16x16_iu8",
-    "wmma_i32_16x16x16_iu4",
-};
+/*
+ * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
+ * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
+ * the accumulator fragment length and dtype for the atom. Both come from the
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len (the
+ * _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
+ * rocke_arch_mma_op_id_c_dtype (the JSON catalog aggregation). This bucket keeps
+ * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
+ * / _MMA_C_INT_OP_IDS.
+ *
+ * ROCKE_MMA_RESULT_HINT below is purely ir-side SSA naming (not arch data), kept
+ * here so the emitted value numbering stays byte-identical.
+ */
 
 /* op_id -> result_name_hint override (default "acc"). */
 typedef struct
@@ -79,43 +53,27 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Returns the c_frag_len for op_id, or -1 if unknown. */
+/* Accumulator fragment length for op_id, from the arch SSOT
+ * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
+ * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
 static int rocke_mma_c_frag_len(const char* op_id)
 {
-    size_t i;
-    if(!op_id)
-    {
-        return -1;
-    }
-    for(i = 0; i < sizeof(ROCKE_MMA_C_FRAG_LEN) / sizeof(ROCKE_MMA_C_FRAG_LEN[0]); ++i)
-    {
-        if(strcmp(ROCKE_MMA_C_FRAG_LEN[i].op_id, op_id) == 0)
-        {
-            return ROCKE_MMA_C_FRAG_LEN[i].c_frag_len;
-        }
-    }
-    return -1;
+    return rocke_arch_mma_c_frag_len(op_id);
 }
 
+/* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
+ * (target._op_id_c_dtype()[op_id] == "i32"). */
 static bool rocke_mma_is_int_acc(const char* op_id)
 {
-    size_t i;
-    if(!op_id)
-    {
-        return false;
-    }
-    for(i = 0; i < sizeof(ROCKE_MMA_C_INT_OP_IDS) / sizeof(ROCKE_MMA_C_INT_OP_IDS[0]); ++i)
-    {
-        if(strcmp(ROCKE_MMA_C_INT_OP_IDS[i], op_id) == 0)
-        {
-            return true;
-        }
-    }
-    return false;
+    const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
+    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
 {
+    const char* family = rocke_arch_mma_op_id_family(op_id);
+    if(family && (strcmp(family, "wmma_scaled") == 0 || strcmp(family, "mfma_scaled") == 0))
+        return "mxacc";
     size_t i;
     if(op_id)
     {
@@ -130,7 +88,7 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's inline ternary). */
+/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
 static int rocke_elem_bytes_name(const char* elem_name)
 {
     if(!elem_name)
@@ -142,7 +100,12 @@ static int rocke_elem_bytes_name(const char* elem_name)
     {
         return 1;
     }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0)
+    if(strcmp(elem_name, "f64") == 0)
+    {
+        return 8;
+    }
+    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
+       || strcmp(elem_name, "tf32") == 0)
     {
         return 4;
     }
@@ -199,24 +162,46 @@ static rocke_value_t** rocke_build_mem_operands(rocke_ir_builder_t* b,
 /*  LDS (shared memory) -- alloc                                          */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive)
+{
+    const rocke_type_t* t;
+    rocke_attr_map_t attrs;
+    const rocke_attr_map_t* attrs_p = NULL;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    t = rocke_smem_type(b, elem, shape, rank, exclusive);
+    if(!t)
+    {
+        return NULL;
+    }
+    /* Carry the exclusive bit as an op attr so it round-trips through the
+     * ck.dsl.ir/v1 serializer (the type name deliberately omits it). Only
+     * emitted when set, so the default stays byte-identical. Ignored by the
+     * native .ll lowering (which reads the SmemType's smem_exclusive). */
+    if(exclusive)
+    {
+        attrs = rocke_i_attrs(b);
+        rocke_attr_set_bool(b, &attrs, "exclusive", true);
+        attrs_p = &attrs;
+    }
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, attrs_p, name_hint ? name_hint : "smem");
+}
+
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const rocke_type_t* elem,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint)
 {
-    const rocke_type_t* t;
-    if(!rocke_i_live(b))
-    {
-        return NULL;
-    }
-    t = rocke_smem_type(b, elem, shape, rank);
-    if(!t)
-    {
-        return NULL;
-    }
-    return rocke_i_op1(
-        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, NULL, name_hint ? name_hint : "smem");
+    return rocke_b_smem_alloc_ex(b, elem, shape, rank, name_hint, 0);
 }
 
 /* ===================================================================== */
@@ -260,6 +245,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     const char* elem_name;
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
+    static const int allowed_64bit[] = {2};
     int elem_bytes;
     if(!rocke_i_live(b))
     {
@@ -291,10 +277,19 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     }
     elem_name = value->type->elem->name;
     {
-        bool eight = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-                      || strcmp(elem_name, "bf8e5m2") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 4 : 3;
+        const int* allowed = allowed_other;
+        int acount = 3;
+        if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+           || strcmp(elem_name, "bf8e5m2") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 4;
+        }
+        else if(strcmp(elem_name, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 1;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             rocke_i_set_err(b,
@@ -371,8 +366,10 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     const rocke_type_t* vt;
     rocke_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
-    static const int allowed_other[] = {1, 2, 4, 8};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 12, 16};
+    static const int allowed_16bit[] = {1, 2, 4, 6, 8};
+    static const int allowed_32bit[] = {1, 2, 3, 4, 8};
+    static const int allowed_64bit[] = {1, 2};
     char hint[16];
     if(!rocke_i_live(b))
     {
@@ -384,21 +381,34 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
     }
     dn = dtype->name;
     if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
-         || strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
-         || strcmp(dn, "i8") == 0))
+         || strcmp(dn, "tf32") == 0 || strcmp(dn, "i32") == 0 || strcmp(dn, "f64") == 0
+         || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0))
     {
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
-            "bf8e5m2 / i8, got %s",
+            "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+            "fp8e4m3 / bf8e5m2 / i8, got %s",
             dn);
     }
     {
-        bool eight
-            = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
-        const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount = eight ? 5 : 4;
+        const int* allowed = allowed_32bit;
+        int acount = 5;
+        if(strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0)
+        {
+            allowed = allowed_8bit;
+            acount = 6;
+        }
+        else if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0)
+        {
+            allowed = allowed_16bit;
+            acount = 5;
+        }
+        else if(strcmp(dn, "f64") == 0)
+        {
+            allowed = allowed_64bit;
+            acount = 2;
+        }
         if(!rocke_n_in(n, allowed, acount))
         {
             return (rocke_value_t*)rocke_i_set_err(
@@ -592,10 +602,11 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mma op_id is NULL");
     }
     /* C has no MmaOp object; op_id is always a bare string, so the frag length
-     * and accumulator element come from the static op_id table (the Python
-     * bare-string code path). */
+     * and accumulator element are resolved from the arch SSOT (the Python
+     * bare-string code path). A <= 0 frag length means the op_id is unknown to
+     * the SSOT (the zero-length _frag_info fallback). */
     c_frag_len = rocke_mma_c_frag_len(op_id);
-    if(c_frag_len < 0)
+    if(c_frag_len <= 0)
     {
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
@@ -626,6 +637,12 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     {
         ops[3 + i] = extra[i];
     }
+    const char* tf32_error = rocke_tf32_mma_error(op_id, ops, nops);
+    if(tf32_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", tf32_error);
+    const char* mx_error = rocke_scaled_mfma_error(op_id, ops, nops);
+    if(mx_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", mx_error);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
@@ -714,6 +731,39 @@ rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
 /*  inline asm                                                           */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar < ROCKE_SCALAR_I1 || value->type->scalar > ROCKE_SCALAR_BF8E5M2)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "optimization_barrier requires a directly lowerable scalar or i1");
+    }
+    if(value->type->scalar == ROCKE_SCALAR_I1 || value->type->scalar == ROCKE_SCALAR_I8
+       || value->type->scalar == ROCKE_SCALAR_FP8E4M3
+       || value->type->scalar == ROCKE_SCALAR_BF8E5M2)
+    {
+        bool encoded_float = value->type->scalar == ROCKE_SCALAR_FP8E4M3
+                             || value->type->scalar == ROCKE_SCALAR_BF8E5M2;
+        rocke_value_t* raw = encoded_float ? rocke_b_bitcast(b, value, rocke_i8()) : value;
+        rocke_value_t* wide = rocke_b_zext(b, raw, rocke_i32());
+        rocke_value_t* opaque = rocke_b_optimization_barrier(b, wide);
+        rocke_value_t* narrow = rocke_b_trunc(b, opaque, raw->type);
+        return encoded_float ? rocke_b_bitcast(b, narrow, value->type) : narrow;
+    }
+    rocke_inline_asm_opts_t opts = {};
+    opts.sideeffect_set = true;
+    opts.sideeffect = false;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {value->type};
+    rocke_op_t* op = rocke_b_inline_asm(b, "", "=v,0", operands, 1, types, 1, &opts);
+    return op ? op->results[0] : NULL;
+}
+
 rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const char* asm_template,
                                const char* constraints,
@@ -782,4 +832,103 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
      * given result_types reproduces the emission for any N. */
     return rocke_b_inline_asm(
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
+}
+
+static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mnemonic, int imm)
+{
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
+    const char* text;
+    if(!rocke_i_live(b))
+        return;
+    if(imm < 0 || imm > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s imm must fit an unsigned i16 (0..65535), got %d",
+                        mnemonic,
+                        imm);
+        return;
+    }
+    text = rocke_arena_printf(&b->arena, "%s %d", mnemonic, imm);
+    if(!text)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "%s inline-asm text allocation failed", mnemonic);
+        return;
+    }
+    memset(&opts, 0, sizeof(opts));
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    op = rocke_b_inline_asm(b, text, "", NULL, 0, NULL, 0, &opts);
+    if(!op)
+        return;
+    rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
+    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+}
+
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_delay_alu", imm);
+}
+
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_alu", imm);
+}
+
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_clause", imm);
+}
+
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_xcnt", imm);
+}
+
+/* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----
+ *
+ * These emit AMDGPU exec-mask manipulation instructions used by the wavelet
+ * pipeline's MFMA variant to split math-wave and load-wave execution paths
+ * without divergent LLVM branches (which would deadlock barriers).
+ *
+ * Python counterparts in IRBuilder: exec_and_saveexec / exec_xor /
+ * exec_or_saveexec / exec_or (core/ir.py lines 2985-3025).
+ */
+
+rocke_value_t* rocke_b_exec_and_saveexec(rocke_ir_builder_t* b, rocke_value_t* mask)
+{
+    if(!rocke_i_live(b) || !mask)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_AND_SAVEEXEC, &mask, 1, &i64_t, 1, NULL, NULL, 0, "exec_save", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_xor(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_XOR, &saved, 1, &i64_t, 1, NULL, NULL, 0, "exec_compl", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+rocke_value_t* rocke_b_exec_or_saveexec(rocke_ir_builder_t* b, rocke_value_t* compl_v)
+{
+    if(!rocke_i_live(b) || !compl_v)
+        return NULL;
+    const rocke_type_t* i64_t = rocke_i64();
+    rocke_op_t* op = rocke_i_op(
+        b, ROCKE_OP_TILE_EXEC_OR_SAVEEXEC, &compl_v, 1, &i64_t, 1, NULL, NULL, 0, "exec_tmp", NULL);
+    return op ? op->results[0] : NULL;
+}
+
+void rocke_b_exec_or(rocke_ir_builder_t* b, rocke_value_t* saved)
+{
+    if(!rocke_i_live(b) || !saved)
+        return;
+    rocke_i_op(b, ROCKE_OP_TILE_EXEC_OR, &saved, 1, NULL, 0, NULL, NULL, 0, "v", NULL);
 }

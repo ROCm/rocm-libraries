@@ -33,10 +33,24 @@ if(NOT DEFINED CLANG_TIDY_SOURCE_FILTER)
     set(CLANG_TIDY_SOURCE_FILTER "^(?!${CMAKE_BINARY_DIR}/).*")
 endif()
 
+# Windows-only clang-tidy relaxations: both checks fire on Microsoft STL
+# internals rather than on our code, and are clean against libstdc++, so Linux
+# keeps the full rule set. MSVC rethrows with a bare, unnamed `throw;`
+# (bugprone-exception-escape, which IgnoredExceptions cannot narrow) and its
+# node-based containers are not nothrow-move-constructible
+# (performance-noexcept-move-constructor). --checks= extends -config-file=.
+set(CLANG_TIDY_PLATFORM_ARGS "")
+if(WIN32)
+    set(CLANG_TIDY_PLATFORM_ARGS
+        --checks=-bugprone-exception-escape,-performance-noexcept-move-constructor
+    )
+endif()
+
 # Set the CLANG_TIDY_COMMAND variable for per-target integration.
 function(setClangTidyVars)
     set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${CLANG_TIDY_CONFIG_FILE} -p
-                           ${CMAKE_BINARY_DIR} ${CLANG_TIDY_EXTRA_ARGS} PARENT_SCOPE
+                           ${CMAKE_BINARY_DIR} ${CLANG_TIDY_PLATFORM_ARGS}
+                           ${CLANG_TIDY_EXTRA_ARGS} PARENT_SCOPE
     )
 endfunction()
 
@@ -61,8 +75,13 @@ function(add_clang_tidy_custom_target)
 
         if(ROCM_LIBS_SUPERBUILD)
             set(_TIDY_TARGET ${PROJECT_NAME}_tidy)
+            # In superbuild the compile database is shared across components; restrict
+            # this target to the including project's own sources.
+            file(RELATIVE_PATH _tidy_rel "${CMAKE_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}")
+            set(_TIDY_SCOPE_ARG "${_tidy_rel}/")
         else()
             set(_TIDY_TARGET tidy)
+            set(_TIDY_SCOPE_ARG "")
         endif()
 
         add_custom_target(
@@ -72,7 +91,7 @@ function(add_clang_tidy_custom_target)
                 -config-file=${CLANG_TIDY_CONFIG_FILE}
                 -source-filter "${CLANG_TIDY_SOURCE_FILTER}"
                 -quiet -j ${CLANG_TIDY_JOBS}
-                ${CLANG_TIDY_EXTRA_ARGS}
+                ${CLANG_TIDY_EXTRA_ARGS} ${_TIDY_SCOPE_ARG}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT
                 "Running clang-tidy on ${PROJECT_NAME} (${CLANG_TIDY_JOBS} parallel jobs)..."

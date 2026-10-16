@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_TYPES_H_
-#define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
 #ifdef __cplusplus
@@ -337,13 +335,14 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET
     = 1, /**< stride between consecutive matrices in a batch expressed in terms
             of matrix elements. */
-    ROCBLASLT_MATRIX_LAYOUT_TYPE  = 2,
-    ROCBLASLT_MATRIX_LAYOUT_ORDER = 3,
-    ROCBLASLT_MATRIX_LAYOUT_ROWS  = 4,
-    ROCBLASLT_MATRIX_LAYOUT_COLS  = 5,
-    ROCBLASLT_MATRIX_LAYOUT_LD    = 6,
+    ROCBLASLT_MATRIX_LAYOUT_TYPE       = 2,
+    ROCBLASLT_MATRIX_LAYOUT_ORDER      = 3,
+    ROCBLASLT_MATRIX_LAYOUT_ROWS       = 4,
+    ROCBLASLT_MATRIX_LAYOUT_COLS       = 5,
+    ROCBLASLT_MATRIX_LAYOUT_LD         = 6,
     ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
-    ROCBLASLT_MATRIX_LAYOUT_MAX   = 8
+    ROCBLASLT_MATRIX_LAYOUT_OFFSET     = 8,
+    ROCBLASLT_MATRIX_LAYOUT_MAX        = 9
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -396,6 +395,10 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
+    ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
+#endif
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -523,6 +526,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_a;
     size_t             col_stride_a;
     size_t             batch_stride_a;
+    int64_t            batch_offset_a;
 
     hipDataType        b_type;
     const void*        B;
@@ -530,6 +534,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_b;
     size_t             col_stride_b;
     size_t             batch_stride_b;
+    int64_t            batch_offset_b;
 
     const void* beta;
 
@@ -539,6 +544,7 @@ struct RocblasltContractionProblem
     size_t             row_stride_c;
     size_t             col_stride_c;
     size_t             batch_stride_c;
+    int64_t            batch_offset_c;
 
     hipDataType  d_type;
     void*        D;
@@ -546,6 +552,7 @@ struct RocblasltContractionProblem
     size_t       row_stride_d;
     size_t       col_stride_d;
     size_t       batch_stride_d;
+    int64_t      batch_offset_d;
 
     void*        E;
     void* const* batch_E;
@@ -582,6 +589,11 @@ struct RocblasltContractionProblem
 
     hipStream_t stream;
     void*       Synchronizer;
+    // Stream-K flag region, private to this (stream, problem index) pair. Not a
+    // constructor parameter: the object API builds the problem before it knows
+    // its stream, so this is assigned once the stream is available rather than
+    // threaded through a 60-argument constructor that every caller spells out.
+    void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
@@ -598,6 +610,20 @@ struct RocblasltContractionProblem
     // Effective sm_count_target after the (pref > desc > handle)
     // precedence resolution. 0 = "use all CUs the device exposes".
     int32_t sm_count_target = 0;
+    // Effective uniform-summation-order request after first-on-wins
+    // (preference true, desc==1, handle==1) resolution. 0 = off (default),
+    // 1 = on. Forwarded into ContractionProblemParameters::setUniformSummationOrder
+    // by tensile_host.cpp.
+    int32_t uniform_summation_order = 0;
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // The four below are set post-construction, not through the constructor.
+    // fused_epilogue and fused_a2a_peer_flag are non-owning.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue      = nullptr;
+    uint32_t                                       fused_a2a_world     = 0;
+    uint32_t                                       fused_a2a_rank      = 0;
+    void* const*                                   fused_a2a_peer_flag = nullptr;
+#endif
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -612,22 +638,26 @@ struct RocblasltContractionProblem
                                 const void* const*     batch_A,
                                 int64_t                ld_a,
                                 int64_t                batch_stride_a,
+                                int64_t                batch_offset_a,
                                 hipDataType            b_type,
                                 const void*            B,
                                 const void* const*     batch_B,
                                 int64_t                ld_b,
                                 int64_t                batch_stride_b,
+                                int64_t                batch_offset_b,
                                 const void*            beta,
                                 hipDataType            c_type,
                                 const void*            C,
                                 const void* const*     batch_C,
                                 int64_t                ld_c,
                                 int64_t                batch_stride_c,
+                                int64_t                batch_offset_c,
                                 hipDataType            d_type,
                                 void*                  D,
                                 void* const*           batch_D,
                                 int64_t                ld_d,
                                 int64_t                batch_stride_d,
+                                int64_t                batch_offset_d,
                                 void*                  E,
                                 void* const*           batch_E,
                                 int64_t                ld_e,
@@ -662,8 +692,26 @@ struct RocblasltContractionProblem
                                 hipblasLtBatchMode_t   batchMode,
                                 int32_t                bias_stride,
                                 int32_t                streamk_tile_scheduling_ext = 0,
-                                int32_t                sm_count_target         = 0);
+                                int32_t                sm_count_target         = 0,
+                                int32_t                uniform_summation_order = 0);
 };
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
+struct RocblasltFusedEpilogueInfo
+{
+    bool                         hasA2APrefix      = false;
+    const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
+    void* const*                 a2aRecvPtrs       = nullptr;
+    int64_t                      a2aExtent         = 0;
+    hipblasLtA2ACompletionMode_t a2aCompletionMode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
+    uint32_t                     commChannel       = 0;
+};
+
+// Returns false when desc is nullptr.
+bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
+                                      RocblasltFusedEpilogueInfo&                    out);
+#endif
 
 namespace rocblaslt
 {
@@ -732,5 +780,3 @@ namespace rocblaslt
         void* amaxD         = nullptr;
     };
 } // End of namespace rocblaslt
-
-#endif /* _ROCBLASLT_TYPES_H_ */

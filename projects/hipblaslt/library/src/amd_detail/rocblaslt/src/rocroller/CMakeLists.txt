@@ -38,9 +38,18 @@ target_include_directories(hipblaslt-rocroller
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/tensilelite/include"
 )
+if(HIPBLASLT_ENABLE_COVERAGE)
+    # These sources land inside hipblaslt via the WHOLE_ARCHIVE link below, so
+    # without their own instrumentation they are missing from the coverage
+    # report even when the tests execute them. Host-only translation units, so
+    # no -Xarch_host selector is needed.
+    target_compile_options(hipblaslt-rocroller PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(hipblaslt-rocroller PUBLIC -fprofile-instr-generate)
+endif()
+
 target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
 
-if(NOT HIPBLASLT_BUILD_SHARED_LIBS)
+if(NOT BUILD_SHARED_LIBS)
     install(TARGETS hipblaslt-rocroller
         EXPORT hipblaslt-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel)

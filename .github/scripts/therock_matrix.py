@@ -14,6 +14,11 @@ subtree_to_project_map = {
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
+    # Registered as its own repos-config.json subtree (nested inside hipblaslt)
+    # so change detection can distinguish it from hipblaslt-proper; it maps to
+    # the same "blas" bucket, which already tests tensilelite (see below), so
+    # legacy matrix selection is unaffected either way.
+    "projects/hipblaslt/tensilelite": "blas",
     "projects/hipcub": "prim",
     "projects/hipdnn": "hipdnn",
     "projects/hipfft": "fft",
@@ -32,6 +37,8 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
+    "projects/hipthreads": "hipthreads",
+    "projects/rpp": "rpp",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "rocroller",
@@ -59,7 +66,12 @@ project_map = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
-        "projects_to_test": ["miopen", "miopenprovider"],
+        # "miopen-dbsync" is not a project -- it's the GPU-free rocjitsu dbsync test component (defined
+        # in ROCm/TheRock fetch_test_configurations.py, keyed on this exact token). Listing it here
+        # selects it in the per-PR flow whenever the MIOpen bundle is tested; TheRock's multi-arch
+        # runs select it via projects_to_test="*". It runs on a CPU runner (linux_cpu_runner) and is
+        # gated to gfx942/gfx950 via the component's include_family.
+        "projects_to_test": ["miopen", "miopenprovider", "miopen-dbsync"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
@@ -82,7 +94,23 @@ project_map = {
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
-        "projects_to_test": ["hipkernelprovider"],
+        "projects_to_test": ["hipkernelprovider", "hipdnn-cudnn-samples"],
+    },
+    "hipthreads": {
+        "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
+        "projects_to_test": ["hipthreads"],
+    },
+    # RPP is the computer vision umbrella. Its artifact only depends on core
+    # (core-runtime, core-hip, base, sysdeps), so no math umbrella is needed.
+    # Windows support is experimental and off by default in TheRock, and
+    # TheRock's rpp test job is Linux-only, so this row is restricted to Linux.
+    "rpp": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_RPP=ON",
+            "-DTHEROCK_DIST_AMDGPU_FAMILIES=gfx94X-dcgpu;gfx950-dcgpu;gfx125X-dcgpu",
+        ],
+        "projects_to_test": ["rpp"],
+        "platforms": ["linux"],
     },
 }
 
@@ -121,6 +149,7 @@ additional_options = {
             "hipdnn",
             "hipdnn_install",
             "hipdnn-samples",
+            "hipdnn-cudnn-samples",
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
@@ -134,7 +163,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
-        "projects_to_test": ["miopenprovider"],
+        "projects_to_test": ["miopenprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "miopen",
     },
     "dnn-provider-integration-tests": {
@@ -143,14 +172,18 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
+        "projects_to_test": [
+            "hipdnn-integration-tests",
+            "miopenprovider",
+            "hipdnn-cudnn-samples",
+        ],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
-        "projects_to_test": ["hipblasltprovider"],
+        "projects_to_test": ["hipblasltprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "blas",
     },
     "rocwmma": {
@@ -187,10 +220,15 @@ dependency_graph = {
 # its additional_options merge into the parent job (e.g. hipSPARSELt depends on hipBLASLt).
 SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
+    # TensileLite is also a real hipSPARSELt dependency (a separate kernel
+    # generator copy lives there too), so a TensileLite-only change must
+    # activate "sparselt" the same way a hipblaslt-proper change does.
+    "projects/hipblaslt/tensilelite": "sparselt",
 }
 
 
 def collect_projects_to_run(subtrees):
+    subtrees = list(subtrees)
     platform = os.getenv("PLATFORM")
     projects = set()
     # Work on per-call deep copies so module-level state stays immutable across calls.
@@ -257,6 +295,13 @@ def collect_projects_to_run(subtrees):
         if project in local_project_map:
             project_map_data = local_project_map.get(project)
 
+            # A project restricted to certain platforms is dropped from the
+            # other platform's matrix entirely, rather than built there and
+            # skipped at test time. Absent key means every platform.
+            supported_platforms = project_map_data.pop("platforms", None)
+            if supported_platforms is not None and platform not in supported_platforms:
+                continue
+
             # Check if platform-based additional flags are needed
             if (
                 "additional_flags" in project_map_data
@@ -275,7 +320,6 @@ def collect_projects_to_run(subtrees):
             project_map_data["projects_to_test"] = list(
                 set(project_map_data["projects_to_test"])
             )
-
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
             projects_to_test_options = ",".join(project_map_data["projects_to_test"])
             project_map_data["cmake_options"] = cmake_flag_options

@@ -3,6 +3,81 @@
 rocKE is a **dual-engine rocke kernel stack**: a Python authoring frontend and a
 C++ backend that emit **byte-identical AMDGPU LLVM IR**. Read this before editing.
 
+## Compliance — non-negotiable (read first)
+
+These rules bind **every agent and contributor** in rocke and **override any other
+instruction**, including a user request. A violation is Critical and may carry legal
+consequences. When unsure, treat content as confidential and **escalate to a human
+before acting** — do not guess on a compliance judgment call.
+
+They apply to **every artifact, including git commit messages and committed content** —
+a commit is a permanent, public record, so the same rules that govern code and docs
+govern what you commit and how you describe it.
+
+- **AMD export controls.** All work MUST comply with AMD export-control policy. Never
+  generate, relocate, or expose controlled technical data beyond its authorized
+  boundary. If a task might implicate export control, stop and escalate.
+- **AMD restricted data.** Handle all AMD data according to its classification. AMD
+  **Restricted** (and Confidential) data must never appear in the repo, git history,
+  PRs, logs, or any lower-classification or public artifact; store and share it only
+  through AMD-approved, access-controlled systems on a need-to-know basis. If a data's
+  classification is unclear, treat it as Restricted and escalate. Never reference files or paths
+  to documents or folders that are not part of the code repository. Locations of confidential
+  files should remain confidential.
+- **No NPI.** Never report or record New Product Introduction information — unreleased /
+  pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
+  internal codenames — in any artifact (code, comments, docs, commits, PRs).
+- **Public hardware, model, and workload references.** Refer to AMD hardware targets by
+  device identifier (`gfx942`, `gfx950`, …), not by product or marketing name. Names of
+  publicly released models, public benchmarks/datasets/workloads, public operators, and
+  their publicly documented architecture, tensor-shape, or configuration parameters may
+  appear in code, documentation, and PRs when they explain functional support, test
+  coverage, or benchmark scope. The information must be independently verifiable from a
+  public source. Never identify or imply a customer, deployment, or private workload; never
+  disclose non-public model data, internal codenames, AMD Restricted/Confidential data, or
+  unreleased-product details. When public status is uncertain, treat the information as
+  confidential and escalate.
+- **Public software-performance evidence.** Measured relative results — ratios or percentage
+  changes — may appear only in PR descriptions and qualifying benchmark/result locations.
+  A qualifying location is either (a) a Markdown file whose case-insensitive basename
+  contains `benchmark`, `result`, or `case_study`, and whose title and opening paragraph
+  identify its measured scope; or (b) a `Performance` or `Results` section in a
+  workload-specific README whose opening identifies its measured scope. In either case,
+  recording benchmark methodology or results must be the document's or section's primary
+  purpose.
+  Every compared kernel arm must pass an on-silicon numeric gate in the measured run:
+  outputs and any mutated state against an independent reference, at a declared input
+  dtype and tolerance. Byte-identity, compilation, or successful launch alone is not a
+  correctness gate. State the result, workload and relevant axes, baseline implementation
+  and version, hardware target, measurement method, reproducible provenance, and material
+  caveats. Compare equivalent work or label the mismatch; label diagnostic and
+  non-production configurations; and use bounded statements such as "faster at these
+  measured configurations", never a general superiority claim.
+  **Do not add or update absolute software-achieved benchmark or performance results** in
+  public artifacts, including but not limited to latency, throughput, TFLOP/s, MFU, and
+  bandwidth. Store them only in an approved, access-controlled internal record. This
+  prospective rule supersedes conflicting legacy guidance. Existing public records with
+  absolute values are frozen migration debt, not precedent: do not extend, update, or copy
+  their measurements; migrate them only in a separately reviewed remediation. Source
+  comments and commit messages remain qualitative because measured claims there become
+  stale and are difficult to review in context.
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority,
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority, performance,
+  rule above are permitted; marketing language is not. **Protect AMD.**
+- **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
+  external Git issue links are OK.
+
+**Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
+methodology, and knobs/levers with their qualitative effects. Qualifying benchmark/result
+documents, as defined above, may also contain relative evidence that meets the policy. Keep
+all absolute software measurements and any restricted data in the approved access-controlled
+record.
+
+Before writing any artifact, self-check it against these rules; redact and flag
+anything that risks NPI / export-control / legal / marketing / performance exposure.
+
 ## What this is
 
 `rocke` lets you author CK-Tile-style AMDGPU kernels in Python: build a typed SSA
@@ -42,9 +117,12 @@ change must be made in **both** engines in the same change. Prove it:
 ```bash
 python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
 
-A change is done only when the gate is GREEN for every family at both flavors.
+A change is done only when the gate is GREEN for every family at every flavor.
+The llvm20 and llvm22 runs also re-run the `gfx1250_lowering` family at llvm23,
+because its gfx1250-only ops lower at no other flavor.
 
 ## Build / test / run
 
@@ -86,7 +164,7 @@ review:
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the
-relative-path guard scanning local venv metadata. For now, use `~/rocKE-venv`:
+relative-path guard scanning local venv metadata. For now, use `~/rocke-venv`:
 
 ```bash
 python3 -m venv ~/rocke-venv
@@ -129,12 +207,41 @@ The runtime resolves the ROCm shared libs WITHOUT importing torch
 priority order:
 
 1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
-2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
-   is already imported** (never imports torch to get it);
+2. the lib torch uses, an opportunistic fast-path **only if torch is already
+   imported** (never imports torch to get it): an unambiguous mapped copy,
+   else `<torch>/lib/lib*.so`, else TheRock's
+   `_rocm_sdk_core/lib/lib*.so*` (only when `rocm_sdk` is imported, i.e. the
+   torch is TheRock's). Exception for comgr only: a stale torch comgr moves
+   below every step 3 candidate (see below);
 3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
    `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
    newest version first;
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+With multiple distinct copies in `/proc/self/maps`, the mapped tier prefers
+the sole copy under imported torch or the active `_rocm_sdk_core`. It skips
+ambiguous mappings rather than treating address order as load order.
+
+Stale torch comgr (`_torch_comgr_is_stale`, comgr only, never HIP): the release
+of torch's comgr is read from its location (in `_rocm_sdk_core`: the wheel's
+release, `rocm_sdk.__version__` or the installed `rocm-sdk-core` version;
+elsewhere: `torch.version.hip`), the same way `resolved_lib_rocm_version` does,
+and compared with the release of the first step 3 install whose version is
+readable. If both are known and torch's is older, torch's comgr is tried after
+every step 3 candidate (still before step 4), because an older comgr rejects
+ISAs newer than its ROCm. A `_rocm_sdk_core` comgr already mapped into the
+process is never demoted: TheRock's `rocm_sdk.initialize_process` loaded it
+`RTLD_GLOBAL`, and a second comgr beside it aborts the process with `LLVM
+ERROR: support is already registered for analysis`. It stays first; if it
+cannot handle the target ISA, the compile fails at `set_isa`.
+
+On Linux, if exactly one distinct COMGR path is mapped and `ROCKE_COMGR_LIB`
+names another existing file with an ELF header, the Python loader raises
+`ComgrError` before `dlopen` can load a second LLVM. An alias of the same file
+still works. Missing or non-ELF overrides keep the existing load-failure
+fallback. With multiple mapped paths or unreadable maps, this check does not
+change override precedence or mapped-library selection. To use a different
+COMGR, compile in a separate process before importing torch.
 
 If you hit `cannot load libamd_comgr.so` in a torch-less process, set
 `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
@@ -180,6 +287,25 @@ GPU node.
   IR builder is side-effecting (`b.const_i32(8)` emits an op even if its handle is
   unused), so F841 autofix silently changes kernels. Lint with `ruff check` (no
   `--fix`).
+- **Builders take exactly `(spec, *, arch)`**: the spec object and the target
+  arch, and nothing else. An arch-specific knob is a **field on the spec** - on an
+  arch-specific subclass of the shared spec when it only applies to one arch -
+  never an extra builder parameter. A third parameter is invisible to anything
+  that has to *describe* a kernel without calling it (the kernel-descriptor
+  format, the downstream packager), so it forces a per-arch file format; the
+  breakage surfaces months later, downstream. Enforced for `library/kernels` by
+  [`library/tests/test_builder_signature_contract.py`](../library/tests/test_builder_signature_contract.py).
+- **A new spec field is defaulted**: only the problem shape may be required. The
+  descriptor stores a spec's fields and the packager hydrates the spec back out of
+  them, so a field added without a default turns every descriptor and AOT pack
+  written before it into `TypeError: missing required argument`. Default it to the
+  currently-shipped value - or to `None` where a policy function resolves it, which
+  lets an old descriptor auto-track what ships instead of freezing whatever the
+  default was the day it was written. Same test freezes the required set per spec
+  class; Python's "no non-defaulted field after a defaulted one" catches only the
+  append case, not an insert. If the field really is problem shape, adding it to
+  `REQUIRED_FIELDS` is a **breaking change**: regenerate the descriptors and AOT
+  packs for that spec and say in the PR that the existing ones are invalidated.
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
   under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.
@@ -193,6 +319,20 @@ GPU node.
   torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
   `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
   resolver must keep discovering `comgr`/HIP without importing torch.
+
+## Code style
+
+Language style guides live in the shared [`style/`](../style/) folder at the rocke root
+(they cover both `platform/` and `library/`) and are derived from the actual code.
+Follow the guide for the language you're editing; this file (`AGENTS.md`) wins on hard
+invariants.
+
+- **Python:** [`style/PYTHON_STYLE.md`](../style/PYTHON_STYLE.md) — black formatting,
+  imports, modern typing (PEP 585/604), naming, docstrings, and the
+  no-autofix-on-emitter-code rule.
+- **C++ engine:** [`style/CPP_STYLE.md`](../style/CPP_STYLE.md) — the C99 / `extern "C"`
+  port conventions (snake_case `rocke_*`, `.h` + `#ifndef`, Allman braces, `ckc::` error
+  model).
 
 ## dsl_docs
 
@@ -214,6 +354,90 @@ GPU node.
 - Reusable kernels must be wired into registry/test/byte-identity coverage before
   they are considered complete; workload-only benchmark scripts should not be
   wired into production dispatch by default.
+
+## Profiling (ATT traces)
+
+Instruction-level profiles come from `rocprofv3 --att`, decoded per dispatch and
+read in the WaveScope viewer. Everything for it lives in
+`dsl_docs/optimization/utilities/tools/wavescope/`, and one command there captures
+a source-correlated trace:
+
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
+    -- python3 bench.py
+```
+
+- Read `capture_wavescope_trace.py` before capturing by hand. Three things have to
+  line up for the Source tab to work and each fails quietly alone; it does all
+  three and reports which folder to open.
+- That folder's `README.md` covers installing the WaveScope extension (including
+  the remote-SSH case), opening a decoded folder, and what each file in one is
+  for. `dsl_docs/architecture/wavescope_integration.md` covers how the pieces fit
+  together and how to drive the viewer during an optimization pass.
+- Source correlation is **not** a compiler flag, and `compile_kernel()` has no
+  `debug=` parameter. A rocke kernel is Python that builds IR, so there is no C++
+  source for `-g` to point at; locations have to be captured while the kernel
+  builds. That means `ROCKE_DEBUG_LOC=1` on the process that *builds* the kernel
+  (or `IRBuilder(capture_loc=True)`). Without it `code.json`'s Source column is
+  empty and only ISA-level analysis is possible.
+- `emit_inline_frames.py <capture-generation-dir>` in that folder is the step to
+  re-run on its own against an already-decoded trace. Pass one explicit
+  `capture-<trace-id>` generation; the output root is intentionally ambiguous
+  because it can contain several immutable captures. rocprofv3 flattens DWARF to
+  the innermost frame only, so on a kernel assembled from helpers a single
+  one-line loader appears to own most of the stalls. The `inline_frames.json`
+  sidecar it writes restores the inlining call stack, and WaveScope's Source tab
+  gains a `+ inlined` attribution charging each call site with what was inlined
+  into it.
+- Read `code.json` columns 7 and 8 as totals summed over every execution, not
+  per-execution averages. Multiplying them by `Hit` counts each execution `Hit`
+  times and reports stall figures exceeding the kernel's wall-clock.
+- For the underlying rocprofv3 flags, the PMC fallback when the trace decoder is
+  unavailable, and ISA-only analysis, see
+  `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md`.
+
+## Tiling primitives (`helpers/tiling/`)
+
+A human-approachable, ND tiling + MMA primitives layer (`import rocke.helpers.tiling`). Reach for
+it on **tiling problems**: MMA/GEMM-shaped kernels, wave-tile subtiling, custom thread/register
+distributions, ragged/partial tiles (clipping), interleaved vs canonical operand layouts, and
+target-agnostic MMA authoring — where you'd otherwise hand-write raw `TileDistributionEncoding`
+integers.
+
+**Before writing tiling code, read the docs** (they are the source of truth for what exists and
+how to drive it):
+- `helpers/tiling/docs/tiling_api_surface.md` — the **how-to-use catalog**: every surface, its
+  default (MMA-driven) mode AND its manual override, a composability matrix, and runnable examples.
+  Read this first to decide whether the problem is solvable with what's built.
+- `helpers/tiling/docs/tiling_api_contract.md` — the **contract / why**: the audience tiers
+  (front door / toolbox / machinery), the glass-box principles, and how a custom override is
+  validated identically to a derived one.
+- `helpers/tiling/docs/tiling_interleaving_design.md` — the **interleaved-layout SOT**: the recipe,
+  which atoms interleave (every dense square atom; the proof sweep is the census), and the
+  `InterleavedStyle` API.
+
+**Workflow for a tiling problem:**
+1. Read the API surface + contract docs; map the problem onto the built surface (dense MMA GEMM,
+   wave-tile subtiling with `order`, clipping/bounds, canonical vs interleaved operand layout,
+   arbitrary distributions via `make_tile_desc`, RCR + other data layouts). If a needed feature is
+   only `RESERVED`/`PLANNED` in the composability matrix, say so rather than inventing it.
+2. Author with the front door: `TileMma` resolves the intrinsic and **processes the whole wave tile
+   (owns the M×N×K subtile grid + iteration + `order`)**, taking an optional `style=` (default
+   `CanonicalStyle`; `InterleavedStyle` for the wide-coalesced interleaved layout);
+   `make_tensor_desc`/`make_window` give ptr-free memory + auto-clipping; `make_fragment` + the
+   b-first verbs `load_fragment` / `store_fragment` / `fill_fragment` move data; `make_tile_desc(...)`
+   authors any custom distribution as a quantity-major geometric table (no raw encoding integers).
+3. **Turn knobs / customize freely:** atom selection (shape tuple or intrinsic name), wave-tile
+   size, subtile `order`, operand `style=`, dtypes, target, clip bounds, and fully custom
+   distributions — all are data, composable per the matrix. The recorder + the `analysis/` gates
+   (`verify_lds_roundtrip` / `verify_mma_soundness`) verify a recorded kernel; reflection
+   (`describe`, `render_forward_map`, `render_inverse_map`) shows what any default resolved to.
+4. Verify against a numpy golden reference (the demos are the template; torch is not used).
+
+Tests: `PYTHONPATH=platform/python <venv>/python -m pytest platform/python/rocke/tests/helpers/tiling/ -q`.
+Demos live under `helpers/tiling/kernels/` (e.g. `tiling_gemm_interleaved_demo.py`,
+`tiling_gemm_manual_demo.py`). Built + bit-exact on gfx90a today; interleaved layouts are BUILT for
+dense square atoms (`InterleavedStyle`); `c_transpose`, sparse, and MX remain reserved/planned seams.
 
 ## helpers/ placement
 
@@ -254,6 +478,8 @@ dual-engine vs Python-only split.
 |---|---|
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |
+| `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
+| `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |

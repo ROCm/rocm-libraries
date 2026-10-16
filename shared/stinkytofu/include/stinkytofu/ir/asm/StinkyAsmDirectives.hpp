@@ -108,6 +108,20 @@ struct AsmDirective : public IRBase {
     static bool classof(const IRBase* ir) {
         return ir->getType() == IRType::StinkyAsmDirective;
     }
+
+    IRBase* clone() const override {
+        auto* copied = new AsmDirective();
+        copied->kind = kind;
+        copied->name = name;
+        copied->comment = comment;
+        copied->params = params;
+        copied->symbol = symbol;
+        copied->value = value;
+        copied->condition = condition;
+        copied->filename = filename;
+        copied->intValue = intValue;
+        return copied;
+    }
 };
 
 }  // namespace stinkytofu

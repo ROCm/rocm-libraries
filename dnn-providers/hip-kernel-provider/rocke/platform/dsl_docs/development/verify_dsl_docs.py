@@ -108,7 +108,6 @@ _imp(
         "WarpGrid",
         "compile_kernel",
         "attention_args_signature",
-        "conv_args_signature",
         "gemm_args_signature",
         "make_conv_manifest",
         "make_attention_manifest",
@@ -591,19 +590,23 @@ check("optimize_kernel CSE", t_passes)
 
 section("specs build + lower (LLVM / HIP / CK Tile)")
 
-from rocke.instances import (
-    TileSpec,
-    TraitSpec,
-    UniversalGemmSpec,
-    build_universal_gemm,
+from kernels.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
+)
+from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConv16cSpec,
     DirectConv4cSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
+)
+from rocke.instances import (
+    TileSpec,
+    TraitSpec,
+    UniversalGemmSpec,
+    build_universal_gemm,
     ElementwiseSpec,
     build_elementwise,
     Reduce2DSpec,
@@ -1203,7 +1206,6 @@ section("manifest")
 from rocke.helpers import (
     MANIFEST_SCHEMA,
     attention_args_signature,
-    conv_args_signature,
     gemm_args_signature,
     compile_kernel,
 )
@@ -1215,8 +1217,6 @@ def t_manifest() -> None:
     assert any(e["name"] == "M" for e in gs)
     gsb = gemm_args_signature(with_bytes=True)
     assert any(e["name"] == "A_bytes" for e in gsb)
-    cs = conv_args_signature()
-    assert {e["name"] for e in cs} >= {"A", "B", "D", "A_bytes", "B_bytes", "D_bytes"}
     a2 = attention_args_signature(path="2d")
     ar = attention_args_signature(path="reduce")
     assert len(a2) >= 6 and len(ar) >= 4

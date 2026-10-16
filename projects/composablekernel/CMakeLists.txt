@@ -41,12 +41,24 @@ if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
   message(STATUS "Enabling ASAN for Composable Kernel (THEROCK_SANITIZER=${THEROCK_SANITIZER})")
 endif()
 
-set(version 1.2.0)
+set(version 1.3.0)
 project(composable_kernel VERSION ${version} LANGUAGES CXX)
+
+# CK's large HIP translation units can fail in Clang's heterogeneous DWARF
+# emission under host TSAN. Release does not override debug flags inherited
+# from a parent toolchain, so disable debug info for CK compilation only.
+# Keep the host TSAN instrumentation and all other toolchain flags.
+if(THEROCK_SANITIZER STREQUAL "TSAN")
+  add_compile_options(-g0)
+endif()
 include(CTest)
 
 option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
+option(MIOPEN_SPLIT_LIBS "With MIOPEN_REQ_LIBS_ONLY, also build device_conv_operations_<arch>, one uniquely named copy of the convolution library per GPU target" OFF)
+if(MIOPEN_SPLIT_LIBS AND NOT MIOPEN_REQ_LIBS_ONLY)
+    message(WARNING "MIOPEN_SPLIT_LIBS has no effect without MIOPEN_REQ_LIBS_ONLY")
+endif()
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
 option(CK_TILE_DISPATCHER "Use CK Tile Dispatcher for profiler convolution kernels" OFF)
@@ -57,7 +69,6 @@ option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if suppo
 option(BUILD_CK_TILE_ENGINE "Build the tile_engine subdirectory" OFF)
 option(BUILD_CK_EXAMPLES "Build the example subdirectory" ON)
 option(BUILD_CK_TUTORIALS "Build the tutorial subdirectory" ON)
-option(CK_ENABLE_ROCM_CK "Build rocm_ck API" OFF)
 
 if(CK_EXPERIMENTAL_BUILDER)
     add_definitions(-DCK_EXPERIMENTAL_BUILDER)
@@ -189,6 +200,13 @@ function(_ck_gpu_target_string_to_id TARGET_STR OUT_VAR)
         set(${OUT_VAR} "0x1153" PARENT_SCOPE)
     elseif(_tgt MATCHES "^gfx11-generic$")
         set(${OUT_VAR} "0x11FF" PARENT_SCOPE)
+    # GFX11.7
+    elseif(_tgt STREQUAL "gfx1170")
+        set(${OUT_VAR} "0x1170" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1171")
+        set(${OUT_VAR} "0x1171" PARENT_SCOPE)
+    elseif(_tgt MATCHES "^gfx11-7-generic$")
+        set(${OUT_VAR} "0x117F" PARENT_SCOPE)
     # GFX12
     elseif(_tgt STREQUAL "gfx1200")
         set(${OUT_VAR} "0x1200" PARENT_SCOPE)
@@ -196,7 +214,7 @@ function(_ck_gpu_target_string_to_id TARGET_STR OUT_VAR)
         set(${OUT_VAR} "0x1201" PARENT_SCOPE)
     elseif(_tgt MATCHES "^gfx12-generic$")
         set(${OUT_VAR} "0x12FF" PARENT_SCOPE)
-    elseif(_tgt STREQUAL "gfx1250")
+    elseif(_tgt STREQUAL "gfx1250" OR _tgt STREQUAL "gfx1250-strict")
         set(${OUT_VAR} "0x1250" PARENT_SCOPE)
     else()
         message(WARNING "_ck_gpu_target_string_to_id: unknown GPU target '${TARGET_STR}', skipping")
@@ -215,6 +233,21 @@ endforeach()
 list(JOIN _ck_hex_ids "," _ck_hex_str)
 if(_ck_hex_str)
     add_compile_definitions(CK_CMAKE_GPU_TARGET_IDS=${_ck_hex_str})
+endif()
+
+# ---------------------------------------------------------------------------
+# The new unified ck_tile framework (USE_NEW_UNIFIED_FRAMEWORK) does not yet
+# support gfx1250. Force it OFF for any build that targets gfx1250 so the legacy
+# WarpGemm path is used -- even if the flag would otherwise default to (or be
+# requested as) on. This is applied as a compile definition (rather than a
+# device-only __gfx1250__ guard in a header) so it stays consistent across BOTH
+# the host and device compilation passes: USE_NEW_UNIFIED_FRAMEWORK is consumed
+# by the preprocessor in headers that host code also instantiates (e.g. via
+# getCMakeCompilerTarget()), so a device-pass-only guard would desync host/device.
+# ---------------------------------------------------------------------------
+if(GPU_TARGETS MATCHES "gfx1250")
+    add_compile_definitions(USE_NEW_UNIFIED_FRAMEWORK=0)
+    message(STATUS "gfx1250 target detected: forcing USE_NEW_UNIFIED_FRAMEWORK=0 (unified ck_tile framework not yet supported on gfx1250)")
 endif()
 
 #for f8/bf8_t type
@@ -384,7 +417,7 @@ if(NOT ENABLE_ASAN_PACKAGING)
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483 AND ${hip_VERSION_FLAT} LESS 700200000)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx11-7-generic;gfx12-generic")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 700200000)
         set(CK_GPU_TARGETS "")
     endif()
@@ -410,10 +443,33 @@ endif()
 rocm_check_target_ids(SUPPORTED_GPU_TARGETS
         TARGETS ${CK_GPU_TARGETS})
 
+# Per-target convolution library names (MIOPEN_SPLIT_LIBS) use the full target id, so xnack
+# variants stay separate. The name mapping is the one MIOpen uses (miopen_sanitize_arch in
+# projects/miopen/CMakeLists.txt): gfx942:xnack+ -> gfx942_xnackp.
+function(ck_sanitize_arch ARCH OUT_VAR)
+    string(REPLACE ":" "_" _ck_sanitized "${ARCH}")
+    string(REPLACE "+" "p" _ck_sanitized "${_ck_sanitized}")
+    string(REPLACE "-" "_" _ck_sanitized "${_ck_sanitized}")
+    set(${OUT_VAR} "${_ck_sanitized}" PARENT_SCOPE)
+endfunction()
+
 message(STATUS "Building CK for the following targets: ${SUPPORTED_GPU_TARGETS}")
 
 # Cache SUPPORTED_GPU_TARGETS for debug
 set(SUPPORTED_GPU_TARGETS "${SUPPORTED_GPU_TARGETS}" CACHE STRING "List of supported GPU targets")
+
+# SPIR-V target detection (amdgcnspirv)
+set(CK_TARGET_SPIRV OFF)
+if("amdgcnspirv" IN_LIST SUPPORTED_GPU_TARGETS)
+    set(CK_TARGET_SPIRV ON)
+    message(STATUS "SPIR-V target (amdgcnspirv) detected — enabling CK_EXPERIMENTAL_SPIRV")
+    add_definitions(-DCK_EXPERIMENTAL_SPIRV)
+    # SPIR-V is incompatible with offload compression
+    if(NOT DISABLE_OFFLOAD_COMPRESS)
+        message(STATUS "Disabling offload compression (incompatible with SPIR-V)")
+        set(DISABLE_OFFLOAD_COMPRESS ON)
+    endif()
+endif()
 
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx11|gfx12" AND NOT FORCE_DISABLE_XDL)
     message(STATUS "Enabling XDL instances")
@@ -927,12 +983,6 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    endif()
    if(BUILD_CK_TILE_ENGINE)
        add_subdirectory(tile_engine)
-   endif()
-   if(CK_ENABLE_ROCM_CK)
-       add_subdirectory(rocm_ck)
-       if(TARGET check)
-           add_dependencies(check build-smoke-rocm-ck)
-       endif()
    endif()
    if(BUILD_TESTING)
        rocm_package_setup_component(tests

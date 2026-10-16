@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Run a command (typically hipblaslt-bench) under CU contention.
+
+Launches a persistent HIP "busy" kernel with configurable LDS reservation,
+waits until all its workgroups are resident, then runs the given command while
+that contention is in effect. The cotenant is always killed when the command
+finishes or this script is interrupted.
+
+    hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
+
+The hipblaslt build places hipblaslt-cotenant-kernel beside this script (in
+<build>/clients and in the installed bin/); --binary overrides it. The cotenant
+log defaults to ./cotenant.<pid>.log.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import TextIO
+
+HERE = Path(__file__).resolve().parent
+# Built and installed by hipblaslt next to this script.
+KERNEL_BIN = HERE / "hipblaslt-cotenant-kernel"
+
+
+def probe_cus(env: dict[str, str]) -> int | None:
+    """Return the CU count of the first GPU via rocminfo, or None."""
+    try:
+        out = subprocess.check_output(
+            ["rocminfo"], text=True, env=env, stderr=subprocess.DEVNULL
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    in_gpu = False
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "Name:" and fields[1].startswith("gfx"):
+            in_gpu = True
+        elif in_gpu and line.strip().startswith("Compute Unit:"):
+            return int(fields[-1])
+    return None
+
+
+def resolve_binary(explicit: str | None) -> Path:
+    """Locate the cotenant kernel binary: --binary, else the one beside this script."""
+    path = Path(explicit) if explicit else KERNEL_BIN
+    if not (path.is_file() and os.access(path, os.X_OK)):
+        if explicit:
+            sys.exit(f"ERROR: --binary {path} is not an executable file.")
+        sys.exit(
+            f"ERROR: {path} not found or not executable. Run hipblaslt-cotenant from the hipblaslt build "
+            "(<build>/clients) or install, or pass --binary PATH."
+        )
+    return path
+
+
+def resolve_log_path(explicit: str | None) -> Path:
+    """Pick a writable path for the cotenant log: --log, else the cwd, else a temp dir.
+
+    The default name includes the PID so concurrent runs in the same directory
+    don't stomp on each other's log.
+    """
+    if explicit:
+        return Path(explicit)
+    name = f"cotenant.{os.getpid()}.log"
+    if os.access(Path.cwd(), os.W_OK):
+        return Path.cwd() / name
+    return Path(tempfile.gettempdir()) / name
+
+
+def run_command(command: list[str], env: dict[str, str]) -> int:
+    """Run the user's command, returning its exit code; fail cleanly if not found."""
+    try:
+        return subprocess.run(command, env=env).returncode
+    except FileNotFoundError:
+        sys.exit(f"ERROR: command not found: {command[0]}")
+
+
+# Printed by the kernel once every workgroup is confirmed resident on the CUs.
+READY_MARKER = "READY"
+
+
+def wait_ready(
+    proc: subprocess.Popen, log_handle: TextIO, log_path: Path, wait_s: float
+) -> None:
+    """Block until the cotenant logs READY (all workgroups resident); abort if it exits or times out."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        # Re-read the whole log each poll: the cotenant writes concurrently, so a
+        # line-at-a-time read could split the marker across two reads and miss it.
+        log_handle.seek(0)
+        if READY_MARKER in log_handle.read():
+            return
+        if proc.poll() is not None:
+            sys.exit(
+                f"ERROR: cotenant exited (rc={proc.returncode}) before becoming resident; see {log_path}."
+            )
+        if time.monotonic() >= deadline:
+            sys.exit(
+                f"ERROR: cotenant not resident after {wait_s}s; aborting. See {log_path} "
+                "(raise --wait if the device is slow to schedule the grid)."
+            )
+        time.sleep(0.1)
+
+
+def main() -> int:
+    # Route SIGTERM through the same cleanup path Ctrl-C already uses, so an
+    # external `kill` of this process still tears the cotenant down.
+    def _sigterm(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _sigterm)
+
+    ap = argparse.ArgumentParser(
+        description="Run a command under CU contention from a busy cotenant kernel.",
+        epilog="All options must precede `--`; everything after it is the command, "
+        "e.g. hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 1024 -n 1024 -k 1024",
+    )
+    ap.add_argument(
+        "--cus",
+        type=int,
+        required=True,
+        metavar="N",
+        help="cotenant workgroup count (one per CU at max occupancy 1; 0 = uncontended baseline)",
+    )
+    ap.add_argument(
+        "--max-occupancy",
+        type=int,
+        default=1,
+        metavar="N",
+        help="LDS-based workgroups-per-CU limit, 1–64 (default: 1); each workgroup reserves about 1/N of CU LDS",
+    )
+    ap.add_argument(
+        "--device", metavar="N", help="set HIP_VISIBLE_DEVICES for cotenant and command"
+    )
+    ap.add_argument(
+        "--binary",
+        metavar="PATH",
+        help="hipblaslt-cotenant-kernel to use (default: the one beside this script)",
+    )
+    ap.add_argument(
+        "--log",
+        metavar="PATH",
+        help="cotenant log path (default: ./cotenant.<pid>.log, or a temp dir if cwd is read-only)",
+    )
+    ap.add_argument(
+        "--wait",
+        type=float,
+        default=30.0,
+        metavar="S",
+        help="max seconds to wait for residency (default: 30)",
+    )
+    ap.add_argument(
+        "--grace",
+        type=float,
+        default=0.0,
+        metavar="S",
+        help="extra seconds to wait after residency is confirmed (default: 0)",
+    )
+    ap.add_argument(
+        "command", nargs=argparse.REMAINDER, help="command to run after `--`"
+    )
+    args = ap.parse_args()
+
+    if args.cus < 0:
+        sys.exit("ERROR: --cus must be >= 0.")
+    if not 1 <= args.max_occupancy <= 64:
+        sys.exit("ERROR: --max-occupancy must be in [1, 64].")
+    if not args.wait >= 0:
+        sys.exit("ERROR: --wait must be >= 0.")
+    if not args.grace >= 0:
+        sys.exit("ERROR: --grace must be >= 0.")
+    command = (
+        args.command[1:] if args.command and args.command[0] == "--" else args.command
+    )
+    if not command:
+        sys.exit("ERROR: no command given; pass it after `--`.")
+
+    env = os.environ.copy()
+    if args.device is not None:
+        env["HIP_VISIBLE_DEVICES"] = args.device
+
+    # --cus 0 is the uncontended baseline: run the command with no cotenant.
+    if args.cus == 0:
+        print(f"running uncontended (no cotenant): {' '.join(command)}")
+        return run_command(command, env)
+
+    # rocminfo selects via ROCR_VISIBLE_DEVICES; mirror the device the kernel
+    # will actually use (HIP_VISIBLE_DEVICES, from --device or the environment)
+    # so the CU probe targets that GPU on heterogeneous multi-GPU hosts.
+    probe_env = env.copy()
+    hip_visible = env.get("HIP_VISIBLE_DEVICES")
+    if hip_visible is not None:
+        probe_env["ROCR_VISIBLE_DEVICES"] = hip_visible
+    total_cus = probe_cus(probe_env)
+
+    if total_cus is None:
+        print(
+            "WARNING: could not read CU count from rocminfo; skipping --cus bounds check."
+        )
+    elif args.cus > total_cus:
+        sys.exit(f"ERROR: --cus {args.cus} exceeds the device CU count ({total_cus}).")
+
+    binary = resolve_binary(args.binary)
+
+    log_path = resolve_log_path(args.log)
+    print(
+        f"launching cotenant with {args.cus} workgroups "
+        f"(max occupancy: {args.max_occupancy}, log: {log_path})"
+    )
+    try:
+        log = open(log_path, "w")
+    except OSError as e:
+        sys.exit(
+            f"ERROR: cannot write log to {log_path} ({e.strerror}); pass --log PATH."
+        )
+    with log, open(log_path, "r") as log_reader:
+        # No start_new_session: keep the cotenant in this process's group so
+        # terminal signals (SIGINT/SIGHUP) reach it directly even if our cleanup
+        # never runs. It is not a group leader, so cleanup uses os.kill, not killpg.
+        cotenant = subprocess.Popen(
+            [str(binary), str(args.cus), str(args.max_occupancy)],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        try:
+            wait_ready(cotenant, log_reader, log_path, args.wait)
+            if args.grace:
+                time.sleep(args.grace)
+            print(f"running: {' '.join(command)}")
+            return run_command(command, env)
+        finally:
+            if cotenant.poll() is None:
+                try:
+                    os.kill(cotenant.pid, signal.SIGTERM)
+                    try:
+                        cotenant.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.kill(cotenant.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # cotenant exited between the poll and the signal
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # main()'s finally has already torn down the cotenant during unwinding.
+        sys.exit(130)

@@ -28,25 +28,71 @@
 
 namespace stinkytofu {
 class Pass;
+class ModulePass;
+class PassContext;
+struct StinkyInstruction;
+
+/// Pass policy.
+///
+/// Baseline is the per-pipe / per-FIFO count alone; each refinement is enabled per arch.
+struct InsertWaitAluOptions {
+    /// Stamp VALU source operands as well as dests, for the src-operand WAR hazard.
+    bool enableESM2TrackValuVsrc = false;
+    /// Count a CSMACC producer's followers across the VA order, and retire it at the shared floor.
+    bool sharedOrderCountFollowers = false;
+    /// Count an XDL producer's followers from the nearest anchor rather than its own ticket.
+    bool xdlCountFromNextWmma = false;
+};
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
 ///
-/// Operates on whatever Function it is given — a real kernel function, or a
-/// region extracted by ScopeAdaptor. Owns the mode2 lifecycle within that
-/// scope: enables mode2 at the entry block, disables it before calls/returns,
-/// emits s_wait_alu wherever the VA_VDST / VM_VSRC scoreboard requires.
-/// Tracks only VA_VDST and VM_VSRC counters — memory completion counters
-/// are owned by the memory waitcnt pass.
-///
-/// Caller responsibilities when running on a sub-region (ScopeAdaptor):
-///   1. Mode state at the region boundary is the caller's concern. The pass
-///      flips mode2 on/off inside its own scope; redundant flips on splice-back
-///      are not removed here.
-///   2. The scope must contain every producer of every VGPR consumed inside
-///      it. Producers outside the scope (e.g. pre-loop preloads) are invisible
-///      to the scoreboard and will not generate waits.
-///
-/// RemoveWaitAluPass must run first to strip any pre-existing wait_alu state.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass();
+/// Function pass: full scoreboard analysis when run on the entry, conservative
+/// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
+/// mode and unit tests.
+/// The options the gfx1250 pipeline runs InsertWaitAlu with. A scheduler querying
+/// WaitAluTracker must use the same ones to predict the waits the pass will emit.
+inline InsertWaitAluOptions gfx1250InsertWaitAluOptions(bool enableESM2TrackValuVsrc) {
+    return {enableESM2TrackValuVsrc, /*sharedOrderCountFollowers=*/true,
+            /*xdlCountFromNextWmma=*/true};
+}
+
+/// The s_wait_alu InsertWaitAlu would emit before an instruction; -1 = no wait on that
+/// counter.
+struct WaitAluNeed {
+    int vaVdst = -1;
+    int vmVsrc = -1;
+    bool any() const {
+        return vaVdst >= 0 || vmVsrc >= 0;
+    }
+};
+
+/// InsertWaitAlu's scoreboard stepped one instruction at a time, so a scheduler can ask
+/// what s_wait_alu a candidate would need at the current point of its schedule. Uses the
+/// pass's own walk; it starts from an empty state, where the pass seeds a BB from its
+/// predecessors.
+class STINKYTOFU_EXPORT WaitAluTracker {
+   public:
+    WaitAluTracker(const PassContext& passCtx, InsertWaitAluOptions opts);
+    ~WaitAluTracker();
+    WaitAluTracker(const WaitAluTracker&) = delete;
+    WaitAluTracker& operator=(const WaitAluTracker&) = delete;
+
+    /// The wait `inst` would need if it were issued next.
+    WaitAluNeed query(const StinkyInstruction& inst) const;
+    /// Issue `inst`: apply the wait it needs, then record what it produces.
+    void commit(const StinkyInstruction& inst);
+
+   private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(InsertWaitAluOptions opts = {});
+
+/// Whole-kernel driver: full analysis on the entry function, then the conservative
+/// call-boundary drain on every callee. Reserves a seam for future caller<->callee
+/// analysis.
+STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createInsertWaitAluModulePass(
+    InsertWaitAluOptions opts = {});
 
 }  // namespace stinkytofu

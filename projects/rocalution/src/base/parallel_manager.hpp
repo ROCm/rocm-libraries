@@ -38,7 +38,7 @@ namespace rocalution
     class GlobalVector;
     struct MRequest;
 
-    /** \ingroup backend_module
+    /** \ingroup parallel_module
   * \brief Parallel Manager class
   * \details
   * The parallel manager class handles the communication and the mapping of the global

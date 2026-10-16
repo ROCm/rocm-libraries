@@ -494,7 +494,10 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 }
 #endif
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -528,7 +531,7 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 }
 #endif
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && (CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 12011)
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
                                           int64_t                     mb,
                                           int64_t                     nb,
@@ -561,6 +564,7 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                hipsparse::hipOrderToCudaOrder(order)));
 }
 #endif
+// clang-format on
 
 #if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseDestroySpMat(hipsparseConstSpMatDescr_t spMatDescr)
@@ -925,6 +929,28 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCsrSetPointers(
         (cusparseSpMatDescr_t)spMatDescr, csrRowOffsets, csrColInd, csrValues));
+}
+#endif
+
+#if(CUDART_VERSION >= 11040)
+hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                          void*                 cooRowInd,
+                                          void*                 cooColInd,
+                                          void*                 cooValues)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseCooSetPointers((cusparseSpMatDescr_t)spMatDescr, cooRowInd, cooColInd, cooValues));
+}
+#endif
+
+#if(CUDART_VERSION >= 11030)
+hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                          void*                 cscColOffsets,
+                                          void*                 cscRowInd,
+                                          void*                 cscValues)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCscSetPointers(
+        (cusparseSpMatDescr_t)spMatDescr, cscColOffsets, cscRowInd, cscValues));
 }
 #endif
 

@@ -107,17 +107,22 @@ public:
         ASSERT_NO_THROW(getExecutionPlanDescriptor()->finalize());
     }
 
-    flatbuffers::DetachedBuffer makeSerializedPlan(uint32_t version = 1,
+    // Default version must match the current PLAN_SERIALIZATION_VERSION so that
+    // plans built here are "supported" and reach the field-level validation.
+    flatbuffers::DetachedBuffer makeSerializedPlan(uint32_t version = 2,
                                                    int64_t workspaceSize = 1024,
                                                    bool includeTensorUids = true,
                                                    bool includePluginPayload = true,
                                                    bool emptyTensorUids = false,
                                                    bool emptyPluginPayload = false,
-                                                   bool isOverrideShapeEnabled = false) const
+                                                   bool isOverrideShapeEnabled = false,
+                                                   bool includeTensorAlignments = true,
+                                                   bool mismatchTensorAlignments = false) const
     {
         flatbuffers::FlatBufferBuilder builder;
         flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensorUids;
         flatbuffers::Offset<flatbuffers::Vector<uint8_t>> pluginPayload;
+        flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensorAlignments;
 
         if(includeTensorUids)
         {
@@ -130,6 +135,13 @@ public:
                 = emptyPluginPayload ? std::vector<uint8_t>{} : std::vector<uint8_t>{4, 5, 6};
             pluginPayload = builder.CreateVector(pluginPayloadBytes);
         }
+        if(includeTensorAlignments)
+        {
+            // A deliberately short vector exercises the size-mismatch guard.
+            auto alignments
+                = mismatchTensorAlignments ? std::vector<int64_t>{16} : _tensorAlignments;
+            tensorAlignments = builder.CreateVector(alignments);
+        }
 
         auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
             builder,
@@ -138,7 +150,8 @@ public:
             workspaceSize,
             tensorUids,
             pluginPayload,
-            isOverrideShapeEnabled);
+            isOverrideShapeEnabled,
+            tensorAlignments);
         builder.Finish(plan);
         return builder.Release();
     }
@@ -156,16 +169,21 @@ protected:
     std::shared_ptr<MockEnginePluginResourceManager> _mockEnginePluginResourceManager = nullptr;
     flatbuffers::DetachedBuffer _serializedGraph;
     std::vector<int64_t> _tensorUids{11, 22, 33};
+    // Parallel to _tensorUids: alignment[i] is the required byte alignment of
+    // tensor_uids[i]. Deliberately non-default (not all 16) so tests prove the
+    // values are carried through, not just defaulted.
+    std::vector<int64_t> _tensorAlignments{16, 64, 256};
 
     void SetUp() override
     {
         flatbuffers::FlatBufferBuilder builder;
         hipdnn_flatbuffers_sdk::data_objects::GraphT graph;
-        for(auto uid : _tensorUids)
+        for(size_t i = 0; i < _tensorUids.size(); ++i)
         {
             auto tensor
                 = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>();
-            tensor->uid = uid;
+            tensor->uid = _tensorUids[i];
+            tensor->alignment = _tensorAlignments[i];
             graph.tensors.push_back(std::move(tensor));
         }
         builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, &graph));
@@ -377,6 +395,19 @@ TEST_F(TestExecutionPlanDescriptor, GetTensorUids)
     ASSERT_EQ(plan->getTensorUids(), _tensorUids);
 }
 
+TEST_F(TestExecutionPlanDescriptor, FinalizeCollectsTensorAlignments)
+{
+    auto plan = getExecutionPlanDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(plan->getTensorAlignments(), HIPDNN_STATUS_INTERNAL_ERROR);
+
+    makeExecutionPlanFinalized();
+
+    // Alignments are collected from the serialized graph, parallel to the uids.
+    ASSERT_EQ(plan->getTensorAlignments(), _tensorAlignments);
+    ASSERT_EQ(plan->getTensorAlignments().size(), plan->getTensorUids().size());
+}
+
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsInvalidFlatBuffer)
 {
     auto plan = getExecutionPlanDescriptor();
@@ -391,7 +422,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsInvalidFlatBuffer)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsUnsupportedVersion)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(2);
+    auto serializedPlan = makeSerializedPlan(99);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -402,7 +433,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsUnsupportedVersion)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, false);
+    auto serializedPlan = makeSerializedPlan(2, 1024, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -413,7 +444,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorUids)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, true);
+    auto serializedPlan = makeSerializedPlan(2, 1024, true, true, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -424,7 +455,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyTensorUids)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, false);
+    auto serializedPlan = makeSerializedPlan(2, 1024, true, false);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -435,7 +466,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingPluginPayload)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, true);
+    auto serializedPlan = makeSerializedPlan(2, 1024, true, true, false, true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -446,7 +477,44 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsEmptyPluginPayload)
 TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsNegativeWorkspaceSize)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan(1, -1);
+    auto serializedPlan = makeSerializedPlan(2, -1);
+
+    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
+                                                            serializedPlan.data(),
+                                                            serializedPlan.size()),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMissingTensorAlignments)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan(2,
+                                             1024,
+                                             /*includeTensorUids=*/true,
+                                             /*includePluginPayload=*/true,
+                                             /*emptyTensorUids=*/false,
+                                             /*emptyPluginPayload=*/false,
+                                             /*isOverrideShapeEnabled=*/false,
+                                             /*includeTensorAlignments=*/false);
+
+    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
+                                                            serializedPlan.data(),
+                                                            serializedPlan.size()),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestExecutionPlanDescriptor, DeserializeRejectsMismatchedTensorAlignments)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan(2,
+                                             1024,
+                                             /*includeTensorUids=*/true,
+                                             /*includePluginPayload=*/true,
+                                             /*emptyTensorUids=*/false,
+                                             /*emptyPluginPayload=*/false,
+                                             /*isOverrideShapeEnabled=*/false,
+                                             /*includeTensorAlignments=*/true,
+                                             /*mismatchTensorAlignments=*/true);
 
     ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
                                                             serializedPlan.data(),
@@ -472,6 +540,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
 
     ASSERT_TRUE(plan->isFinalized());
     ASSERT_EQ(plan->getTensorUids(), _tensorUids);
+    ASSERT_EQ(plan->getTensorAlignments(), _tensorAlignments);
     ASSERT_FALSE(plan->isOverrideShapeEnabled());
     ASSERT_EQ(plan->getExecutionContext(), getExecutionContext());
 
@@ -608,13 +677,17 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
 
     auto executionPlan
         = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
-    ASSERT_EQ(executionPlan->version(), 1);
+    ASSERT_EQ(executionPlan->version(), 2);
     ASSERT_EQ(executionPlan->engine_id(), ENGINE_ID);
     ASSERT_EQ(executionPlan->workspace_size(), 1024);
     ASSERT_FALSE(executionPlan->is_override_shape_enabled());
     ASSERT_EQ(std::vector<int64_t>(executionPlan->tensor_uids()->begin(),
                                    executionPlan->tensor_uids()->end()),
               _tensorUids);
+    ASSERT_NE(executionPlan->tensor_alignments(), nullptr);
+    ASSERT_EQ(std::vector<int64_t>(executionPlan->tensor_alignments()->begin(),
+                                   executionPlan->tensor_alignments()->end()),
+              _tensorAlignments);
     ASSERT_EQ(std::vector<uint8_t>(executionPlan->plugin_payload()->begin(),
                                    executionPlan->plugin_payload()->end()),
               pluginPayload);
@@ -665,7 +738,7 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsOverrideShapeEnabledFlag)
 {
     auto plan = getExecutionPlanDescriptor();
     auto serializedPlan
-        = makeSerializedPlan(1, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
+        = makeSerializedPlan(2, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,

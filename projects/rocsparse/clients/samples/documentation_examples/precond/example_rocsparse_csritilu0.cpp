@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -87,6 +87,10 @@ int main()
     int                  option   = 0;
     float                tol      = 1e-7;
 
+    option |= rocsparse_itilu0_option_stopping_criteria; // Add stopping criteria.
+    option |= rocsparse_itilu0_option_compute_nrm_residual; // Compute the norm of the residual.
+    option |= rocsparse_itilu0_option_verbose; // Put verbose.
+
     size_t buffer_size;
     ROCSPARSE_CHECK(rocsparse_csritilu0_buffer_size(handle,
                                                     alg,
@@ -116,23 +120,26 @@ int main()
                                                    buffer_size,
                                                    dbuffer));
 
-    ROCSPARSE_CHECK(rocsparse_scsritilu0_compute(handle,
-                                                 alg,
-                                                 option,
-                                                 &nmaxiter,
-                                                 tol,
-                                                 m,
-                                                 nnz,
-                                                 dcsr_row_ptr,
-                                                 dcsr_col_ind,
-                                                 dcsr_val,
-                                                 dilu0,
-                                                 idx_base,
-                                                 buffer_size,
-                                                 dbuffer));
+    const int num_iterations_without_stopping_criteria = 1;
+    ROCSPARSE_CHECK(rocsparse_scsritilu0_compute_ex(handle,
+                                                    alg,
+                                                    option,
+                                                    &nmaxiter,
+                                                    num_iterations_without_stopping_criteria,
+                                                    tol,
+                                                    m,
+                                                    nnz,
+                                                    dcsr_row_ptr,
+                                                    dcsr_col_ind,
+                                                    dcsr_val,
+                                                    dilu0,
+                                                    idx_base,
+                                                    buffer_size,
+                                                    dbuffer));
 
     std::vector<float> hilu0(nnz);
     HIP_CHECK(hipMemcpy(hilu0.data(), dilu0, sizeof(float) * nnz, hipMemcpyDeviceToHost));
+    std::cout << "nmaxiter " << nmaxiter << std::endl;
 
     std::cout << "hilu0" << std::endl;
     for(size_t i = 0; i < hilu0.size(); i++)

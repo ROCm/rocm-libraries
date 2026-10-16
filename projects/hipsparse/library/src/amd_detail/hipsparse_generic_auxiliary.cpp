@@ -554,7 +554,6 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
         hipsparse::hipDataTypeToHCCDataType(valueType)));
 }
 
-#ifdef HIPSPARSE_WITH_SPMV_BSR
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
                                      int64_t                mb,
                                      int64_t                nb,
@@ -659,7 +658,6 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
 
     return status;
 }
-#endif /* HIPSPARSE_WITH_SPMV_BSR */
 
 hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
                                         int64_t                rows,
@@ -1228,6 +1226,14 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_coo_set_pointers(
         to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
+}
+
+hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                                 void*                 ellColInd,
+                                                 void*                 ellValue)
+{
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_bell_set_pointers(to_rocsparse_spmat_descr(spMatDescr), ellColInd, ellValue));
 }
 
 hipsparseStatus_t hipsparseSpMatGetSize(hipsparseConstSpMatDescr_t spMatDescr,

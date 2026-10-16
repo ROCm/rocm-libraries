@@ -150,6 +150,327 @@ rocke_value_t* rocke_b_ds_swizzle_xor(rocke_ir_builder_t* b, rocke_value_t* data
     return rocke_i_op1(b, ROCKE_OP_TILE_DS_SWIZZLE_XOR, &data, 1, rocke_i32(), &attrs, "sw");
 }
 
+rocke_value_t* rocke_b_ds_swizzle(rocke_ir_builder_t* b, rocke_value_t* data, int offset)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "ds_swizzle: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "ds_swizzle requires i32 data");
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "offset", (int64_t)((uint32_t)offset));
+    return rocke_i_op1(b, ROCKE_OP_TILE_DS_SWIZZLE, &data, 1, rocke_i32(), &attrs, "dssw");
+}
+
+rocke_value_t* rocke_b_mov_dpp8(rocke_ir_builder_t* b, rocke_value_t* data, int sel)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "mov_dpp8: NULL data");
+    if(!rocke_i_type_is(data->type, "i32") && !rocke_i_type_is(data->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "mov_dpp8 requires i32 or f32 data");
+    if(sel < 0 || sel > 0xFFFFFF)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "mov_dpp8 sel must fit in 24 bits, got %d", sel);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "sel", (int64_t)(sel & 0xFFFFFF));
+    return rocke_i_op1(b, ROCKE_OP_TILE_MOV_DPP8, &data, 1, data->type, &attrs, "dpp8");
+}
+
+rocke_value_t*
+    rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3)
+{
+    rocke_attr_map_t attrs;
+    int ctrl;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "quad_perm: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "quad_perm requires i32 data");
+    if(p0 < 0 || p0 > 3 || p1 < 0 || p1 > 3 || p2 < 0 || p2 > 3 || p3 < 0 || p3 > 3)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "quad_perm lane selectors must be in 0..3, got [%d,%d,%d,%d]",
+            p0,
+            p1,
+            p2,
+            p3);
+    ctrl = p0 | (p1 << 2) | (p2 << 4) | (p3 << 6);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "ctrl", (int64_t)ctrl);
+    return rocke_i_op1(b, ROCKE_OP_TILE_QUAD_PERM, &data, 1, rocke_i32(), &attrs, "qperm");
+}
+
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!data)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "dpp_xor: NULL data");
+    if(!rocke_flow_is_i32(data->type))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "dpp_xor requires i32 data");
+    if(xor_mask < 1 || xor_mask > 15)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "dpp_xor xor_mask must be 1..15 (intra-16-lane row), got %d",
+            xor_mask);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "xor_mask", (int64_t)xor_mask);
+    return rocke_i_op1(b, ROCKE_OP_TILE_DPP_XOR, &data, 1, rocke_i32(), &attrs, "dppx");
+}
+
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp: NULL operand");
+    if(lane_xor < 1 || lane_xor > 15)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp lane_xor must be 1..15, got %d", lane_xor);
+    if(rocke_i_type_is(v->type, "f32"))
+    {
+        rocke_value_t* v_i = rocke_b_bitcast(b, v, rocke_i32());
+        rocke_value_t* r = rocke_b_dpp_xor(b, v_i, lane_xor);
+        return rocke_b_bitcast(b, r, rocke_f32());
+    }
+    if(rocke_flow_is_i32(v->type))
+        return rocke_b_dpp_xor(b, v, lane_xor);
+    return (rocke_value_t*)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "warp_shuffle_xor_dpp: unsupported type %s", v->type->name);
+}
+
+int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask)
+{
+    /* Python rocke.core.ir.dpp_xor_ctrl / DPP_XOR_CTRL_NO_ROW_XMASK. Each
+     * gfx9 entry is exactly lane i -> i ^ mask inside a 16-lane row. */
+    if(xor_mask < 1 || xor_mask > 15)
+        return -1;
+    if(has_row_xmask)
+        return 0x160 | xor_mask;
+    switch(xor_mask)
+    {
+    case 1:
+        return 0xB1; /* quad_perm [1, 0, 3, 2] */
+    case 2:
+        return 0x4E; /* quad_perm [2, 3, 0, 1] */
+    case 3:
+        return 0x1B; /* quad_perm [3, 2, 1, 0] */
+    case 7:
+        return 0x141; /* row_half_mirror */
+    case 8:
+        return 0x128; /* row_ror:8 */
+    case 15:
+        return 0x140; /* row_mirror */
+    default:
+        return -1;
+    }
+}
+
+static bool flow_wave_reduce_allowed(const char* reduce_op, const char* ty)
+{
+    if(!reduce_op || !ty)
+        return false;
+    if(strcmp(ty, "f32") == 0)
+        return strcmp(reduce_op, "fmax") == 0 || strcmp(reduce_op, "fadd") == 0;
+    if(strcmp(ty, "i32") == 0)
+        return strcmp(reduce_op, "add") == 0 || strcmp(reduce_op, "max") == 0
+               || strcmp(reduce_op, "min") == 0;
+    return false;
+}
+
+rocke_value_t* rocke_b_wave_reduce(rocke_ir_builder_t* b,
+                                   rocke_value_t* v,
+                                   const char* reduce_op,
+                                   int strategy)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "wave_reduce: NULL operand");
+    if(!flow_wave_reduce_allowed(reduce_op, v->type->name))
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "wave_reduce unsupported pair reduce_op=%s type=%s",
+                                               reduce_op ? reduce_op : "(null)",
+                                               v->type->name ? v->type->name : "(null)");
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "reduce_op", reduce_op);
+    rocke_attr_set_int(b, &attrs, "strategy", (int64_t)strategy);
+    return rocke_i_op1(b, ROCKE_OP_TILE_WAVE_REDUCE, &v, 1, v->type, &attrs, "wred");
+}
+
+rocke_value_t* rocke_b_readlane(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lane)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v || !lane)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "readlane: NULL operand");
+    if(!rocke_i_type_is(v->type, "i32") && !rocke_i_type_is(v->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "readlane supports i32 or f32");
+    if(!rocke_flow_is_i32(lane->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "readlane lane index must be i32");
+    ops[0] = v;
+    ops[1] = lane;
+    return rocke_i_op1(b, ROCKE_OP_TILE_READLANE, ops, 2, v->type, NULL, "rlane");
+}
+
+rocke_value_t* rocke_b_writelane(rocke_ir_builder_t* b,
+                                 rocke_value_t* uniform_val,
+                                 rocke_value_t* lane,
+                                 rocke_value_t* passthrough)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!uniform_val || !lane || !passthrough)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "writelane: NULL operand");
+    if(!rocke_i_type_is(uniform_val->type, "i32") && !rocke_i_type_is(uniform_val->type, "f32"))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "writelane supports i32 or f32");
+    if(passthrough->type != uniform_val->type)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "writelane passthrough must match uniform_val type");
+    if(!rocke_flow_is_i32(lane->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "writelane lane index must be i32");
+    ops[0] = uniform_val;
+    ops[1] = lane;
+    ops[2] = passthrough;
+    return rocke_i_op1(b, ROCKE_OP_TILE_WRITELANE, ops, 3, uniform_val->type, NULL, "wlane");
+}
+
+rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
+                                  rocke_value_t* old,
+                                  rocke_value_t* src0,
+                                  rocke_value_t* src1,
+                                  rocke_value_t* src2,
+                                  bool fi,
+                                  bool bound_ctrl)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!old || !src0 || !src1 || !src2)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "permlane16: NULL operand");
+    if(!rocke_flow_is_i32(old->type) || !rocke_flow_is_i32(src0->type)
+       || !rocke_flow_is_i32(src1->type) || !rocke_flow_is_i32(src2->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "permlane16 requires i32 operands");
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_bool(b, &attrs, "fi", fi);
+    rocke_attr_set_bool(b, &attrs, "bound_ctrl", bound_ctrl);
+    ops[0] = old;
+    ops[1] = src0;
+    ops[2] = src1;
+    ops[3] = src2;
+    return rocke_i_op1(b, ROCKE_OP_TILE_PERMLANE16, ops, 4, rocke_i32(), &attrs, "pl16");
+}
+
+rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!src)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "permlane64: NULL operand");
+    if(!rocke_flow_is_i32(src->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "permlane64 requires i32 operand");
+    return rocke_i_op1(b, ROCKE_OP_TILE_PERMLANE64, &src, 1, rocke_i32(), NULL, "pl64");
+}
+
+rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
+                                 rocke_value_t* a,
+                                 rocke_value_t* bb,
+                                 rocke_value_t* shift)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !bb || !shift)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "alignbyte: NULL operand");
+    if(!rocke_flow_is_i32(a->type) || !rocke_flow_is_i32(bb->type)
+       || !rocke_flow_is_i32(shift->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "alignbyte requires i32 operands");
+    ops[0] = a;
+    ops[1] = bb;
+    ops[2] = shift;
+    return rocke_i_op1(b, ROCKE_OP_TILE_ALIGNBYTE, ops, 3, rocke_i32(), NULL, "algn");
+}
+
+rocke_value_t* rocke_b_s_wqm(rocke_ir_builder_t* b, rocke_value_t* mask)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!mask)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "s_wqm: NULL mask");
+    if(!rocke_i_type_is(mask->type, "i32") && !rocke_i_type_is(mask->type, "i64"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "s_wqm requires i32 or i64 mask");
+    return rocke_i_op1(b, ROCKE_OP_TILE_S_WQM, &mask, 1, mask->type, NULL, "wqm");
+}
+
+rocke_value_t* rocke_b_av_load_b128(rocke_ir_builder_t* b, rocke_value_t* ptr)
+{
+    const rocke_type_t* rty;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "av_load_b128: NULL ptr");
+    rty = rocke_vector_type(b, rocke_i32(), 4);
+    if(!rty)
+        return NULL;
+    return rocke_i_op1(b, ROCKE_OP_TILE_AV_LOAD_B128, &ptr, 1, rty, NULL, "avld");
+}
+
+void rocke_b_av_store_b128(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* data)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !data)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "av_store_b128: NULL operand");
+        return;
+    }
+    if(data->type->kind != ROCKE_TYPE_VECTOR || data->type->count != 4
+       || !rocke_i_type_is(data->type->elem, "i32"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "av_store_b128 requires <4 x i32> data");
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = data;
+    rocke_i_op0(b, ROCKE_OP_TILE_AV_STORE_B128, ops, 2, NULL);
+}
+
+rocke_value_t* rocke_b_s_alloc_vgpr(rocke_ir_builder_t* b, int count)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(count <= 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "s_alloc_vgpr count must be positive");
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "count", (int64_t)count);
+    return rocke_i_op1(b, ROCKE_OP_TILE_S_ALLOC_VGPR, NULL, 0, rocke_i32(), &attrs, "valloc");
+}
+
 rocke_value_t* rocke_b_mov_dpp(
     rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl, bool bound_ctrl)
 {
@@ -281,6 +602,16 @@ rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "warp_shuffle_xor: NULL operand");
 
+    /* f64: split into two i32 halves and shuffle each on the 32-bit path. */
+    if(rocke_i_type_is(v->type, "f64"))
+    {
+        rocke_value_t* halves = rocke_b_bitcast(b, v, rocke_vector_type(b, rocke_i32(), 2));
+        rocke_value_t* parts[2];
+        parts[0] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 0), lane_xor);
+        parts[1] = rocke_b_warp_shuffle_xor(b, rocke_b_vec_extract(b, halves, 1), lane_xor);
+        return rocke_b_bitcast(b, rocke_b_vec_pack(b, parts, 2, rocke_i32()), rocke_f64());
+    }
+
     if(lane_xor >= 1 && lane_xor <= 31)
     {
         /* Intra-32-lane XOR -> ds_swizzle (1 LDS op, no addr-compute). */
@@ -375,7 +706,7 @@ rocke_value_t* rocke_b_ds_read_tr16_b64(rocke_ir_builder_t* b,
     if(!dtype)
         dtype = rocke_f16();
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR16_B64, smem, indices, num_indices, dtype, 4, "tr16", true);
+        b, ROCKE_OP_TILE_DS_READ_TR16_B64, smem, indices, num_indices, dtype, 4, "dtr16", true);
 }
 
 rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b,
@@ -392,7 +723,7 @@ rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b,
     if(!dtype)
         dtype = rocke_f16();
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR16_B128, smem, indices, num_indices, dtype, 8, "tr16w", true);
+        b, ROCKE_OP_TILE_DS_READ_TR16_B128, smem, indices, num_indices, dtype, 8, "dtr16w", true);
 }
 
 rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
@@ -413,7 +744,7 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "ds_read_tr_b8 needs at least one index");
     return rocke_flow_ds_read_tr(
-        b, ROCKE_OP_TILE_DS_READ_TR_B8, smem, indices, num_indices, dtype, 8, "tr8", false);
+        b, ROCKE_OP_TILE_DS_READ_TR_B8, smem, indices, num_indices, dtype, 8, "dtr8", false);
 }
 
 /* ============================ LDS pointer arithmetic ==================== */
@@ -508,6 +839,249 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, ops, 4, &attrs);
 }
 
+void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* lds_ptr,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   int dwords,
+                                   int coherency)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(dwords == 1 || dwords == 3 || dwords == 4))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_lds_async dwords must be 1, 3, or 4 (got %d)", dwords);
+        return;
+    }
+    if(!(coherency >= 0 && coherency <= 3))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "coherency must be 0..3 (got %d)", coherency);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    rocke_attr_set_int(b, &attrs, "aux", (int64_t)coherency);
+    ops[0] = rsrc;
+    ops[1] = lds_ptr;
+    ops[2] = voffset;
+    ops[3] = soffset;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC, ops, 4, &attrs);
+}
+
+void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
+                                      rocke_value_t* src_ptr,
+                                      rocke_value_t* src_index,
+                                      rocke_value_t* lds_smem,
+                                      rocke_value_t* const* lds_indices,
+                                      int num_lds_indices,
+                                      int width_bytes,
+                                      int coherency,
+                                      int offset_bytes)
+{
+    rocke_value_t* ops[3 + 8];
+    rocke_attr_map_t attrs;
+    int i;
+    if(!rocke_i_live(b))
+        return;
+    if(!(width_bytes == 1 || width_bytes == 4 || width_bytes == 8 || width_bytes == 16))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_load_async_to_lds width_bytes must be 1, 4, 8, or 16 (got %d)",
+                        width_bytes);
+        return;
+    }
+    if(!(coherency >= 0 && coherency <= 3))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "coherency must be 0..3 (got %d)", coherency);
+        return;
+    }
+    if(num_lds_indices < 0 || num_lds_indices > 8)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_load_async_to_lds: bad lds index rank %d", num_lds_indices);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "width_bytes", (int64_t)width_bytes);
+    rocke_attr_set_int(b, &attrs, "cpol", (int64_t)coherency);
+    rocke_attr_set_int(b, &attrs, "offset_bytes", (int64_t)offset_bytes);
+    ops[0] = src_ptr;
+    ops[1] = src_index;
+    ops[2] = lds_smem;
+    for(i = 0; i < num_lds_indices; ++i)
+        ops[3 + i] = lds_indices[i];
+    rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, ops, 3 + num_lds_indices, &attrs);
+}
+
+static int rocke_i_is_local_ptr(const rocke_value_t* value)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    return type
+           && ((type->kind == ROCKE_TYPE_SCALAR && type->scalar == ROCKE_SCALAR_I64)
+               || (type->kind == ROCKE_TYPE_PTR && type->space
+                   && strcmp(type->space, "local") == 0));
+}
+
+static int rocke_i_is_global_ptr(const rocke_value_t* value)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    return type && type->kind == ROCKE_TYPE_PTR && type->space
+           && strcmp(type->space, "global") == 0;
+}
+
+static int rocke_i_check_cachepolicy(rocke_ir_builder_t* b, const char* op, int cachepolicy)
+{
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s cachepolicy must be in 0..31, got %d", op, cachepolicy);
+        return 0;
+    }
+    return 1;
+}
+
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
+                                         int cachepolicy)
+{
+    rocke_value_t* ops[2];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(width_bytes == 1 || width_bytes == 4 || width_bytes == 8 || width_bytes == 16))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_store_async_from_lds width_bytes must be 1, 4, 8, or 16 (got %d)",
+                        width_bytes);
+        return;
+    }
+    if(!rocke_i_is_global_ptr(dst_ptr))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_store_async_from_lds dst_ptr must be a global pointer");
+        return;
+    }
+    if(!rocke_i_is_local_ptr(lds_ptr))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_store_async_from_lds local pointer must be i64 from "
+                        "smem_addr_of or ptr<...,local>");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "global_store_async_from_lds", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width_bytes);
+    rocke_attr_set_int(b, &attrs, "offset_bytes", offset_bytes);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    ops[0] = dst_ptr;
+    ops[1] = lds_ptr;
+    rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS, ops, 2, &attrs);
+}
+
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
+                                             const rocke_type_t* dtype)
+{
+    rocke_attr_map_t attrs;
+    const rocke_type_t* result_type;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rocke_i_is_global_ptr(src_ptr))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_load_tr16_b128 src_ptr must be a global pointer");
+    if(!dtype
+       || !(dtype->scalar == ROCKE_SCALAR_F16 || dtype->scalar == ROCKE_SCALAR_BF16
+            || dtype->scalar == ROCKE_SCALAR_I16))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_load_tr16_b128 dtype must be f16/bf16/i16");
+    result_type = rocke_vector_type(b, dtype, 8);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "dtype", dtype->name);
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128, &src_ptr, 1, result_type, &attrs, "gtr");
+}
+
+static int rocke_i_check_tensor_group(
+    rocke_ir_builder_t* b, const char* op, const char* field, rocke_value_t* value, int lanes)
+{
+    const rocke_type_t* type = value ? value->type : NULL;
+    if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != lanes || !type->elem
+       || type->elem->scalar != ROCKE_SCALAR_I32)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s %s must be vec<i32x%d>", op, field, lanes);
+        return 0;
+    }
+    return 1;
+}
+
+static void rocke_b_tensor_lds_transfer(rocke_ir_builder_t* b,
+                                        rocke_opcode_t opcode,
+                                        const char* name,
+                                        rocke_value_t* d0,
+                                        rocke_value_t* d1,
+                                        rocke_value_t* d2,
+                                        rocke_value_t* d3,
+                                        rocke_value_t* d4,
+                                        int cachepolicy)
+{
+    rocke_value_t* ops[5] = {d0, d1, d2, d3, d4};
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_tensor_group(b, name, "d0", d0, 4)
+       || !rocke_i_check_tensor_group(b, name, "d1", d1, 8)
+       || !rocke_i_check_tensor_group(b, name, "d2", d2, 4)
+       || !rocke_i_check_tensor_group(b, name, "d3", d3, 4)
+       || !rocke_i_check_tensor_group(b, name, "d4", d4, 8)
+       || !rocke_i_check_cachepolicy(b, name, cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, opcode, ops, 5, &attrs);
+}
+
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
+                                int cachepolicy)
+{
+    rocke_b_tensor_lds_transfer(
+        b, ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS, "tensor_load_to_lds", d0, d1, d2, d3, d4, cachepolicy);
+}
+
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
+                                   int cachepolicy)
+{
+    rocke_b_tensor_lds_transfer(b,
+                                ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS,
+                                "tensor_store_from_lds",
+                                d0,
+                                d1,
+                                d2,
+                                d3,
+                                d4,
+                                cachepolicy);
+}
+
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -555,6 +1129,16 @@ rocke_value_t*
     ops[0] = ptr;
     ops[1] = byte_off;
     return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_ADD, ops, 2, ptr->type, NULL, "gptr");
+}
+
+rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rocke_i_is_global_ptr(ptr))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_ptr_to_i64 ptr must be a global pointer");
+    return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, &ptr, 1, rocke_i64(), NULL, "gaddr");
 }
 
 rocke_value_t*
@@ -614,6 +1198,27 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
     ops[1] = voffset;
     ops[2] = soffset;
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16, ops, 3, rocke_f16(), NULL, "bl1");
+}
+
+/* D16-form scalar half buffer load: ``raw.ptr.buffer.load.f16`` returns
+ * ``half`` directly (no i16 bitcast). Port of Python
+ * IRBuilder.buffer_load_f16_d16 / the pinned PR9710
+ * tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_f16_d16: NULL operand");
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_F16_D16, ops, 3, rocke_f16(), NULL, "bld16");
 }
 
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
@@ -830,6 +1435,548 @@ void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt
     rocke_attr_set_int(b, &attrs, "lgkmcnt", (int64_t)lgkmcnt);
     rocke_attr_set_int(b, &attrs, "expcnt", (int64_t)expcnt);
     rocke_i_op0(b, ROCKE_OP_TILE_S_WAITCNT, NULL, 0, &attrs);
+}
+
+/* Range-check an immediate the intrinsic declares as i16 (Python _check_u16).
+ * LLVM truncates a too-wide immediate silently (i16 70000 becomes i16 4464),
+ * turning an out-of-range wait count into a WRONG wait count with no
+ * diagnostic. Record the error instead; masking would be equally silent. */
+static int rocke_i_check_u16(rocke_ir_builder_t* b, const char* op, const char* field, int value)
+{
+    if(value < 0 || value > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s %s must fit an unsigned i16 (0..65535), got %d",
+                        op,
+                        field,
+                        value);
+        return 0;
+    }
+    return 1;
+}
+
+void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_wait_asynccnt", "n", n))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "n", (int64_t)n);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_ASYNCCNT, NULL, 0, &attrs);
+}
+
+void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_wait_tensorcnt", "n", n))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "n", n);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_TENSORCNT, NULL, 0, &attrs);
+}
+
+void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "barrier_type", barrier_type);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_BARRIER_SIGNAL, NULL, 0, &attrs);
+}
+
+static void rocke_b_s_barrier_u16(rocke_ir_builder_t* b,
+                                  rocke_opcode_t opcode,
+                                  const char* name,
+                                  int barrier_type)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, name, "barrier_type", barrier_type))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "barrier_type", barrier_type);
+    rocke_i_op0(b, opcode, NULL, 0, &attrs);
+}
+
+void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type)
+{
+    rocke_b_s_barrier_u16(b, ROCKE_OP_TILE_S_BARRIER_WAIT, "s_barrier_wait", barrier_type);
+}
+
+static int rocke_i_check_i32_value(rocke_ir_builder_t* b,
+                                   const char* op,
+                                   const char* field,
+                                   rocke_value_t* value)
+{
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar != ROCKE_SCALAR_I32)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s %s must be i32", op, field);
+        return 0;
+    }
+    return 1;
+}
+
+static void rocke_b_named_barrier_two(rocke_ir_builder_t* b,
+                                      rocke_opcode_t opcode,
+                                      const char* name,
+                                      rocke_value_t* barrier,
+                                      rocke_value_t* member_count)
+{
+    rocke_value_t* ops[2] = {barrier, member_count};
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_local_ptr(barrier))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s local pointer must be i64 from smem_addr_of or ptr<...,local>",
+                        name);
+        return;
+    }
+    if(!rocke_i_check_i32_value(b, name, "member_count", member_count))
+        return;
+    rocke_i_op0(b, opcode, ops, 2, NULL);
+}
+
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
+                            rocke_value_t* member_count)
+{
+    rocke_b_named_barrier_two(
+        b, ROCKE_OP_TILE_S_BARRIER_INIT, "s_barrier_init", barrier, member_count);
+}
+
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
+                                  rocke_value_t* member_count)
+{
+    rocke_b_named_barrier_two(
+        b, ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR, "s_barrier_signal_var", barrier, member_count);
+}
+
+static void rocke_b_named_barrier_one(rocke_ir_builder_t* b,
+                                      rocke_opcode_t opcode,
+                                      const char* name,
+                                      rocke_value_t* barrier)
+{
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_local_ptr(barrier))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s local pointer must be i64 from smem_addr_of or ptr<...,local>",
+                        name);
+        return;
+    }
+    rocke_i_op0(b, opcode, &barrier, 1, NULL);
+}
+
+void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier)
+{
+    rocke_b_named_barrier_one(b, ROCKE_OP_TILE_S_BARRIER_JOIN, "s_barrier_join", barrier);
+}
+
+void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier)
+{
+    rocke_b_named_barrier_one(b, ROCKE_OP_TILE_S_WAKEUP_BARRIER, "s_wakeup_barrier", barrier);
+}
+
+void rocke_b_s_barrier_leave(rocke_ir_builder_t* b, int barrier_type)
+{
+    rocke_b_s_barrier_u16(b, ROCKE_OP_TILE_S_BARRIER_LEAVE, "s_barrier_leave", barrier_type);
+}
+
+void rocke_b_asyncmark(rocke_ir_builder_t* b)
+{
+    if(!rocke_i_live(b))
+        return;
+    rocke_i_op0(b, ROCKE_OP_TILE_ASYNCMARK, NULL, 0, NULL);
+}
+
+void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "wait_asyncmark", "n", n))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "n", (int64_t)n);
+    rocke_i_op0(b, ROCKE_OP_TILE_WAIT_ASYNCMARK, NULL, 0, &attrs);
+}
+
+void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_wait_event", "imm", imm))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "imm", (int64_t)imm);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_WAIT_EVENT, NULL, 0, &attrs);
+}
+
+void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !length)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "s_prefetch_inst: NULL operand");
+        return;
+    }
+    ops[0] = ptr;
+    ops[1] = length;
+    rocke_i_op0(b, ROCKE_OP_TILE_S_PREFETCH_INST, ops, 2, NULL);
+}
+
+/* ----- gfx1250 data prefetch (Python IRBuilder.s_setreg .. flat_prefetch) ----- */
+
+void rocke_b_s_setreg(rocke_ir_builder_t* b, int simm16, rocke_value_t* value)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_u16(b, "s_setreg", "simm16", simm16))
+        return;
+    if(!rocke_i_check_i32_value(b, "s_setreg", "value", value))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "simm16", simm16);
+    rocke_i_op0(b, ROCKE_OP_TILE_S_SETREG, &value, 1, &attrs);
+}
+
+void rocke_b_enable_scalar_prefetch(rocke_ir_builder_t* b)
+{
+    if(!rocke_i_live(b))
+        return;
+    rocke_b_s_setreg(b,
+                     ROCKE_HWREG(ROCKE_HW_REG_MODE, ROCKE_MODE_SCALAR_PREFETCH_EN_BIT, 1),
+                     rocke_b_const_i32(b, 1));
+}
+
+void rocke_b_s_prefetch_data(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return;
+    if(!ptr || !ptr->type || ptr->type->kind != ROCKE_TYPE_PTR)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "s_prefetch_data ptr must be a pointer");
+        return;
+    }
+    if(!rocke_i_check_i32_value(b, "s_prefetch_data", "length", length))
+        return;
+    ops[0] = ptr;
+    ops[1] = length;
+    rocke_i_op0(b, ROCKE_OP_TILE_S_PREFETCH_DATA, ops, 2, NULL);
+}
+
+void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* length,
+                                    int offset)
+{
+    rocke_value_t* ops[2];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_check_tensor_group(b, "s_buffer_prefetch_data", "rsrc", rsrc, 4))
+        return;
+    if(!rocke_i_check_i32_value(b, "s_buffer_prefetch_data", "length", length))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "offset", offset);
+    ops[0] = rsrc;
+    ops[1] = length;
+    rocke_i_op0(b, ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA, ops, 2, &attrs);
+}
+
+void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!rocke_i_is_global_ptr(ptr))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_prefetch ptr must be a global pointer");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "global_prefetch", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, ROCKE_OP_TILE_GLOBAL_PREFETCH, &ptr, 1, &attrs);
+}
+
+void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy)
+{
+    rocke_attr_map_t attrs;
+    const char* space;
+    if(!rocke_i_live(b))
+        return;
+    /* shared/private lower to a bare (flat) `ptr`; the others carry an
+     * explicit address space and are not flat pointers. */
+    space = (ptr && ptr->type && ptr->type->kind == ROCKE_TYPE_PTR) ? ptr->type->space : NULL;
+    if(!space || strcmp(space, "global") == 0 || strcmp(space, "constant") == 0
+       || strcmp(space, "lds") == 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "flat_prefetch ptr must be a flat pointer");
+        return;
+    }
+    if(!rocke_i_check_cachepolicy(b, "flat_prefetch", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    rocke_i_op0(b, ROCKE_OP_TILE_FLAT_PREFETCH, &ptr, 1, &attrs);
+}
+
+void rocke_b_cluster_barrier(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_i_op0(b, ROCKE_OP_TILE_CLUSTER_BARRIER, NULL, 0, &attrs);
+}
+
+rocke_value_t* rocke_b_cluster_load(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* mask,
+                                    int width_bytes,
+                                    int cachepolicy)
+{
+    rocke_value_t* ops[2];
+    rocke_attr_map_t attrs;
+    const rocke_type_t* rty;
+    int lanes;
+    if(!rocke_i_live(b))
+        return NULL;
+    lanes = width_bytes == 4 ? 1 : width_bytes == 8 ? 2 : width_bytes == 16 ? 4 : 0;
+    if(lanes == 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "cluster_load width_bytes must be 4, 8, or 16 (got %d)",
+            width_bytes);
+    if(!rocke_i_is_global_ptr(ptr))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cluster_load ptr must be a global pointer");
+    if(!rocke_i_check_i32_value(b, "cluster_load", "mask", mask))
+        return NULL;
+    if(!rocke_i_check_cachepolicy(b, "cluster_load", cachepolicy))
+        return NULL;
+    rty = lanes == 1 ? rocke_i32() : rocke_vector_type(b, rocke_i32(), lanes);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width_bytes);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    ops[0] = ptr;
+    ops[1] = mask;
+    return rocke_i_op1(b, ROCKE_OP_TILE_CLUSTER_LOAD, ops, 2, rty, &attrs, "cld");
+}
+
+void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
+                                       rocke_value_t* src_ptr,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* mask,
+                                       int width_bytes,
+                                       int offset_bytes,
+                                       int cachepolicy)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(width_bytes == 1 || width_bytes == 4 || width_bytes == 8 || width_bytes == 16))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "cluster_load_async_to_lds width_bytes must be 1, 4, 8, or 16 (got %d)",
+                        width_bytes);
+        return;
+    }
+    if(!rocke_i_is_global_ptr(src_ptr))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cluster_load_async_to_lds src_ptr must be a global pointer");
+        return;
+    }
+    if(!rocke_i_is_local_ptr(lds_ptr))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "cluster_load_async_to_lds local pointer must be i64 from "
+                        "smem_addr_of or ptr<...,local>");
+        return;
+    }
+    if(!rocke_i_check_i32_value(b, "cluster_load_async_to_lds", "mask", mask))
+        return;
+    if(!rocke_i_check_cachepolicy(b, "cluster_load_async_to_lds", cachepolicy))
+        return;
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "width_bytes", width_bytes);
+    rocke_attr_set_int(b, &attrs, "offset_bytes", offset_bytes);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", cachepolicy);
+    ops[0] = src_ptr;
+    ops[1] = lds_ptr;
+    ops[2] = mask;
+    rocke_i_op0(b, ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS, ops, 3, &attrs);
+}
+
+/* Descriptor words are raw bit patterns; emit them as signed i32 constants. */
+static rocke_value_t* rocke_i_tdm_word(rocke_ir_builder_t* b, uint32_t value)
+{
+    return rocke_b_const_i32(b, (int64_t)(int32_t)value);
+}
+
+int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
+                              rocke_value_t* global_ptr,
+                              rocke_value_t* lds_addr,
+                              int elem_bytes,
+                              rocke_value_t* tensor_dim0,
+                              rocke_value_t* tensor_dim1,
+                              rocke_value_t* row_stride,
+                              int tile_dim0,
+                              int tile_dim1,
+                              int workgroup_mask,
+                              int pad_interval,
+                              int pad_amount,
+                              rocke_value_t* out[5])
+{
+    static const char* name = "tdm_descriptor_2d";
+    const rocke_type_t* lty = lds_addr ? lds_addr->type : NULL;
+    int lds_is_i32, lds_is_i64, data_size, pad_enable;
+    uint32_t flags;
+    rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *zero4;
+    int i;
+    if(!rocke_i_live(b))
+        return 0;
+    if(!rocke_i_is_global_ptr(global_ptr))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s global_ptr must be a global pointer", name);
+        return 0;
+    }
+    lds_is_i32 = lty && lty->kind == ROCKE_TYPE_SCALAR && lty->scalar == ROCKE_SCALAR_I32;
+    lds_is_i64 = lty && lty->kind == ROCKE_TYPE_SCALAR && lty->scalar == ROCKE_SCALAR_I64;
+    if(!lds_is_i32 && !lds_is_i64)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s lds_addr must be i64 or i32", name);
+        return 0;
+    }
+    if(!rocke_i_check_i32_value(b, name, "tensor_dim0", tensor_dim0)
+       || !rocke_i_check_i32_value(b, name, "tensor_dim1", tensor_dim1)
+       || !rocke_i_check_i32_value(b, name, "row_stride", row_stride))
+        return 0;
+    switch(elem_bytes)
+    {
+    case 1:
+        data_size = 0;
+        break;
+    case 2:
+        data_size = 1;
+        break;
+    case 4:
+        data_size = 2;
+        break;
+    case 8:
+        data_size = 3;
+        break;
+    default:
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s elem_bytes must be 1, 2, 4, or 8 (got %d)", name, elem_bytes);
+        return 0;
+    }
+    if(tile_dim0 < 1 || tile_dim0 > 0xFFFF)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s tile_dim0 must be in 1..65535 (got %d)", name, tile_dim0);
+        return 0;
+    }
+    if(tile_dim1 < 1 || tile_dim1 > 0xFFFF)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s tile_dim1 must be in 1..65535 (got %d)", name, tile_dim1);
+        return 0;
+    }
+    if(workgroup_mask < 0 || workgroup_mask > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s workgroup_mask must be in 0..65535 (got %d)",
+                        name,
+                        workgroup_mask);
+        return 0;
+    }
+    /* pad_interval < 0 means "no LDS padding" (Python: pad_interval=None). */
+    pad_enable = pad_interval >= 0;
+    if(pad_enable && pad_interval > 7)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s pad_interval must be in 0..7 (got %d)", name, pad_interval);
+        return 0;
+    }
+    if(pad_amount < 0 || pad_amount > 0x7F || (pad_amount && !pad_enable))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s pad_amount must be in 0..127 and needs pad_interval (got %d)",
+                        name,
+                        pad_amount);
+        return 0;
+    }
+
+    /* Op order mirrors IRBuilder.tdm_descriptor_2d exactly (SSA names). */
+    c16 = rocke_b_const_i32(b, 16);
+    /* Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2. */
+    lds32 = lds_is_i32 ? lds_addr : rocke_b_trunc(b, lds_addr, rocke_i32());
+    gaddr = rocke_b_global_ptr_to_i64(b, global_ptr);
+    g_hi = rocke_b_trunc(b, rocke_b_lshr(b, gaddr, rocke_b_const_i64(b, 32)), rocke_i32());
+    group0[0] = rocke_b_const_i32(b, 1);
+    group0[1] = lds32;
+    group0[2] = rocke_b_trunc(b, gaddr, rocke_i32());
+    /* Sibling builder calls are sequenced through temporaries: C leaves
+     * argument evaluation order unspecified. */
+    lo = rocke_b_land(b, g_hi, rocke_b_const_i32(b, 0x1FFFFFF));
+    hi = rocke_i_tdm_word(b, 2u << 30);
+    group0[3] = rocke_b_lor(b, lo, hi);
+    /* Group 1: flags | tensor dims split 16/16 across words | tile dims |
+     * dim-0 stride = row_stride; dim-1 stride = 1, as CK Tile programs rank 2. */
+    flags = (uint32_t)workgroup_mask | (uint32_t)data_size << 16 | (uint32_t)pad_enable << 20
+            | (uint32_t)(pad_enable ? pad_interval : 0) << 22 | (uint32_t)pad_amount << 25;
+    group1[0] = rocke_i_tdm_word(b, flags);
+    group1[1] = rocke_b_shl(b, tensor_dim0, c16);
+    lo = rocke_b_lshr(b, tensor_dim0, c16);
+    hi = rocke_b_shl(b, tensor_dim1, c16);
+    group1[2] = rocke_b_lor(b, lo, hi);
+    lo = rocke_b_lshr(b, tensor_dim1, c16);
+    hi = rocke_i_tdm_word(b, (uint32_t)tile_dim0 << 16);
+    group1[3] = rocke_b_lor(b, lo, hi);
+    group1[4] = rocke_b_const_i32(b, tile_dim1);
+    group1[5] = row_stride;
+    group1[6] = rocke_b_const_i32(b, 1 << 16);
+    group1[7] = rocke_b_const_i32(b, 0);
+    for(i = 0; i < 4; ++i)
+        group0[i] = rocke_b_readfirstlane(b, group0[i]);
+    out[0] = rocke_b_vec_pack(b, group0, 4, rocke_i32());
+    for(i = 0; i < 8; ++i)
+        group1[i] = rocke_b_readfirstlane(b, group1[i]);
+    out[1] = rocke_b_vec_pack(b, group1, 8, rocke_i32());
+    zero4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+    out[2] = zero4;
+    out[3] = zero4;
+    out[4] = rocke_b_zero_vec(b, rocke_i32(), 8);
+    return rocke_i_live(b);
 }
 
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level)
@@ -1180,6 +2327,38 @@ rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond)
         return out;
     out.op = op;
     out.then_region = then_r;
+    return out;
+}
+
+rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond)
+{
+    rocke_if_else_t out;
+    rocke_region_t* then_r;
+    rocke_region_t* else_r;
+    rocke_region_t* regions[2];
+    rocke_op_t* op;
+
+    memset(&out, 0, sizeof(out));
+    if(!rocke_i_live(b))
+        return out;
+    if(!cond)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "scf_if_else: NULL cond");
+        return out;
+    }
+
+    then_r = rocke_i_new_region(b, "then");
+    else_r = rocke_i_new_region(b, "else");
+    if(!then_r || !else_r)
+        return out;
+    regions[0] = then_r;
+    regions[1] = else_r;
+    op = rocke_i_op(b, ROCKE_OP_SCF_IF_ELSE, &cond, 1, NULL, 0, NULL, regions, 2, "v", NULL);
+    if(!op)
+        return out;
+    out.op = op;
+    out.then_region = then_r;
+    out.else_region = else_r;
     return out;
 }
 

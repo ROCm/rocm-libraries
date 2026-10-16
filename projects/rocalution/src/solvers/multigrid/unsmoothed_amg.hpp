@@ -35,11 +35,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class UAAMG
-  * \brief Unsmoothed Aggregation Algebraic MultiGrid Method
-  * \details
-  * The Unsmoothed Aggregation Algebraic MultiGrid method is based on unsmoothed
-  * aggregation based interpolation scheme.
-  * \cite stueben
+  * \brief Unsmoothed Aggregation Algebraic MultiGrid method.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
