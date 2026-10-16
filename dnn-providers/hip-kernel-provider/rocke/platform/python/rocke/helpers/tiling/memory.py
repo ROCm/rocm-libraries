@@ -8,21 +8,23 @@ owns the *correctness envelope* the style cannot reach past (rev-7 Principle 8, 
 
 - ``cooperative_load_desc`` / ``cooperative_load_width`` -- the block-wide, free-dim-contiguous global
   load tile (the wide, coalesced direction). Rank-2-enforcing.
-- ``lds_tile_alloc`` -- the FULL-tile LDS allocation shape, DERIVED from ``desc_extents`` of the
-  (K, free) store descriptor (invariant a). The extent is ``bounds``-independent: a style never sizes
-  LDS, so it cannot clip-size the allocation (which would let a full-width unmasked read index a
-  neighbour workgroup's LDS).
+- ``lds_tile_desc`` -- the FULL-tile LDS tensor descriptor, DERIVED from ``desc_extents`` of the
+  cooperative descriptor (invariant a) and written in the convention order ``(free, K)``. The extent is
+  ``bounds``-independent: a style never sizes LDS, so it cannot clip-size the buffer (which would let a
+  full-width unmasked read index a neighbour workgroup's LDS). The buffer is flat and sized from the
+  descriptor: ``b.smem_alloc(td.dtype, [td.element_span])``.
 - ``lds_store`` / ``lds_read`` -- the LDS-facing verbs. Their signature has NO ``bounds`` parameter, so
   masking an LDS access is unrepresentable (invariant b -- the cooperative store/read stay full-width
   and unmasked; zeros, if any, flow through LDS and contribute nothing to the MAC). Each runs the
-  ``desc_extents``-vs-allocation fit guard UNCONDITIONALLY before emitting (invariant c).
+  ``desc_extents``-vs-descriptor-lengths fit guard UNCONDITIONALLY before emitting (invariant c); the
+  verbs they call then check the flat buffer holds the descriptor's span.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .descriptors import make_window
+from .descriptors import TensorDesc, make_tensor_desc, make_window
 from .emit import load_fragment, store_fragment
 from .fragments import Fragment, TileDesc
 from .layouts import make_tile_desc
@@ -31,7 +33,7 @@ from .lds_conflict import desc_extents
 __all__ = [
     "cooperative_load_desc",
     "cooperative_load_width",
-    "lds_tile_alloc",
+    "lds_tile_desc",
     "lds_store",
     "lds_read",
 ]
@@ -123,64 +125,74 @@ def cooperative_load_desc(
     return desc
 
 
-def lds_tile_alloc(
-    coop_desc: TileDesc, *, buffers: int, n_waves: int, wave_size: int = 64
-) -> tuple[tuple[int, int], tuple[int, int]]:
-    """The FULL-tile LDS allocation ``(shape, strides)`` for a cooperative-load operand -- DERIVED from
-    ``desc_extents`` of the (K, free) store descriptor, so it is ``bounds``-independent (seam invariant
-    a). ``buffers`` is the double-buffer count; the free axis is that multiple of the store's free
-    extent, and the two buffer halves are free-dim-adjacent (row stride = ``buffers * free_extent``).
+def lds_tile_desc(
+    coop_desc: TileDesc,
+    dtype: Any,
+    *,
+    buffers: int,
+    n_waves: int,
+    wave_size: int = 64,
+) -> TensorDesc:
+    """The FULL-tile LDS tensor descriptor for a cooperative-load operand, in the convention order
+    ``(free, K)`` -- DERIVED from ``desc_extents`` of ``coop_desc`` itself, so it is
+    ``bounds``-independent (seam invariant a). A style supplies the coop descriptor; the SEAM sizes the
+    buffer. A style can never clip-size it.
 
-    A style supplies the coop descriptor; the SEAM sizes the allocation. A style can never clip-size it.
+    ``buffers`` is the multi-buffer count. The buffers sit side by side on the free axis -- buffer ``i``
+    starts at free position ``i * free_ext`` -- so the lengths are ``(buffers * free_ext, k_ext)`` and
+    the strides ``(1, buffers * free_ext)``: element ``(f, k)`` lives at ``f + k * buffers * free_ext``,
+    a ``[K][buffers * free]`` buffer. Allocate it flat from the descriptor,
+    ``b.smem_alloc(td.dtype, [td.element_span])``, and address it with the cooperative and read tiles
+    as they are (``(free, K)``, unswapped) at origins ``(free_position, k)``.
+
+    The stride-1 axis is axis 0 (the free axis), so the built-in ``lds_swizzle=True`` refuses this
+    descriptor (it needs the stride-1 axis last); a swizzle on it is a swizzle callable. Vector width
+    is unaffected: the cooperative and read tiles keep the free axis innermost in their registers.
     """
-    store_desc = coop_desc.swap_dims(
-        0, 1
-    )  # (free, K) -> (K, free): the LDS store order
-    block_lanes = wave_size * n_waves
-    ext = desc_extents(store_desc, block_lanes)
+    ext = desc_extents(coop_desc, wave_size * n_waves)
     if len(ext) != 2:
         raise ValueError(
-            f"LDS store descriptor must be rank-2 (K, free) -- extents {ext!r}"
+            f"cooperative LDS descriptor must be rank-2 (free, K) -- extents {ext!r}"
         )
-    k_ext, free_ext = ext
-    shape = (k_ext, buffers * free_ext)
-    strides = (buffers * free_ext, 1)
-    return shape, strides
+    free_ext, k_ext = ext
+    row = buffers * free_ext
+    return make_tensor_desc((row, k_ext), (1, row), dtype)
 
 
 def _fit_or_raise(
-    what: str, tile_desc: TileDesc, n_lanes: int, alloc: tuple[int, ...]
+    what: str, tile_desc: TileDesc, n_lanes: int, lds_tensor_desc: TensorDesc
 ) -> None:
-    """Raise unless every axis of ``tile_desc`` fits the LDS ``alloc`` (seam invariant c). LDS accesses
-    are UNCLIPPED by design, so an out-of-range index is not masked -- it reads another workgroup's
-    memory. Sizing to the DESCRIPTOR, per axis (a product check hides compensating per-axis errors).
-    This is an EXTENT-vs-alloc check (`origin` unchecked): it polices full-tile SIZING, not a
-    within-alloc buffer-index bug -- the double-buffer geometry closes that by construction.
+    """Raise unless every axis of ``tile_desc`` fits the LDS descriptor's lengths (seam invariant c).
+    LDS accesses are UNCLIPPED by design, so an out-of-range index is not masked -- it reads another
+    workgroup's memory. Checked per axis (a product check hides compensating per-axis errors). This is
+    an EXTENT-vs-lengths check (`origin` unchecked): it polices full-tile SIZING, not a within-buffer
+    buffer-index bug -- the multi-buffer geometry closes that by construction.
     """
     ext = desc_extents(tile_desc, n_lanes)
-    if len(ext) != len(alloc) or any(e > a for e, a in zip(ext, alloc)):
+    lengths = tuple(lds_tensor_desc.lengths)
+    if len(ext) != len(lengths) or any(e > n for e, n in zip(ext, lengths)):
         raise ValueError(
-            f"{what} addresses {ext} but the LDS allocation is {tuple(alloc)} -- "
-            f"the cooperative LDS access would run outside the allocation (unclipped by design). "
-            f"Size the allocation to the descriptor, per axis."
+            f"{what} addresses {ext} but the LDS tensor descriptor has lengths {lengths} -- "
+            f"the cooperative LDS access would run outside the buffer (unclipped by design). "
+            f"Describe the buffer with lengths that cover the tile, per axis."
         )
 
 
 def lds_store(
     b: Any,
     ptr: Any,
-    lds_tensor_desc: Any,
+    lds_tensor_desc: TensorDesc,
     origin: tuple[Any, ...],
     fragment: Fragment,
     thread: Any,
     *,
-    alloc: tuple[int, ...],
     n_lanes: int,
 ) -> None:
     """Full-width, UNMASKED cooperative store into LDS (seam invariant b: NO ``bounds`` parameter, so an
-    LDS mask is unrepresentable). Runs the fit guard against ``alloc`` first (invariant c). The store
-    width follows the fragment's contiguous run (``ds_write_b{32,64,128}``)."""
-    _fit_or_raise("cooperative LDS store", fragment.tile_desc, n_lanes, alloc)
+    LDS mask is unrepresentable). Runs the fit guard against the descriptor's lengths first (invariant
+    c). The store width follows the fragment's contiguous run (``ds_write_b{32,64,128}``).
+    """
+    _fit_or_raise("cooperative LDS store", fragment.tile_desc, n_lanes, lds_tensor_desc)
     window = make_window(
         lds_tensor_desc, origin
     )  # no bounds -- masking LDS is unrepresentable
@@ -196,19 +208,18 @@ def lds_store(
 def lds_read(
     b: Any,
     ptr: Any,
-    lds_tensor_desc: Any,
+    lds_tensor_desc: TensorDesc,
     origin: tuple[Any, ...],
     tile_desc: TileDesc,
     thread: Any,
     *,
-    alloc: tuple[int, ...],
     n_lanes: int,
 ) -> Fragment:
     """Full-width, UNMASKED cooperative read from LDS (seam invariant b: NO ``bounds`` parameter). Runs
-    the fit guard against ``alloc`` first (invariant c). Returns the loaded fragment; the caller applies
-    any MMA-ready register reorder (that is a register transform, not a memory access).
+    the fit guard against the descriptor's lengths first (invariant c). Returns the loaded fragment; the
+    caller applies any MMA-ready register reorder (that is a register transform, not a memory access).
     """
-    _fit_or_raise("cooperative LDS read", tile_desc, n_lanes, alloc)
+    _fit_or_raise("cooperative LDS read", tile_desc, n_lanes, lds_tensor_desc)
     window = make_window(lds_tensor_desc, origin)  # no bounds
     if window.bounds is not None:  # invariant b: the LDS window can never carry a clip
         raise ValueError(

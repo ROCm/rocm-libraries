@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .descriptors import TensorWindow
+from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc
 
@@ -203,6 +203,31 @@ def _address(b: Any, window: TensorWindow, positions: list[Any]) -> Any:
     return address
 
 
+def _check_lds_buffer(verb: str, buffer: Any, tensor: TensorDesc) -> None:
+    """Fail fast unless ``buffer`` can hold ``tensor``: an LDS buffer is flat (rank 1), holds the
+    tensor's dtype, and holds at least the tensor's :attr:`~TensorDesc.element_span` elements. The
+    descriptor is the one home of the buffer's layout; the allocation only gives it room, so a
+    buffer that disagrees with it is refused here rather than read or written out of range (LDS
+    accesses are unclipped). Window origins are trusted, as for every LDS access."""
+    buffer_type = buffer.type
+    span = tensor.element_span
+    if len(buffer_type.shape) != 1:
+        raise ValueError(
+            f"{verb}: the LDS buffer {buffer_type.name} has rank {len(buffer_type.shape)} -- an LDS "
+            f"buffer is flat; its layout lives in the tensor descriptor. Allocate "
+            f"smem_alloc({tensor.dtype.name}, [{span}])"
+        )
+    if buffer_type.elem.name != tensor.dtype.name:
+        raise ValueError(
+            f"{verb}: LDS buffer element {buffer_type.elem.name} != tensor dtype {tensor.dtype.name}"
+        )
+    if span > buffer_type.shape[0]:
+        raise ValueError(
+            f"{verb}: the LDS tensor spans {span} elements but the buffer holds "
+            f"{buffer_type.shape[0]} -- size the allocation from the descriptor"
+        )
+
+
 def _register_coord_offsets(
     encoding: WarpDistributionEncoding, register_index: int
 ) -> tuple[int, ...]:
@@ -345,8 +370,10 @@ def _contiguous_run(
     COMPILE-TIME multiple of the tile extent, so no tile overhangs the tensor. A ragged/odd tensor, or
     a runtime clip that can't be proven aligned, falls to the SCALAR path (which masks against the
     length) -- never an out-of-bounds wide read (the page-fault risk Principle 4 kills). LDS is EXEMPT:
-    its allocation is the full tile by construction (seam invariant a), so a wide LDS access never
-    overhangs; the gate applies to global only."""
+    the verbs check that the flat buffer holds the descriptor's whole span (:func:`_check_lds_buffer`)
+    and LDS accesses are unclipped, so the gate applies to global only. Because both spaces address
+    an element by ``sum(position * stride)``, consecutive registers of a run on a stride-1 axis are
+    consecutive elements in LDS exactly as in global memory."""
     layout = tile_desc.layout
     if dtype.name not in _WIDE_OK:
         return 1
@@ -402,12 +429,14 @@ def _is_lds(source: Any) -> bool:
 
 
 def _swizzle_lds_positions(b: Any, positions: list) -> list:
-    """XOR-swizzle the innermost LDS index by the outer index, at b128-block (8-f16) granularity:
+    """XOR-swizzle the last LDS position by the one before it, at b128-block (8-f16) granularity:
     ``m -> ((m>>3) ^ (outer & 7)) << 3 | (m & 7)``. Keeps every 8-f16 (b128) run contiguous while
     de-aliasing LDS banks across the outer (K) dim -> conflict-free WITHOUT padding (which breaks
     alignment). A bijection of the physical ``(outer, m)``, so applying it identically to the store and
     the read leaves correctness intact regardless of the two fragments' layouts. Requires each access to
-    be naturally vw-aligned within an 8-f16 block (true for our b128 store / b64 read).
+    be naturally vw-aligned within an 8-f16 block (true for our b128 store / b64 read), and the last
+    axis to be the buffer's stride-1 axis (checked by :func:`_check_builtin_swizzle`): the swizzled
+    positions are then linearised by the descriptor strides like any other LDS position.
     """
     if len(positions) < 2:
         return positions
@@ -416,6 +445,68 @@ def _swizzle_lds_positions(b: Any, positions: list) -> list:
     # intact -> identical bank mapping to a block XOR, in 3 VALU ops (mod, shl, xor) not 6.
     m_swz = b.xor(m, b.shl(b.mod(outer, b.const_i32(8)), b.const_i32(3)))
     return positions[:-1] + [m_swz]
+
+
+def _check_builtin_swizzle(strides: tuple[int, ...]) -> None:
+    """The built-in swizzle (``lds_swizzle=True``) permutes the LAST position inside 8-element
+    blocks, which keeps each block contiguous only when the last axis is the buffer's stride-1 axis.
+    Refuse any other layout instead of scattering a vector run; a swizzle callable states its own
+    rule."""
+    if strides[-1] == 1:
+        return
+    where = (
+        f"put it at axis {strides.index(1)}"
+        if 1 in strides
+        else "have no stride-1 axis"
+    )
+    raise ValueError(
+        f"lds_swizzle=True needs the stride-1 axis last -- strides {tuple(strides)} {where}; "
+        f"describe the buffer with its contiguous axis last or pass a swizzle callable"
+    )
+
+
+def _lds_index(
+    b: Any,
+    window: TensorWindow,
+    tile_desc: TileDesc,
+    thread: Any,
+    register: int,
+    lds_swizzle: bool | Callable[[Any, list], list],
+    base_index: Any,
+) -> Any:
+    """The flat LDS element index of `register`'s run start, ``sum(position * stride)`` over the
+    window's descriptor -- the same address rule as global memory.
+
+    Without a swizzle it is the lane base index (``base_index``, from :func:`_lane_base_index`,
+    emitted once per access) plus the register's compile-time offset: consecutive runs differ by a
+    constant, which the backend folds into the instruction offset and pairs into ``ds_read2`` /
+    ``ds_write2``. A swizzle is not linear, so a swizzled run rebuilds its positions, swizzles them
+    and linearises the result (``base_index`` is unused then)."""
+    if not lds_swizzle:
+        return _register_index(b, window, tile_desc, base_index, register)
+    coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
+    swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
+    return _address(b, window, swizzle(b, _positions(b, window, coords)))
+
+
+def _checked_lds_base_index(
+    verb: str,
+    b: Any,
+    buffer: Any,
+    window: TensorWindow,
+    tile_desc: TileDesc,
+    thread: Any,
+    lds_swizzle: bool | Callable[[Any, list], list],
+) -> Any:
+    """Check the LDS buffer (and the built-in swizzle's layout rule), then return the lane base
+    index the unswizzled runs add their offsets to (``None`` when a swizzle is active).
+    """
+    _check_lds_buffer(verb, buffer, window.tensor)
+    if lds_swizzle is True:
+        _check_builtin_swizzle(window.tensor.strides)
+    if lds_swizzle:
+        return None
+    return _lane_base_index(b, window, tile_desc, thread)[1]
 
 
 def _swizzle_vw(lds_swizzle: Any, dist_vw: int, align: int) -> int:
@@ -456,10 +547,11 @@ def load_fragment(
     from the source (:func:`_is_lds`), so the same verb stages global<->register and LDS<->register.
     The fragment's dtype IS ``window.tensor.dtype`` (nothing is baked in). Where the window clips (an
     element past its bound), OOB elements are filled with `pad` (`masked_global_load`); otherwise the
-    plain `global_load` fast path (byte-identical to no-clip). LDS loads are unclipped (the buffer is
-    exactly sized) and index the smem memref directly by the layout's positions -- the window's
-    strides are unused there. `pad` default `0`; a non-zero `constant(value)` fill is reserved.
-    `coherency` reserved.
+    plain `global_load` fast path (byte-identical to no-clip). In both spaces an element's index is
+    ``sum(position * stride)`` over the window's descriptor. An LDS buffer is flat
+    (``b.smem_alloc(td.dtype, [td.element_span])``) and the descriptor is its layout: the buffer must
+    be rank 1, hold the tensor's dtype and hold its span (refused otherwise); LDS loads are unclipped.
+    `pad` default `0`; a non-zero `constant(value)` fill is reserved. `coherency` reserved.
     """
     dtype = window.tensor.dtype
     # N-D boundary gate: a tensor loaded as a typed MMA OPERAND must be the rank-2 one-free-one-
@@ -476,19 +568,23 @@ def load_fragment(
     if lds:
         vw = _swizzle_vw(lds_swizzle, vw, align)
     value = b.zero_vec(dtype, tile_desc.register_count)
+    if lds:
+        # LDS source: one flat element index per run (wide when contiguous), lane base once.
+        base_index = _checked_lds_base_index(
+            "load_fragment", b, ptr, window, tile_desc, thread, lds_swizzle
+        )
+        for register in range(0, tile_desc.register_count, vw):
+            index = _lds_index(
+                b, window, tile_desc, thread, register, lds_swizzle, base_index
+            )
+            loaded = b.smem_load_vN(ptr, index, dtype=dtype, n=vw)
+            for i in range(vw):
+                value = b.vec_insert(value, b.vec_extract(loaded, i), register + i)
+        return Fragment(tile_desc, dtype, value)
     zero: Any = None  # the pad scalar, emitted lazily on the first clipped element
     for register in range(0, tile_desc.register_count, vw):
         coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
         positions = _positions(b, window, coords)
-        if lds:
-            if lds_swizzle:
-                swz = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
-                positions = swz(b, positions)
-            # LDS source: index the smem memref by the layout positions (wide when contiguous).
-            loaded = b.smem_load_vN(ptr, *positions, dtype=dtype, n=vw)
-            for i in range(vw):
-                value = b.vec_insert(value, b.vec_extract(loaded, i), register + i)
-            continue
         address = _address(b, window, positions)
         if vw > 1:
             # Contiguous stride-1 run -> single vectorised global load (global_load_dwordxN).
@@ -539,8 +635,9 @@ def store_fragment(
     reserved -- this is not a transparent memcpy. `ptr` is the DEST: a global ``ptr<...>`` OR an LDS
     ``smem<...>`` buffer -- the store op is chosen from the dest (:func:`_is_lds`). If the window has
     a clip, OOB global writes are **dropped** (guarded by ``scf_if``); C2's branchless buffer
-    ``_OOB_SENTINEL`` drop is the reserved efficient path. LDS stores index the smem memref by the
-    layout positions (unclipped; strides unused).
+    ``_OOB_SENTINEL`` drop is the reserved efficient path. LDS stores address the flat buffer through
+    the window's strides, exactly like global stores, after the same buffer checks as
+    :func:`load_fragment` (unclipped).
     """
     out_dtype = window.tensor.dtype
     align = _align_of(out_dtype)
@@ -563,22 +660,21 @@ def store_fragment(
     # register (the lane mod/div rebuilt each time) instead leaves every store a distinct expression it
     # cannot relate, so ANY strided global store this verb emits stays scalar/narrow -- the C epilogue is
     # just the visible case. Bit-exact with the per-register reconstruction by linearity of _address. The
-    # LDS path keeps the plain wrapper (its wide ds_write already vectorizes).
-    base_positions: list[Any] = []
-    base_index: Any = None
-    if not lds:
-        base_positions, base_index = _lane_base_index(
-            b, window, fragment.tile_desc, thread
+    # LDS path uses the same base-plus-constant form per wide run (see _lds_index).
+    if lds:
+        lds_base_index = _checked_lds_base_index(
+            "store_fragment", b, ptr, window, fragment.tile_desc, thread, lds_swizzle
         )
-    for register in range(0, fragment.tile_desc.register_count, vw):
-        if lds:
-            coords = emit_tensor_coordinates(
-                b, fragment.tile_desc.layout, thread, register
+        for register in range(0, fragment.tile_desc.register_count, vw):
+            index = _lds_index(
+                b,
+                window,
+                fragment.tile_desc,
+                thread,
+                register,
+                lds_swizzle,
+                lds_base_index,
             )
-            positions = _positions(b, window, coords)
-            if lds_swizzle:
-                swz = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
-                positions = swz(b, positions)
             if vw == 1:
                 el = _cast_element(
                     b,
@@ -586,7 +682,7 @@ def store_fragment(
                     fragment.dtype,
                     out_dtype,
                 )
-                b.smem_store_vN(ptr, positions, el, 1)
+                b.smem_store_vN(ptr, [index], el, 1)
             else:
                 vec = b.zero_vec(out_dtype, vw)
                 for i in range(vw):
@@ -597,8 +693,10 @@ def store_fragment(
                         out_dtype,
                     )
                     vec = b.vec_insert(vec, el, i)
-                b.smem_store_vN(ptr, positions, vec, vw)
-            continue
+                b.smem_store_vN(ptr, [index], vec, vw)
+        return
+    base_positions, base_index = _lane_base_index(b, window, fragment.tile_desc, thread)
+    for register in range(0, fragment.tile_desc.register_count, vw):
         positions = _register_positions(b, fragment.tile_desc, base_positions, register)
         address = _register_index(b, window, fragment.tile_desc, base_index, register)
         element = b.vec_extract(fragment.value, register)

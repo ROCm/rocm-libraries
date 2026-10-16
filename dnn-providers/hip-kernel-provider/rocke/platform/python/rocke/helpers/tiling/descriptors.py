@@ -50,9 +50,11 @@ class TensorDesc:
 
     In a window the `lengths` are the valid extent (the default clip bound) and `strides` are the
     physical layout (so a stride-1 axis is the memory-contiguous one); the ptr binds later, at
-    load/store. `axis_roles` is opt-in: a positional rank-2 operand needs none, but an N-D tensor
-    declares them so `at_index`/`squeeze` can reduce it to the rank-2 `(free, K)` an MMA consumes
-    WITHOUT guessing which axis is the contraction.
+    load/store. The same holds in global memory and in LDS: an element's index is
+    ``sum(position * stride)`` in both, and an LDS buffer is a flat allocation sized by
+    :attr:`element_span`. `axis_roles` is opt-in: a positional rank-2 operand needs none, but an
+    N-D tensor declares them so `at_index`/`squeeze` can reduce it to the rank-2 `(free, K)` an MMA
+    consumes WITHOUT guessing which axis is the contraction.
     """
 
     lengths: tuple[int, ...]
@@ -87,6 +89,23 @@ class TensorDesc:
     @property
     def rank(self) -> int:
         return len(self.lengths)
+
+    @property
+    def element_span(self) -> int:
+        """Number of elements from the first to the last element this description can address:
+        ``1 + sum((length - 1) * stride)`` over every axis. It is the size an LDS buffer needs --
+        ``b.smem_alloc(td.dtype, [td.element_span])`` -- so the descriptor stays the one home of the
+        buffer's layout. Padding (a larger outer stride) is counted up to the last element; the dead
+        space after it is not. Static: every length and stride is an int.
+        """
+        for axis, stride in enumerate(self.strides):
+            if stride < 0:
+                raise ValueError(
+                    f"TensorDesc.element_span needs non-negative strides -- strides[{axis}]={stride}"
+                )
+        return 1 + sum(
+            (length - 1) * stride for length, stride in zip(self.lengths, self.strides)
+        )
 
     def _role_axis(self, role: str) -> int | None:
         """The axis index carrying `role`, or None (also None when roles are undeclared)."""

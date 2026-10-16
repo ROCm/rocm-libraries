@@ -15,7 +15,7 @@ THE CRC GIFT: because the global load is already free-dim-innermost (M for A, N 
 byte order the coalesced global load wants IS the free-dim-innermost LDS store order -- so the
 cooperative store into LDS is an IDENTITY round-trip (no global->LDS register reorder). The K-loop
 wave read then reaches its K-contiguous MMA operand via a pure ``_transpose_desc`` relabel of the
-M-innermost LDS memref (no shuffle, no cross-lane). This is the mirror image of the row-major
+M-innermost LDS buffer (no shuffle, no cross-lane). This is the mirror image of the row-major
 interleaved kernel (``tiling_gemm_interleaved_demo``), which pays a register ``reorder`` on the store
 because its global load is K-contiguous.
 
@@ -257,14 +257,15 @@ def build_crc_gemm(
 
     # LDS is FREE-DIM-INNERMOST ([tile_k, _bufs*free], free stride-1): the coop store is an identity
     # (store desc == load desc) and the wave read reaches K-contiguous by a _transpose_desc relabel.
-    lds_a = b.smem_alloc(F16, [tile_k, _bufs * tile_m], name_hint="lds_a")
-    lds_b = b.smem_alloc(F16, [tile_k, _bufs * tile_n], name_hint="lds_b")
     lds_a_td = make_tensor_desc((tile_k, _bufs * tile_m), (_bufs * tile_m, 1), F16)
     lds_b_td = make_tensor_desc((tile_k, _bufs * tile_n), (_bufs * tile_n, 1), F16)
+    # Each LDS buffer is flat and sized from its descriptor: the descriptor is the layout.
+    lds_a = b.smem_alloc(lds_a_td.dtype, [lds_a_td.element_span], name_hint="lds_a")
+    lds_b = b.smem_alloc(lds_b_td.dtype, [lds_b_td.element_span], name_hint="lds_b")
 
-    # The coop store/read index the (K, free) LDS memref -- the free dim is the memref innermost -> wide
-    # ds_write/ds_read. The coop desc's own X-dims are (free, K); _transpose_desc gives the (K, free)
-    # view the memref uses. Retagging the coop fragment to this transposed layout is register-IDENTITY
+    # The coop store/read address the LDS buffer described (K, free) -- the free dim is its stride-1
+    # axis -> wide ds_write/ds_read. The coop desc's own X-dims are (free, K); _transpose_desc gives the
+    # (K, free) view that description uses. Retagging the coop fragment to this transposed layout is register-IDENTITY
     # (same registers, swapped X-dim labels) -- the CRC gift: the store is NOT a reorder.
     a_coop_t, b_coop_t = _transpose_desc(a_coop), _transpose_desc(b_coop)
     a_rd_t, b_rd_t = _transpose_desc(slotA_wave), _transpose_desc(slotB_wave)

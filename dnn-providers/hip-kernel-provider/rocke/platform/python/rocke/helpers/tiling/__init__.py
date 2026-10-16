@@ -28,9 +28,9 @@ TOOLBOX -- the primitives the front door composes, callable directly for finer c
         these to hold the resolved layouts (plan) or drive the atom grid (driver) yourself.
     ``LayoutStyle`` / ``CanonicalStyle`` / ``InterleavedStyle``   the operand-layout STRATEGY -- pass
         ``style=`` to pick a profile (default canonical), or subclass to add one (docs/tiling_api_contract.md).
-    ``cooperative_load_desc`` / ``cooperative_load_width`` / ``lds_tile_alloc`` / ``lds_store`` /
-        ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile alloc,
-        unmasked LDS verbs, extent-vs-allocation guard).
+    ``cooperative_load_desc`` / ``cooperative_load_width`` / ``lds_tile_desc`` / ``lds_store`` /
+        ``lds_read``   the style-agnostic global->LDS memory bridge a style composes (full-tile LDS
+        descriptor, unmasked LDS verbs, extent-vs-descriptor guard).
     ``TensorDesc`` / ``TensorWindow`` / ``TileDesc`` / ``Fragment`` / ``fragment_length``   the value types.
     ``load_mma_traits`` / ``MmaTraits`` / ``MmaTraitsCatalog`` / ``DEFAULT_TRAITS_PATH``   the atom SSOT.
     ``describe`` / ``render_forward_map`` / ``render_inverse_map``   see a layout instead of decoding it.
@@ -73,7 +73,7 @@ from .mma import (
 from .memory import (
     cooperative_load_desc,
     cooperative_load_width,
-    lds_tile_alloc,
+    lds_tile_desc,
     lds_store,
     lds_read,
 )
@@ -120,7 +120,7 @@ __all__ = [
     "InterleavedStyle",
     "cooperative_load_desc",
     "cooperative_load_width",
-    "lds_tile_alloc",
+    "lds_tile_desc",
     "lds_store",
     "lds_read",
     "TensorDesc",

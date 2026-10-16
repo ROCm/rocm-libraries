@@ -548,9 +548,8 @@ def desc_extents(tile_desc, n_lanes, origin=(0, 0)):
     Used to bound a fragment against its window PER AXIS. A product check (`rows*cols == elems`) is
     NOT sufficient: compensating per-axis errors cancel (a 32x16 descriptor "fits" a 16x32 window by
     element count while addressing rows that do not exist), and it says nothing about the LDS
-    allocation, whose accesses are UNCLIPPED by design (see emit.py: "LDS loads are unclipped (the
-    buffer is exactly sized)") -- so an out-of-range LDS index is not masked, it reads another
-    workgroup's memory."""
+    allocation, whose accesses are UNCLIPPED by design (see emit.py: LDS loads are unclipped) -- so an
+    out-of-range LDS index is not masked, it reads another workgroup's memory."""
     from rocke.helpers.tiling.emit import emit_tensor_coordinates
 
     ext = None
@@ -689,8 +688,9 @@ def build_probe(
 
     band_td = make_tensor_desc((coop_free, tile_k), (tile_k, 1), dt)
     stride = tile_free + lds_pad
-    lds = b.smem_alloc(dt, [tile_k, stride], name_hint="lds_probe")
     lds_td = make_tensor_desc((tile_k, tile_free), (stride, 1), dt)
+    # The LDS buffer is flat and sized from its descriptor: the descriptor is the layout.
+    lds = b.smem_alloc(lds_td.dtype, [lds_td.element_span], name_hint="lds_probe")
 
     def _load_band():
         return load_fragment(
