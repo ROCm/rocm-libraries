@@ -62,26 +62,40 @@ def _kernel_id(req: MLARequest, candidate: KernelCandidate, spec: Any) -> Kernel
     return make_kernel_id(req, candidate, spec, op=req.op)
 
 
+def _sweep_ok(req: OperatorRequest, candidate: KernelCandidate) -> bool:
+    # Drops an opt-in fixed-layout candidate that would repeat the layout the
+    # production candidate ships for ``req``.
+    return not gfx942.sweep_skips(req, candidate)
+
+
 def registered_mla_combos(
     req: OperatorRequest,
 ) -> Tuple[Tuple[KernelCandidate, Any], ...]:
     """Every registered MLA ``(candidate, spec)`` that can launch ``req``."""
     if _request_errors(req):
         return ()
-    return MLA_REGISTRY.combos(req)
+    return MLA_REGISTRY.combos(req, selector_ok=_sweep_ok)
 
 
 def mla_sweep_space(req: OperatorRequest) -> Sequence[Any]:
+    """Every admissible spec for ``req``, opt-in candidates included.
+
+    The shipped spec comes first. The opt-in gfx942 candidates, each pinned to
+    one two-heads layout (``agpr_acc``, ``row16``), add the layout the rule did
+    not ship when its admission accepts it (agpr_acc refuses llvm20); the one
+    repeating the shipped layout is skipped (``gfx942.sweep_skips``), so each
+    layout appears once.
+    """
     if _request_errors(req):
         return ()
-    return MLA_REGISTRY.sweep_space(req)
+    return MLA_REGISTRY.sweep_space(req, selector_ok=_sweep_ok)
 
 
 def dispatch_mla_all(req: MLARequest) -> Tuple[DispatchResult, ...]:
     """Every eligible MLA kernel for ``req``, one result per combo."""
     if _request_errors(req):
         return ()
-    return MLA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
+    return MLA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id, selector_ok=_sweep_ok)
 
 
 def dispatch_mla(req: MLARequest, *, ranker: Ranker | None = None) -> DispatchResult:

@@ -14,7 +14,10 @@ Eligibility is always asked through :meth:`KernelCandidate.admits`, never throug
 
 from __future__ import annotations
 
+import os
 import unittest
+from contextlib import contextmanager
+from unittest import mock
 
 from dispatch.mla import (
     FAMILY,
@@ -31,6 +34,9 @@ from dispatch.mla import (
 )
 
 _NAME = "mla_prefill_fwd_gfx942"
+# Opt-in candidates pinned to one fixed two-heads layout each.
+_AGPR_NAME = "mla_prefill_fwd_gfx942_agpr_acc"
+_ROW16_NAME = "mla_prefill_fwd_gfx942_row16"
 
 
 def _req(**overrides) -> MLARequest:
@@ -48,6 +54,13 @@ def _req(**overrides) -> MLARequest:
     )
     base.update(overrides)
     return MLARequest(**base)
+
+
+@contextmanager
+def _flavor(flavor: str):
+    """Pin the LLVM flavor; agpr_acc admission refuses llvm20."""
+    with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": flavor}):
+        yield
 
 
 class TestRegistration(unittest.TestCase):
@@ -138,7 +151,10 @@ class TestArchGating(unittest.TestCase):
                 self.assertIn(arch, why)
 
     def test_for_arch_serves_it_only_to_gfx942(self):
-        self.assertEqual([c.name for c in MLA_REGISTRY.for_arch("gfx942")], [_NAME])
+        self.assertEqual(
+            [c.name for c in MLA_REGISTRY.for_arch("gfx942")],
+            [_NAME, _AGPR_NAME, _ROW16_NAME],
+        )
         for arch in ("gfx950", "gfx1250"):
             with self.subTest(arch=arch):
                 self.assertEqual(MLA_REGISTRY.for_arch(arch), ())
@@ -489,56 +505,34 @@ class TestDispatchResult(unittest.TestCase):
                     )
                 self.assertEqual(gate.call_count, 1)
 
-    def test_agpr_layout_for_long_keys_that_fill_the_device(self):
-        import os
-
-        old = os.environ.get("ROCKE_LLVM_FLAVOR")
-        try:
-            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm22"
+    def test_agpr_layout_for_many_rows_per_sequence(self):
+        with _flavor("llvm22"):
             long_full = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
             self.assertTrue(long_full.agpr_acc)
             self.assertEqual(long_full.block_q, 64)
-            # Too few workgroups to fill 228 CUs -- (128 // 64 + 2) x 32 = 128
-            # at 64 heads -- or too short a key range.
+            # Two sequences of 64 queries: 64 rows per sequence, under 320.
             self.assertFalse(
-                dispatch_mla(
-                    _req(num_heads=64, total_q=128, max_seqlen_k=32768)
-                ).spec.agpr_acc
+                dispatch_mla(_req(total_q=128, max_seqlen_k=32768)).spec.agpr_acc
             )
-            self.assertFalse(
+            # Key length plays no part: 4096 rows per sequence at S_k = 2048.
+            self.assertTrue(
                 dispatch_mla(_req(total_q=8192, max_seqlen_k=2048)).spec.agpr_acc
             )
-            # llvm20 refuses agpr_acc; dispatch falls back to 16 rows per wave.
-            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
+        # llvm20 refuses agpr_acc; dispatch falls back to 16 rows per wave.
+        with _flavor("llvm20"):
             fallback = dispatch_mla(_req(total_q=8192, max_seqlen_k=8192)).spec
             self.assertFalse(fallback.agpr_acc)
             self.assertEqual(fallback.block_q, 32)
-        finally:
-            if old is None:
-                os.environ.pop("ROCKE_LLVM_FLAVOR", None)
-            else:
-                os.environ["ROCKE_LLVM_FLAVOR"] = old
 
-    def test_agpr_fill_test_counts_the_packed_varlen_grid(self):
-        # Two sequences of 64 queries x 128 heads on 228 CUs. Ignoring the
-        # + num_seqs term gives (128 // 64) * 64 = 128 workgroups, under the CU
-        # count; the real launch is (128 // 64 + 2) * 64 = 256, which fills it.
-        import os
-
-        old = os.environ.get("ROCKE_LLVM_FLAVOR")
-        try:
-            os.environ["ROCKE_LLVM_FLAVOR"] = "llvm22"
+    def test_two_short_sequences_stay_on_the_default_layout(self):
+        # Two sequences of 64 queries x 128 heads: the old fill-count rule
+        # picked agpr_acc here; 64 rows per sequence is under the threshold.
+        with _flavor("llvm22"):
             req = _req(total_q=128, num_seqs=2, max_seqlen_k=4096, num_kv_blocks=512)
-            self.assertLess((128 // 64) * (128 // 2), req.num_cus)
             result = dispatch_mla(req)
-            self.assertTrue(result.spec.agpr_acc)
-            self.assertEqual(result.grid[0] * result.grid[1], 256)
-            self.assertGreaterEqual(result.grid[0] * result.grid[1], req.num_cus)
-        finally:
-            if old is None:
-                os.environ.pop("ROCKE_LLVM_FLAVOR", None)
-            else:
-                os.environ["ROCKE_LLVM_FLAVOR"] = old
+            self.assertFalse(result.spec.agpr_acc)
+            self.assertEqual(result.spec.block_q, 32)
+            self.assertEqual(result.grid, (128 // 32 + 2, 128 // 2, 1))
 
     def test_xcd_count_from_cu_count(self):
         # 38 CUs per CDNA3 XCD: a 228-CU gfx942 has 6, a 304-CU one 8. Anything
@@ -595,23 +589,23 @@ class TestDispatchResult(unittest.TestCase):
         self.assertEqual(a.compile_key, b.compile_key)
         self.assertNotEqual(a.selection_key, b.selection_key)
 
-    def test_sweep_space_is_the_selected_spec(self):
-        self.assertEqual(mla_sweep_space(_req()), (dispatch_mla(_req()).spec,))
+    def test_sweep_space_leads_with_the_selected_spec(self):
+        self.assertEqual(mla_sweep_space(_req())[0], dispatch_mla(_req()).spec)
 
     def test_sweep_space_is_empty_for_a_malformed_request(self):
         self.assertEqual(mla_sweep_space(_req(num_heads=0)), ())
 
-    def test_combos_are_the_selected_candidate_and_spec(self):
+    def test_combos_lead_with_the_selected_candidate_and_spec(self):
         result = dispatch_mla(_req())
-        self.assertEqual(
-            registered_mla_combos(_req()), ((result.candidate, result.spec),)
-        )
+        combos = registered_mla_combos(_req())
+        self.assertEqual(combos[0], (result.candidate, result.spec))
+        self.assertTrue(all(c.opt_in for c, _ in combos[1:]))
 
     def test_combos_are_empty_for_a_malformed_request(self):
         self.assertEqual(registered_mla_combos(_req(num_heads=0)), ())
 
     def test_dispatch_all_agrees_with_dispatch(self):
-        (swept,) = dispatch_mla_all(_req())
+        swept = dispatch_mla_all(_req())[0]
         auto = dispatch_mla(_req())
         # A sweep result carries the request with this candidate pinned, so its
         # selection key is the pinned request's; the compiled kernel is shared.
@@ -625,6 +619,309 @@ class TestDispatchResult(unittest.TestCase):
 
     def test_dispatch_all_is_empty_for_a_malformed_request(self):
         self.assertEqual(dispatch_mla_all(_req(num_heads=0)), ())
+
+
+def _agpr(**overrides) -> bool:
+    """Whether dispatch ships agpr_acc for ``_req(**overrides)`` at llvm22."""
+    with _flavor("llvm22"):
+        return dispatch_mla(_req(**overrides)).spec.agpr_acc
+
+
+class TestAgprLayoutRule(unittest.TestCase):
+    """agpr_acc iff total_q / num_seqs >= _AGPR_MIN_AVG_ROWS (320).
+
+    Every request here carries a 64-page pool and H=128 unless it says
+    otherwise; the pool only feeds the extent check, which these sizes pass.
+    """
+
+    def test_threshold_constant(self):
+        from dispatch.mla import gfx942
+
+        self.assertEqual(gfx942._AGPR_MIN_AVG_ROWS, 320)
+
+    def test_short_sequence_batches_stay_on_the_default_layout(self):
+        for q_len, seqs in ((8, 64), (1, 100), (64, 8)):
+            with self.subTest(q_len=q_len, seqs=seqs):
+                self.assertFalse(
+                    _agpr(
+                        total_q=q_len * seqs,
+                        num_seqs=seqs,
+                        max_seqlen_k=4096,
+                        num_kv_blocks=64,
+                    )
+                )
+
+    def test_single_sequence_threshold(self):
+        for q_len, want in ((319, False), (320, True)):
+            with self.subTest(q_len=q_len):
+                self.assertEqual(
+                    _agpr(
+                        total_q=q_len, num_seqs=1, max_seqlen_k=4096, num_kv_blocks=64
+                    ),
+                    want,
+                )
+
+    def test_ragged_batches_use_the_average(self):
+        # The request carries totals only, so a ragged batch is judged by its
+        # average: 64 + 448 + 448 averages 320; 1 + 511 averages 256 even though
+        # one sequence is long.
+        for q_lens, want in (((64, 448, 448), True), ((1, 511), False)):
+            with self.subTest(q_lens=q_lens):
+                self.assertEqual(
+                    _agpr(
+                        total_q=sum(q_lens),
+                        num_seqs=len(q_lens),
+                        max_seqlen_k=8192,
+                        num_kv_blocks=64,
+                    ),
+                    want,
+                )
+
+    def test_independent_of_cu_count_and_key_length(self):
+        for total_q, seqs in ((128, 2), (192, 1), (319, 1), (320, 1), (960, 3)):
+            answers = {
+                _agpr(
+                    total_q=total_q,
+                    num_seqs=seqs,
+                    num_cus=cus,
+                    max_seqlen_k=s_k,
+                    num_kv_blocks=64,
+                )
+                for cus in (228, 304)
+                for s_k in (2048, 32768)
+            }
+            with self.subTest(total_q=total_q, seqs=seqs):
+                self.assertEqual(len(answers), 1, answers)
+
+    def test_short_key_ranges_follow_the_same_rule(self):
+        # Measured down to S_k = 512 on the 304-CU part: no key-length floor.
+        for total_q, seqs, want in ((512, 1, True), (2048, 4, True), (256, 1, False)):
+            with self.subTest(total_q=total_q, seqs=seqs):
+                self.assertEqual(
+                    _agpr(
+                        total_q=total_q,
+                        num_seqs=seqs,
+                        max_seqlen_k=512,
+                        num_kv_blocks=128,
+                    ),
+                    want,
+                )
+
+    def test_threshold_is_a_keyword_parameter(self):
+        from dispatch.mla import gfx942
+
+        req = _req(total_q=192, num_seqs=1, max_seqlen_k=4096)
+        self.assertFalse(gfx942._use_agpr_layout(req))
+        self.assertTrue(gfx942._use_agpr_layout(req, min_avg_rows=128))
+        self.assertFalse(gfx942._use_agpr_layout(req, min_avg_rows=193))
+
+    def test_force_hook_overrides_the_rule(self):
+        from dispatch.mla import gfx942
+
+        short = {"total_q": 128, "num_seqs": 2, "max_seqlen_k": 4096}
+        long = {"total_q": 512, "num_seqs": 1, "max_seqlen_k": 4096}
+        with mock.patch.object(gfx942, "_AGPR_FORCE", True):
+            self.assertTrue(_agpr(**short))
+        with mock.patch.object(gfx942, "_AGPR_FORCE", False):
+            self.assertFalse(_agpr(**long))
+        self.assertEqual((_agpr(**short), _agpr(**long)), (False, True))
+
+    def test_llvm20_falls_back_to_the_default_layout(self):
+        with _flavor("llvm20"):
+            spec = dispatch_mla(_req(total_q=512, num_seqs=1)).spec
+        self.assertFalse(spec.agpr_acc)
+        self.assertEqual(spec.block_q, 32)
+
+
+class TestAgprRowFill(unittest.TestCase):
+    """Second term: row-carrying agpr_acc workgroups >= num_cus / 2.
+
+    rows_wgs = max(ceil(total_q / 64), num_seqs) * (num_heads // 2). It only
+    binds at low head counts; every case here clears the 320-row average.
+    """
+
+    def test_fill_fraction_constant(self):
+        from dispatch.mla import gfx942
+
+        self.assertEqual(gfx942._AGPR_MIN_ROW_FILL, (1, 2))
+
+    def test_low_head_counts_on_304_cus(self):
+        # (num_heads, single-sequence S_q, rows_wgs, agpr_acc?)
+        for heads, q_len, rows_wgs, want in (
+            (16, 1024, 128, False),
+            (16, 2048, 256, True),
+            (32, 512, 128, False),
+            (32, 1024, 256, True),
+            (64, 320, 160, True),
+        ):
+            with self.subTest(heads=heads, q_len=q_len):
+                self.assertEqual(-(-q_len // 64) * (heads // 2), rows_wgs)
+                self.assertEqual(
+                    _agpr(
+                        num_heads=heads,
+                        total_q=q_len,
+                        num_seqs=1,
+                        num_cus=304,
+                        max_seqlen_k=8192,
+                        num_kv_blocks=512,
+                    ),
+                    want,
+                )
+
+    def test_boundary_is_exact(self):
+        # H=2 is one head pair, so rows_wgs = ceil(total_q / 64): 151 vs 152
+        # against num_cus / 2 = 152.
+        for total_q, want in ((151 * 64, False), (151 * 64 + 1, True)):
+            with self.subTest(total_q=total_q):
+                self.assertEqual(
+                    _agpr(num_heads=2, total_q=total_q, num_seqs=1, num_cus=304),
+                    want,
+                )
+        # Odd CU count: rows_wgs * 2 >= num_cus, so 160 rows_wgs clears 319 and
+        # 320 but not 321.
+        for cus, want in ((319, True), (320, True), (321, False)):
+            with self.subTest(num_cus=cus):
+                self.assertEqual(
+                    _agpr(num_heads=64, total_q=320, num_seqs=1, num_cus=cus), want
+                )
+
+    def test_unknown_cu_count_keeps_the_default_layout(self):
+        from dispatch.mla import gfx942
+
+        req = _req(total_q=8192, num_seqs=1, num_cus=0)
+        self.assertFalse(gfx942._use_agpr_layout(req, 0))
+        with mock.patch.object(gfx942, "_resolve_num_cus", return_value=0):
+            self.assertFalse(_agpr(total_q=8192, num_seqs=1, num_cus=0))
+            # num_cus still feeds the XCD order; unknown keeps launch order.
+            with _flavor("llvm22"):
+                spec = dispatch_mla(req).spec
+        self.assertEqual((spec.agpr_acc, spec.num_xcds), (False, 0))
+
+    def test_fill_fraction_is_a_keyword_parameter(self):
+        from dispatch.mla import gfx942
+
+        # H16 1x1024: rows_wgs 128 against 304 CUs.
+        req = _req(num_heads=16, total_q=1024, num_seqs=1, num_cus=304)
+        self.assertFalse(gfx942._use_agpr_layout(req))
+        self.assertTrue(gfx942._use_agpr_layout(req, min_row_fill=(1, 3)))
+        self.assertTrue(gfx942._use_agpr_layout(req, min_row_fill=(0, 1)))
+        self.assertFalse(
+            gfx942._use_agpr_layout(
+                _req(num_heads=128, total_q=8192, num_seqs=1), min_row_fill=(100, 1)
+            )
+        )
+        # An explicit num_cus overrides the request's.
+        self.assertTrue(gfx942._use_agpr_layout(req, 256))
+
+
+class TestSweepCoverage(unittest.TestCase):
+    """Opt-in candidates pin a fixed layout; the sweep holds each layout once.
+
+    ``auto`` only ever returns the production candidate's rule-driven pick.
+    """
+
+    # (total_q, num_seqs) on each side of the 320-rows-per-sequence threshold.
+    _BELOW = (64, 2)
+    _ABOVE = (512, 1)
+
+    @staticmethod
+    def _pin(name, **overrides):
+        c = MLA_REGISTRY.get(name)
+        return _req(algorithm=c.algorithm, spec_id=c.spec_id, **overrides)
+
+    def test_opt_in_candidates(self):
+        self.assertFalse(MLA_REGISTRY.get(_NAME).opt_in)
+        algorithms = {MLA_REGISTRY.get(_NAME).algorithm}
+        for name in (_AGPR_NAME, _ROW16_NAME):
+            with self.subTest(name=name):
+                self.assertTrue(MLA_REGISTRY.get(name).opt_in)
+                algorithms.add(MLA_REGISTRY.get(name).algorithm)
+        self.assertEqual(len(algorithms), 3)
+
+    def test_pins_return_their_layout_on_both_sides_of_the_threshold(self):
+        for total_q, seqs in (self._BELOW, self._ABOVE):
+            with self.subTest(total_q=total_q, seqs=seqs), _flavor("llvm22"):
+                agpr = dispatch_mla(
+                    self._pin(_AGPR_NAME, total_q=total_q, num_seqs=seqs)
+                )
+                self.assertEqual(agpr.candidate.name, _AGPR_NAME)
+                self.assertTrue(agpr.spec.agpr_acc)
+                self.assertEqual(agpr.spec.block_q, 64)
+                self.assertEqual(agpr.grid, (total_q // 64 + seqs, 64, 1))
+                row16 = dispatch_mla(
+                    self._pin(_ROW16_NAME, total_q=total_q, num_seqs=seqs)
+                )
+                self.assertEqual(row16.candidate.name, _ROW16_NAME)
+                self.assertFalse(row16.spec.agpr_acc)
+                self.assertEqual(row16.spec.block_q, 32)
+                self.assertEqual(row16.spec.heads_per_wg, 2)
+
+    def test_sweep_holds_each_layout_once_shipped_first(self):
+        for (total_q, seqs), shipped in ((self._BELOW, False), (self._ABOVE, True)):
+            req = _req(total_q=total_q, num_seqs=seqs)
+            other = _ROW16_NAME if shipped else _AGPR_NAME
+            with self.subTest(total_q=total_q, seqs=seqs), _flavor("llvm22"):
+                auto = dispatch_mla(req)
+                self.assertEqual(auto.candidate.name, _NAME)
+                self.assertEqual(auto.spec.agpr_acc, shipped)
+                self.assertEqual(
+                    [s.agpr_acc for s in mla_sweep_space(req)], [shipped, not shipped]
+                )
+                self.assertEqual(
+                    [(c.name, s.agpr_acc) for c, s in registered_mla_combos(req)],
+                    [(_NAME, shipped), (other, not shipped)],
+                )
+                self.assertEqual(
+                    [r.candidate.name for r in dispatch_mla_all(req)], [_NAME, other]
+                )
+
+    def test_auto_never_returns_an_opt_in(self):
+        for total_q, seqs in (self._BELOW, self._ABOVE):
+            req = _req(total_q=total_q, num_seqs=seqs)
+            for flavor in ("llvm20", "llvm22"):
+                with self.subTest(total_q=total_q, flavor=flavor), _flavor(flavor):
+                    self.assertEqual(
+                        [c.name for c in MLA_REGISTRY.supported(req)], [_NAME]
+                    )
+                    self.assertEqual(dispatch_mla(req).candidate.name, _NAME)
+
+    def test_llvm20_sweeps_only_the_16_row_layout(self):
+        for total_q, seqs in (self._BELOW, self._ABOVE):
+            req = _req(total_q=total_q, num_seqs=seqs)
+            with self.subTest(total_q=total_q, seqs=seqs), _flavor("llvm20"):
+                self.assertEqual([s.agpr_acc for s in mla_sweep_space(req)], [False])
+                ok, why = MLA_REGISTRY.get(_AGPR_NAME).admits(
+                    self._pin(_AGPR_NAME, total_q=total_q, num_seqs=seqs)
+                )
+                self.assertFalse(ok)
+                self.assertIn("llvm20", why)
+                with self.assertRaises(ValueError):
+                    dispatch_mla(self._pin(_AGPR_NAME, total_q=total_q, num_seqs=seqs))
+                # row16 pinned still serves it.
+                self.assertFalse(
+                    dispatch_mla(
+                        self._pin(_ROW16_NAME, total_q=total_q, num_seqs=seqs)
+                    ).spec.agpr_acc
+                )
+
+    def test_odd_head_count_has_no_opt_ins(self):
+        with _flavor("llvm22"):
+            self.assertEqual(len(mla_sweep_space(_req(num_heads=5))), 1)
+            for name in (_AGPR_NAME, _ROW16_NAME):
+                with self.subTest(name=name):
+                    ok, why = MLA_REGISTRY.get(name).admits(
+                        self._pin(name, num_heads=5)
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("single-head", why)
+
+    def test_opt_ins_build(self):
+        with _flavor("llvm22"):
+            for name in (_AGPR_NAME, _ROW16_NAME):
+                with self.subTest(name=name):
+                    result = dispatch_mla(self._pin(name))
+                    kernel = result.candidate.built(result.spec, result.request.arch)
+                    self.assertEqual(kernel.name, result.spec.fwd_kernel_name())
 
 
 class TestSupportImpliesBuildable(unittest.TestCase):

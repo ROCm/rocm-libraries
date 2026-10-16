@@ -199,6 +199,44 @@ class TestDriver(unittest.TestCase):
                         self.assertIn(x + 1, heads)
         self.assertEqual(drv._gate_heads(128), [0, 1, 32, 33, 64, 65, 96, 97, 127])
 
+    def test_gate_applies_the_verifier_bars(self):
+        # The rocke arm is held to out abs + out max_abs/peak + lse; the aiter
+        # arm (no lse) to out abs + rel. Each failure below passes the 4e-2
+        # absolute bar on its own.
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch required")
+        import numpy as np
+
+        from benchmarks.gfx942.attention.prefill import (
+            benchmark_mla_prefill_live as drv,
+        )
+
+        rows = slice(0, 4)
+        ref_out = np.full((4, 2, 8), 0.1, dtype=np.float32)
+        ref_lse = np.zeros((4, 2), dtype=np.float32)
+        refs = [(rows, ref_out, ref_lse)]
+
+        def gate(out_err, lse_err, with_lse=True):
+            out = torch.from_numpy(ref_out + out_err)
+            lse = torch.from_numpy(ref_lse + lse_err) if with_lse else None
+            return drv._gate(out, lse, refs)
+
+        self.assertTrue(gate(1e-3, 1e-3)["ok"])
+        # 3e-2 abs: under 4e-2, but 0.3 of the 0.1 peak.
+        rel = gate(3e-2, 1e-3)
+        self.assertFalse(rel["ok"])
+        self.assertAlmostEqual(rel["max_rel_peak_out"], 0.3, places=5)
+        self.assertFalse(gate(3e-2, 0.0, with_lse=False)["ok"])
+        self.assertTrue(gate(1e-3, 0.0, with_lse=False)["ok"])
+        # lse 2e-2: under 4e-2, over LSE_ATOL.
+        self.assertFalse(gate(1e-3, 2e-2)["ok"])
+        self.assertEqual(
+            (drv.OUT_REL_PEAK_TOL, drv.LSE_ATOL, drv.BF16_ATTN_ATOL),
+            (2e-2, 1.7e-2, 4e-2),
+        )
+
     def test_overridden_spec_is_readmitted(self):
         # --spec-override swaps the dispatched spec; admission must run again
         # and refuse as a status, not build a spec dispatch would never ship.
