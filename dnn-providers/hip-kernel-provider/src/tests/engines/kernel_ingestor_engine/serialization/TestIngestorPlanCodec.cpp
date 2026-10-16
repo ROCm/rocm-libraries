@@ -281,6 +281,33 @@ INSTANTIATE_TEST_SUITE_P(SourceKinds,
                              }
                          });
 
+TEST(TestIngestorPlanCodec, BufferEncodingRoundTrips)
+{
+    for(const KernelSourceKind sourceKind : {KernelSourceKind::EMBEDDED_SOURCE,
+                                             KernelSourceKind::KPACK,
+                                             KernelSourceKind::HSACO_FILE,
+                                             KernelSourceKind::ROCKE_BUILDER})
+    {
+        SCOPED_TRACE("source kind " + std::to_string(static_cast<int>(sourceKind)));
+        const IngestorPlanPayload payload = makePayload(sourceKind);
+        const EncodedIngestorPlan encoded = encodeIngestorPlanToBuffer(payload);
+
+        ASSERT_NE(encoded.bytes.get(), nullptr);
+        ASSERT_GT(encoded.size, HEADER_SIZE);
+        const IngestorPlanHeader header
+            = decodeIngestorPlanHeader(encoded.bytes.get(), encoded.size);
+        EXPECT_EQ(static_cast<size_t>(header.headerSize), HEADER_SIZE);
+
+        // The body is every byte after the header, and the header digest covers all of it.
+        const uint8_t* body = encoded.bytes.get() + HEADER_SIZE;
+        const size_t bodySize = encoded.size - HEADER_SIZE;
+        EXPECT_TRUE(fb::ExecutionPlanBufferHasIdentifier(body));
+        EXPECT_EQ(header.bodyDigest, detail::computeIngestorPlanBodyDigest(body, bodySize));
+
+        EXPECT_TRUE(decodeIngestorPlan(encoded.bytes.get(), encoded.size) == payload);
+    }
+}
+
 TEST(TestIngestorPlanCodec, RoundTripsEmptyOptionalContent)
 {
     IngestorPlanPayload payload = makePayload(KernelSourceKind::EMBEDDED_SOURCE, 0);

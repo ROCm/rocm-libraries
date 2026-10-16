@@ -4,10 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
-#include <cstring>
-#include <memory>
 #include <utility>
-#include <vector>
 
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -45,20 +42,16 @@ hipdnnPluginStatus_t hipdnnEnginePluginSerializeExecutionContext(
             kie::refuseNonIngestorPlanSave();
         }
 
-        const std::vector<uint8_t> encoded = kie::serialization::encodeIngestorPlan(
+        // The destroy hook frees this buffer with delete[].
+        auto encoded = kie::serialization::encodeIngestorPlanToBuffer(
             kie::captureIngestorPlan(typedContext.plan(), typedHandle));
 
-        // The destroy hook frees this buffer with delete[].
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-        auto bytes = std::make_unique<uint8_t[]>(encoded.size());
-        std::memcpy(bytes.get(), encoded.data(), encoded.size());
-
-        LOG_API_SUCCESS(apiName, "serializedContext->size=" << encoded.size());
+        LOG_API_SUCCESS(apiName, "serializedContext->size=" << encoded.size);
 
         // Nothing below may throw: once the buffer is released the caller owns it, and a
         // failure status stops hipDNN from ever calling the destroy hook.
-        serializedContext->size = encoded.size();
-        serializedContext->ptr = bytes.release();
+        serializedContext->size = encoded.size;
+        serializedContext->ptr = encoded.bytes.release();
     });
 }
 

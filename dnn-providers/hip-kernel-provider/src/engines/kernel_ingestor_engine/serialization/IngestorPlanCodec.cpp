@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -434,7 +435,7 @@ IngestorPlanPayload toIngestorPlanPayload(const fb::ExecutionPlan& plan, Checked
 
 } // namespace
 
-std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
+EncodedIngestorPlan encodeIngestorPlanToBuffer(IngestorPlanPayload payload)
 {
     const fb::SourceKind sourceKind = checkWriterInputs(payload);
 
@@ -449,6 +450,8 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
     flatbuffers::FlatBufferBuilder builder(payload.codeObject.size() + BUILDER_HEADROOM);
 
     const auto kernelImage = writeKernelImage(builder, payload, sourceKind);
+    // The builder holds the code bytes now. Free the payload copy to lower the peak memory.
+    std::vector<uint8_t>().swap(payload.codeObject);
 
     std::vector<flatbuffers::Offset<fb::LaunchValue>> values;
     values.reserve(payload.launchValues.size());
@@ -491,11 +494,23 @@ std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
     }
 
     const uint8_t* body = builder.GetBufferPointer();
-    std::vector<uint8_t> bytes
+    const std::vector<uint8_t> header
         = encodeIngestorPlanHeader(IngestorPlanKind::SINGLE_KERNEL_PLAN,
                                    detail::computeIngestorPlanBodyDigest(body, bodySize));
-    bytes.insert(bytes.end(), body, body + bodySize);
-    return bytes;
+
+    EncodedIngestorPlan encoded;
+    encoded.size = header.size() + bodySize;
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    encoded.bytes = std::make_unique<uint8_t[]>(encoded.size);
+    std::memcpy(encoded.bytes.get(), header.data(), header.size());
+    std::memcpy(encoded.bytes.get() + header.size(), body, bodySize);
+    return encoded;
+}
+
+std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload)
+{
+    const EncodedIngestorPlan encoded = encodeIngestorPlanToBuffer(payload);
+    return {encoded.bytes.get(), encoded.bytes.get() + encoded.size};
 }
 
 std::string ingestorPlanMessageText(const std::string& text)

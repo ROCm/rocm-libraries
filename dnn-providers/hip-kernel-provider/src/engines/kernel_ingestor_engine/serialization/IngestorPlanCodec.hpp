@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,24 @@
 /// check whether this provider can launch the plan.
 namespace hip_kernel_provider::kernel_ingestor_engine::serialization
 {
+
+/// The bytes of a saved ingestor plan: the header, then the FlatBuffer body.
+struct EncodedIngestorPlan
+{
+    /// The buffer. It is allocated with `new[]`.
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    std::unique_ptr<uint8_t[]> bytes;
+    /// The number of bytes in `bytes`.
+    size_t size = 0;
+};
+
+/// Writes the header and the FlatBuffer body of `payload` into one buffer.
+///
+/// The function frees the code bytes of `payload` after it copies them. Move the payload in
+/// to keep the number of code object copies low.
+///
+/// Throws the same errors as `encodeIngestorPlan`.
+EncodedIngestorPlan encodeIngestorPlanToBuffer(IngestorPlanPayload payload);
 
 /// Returns the header and the FlatBuffer body of `payload`.
 ///
