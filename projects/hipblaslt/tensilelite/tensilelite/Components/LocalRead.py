@@ -1815,6 +1815,12 @@ class LocalReadMFMA(LocalRead):
                             highBits = 0 if writer.states.archCaps["DSLow16NotPreserve"] else highBitsForHalf or isHigh16Bits
 
                             addrIdx = paramList[0] // 65536
+                            if tc == "B" and kernel.get("LDSSegmentBRotate"):
+                                # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair, so register h must
+                                # serve exactly component h (see segment_interleave.b_rotate_reason).
+                                assert numOffsets == 1 and \
+                                    addrIdx == segCompByteOff // kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], \
+                                    "LDSSegmentBRotate: B read vIdx=%u uses LocalReadAddrB+%u" % (vIdx, addrIdx)
                             srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                             tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536

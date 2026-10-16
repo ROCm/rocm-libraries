@@ -249,6 +249,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if not state.get("PrefetchGL2SAddr", False):
     requiredParametersTemp.discard("PrefetchGL2SAddr")
 
+  # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
+  if state.get("LDSSegmentBRotate", 0):
+    requiredParametersTemp.add("LDSSegmentBRotate")
+  else:
+    requiredParametersTemp.discard("LDSSegmentBRotate")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernel":
       continue
