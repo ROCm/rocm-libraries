@@ -193,6 +193,21 @@ using SubQK64Problem =
 using VColumnMajorProblem =
     TestProblemWithShape<SelectionBaseProblem, TestShapeWithVLayout<TestFmhaShape<128>, false>>;
 
+// fp8 is admitted at its own WMMA geometry: the 16x16x128 instruction scales kN0/kK0/kK1 up
+// with it. TestShapeWithGeometry cannot express this -- it keeps the 16x16x32 warp tile.
+using Fp8Shape = ck_tile::TileFmhaShape<ck_tile::sequence<64, 128, 128, 128, 128, 128>,
+                                        ck_tile::sequence<4, 1, 1>,
+                                        ck_tile::sequence<16, 16, 128>,
+                                        ck_tile::sequence<4, 1, 1>,
+                                        ck_tile::sequence<16, 16, 128>,
+                                        true>;
+using Fp8DataTypes =
+    TestProblemWithDataTypes<SelectionBaseProblem, ck_tile::fp8_t, ck_tile::fp8_t, ck_tile::fp8_t>;
+using Fp8Problem = TestProblemWithShape<Fp8DataTypes, Fp8Shape>;
+// Each dtype is admitted only at its own geometry, so the two cross cases stay disabled: fp8
+// at the bf16 tile (Fp8DataTypes keeps TestFmhaShape's 16x16x32), and half at the fp8 tile.
+using HalfAtFp8ShapeProblem = TestProblemWithShape<SelectionBaseProblem, Fp8Shape>;
+
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<MixedTypeProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<FloatProblem>>());
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<PackedProblem>>());
@@ -214,6 +229,18 @@ static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SubQK
 static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<VColumnMajorProblem>>());
 static_assert(
     is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<SelectionBaseProblem, false>>());
+
+// An fp8 V row is kN1 * 1 B = 128 B, half the 64-bank wrap, so the rows of a transpose
+// tile would start on two banks. interval = the row width, pad = one 16x16 tile row, a
+// 36-dword stride that puts the 16 rows on 16 distinct 4-bank groups. Q stays unpadded:
+// kPadProgressiveQ needs kProgressiveDsLoadK, which fp8 does not set.
+using Fp8Pad = ck_tile::detail::LdsPaddingConfig<true, 128, 16>;
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::Q, NoPad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::K, Fp8Pad>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<Fp8Problem>::V, Fp8Pad>);
+static_assert(is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<Fp8DataTypes>>());
+static_assert(
+    is_disabled_selection<ck_tile::detail::QrTdmPaddingSelection<HalfAtFp8ShapeProblem>>());
 
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 16>);
 static_assert(ck_tile::detail::is_valid_lds_padding_config_v<true, 256, 32>);
