@@ -516,6 +516,30 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(0,
                         getPassContext().getPassFeatureConfig().dagFeatures.wmmaQueueCoverCycles);
     }
+    // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
+    // queued cover drops below the refill line (wmmaQueueCover()) with room in the queue, and
+    // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
+    // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
+    // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
+    bool wmmaRefillActive(int wmmaLatency) {
+        if (wmmaQueueCover() <= 0) return false;
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        const bool room = outstandingWmmas() < wmmaQueueDepth();
+        if (wmmaRefilling_) {
+            const int target = f.wmmaRefillToCycles > 0
+                                   ? f.wmmaRefillToCycles
+                                   : wmmaQueueDepth() * std::max(1, wmmaLatency);
+            const bool more = f.wmmaRefillMode == PassFeatureConfig::WmmaRefillMode::Fixed
+                                  ? wmmaRefillLeft_ > 0
+                                  : queuedCoverCycles() < target;
+            if (!room || !more) wmmaRefilling_ = false;
+        }
+        if (!wmmaRefilling_ && room && queuedCoverCycles() < wmmaQueueCover()) {
+            wmmaRefilling_ = true;
+            wmmaRefillLeft_ = std::max(1, f.wmmaBatchSize);
+        }
+        return wmmaRefilling_;
+    }
     // Cycles until the pipe has run everything queued.
     int queuedCoverCycles() const {
         return queuedEnds_.empty() ? 0 : std::max(0, queuedEnds_.back() - coIssueCyclePos_);
@@ -776,6 +800,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     };
 
     int wmmaIssuedCountThisRegion_ = 0;
+    bool wmmaRefilling_ = false;
+    int wmmaRefillLeft_ = 0;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -1595,6 +1621,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
 
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     wmmaIssuedCountThisRegion_++;
+    if (wmmaRefilling_ && wmmaRefillLeft_ > 0) --wmmaRefillLeft_;
     if (hideBudget_.numWindows() > 0) {
         if (hideBudget_.issueBudgetByWmmaIndex) {
             const int windowIndex = wmmaIssuedCountThisRegion_ - 1;
@@ -2452,9 +2479,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
         // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
         // the queue has room (a full queue already covers it, and the wait fits other work).
-        const bool preemptForQueue = wmmaQueueCover() > 0 &&
-                                     outstandingWmmas() < wmmaQueueDepth() &&
-                                     queuedCoverCycles() < wmmaQueueCover();
+        const bool preemptForQueue = wmmaRefillActive(bestWMMA->inst->latencyCycles);
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);
@@ -2893,6 +2918,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     regionDag_ = &deps.dag;
     carryQueuedWar();
     wmmaIssuedCountThisRegion_ = 0;
+    wmmaRefilling_ = false;
+    wmmaRefillLeft_ = 0;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering

@@ -109,6 +109,9 @@
     X(TensorLoadWmmaSpace, int)                   \
     X(WmmaQueueDepth, int)                        \
     X(WmmaQueueCoverCycles, int)                  \
+    X(WmmaRefillMode, int)                        \
+    X(WmmaBatchSize, int)                         \
+    X(WmmaRefillToCycles, int)                    \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \

@@ -86,6 +86,11 @@ struct PassFeatureConfig {
         Periodic,  ///< A period opens at its first ds_load; all slots free span cycles later
     };
 
+    enum class WmmaRefillMode : int {
+        Fixed = 0,    ///< A refill issues wmmaBatchSize WMMAs
+        Dynamic = 1,  ///< A refill issues WMMAs until the queued cover reaches wmmaRefillToCycles
+    };
+
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -133,6 +138,15 @@ struct PassFeatureConfig {
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
+        /// How many WMMAs one refill issues once the queue drops below the refill line
+        /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
+        /// for the queued cover to reach wmmaRefillToCycles, counted from the live timeline.
+        WmmaRefillMode wmmaRefillMode = WmmaRefillMode::Fixed;
+        /// Fixed mode: WMMAs per refill. <= 0 is treated as 1.
+        int wmmaBatchSize = 1;
+        /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
+        /// (wmmaQueueDepth * the WMMA latency).
+        int wmmaRefillToCycles = 0;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra

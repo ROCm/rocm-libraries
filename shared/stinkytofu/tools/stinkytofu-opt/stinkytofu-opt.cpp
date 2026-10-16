@@ -189,6 +189,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
+                arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
+                arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--merge-barrier-threshold=") ||
@@ -572,6 +574,18 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
+        } else if (a.starts_with("--wmma-refill-mode=")) {
+            const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
+            passFeatureConfig.dagFeatures.wmmaRefillMode =
+                (v == "dynamic" || v == "1")
+                    ? stinkytofu::PassFeatureConfig::WmmaRefillMode::Dynamic
+                    : stinkytofu::PassFeatureConfig::WmmaRefillMode::Fixed;
+        } else if (a.starts_with("--wmma-batch-size=")) {
+            passFeatureConfig.dagFeatures.wmmaBatchSize =
+                std::max(1, std::stoi(a.substr(std::string("--wmma-batch-size=").size())));
+        } else if (a.starts_with("--wmma-refill-to-cycles=")) {
+            passFeatureConfig.dagFeatures.wmmaRefillToCycles =
+                std::stoi(a.substr(std::string("--wmma-refill-to-cycles=").size()));
         } else if (a.starts_with("--global-read-queue-depth=")) {
             passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
         } else if (a.starts_with("--global-read-drain-latency=")) {

@@ -188,6 +188,11 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
+                passFeatureConfig.dagFeatures.wmmaRefillMode =
+                    static_cast<PassFeatureConfig::WmmaRefillMode>(moduleOptions.WmmaRefillMode);
+                passFeatureConfig.dagFeatures.wmmaBatchSize =
+                    std::max(1, moduleOptions.WmmaBatchSize);
+                passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
                 passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
                     moduleOptions.DsIssueCapSpanCycles;
                 passFeatureConfig.dagFeatures.dsIssueCapMode =

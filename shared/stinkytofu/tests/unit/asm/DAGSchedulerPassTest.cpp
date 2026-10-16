@@ -3325,3 +3325,69 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
     pass->run(*func, ctx, am);
     EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWddddddWddWWWW");
 }
+
+// Refill modes: with depth 8 and a refill line of 16, a refill that finds the queue low issues
+// a whole batch before the next ds_load (Fixed: wmmaBatchSize of them; Dynamic: up to the
+// refill target in cycles).
+TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * (i % 6), 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Fixed;
+    pfc.dagFeatures.wmmaBatchSize = 4;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWWddddddddWWWWWWWW");
+}
+
+TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * (i % 6), 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsReadThrottleLatency = 1;
+    pfc.dagFeatures.dsReadPerCap = 100;
+    pfc.dagFeatures.wmmaQueueDepth = 8;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Dynamic;
+    pfc.dagFeatures.wmmaRefillToCycles = 32;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWWWddddddddWWWWWWW");
+}
+
+// Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.
+TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadThrottleLatency = 1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.wmmaQueueDepth = 4;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        if (v == 1) pfc.dagFeatures.wmmaBatchSize = 1;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0], shapes[1]);
+    EXPECT_EQ(shapes[0], "WWWddddddWddWWWW");
+}
