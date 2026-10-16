@@ -92,15 +92,15 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Spread the region's ds_loads evenly over its timeline (cycles). The k-th ds_load is planned `k * regionCycles / ds_loads` cycles after the region start and issues no earlier than that (less the tolerance), at least one period after the previous ds_load, and while the ds queue (`DsReadQueueDepth` credits) has a free credit. A load whose first consumer needs it sooner has its own deadline and issues then. Barrier ds_load windows use the same density. |
-| `DsSpreadToleranceCycles` | -1 → strict | `--ds-spread-tolerance-cycles=N` | How early, in cycles, a ds_load may issue before its planned cycle. 0 or -1 = as even as possible; per-load consumer deadlines are the only early release. |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Spread the region's ds_loads evenly over the time the region has left. A ds_load issues once `gap` cycles have passed since the previous one, where `gap = (cycles of WMMAs still to issue - ds return latency - tolerance) / ds_loads left`, re-evaluated at every decision, so a held load makes the next gaps shorter and the last ds_load still returns before the region ends. It also needs a free ds credit (`DsReadQueueDepth`). A load whose first consumer needs it sooner has its own deadline and issues then. Barrier ds_load windows use the same density. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
+| `DsSpreadToleranceCycles` | -1 → none | `--ds-spread-tolerance-cycles=N` | Extra cycles of lead for the spread: the last ds_load issues that many cycles earlier than the ds return latency alone requires. Larger = closer to greedy. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
 | `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
 | `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
 | `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
 
 A held ds_load is released early only when no WMMA is ready to issue in its place, or at its consumer deadline. With the debug
-type `StinkyDAGSchedulerPass` enabled, each region logs the period and `gapCv`, the
+type `StinkyDAGSchedulerPass` enabled, each region logs the tail reserve and `gapCv`, the
 coefficient of variation of the gaps between its ds_loads (0 = perfectly even).
 
 **Barrier sizing:** the ds_loads in front of a barrier are given `WMMAs / ds_loads` windows each,

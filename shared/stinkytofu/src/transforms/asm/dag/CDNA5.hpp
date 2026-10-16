@@ -431,6 +431,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return globalReadInflight_.full();
     }
 
+    // Cycles the region's WMMAs still to issue will take, less the cover the wave already has
+    // queued ahead of the pipe. The time the ds spread has left.
+    int dsSpreadWmmaCyclesLeft() const {
+        const int left = std::max(0, wmmaTotalThisRegion_ - wmmaIssuedCountThisRegion_);
+        return std::max(0, left * std::max(1, wmmaIssueConfig.latency) - queuedCoverCycles());
+    }
     bool dsSpreadOn() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.dsSpread;
     }
@@ -962,7 +968,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         PASS_DEBUG({
             if (dsSpreadOn() && dsSpread_.active())
                 std::cerr << "[CDNA5 dsSpread] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
-                          << " periodCycles=" << dsSpread_.periodCycles()
+                          << " tailReserve=" << dsSpread_.tailReserveCycles()
                           << " gapCv=" << dsSpread_.gapCv() << "\n";
         });
     }
@@ -1618,7 +1624,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) {
-            if (!spread || dsSpread_.released(pickedDS->id, clock_)) {
+            if (!spread || dsSpread_.released(pickedDS->id, clock_, dsSpreadWmmaCyclesLeft(),
+                                              dsTotalThisRegion_ - dsIssuedThisRegion_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -3391,16 +3398,17 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         constexpr int kDsLeadWindows = 2;
-        // The wave issues WMMAs up to the queue cover ahead of the pipe, so the region's issue
-        // time is shorter than its pipe time by about that cover.
-        const int queueLead = std::max(0, wmmaQueueCover());
-        const int regionCycles =
-            std::max(windowCycles, wmmaTotalThisRegion_ * windowCycles - queueLead);
-        dsSpread_.plan(loads, regionCycles, windowCycles, dagFeatures.dsSpreadToleranceCycles,
-                       kDsLeadWindows * windowCycles, clock_);
-        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
-                             << wmmaTotalThisRegion_ << " periodCycles=" << dsSpread_.periodCycles()
-                             << " toleranceCycles=" << dsSpread_.toleranceCycles() << "\n");
+        // The last ds_load must return before the region ends, so it issues its credit lifetime
+        // ahead of the last WMMA.
+        dsSpread_.plan(loads, windowCycles, dagFeatures.dsSpreadToleranceCycles,
+                       kDsLeadWindows * windowCycles, dsReadCreditLifetime(), clock_);
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
+                             << " wmmas=" << wmmaTotalThisRegion_
+                             << " tailReserve=" << dsSpread_.tailReserveCycles()
+                             << " toleranceCycles=" << dsSpread_.toleranceCycles() << " startGap="
+                             << dsSpread_.gapCycles(wmmaTotalThisRegion_ * windowCycles,
+                                                    static_cast<int>(loads.size()))
+                             << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

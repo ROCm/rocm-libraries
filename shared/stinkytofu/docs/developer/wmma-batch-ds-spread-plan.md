@@ -82,17 +82,18 @@ slot-first and hide-budget ds logic.
 - **Soft preference:** spread ds_loads evenly. A ready ds_load that fits a free
   credit issues. A load is delayed only to avoid a burst that would fill the
   FIFO. Evenness never idles the pipe by itself.
-- **Timeline in cycles, not WMMA index:** the region's issue time is
-  `wmmaTotal * L - queue cover` (the wave runs ahead of the pipe by the queued
-  cover). The k-th ds_load is planned `k * regionTime / n` cycles after the region
-  clock start, so a barrier wait or any other stall moves the plan with the clock.
-- **Spacing:** a ds_load issues no earlier than its planned cycle (less the
-  tolerance) and no earlier than one period (`regionTime / n`) after the previous
-  ds_load, so a backlog drains at the planned rate instead of as a burst.
+- **Timeline in cycles, not WMMA index, and adaptive:** at every decision the spread
+  computes `gap = (WMMA cycles still to issue - ds return latency - tolerance) /
+  ds_loads left` and issues the next ds_load once the clock is `gap` past the
+  previous one. A load that was held (no credit, a dependency, a barrier) makes the
+  next gaps shorter, so the stream catches up evenly and the last ds_load still
+  returns before the region ends. A fixed plan (`k * regionTime / n`) was tried
+  first: the real clock at region end is shorter than the plan, so the last loads
+  were still held when the WMMAs ran out and drained as a burst of 15.
 - **Per-load deadline:** a load whose first consumer WMMA needs it earlier has its
-  own deadline (consumer window * L - lead) and issues then, bypassing the plan and
-  the spacing. No global slack: one tight consumer does not open the gate for the
-  rest. The ds order lock is kept.
+  own deadline (consumer window * L - lead) and issues then, bypassing the gap. No
+  global slack: one tight consumer does not open the gate for the rest. The ds
+  order lock is kept.
 - **Never deadlocks:** the deadline lifts any hold, and the existing Phase G
   fallback stays.
 
@@ -100,10 +101,10 @@ slot-first and hide-budget ds logic.
 
 - **Metric:** coefficient of variation of ds_load issue gaps in the main loop,
   written to the debug log and asserted in tests.
-- **Auto (-1):** strict, tolerance 0; the per-load consumer deadlines are the only
-  early release, so the spread is as even as dependencies allow. No pre-scan search.
-- **Manual:** `DsSpreadToleranceCycles=<cycles>`: every load may issue that many
-  cycles before its planned cycle. Large = today's greedy behavior.
+- **Auto (-1):** no extra lead; the last ds_load issues its return latency before the
+  region's last WMMA, and the per-load consumer deadlines are the only early release.
+- **Manual:** `DsSpreadToleranceCycles=<cycles>`: extra lead on top of the return
+  latency. Large = today's greedy behavior.
 
 ### 4. Unchanged
 

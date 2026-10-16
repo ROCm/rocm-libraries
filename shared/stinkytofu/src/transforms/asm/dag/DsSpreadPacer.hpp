@@ -11,18 +11,20 @@
 
 namespace stinkytofu {
 
-// Spreads a region's ds_loads evenly over the region's timeline, in cycles. The region's issue
-// time is `regionCycles` (wmmaTotal * windowCycles, less the WMMA queue cover the wave runs
-// ahead of the pipe); the k-th ds_load (program order) is planned at
-// start + k * regionCycles / n, one `period` after the previous one. A ds_load may
-// issue once the clock reaches its planned cycle (less `toleranceCycles`) and at least one
-// period after the previous ds_load, so a backlog (a held load, a barrier wait) drains at the
-// planned rate instead of as a burst.
+// Spreads a region's ds_loads evenly over the time the region has left, in cycles.
 //
-// A load whose first consumer WMMA needs it earlier than its plan has its own deadline,
+// The time left is what the WMMAs still to issue will take, less the cycles the last ds_load needs
+// to return before the region ends (`tailReserveCycles`) and the manual `toleranceCycles`. A
+// ds_load may issue once the clock is `gap` cycles past the previous ds_load, where
+//     gap = timeLeft / dsLeft.
+// Re-evaluated at every decision, the gap adapts: a held load (no credit, a dependency, a
+// barrier) makes the next gaps shorter, so the stream catches up evenly and the last ds_load
+// still issues its return latency before the region ends, instead of the backlog draining as a
+// burst at the tail.
+//
+// A load whose first consumer WMMA needs it earlier than its turn has its own deadline,
 // consumerWindow * windowCycles - leadCycles after the region start; from then on it issues
-// regardless of the plan and of the period, so one tight consumer does not open the gate for
-// every other load.
+// regardless of the gap, so one tight consumer does not open the gate for every other load.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -31,39 +33,37 @@ class DsSpreadPacer {
     };
 
     void reset() {
-        planned_.clear();
         deadline_.clear();
         toleranceCycles_ = 0;
-        periodCycles_ = 0;
+        tailReserveCycles_ = 0;
         lastIssue_ = kNever;
         active_ = false;
         issueClocks_.clear();
     }
 
-    // loads: the region's ds_loads in program order. regionCycles is the region's issue time and
-    // startClock the region clock at the plan.
-    // manualToleranceCycles >= 0 lets every load issue that many cycles before its planned
-    // cycle; < 0 is strict (0), the per-load deadlines being the only early release.
-    void plan(const std::vector<Load>& loads, int regionCycles, int windowCycles,
-              int manualToleranceCycles, int leadCycles, int startClock = 0) {
+    // loads: the region's ds_loads in program order. startClock is the region clock at the plan.
+    // tailReserveCycles: cycles the last ds_load needs to return before the region ends.
+    // manualToleranceCycles >= 0 adds that many cycles of lead on top of the tail reserve;
+    // < 0 adds none (the per-load deadlines being the only other early release).
+    void plan(const std::vector<Load>& loads, int windowCycles, int manualToleranceCycles,
+              int leadCycles, int tailReserveCycles, int startClock = 0) {
         reset();
-        const int n = static_cast<int>(loads.size());
-        if (n == 0 || regionCycles <= 0 || windowCycles <= 0) return;
+        if (loads.empty() || windowCycles <= 0) return;
         active_ = true;
-        periodCycles_ = std::max<long long>(1, regionCycles / n);
         toleranceCycles_ = std::max(0, manualToleranceCycles);
-        for (int k = 0; k < n; ++k) {
-            planned_[loads[k].nodeId] =
-                startClock + static_cast<int>(static_cast<long long>(k) * regionCycles / n);
-            if (loads[k].consumerWindow != INT_MAX)
-                deadline_[loads[k].nodeId] =
-                    startClock + loads[k].consumerWindow * windowCycles - leadCycles;
+        tailReserveCycles_ = std::max(0, tailReserveCycles);
+        for (const Load& l : loads) {
+            if (l.consumerWindow != INT_MAX)
+                deadline_[l.nodeId] = startClock + l.consumerWindow * windowCycles - leadCycles;
         }
     }
 
-    // Region cycles per ds_load: the spacing between two consecutive ds_loads.
-    int periodCycles() const {
-        return static_cast<int>(periodCycles_);
+    // Cycles between two consecutive ds_loads when `wmmaCyclesLeft` cycles of WMMAs and `dsLeft`
+    // ds_loads remain. 0 once there is nothing left to spread over (issue as soon as ready).
+    int gapCycles(int wmmaCyclesLeft, int dsLeft) const {
+        if (dsLeft <= 0) return 0;
+        const int budget = wmmaCyclesLeft - tailReserveCycles_ - toleranceCycles_;
+        return budget > 0 ? budget / dsLeft : 0;
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -82,14 +82,17 @@ class DsSpreadPacer {
         return toleranceCycles_;
     }
 
-    // Whether the ds_load may issue at region clock `clock`.
-    bool released(unsigned nodeId, int clock) const {
+    int tailReserveCycles() const {
+        return tailReserveCycles_;
+    }
+
+    // Whether the ds_load may issue at region clock `clock`, with `wmmaCyclesLeft` cycles of WMMAs
+    // still to issue in the region and `dsLeft` ds_loads still to issue (this one included).
+    bool released(unsigned nodeId, int clock, int wmmaCyclesLeft, int dsLeft) const {
         if (!active_) return true;
         auto dl = deadline_.find(nodeId);
         if (dl != deadline_.end() && clock >= dl->second) return true;
-        auto it = planned_.find(nodeId);
-        if (it == planned_.end()) return true;
-        return clock + toleranceCycles_ >= it->second && clock - lastIssue_ >= periodCycles_;
+        return clock - lastIssue_ >= gapCycles(wmmaCyclesLeft, dsLeft);
     }
 
     void noteIssue(int clock) {
@@ -117,12 +120,11 @@ class DsSpreadPacer {
    private:
     static constexpr long long kNever = -(1LL << 40);  // no ds_load issued yet
 
-    std::unordered_map<unsigned, int> planned_;
     std::unordered_map<unsigned, int> deadline_;
     std::vector<int> issueClocks_;
-    long long periodCycles_ = 0;
     long long lastIssue_ = kNever;
     int toleranceCycles_ = 0;
+    int tailReserveCycles_ = 0;
     bool active_ = false;
 };
 
