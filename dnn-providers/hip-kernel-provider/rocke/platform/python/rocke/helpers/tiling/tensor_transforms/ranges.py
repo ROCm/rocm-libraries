@@ -440,6 +440,38 @@ class AffineCoord:
         """The coordinate that is the constant ``c``."""
         return cls(c)
 
+    @property
+    def uniform_range(self) -> Interval:
+        """The range of the uniform side: the sum of the uniform parts (``[0, 1)`` when none)."""
+        if not self.uniform:
+            return Interval(0, 1)
+        total = self.uniform[0].range
+        for part in self.uniform[1:]:
+            total = total.plus(part.range)
+        return total
+
+    @property
+    def range(self) -> Interval:
+        """The range of the whole coordinate: uniform side + lane part + constant."""
+        total = self.uniform_range
+        if self.lane is not None:
+            total = total.plus(self.lane_range)
+        return total.shifted(self.const)
+
+    @property
+    def congruence(self) -> Congruence:
+        """The residue of the whole coordinate, combined from every part, the lane part and the
+        constant. A coordinate with no part is its constant (a multiple of itself)."""
+        residues = [part.congruence for part in self.uniform]
+        if self.lane is not None:
+            residues.append(self.lane_congruence)
+        if not residues:
+            return Congruence(abs(self.const) or 1, 0)
+        total = residues[0]
+        for residue in residues[1:]:
+            total = total.plus(residue)
+        return total.shifted(self.const)
+
     def __add__(self, other: AffineCoord) -> AffineCoord:
         """The sum, emitting nothing: consts added, uniform parts concatenated (this one's
         first), the one lane part kept."""
