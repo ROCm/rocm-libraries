@@ -15,8 +15,15 @@ software replaces an instruction the hardware lacks. rocKE adds two emulated TF3
 gfx950. They build each TF32 product from three BF16 MMAs, on the native BF16 atoms that
 gfx950 does have.
 
-Each product carries about 16 effective mantissa bits, between TF32 with 10 bits and FP32
-with 24 bits. The MMA catalog is the per-arch table of available atoms. A `(tf32, tf32,
+For ordinary-magnitude finite operands, products typically carry roughly 16 bits of
+precision. This is not a full-domain relative-accuracy guarantee: subnormal payloads
+have an absolute split-error bound of `2^-134` per operand, and magnitudes at or below
+`2^-134` split to zero even when their product with a large partner is representable.
+An infinity or NaN makes every output it feeds non-finite, but infinity against a
+sufficiently large finite partner can become NaN rather than infinity; the emulation
+is not IEEE-equivalent.
+
+The MMA catalog is the per-arch table of available atoms. A `(tf32, tf32,
 fp32)` query returns the native atom on gfx942 and the emulated atom on gfx950, so one
 kernel body reaches either target. The recipe and its rounding match the packed path of
 Composable Kernel (CK), the public reference implementation.
@@ -91,10 +98,13 @@ D  = mfma(a_big,   b_big,   t1)
 
 - The term order is fixed. FP32 accumulation is not associative, so another order produces
   different result bits, and a test pins the order.
-- The expansion omits `a_small * b_small`. That term stays below `2^-16` of the product,
-  the same size as the error the split already carries. On raw FP32 payloads the result
-  tracks the exact product better than the native atom, which ignores the low 13 operand
-  bits.
+- The expansion omits `a_small * b_small`. For ordinary-magnitude finite operands, that
+  term stays below `2^-16` of the product, the same order as the split's representation
+  error. Emulation can improve accuracy on raw FP32 payloads, but is not uniformly more
+  accurate than native XF32. For TF32-prepared operands, native products can be exact
+  while emulation retains the omitted-term error: for `A = B = 1 + 2^-8`, it gives
+  `1.0078125` instead of `1.0078277587890625`. Native and emulated results are not
+  bit-reproducible across targets.
 - Only the last term writes the value that the caller named, so the expansion changes
   nothing downstream.
 
