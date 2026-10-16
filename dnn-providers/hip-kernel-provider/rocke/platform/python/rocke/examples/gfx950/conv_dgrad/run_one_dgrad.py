@@ -21,6 +21,7 @@ is how you get the ``--kernel-regex`` for a capture without perturbing it.
 Usage:
     python3 run_one_dgrad.py --kouter on --stride 2
     python3 run_one_dgrad.py --tile-m 128 --print-name-only
+    python3 run_one_dgrad.py --tap-outer off   # the flat k_dg loop at stride 1
 
     ROCPROF_TRACE_DECODER_LIB=<dir with librocprof-trace-decoder.so> \\
     python3 ../../../../../dsl_docs/optimization/utilities/tools/wavescope/\\
@@ -58,8 +59,10 @@ def _parse_args(argv=None):
         help="override -u/-v in --miopen-cmd. stride > 1 takes the tilde "
         "sub-GEMM decomposition, which is a different kernel shape entirely.",
     )
-    # Defaults are the shipped dispatch geometry -- see _GFX950_TILE_* and
-    # _GFX950_WARP_* in library/dispatch/grouped_convolution.py.
+    # Defaults are the 64x64 entry of the shipped dispatch tile table, with no
+    # dY halo knobs -- see _gfx950_dgrad_tile and _gfx950_dgrad_halo_pick (the
+    # halo pick dispatch takes on eligible stride-1 problems) in
+    # library/dispatch/grouped_convolution.py.
     ap.add_argument("--tile-m", type=int, default=64)
     ap.add_argument("--tile-n", type=int, default=64)
     ap.add_argument("--tile-k", type=int, default=64)
@@ -90,6 +93,24 @@ def _parse_args(argv=None):
         "layouts in-process -- which is how you get an M-outer baseline to "
         "trace against. Neither dispatch nor the sweep driver takes an "
         "override.",
+    )
+    ap.add_argument(
+        "--tap-outer",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="DgradConvSpec.tap_outer_k: the stride-1 K loop with the filter "
+        "tap outer and the output-channel chunk inner. auto (the default) "
+        "takes it where dispatch does (stride 1, dilation 1, wave64, kpg a "
+        "multiple of tile_k); on/off force the field (the validator rejects "
+        "'on' outside those rules).",
+    )
+    ap.add_argument(
+        "--uniform-k",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="DgradConvSpec.uniform_k_decode. auto (the default) follows "
+        "dispatch: on where DgradConvSpec.default_uniform_k_decode says so and "
+        "the tap-outer loop is off (the two loops are exclusive).",
     )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=200)
@@ -178,6 +199,22 @@ def main(argv=None) -> int:
         if a.kouter == "auto"
         else a.kouter == "on"
     )
+    # The K loop of the binary dispatch would name (_dgrad_dispatch_spec):
+    # tap-outer on the stride-1 binary, uniform decode on the tilde binary.
+    stride1 = (p.sH, p.sW, p.dH, p.dW) == (1, 1, 1, 1)
+    tap_outer = (
+        stride1 and tgt.wave_size == 64 and p.kpg % a.tile_k == 0
+        if a.tap_outer == "auto"
+        else a.tap_outer == "on"
+    )
+    uniform_k = (
+        not tap_outer
+        and DgradConvSpec.default_uniform_k_decode(
+            arch=a.arch, wave_size=tgt.wave_size, pipeline=a.pipeline
+        )
+        if a.uniform_k == "auto"
+        else a.uniform_k == "on"
+    )
     spec = DgradConvSpec(
         problem=p,
         name=a.name,
@@ -195,6 +232,8 @@ def main(argv=None) -> int:
         epilogue=a.epilogue,
         split_k=a.split_k,
         lds_k_outer=lds_k_outer,
+        tap_outer_k=tap_outer,
+        uniform_k_decode=uniform_k,
         vector_size_a=vec_a,
         vector_size_b=vec_b,
         vector_size_c=vec_c,
@@ -213,7 +252,11 @@ def main(argv=None) -> int:
         f"config tile={a.tile_m}x{a.tile_n}x{a.tile_k} warp={a.warp_m}x{a.warp_n} "
         f"atom={a.warp_tile_mn}x{a.warp_tile_mn}x{atom.k} {a.pipeline}/{a.epilogue} "
         f"spk={a.split_k} kouter={'on' if lds_k_outer else 'off'}"
-        f"{' (auto)' if a.kouter == 'auto' else ''} sub_gemms={len(sub_gemms)} "
+        f"{' (auto)' if a.kouter == 'auto' else ''} "
+        f"tap_outer={'on' if tap_outer else 'off'} "
+        f"uniform_k={'on' if uniform_k else 'off'} "
+        f"folded_record={'on' if spec.folds_sub_gemm_record else 'off'} "
+        f"sub_gemms={len(sub_gemms)} "
         f"needs_atomic={spec.needs_atomic}",
         flush=True,
     )

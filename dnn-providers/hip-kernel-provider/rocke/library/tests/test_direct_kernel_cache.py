@@ -1142,3 +1142,19 @@ def test_dgrad_rtc_rejects_what_no_binary_fits(cache, groups, cpg, kpg, why):
     assert not _rtc(plans)
     reasons = [r for i, r in rejected if i.algorithm == "direct_dgrad_mfma_rtc"]
     assert reasons and any(why in r for r in reasons), reasons[:3]
+
+
+def test_run_from_cache_variants_filter():
+    """``--variants`` names cache variants (DIRECT_CAPABILITIES keys)."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_direct_conv import _cache_variants
+
+    assert _cache_variants(SimpleNamespace(variants=None)) == frozenset()
+    picked = _cache_variants(
+        SimpleNamespace(variants="direct_grouped_dgrad_4c, direct_grouped_dgrad_fused")
+    )
+    assert picked == {"direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused"}
+    assert picked <= set(dks.DIRECT_CAPABILITIES)
+    with pytest.raises(ValueError, match="unknown direct variant"):
+        _cache_variants(SimpleNamespace(variants="direct_grouped_dgrad_4c,bogus"))
