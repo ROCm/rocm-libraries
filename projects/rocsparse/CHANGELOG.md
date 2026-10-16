@@ -3,6 +3,15 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Changed
+* The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
+
+### Resolved issues
+* Fixed `rocsparse_spilu0` with a zero batch stride (all batch instances sharing the same values) for CSR matrices with long rows, that is, at least 512 non-zeros in a row on wave32 devices and 1024 on wave64 devices. The kernel launched one grid row per batch instance although the workspace holds the completion flags of a single instance, so the instances after the first accessed memory outside the workspace. The kernel now runs a single instance, as the other CSR `rocsparse_spilu0` kernel already did.
+* Fixed incomplete factorizations with a zero batch stride for `rocsparse_spic0` (CSR and BSR), `rocsparse_spilu0` (BSR), and `rocsparse_spildlt0` (CSR). The kernels launched one grid row per batch instance while every instance wrote the same values, so concurrent instances raced on those values and reported singularity positions for an instance that never ran. A zero value stride now factorizes a single instance, and that instance's singularity positions are copied to the others. `rocsparse_spildlt0` still writes each instance's diagonal output.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
@@ -15,7 +24,6 @@ Documentation for rocSPARSE is available at
 
 ### Changed
 * Replaced the soon-to-be-deprecated `__hip_atomic_*` builtins with the equivalent `__scoped_atomic_*` builtins.
-* The incomplete factorization kernels used by `rocsparse_spic0`, `rocsparse_spilu0`, and `rocsparse_spildlt0` (`csric0`, `csrilu0`, `csrildlt0`, `bsric0`, and `bsrilu0`) now clamp the batch dimension of their launch grids to the device limit and cover the remaining batch instances with a grid-stride loop. The singularity-position initialization grid-strides as well, so these routines support batch counts above the grid limit.
 
 ### Optimized
 * Improved the performance of the sparse triangular solves and the incomplete factorizations on gfx942 and gfx950. The kernels no longer write back and invalidate the L2 cache for every solved or factorized row. The row results and their completion flags are now exchanged with device-scope atomic stores and loads instead. This affects `rocsparse_spsv` and `rocsparse_sptrsv` (CSR, CSC, COO, and ELL formats), `rocsparse_spsm` and `rocsparse_sptrsm` (CSR, CSC, and COO formats), `rocsparse_Xcsrsv_solve`, `rocsparse_Xcsrsm_solve`, `rocsparse_Xcsrilu0`, `rocsparse_Xcsric0`, `rocsparse_spilu0`, `rocsparse_spic0`, and `rocsparse_spildlt0`. It also affects `rocsparse_Xbsrsv_solve` with block sizes up to 32, `rocsparse_Xbsrilu0` with block sizes up to 8, and `rocsparse_Xbsric0` with block sizes up to 16 and at most 128 blocks per block row. Larger block sizes and `rocsparse_Xbsrsm_solve` keep the previous synchronization, because their kernels reread row results too often for device-scope atomics to pay off.
@@ -33,8 +41,6 @@ Documentation for rocSPARSE is available at
 * Fixed kernel launches whose `grid.x * blockDim.x` exceeded the 32-bit work-item dispatch limit. CDNA rejects those launches (`hipErrorInvalidConfiguration` / `rocsparse_status_internal_error`). `rocsparse_axpby` (both the `beta` scaling of `y` and the `axpyi` update), `rocsparse_axpyi`, `rocsparse_roti` and `rocsparse_rot`, `rocsparse_scatter`, ELL SpMV (non-transposed and transposed), and COO AoS SpMV (atomic and transposed) now clamp `grid.x` to `(2^32 - 1) / blockDim.x` and cover the remainder with a grid-stride loop.
 * Fixed an integer overflow in the binary search that maps nonzeros to rows in the nnz-split algorithms of `rocsparse_spmv` (CSR) and `rocsparse_spmm` (CSR and CSC). With 32-bit indices and matrices with more than `2^30` rows, the search midpoint `(left + right) / 2` could overflow, causing out-of-bounds reads or incorrect row assignments. The midpoint is now computed as `left + (right - left) / 2`.
 * Fixed an invalid kernel launch in legacy `rocsparse_Xbsr2csr` and the 64-bit BSR-to-CSR conversion, where the 1024-thread kernels overflowed the 32-bit work-item grid limit at about 4.2 million block rows because the grid was not clamped.
-* Fixed `rocsparse_spilu0` with a zero batch stride (all batch instances sharing the same values) for CSR matrices with long rows, that is, at least 512 non-zeros in a row on wave32 devices and 1024 on wave64 devices. The kernel launched one grid row per batch instance although the workspace holds the completion flags of a single instance, so the instances after the first accessed memory outside the workspace. The kernel now runs a single instance, as the other CSR `rocsparse_spilu0` kernel already did.
-* Fixed incomplete factorizations with a zero batch stride for `rocsparse_spic0` (CSR and BSR), `rocsparse_spilu0` (BSR), and `rocsparse_spildlt0` (CSR). The kernels launched one grid row per batch instance while every instance wrote the same values, so concurrent instances raced on those values and reported singularity positions for an instance that never ran. A zero value stride now factorizes a single instance, and that instance's singularity positions are copied to the others. `rocsparse_spildlt0` still writes each instance's diagonal output.
 
 ## rocSPARSE 5.1.0 for ROCm 10.1
 
