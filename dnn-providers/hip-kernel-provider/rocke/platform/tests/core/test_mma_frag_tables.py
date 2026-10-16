@@ -26,7 +26,13 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch.target import _MMA_FRAGMENT_INFO, _op_id_c_dtype, _load_specs
+from rocke.core.arch.target import (
+    _MMA_FRAGMENT_INFO,
+    _frag_info,
+    _load_specs,
+    _op_id_c_dtype,
+    _op_id_physical_op_id,
+)
 from rocke.core.ir import (
     _MMA_RESULT_HINT,
     _mma_c_frag_len,
@@ -94,6 +100,20 @@ class TestMmaFragTables(unittest.TestCase):
                 msg=f"int-accumulator op_id {op_id!r} has no SSOT frag length, so "
                 f"IRBuilder.mma would raise for it",
             )
+
+    def test_emulated_op_ids_size_through_their_physical_atom(self):
+        # An emulated atom borrows its fragment from the instruction it issues
+        # rather than restating it, so its bare op_id must size exactly as that
+        # physical atom does -- or IRBuilder.mma("<logical op_id>") would raise.
+        emulated = _op_id_physical_op_id()
+        self.assertTrue(emulated, "expected at least one emulated atom in the catalog")
+        for op_id, physical in emulated.items():
+            with self.subTest(op_id=op_id):
+                self.assertNotIn(op_id, _MMA_FRAGMENT_INFO)
+                self.assertIs(_frag_info(op_id), _MMA_FRAGMENT_INFO[physical])
+                self.assertEqual(
+                    _mma_c_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].c_frag_len
+                )
 
     def test_result_hint_op_ids_have_frag_lengths(self):
         for op_id in _MMA_RESULT_HINT:
