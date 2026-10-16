@@ -80,6 +80,12 @@ static const registry_row_t REGISTRY[] = {
      ROCKE_BUFFER_RSRC_WORD3_RDNA,
      ROCKE_WAITCNT_GFX11,
      32},
+    {"gfx12-generic",
+     ROCKE_ISA_GFX12_RDNA,
+     6,
+     ROCKE_BUFFER_RSRC_WORD3_RDNA,
+     ROCKE_WAITCNT_GFX11,
+     32},
     /* gfx1250: a CDNA part on the GFX12 programming model (wave32, WMMA-only).
      * The RDNA SRD word3 and gfx11 waitcnt layout are inherited placeholders,
      * as in Python's Gfx1250Backend; the gfx1250 57-bit SRD is deferred, and
@@ -124,7 +130,8 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
              * sorted-list suffix is reproducible from rocke_backend_is_known if
              * a caller wants it, so we keep this allocation-free. */
             *err = "no ISA backend registered for the given gfx target; known: "
-                   "gfx11-generic, gfx1151, gfx1201, gfx1250, gfx908, gfx90a, gfx942, gfx950";
+                   "gfx11-generic, gfx1151, gfx12-generic, gfx1201, gfx1250, gfx908, gfx90a, "
+                   "gfx942, gfx950";
         }
         return be;
     }
