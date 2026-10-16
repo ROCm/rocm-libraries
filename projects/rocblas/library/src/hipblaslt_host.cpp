@@ -1024,16 +1024,17 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
                 for(auto op2 : ops)
                 {
                     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults_temp;
-                    auto fetch = hipblaslt_ext::getAllAlgos(handle,
-                                                            gemmType,
-                                                            op1,
-                                                            op2,
-                                                            hipblaslt_datatype<Ti>,
-                                                            hipblaslt_datatype<Ti>,
-                                                            hipblaslt_datatype<To>,
-                                                            hipblaslt_datatype<To>,
-                                                            hipblaslt_compute_type_for<Ti, Tc>(prob.handle),
-                                                            heuristicResults_temp);
+                    auto fetch = hipblaslt_ext::getAllAlgos(
+                        handle,
+                        gemmType,
+                        op1,
+                        op2,
+                        hipblaslt_datatype<Ti>,
+                        hipblaslt_datatype<Ti>,
+                        hipblaslt_datatype<To>,
+                        hipblaslt_datatype<To>,
+                        hipblaslt_compute_type_for<Ti, Tc>(prob.handle),
+                        heuristicResults_temp);
 
                     heuristicResults.insert(heuristicResults.end(),
                                             heuristicResults_temp.begin(),
