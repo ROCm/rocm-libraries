@@ -99,7 +99,7 @@ jobs:
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
           EOF
-          dnf -y install cmake git git-lfs gzip tar unzip wget which \
+          dnf -y install cmake gcc gcc-c++ git git-lfs gzip tar unzip wget which \
             python3.11 python3.11-pip python3.11-devel
           # These are base SDK prerequisites that invoke --install-deps
           # expects the build image to provide.
