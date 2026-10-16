@@ -31,8 +31,6 @@
 #include "miopen_type_traits.hpp" // std::is_same
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
-// Offline compilation needs these for __half and the bit-cast builtins;
-// runtime compilation preincludes the HIP declarations.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #endif

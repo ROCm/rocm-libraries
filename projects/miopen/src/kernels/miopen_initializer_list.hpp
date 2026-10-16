@@ -3,14 +3,8 @@
 
 #pragma once
 
-/// Freestanding std::initializer_list for MIOpen runtime-compiled kernels
-/// (clang lowers braced-init-lists to field stores on this exact layout,
-/// so field order and types are fixed by the ABI).
-///
-/// The real <initializer_list> is preferred whenever it is reachable; the
-/// fallback below is selected only when kernels are compiled at runtime
-/// (MIOPEN_HIP_RUNTIME_COMPILE) and no host C++ standard library is
-/// installed (see miopen_type_traits.hpp for the rationale).
+/// Minimal std::initializer_list for runtime compilation without a host
+/// C++ standard library (field order fixed by the clang ABI).
 
 #if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<initializer_list>)
 

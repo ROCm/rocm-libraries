@@ -25,22 +25,64 @@
  *******************************************************************************/
 #pragma once
 
-// Runtime compilation (MIOPEN_HIP_RUNTIME_COMPILE) may run where no host
-// C++ standard library is installed (for example the AMD Windows ROCm
-// wheels without an MSVC installation). Prefer the real <type_traits>
-// whenever it is reachable; otherwise fall back to the minimal traits
-// below so runtime-compiled kernels stay self-contained. The fallback
-// definitions never coexist with a real standard library in one
-// translation unit (that coexistence is the rocm-libraries#7718 failure
-// class).
+// Minimal <type_traits> definitions for runtime compilation without a host C++ standard library.
 #if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !__has_include(<type_traits>)
 
-#if __has_include(<utility>)
-#error \
-    "inconsistent C++ standard library availability: <type_traits> is not reachable but <utility> is; provide a complete standard library (or none)"
-#endif
-
 namespace std {
+
+template <class T>
+struct remove_reference
+{
+    typedef T type;
+};
+template <class T>
+struct remove_reference<T&>
+{
+    typedef T type;
+};
+template <class T>
+struct remove_reference<T&&>
+{
+    typedef T type;
+};
+
+template <class T>
+using remove_reference_t = typename remove_reference<T>::type;
+
+template <class T>
+struct remove_const
+{
+    typedef T type;
+};
+template <class T>
+struct remove_const<const T>
+{
+    typedef T type;
+};
+template <class T>
+using remove_const_t = typename remove_const<T>::type;
+
+template <class T>
+struct remove_volatile
+{
+    typedef T type;
+};
+template <class T>
+struct remove_volatile<volatile T>
+{
+    typedef T type;
+};
+template <class T>
+using remove_volatile_t = typename remove_volatile<T>::type;
+
+template <class T>
+struct remove_cv
+{
+    typedef typename remove_volatile<typename remove_const<T>::type>::type type;
+};
+
+template <class T>
+using remove_cv_t = typename remove_cv<T>::type;
 
 template <class T, T v>
 struct integral_constant
@@ -55,62 +97,11 @@ struct integral_constant
 using true_type  = integral_constant<bool, true>;
 using false_type = integral_constant<bool, false>;
 
-template <class T>
-struct remove_reference
-{
-    using type = T;
-};
-template <class T>
-struct remove_reference<T&>
-{
-    using type = T;
-};
-template <class T>
-struct remove_reference<T&&>
-{
-    using type = T;
-};
-template <class T>
-using remove_reference_t = typename remove_reference<T>::type;
-
-template <class T>
-struct remove_const
-{
-    using type = T;
-};
-template <class T>
-struct remove_const<const T>
-{
-    using type = T;
-};
-template <class T>
-using remove_const_t = typename remove_const<T>::type;
-
-template <class T>
-struct remove_volatile
-{
-    using type = T;
-};
-template <class T>
-struct remove_volatile<volatile T>
-{
-    using type = T;
-};
-template <class T>
-using remove_volatile_t = typename remove_volatile<T>::type;
-
-template <class T>
-struct remove_cv
-{
-    using type = typename remove_volatile<typename remove_const<T>::type>::type;
-};
-template <class T>
-using remove_cv_t = typename remove_cv<T>::type;
-
 template <class T, class U>
 struct is_same : false_type
 {
 };
+
 template <class T>
 struct is_same<T, T> : true_type
 {
@@ -128,34 +119,38 @@ struct enable_if<true, T>
 template <bool B, class T = void>
 using enable_if_t = typename enable_if<B, T>::type;
 
-namespace detail {
 template <class T>
 struct is_pointer_helper : false_type
 {
 };
+
 template <class T>
 struct is_pointer_helper<T*> : true_type
 {
 };
-} // namespace detail
 
 template <class T>
-struct is_pointer : detail::is_pointer_helper<typename remove_cv<T>::type>
+struct is_pointer : is_pointer_helper<typename remove_cv<T>::type>
 {
 };
 
-template <bool B, class X, class Y>
-struct conditional
+template <bool predicate, typename X, typename Y>
+struct conditional;
+
+template <typename X, typename Y>
+struct conditional<true, X, Y>
 {
     using type = X;
 };
-template <class X, class Y>
+
+template <typename X, typename Y>
 struct conditional<false, X, Y>
 {
     using type = Y;
 };
-template <bool B, class X, class Y>
-using conditional_t = typename conditional<B, X, Y>::type;
+
+template <bool predicate, typename X, typename Y>
+using conditional_t = typename conditional<predicate, X, Y>::type;
 
 // clang provides this as a builtin in all modes (host STL not required).
 template <class T>
