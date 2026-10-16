@@ -172,6 +172,24 @@ namespace
         return std::max<int64_t>(k, 1);
     }
 
+    // Largest rows and cols of any group.
+    void maxGroupShape(rocblaslt_matrix_layout        matD,
+                       const rocblaslt_grouped_hints& h,
+                       int64_t&                       maxRows,
+                       int64_t&                       maxCols)
+    {
+        const bool    rowsFixed = matD->rows_array == nullptr;
+        const bool    colsFixed = matD->cols_array == nullptr;
+        const int64_t totalRows = rowsFixed ? 0 : h.max_total_rows;
+        const int64_t totalCols = colsFixed ? 0 : h.max_total_cols;
+        maxRows = rowsFixed ? static_cast<int64_t>(matD->m) : (h.max_rows ? h.max_rows : totalRows);
+        maxCols = colsFixed ? static_cast<int64_t>(matD->n) : (h.max_cols ? h.max_cols : totalCols);
+        if(totalRows > 0)
+            maxRows = std::min(maxRows, totalRows);
+        if(totalCols > 0)
+            maxCols = std::min(maxCols, totalCols);
+    }
+
     // Placeholders whose total tile count bounds the real problems for any tile size, so
     // the grid computed from them covers every launch within the hints. With per-group
     // columns summing to at most S, Mmax x S plus G - 1 groups of Mmax x 1 is such a bound,
@@ -182,19 +200,11 @@ namespace
                                        const rocblaslt_grouped_hints& h,
                                        Placeholders&                  out)
     {
-        const int64_t groups     = matD->group_count;
-        const bool    rowsFixed  = matD->rows_array == nullptr;
-        const bool    colsFixed  = matD->cols_array == nullptr;
-        const int64_t totalRows  = rowsFixed ? 0 : h.max_total_rows;
-        const int64_t totalCols  = colsFixed ? 0 : h.max_total_cols;
-        int64_t       maxRows    = rowsFixed ? static_cast<int64_t>(matD->m)
-                                             : (h.max_rows ? h.max_rows : totalRows);
-        int64_t       maxCols    = colsFixed ? static_cast<int64_t>(matD->n)
-                                             : (h.max_cols ? h.max_cols : totalCols);
-        if(totalRows > 0)
-            maxRows = std::min(maxRows, totalRows);
-        if(totalCols > 0)
-            maxCols = std::min(maxCols, totalCols);
+        const int64_t groups    = matD->group_count;
+        const int64_t totalRows = matD->rows_array == nullptr ? 0 : h.max_total_rows;
+        const int64_t totalCols = matD->cols_array == nullptr ? 0 : h.max_total_cols;
+        int64_t       maxRows, maxCols;
+        maxGroupShape(matD, h, maxRows, maxCols);
         if(maxRows <= 0 || maxCols <= 0)
         {
             log_error(__func__,
@@ -339,6 +349,46 @@ namespace
         if(status == rocblaslt_status_success && gemmCount != static_cast<size_t>(groups))
             status = rocblaslt_status_internal_error;
         return status;
+    }
+
+    // The group shapes are never checked on the host, so an algo must also accept sizes
+    // that are no multiple of a power of two: the largest odd size within the max hints in
+    // each dimension set by a device array. Kernels that assume a size multiple reject
+    // these.
+    rocblaslt_status buildOddData(rocblaslt_handle               handle,
+                                  rocblaslt_matmul_desc          desc,
+                                  rocblaslt_matrix_layout        matA,
+                                  rocblaslt_matrix_layout        matB,
+                                  rocblaslt_matrix_layout        matC,
+                                  rocblaslt_matrix_layout        matD,
+                                  const rocblaslt_grouped_hints& h,
+                                  std::shared_ptr<void>&         gemmData)
+    {
+        auto    odd = [](int64_t v) { return std::max<int64_t>(v % 2 ? v : v - 1, 1); };
+        int64_t maxRows, maxCols;
+        maxGroupShape(matD, h, maxRows, maxCols);
+        Placeholders p;
+        p.rows0 = p.rows = matD->rows_array == nullptr ? maxRows : odd(maxRows);
+        p.cols0 = p.cols = matD->cols_array == nullptr ? maxCols : odd(maxCols);
+        p.k              = placeholderK(desc, matA, h);
+        if(!kIsUniform(desc, matA))
+            p.k |= 1;
+        size_t gemmCount = 0;
+        return buildGroupedData(handle, desc, matA, matB, matC, matD, p, gemmData, gemmCount);
+    }
+
+    bool algoSupports(rocblaslt_handle      handle,
+                      std::shared_ptr<void> gemmData,
+                      rocblaslt_matmul_algo algo)
+    {
+        size_t ws = 0;
+        return rocblaslt_is_algo_supported_cpp(handle,
+                                               rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
+                                               gemmData,
+                                               algo,
+                                               nullptr,
+                                               ws)
+               == rocblaslt_status_success;
     }
 
     struct GroupedDims
@@ -548,6 +598,10 @@ rocblaslt_status
             handle, desc, matA, matB, matC, matD, bound, boundData, gemmCount);
         if(status != rocblaslt_status_success)
             return status;
+        std::shared_ptr<void> oddData;
+        status = buildOddData(handle, desc, matA, matB, matC, matD, h, oddData);
+        if(status != rocblaslt_status_success)
+            return status;
 
         for(auto& candidate : candidates)
         {
@@ -561,7 +615,7 @@ rocblaslt_status
                                                nullptr,
                                                ws)
                    != rocblaslt_status_success
-               || ws > tensileMax)
+               || ws > tensileMax || !algoSupports(handle, oddData, candidate.algo))
                 continue;
             auto& out                     = heuristicResultsArray[*returnAlgoCount];
             out                           = candidate;
@@ -664,6 +718,17 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             if(required > tensileWsSize)
             {
                 log_error(__func__, "workspace too small", required + recBytes);
+                return rocblaslt_status_invalid_value;
+            }
+            std::shared_ptr<void> oddData;
+            status
+                = buildOddData(handle, desc, matA, matB, matC, matD, desc->grouped_hints, oddData);
+            if(status != rocblaslt_status_success)
+                return status;
+            if(!algoSupports(handle, oddData, *algo))
+            {
+                log_error(__func__,
+                          "the algo does not support every group shape the layouts allow");
                 return rocblaslt_status_invalid_value;
             }
             status = rocblaslt_makeArgument_cpp(handle,
