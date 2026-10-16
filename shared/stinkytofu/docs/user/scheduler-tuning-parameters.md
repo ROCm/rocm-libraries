@@ -72,7 +72,38 @@ is on, the wait pass also merges the waits of back-to-back WMMAs onto the first 
 run stays back-to-back. The knob heuristic does **not** scale with the queue: when you raise
 the depth, set `DsReadPerCap` explicitly.
 
-## ds_load issue
+### WMMA refill (batches)
+
+The queue is refilled in batches. A refill starts when the queued cover drops below the refill
+line (`WmmaQueueCoverCycles`) and the queue has room. It then issues WMMAs ahead of other work
+until it is done. A full WMMA queue only makes the next WMMA wait, which costs no efficiency, so
+the queue is kept busy and covers the small stalls of the ds_loads and barriers between batches.
+
+| Module option | Default | CLI | Meaning |
+|---|---|---|---|
+| `WmmaRefillMode` | 0 (`Fixed`) | `--wmma-refill-mode=fixed\|dynamic` | `0` / `fixed`: each refill issues `WmmaBatchSize` WMMAs. `1` / `dynamic`: each refill issues WMMAs until the queued cover reaches `WmmaRefillToCycles`; the count follows the live timeline and the WMMA latency. |
+| `WmmaBatchSize` | 1 | `--wmma-batch-size=N` | Fixed mode: WMMAs per refill. 1 is the one-WMMA-at-a-time refill. |
+| `WmmaRefillToCycles` | 0 → full queue | `--wmma-refill-to-cycles=N` | Dynamic mode: the queued cover (cycles) a refill fills up to. 0 = `WmmaQueueDepth` × the WMMA latency. |
+
+A refill also ends when the queue is full. A dependent WMMA that needs coexec padding is held as
+before.
+
+## ds_load even spread
+
+| Module option | Default | CLI | Meaning |
+|---|---|---|---|
+| `DsSpread` | false | `--ds-spread` | Spread the region's ds_loads evenly over its WMMAs. The k-th ds_load is released at WMMA window `k * WMMAs / ds_loads`, less the tolerance, and issues only while the ds queue (`DsReadQueueDepth` credits) has a free one. The cap, throttle, slot-first and ds hide-budget pacing below are bypassed. |
+| `DsSpreadToleranceCycles` | -1 → automatic | `--ds-spread-tolerance-cycles=N` | How early, in cycles, a ds_load may issue before its slot. 0 = as even as possible. Automatic = the smallest tolerance that still lets every ds_load reach its first consumer WMMA two windows ahead, i.e. as even as the dependencies allow. |
+
+A held ds_load is released early only when no WMMA is ready to issue in its place. With the debug
+type `StinkyDAGSchedulerPass` enabled, each region logs the resolved tolerance and `gapCv`, the
+coefficient of variation of the gaps between its ds_loads (0 = perfectly even).
+
+`DsReadOrder` and `LockDsReadOrder` apply unchanged.
+
+## ds_load issue (cap and throttle pacing)
+
+Used when `DsSpread` is off.
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|

@@ -1,0 +1,26 @@
+
+*** Before Pass: StinkyBuildImplicitDependencyPass ***
+st.func @tensor_load_chain_reaches_wmma() {
+  ^entry:
+    v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
+    "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    v[32:35] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[36:39] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
+    "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+*** Before Pass: StinkyDAGSchedulerPass ***
+st.func @tensor_load_chain_reaches_wmma() {
+  ^entry:
+    v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
+    LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    LDS0 = "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    LDS0 = "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+    v[32:35] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[36:39] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
+    "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

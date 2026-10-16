@@ -1,6 +1,8 @@
 # WMMA batch refill and even ds_load spread: plan
 
-Status: plan, not implemented. Scope: the gfx1250 CDNA5 DAG scheduler
+Status: phases 2-4 implemented behind options (`WmmaBatchSize`/`WmmaRefillMode`, `DsSpread`); the
+legacy ds pacing (phase 5) is still in place and `DsSpread` is off by default until the perf A/B
+(phase 7) is done on hardware. Scope: the gfx1250 CDNA5 DAG scheduler
 (`src/transforms/asm/dag/CDNA5.hpp`).
 
 ## Why now

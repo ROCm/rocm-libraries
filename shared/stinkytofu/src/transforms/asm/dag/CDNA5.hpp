@@ -1049,6 +1049,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
                       IRList::iterator blockBegin, const RegionDependencies& deps) override;
 
     void onFinishBB() override;
+    // PASS_DEBUG: how even the last region's ds_loads came out (CV of their issue gaps).
+    void logDsSpreadEvenness() const {
+        PASS_DEBUG({
+            if (dsSpreadOn() && dsSpread_.active())
+                std::cerr << "[CDNA5 dsSpread] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
+                          << " slackWindows=" << dsSpread_.slack() << " gapCv=" << dsSpread_.gapCv()
+                          << "\n";
+        });
+    }
     void onScheduled(const StinkyInstruction& inst) override {
         if (waitAlu_) waitAlu_->commit(inst);
     }
@@ -2910,6 +2919,7 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
 }
 
 void CDNA5ReadyQueue::onFinishBB() {
+    logDsSpreadEvenness();
     PASS_DEBUG({
         const int total = dsBindNeither_ + dsBindCapOnly_ + dsBindQueueOnly_ + dsBindBoth_;
         if (total > 0) {
@@ -3693,6 +3703,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
         }
     }
+    logDsSpreadEvenness();
     dsSpread_.reset();
     if (dagFeatures.dsSpread) {
         std::vector<int> wmmaIndex(deps.dag.nodes.size(), INT_MAX);
