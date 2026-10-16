@@ -12,6 +12,7 @@
 
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/DeviceIdentity.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -20,10 +21,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#if !defined(HIPDNN_BENCH_CSV_SAMPLE)
-#error "HIPDNN_BENCH_CSV_SAMPLE must name uhd_gen's sample of the CSV; see tests/CMakeLists.txt"
-#endif
 
 namespace hipdnn_bench
 {
@@ -109,9 +106,14 @@ TEST(TestCsvOutput, TheHeaderIsTheOneTheDatasetFixtureConverts)
         deviceNames.push_back(column.first);
     }
 
-    std::ifstream sample(HIPDNN_BENCH_CSV_SAMPLE);
+    // Staged with the test data at the same offset from the test binary in the build and
+    // install trees (tests/CMakeLists.txt).
+    const auto samplePath = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                            / HIPDNN_TEST_DATA_RELDIR / HIPDNN_BENCH_CSV_SAMPLE_SUBDIR
+                            / "hipdnn_bench.csv";
+    std::ifstream sample(samplePath);
     std::string expected;
-    ASSERT_TRUE(std::getline(sample, expected)) << HIPDNN_BENCH_CSV_SAMPLE;
+    ASSERT_TRUE(std::getline(sample, expected)) << samplePath;
     EXPECT_EQ(csvHeader(deviceNames, {"M"}, {"tile_m"}), expected);
 }
 
