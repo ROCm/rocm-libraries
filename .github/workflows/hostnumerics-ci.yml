@@ -313,7 +313,6 @@ jobs:
             --exclude-regex '^hostnumerics-(package-components|python-.*)$' \
             --no-tests=error --output-on-failure
 
-      # Behavioral tests run through Python, so instrument the bindings as well.
       - name: Test Python with sanitizers
         env:
           # CPython owns process-lifetime allocations; retain bounds/UB checks.
