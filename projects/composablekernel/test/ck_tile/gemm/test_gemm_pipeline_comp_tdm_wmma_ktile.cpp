@@ -20,7 +20,16 @@ using KernelTypesCompTDMKTile = ::testing::Types<
     std::tuple<Row, Col, Row, F16, F16, F32, F16, I128, I128, I64,  I16, I16, Intrawave, CompTDMV1>,
     std::tuple<Row, Col, Row, F16, F16, F32, F16, I128, I128, I64,  I16, I16, Intrawave, CompTDMV2>,
     std::tuple<Row, Col, Row, F16, F16, F32, F16, I128, I128, I128, I16, I16, Intrawave, CompTDMV1>,
-    std::tuple<Row, Col, Row, F16, F16, F32, F16, I128, I128, I128, I16, I16, Intrawave, CompTDMV2>
+    std::tuple<Row, Col, Row, F16, F16, F32, F16, I128, I128, I128, I16, I16, Intrawave, CompTDMV2>,
+    // bf16: same byte layout as fp16
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I96,  I16, I16, Intrawave, CompTDMV1>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I96,  I16, I16, Intrawave, CompTDMV2>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I192, I16, I16, Intrawave, CompTDMV1>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I192, I16, I16, Intrawave, CompTDMV2>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I64,  I16, I16, Intrawave, CompTDMV1>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I64,  I16, I16, Intrawave, CompTDMV2>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I128, I16, I16, Intrawave, CompTDMV1>,
+    std::tuple<Row, Col, Row, BF16, BF16, F32, BF16, I128, I128, I128, I16, I16, Intrawave, CompTDMV2>
 >;
 // clang-format on
 
