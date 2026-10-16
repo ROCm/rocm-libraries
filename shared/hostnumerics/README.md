@@ -138,3 +138,11 @@ C++ code that handles elements of a runtime `ScalarType` uses
 `visitScalarType(type, visitor)` to select code specialized for that encoding
 once per operation. `scalar_type.hpp` documents the visitor contract and the
 usual pattern.
+
+## Error handling
+
+HostNumerics-owned terminal errors throw `std::runtime_error` with a useful
+message. Expected support and compatibility failures should use explicit results
+or checks. Allocation, system, dependency and visitor errors retain their
+original types. Dispatch rejects invalid enum values before invoking the visitor
+or moving its arguments. This policy does not promise exceptions-disabled builds.

@@ -310,7 +310,7 @@ struct ScalarTag {
 // return type; an explicit return type on the visitor gives clearer errors.
 // The visitor and arguments keep their value categories, and reference and void
 // returns are preserved. ScalarType::Count and values outside the enum throw
-// std::invalid_argument before the visitor is called.
+// std::runtime_error before the visitor is called.
 //
 // Dispatch once per operation and run the element loop inside the typed code:
 //
@@ -388,6 +388,6 @@ decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... arg
         case ScalarType::Count:
             break;
     }
-    throw std::invalid_argument("Invalid ScalarType.");
+    throw std::runtime_error("Invalid ScalarType.");
 }
 }  // namespace roc::hostnumerics
