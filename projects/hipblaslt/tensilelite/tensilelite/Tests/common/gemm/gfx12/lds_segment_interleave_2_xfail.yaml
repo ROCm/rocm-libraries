@@ -45,6 +45,10 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32]
         - TDMInst: [3]
+        - LDSTrInst: [True]  # Required for TDM on gfx1250
+        - 1LDSBuffer: [1]  # Required for LDSTrInst
+        - ExpandPointerSwap: [False]  # LDSTrInst doesn't support ExpandPointerSwap
+        - WaveSeparateGlobalReadA: [1]  # Required for LDSSegmentInterleave
         - LDSSegmentInterleave: [0, 1]  # Test both disabled and enabled
         - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
@@ -82,6 +86,10 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32]
         - TDMInst: [3]
+        - LDSTrInst: [True]  # Required for TDM on gfx1250
+        - 1LDSBuffer: [1]  # Required for LDSTrInst
+        - ExpandPointerSwap: [False]  # LDSTrInst doesn't support ExpandPointerSwap
+        - WaveSeparateGlobalReadA: [1]  # Required for LDSSegmentInterleave
         - LDSSegmentInterleave: [0, 1]
         - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:
@@ -118,6 +126,10 @@ BenchmarkProblems:
         - DepthU: [64]
         - WavefrontSize: [32]
         - TDMInst: [3]
+        - LDSTrInst: [True]  # Required for TDM on gfx1250
+        - 1LDSBuffer: [1]  # Required for LDSTrInst
+        - ExpandPointerSwap: [False]  # LDSTrInst doesn't support ExpandPointerSwap
+        - WaveSeparateGlobalReadA: [1]  # Required for LDSSegmentInterleave
         - LDSSegmentInterleave: [0, 1]
         - ScheduleIterAlg: [3]
       BenchmarkFinalParameters:

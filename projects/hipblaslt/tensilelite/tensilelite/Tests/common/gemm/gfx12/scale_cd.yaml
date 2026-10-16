@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Gap Coverage: StridedBatched parameter
-# Tests both strided batching (default) and pointer-array batching modes
+# Gap Coverage: UseScaleCD and OutputAmaxD parameters
+# Tests scaling for C/D tensors and amax output
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
@@ -17,7 +17,7 @@ GlobalParameters:
   Architecture: gfx1250
 
 BenchmarkProblems:
-  # FP16 Strided Batched (default mode)
+  # FP16 with UseScaleCD=True
   -
     - # ProblemType
       OperationType: GEMM
@@ -29,7 +29,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      StridedBatched: True  # Explicit strided batched
+      UseScaleCD: True
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -44,11 +44,14 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [8]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 2, 128]
-          - Exact: [128, 128, 4, 128]
-          - Exact: [256, 256, 8, 256]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
 
-  # FP16 Pointer-Array Batched (non-strided)
+  # FP16 with OutputAmaxD=True
+  # Note: This is a rejection test. OutputAmaxD is FP8-only - FP16 destinations
+  # use even gwvw which takes the packed VMulPKF32 path that never writes AmaxOut,
+  # resulting in silently-wrong amaxD=0. This test validates that OutputAmaxD
+  # with non-F8 DestDataType is cleanly rejected.
   -
     - # ProblemType
       OperationType: GEMM
@@ -60,7 +63,7 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      StridedBatched: False  # Pointer-array batching
+      OutputAmaxD: True
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -71,14 +74,16 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 1, 1, 1, 1]
         - DepthU: [64]
         - WavefrontSize: [32]
-        - GlobalReadVectorWidthA: [8]
-        - GlobalReadVectorWidthB: [8]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 2, 128]
-          - Exact: [128, 128, 4, 128]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
 
-  # BF16 Pointer-Array Batched
+  # BF16 with UseScaleCD and OutputAmaxD combined
+  # Note: This is a rejection test. OutputAmaxD is FP8-only - BF16 destinations
+  # use even gwvw which takes the packed VMulPKF32 path that never writes AmaxOut,
+  # resulting in silently-wrong amaxD=0. This test validates that OutputAmaxD
+  # with non-F8 DestDataType is cleanly rejected.
   -
     - # ProblemType
       OperationType: GEMM
@@ -90,7 +95,8 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      StridedBatched: False
+      UseScaleCD: True
+      OutputAmaxD: True
 
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
@@ -103,5 +109,34 @@ BenchmarkProblems:
         - WavefrontSize: [32]
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 2, 128]
-          - Exact: [256, 256, 4, 256]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+
+  # FP8 with UseScaleAB and UseScaleCD
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      UseScaleAB: "Scalar"
+      UseScaleCD: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]  # FP8 requires K=64 on gfx1250
+        - DepthU: [64]
+        - WavefrontSize: [32]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
