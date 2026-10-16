@@ -43,5 +43,9 @@ def build(spec, arch):
     ).build_unified_attention_3d_tiled(spec, arch=arch)
 
 
+def main() -> int:
+    return run_emit(spec_for_index, build)
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_emit(spec_for_index, build))
+    raise SystemExit(main())

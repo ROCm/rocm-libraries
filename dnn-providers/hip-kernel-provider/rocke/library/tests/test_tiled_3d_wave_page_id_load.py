@@ -172,10 +172,9 @@ def test_gfx942_dispatch_scope(monkeypatch, kw, arch, expected):
         "dtype": "bf16",
     }
     base.update(kw)
-    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
     monkeypatch.delenv("HIPDNN_GFX942_3D_WKV", raising=False)
     problem = au.UnifiedAttentionProblem(**base)  # type: ignore[arg-type]
-    assert au._wave_page_id_load_3d(problem) is expected
+    assert au._wave_page_id_load_3d(problem, arch) is expected
 
 
 def _reference(torch, q, k, v, lengths):
@@ -247,11 +246,10 @@ def test_wave_page_id_load_matches_reference(dtype, tile, num_segments, swizzle)
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch="gfx950",
         num_kv_blocks=k.shape[0],
     )
     segment = replace(
-        au._tiled_3d_spec_from_problem(problem),
+        au._tiled_3d_spec_from_problem(problem, "gfx950"),
         num_segments=num_segments,
         tile_size_override=None if tile == block_size else tile,
         use_kv_lds_swizzle=swizzle,
@@ -352,11 +350,10 @@ def test_gfx942_wave_page_id_load_matches_reference(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch="gfx942",
         num_kv_blocks=k.shape[0],
     )
     segment = replace(
-        au._tiled_3d_spec_from_problem(problem),
+        au._tiled_3d_spec_from_problem(problem, "gfx942"),
         num_segments=num_segments,
         tile_size_override=None if tile == block_size else tile,
         use_wide_kv_load=wide,

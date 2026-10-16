@@ -3096,56 +3096,6 @@ void cpu_laset<rocblas_double_complex>(char uplo,
     zlaset_(&uplo, &m, &n, &alpha, &beta, A, &lda);
 }
 
-// lacpy
-
-template <>
-void cpu_lacpy<float>(char uplo,
-                      rocblas_int m,
-                      rocblas_int n,
-                      float* A,
-                      rocblas_int lda,
-                      float* B,
-                      rocblas_int ldb)
-{
-    slacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
-}
-
-template <>
-void cpu_lacpy<double>(char uplo,
-                       rocblas_int m,
-                       rocblas_int n,
-                       double* A,
-                       rocblas_int lda,
-                       double* B,
-                       rocblas_int ldb)
-{
-    dlacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
-}
-
-template <>
-void cpu_lacpy<rocblas_double_complex>(char uplo,
-                                       rocblas_int m,
-                                       rocblas_int n,
-                                       rocblas_double_complex* A,
-                                       rocblas_int lda,
-                                       rocblas_double_complex* B,
-                                       rocblas_int ldb)
-{
-    zlacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
-}
-
-template <>
-void cpu_lacpy<rocblas_float_complex>(char uplo,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      rocblas_float_complex* A,
-                                      rocblas_int lda,
-                                      rocblas_float_complex* B,
-                                      rocblas_int ldb)
-{
-    clacpy_(&uplo, &m, &n, A, &lda, B, &ldb);
-}
-
 // gecon
 
 template <>
@@ -3263,6 +3213,32 @@ void cpu_lacgv<rocblas_double_complex>(rocblas_int n, rocblas_double_complex* x,
 }
 
 // lacpy
+template <>
+void cpu_lacpy<float>(rocblas_fill uplo,
+                      rocblas_int m,
+                      rocblas_int n,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb)
+{
+    char uploC = rocblas2char_fill(uplo);
+    slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
+template <>
+void cpu_lacpy<double>(rocblas_fill uplo,
+                       rocblas_int m,
+                       rocblas_int n,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb)
+{
+    char uploC = rocblas2char_fill(uplo);
+    dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
+}
+
 template <>
 void cpu_lacpy<rocblas_float_complex>(rocblas_fill uplo,
                                       rocblas_int m,

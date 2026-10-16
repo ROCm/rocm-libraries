@@ -30,6 +30,7 @@
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
 #include "cblas_interface.hpp"
+#include "cotenant.hpp"
 #include "efficiency_monitor.hpp"
 #include "fast_check.hpp"
 #include "flops.hpp"
@@ -64,6 +65,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <stdexcept>
 
 extern "C" __global__ void flush_icache()
 {
@@ -625,6 +627,7 @@ template <typename Ti, typename Tc, typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -646,19 +649,20 @@ void epilogue_func(int64_t     m,
     {
         Ti bias_data = enable_bias ? cast_from_type<Ti>(bias, bias_type, i) : 0;
 
-#define CALCULATE_EPILOGUE_ACT                                                                \
-    auto pos     = j * ld + i;                                                                \
-    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
-    if(e && !gradient)                                                                        \
-    {                                                                                         \
-        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
-    }                                                                                         \
-    Tact in_Tact_act = 0;                                                                     \
-    if(gradient)                                                                              \
-    {                                                                                         \
-        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, pos), arg1, arg2) * in_Tact; \
-    }                                                                                         \
-    else                                                                                      \
+#define CALCULATE_EPILOGUE_ACT                                                                 \
+    auto pos     = j * ld + i;                                                                 \
+    auto epos    = j * lde + i;                                                                \
+    auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                     \
+    if(e && !gradient)                                                                         \
+    {                                                                                          \
+        saturate_cast_to_type(e, (in_Tact * scaleE), aux_type, epos);                          \
+    }                                                                                          \
+    Tact in_Tact_act = 0;                                                                      \
+    if(gradient)                                                                               \
+    {                                                                                          \
+        in_Tact_act = act_func(cast_from_type<Tact>(e, aux_type, epos), arg1, arg2) * in_Tact; \
+    }                                                                                          \
+    else                                                                                       \
         in_Tact_act = act_func(in_Tact, arg1, arg2);
 
         if(amaxD == nullptr)
@@ -690,6 +694,7 @@ template <typename Tact, typename F>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -714,6 +719,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -735,6 +741,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -756,6 +763,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -783,6 +791,7 @@ template <typename Ti, typename Tc>
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    Ti*         in,
                    void*       out,
                    Tc*         out_raw,
@@ -797,12 +806,13 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                                \
-    auto pos  = j * ld + i;                                     \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
-    if(e)                                                       \
-    {                                                           \
-        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                   \
+    auto pos  = j * ld + i;                                        \
+    auto epos = j * lde + i;                                       \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;          \
+    if(e)                                                          \
+    {                                                              \
+        saturate_cast_to_type(e, (temp * scaleE), aux_type, epos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -838,6 +848,7 @@ void epilogue_func(int64_t     m,
 void epilogue_func(int64_t     m,
                    int64_t     n,
                    int64_t     ld,
+                   int64_t     lde,
                    void*       in,
                    void*       out,
                    void*       out_raw,
@@ -859,6 +870,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (float*)in,
                       out,
                       (float*)out_raw,
@@ -877,6 +889,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (double*)in,
                       out,
                       (double*)out_raw,
@@ -895,6 +908,7 @@ void epilogue_func(int64_t     m,
         epilogue_func(m,
                       n,
                       ld,
+                      lde,
                       (int32_t*)in,
                       out,
                       (int32_t*)out_raw,
@@ -1788,121 +1802,6 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
     return {real_compute_input_typeA, real_compute_input_typeB};
 }
 
-// Swizzle MX scale tensor for the new MX layout expected by the kernel.
-// The kernel expects scale data in a permuted layout where the K-block dimension
-// is split into outer tiles of size dimk (=128/MXBlock) and interleaved with the
-// tiled (M or N) dimension.
-//
-// scaleRows/scaleCols: dimensions of the scale matrix in column-major storage
-// MXBlock: the MX block size (e.g. 16)
-// kAlongRows: true if the K-block dimension is along rows of the scale matrix
-//   transA=T scaleA: scale is (K/MX) x M  -> kAlongRows = true
-//   transA=N scaleA: scale is M x (K/MX)  -> kAlongRows = false
-//   transB=N scaleB: scale is (K/MX) x N  -> kAlongRows = true
-//   transB=T scaleB: scale is N x (K/MX)  -> kAlongRows = false
-//
-// Returns the total number of elements in the swizzled (potentially padded) buffer.
-// Raw-pointer overload so callers can pass per-batch offsets into the scale
-// buffer via uint8_t* arithmetic. hScaleA/B hold num_batches scale blocks
-// concatenated (size_scale*Vec[i] bytes each), and each block must be swizzled
-// independently.
-size_t swizzle_mx_scale(void*  scalePtr,
-                        size_t scaleRows,
-                        size_t scaleCols,
-                        size_t MXBlock,
-                        bool   kAlongRows)
-{
-    using Tensor = Tensor::Manipulation::Tensor;
-    size_t dimk = 128 / MXBlock;
-
-    // hipblaslt-bench stores scale in column-major: (scaleRows x scaleCols) with
-    // scaleRows as the fastest varying dimension (stride 1).
-    // In row-major Tensor convention: Tensor({scaleCols, scaleRows}) has scaleCols
-    // as slow dim and scaleRows as fast dim, matching the column-major layout.
-    //
-    // The tensile-client MXSA descriptor for Alik (transA=T) has sizes [batch, M, K/MX]
-    // with M varying fastest (stride 1). Its tmpTensor({K/MX, M}) has M as fast dim,
-    // matching tensile's memory layout.
-    //
-    // hipblaslt-bench transA=T: scale is (K/MX rows x M cols), col-major:
-    //   K/MX is fastest. As row-major Tensor({M, K/MX}): K/MX is fastest.
-    //   To match tensile-client's Tensor({K/MX, M}) where M is fastest,
-    //   we must interpret it as Tensor({scaleCols, scaleRows}) = Tensor({M, K/MX}).
-    //   But tensile wants Tensor({K/MX, M}), which is a different memory order.
-    //   Since hipblaslt has K/MX fastest and tensile has M fastest, the memory layouts
-    //   differ by a transpose. We handle this by using Tensor({scaleCols, scaleRows})
-    //   which matches hipblaslt's actual memory layout, and adapting the permutation.
-
-    if(kAlongRows)
-    {
-        // K-blocks along rows: scaleRows = K/MX, scaleCols = M (or N)
-        // hipblaslt col-major memory: K/MX fastest → row-major Tensor({M, K/MX})
-        // Tensile: Tensor({K/MX, M}) with M fastest (different layout)
-        //
-        // We work with hipblaslt's native layout: Tensor({scaleCols, scaleRows}) = Tensor({M, K/MX})
-        // The swizzle needs to group K/MX (the fast/last dim) into dimk-sized blocks.
-        auto mnDim = scaleCols; // M
-        auto kDim  = scaleRows; // K/MX
-
-        auto tmpTensor = Tensor({mnDim, kDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scalePtr, mnDim * kDim);
-
-        // Pad kDim (K/MX, the fast dim) to multiple of dimk
-        ::Tensor::Manipulation::Shape paddedShape{mnDim, (kDim + dimk - 1) / dimk * dimk};
-        uint64_t padVal{};
-        auto     paddedTensor
-            = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, &padVal, sizeof(uint8_t));
-
-        // Reshape: {M, padK/dimk, dimk}
-        paddedTensor.reshape({paddedShape[0], paddedShape[1] / dimk, dimk});
-
-        // Permute {1,0,2}: {padK/dimk, M, dimk}
-        Tensor permuted = permute(paddedTensor, {1, 0, 2});
-
-        auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scalePtr, permuted.as<void>(), totalElements);
-        return totalElements;
-    }
-    else
-    {
-        // K-blocks along cols: scaleRows = M (or N), scaleCols = K/MX
-        // hipblaslt col-major memory: M fastest → row-major Tensor({K/MX, M})
-        // This actually matches tensile's layout: Tensor({K/MX, M}) with M fastest
-        auto kDim  = scaleCols; // K/MX
-        auto mnDim = scaleRows; // M
-
-        auto tmpTensor = Tensor({kDim, mnDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scalePtr, kDim * mnDim);
-
-        // Pad mnDim (M, the fast dim) to multiple of dimk
-        ::Tensor::Manipulation::Shape paddedShape{kDim, (mnDim + dimk - 1) / dimk * dimk};
-        uint64_t padVal{};
-        auto     paddedTensor
-            = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, &padVal, sizeof(uint8_t));
-
-        // Reshape: {K/MX, padM/dimk, dimk}
-        paddedTensor.reshape({paddedShape[0], paddedShape[1] / dimk, dimk});
-
-        // Permute {1,0,2}: {padM/dimk, K/MX, dimk}
-        Tensor permuted = permute(paddedTensor, {1, 0, 2});
-
-        auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scalePtr, permuted.as<void>(), totalElements);
-        return totalElements;
-    }
-}
-
-// Convenience overload: swizzle a single scale block held by a HipHostBuffer.
-size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
-                        size_t         scaleRows,
-                        size_t         scaleCols,
-                        size_t         MXBlock,
-                        bool           kAlongRows)
-{
-    return swizzle_mx_scale(scaleBuf.buf(), scaleRows, scaleCols, MXBlock, kAlongRows);
-}
-
-
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
                               hipDataType      TiB,
@@ -2060,10 +1959,10 @@ void testing_matmul(const Arguments& arg)
         }
         else
         {
-            if(real_bias_type == HIP_R_16F)
+            if(real_bias_type == HIP_R_16F || real_bias_type == HIP_R_16BF)
             {
                 return testing_matmul_with_bias(
-                    arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_16F, real_aux_type);
+                    arg_revised, tiA, tiB, to, tc, tciA, tciB, real_bias_type, real_aux_type);
             }
             else
             {
@@ -2120,6 +2019,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      Tbias,
                               hipDataType      Taux)
 {
+    hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
+    hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
+
+    // The preswizzled kernels and scale allocation require K along the stored rows.
+    // Reject other orientations before allocation or MX input generation, also in Release builds.
+    if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transA != HIPBLAS_OP_T)
+        throw std::invalid_argument("scaleA=1001 requires transA=T");
+    if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT && transB != HIPBLAS_OP_N)
+        throw std::invalid_argument("scaleB=1001 requires transB=N");
+
     double gpu_time_used, cpu_time_used, gpu_mem_gbytes;
     gpu_time_used = cpu_time_used = gpu_mem_gbytes = 0.0;
     bool                   HMM                     = arg.HMM;
@@ -2130,9 +2039,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipEvent_t event_gpu_time_start, event_gpu_time_end;
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
-
-    hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
-    hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 
     // If input type is complex then alpha is set to complex datatype else compute type 
     hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
@@ -2330,26 +2236,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
-            {
-                if(!mx_use_rocroller)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_A   = blockSize(arg.scaleA);
-                    size_t dimk        = 128 / MXBlock_A;
-                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
-                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
-                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
-                    size_t padDim      = kAlongRowsA ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
-                }
-            }
+                size_scaleAVec[i] = blockScaleBufferSize(
+                    A_row[i], A_col[i], arg.scaleA, transA == HIPBLAS_OP_T, mx_use_rocroller);
             else
                 size_scaleAVec[i] = 0;
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
@@ -2357,26 +2245,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
-            {
-                if(!mx_use_rocroller)
-                {
-                    // Account for padding in the swizzled MX layout
-                    size_t MXBlock_B   = blockSize(arg.scaleB);
-                    size_t dimk        = 128 / MXBlock_B;
-                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
-                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
-                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
-                    size_t padDim      = kAlongRowsB ? kDim : mnDim;
-                    size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
-                    size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
-                }
-            }
+                size_scaleBVec[i] = blockScaleBufferSize(
+                    B_row[i], B_col[i], arg.scaleB, transB == HIPBLAS_OP_N, mx_use_rocroller);
             else
                 size_scaleBVec[i] = 0;
         }
@@ -5487,7 +5357,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
 #define epilogue_param                                                                      \
-    M[gemmIdx], N[gemmIdx], ldd[gemmIdx],                                                   \
+    M[gemmIdx], N[gemmIdx], ldd[gemmIdx], lde[gemmIdx],                                     \
         (hD_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),                 \
         (hD_gold[gemmIdx].as<char>() + pos * realDataTypeSize(To)),                         \
         (hBias_gold_epl[gemmIdx].as<char>() + pos * realDataTypeSize(Talpha)),              \
@@ -5569,10 +5439,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                     auto                        pos    = stride_d[gemmIdx] * batchIdx;
                     std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
-                    void*                       ePos
-                        = ((*hEInst).size() <= gemmIdx)
-                              ? nullptr
-                              : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
+                    void*                       ePos      = ((*hEInst).size() <= gemmIdx)
+                                                                ? nullptr
+                                                                : ((*hEInst)[gemmIdx].as<char>()
+                                        + stride_e[gemmIdx] * batchIdx * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
                     if(applyBias && arg.bias_stride > 0)
@@ -6569,6 +6439,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   tuningVec[heuristicTuningIndex[sol]],
                                                   *dWorkspace));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6616,6 +6491,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6716,6 +6596,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6838,6 +6723,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -6898,6 +6788,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                             stream));
                     }
 
+                    // Cotenant startup (stream sync, launch, residency wait) stays before the timed region.
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -7245,6 +7140,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(h)
                 (void)hipblasLtMatmulDescDestroy(h);
 
+    // Before ROCm 7.1, destroying a stream with unsynchronized work leaks its last command,
+    // which keeps that command's buffers alive. A leaked placed buffer leaves a stale VA
+    // reservation that breaks a later hipMemAddressFree at the same address.
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));

@@ -437,6 +437,8 @@ if(ROCKE_INSTALL_TESTS)
     # prefix on each, matching the other installed tests.
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
+        "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py")
@@ -465,6 +467,25 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
+    # RDNA WMMA attention CPU tests: spec validation, dispatch selection and
+    # the tuned-candidate contract. Same PYTHONPATH rule as the conv entry.
+    set(_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS
+        "tests/library/tests/test_wmma_fmha_fwd_spec.py"
+        "tests/library/tests/dispatch/attention/test_gfx1151_attention_selection.py"
+        "tests/library/tests/dispatch/attention/test_tuning_contract.py")
+    set(_ROCKE_LIBRARY_ATTENTION_TESTS "")
+    foreach(_rocke_attention_test ${_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_ATTENTION_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_attention_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_TESTS} -v -rs --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 300)\n")
+
     foreach(_operation sdpa conv)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -491,10 +512,12 @@ if(ROCKE_INSTALL_TESTS)
     # Library GPU numeric suites: convolution, attention, KDA, and GDN.
     # Select files rather than the "gpu" pytest marker because several runtime
     # tests lack that marker. Their dependency and architecture checks report
-    # skips when the required torch installation or GPU is unavailable.
+    # skips when the required torch installation or GPU is unavailable; the
+    # RDNA WMMA suites skip on devices without a gfx11/gfx12 generic target.
     set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
         "tests/library/tests/test_conv_fwd_correctness.py"
         "tests/library/tests/test_conv_wgrad_correctness.py"
+        "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
@@ -503,11 +526,16 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_dtype_dispatch.py"
         "tests/library/tests/test_extended_parity_attention.py"
         "tests/library/tests/test_gdn_decode_gfx950_numeric.py"
+        "tests/library/tests/test_gdn_decode_fused_gfx950_numeric.py"
+        "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
-        "tests/library/tests/test_kda_gdn_gfx950_numeric.py")
+        "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
+        "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
+        "tests/library/tests/test_wmma_fp8_decode_numeric.py"
+        "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")
     foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS

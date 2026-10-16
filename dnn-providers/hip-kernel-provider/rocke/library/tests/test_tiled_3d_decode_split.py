@@ -97,10 +97,10 @@ def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segm
         max_seqlen_k=max_seqlen_k,
         num_cus=num_cus,
     )
-    assert au._gfx950_3d_tile_size_override(p) == tile
+    assert au._gfx950_3d_tile_size_override(p, "gfx950") == tile
     assert au._kv_lds_swizzle_3d(p, arch="gfx950") is (tile is not None)
-    assert au._num_segments(p) == segments
-    spec = bld._tiled_3d_spec_from_problem(p)
+    assert au._num_segments(p, "gfx950") == segments
+    spec = bld._tiled_3d_spec_from_problem(p, "gfx950")
     assert spec.tile_size_override == tile
     assert spec.num_segments == segments
     assert spec.use_kv_lds_swizzle is (tile is not None)
@@ -108,7 +108,7 @@ def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segm
 
 
 def test_out_of_scope_keeps_the_previous_spec(gfx950):
-    spec = bld._tiled_3d_spec_from_problem(_problem(sliding_window=128))
+    spec = bld._tiled_3d_spec_from_problem(_problem(sliding_window=128), "gfx950")
     assert spec.tile_size_override is None
     assert not spec.use_kv_lds_swizzle
     assert not spec.use_wave_page_id_load
@@ -126,10 +126,10 @@ def test_strided_decode_follows_the_rule(gfx950, num_seqs, tile, segments):
 
 
 def test_cache_key_follows_the_rule(gfx950):
-    assert au._tiled_3d_cache_key(_problem()) != au._tiled_3d_cache_key(
-        _problem(sliding_window=128)
+    assert au._tiled_3d_cache_key(_problem(), "gfx950") != au._tiled_3d_cache_key(
+        _problem(sliding_window=128), "gfx950"
     )
-    assert au._tiled_3d_cache_key(_problem())[-3:] == (64, True, True)
+    assert au._tiled_3d_cache_key(_problem(), "gfx950")[-3:] == (64, True, True)
 
 
 @pytest.fixture
@@ -185,8 +185,8 @@ def test_gfx942_split(
         max_seqlen_k=max_seqlen_k,
         num_cus=304,
     )
-    assert au._num_segments(p) == segments
-    spec = bld._tiled_3d_spec_from_problem(p)
+    assert au._num_segments(p, "gfx942") == segments
+    spec = bld._tiled_3d_spec_from_problem(p, "gfx942")
     assert spec.num_segments == segments
     assert spec.use_kv_lds_swizzle and spec.use_wave_page_id_load
     segment, reduce = au._strided_3d_specs_from_problem(p, arch="gfx942")
@@ -195,6 +195,6 @@ def test_gfx942_split(
 
 def test_gfx942_few_ctas_at_long_kv_keep_the_previous_count(gfx942, monkeypatch):
     p = _problem(num_seqs=1, num_kv_heads=8, max_seqlen_k=32768, num_cus=304)
-    assert au._gfx942_3d_decode_ctas_per_segment(p) is None
+    assert au._gfx942_3d_decode_ctas_per_segment(p, "gfx942") is None
     monkeypatch.setattr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
-    assert au._num_segments(p) == 128
+    assert au._num_segments(p, "gfx942") == 128

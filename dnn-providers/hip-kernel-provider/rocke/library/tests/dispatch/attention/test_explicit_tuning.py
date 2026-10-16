@@ -141,7 +141,7 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "all-decode"):
             au._num_q_blocks(mixed, 4, decode_grid=True)
         tuned = SimpleNamespace(kernel_spec=segment, allow_unsupported=False)
-        ok, why = au._explicit_path_supported(mixed, tuned, "3d")
+        ok, why = au._explicit_path_supported(mixed, tuned, "3d", "gfx950")
         self.assertFalse(ok)
         self.assertIn("all-decode", why)
 
