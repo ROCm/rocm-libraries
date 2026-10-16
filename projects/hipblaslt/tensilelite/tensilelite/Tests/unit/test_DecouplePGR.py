@@ -1612,8 +1612,6 @@ def test_reachable_fuse_integers_resolve_to_their_row(fuse, expected):
 DECLINES = (
     ("TDMSplit", {"TDMSplit": True}),
     ("UseSubtileImpl", {"UseSubtileImpl": True}),
-    ("no MX scale on A", {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}}),
-    ("no MX scale on B", {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}}),
     ("NumWaves==1", {"NumWaves": 1}),
     ("TDM moves A only", {"TDMInst": 1}),
     ("TDM moves B only", {"TDMInst": 2}),

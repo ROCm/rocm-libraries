@@ -148,6 +148,10 @@ class _SKWriter:
         return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
 
 
+    def tdmPairOnEveryWave(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.tdmPairOnEveryWave(self, kernel, tpa, tpb)
+
+
 def _sk_common_kernel(dp_only):
     return {
         "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",

@@ -7,8 +7,21 @@
   TDMFuse=2  {A,MXSA,MXSB} + {B}   2/1/1 remainder split, NumWaves==4
   TDMFuse=3  {B,MXSA,MXSB} + {A}   the mirror of 2, same split and wave count
 
+A set splits its waves over the members the problem carries (tdmWaveShares), so
+the waves of a missing MX scale go to the rest of its set. Without MX scales
+TDMFuse 1-3 all reduce to {A} + {B}: A and B each ride every wave and the three
+rows issue the same loads (tdmWaveMask). TDMFuse=0 keeps A and B on one set,
+split by wave parity. With one scale, that scale takes every wave of the
+TDMFuse=0 scale set, shares its data tensor's set with it on TDMFuse 1-3, and
+the other data tensor of TDMFuse 1-3 rides every wave of a set of its own.
+On one wave nothing is separated: every live tensor issues from its own
+descriptor on wave 0.
+
 TDM_FUSE_GROUPING maps stable, name-bearing integers to TDM_GROUPS rows.
 """
+
+import functools
+import itertools
 
 
 class TdmGrouping:
@@ -45,23 +58,22 @@ def tdmBothTensors(ks):
 
 
 def _tdmFuseCanShareDescriptors(ks):
-    """Shared-descriptor preconditions, including writer-visible TDMSplit states."""
+    """Preconditions of every row but the default, with or without MX scales.
+
+    Includes writer-visible TDMSplit states; the sets need more than one wave
+    to split over.
+    """
     if not tdmBothTensors(ks):
         return False
     if ks.get("TDMSplit") or ks.get("UseSubtileImpl"):
         return False
-    pt = ks.get("ProblemType") or {}
-    return bool(pt.get("MXBlockA") and pt.get("MXBlockB"))
+    return ks.get("NumWaves", 1) > 1
 
 
 def _acceptSharedScaleSet(ks):
-    """Accept A_MX/B_MX only for the emittable four-wave 2/1/1 partition."""
-    return _tdmFuseCanShareDescriptors(ks) and ks.get("NumWaves", 1) == 4
-
-
-def _acceptPairedSets(ks):
-    """Preconditions for a row giving each data tensor its own scale."""
-    return _tdmFuseCanShareDescriptors(ks) and ks.get("NumWaves", 1) > 1
+    """Accept A_MX/B_MX; with both scales only the emittable four-wave 2/1/1 partition."""
+    bothScales = tdmLiveScales(ks) == TDM_SCALE_TENSORS
+    return _tdmFuseCanShareDescriptors(ks) and (not bothScales or ks.get("NumWaves", 1) == 4)
 
 
 def _acceptAlways(ks):
@@ -72,7 +84,7 @@ def _acceptAlways(ks):
 # Every mapped row needs an acceptance predicate; tdmGroupingName rejects omissions.
 _GROUPING_ACCEPTED = {
     "MX_AB": _acceptAlways,
-    "paired": _acceptPairedSets,
+    "paired": _tdmFuseCanShareDescriptors,
     "A_MX": _acceptSharedScaleSet,
     "B_MX": _acceptSharedScaleSet,
 }
@@ -111,8 +123,14 @@ def tdmGrouping(ks):
 
 
 def tdmFusePaired(ks):
-    """TDMFuse=1: {A,MXSA} and {MXSB,B}, one scale per data tensor. NumWaves>1."""
-    return tdmGrouping(ks).name == "paired"
+    """TDMFuse=1 with both MX scales: {A,MXSA} and {MXSB,B}. NumWaves>1.
+
+    The paired writer arms assume both scales. With one scale the row is the
+    scale's data set plus a lone data set and takes the shared-scale arms
+    (tdmSharedScaleSet); without scales it is {A} + {B} on the every-wave arms
+    (tdmPairOnEveryWave).
+    """
+    return tdmGrouping(ks).name == "paired" and tdmLiveScales(ks) == TDM_SCALE_TENSORS
 
 
 def tdmWaveSeparated(ks):
@@ -140,7 +158,7 @@ def tdmMemberIsLive(ks, tc):
 
 
 def liveGroups(ks, grouping=None):
-    """Drop dead members, but preserve full-group wave partitioning."""
+    """Each set's live members, dropping sets with none; waves come from tdmWaveShares."""
     grouping = grouping if grouping is not None else tdmGrouping(ks)
     live = []
     for group in grouping.groups:
@@ -153,6 +171,11 @@ def liveGroups(ks, grouping=None):
 # Descriptor ownership expected by PrefetchAcrossPersistent.
 TDM_DATA_TENSORS = ("A", "B")
 TDM_SCALE_TENSORS = ("MXSA", "MXSB")
+
+
+def tdmLiveScales(ks):
+    """The MX scales this problem carries, in TDM_SCALE_TENSORS order."""
+    return tuple(tc for tc in TDM_SCALE_TENSORS if tdmMemberIsLive(ks, tc))
 
 
 def tdmScaleSharesDataSet(ks, grouping=None):
@@ -185,17 +208,24 @@ def tdmSetOwner(ks, tc):
 
 
 def tdmSharedScaleSet(ks):
-    """Return the set containing both MX scales and one data tensor, or None."""
-    for group in tdmGrouping(ks).groups:
-        if len(group) < 2 or not set(TDM_SCALE_TENSORS) <= set(group):
-            continue
-        if len([tc for tc in group if tc in TDM_DATA_TENSORS]) == 1:
-            return group
-    return None
+    """Return the one live set carrying a data tensor and the live MX scales, or None.
+
+    TDMFuse 2/3 seat every live scale on the owner's set, and TDMFuse=1 with one
+    scale seats it on its data tensor's set; the other data tensor rides a set
+    of its own. TDMFuse=1 with both scales puts a scale on each data set and
+    takes the paired arms instead (tdmFusePaired), so it has no such set.
+    """
+    shared = tdmScaleSharesDataSet(ks)
+    if len(shared) != 1:
+        return None
+    group = shared[0]
+    if len([tc for tc in group if tc in TDM_DATA_TENSORS]) != 1:
+        return None
+    return group
 
 
 def tdmSharedScaleSetOwner(ks):
-    """The data tensor whose descriptor set both MX scales ride, or None."""
+    """The data tensor whose descriptor set the live MX scales ride, or None."""
     group = tdmSharedScaleSet(ks)
     if group is None:
         return None
@@ -226,9 +256,11 @@ def tdmPapRejectReason(ks):
 
 
 def tdmGroupPartner(ks, tc, fallback):
-    """Return the other member of a two-member set, or `fallback`."""
+    """Return the other member of a two-member set whose members are both live, or `fallback`."""
     for group in tdmGrouping(ks).groups:
         if tc in group and len(group) == 2:
+            if not all(tdmMemberIsLive(ks, member) for member in group):
+                return fallback
             return group[0] if group[1] == tc else group[1]
     return fallback
 
@@ -250,23 +282,45 @@ def _waveShares(numWaves, numMembers, layout):
             for i in range(numMembers))
     # "block": contiguous shares, remainder handed to the leading members.
     base, extra = divmod(numWaves, numMembers)
-    shares, start = [], 0
-    for i in range(numMembers):
-        width = base + (1 if i < extra else 0)
-        shares.append((tuple(range(start, start + width)), width))
-        start += width
-    return tuple(shares)
+    widths = tuple(base + (1 if i < extra else 0) for i in range(numMembers))
+    starts = itertools.accumulate(widths, initial=0)
+    return tuple((tuple(range(start, start + width)), width)
+                 for start, width in zip(starts, widths))
+
+
+def _setWaveShares(group, layout, numWaves, isLive):
+    """(waves, numComp) for each member of one descriptor set, in member order.
+
+    The set's waves split over its live members alone, by `layout` and in member
+    order, so no wave of a set with a live member idles. A dead member gets no
+    wave; with every member live this is the row's full split.
+    """
+    live = tuple(tc for tc in group if isLive(tc))
+    shares = dict(zip(live, _waveShares(numWaves, len(live), layout)))
+    return tuple(shares.get(tc, ((), 0)) for tc in group)
+
+
+def tdmWaveShares(grouping, numWaves, isLive):
+    """{member: (numComp, waves)} over every set of `grouping`.
+
+    Reads nothing but its arguments: `isLive(tc)` says which members the
+    problem carries.
+    """
+    return {tc: (numComp, waves)
+            for group in grouping.groups
+            for tc, (waves, numComp) in zip(
+                group, _setWaveShares(group, grouping.layout, numWaves, isLive))}
 
 
 def tdmWavePartition(ks, tc):
-    """Return (`numComp`, wave indices) for tensor `tc`."""
+    """Return (`numComp`, wave indices) for tensor `tc`: (0, ()) when no wave issues it."""
     numWaves = ks.get("NumWaves", 1)
-    grouping = tdmGrouping(ks)
-    layout = grouping.layout
-    for group in grouping.groups:
-        if tc in group:
-            waves, numComp = _waveShares(numWaves, len(group), layout)[group.index(tc)]
-            return numComp, waves
+    if numWaves <= 1:
+        # One wave issues every live tensor from its own descriptor.
+        return (1, (0,)) if tdmMemberIsLive(ks, tc) else (0, ())
+    shares = tdmWaveShares(tdmGrouping(ks), numWaves, functools.partial(tdmMemberIsLive, ks))
+    if tc in shares:
+        return shares[tc]
     # A tensor no row names: the default two-way parity. Metadata rides the
     # even arm, the one issueLoad admits it on.
     numComp = numWaves // 2
@@ -274,23 +328,78 @@ def tdmWavePartition(ks, tc):
     return numComp, tuple(w for w in range(numWaves) if (w % 2 == 0) == isAArm)
 
 
+def tdmWaveMask(ks, tc):
+    """The waves that issue tensor `tc`'s TDM load: bit w is set for wave w, 0 for none."""
+    return sum(1 << w for w in tdmWavePartition(ks, tc)[1])
+
+
+def tdmWaveMasks(ks):
+    """{tensor: tdmWaveMask} for every live member of the resolved grouping."""
+    return {tc: tdmWaveMask(ks, tc) for group in liveGroups(ks) for tc in group}
+
+
 def tdmWaveComponents(ks, tc):
-    """Return (`numComp`, WaveIdx right shift); None means WaveIdx is unused."""
+    """Return (`numComp`, WaveIdx right shift, wave offset) for tensor `tc`.
+
+    A wave's component is (WaveIdx - offset) >> shift; a None shift means one
+    component, so WaveIdx is unused. The offset is nonzero only for a run of
+    waves that starts above wave 0, which no shift alone reaches.
+    """
     numComp, waves = tdmWavePartition(ks, tc)
     if numComp == 1:
-        return numComp, None
+        return numComp, None, 0
     if waves == tuple(range(numComp)):
-        return numComp, 0
+        return numComp, 0, 0
     if numComp < 2:
         # numComp == 0: no wave carries this member, so the id is never read.
-        return numComp, 1
+        return numComp, 1, 0
     if tuple(w >> 1 for w in waves) == tuple(range(numComp)):
-        return numComp, 1
+        return numComp, 1, 0
+    if waves == tuple(range(waves[0], waves[0] + numComp)):
+        return numComp, 0, waves[0]
     raise TdmArrangementNotEmittable(
-        "tensor %s rides waves %s over %d components, and no right-shift of WaveIdx maps "
-        "that onto components 0..%d: shifting by one gives %s"
+        "tensor %s rides waves %s over %d components, and no offset and right-shift of "
+        "WaveIdx maps that onto components 0..%d: shifting by one gives %s"
         % (tc, waves, numComp, numComp - 1, tuple(w >> 1 for w in waves)))
 
+
+def tdmRidesEveryWave(ks, tc):
+    """True when wave-separated TDM spreads tensor `tc` over every wave."""
+    if not tdmWaveSeparated(ks):
+        return False
+    _, waves = tdmWavePartition(ks, tc)
+    return waves == tuple(range(ks.get("NumWaves", 1)))
+
+
+def tdmPairOnEveryWave(ks, tcA, tcB):
+    """True when both tensors of a writer pair ride every wave, so neither needs a wave guard.
+
+    A data tensor rides every wave when it is its set's only live member, and
+    TDMFuse 1-3 without MX scales give both A and B such a set; the scale pair
+    and every other row keep their guarded paths.
+    """
+    return tdmRidesEveryWave(ks, tcA) and tdmRidesEveryWave(ks, tcB)
+
+
+def tdmHalfPlrMaskedIncs(ks):
+    """Tensors whose own GlobalReadIncs HalfPLR's last-iteration mask zeroes.
+
+    Parity and shared sets advance through a shadow increment, which the mask zeroes instead. A
+    tensor that advances by its own increment loses it, while removeStagger still needs it to
+    rebase that tensor's descriptor for the K tail: every live tensor on one wave, where each
+    keeps its own descriptor, and on more waves both members of an every-wave pair, the data
+    tensor beside a shared scale set, and a lone scale on a parity row. Empty for HalfPLR 0.
+    """
+    if not ks.get("HalfPLR"):
+        return ()
+    if ks.get("NumWaves", 1) <= 1:
+        return ("A", "B") + tdmLiveScales(ks)
+    if tdmSharedScaleSetActive(ks):
+        return ("B" if tdmSharedScaleSetOwner(ks) == "A" else "A",)
+    if tdmPairOnEveryWave(ks, "A", "B"):
+        return ("A", "B")
+    live = tdmLiveScales(ks)
+    return tuple(live) if len(live) == 1 else ()
 
 def tdmSoleWave(ks, tc):
     """Return the sole wave carrying `tc`."""
@@ -300,6 +409,32 @@ def tdmSoleWave(ks, tc):
             "the shared-set increment selects one wave per member; %s rides waves %s"
             % (tc, waves))
     return waves[0]
+
+
+def tdmWaveGuard(ks, tc):
+    """How a writer admits exactly the waves that carry `tc`.
+
+    ("all",) every wave; ("none",) no wave; ("wave", w) wave w alone; ("below", n)
+    waves 0..n-1; ("from", w) waves w..NumWaves-1; ("parity", r) the waves whose
+    index is r modulo 2.
+    """
+    numWaves = ks.get("NumWaves", 1)
+    _, waves = tdmWavePartition(ks, tc)
+    if not waves:
+        return ("none",)
+    if waves == tuple(range(numWaves)):
+        return ("all",)
+    if len(waves) == 1:
+        return ("wave", waves[0])
+    if waves == tuple(range(len(waves))):
+        return ("below", len(waves))
+    if waves == tuple(range(waves[0], numWaves)):
+        return ("from", waves[0])
+    if waves == tuple(range(waves[0] % 2, numWaves, 2)):
+        return ("parity", waves[0] % 2)
+    raise TdmArrangementNotEmittable(
+        "tensor %s rides waves %s of %d, which is neither one wave, a run touching the first "
+        "or last wave, nor a parity class" % (tc, waves, numWaves))
 
 
 def tdmWaveRangeText(ks, tc):

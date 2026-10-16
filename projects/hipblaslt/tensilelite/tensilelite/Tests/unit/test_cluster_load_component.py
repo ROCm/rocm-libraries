@@ -402,9 +402,23 @@ class TestMaskAxisPerGrouping:
             assert ("s_or_b32 s[sgpr%s], s[sgpr%s], s[sgprMulticastMask%s]"
                     % (group1, group1, tc[-1])) in str(mod)
 
+    @pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+    def test_rows_without_scales_give_each_data_tensor_its_own_mask(self, tdmFuse):
+        # Without MX scales TDMFuse 1-3 reduce to {A} + {B}, each over every wave, so no parity branch.
+        k = _kernel(clusterDim=(2, 4), tdmFuse=tdmFuse, mx=False)
+        assert _c().usesCombinedMask(k) is False
+        for tc in ("A", "B"):
+            group1 = "tdm%sGroup1" % tc
+            mod = str(_c().applyToDescriptor(_StubWriter(), k, group1, tc, waveSeparated=True))
+            assert ("s_or_b32 s[sgpr%s], s[sgpr%s], s[sgprMulticastMask%s]"
+                    % (group1, group1, tc)) in mod, (tc, mod)
+            assert "OddWave" not in mod, (tc, mod)
+
     def test_declined_grouping_keeps_combined_mask(self):
-        # Without MX scales TDMFuse=1 falls back to the MX_AB row.
-        assert _c().usesCombinedMask(_kernel(clusterDim=(2, 4), tdmFuse=1, mx=False))
+        # TDMSplit declines TDMFuse=1, which falls back to the MX_AB row.
+        k = _kernel(clusterDim=(2, 4), tdmFuse=1, mx=True)
+        k["TDMSplit"] = True
+        assert _c().usesCombinedMask(k)
 
 
 if __name__ == "__main__":
