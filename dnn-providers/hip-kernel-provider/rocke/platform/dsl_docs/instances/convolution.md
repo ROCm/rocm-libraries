@@ -758,9 +758,8 @@ derives the tile counts from its kernargs and decodes the block id through
 Candidates: `nongrouped_specs(problem, arch)`;
 `tile_w_candidates(Wo, atom_tile)` prefers widths that divide `Wo` exactly, and
 the 16-wide atoms exist for widths that are not a multiple of 32. The AOT cache
-(`benchmarks/common/direct_kernel_sweep.py`, variant `direct_nongrouped`) builds
-the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride 1/2
-and offers a problem only the widths `tile_w_candidates` would pick for it.
+builds the shape-independent `nongrouped_knobs(arch, dtype)` grid for 3x3 stride
+1/2 and offers a problem only the widths `tile_w_candidates` would pick for it.
 
 C++ engine twin: `rocke_build_direct_conv_nongrouped` in
 `cpp/instances/common/conv_direct_nongrouped.cpp`; byte-identity gated by

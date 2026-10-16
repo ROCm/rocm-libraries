@@ -69,13 +69,13 @@ def job_and_builder(identity: KernelIdentity):
     """``(job, build)``: the job ``--compile-all`` builds ``identity`` from
     and the family's ``build(job, arch, dtype)``."""
     if identity.is_direct:
-        from benchmarks.common.direct_kernel_sweep import (
+        from kernels.common.conv_direct_aot_jobs import (
             build_direct_job,
             direct_job_for_identity,
         )
 
         return direct_job_for_identity(identity), build_direct_job
-    from benchmarks.common.kernel_sweep import build_kernel, job_for_identity
+    from kernels.common.conv_aot_jobs import build_kernel, job_for_identity
 
     return job_for_identity(identity), build_kernel
 

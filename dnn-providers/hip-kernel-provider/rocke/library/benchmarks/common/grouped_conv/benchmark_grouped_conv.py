@@ -495,8 +495,8 @@ def _build_jobs(specs):
     family builds for its identity, so its binary is the one the implicit-GEMM
     and direct-conv caches would hold for that name.
     """
-    from benchmarks.common.direct_kernel_sweep import direct_job_for_identity
-    from benchmarks.common.kernel_sweep import job_for_identity
+    from kernels.common.conv_aot_jobs import job_for_identity
+    from kernels.common.conv_direct_aot_jobs import direct_job_for_identity
 
     groups: dict = {}
     seen: set = set()
@@ -516,8 +516,9 @@ def _build_jobs(specs):
 
 def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> int:
     """Bring ``cache`` up to date for ``specs``; compile only what changed."""
-    from benchmarks.common.direct_kernel_sweep import build_direct_job
-    from benchmarks.common.kernel_sweep import build_kernel, compile_jobs
+    from benchmarks.common.kernel_sweep import compile_jobs
+    from kernels.common.conv_aot_jobs import build_kernel
+    from kernels.common.conv_direct_aot_jobs import build_direct_job
 
     try:
         groups = _build_jobs(specs)
@@ -1158,6 +1159,9 @@ def main(argv: list[str] | None = None) -> int:
         args.verify = True
     if args.sample is not None and not 0.0 < args.sample <= 1.0:
         print("error: --sample takes a fraction in (0, 1]", file=sys.stderr)
+        return 2
+    if args.ckprofiler is not None and args.ckprofiler_script is None:
+        print("error: --ckprofiler requires --ckprofiler-script", file=sys.stderr)
         return 2
 
     if args.compile_all:

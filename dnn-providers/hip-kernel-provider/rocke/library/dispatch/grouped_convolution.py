@@ -7,8 +7,13 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950 (the gfx942 forward
-list is registered but empty). Every
+forward convolutions on gfx942 and gfx950, and backward-data (dgrad)
+convolutions on gfx950. Weight-gradient (wgrad) and gfx1250 forward have no
+list registered at all: this rewrite moved fwd/dgrad onto the instance-list
+machinery but has not yet ported wgrad or gfx1250 onto it, so those
+directions/arches are an explicit, declared gap rather than a silent
+regression -- a request for either is rejected with a reason, not routed to a
+default. Every
 record there spells the :class:`KernelIdentity` of one AOT kernel (format:
 :class:`InstanceList`; edit with
 ``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
@@ -18,9 +23,6 @@ format in :mod:`kernels.common.conv_kernel_label`) and whose ``algorithm`` is
 the kernel family (``implicit_gemm``, ``direct_nongrouped``,
 ``direct_depthwise_dgrad``, ...). So a request can pin one family
 (``algorithm=``) or one instance (``spec_id=<name>``).
-
-Nothing else is registered: no wgrad, no other arch. A request for either is
-rejected with a reason rather than routed to a default.
 
 A dgrad request describes the same convolution as the forward one (its
 ``Hi``/``Wi`` are dX's extents, ``Ho``/``Wo`` dY's); the instance computes dX
@@ -37,15 +39,21 @@ WHAT DISPATCH DECIDES
   shape (:func:`kernels.common.conv_direct_variants.direct_spec_for_problem`).
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
-  name; a process lowering another flavor admits none of them (set
-  ``ROCKE_LLVM_FLAVOR`` to the instances' flavor).
+  name; a process lowering another flavor admits none of them. Set
+  ``ConvGroupedRequest.llvm_flavor`` to pin the flavor a request is checked
+  against; left at its default (``None``) it falls back to this process's
+  detected flavor (``ROCKE_LLVM_FLAVOR``, or COMGR auto-detection).
 * **Selection** among admitted instances is the list order: the first listed
   wins. That is a placeholder policy until measured rankings exist; the
   ``ranker`` hook of :func:`dispatch_conv_grouped` is where one plugs in.
 
-Building the instances is not done here: their binaries come from the AOT
+Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
---compile-all``), keyed by the same identity. What dispatch hands a launcher is
+--compile-all``), keyed by the same identity. Every candidate can still build
+its kernel IR (``DispatchResult.build()``): from the job ``--compile-all``
+builds its identity from (:func:`kernels.common.conv_aot_jobs.job_for_identity`,
+:func:`kernels.common.conv_direct_aot_jobs.direct_job_for_identity`), so it is
+the IR of the cached binary. What dispatch hands a launcher is
 a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
 order -- each one's identity, launch geometry, kernarg signature and buffers
 -- plus the scratch and host tables they need. Most instances are one kernel;
@@ -59,11 +67,16 @@ from __future__ import annotations
 import dataclasses
 import functools
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
+from kernels.common.conv_aot_jobs import build_kernel, job_for_identity
+from kernels.common.conv_direct_aot_jobs import (
+    build_direct_job,
+    direct_job_for_identity,
+)
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_variants import (
     direct_dgrad_weight_transforms,
@@ -93,8 +106,10 @@ from rocke.dispatch.core import (
 )
 
 __all__ = [
+    "CONV_DGRAD_EXECUTION_REGISTRY",
     "CONV_DGRAD_REGISTRY",
     "CONV_DIRECT_ABI_VERSION",
+    "CONV_FWD_EXECUTION_REGISTRY",
     "CONV_FWD_REGISTRY",
     "CONV_GROUPED_ABI_VERSION",
     "ConvGroupedRequest",
@@ -108,6 +123,7 @@ __all__ = [
     "dispatch_conv_grouped",
     "dispatch_conv_grouped_all",
     "format_instance_list",
+    "iter_dispatch_conv_grouped_all",
     "launch_plan_for",
     "load_instance_list",
     "registered_conv_grouped_combos",
@@ -174,6 +190,10 @@ class ConvGroupedRequest(OperatorRequest):
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # LLVM flavor to check instance provenance against; None means "detect
+    # from this process" (current_llvm_flavor()). Set explicitly to pin
+    # admission to a flavor without touching ROCKE_LLVM_FLAVOR.
+    llvm_flavor: str | None = None
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -409,7 +429,7 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _conv_problem(req))
+        return identity_supports_problem(identity, _conv_problem(req), req.llvm_flavor)
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -417,7 +437,7 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     problem, why = _direct_problem(req)
     if problem is None:
         return False, why
-    ok, why = identity_supports_problem(identity, problem)
+    ok, why = identity_supports_problem(identity, problem, req.llvm_flavor)
     if not ok:
         return False, why
     spec, why = _direct_launch_spec(identity, req)
@@ -671,6 +691,22 @@ def launch_plan_for(req: ConvGroupedRequest, spec: ConvInstanceSpec) -> ConvLaun
 # ---------------------------------------------------------------------------
 
 
+def _build_instance(spec: ConvInstanceSpec, arch: str):
+    """``build(spec, arch)`` of every instance candidate: its kernel IR.
+
+    Built from the job ``--compile-all`` builds the identity from, so this is
+    the IR of the cached binary. Only the instance's own kernel: the helpers a
+    run launches before it (``spec.helpers``) are binaries of their own.
+    """
+    identity = spec.identity
+    if arch != identity.arch:
+        raise ValueError(f"{spec.name} is a {identity.arch} instance, not {arch}")
+    if identity.is_direct:
+        job = direct_job_for_identity(identity)
+        return build_direct_job(job, arch, identity.dtype_a)[0]
+    return build_kernel(job_for_identity(identity), arch, identity.dtype_a)[0]
+
+
 def _make_instance_candidate(spec: ConvInstanceSpec, priority: int) -> KernelCandidate:
     name, identity = spec.name, spec.identity
 
@@ -710,6 +746,7 @@ def _make_instance_candidate(spec: ConvInstanceSpec, priority: int) -> KernelCan
         grid=_grid,
         block=_block,
         sweep_space=lambda req: (spec,) if candidate.admits(req)[0] else (),
+        build=_build_instance,
     )
     return candidate
 
@@ -1011,6 +1048,24 @@ _REGISTRIES = {
 }
 CONV_FWD_REGISTRY = _REGISTRIES["fwd"]
 CONV_DGRAD_REGISTRY = _REGISTRIES["dgrad"]
+
+# A second registry per direction, holding the same candidates as the route
+# registry above but meant for sweeping/benchmarking rather than production
+# routing (see :func:`iter_dispatch_conv_grouped_all`). Kept distinct from
+# ``_REGISTRIES`` so routing policy (e.g. a future ranker) can diverge from
+# what a sweep walks, mirroring ``ATTENTION_ROUTE_REGISTRY`` /
+# ``ATTENTION_EXECUTION_REGISTRY`` (:mod:`dispatch.attention`). Like
+# attention's, it refuses a candidate without a ``build``, so everything a
+# sweep walks can be built (:func:`_build_instance`).
+_EXECUTION_REGISTRIES = {
+    direction: CandidateRegistry(
+        family, dim_vocabulary=_CONV_DIM_VOCABULARY, require_build=True
+    )
+    for direction, family in _FAMILIES.items()
+}
+CONV_FWD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["fwd"]
+CONV_DGRAD_EXECUTION_REGISTRY = _EXECUTION_REGISTRIES["dgrad"]
+
 # Registered instances by name; a candidate's spec does not depend on the request.
 _INSTANCE_SPECS: dict[str, ConvInstanceSpec] = {}
 for (_arch, _direction), _ in _INSTANCE_LISTS.items():
@@ -1022,7 +1077,9 @@ for (_arch, _direction), _ in _INSTANCE_LISTS.items():
             helpers=_instance_helpers(_identity),
         )
         _INSTANCE_SPECS[_spec.name] = _spec
-        _REGISTRIES[_direction].register(_make_instance_candidate(_spec, _priority))
+        _candidate = _make_instance_candidate(_spec, _priority)
+        _REGISTRIES[_direction].register(_candidate)
+        _EXECUTION_REGISTRIES[_direction].register(_candidate)
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1143,23 @@ def dispatch_conv_grouped_all(req: ConvGroupedRequest) -> tuple[DispatchResult, 
     if _request_errors(req):
         return ()
     return _registry(req).dispatch_all(req, kernel_id=_kernel_id)
+
+
+def iter_dispatch_conv_grouped_all(req: ConvGroupedRequest) -> Iterable[DispatchResult]:
+    """Stream a :class:`DispatchResult` for every instance that can run ``req``.
+
+    Reads :data:`CONV_FWD_EXECUTION_REGISTRY` / :data:`CONV_DGRAD_EXECUTION_REGISTRY`
+    rather than the production route registries -- the home for sweep/tuning
+    consumers, mirroring :func:`dispatch.attention.iter_dispatch_attention_all`.
+    Every result builds (``result.build()`` is the instance's kernel IR, see
+    :func:`_build_instance`); today the candidates are the same as
+    :func:`dispatch_conv_grouped_all`'s.
+    """
+    if _request_errors(req):
+        return
+    yield from _EXECUTION_REGISTRIES[req.direction.lower()].iter_dispatch_all(
+        req, kernel_id=_kernel_id
+    )
 
 
 def _no_instance_reason(req: ConvGroupedRequest) -> str:

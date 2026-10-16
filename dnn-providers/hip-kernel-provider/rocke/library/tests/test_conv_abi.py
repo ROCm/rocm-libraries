@@ -37,6 +37,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
+from kernels.common import conv_aot_jobs as aj
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_abi import conv_arg_names, conv_direct_arg_names
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
@@ -952,19 +953,19 @@ def test_aot_dgrad_builds_one_tilde_binary_for_every_stride(monkeypatch):
 
     from benchmarks.common.kernel_cache import KernelCache
 
-    ks = _shrink_sweep_grid(monkeypatch)
+    _shrink_sweep_grid(monkeypatch)
     target = ArchTarget.from_gfx(_ARCH)
     family = "wmma" if target.wave_size == 32 else "mma"
-    jobs = list(ks._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
+    jobs = list(aj._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
     assert jobs
     for j in jobs:
         i = j.identity
         assert (i.stride_h, i.stride_w, i.dilation_h, i.dilation_w) == (0, 0, 0, 0)
-        p = ks._probe_problem("dgrad", j.caps)
+        p = aj._probe_problem("dgrad", j.caps)
         assert p.sH > 1 or p.dH > 1
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
-    ident = next(j.identity for j in jobs if ks._spec_is_valid(j, _ARCH, "fp16"))
+    ident = next(j.identity for j in jobs if aj._spec_is_valid(j, _ARCH, "fp16"))
     for s, d in ((1, 1), (2, 1), (3, 1), (1, 2)):
         p = ConvProblem(
             N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, sH=s, sW=s, pH=d, pW=d, dH=d, dW=d
@@ -1089,7 +1090,6 @@ def test_cache_async_chunk_must_divide_cpg():
     """The async loaders' chunk width is baked from the build-time cpg; a
     problem whose cpg it does not divide would read across filter positions."""
     from benchmarks.common.kernel_cache import KernelCache
-    from benchmarks.common.kernel_sweep import _async_chunks
 
     cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
     cfg = dict(
@@ -1109,7 +1109,7 @@ def test_cache_async_chunk_must_divide_cpg():
         vector_size_c=2,
         async_dma=True,
     )
-    chunks = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, _ARCH)
+    chunks = aj._async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, _ARCH)
     assert chunks["async_chunk_a"] > 2 and chunks["async_chunk_b"] > 2
     ident = _cache_identity(async_dma=True, **chunks)
 
@@ -1125,7 +1125,7 @@ def test_cache_async_chunk_must_divide_cpg():
     # dword per lane, so the same cfg bakes a 2-half chunk there. Recording
     # gfx950's 8 for a gfx942 binary would advertise a cpg divisibility the
     # ISA does not have.
-    narrow_arch = _async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, "gfx942")
+    narrow_arch = aj._async_chunks(cfg, ("fp16", "fp16", "fp16"), {}, "gfx942")
     assert narrow_arch == {"async_chunk_a": 2, "async_chunk_b": 2}
 
 
@@ -1141,21 +1141,21 @@ def test_count_jobs_matches_the_generators(monkeypatch, directions):
     """
     from rocke.core.arch import ArchTarget
 
-    ks = _shrink_sweep_grid(monkeypatch)
+    _shrink_sweep_grid(monkeypatch)
     target = ArchTarget.from_gfx(_ARCH)
     family = "wmma" if target.wave_size == 32 else "mma"
     split_ks = (1, 4)
     gens = {
-        "fwd": lambda: ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target),
-        "wgrad": lambda: ks._wgrad_jobs(
+        "fwd": lambda: aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target),
+        "wgrad": lambda: aj._wgrad_jobs(
             _ARCH, "fp16", target.wave_size, family, target, split_ks
         ),
-        "dgrad": lambda: ks._dgrad_jobs(
+        "dgrad": lambda: aj._dgrad_jobs(
             _ARCH, "fp16", target.wave_size, family, target, 64
         ),
     }
     walked = sum(sum(1 for _ in gens[d]()) for d in directions)
-    counted = ks.count_jobs(
+    counted = aj.count_jobs(
         dtype="fp16", target=target, directions=directions, split_ks=split_ks
     )
     assert walked > 0
@@ -1163,14 +1163,16 @@ def test_count_jobs_matches_the_generators(monkeypatch, directions):
 
 
 def _shrink_sweep_grid(monkeypatch):
+    """Shrink the AOT grid (:mod:`kernels.common.conv_aot_jobs`); return the
+    sweep module that enumerates and compiles it."""
     from benchmarks.common import kernel_sweep as ks
 
-    monkeypatch.setattr(ks, "_TILE_MN", (32, 64))
-    monkeypatch.setattr(ks, "_TILE_K", (32,))
-    monkeypatch.setattr(ks, "_WARP_MN", (1, 2))
-    monkeypatch.setattr(ks, "_VECS", (2, 8))
+    monkeypatch.setattr(aj, "_TILE_MN", (32, 64))
+    monkeypatch.setattr(aj, "_TILE_K", (32,))
+    monkeypatch.setattr(aj, "_WARP_MN", (1, 2))
+    monkeypatch.setattr(aj, "_VECS", (2, 8))
     # basic/wavelet are in so the AOT alias filter is exercised.
-    monkeypatch.setattr(ks, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
+    monkeypatch.setattr(aj, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
     return ks
 
 
@@ -1196,16 +1198,16 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
     split_ks = (1, 4)
 
     streams = [
-        iter(ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
-        iter(ks._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
+        iter(aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)),
+        iter(aj._wgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, split_ks)),
         iter(
-            ks._dgrad_jobs(
+            aj._dgrad_jobs(
                 _ARCH,
                 "fp16",
                 target.wave_size,
                 family,
                 target,
-                ks.CACHE_DGRAD_MAX_SUB_GEMMS,
+                aj.CACHE_DGRAD_MAX_SUB_GEMMS,
             )
         ),
     ]
@@ -1215,7 +1217,7 @@ def test_enumerate_jobs_matches_a_serial_round_robin(monkeypatch, jobs):
         for stream in streams:
             for job in stream:
                 key = job.identity.stable_hash()
-                if key in seen or not ks._spec_is_valid(job, _ARCH, "fp16"):
+                if key in seen or not aj._spec_is_valid(job, _ARCH, "fp16"):
                     continue
                 seen[key] = job
                 still_running.append(stream)
@@ -1324,8 +1326,8 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     family = "wmma" if target.wave_size == 32 else "mma"
     pool = [
         j
-        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
-        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+        for j in aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and aj._spec_is_valid(j, _ARCH, "fp16")
     ]
     jobs, spare = pool[:3], pool[-1]
     cache = KernelCache(tmp_path, _ARCH)
@@ -1334,7 +1336,7 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     def build(job, arch, dtype):
         # A swapped job stands in for "the emitter now emits other code for
         # this identity".
-        return ks.build_kernel(swap.get(job.identity, job), arch, dtype)
+        return aj.build_kernel(swap.get(job.identity, job), arch, dtype)
 
     def run():
         lines = []
@@ -1397,8 +1399,8 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
     family = "wmma" if target.wave_size == 32 else "mma"
     jobs = [
         j
-        for j in ks._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
-        if not j.identity.async_dma and ks._spec_is_valid(j, _ARCH, "fp16")
+        for j in aj._fwd_jobs(_ARCH, "fp16", target.wave_size, family, target)
+        if not j.identity.async_dma and aj._spec_is_valid(j, _ARCH, "fp16")
     ][:3]
     _REAL_COMPILE_WORKER[:] = [ks._compile_worker]
     _CRASH_IDENTITY[:] = [jobs[0].identity.stable_hash()]
@@ -1409,7 +1411,7 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
         ks.compile_jobs(
             cache=cache,
             all_jobs=jobs,
-            build=ks.build_kernel,
+            build=aj.build_kernel,
             arch=_ARCH,
             dtype="fp16",
             directions=("fwd",),
@@ -1627,7 +1629,7 @@ def test_aot_grid_capability_axes(monkeypatch):
     assert merged and all(j.direction == "wgrad" for j in merged)
     for j in merged:
         assert j.identity.grouped and j.identity.two_stage
-        p = ks._probe_problem("wgrad", j.caps)
+        p = aj._probe_problem("wgrad", j.caps)
         assert p.cpg == p.kpg == 1 and p.groups % j.identity.group_merge == 0
 
 
@@ -1699,7 +1701,7 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
     from rocke.core.arch import ArchTarget
 
     ks = _shrink_sweep_grid(monkeypatch)
-    monkeypatch.setattr(ks, "_TILE_MN", (64, 128, 256))
+    monkeypatch.setattr(aj, "_TILE_MN", (64, 128, 256))
     target = ArchTarget.from_gfx(_ARCH)
     jobs = ks.enumerate_jobs(
         arch=_ARCH, dtype="fp16", target=target, directions=("fwd", "wgrad", "dgrad")
@@ -1709,13 +1711,13 @@ def test_aot_grid_caps_accumulator_registers(monkeypatch):
         return (i.tile_m // i.warp_m) * (i.tile_n // i.warp_n) // target.wave_size
 
     assert jobs
-    assert max(acc(j.identity) for j in jobs) <= ks.CACHE_MAX_ACC_REGS
+    assert max(acc(j.identity) for j in jobs) <= aj.CACHE_MAX_ACC_REGS
     # The cap is what removed them: the shrunk grid does reach past it.
-    monkeypatch.setattr(ks, "_MAX_ACC_REGS", 10**6)
+    monkeypatch.setattr(aj, "_MAX_ACC_REGS", 10**6)
     uncapped = ks.enumerate_jobs(
         arch=_ARCH, dtype="fp16", target=target, directions=("fwd",)
     )
-    assert max(acc(j.identity) for j in uncapped) > ks.CACHE_MAX_ACC_REGS
+    assert max(acc(j.identity) for j in uncapped) > aj.CACHE_MAX_ACC_REGS
 
 
 def test_cache_applies_runtime_launch_limits(tmp_path):

@@ -15,6 +15,7 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
+from kernels.common.conv_direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
@@ -348,7 +349,7 @@ def test_dgrad_stride1_offers_mfma_pipeline_and_scalar(cache):
         assert set(plan.workspaces) == {"ws_t"}
 
 
-@pytest.mark.parametrize("cpg,kpg", dks._DENSE_MFMA_DGRAD_CHANNELS)
+@pytest.mark.parametrize("cpg,kpg", _DENSE_MFMA_DGRAD_CHANNELS)
 def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
     """Each tuned dense (cpg, kpg) row in ``_DENSE_MFMA_DGRAD_CHANNELS`` must
     reach the MFMA dgrad pipeline for a real problem with those channel

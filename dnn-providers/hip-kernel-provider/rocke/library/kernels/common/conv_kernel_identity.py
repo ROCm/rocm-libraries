@@ -353,7 +353,7 @@ def _grid_fits(identity: KernelIdentity, problem: object) -> tuple[bool, str]:
 
 
 def identity_supports_problem(
-    identity: KernelIdentity, problem: object
+    identity: KernelIdentity, problem: object, llvm_flavor: str | None = None
 ) -> tuple[bool, str]:
     """Can a binary built for ``identity`` be launched on ``problem``?
 
@@ -361,6 +361,12 @@ def identity_supports_problem(
     ``DirectConvProblem`` for the direct ones; both are read by attribute.
     Returns ``(ok, reason)``; the reason makes an empty candidate list
     diagnosable instead of just "no compatible kernels".
+
+    ``llvm_flavor`` is the flavor to check provenance against; ``None`` (the
+    default) falls back to :func:`current_llvm_flavor` (environment/COMGR
+    detection), preserving this function's standalone behavior. Callers that
+    have a flavor on hand -- a dispatch request, a test -- should pass it
+    explicitly instead of relying on process environment.
 
     Provenance is checked first: a binary lowered for another LLVM flavor is
     never offered. (Emitter changes are not checked here: most leave most
@@ -383,10 +389,11 @@ def identity_supports_problem(
     see: :func:`kernels.common.conv_direct_variants.direct_spec_for_problem`
     re-validates those against the real shape.
     """
-    if identity.llvm_flavor != current_llvm_flavor():
+    flavor = current_llvm_flavor() if llvm_flavor is None else llvm_flavor
+    if identity.llvm_flavor != flavor:
         return False, (
             f"built for LLVM flavor {identity.llvm_flavor or '<unknown>'}, "
-            f"this process lowers to {current_llvm_flavor()}"
+            f"this process lowers to {flavor}"
         )
 
     cpg = int(getattr(problem, "cpg", 0))

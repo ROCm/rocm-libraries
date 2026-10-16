@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from dispatch.grouped_convolution import (
@@ -66,10 +68,28 @@ def _identities(labels: list[str]) -> list[KernelIdentity]:
 
 
 def _write(path: Path, lst: InstanceList) -> None:
+    """Validate ``lst`` before ``path`` ever sees it.
+
+    The dispatcher (and this tool) load instance lists at import/labels time,
+    so a broken file left on disk breaks every caller, including a later
+    ``format`` meant to fix it. Write to a temp file in the same directory,
+    validate that (running every check the dispatcher's loader runs), and
+    only then replace ``path`` -- on a validation failure the original file
+    is untouched.
+    """
     text = format_instance_list(lst)
-    path.write_text(text, encoding="utf-8")
-    # Reading it back runs every check the dispatcher's loader runs.
-    load_instance_list(path)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        load_instance_list(tmp_path)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     print(f"{path}: {len(lst.identities)} instances")
 
 

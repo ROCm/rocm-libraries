@@ -33,6 +33,7 @@ from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
 from kernels.common.conv_kernel_identity import KernelIdentity
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
 
 _ARCH = "gfx950"
@@ -161,6 +162,44 @@ def test_every_instance_has_the_aot_build_job_compile_all_uses(direction):
             assert job.identity == ident
 
 
+def test_execution_registries_only_hold_buildable_candidates():
+    """The sweep registries refuse a candidate without a ``build``, as
+    attention's do, and every registered instance has one."""
+    for registry in (gc.CONV_FWD_EXECUTION_REGISTRY, gc.CONV_DGRAD_EXECUTION_REGISTRY):
+        assert registry.require_build
+        assert registry.candidates()
+        assert all(c.build is not None for c in registry.candidates())
+
+
+@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+def test_every_swept_family_builds_the_kernel_compile_all_builds(direction):
+    """``result.build()`` of a sweep result is the IR of the cached binary: the
+    kernel ``--compile-all`` builds from the identity's job. One result per
+    family the shapes reach."""
+    shapes = _SHAPES if direction == "fwd" else _DGRAD_SHAPES
+    picked = {}
+    for kw in shapes.values():
+        req = _req(direction=direction, **kw)
+        for result in gc.iter_dispatch_conv_grouped_all(req):
+            picked.setdefault(result.spec.algorithm, result)
+    assert len(picked) > 1
+    for result in picked.values():
+        ident = result.spec.identity
+        if ident.is_direct:
+            want = dks.build_direct_job(
+                dks.direct_job_for_identity(ident), _ARCH, ident.dtype_a
+            )[0]
+        else:
+            want = ks.build_kernel(ks.job_for_identity(ident), _ARCH, ident.dtype_a)[0]
+        assert result.build().name == want.name, result.spec.name
+
+
+def test_an_instance_builds_only_for_its_own_arch():
+    result = gc.dispatch_conv_grouped(_req())
+    with pytest.raises(ValueError, match="gfx950 instance, not gfx942"):
+        result.candidate.built(result.spec, "gfx942")
+
+
 @pytest.mark.parametrize(
     "kw, match",
     [
@@ -200,10 +239,25 @@ def test_dispatch_stays_in_the_requested_direction():
         assert {r.kernel_id.op for r in results} == {f"conv_{direction}"}
 
 
-def test_another_llvm_flavor_admits_nothing(monkeypatch):
-    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm-other")
+def test_another_llvm_flavor_admits_nothing():
+    """Pin a real, differing flavor via the request -- not the environment.
+
+    An unrecognized env value (e.g. "llvm-other") is silently ignored by
+    flavor detection and falls back to auto-detect, so it would not
+    reliably mismatch. Picking a real flavor other than the instances' own
+    guarantees the mismatch deterministically.
+    """
+    instance_flavor = next(
+        iter(
+            {
+                s.identity.llvm_flavor
+                for s in gc.registered_conv_grouped_instances(direction="fwd")
+            }
+        )
+    )
+    other_flavor = next(f for f in LLVM_FLAVORS if f != instance_flavor)
     with pytest.raises(ValueError, match="LLVM flavor"):
-        gc.dispatch_conv_grouped(_req())
+        gc.dispatch_conv_grouped(_req(llvm_flavor=other_flavor))
 
 
 # ---------------------------------------------------------------------------

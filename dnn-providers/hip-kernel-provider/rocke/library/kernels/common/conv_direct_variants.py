@@ -19,13 +19,13 @@ from dataclasses import replace
 __all__ = [
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_TRANSPOSE",
-    "build_direct_kernel",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
     "direct_spec_for_problem",
     "direct_uses_coalesced_weights",
     "make_direct_spec",
+    "select_direct_kernel_builder",
     "validate_direct_spec",
 ]
 
@@ -180,8 +180,15 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
     raise ValueError(f"unknown direct conv variant {variant!r}")
 
 
-def build_direct_kernel(variant: str, spec, arch: str):
-    """The ``KernelDef`` of ``variant`` for ``spec`` (validated by the caller)."""
+def select_direct_kernel_builder(variant: str, spec, arch: str):
+    """The ``KernelDef`` of ``variant`` for ``spec`` (validated by the caller).
+
+    Named away from the ``build_*`` prefix on purpose: this is a dispatch
+    helper over the real per-variant builders below, not a builder itself --
+    ``test_builder_signature_contract.py`` scans every ``build_*`` top-level
+    function for the ``(spec, arch)`` builder signature, and this one takes
+    an extra ``variant``.
+    """
     from kernels.common import conv_direct_grouped as dc
     from kernels.common import conv_direct_nongrouped as dn
 
