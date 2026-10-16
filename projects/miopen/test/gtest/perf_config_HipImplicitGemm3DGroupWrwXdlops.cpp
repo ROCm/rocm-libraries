@@ -24,6 +24,8 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
 
+#include "get_handle.hpp"
+
 #include <set>
 #include <string>
 
@@ -55,6 +57,23 @@ group_conv::GroupConvTestConfig<3u> CanonicalShape()
     return {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
 }
 
+// The 3D grouped Wrw xdlops solver only enumerates kernels on xdlops-capable (CDNA) architectures.
+// On other devices (e.g. gfx110X/RDNA) the CK library still loads but produces no valid kernels, so
+// SetNextValue() legitimately has nothing to seed. The GPU tests use this to skip there rather than
+// failing the kernel-enumeration asserts; on CDNA the solver is applicable and the asserts run.
+bool SolverApplicableHere(const Problem& problem, std::string& reason)
+{
+    auto& handle = get_handle();
+    auto ctx     = miopen::ExecutionContext{};
+    ctx.SetStream(&handle);
+    const miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops solver{};
+    if(solver.IsApplicable(ctx, problem))
+        return true;
+    reason = solver.SolverDbId() + " is not applicable on this device (requires an xdlops/CDNA "
+                                   "architecture)";
+    return false;
+}
+
 } // namespace
 
 // Parameterized only so that INSTANTIATE_TEST_SUITE_P can put these tests under the
@@ -75,6 +94,10 @@ TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, SearchStartsAtKernel
 
     const auto problem =
         MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/false);
+
+    std::string skip_reason;
+    if(!SolverApplicableHere(problem, skip_reason))
+        GTEST_SKIP() << skip_reason;
 
     Config cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -100,6 +123,10 @@ TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupWrwXdlops_FP32, DeterministicSearchS
 
     const auto problem =
         MakeWrwProblem(CanonicalShape(), miopenFloat, miopenTensorNDHWC, /*deterministic=*/true);
+
+    std::string skip_reason;
+    if(!SolverApplicableHere(problem, skip_reason))
+        GTEST_SKIP() << skip_reason;
 
     Config cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
