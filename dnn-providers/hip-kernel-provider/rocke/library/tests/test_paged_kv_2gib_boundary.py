@@ -19,10 +19,12 @@ that read zero V instead give ``(N - m) / N`` for the affected sequence --
 One extra cache block pushes the same data onto the i64 path, which is
 correct on the 2D kernel; that case is the control.
 
-The gfx942 3D split-KV kernel uses the same resource size and gate but has no
-i64 path: its spec raises ``NotImplementedError`` when the gate requests one.
-For that kernel an explicit refusal is acceptable (recorded as xfail); silent
-zero reads are not.
+The gfx942 3D split-KV kernel shares the gate but has no i64 path: its spec
+raises ``NotImplementedError`` when the gate requests one. For that kernel an
+explicit refusal is acceptable (recorded as xfail); silent zero reads are not.
+Its default wide K/V loader uses plain global loads and never sees the
+resource bound; its async DMA loader (HIPDNN_GFX942_3D_WKV=0) uses the same
+``0x7FFF0000`` resource as the 2D kernel. Both loaders are exercised.
 """
 
 from __future__ import annotations
@@ -111,6 +113,17 @@ def gfx942_torch():
     return torch
 
 
+# (backend, HIPDNN_GFX942_3D_WKV). The gfx942 3D kernel has two K/V loaders:
+# the default wide loader (plain global loads, no buffer resource) and the
+# 1-DWORD async DMA loader (``0x7FFF0000`` buffer resource), selected by
+# HIPDNN_GFX942_3D_WKV=0. Only the async loader can show the zero reads.
+_PATHS = {
+    "2d": ("tiled", None),
+    "3d_wide": ("3d", "1"),
+    "3d_async": ("3d", "0"),
+}
+
+
 @pytest.mark.gpu
 @pytest.mark.parametrize(
     "extra_blocks",
@@ -118,19 +131,33 @@ def gfx942_torch():
     ids=["cache_2gib_i32", "cache_2gib_plus_block_i64"],
 )
 @pytest.mark.parametrize("shape", _SHAPES, ids=_shape_id)
-@pytest.mark.parametrize("backend", ["tiled", "3d"], ids=["2d", "3d"])
-def test_zero_q_unit_v_is_exactly_one(gfx942_torch, backend, shape, extra_blocks):
+@pytest.mark.parametrize("path", list(_PATHS))
+def test_zero_q_unit_v_is_exactly_one(
+    gfx942_torch, monkeypatch, path, shape, extra_blocks
+):
     """Zero Q, constant V = 1, identity block table: every output must be 1.
 
     ``extra_blocks=0``: K/V caches of exactly 2^31 bytes (fails while the gate
     is ``> 0x8000_0000``). ``extra_blocks=1``: one unused trailing block moves
     the cache onto the i64 path; the data read is identical (control on 2D).
 
-    ``backend="tiled"`` forces the 2D kernel, ``"3d"`` the split-KV kernel.
-    The 3D kernel may refuse a cache that needs i64 addressing (xfail), but
-    must not return wrong values.
+    ``2d`` forces the 2D kernel; ``3d_wide`` / ``3d_async`` force the split-KV
+    kernel with each K/V loader. The 3D kernel may refuse a cache that needs
+    i64 addressing (xfail), but must not return wrong values.
     """
+    backend, wkv = _PATHS[path]
+    if wkv is not None:
+        # The WKV flag is part of the 3D cache key, so no stale kernel is reused.
+        monkeypatch.setenv("HIPDNN_GFX942_3D_WKV", wkv)
     torch = gfx942_torch
+    try:
+        _run_zero_q_unit_v(torch, backend, shape, extra_blocks)
+    finally:
+        # Return the freed K/V blocks so the next case's mem_get_info sees them.
+        torch.cuda.empty_cache()
+
+
+def _run_zero_q_unit_v(torch, backend, shape, extra_blocks):
     hq, hkv, sk = shape
     blocks_per_seq = sk // _BLOCK_SIZE
     used_blocks = _BATCH * blocks_per_seq
@@ -179,7 +206,9 @@ def test_zero_q_unit_v_is_exactly_one(gfx942_torch, backend, shape, extra_blocks
                 raise  # a cache that fits the resource must not need i64
             pytest.xfail(f"gfx942 3D kernel has no i64 KV path: {exc}")
         raise
-    torch.cuda.synchronize()
+    finally:
+        torch.cuda.synchronize()  # the kernel must finish before K/V are freed
+        del k, v
 
     result = out.float().cpu()
     wrong = (result != 1.0).flatten(1).any(dim=1).nonzero().flatten().tolist()
