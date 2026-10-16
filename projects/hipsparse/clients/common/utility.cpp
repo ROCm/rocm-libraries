@@ -171,10 +171,7 @@ hipError_t query_device_property(int* device_count)
     hipError_t status = hipGetDeviceCount(device_count);
     if(status != hipSuccess)
     {
-        fprintf(stderr,
-                "hipGetDeviceCount failed: %s (%d)\n",
-                hipGetErrorString(status),
-                status);
+        fprintf(stderr, "hipGetDeviceCount failed: %s (%d)\n", hipGetErrorString(status), status);
         return status;
     }
 
