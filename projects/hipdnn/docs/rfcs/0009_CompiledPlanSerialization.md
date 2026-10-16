@@ -368,9 +368,11 @@ result can cover all candidates. In that case, the build makes a plain plan, and
 the first execute. To save a benchmarking plan, execute the plan one time, then save it. Or, build the
 plan with benchmarking off.
 
-The save hook reads the code object again from the kpack archive at the path from the plan build.
-It also checks the SHA-256 of the code object. When the archive is not readable, the status is
-`HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`. When the bytes do not match the SHA-256, the status is
+The save hook reads the code object from the kpack archive that the plan build used. The save hook
+can read the archive through the handle that the plan build opened. It also checks the SHA-256 of
+the code object. If the archive changes after the plan build, the save can fail. When the save
+fails because the archive is not readable, the status is `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`.
+When the save fails because the bytes do not match the SHA-256, the status is
 `HIPDNN_PLUGIN_STATUS_INVALID_VALUE`. Do not change the archive between the plan build and the save.
 
 ### Security
