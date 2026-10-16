@@ -9,7 +9,10 @@ graph's best kernel while its gain over the best kept kernel exceeds epsilon: th
 smallest grid value at or above the round-to-round noise floor that fits the budget.
 Rankings are the ``WinnerCacheFile.hpp`` shards of the successful timing phases of a
 ``tools/sweep.py`` output. Exit 1: the kept set (eps or ``--apply-rules``) exceeds
-the budget; exit 2: unusable input.
+the budget; exit 2: unusable input; exit 3: the sweep cannot support a reduction (a
+failed correctness verdict, or timing phases missing for some (round, corpus)). On exit
+1 and 3 the report is written and ``--out`` is not. A sweep of fewer than 2 timing
+rounds warns on stdout: its noise floor is assumed, not measured.
 """
 
 from __future__ import annotations
@@ -513,8 +516,6 @@ def propose_rules(variants: dict, rankings: list, protected, classification, eps
         if removed:
             rules.append(_costed(text, removed, variants, rankings, protected))
     rules.sort(key=_rule_order)
-    for index, rule in enumerate(rules, start=1):
-        rule.id = f"R{index}"
     return rules
 
 
@@ -522,6 +523,12 @@ def _rule_order(rule: Rule) -> tuple:
     """Lossless rules first, by saving; then by saving per unit of worst gain lost."""
     w, saved = rule.worst_gain_lost, len(rule.removed)
     return (w > 0, -(saved / w) if w > 0 else -saved, rule.text)
+
+
+def _rule_id(text: str) -> str:
+    """Derived from the rule text alone, so an id names the same rule under any
+    ``--budget``: the proposal depends on the budget, the text does not move."""
+    return "R" + hashlib.sha256(text.encode()).hexdigest()[:6]
 
 
 def _costed(text, removed, variants, rankings, protected) -> Rule:
@@ -538,7 +545,7 @@ def _costed(text, removed, variants, rankings, protected) -> Rule:
     at_floor = sorted(
         (cell for cell, names in before.items() if names <= removed), key=repr
     )
-    return Rule("", text, removed, len(losing), worst, at_floor)
+    return Rule(_rule_id(text), text, removed, len(losing), worst, at_floor)
 
 
 def apply_rules(variants: dict, rules: list, chosen: list) -> list:
@@ -546,7 +553,10 @@ def apply_rules(variants: dict, rules: list, chosen: list) -> list:
     by_id = {r.id: r for r in rules}
     unknown = [r for r in chosen if r not in by_id]
     if unknown:
-        raise ReduceError(f"--apply-rules {unknown} not proposed: {list(by_id)}")
+        raise ReduceError(
+            f"--apply-rules {unknown} not proposed: {list(by_id)}; ids come from the "
+            "rule text, so a rule the sweep or --budget no longer proposes is gone"
+        )
     removed = set().union(*(by_id[r].removed for r in chosen))
     return [name for name in variants if name not in removed]
 
@@ -649,6 +659,8 @@ def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
     arms = sorted(
         {r["phase"]["arm"] for _, r in attempts if r["phase"]["kind"] == "timing"}
     )
+    if not arms:
+        raise ReduceError(f"{sweep_dir}: no timing phase")
     if arm is None:
         if len(arms) != 1:
             raise ReduceError(f"timing arms {arms}: name one with --arm")
@@ -792,6 +804,24 @@ def _correctness_warning(r: Reduction) -> str | None:
     )
 
 
+def _sweep_warning(noise: NoiseFloor) -> str | None:
+    if not noise.missing_pairs:
+        return None
+    return (
+        f"timing phases missing for (round, corpus) {noise.missing_pairs}: the sweep "
+        "is partial; do not apply this reduction until it is rerun"
+    )
+
+
+def _single_round_warning(noise: NoiseFloor) -> str | None:
+    if noise.rounds >= 2:
+        return None
+    return (
+        f"{noise.rounds} timing round: eps_min is assumed {SINGLE_ROUND_EPSILON}, "
+        "not measured; sweep at least 2 rounds"
+    )
+
+
 def render_report(r: Reduction, selection, output_note: str, names, applied=()) -> str:
     """The report for the kernel set ``names`` that ``main`` writes, not whichever
     set eps alone would keep. ``applied`` are the ``--apply-rules`` rules behind it."""
@@ -813,12 +843,14 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
         f"({instances(r.variants, kept)} instances per arch)",
         f"- rounds {noise.rounds}, ranked graph records {len(r.rankings)}",
     ]
-    warning = _correctness_warning(r)
-    if warning:
-        lines.append(f"- WARNING: {warning}")
-    if noise.rounds <= 1:
-        lines.append(f"- single round: eps_min assumed {SINGLE_ROUND_EPSILON}")
-    else:
+    for warning in (
+        _correctness_warning(r),
+        _sweep_warning(noise),
+        _single_round_warning(noise),
+    ):
+        if warning:
+            lines.append(f"- WARNING: {warning}")
+    if noise.rounds > 1:
         lines.append(
             f"- drift {noise.drift:.6f}, eps_min {noise.epsilon_min:.6f}; graph keys "
             f"matched {noise.matched_keys}, unmatched {noise.unmatched_keys}"
@@ -894,7 +926,10 @@ def main(argv=None) -> int:
     parser.add_argument("--report", required=True, help="report to write")
     parser.add_argument("--budget", type=int, help="instances per arch")
     parser.add_argument(
-        "--apply-rules", default="", help="rule ids R1,R3,... to apply instead of eps"
+        "--apply-rules",
+        default="",
+        help="rule ids from the report's rule table (R and six hex digits, derived "
+        "from the rule text) to apply instead of eps",
     )
     args = parser.parse_args(argv)
     chosen = [r.strip() for r in args.apply_rules.split(",") if r.strip()]
@@ -903,9 +938,17 @@ def main(argv=None) -> int:
         reduction = analyse(
             args.selection, args.kdp, args.sweep_output, args.arm, args.budget
         )
-        warning = _correctness_warning(reduction)
-        if warning:
-            print(f"WARNING: {warning}")
+        blockers = [
+            w
+            for w in (
+                _correctness_warning(reduction),
+                _sweep_warning(reduction.noise),
+            )
+            if w
+        ]
+        for warning in (*blockers, _single_round_warning(reduction.noise)):
+            if warning:
+                print(f"WARNING: {warning}")
         applied = [rule for rule in reduction.rules if rule.id in chosen]
         if chosen:
             names = apply_rules(reduction.variants, reduction.rules, chosen)
@@ -915,6 +958,16 @@ def main(argv=None) -> int:
             what = f"eps {_eps(reduction.epsilon)}"
         else:
             names, what = sorted(reduction.keep(math.inf)), "floor + coverage"
+        if blockers:
+            note = "not written: the sweep cannot support a reduction (see WARNING)"
+            report.write_text(
+                render_report(reduction, args.selection, note, names, applied), "utf-8"
+            )
+            print(
+                f"FAIL: {what} not written: {'; '.join(blockers)}; report {report}",
+                file=sys.stderr,
+            )
+            return 3
         count = instances(reduction.variants, names)
         if count > reduction.budget:
             note = f"not written: {what} exceed budget"

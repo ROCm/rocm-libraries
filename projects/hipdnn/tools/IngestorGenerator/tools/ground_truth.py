@@ -206,6 +206,13 @@ def load_gt(path) -> list:
         not isinstance(r, dict) or set(r) != _GT_KEYS for r in rows
     ):
         raise GroundTruthError(f"{path} must be a JSON list of `ingest` rows")
+    for index, row in enumerate(rows):
+        time_ms = row["time_ms"]
+        valid = type(time_ms) in (int, float) and math.isfinite(time_ms)
+        if not valid or time_ms <= 0:
+            raise GroundTruthError(
+                f"{path}[{index}]: time_ms {time_ms!r} is not a positive finite number"
+            )
     return rows
 
 

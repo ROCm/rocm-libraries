@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -117,11 +118,11 @@ def test_graphs_refuse_unusable_rows(tmp_path, capsys, overrides, message):
     assert not out.exists()
 
 
-def _phase(sweep, kind, *ledger):
-    path = sweep / "attempts" / kind / "phase.json"
+def _phase(sweep, kind, *ledger, number=1, status="success"):
+    path = sweep / "attempts" / f"{kind}-r{number}" / "phase.json"
     path.parent.mkdir(parents=True)
-    phase = {"kind": kind, "corpus": "ground_truth", "arm": "full", "round": 1}
-    path.write_text(json.dumps({"status": "success", "phase": phase, "ledger": ledger}))
+    phase = {"kind": kind, "corpus": "ground_truth", "arm": "full", "round": number}
+    path.write_text(json.dumps({"status": status, "phase": phase, "ledger": ledger}))
 
 
 def _entry(row, outcome="served", **fields):
@@ -160,6 +161,80 @@ def test_compare_reports_margin_correctness_and_missing(tmp_path, capsys):
     identities.write_text(json.dumps({"device": {"arch": "gfx942"}}))
     assert gt.main(argv) == 2
     assert "['gfx950']" in capsys.readouterr().err and not report.exists()
+
+
+@pytest.mark.parametrize("time_ms", [0, -1.0, "fast"])
+def test_graphs_refuse_a_ground_truth_time_that_is_not_positive(
+    tmp_path, capsys, time_ms
+):
+    """`compare` divides the served time by it."""
+    rc, _, out = _graphs(tmp_path, [_row(1, time_ms=time_ms)])
+    assert rc == 2 and "time_ms" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_graphs_refuse_two_rows_with_one_provenance_row(tmp_path, capsys):
+    rc, _, out = _graphs(tmp_path, [_row(1), _row(1, nhead_q=16, nhead_k=16)])
+    assert rc == 2 and "share a provenance row number" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_graphs_refuse_a_directory_holding_other_graphs(tmp_path, capsys):
+    (tmp_path / "graphs").mkdir()
+    stale = tmp_path / "graphs" / "stale.json"
+    stale.write_text("{}")
+    rc, _, out = _graphs(tmp_path, [_row(1)])
+    assert rc == 2
+    assert "already holds other graphs: ['stale.json']" in capsys.readouterr().err
+    assert sorted(p.name for p in out.iterdir()) == ["stale.json"]
+
+
+@pytest.mark.parametrize("device", ["gfx9", "gfx950-dcgpu", ""])
+def test_ingest_refuses_a_device_that_is_not_one_exact_arch(device):
+    args = argparse.Namespace(map=[], filter=[], device=device)
+    with pytest.raises(gt.GroundTruthError, match="not an exact gfx arch"):
+        gt.ingest([], None, args)
+
+
+def _compare(tmp_path, rows, *phases):
+    """Graph the rows, lay out the timing `phases` ((entries, number, status)) and
+    compare at margin 0.05 unless a test passes its own."""
+    assert _graphs(tmp_path, rows)[0] == 0
+    sweep = tmp_path / "sweep"
+    for entries, number, status in phases:
+        _phase(sweep, "timing", *entries, number=number, status=status)
+    (sweep / "input-identities.json").write_text(
+        json.dumps({"device": {"arch": "gfx950"}})
+    )
+    return tmp_path / "GT.json", sweep
+
+
+def test_compare_takes_the_median_over_the_successful_served_rounds(tmp_path):
+    """Rounds 1-3 serve 0.1, 0.1 and 0.4 ms: the median is 0.1 where the mean is 0.2.
+    A failed round 4 and a declined entry in round 5 are not served times."""
+    phases = [
+        ([_entry(1, mean_ms=0.1)], 1, "success"),
+        ([_entry(1, mean_ms=0.1)], 2, "success"),
+        ([_entry(1, mean_ms=0.4)], 3, "success"),
+        ([_entry(1, mean_ms=5.0)], 4, "failed"),
+        ([_entry(1, "declined", mean_ms=9.0, reason="no kernel")], 5, "success"),
+    ]
+    gt_path, sweep = _compare(tmp_path, [_row(1, time_ms=0.1)], *phases)
+    comparison = gt.compare(gt_path, sweep, None, 0.05)
+    (result,) = comparison["results"]
+    assert (result["rounds"], result["hipdnn_ms"]) == (3, 0.1)
+    assert result["ratio"] == 1.0 and result["within_margin"] is True
+    assert comparison["timing_rounds"] == [1, 2, 3, 5]
+
+
+def test_a_ratio_equal_to_one_plus_margin_is_within_it(tmp_path):
+    """0.75 / 0.5 is exactly 1.5, so margin 0.5 admits it and not 0.8 / 0.5."""
+    rows = [_row(1, time_ms=0.5), _row(2, time_ms=0.5, nhead_q=16, nhead_k=16)]
+    served = [_entry(1, mean_ms=0.75), _entry(2, mean_ms=0.8)]
+    gt_path, sweep = _compare(tmp_path, rows, (served, 1, "success"))
+    results = gt.compare(gt_path, sweep, None, 0.5)["results"]
+    assert [r["ratio"] for r in results] == [1.5, 1.6]
+    assert [r["within_margin"] for r in results] == [True, False]
 
 
 @pytest.mark.parametrize("checked, rc", [(True, 0), (False, 1)])

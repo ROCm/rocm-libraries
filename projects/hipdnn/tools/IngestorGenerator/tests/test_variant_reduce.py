@@ -4,6 +4,7 @@
 """tools/variant_reduce.py on a tiny selection, KDP and sweep output built per test."""
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -205,14 +206,32 @@ def test_a_zero_time_entry_is_a_ranking(tmp_path):
 @pytest.mark.parametrize(
     "ledger, gates, verdict",
     [
-        ({"passed": False}, {"correctness": False}, "FAILED; investigate"),
+        ([({"passed": False}, True)], {"correctness": False}, "FAILED; investigate"),
         (
-            {"passed": False, "tolerance_match": None},
+            [({"passed": False, "tolerance_match": None}, False)],
             {"reference": False},
             "no reference",
         ),
+        (
+            [({"passed": False, "tolerance_match": None}, False)],
+            {"reference": False, "serving": False},
+            "FAILED; investigate",
+        ),
+        (
+            [
+                ({"passed": False}, True),
+                ({"passed": False, "tolerance_match": None}, False),
+            ],
+            {"correctness": False, "reference": False},
+            "FAILED; investigate",
+        ),
     ],
-    ids=["numerics-failed", "no-reference"],
+    ids=[
+        "numerics-failed",
+        "no-reference",
+        "no-reference-and-another-gate-failed",
+        "no-reference-and-numerics-failed",
+    ],
 )
 def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
     args = build(tmp_path, checked=("fp32", 128, 4))
@@ -220,16 +239,174 @@ def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
         tmp_path / "sweep" / "attempts" / "correctness__c__full__r1-0001" / "phase.json"
     )
     record = json.loads(phase.read_text())
-    usable = "reference" not in gates
-    entry = {"correctness": ledger, "reference": {"usable": usable}}
-    record.update(status="failed", gates=gates, ledger=[entry])
+    entries = [
+        {"correctness": correctness, "reference": {"usable": usable}}
+        for correctness, usable in ledger
+    ]
+    record.update(status="failed", gates=gates, ledger=entries)
     phase.write_text(json.dumps(record))
-    assert variant_reduce.main(args) == 0
+    failed = verdict != "no reference"
+    # A failed verdict is the RUNBOOK's "apply no reduction": nothing to adopt.
+    assert variant_reduce.main(args) == (3 if failed else 0)
+    assert (tmp_path / "reduced.yaml").exists() != failed
     warned = "do not apply this reduction" in capsys.readouterr().out
     report = (tmp_path / "report.md").read_text()
     assert f"- c: {verdict}, 1 winners" in report
-    assert warned == ("WARNING" in report) == (verdict != "no reference")
+    assert warned == ("WARNING: correctness attempts failed" in report) == failed
+    assert ("not written" in report) == failed
     assert "; numerics checked |" not in report
+
+
+def _fail_timing_round_two(tmp_path):
+    args = build(tmp_path, rounds=(GRAPHS, GRAPHS))
+    phase = tmp_path / "sweep" / "attempts" / "timing__c__full__r2-0001" / "phase.json"
+    record = json.loads(phase.read_text())
+    phase.write_text(json.dumps(dict(record, status="failed")))
+    return args
+
+
+def test_a_failed_timing_round_stops_the_reduction(tmp_path, capsys):
+    """The noise floor is measured over fewer rounds than were swept, so the
+    reduction is not one to adopt: the report is written, `--out` is not."""
+    args = _fail_timing_round_two(tmp_path)
+    assert variant_reduce.main(args) == 3
+    captured = capsys.readouterr()
+    assert "timing phases missing for (round, corpus) [(2, 'c')]" in captured.out
+    assert "FAIL:" in captured.err
+    assert not (tmp_path / "reduced.yaml").exists()
+    report = (tmp_path / "report.md").read_text()
+    assert "- missing (round, corpus): [(2, 'c')]" in report
+    assert "output: not written" in report
+
+
+def test_a_single_round_sweep_warns_that_its_noise_floor_is_assumed(tmp_path, capsys):
+    assert variant_reduce.main(build(tmp_path)) == 0
+    out = capsys.readouterr().out
+    assert "WARNING: 1 timing round: eps_min is assumed 0.05" in out
+
+
+def test_two_rounds_do_not_warn_about_the_noise_floor():
+    noise = variant_reduce.NoiseFloor(rounds=2, epsilon_min=0.1, drift=0.05)
+    assert variant_reduce._single_round_warning(noise) is None
+    assert variant_reduce._single_round_warning(variant_reduce.NoiseFloor(1, 0.05))
+
+
+def test_a_sweep_with_no_timing_phase_exits_2(tmp_path, capsys):
+    args = build(tmp_path, rounds=(), checked=("fp32", 128, 4))
+    assert variant_reduce.main(args) == 2
+    assert "no timing phase" in capsys.readouterr().err
+
+
+def _retried_round_one(tmp_path, first, second):
+    """Round 1's timing phase attempted twice; the later attempt has status `second`."""
+    args = build(tmp_path)
+    attempts = tmp_path / "sweep" / "attempts"
+    shutil.copytree(
+        attempts / "timing__c__full__r1-0001", attempts / "timing__c__full__r1-0002"
+    )
+    for suffix, status, started in (("1", first, "01"), ("2", second, "02")):
+        path = attempts / f"timing__c__full__r1-000{suffix}" / "phase.json"
+        record = json.loads(path.read_text())
+        record.update(status=status, session={"started_at": f"2026-01-{started}"})
+        path.write_text(json.dumps(record))
+    return args
+
+
+@pytest.mark.parametrize(
+    "first, second, rc",
+    [("failed", "success", 0), ("success", "failed", 2)],
+    ids=["a-retry-rescues-the-phase", "a-failed-retry-supersedes-the-success"],
+)
+def test_the_latest_attempt_of_a_phase_is_the_one_read(tmp_path, first, second, rc):
+    assert variant_reduce.main(_retried_round_one(tmp_path, first, second)) == rc
+
+
+def test_a_graph_ranked_by_two_corpora_in_a_round_takes_the_later_corpus(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    ranked = {"g_perf": [(("fp32", 128, 1), 1.0), (("fp32", 128, 2), 1.5)]}
+    build(other, rounds=(ranked,))
+    args = build(tmp_path)
+    attempts = tmp_path / "sweep" / "attempts"
+    attempt = attempts / "timing__d__full__r1-0001"
+    shutil.copytree(other / "sweep" / "attempts" / "timing__c__full__r1-0001", attempt)
+    path = attempt / "phase.json"
+    record = json.loads(path.read_text())
+    record["phase"]["corpus"] = "d"
+    path.write_text(json.dumps(record))
+    reduction = variant_reduce.analyse(*args[1:6:2])
+    assert reduction.duplicate_keys == 1
+    (perf,) = [r for r in reduction.rankings if "g_perf" in r.key]
+    assert (perf.corpus, perf.entries[0][0]) == ("d", kname("fp32", 128, 1))
+
+
+def test_a_record_with_no_entries_is_skipped_not_fatal(tmp_path):
+    def empty(line):
+        if line["graph"]["key"] == "g_noise":
+            line["entries"] = []
+
+    args = build(tmp_path, empty)
+    reduction = variant_reduce.analyse(*args[1:6:2])
+    assert reduction.empty_records == 1
+    assert len(reduction.rankings) == 2
+    assert variant_reduce.main(args) == 0
+    assert "records with no usable entry: 1" in (tmp_path / "report.md").read_text()
+
+
+def test_equal_gains_take_the_smaller_kernel_name_first(tmp_path):
+    kernels = [("fp32", 128, 2, True), ("fp32", 128, 1, False), ("fp32", 128, 4, False)]
+    default = (("fp32", 128, 2), 1.2)
+    ranked = {
+        "g1": [(("fp32", 128, 4), 1.0), default],
+        "g2": [(("fp32", 128, 1), 1.0), default],
+    }
+    args = build(tmp_path, rounds=(ranked,), kernels=kernels)
+    reduction = variant_reduce.analyse(*args[1:6:2])
+    names = [s.name for s in reduction.steps]
+    assert names == [kname("fp32", 128, 1), kname("fp32", 128, 4)]
+    assert reduction.steps[0].gain == reduction.steps[1].gain > 0
+
+
+def test_a_gain_equal_to_epsilon_is_not_kept():
+    ranking = variant_reduce.Ranking(1, "c", "g", [("a", 1.0)], ())
+    steps = [variant_reduce.Step("a", 0.05, ranking)]
+    assert variant_reduce.keep_at({"f": "floor"}, {}, steps, 0.05) == {"f"}
+    assert variant_reduce.keep_at({"f": "floor"}, {}, steps, 0.049) == {"f", "a"}
+
+
+def test_the_budget_is_met_by_an_equal_count(tmp_path):
+    """Floor and coverage keep 5 kernels; g_perf's 50% win is the next one, so eps
+    must reach 0.5 (a gain equal to eps is not kept) to fit a budget of 5."""
+    assert variant_reduce.main(build(tmp_path) + ["--budget", "5"]) == 0
+    kept = {k.name for k in load_config(tmp_path / "reduced.yaml").packs[0].kernels}
+    assert len(kept) == 5 and kname("fp32", 128, 4) not in kept
+    assert "chosen eps: 0.50" in (tmp_path / "report.md").read_text()
+
+
+def test_the_noise_floor_is_the_median_spread_not_the_largest():
+    """Per-kernel spreads over two rounds are 0, 0.4/2.2 and 4/6: eps_min is twice
+    the middle one."""
+    cell = ("fp32",)
+
+    def ranking(number, *times):
+        entries = list(zip("abc", times))
+        return variant_reduce.Ranking(number, "c", "g", entries, cell)
+
+    rounds = {1: {"g": ranking(1, 1.0, 2.0, 4.0)}, 2: {"g": ranking(2, 1.0, 2.4, 8.0)}}
+    noise = variant_reduce.noise_floor(rounds, [])
+    assert noise.drift == pytest.approx(0.4 / 2.2)
+    assert noise.epsilon_min == pytest.approx(0.8 / 2.2)
+    assert (noise.rounds, noise.matched_keys, noise.unmatched_keys) == (2, 1, 0)
+
+
+def test_a_rule_id_never_names_two_rules_across_budgets(tmp_path):
+    """The proposal depends on `--budget`; `--apply-rules` ids must not."""
+    args = build(tmp_path)
+    seen = {}
+    for budget in (5, 6, 7, 1000):
+        reduction = variant_reduce.analyse(*args[1:6:2], budget=budget)
+        for rule in reduction.rules:
+            assert seen.setdefault(rule.id, rule.text) == rule.text
 
 
 def test_a_subset_of_the_shipped_selection_writes_and_reloads(tmp_path):
