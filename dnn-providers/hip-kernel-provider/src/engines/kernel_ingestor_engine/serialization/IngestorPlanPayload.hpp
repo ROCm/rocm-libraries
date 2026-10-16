@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -27,9 +28,13 @@ namespace hip_kernel_provider::kernel_ingestor_engine::serialization
 inline constexpr std::array<uint8_t, 4> INGESTOR_PLAN_MARKER = {0x48, 0x4B, 0x49, 0x50};
 
 /// The format version this provider writes. It reads the same major and any minor up to
-/// this one.
+/// this one. The rule for a new format version is in ingestor_plan.fbs.
 inline constexpr uint16_t INGESTOR_PLAN_FORMAT_MAJOR = 1;
 inline constexpr uint16_t INGESTOR_PLAN_FORMAT_MINOR = 0;
+
+/// The SHA-256 of ingestor_plan.fbs, with LF line ends. Set it again after each schema edit.
+inline constexpr std::string_view INGESTOR_PLAN_SCHEMA_SHA256
+    = "984f27496867ba4b803e13fcf67f56eda03835eb17b8eaa86d810535749f3ba8";
 
 /// The header size this provider writes. A reader accepts a larger header that keeps the
 /// alignment rule.

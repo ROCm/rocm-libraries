@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +15,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanHeader.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 
@@ -192,6 +194,20 @@ TEST(TestIngestorPlanHeader, ConvertsADigestBetweenRawAndHex)
     const std::string hex = "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf";
     EXPECT_EQ(detail::ingestorPlanDigestToHex(knownDigest()), hex);
     EXPECT_EQ(detail::ingestorPlanDigestFromHex(hex), knownDigest());
+}
+
+TEST(TestIngestorPlanHeader, SchemaHashIsPinnedBesideTheFormatVersion)
+{
+    // The build calculates the SHA-256 of ingestor_plan.fbs with LF line ends.
+    const std::string_view actual = HKP_INGESTOR_PLAN_SCHEMA_SHA256;
+    EXPECT_EQ(actual, INGESTOR_PLAN_SCHEMA_SHA256)
+        << "ingestor_plan.fbs changed. Its SHA-256 is now " << actual << ".\n"
+        << "1. Decide if the change is a minor or a major version. The rule is in "
+           "ingestor_plan.fbs.\n"
+        << "2. If the format version changes, update INGESTOR_PLAN_FORMAT_MAJOR or "
+           "INGESTOR_PLAN_FORMAT_MINOR.\n"
+        << "3. For a new format version, add a golden sample.\n"
+        << "4. Set INGESTOR_PLAN_SCHEMA_SHA256 in IngestorPlanPayload.hpp to " << actual << ".";
 }
 
 } // namespace

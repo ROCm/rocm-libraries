@@ -3,13 +3,30 @@
 
 // The body of a saved ingestor plan. A 48-byte header precedes it; see IngestorPlanPayload.hpp.
 // Regenerate ingestor_plan_generated.h after each edit, and keep it in the same commit.
-// A minor format version adds only optional fields. Any other change is a major version.
 //
 // Every table field carries an explicit `(id: N)`, so its vtable slot comes from that number
 // rather than from its position in the table. A new field takes the next unused id for its
 // table and may be written anywhere in the declaration; the id of an existing field never
 // changes. A union field occupies two slots: the declared id holds the value, and the id one
 // below it holds the implicit type byte.
+//
+// The format version rule:
+// - A minor version can make only these changes:
+//   - Add an optional table field with the next unused id. Do not make it `(required)`.
+//     Give a new scalar `= null`, or a default that means "absent".
+//   - Add a member at the end of a union.
+//   - Add a value at the end of an enum.
+//   - Declare a new table or enum that only a new field or a new union member uses.
+//   The reader of the new minor version accepts an absent field and a file of an older minor.
+// - Never make these changes, in any version:
+//   - Change the type or the default of a field.
+//   - Add or remove `(required)` on an existing field.
+//   - Change or reuse an id.
+//   - Delete a field. To retire a field, mark it `(deprecated)` in a new major version.
+// - Any other change is a major version.
+// - After each edit to this file, set INGESTOR_PLAN_SCHEMA_SHA256 in IngestorPlanPayload.hpp.
+//   A unit test prints the new value.
+// - The dispatch handler contract has its own version, in the dispatch name.
 
 namespace hip_kernel_provider.kernel_ingestor_engine.serialization.fb;
 

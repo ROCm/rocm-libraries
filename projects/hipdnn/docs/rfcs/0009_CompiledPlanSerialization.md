@@ -257,9 +257,35 @@ The current format version is 1.0. A reader reads a payload when these condition
 - The major version of the payload is equal to the major version of the reader.
 - The minor version of the payload is not more than the minor version of the reader.
 
-A new minor version only adds optional fields. All other changes need a new major version. The
-provider version never controls a load. A reader accepts a header larger than 48 bytes when its size
-is a multiple of 16.
+A new minor version can make only these changes to the schema:
+
+- Add an optional table field with the next unused field ID. Do not make the field `(required)`.
+  Give a new scalar field `= null`, or a default value that means "absent".
+- Add a member at the end of a union.
+- Add a value at the end of an enum.
+- Declare a new table or enum that only a new field or a new union member uses.
+
+The reader of the new minor version accepts a payload without the new field, and a payload of an
+older minor version.
+
+Never make these changes, in any version:
+
+- Change the type or the default value of a field.
+- Add or remove `(required)` on a field that exists.
+- Change or reuse a field ID.
+- Delete a field. To retire a field, mark it `(deprecated)` in a new major version.
+
+All other changes need a new major version.
+
+`IngestorPlanPayload.hpp` holds `INGESTOR_PLAN_SCHEMA_SHA256` next to the format version constants.
+This value is the SHA-256 of `ingestor_plan.fbs` with LF line ends. A unit test calculates the
+SHA-256 of the schema file and compares it with this value. After each schema change, decide the
+version change and then update the value.
+
+The dispatch handler contract has a separate version. That version is part of the dispatch name.
+
+The provider version never controls a load. A reader accepts a header larger than 48 bytes when its
+size is a multiple of 16.
 
 ### Load Checks
 
