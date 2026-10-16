@@ -766,29 +766,13 @@ if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     )
 endif()
 
-# test_rocroller_wgm.py compiles RocRollerWgmKernargs.hpp from the installed
-# test tree, either next to the Python package or at <tensilelite-root>/include.
-# Install both copies even when HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS is
-# OFF, so the tests component always carries the header.
-if(NOT WIN32)
-    foreach(_wgm_hdr_dir "include/Tensile" "tensilelite/include/Tensile")
-        set(_wgm_hdr "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/${_wgm_hdr_dir}/RocRollerWgmKernargs.hpp")
-        if(EXISTS "${_wgm_hdr}")
-            install(
-                FILES "${_wgm_hdr}"
-                DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite/${_wgm_hdr_dir}"
-                COMPONENT tests
-            )
-        endif()
-    endforeach()
-endif()
-
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
 #   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
+#   share/hipblaslt/tensilelite/headers/      — C++ headers compiled by unit tests
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
@@ -805,6 +789,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
         DESTINATION "${_tensilelite_install_dest}/Tensile"
+        COMPONENT tests
+    )
+
+    # Compiled by test_rocroller_wgm.py. TheRock's artifact splitter puts any
+    # path with an "include" directory into the dev artifact, which test jobs
+    # do not fetch, so this must not be installed under an include/ directory.
+    install(
+        FILES "${_tensilelite_src}/include/Tensile/RocRollerWgmKernargs.hpp"
+        DESTINATION "${_tensilelite_install_dest}/headers/Tensile"
         COMPONENT tests
     )
 

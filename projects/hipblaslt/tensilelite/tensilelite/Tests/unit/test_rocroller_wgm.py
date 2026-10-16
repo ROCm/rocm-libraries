@@ -111,25 +111,25 @@ _WGM = [
 ]
 
 def _rocrollerWgmHeader() -> Path:
-    """Locate RocRollerWgmKernargs.hpp next to this test or in the source tree.
+    """Locate RocRollerWgmKernargs.hpp in an installed test tree or the source tree.
 
-    The unit job runs a copy of this file from
-    ``build/share/hipblaslt/tensilelite/tensilelite/Tests``. That copy does not
-    sit next to ``projects/hipblaslt/tensilelite/include``. The header is also
-    shipped inside this Python package so the installed tree can compile it.
+    TheRock's unit job runs this file from
+    ``share/hipblaslt/tensilelite/tensilelite/Tests/unit``, and CMake installs
+    the header under ``share/hipblaslt/tensilelite/headers``. A source checkout
+    has it under ``projects/hipblaslt/tensilelite/include``.
     """
     name = Path("Tensile") / "RocRollerWgmKernargs.hpp"
     here = Path(__file__).resolve()
-    packaged = here.parents[2] / "include" / name
-    if packaged.is_file():
-        return packaged
+    installed = here.parents[3] / "headers" / name
+    if installed.is_file():
+        return installed
     rel = Path("include") / name
     source = Path("projects") / "hipblaslt" / "tensilelite" / rel
     for parent in here.parents:
         for candidate in (parent / rel, parent / source):
             if candidate.is_file():
                 return candidate
-    return packaged
+    return installed
 
 
 _HEADER = _rocrollerWgmHeader()
@@ -180,10 +180,7 @@ def test_wgm_kernargs_follow_the_hoisted_formula(sizes, expected):
 def test_cpp_evaluator_matches_python(tmp_path):
     """The launch header is the same integer arithmetic as the Python oracle."""
     if not _HEADER.is_file():
-        # The installed test tree does not always carry the header (it depends
-        # on how the CI artifact is split). The Python oracle tests above and
-        # below still run; only this C++ cross-check needs the header.
-        pytest.skip(f"RocRollerWgmKernargs.hpp not found (looked at {_HEADER})")
+        pytest.fail(f"missing {_HEADER}")
     source = tmp_path / "wgm_match.cpp"
     source.write_text(
         """
