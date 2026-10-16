@@ -60,6 +60,7 @@ class FakeGh:
         # Workflow file name -> text served instead of the checkout's copy.
         self.workflows = {}
         self.auth_error = ""
+        self.local_head = HEAD_SHA
 
     def __call__(self, cmd, capture_output=False, text=False, check=False, **_):
         self.calls.append(cmd)
@@ -110,6 +111,8 @@ class FakeGh:
             return ""
         if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
             return "users/someone/feature"
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return self.local_head
         if cmd[0] == "git":
             return ""
         raise AssertionError(f"unexpected command: {cmd}")
@@ -444,6 +447,56 @@ def test_yes_dispatches_when_nothing_is_active(trigger_mod, gh, monkeypatch, cap
         "linux_test_labels": "test:hipdnn",
     }
     assert "cancels" not in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# Local HEAD against the remote head of a branch taken from the checkout
+# --------------------------------------------------------------------------- #
+
+INFERRED_MULTI_ARCH = ["dispatch", "-w", "multi-arch"]
+
+
+def test_dry_run_warns_when_local_head_differs(trigger_mod, gh, monkeypatch, capsys):
+    gh.local_head = OTHER_SHA
+    _run(trigger_mod, monkeypatch, *INFERRED_MULTI_ARCH, "--dry-run")
+    err = capsys.readouterr().err
+    assert f"local HEAD is {OTHER_SHA[:11]}" in err
+    assert f"the run tests {HEAD_SHA[:11]}" in err
+    assert "also needs --allow-head-mismatch" in err
+    assert gh.dispatched == []
+
+
+def test_yes_refuses_when_local_head_differs(trigger_mod, gh, monkeypatch, capsys):
+    gh.local_head = OTHER_SHA
+    assert _exit_code(trigger_mod, monkeypatch, *INFERRED_MULTI_ARCH, "--yes") == 1
+    assert "pass --allow-head-mismatch" in capsys.readouterr().err
+    assert gh.dispatched == []
+
+
+def test_allow_head_mismatch_dispatches(trigger_mod, gh, monkeypatch):
+    gh.local_head = OTHER_SHA
+    _run(
+        trigger_mod,
+        monkeypatch,
+        *INFERRED_MULTI_ARCH,
+        "--allow-head-mismatch",
+        "--yes",
+    )
+    assert len(gh.dispatched) == 1
+
+
+def test_matching_local_head_dispatches(trigger_mod, gh, monkeypatch, capsys):
+    _run(trigger_mod, monkeypatch, *INFERRED_MULTI_ARCH, "--yes")
+    assert len(gh.dispatched) == 1
+    assert "local HEAD" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("target", [BRANCH, ["--pr", "1"]], ids=["branch", "pr"])
+def test_explicit_ref_skips_local_head_check(trigger_mod, gh, monkeypatch, target):
+    gh.local_head = OTHER_SHA
+    _run(trigger_mod, monkeypatch, *target, *INFERRED_MULTI_ARCH, "--yes")
+    assert len(gh.dispatched) == 1
+    assert ["git", "rev-parse", "HEAD"] not in gh.calls
 
 
 # --------------------------------------------------------------------------- #

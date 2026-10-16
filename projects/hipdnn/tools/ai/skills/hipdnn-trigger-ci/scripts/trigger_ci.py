@@ -367,6 +367,32 @@ def runs_cancelled_by_dispatch(workflow_file, sha):
     ]
 
 
+def check_local_head(ref, head_sha, args):
+    # A ref taken from the checkout reads as "test my code", but the run tests
+    # the remote head, which misses unpushed commits and is newer than a stale
+    # checkout. --reuse-build is checked against the remote head too.
+    local_sha = run_cmd(["git", "rev-parse", "HEAD"])
+    if local_sha == head_sha:
+        return
+    print(
+        f"warning: local HEAD is {local_sha[:11]}, but '{ref}' on {REPO} is at "
+        f"{head_sha[:11]}; the run tests {head_sha[:11]}",
+        file=sys.stderr,
+    )
+    if args.yes and not args.allow_head_mismatch:
+        print(
+            "error: push or pull so they match, or pass --allow-head-mismatch "
+            "after the user approved testing the remote head",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.dry_run:
+        print(
+            "  after approval, the --yes run also needs --allow-head-mismatch",
+            file=sys.stderr,
+        )
+
+
 def check_reuse_baseline(run_id, workflow_file, ref, head_sha):
     run = json.loads(
         run_cmd(
@@ -498,6 +524,8 @@ def cmd_dispatch(args):
             "pass -f name=value"
         )
     head_sha = ref_head_sha(ref)
+    if not args.branch and not args.pr:
+        check_local_head(ref, head_sha, args)
     if args.reuse_build:
         check_reuse_baseline(args.reuse_build, workflow_file, ref, head_sha)
         inputs["baseline_run_id"] = str(args.reuse_build)
@@ -665,6 +693,13 @@ points to.
         action="store_true",
         help="Allow --yes to cancel the active runs of the workflow at the same "
         "commit that the dry-run lists",
+    )
+    dispatch.add_argument(
+        "--allow-head-mismatch",
+        dest="allow_head_mismatch",
+        action="store_true",
+        help="Allow --yes when the branch comes from the checkout and its head "
+        "on GitHub is not the local HEAD; the run tests the GitHub head",
     )
     dispatch.add_argument(
         "--allow-shared-branch",

@@ -1,7 +1,7 @@
 ---
 name: hipdnn-trigger-ci
 description: Dispatch TheRock CI, TheRock Multi-Arch CI or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects and test labels, then check status or watch the run. Always dry-runs first; a real dispatch needs explicit user approval.
-argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [-f <input>=<value> ...] [--reuse-build <run-id>] [--dry-run|--yes [--cancel-active]] [--run-id <run-id>]"
+argument-hint: "[--branch <branch>|--pr <pr-number>] [dispatch -w <workflow>|status|watch] [-f <input>=<value> ...] [--reuse-build <run-id>] [--dry-run|--yes [--cancel-active] [--allow-head-mismatch]] [--run-id <run-id>]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -19,7 +19,7 @@ Infer options from the user request:
   - `multi-arch` → `.github/workflows/therock-multi-arch-ci.yml`. Builds ROCm with TheRock and runs component tests on the chosen GPU families. This is the one to use for hipDNN/provider test labels.
   - `therock-ci` → `.github/workflows/therock-ci.yml`. Single-arch TheRock CI for a set of rocm-libraries subtrees.
   - `hipdnn-superbuild` → `.github/workflows/hipdnn-superbuild-ci.yml`.
-- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. If that upstream is on a remote other than `ROCm/rocm-libraries` (a fork), or the `--pr` is from a fork, the script stops and asks for `--branch`; `--pr <pr-number> status` still works on fork PRs. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it.
+- **Branch**: `--branch <branch>` (a global option, placed before the subcommand). If omitted, `--pr <pr-number>` resolves the PR head branch; otherwise the current git branch is used, under its upstream name when it tracks one. If that upstream is on a remote other than `ROCm/rocm-libraries` (a fork), or the `--pr` is from a fork, the script stops and asks for `--branch`; `--pr <pr-number> status` still works on fork PRs. The branch must already be pushed to `ROCm/rocm-libraries` for a dispatch to find it. The run tests the branch head on GitHub, not the checkout: when the branch comes from the checkout and that head is not the local `HEAD` (unpushed commits, or a checkout behind the remote), `dispatch` warns, in the dry-run too, and `--yes` refuses unless `--allow-head-mismatch` is passed. Prefer pushing or pulling; add the flag only after the user approves testing the GitHub head. `--reuse-build` is checked against the GitHub head as well.
 
   **A dispatch can cancel other runs.** All three workflows use the concurrency group `<workflow>-<PR number or commit SHA>` with `cancel-in-progress: true`. A dispatch has no PR number, so it shares the group of every queued or in-progress run of the same workflow at the branch's head commit that was not started by a pull request: an earlier dispatch on the same commit (for example the same branch with other families or labels), and the push postsubmit or scheduled run of that commit. Pull-request runs are keyed by PR number and are not affected. `dispatch` lists those runs as a warning, in the dry-run too; `--yes` then refuses unless `--cancel-active` is also passed. Show the list to the user and add `--cancel-active` only after they approve cancelling those runs. `dispatch` also refuses `develop` and `release/*`, whose postsubmit runs share the group, unless `--allow-shared-branch` is passed; pass it only when the user explicitly asks to dispatch on such a branch.
 - **Inputs** (`-f <input>=<value>`, repeat per input): the `workflow_dispatch.inputs` of the workflow file on the target branch. Read them there; do not rely on remembered names. `dispatch` reads the same file at the same branch and rejects an unknown name (listing the current inputs), an input given twice, and a missing input that has no default (for example `projects` for `therock-ci`, which otherwise builds and tests nothing yet passes). Omitted inputs keep the workflow default.
@@ -44,7 +44,7 @@ Infer options from the user request:
    ```
    Here `<workflow>` is `multi-arch`, `therock-ci` or `hipdnn-superbuild`; inputs and values are described under Inputs.
 
-4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. If the dry-run listed active runs that the dispatch cancels, ask for approval to cancel them too, and add `--cancel-active`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
+4. After explicit approval, run the same command with `--yes` in place of `--dry-run`. If the dry-run listed active runs that the dispatch cancels, ask for approval to cancel them too, and add `--cancel-active`. If it warned that the local `HEAD` differs from the branch head on GitHub, get approval for that too and add `--allow-head-mismatch`. The script dispatches, waits up to about 15 seconds for the new run to appear and prints its run ID with `gh run watch` / `gh run view --log` commands.
 
 5. Check status or watch:
    ```bash
