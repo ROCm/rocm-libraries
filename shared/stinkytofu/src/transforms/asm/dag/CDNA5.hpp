@@ -536,7 +536,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // deadlines force a burst. The pace and the barrier windows must use the same rate.
     int effectiveDsCyclesPerLoad(int dsTotal) const {
         int cpl = dsReadCyclesPerLoad();
-        if (cpl > 0 && dsTotal > 0 && wmmaTotalThisRegion_ > 0) {
+        if (getPassContext().getPassFeatureConfig().dagFeatures.dsEvenSpreadCap && cpl > 0 &&
+            dsTotal > 0 && wmmaTotalThisRegion_ > 0) {
             const long long even = static_cast<long long>(wmmaTotalThisRegion_) *
                                    std::max(1, wmmaIssueConfig.latency) / dsTotal;
             cpl = static_cast<int>(std::max<long long>(1, std::min<long long>(cpl, even)));
@@ -766,7 +767,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     DAGNode* lastPickedNode_ = nullptr;
     // WMMAs issued since the last non-WMMA instruction. A longer run fills the matrix queue and
     // blocks the wave at the WMMA issue, where no ds_load can go out.
-    static constexpr int kWmmaRunMax = 8;
     int wmmaRun_ = 0;
     bool wmmaRunAtLimit_ = false;
 
@@ -2356,14 +2356,18 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // must fire now; the non-promoted phases below gate themselves off via
     // isPromote(), and the promoted node issues through its own phase — one entry
     // point, no side effects here.
-    wmmaRunAtLimit_ = wmmaRun_ >= kWmmaRunMax;
+    {
+        const int runMax = getPassContext().getPassFeatureConfig().dagFeatures.wmmaRunMax;
+        wmmaRunAtLimit_ = runMax > 0 && wmmaRun_ >= runMax;
+    }
     decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
     // A load the spread gate holds does not stand in for the ones it releases: its section may
     // open later than another's.
     DAGNode* pickedDS = nullptr;
-    const bool spreadOn = dsSpreadOn();
+    const bool spreadOn =
+        dsSpreadOn() && getPassContext().getPassFeatureConfig().dagFeatures.dsReleasedFirst;
     for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
         for (DAGNode* n : localReadQueue) {
             if (pass == 0 && spreadOn && !wmmaRunAtLimit_ && !dsSpread_.released(n->id, clock_))
@@ -2406,8 +2410,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         // the queue has room (a full queue already covers it, and the wait fits other work).
         // A released ds_load that does not wait for a credit hides nothing and stalls nothing: it
         // issues in the WMMA's window, so the refill does not hold it back.
-        const bool dsIssuesFree = hasPickableNonWmma && pickKind == kLocalRead &&
-                                  smallestPickable == pickedDS && !dsReadInflight_.full();
+        const bool dsIssuesFree =
+            hasPickableNonWmma && pickKind == kLocalRead && smallestPickable == pickedDS &&
+            !dsReadInflight_.full() &&
+            getPassContext().getPassFeatureConfig().dagFeatures.dsFreeBypassRefill;
         const bool preemptForQueue =
             wmmaRefillActive(bestWMMA->inst->latencyCycles) && !dsIssuesFree;
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
@@ -2447,7 +2453,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
             << "\n");
-        // A run of kWmmaRunMax WMMAs ends here when something else can issue.
+        // A run of wmmaRunMax WMMAs ends here when something else can issue.
         const bool blockWmmaForRunLimit = wmmaRunAtLimit_ && hasPickableNonWmma;
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
@@ -3609,6 +3615,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         }
         dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_,
                        wmmaTotalThisRegion_);
+        if (!dagFeatures.dsSections) dsSpread_.dropSlots();
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >

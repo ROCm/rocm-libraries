@@ -149,6 +149,16 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
+        /// ds_load slots per barrier / tensor_load section; false = one region pace.
+        bool dsSections = true;
+        /// Cap DsReadCyclesPerLoad at the even spread of the region's loads over its WMMAs.
+        bool dsEvenSpreadCap = true;
+        /// A ds_load that waits for no credit issues while the WMMA queue refill is active.
+        bool dsFreeBypassRefill = true;
+        /// The ds_load offered to the picker is the best one the pacer releases.
+        bool dsReleasedFirst = true;
+        /// Longest run of WMMAs with nothing else between; 0 = no limit.
+        int wmmaRunMax = 8;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
