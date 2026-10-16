@@ -7,11 +7,11 @@ The frozen table was captured from libdivide 5.4.0 (the header hipBLASLt
 fetches for rocRoller) plus the divisor 0 and 1 special cases in
 rocRoller Expression_evaluate_unary.cpp. Tensile magicNumber() is a
 different algorithm and is not what these kernels consume.
+
+tensilelite/tests/RocRollerWgmKernargs_test.cpp checks the C++ launch header
+against the same tables; edit both together.
 """
 
-import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -112,30 +112,6 @@ _WGM = [
     ((5, 0, 64, 64, 2), [0, 1073741823, 0, 2, 0, 1, 1073741823, 0, 0, 0, 0]),
 ]
 
-def _rocrollerWgmHeader() -> Path:
-    """Locate RocRollerWgmKernargs.hpp in an installed test tree or the source tree.
-
-    TheRock's unit job runs this file from
-    ``share/hipblaslt/tensilelite/tensilelite/Tests/unit``, and CMake installs
-    the header under ``share/hipblaslt/tensilelite/headers``. A source checkout
-    has it under ``projects/hipblaslt/tensilelite/include``.
-    """
-    name = Path("Tensile") / "RocRollerWgmKernargs.hpp"
-    here = Path(__file__).resolve()
-    installed = here.parents[3] / "headers" / name
-    if installed.is_file():
-        return installed
-    rel = Path("include") / name
-    source = Path("projects") / "hipblaslt" / "tensilelite" / rel
-    for parent in here.parents:
-        for candidate in (parent / rel, parent / source):
-            if candidate.is_file():
-                return candidate
-    return installed
-
-
-_HEADER = _rocrollerWgmHeader()
-
 
 def _python_magic(kind, divisor):
     if kind == "s32":
@@ -177,76 +153,6 @@ def test_signed_magic_div_matches_rocroller_tree(numer, denom, expected):
 def test_wgm_kernargs_follow_the_hoisted_formula(sizes, expected):
     got = evaluate_wgm(*sizes)
     assert [got[name] for name in WGM_ROLE_ORDER] == expected
-
-
-def _find_cxx():
-    """Return a usable C++ compiler: $CXX, then c++, g++, clang++ (else None)."""
-    env_cxx = os.environ.get("CXX")
-    candidates = ([env_cxx] if env_cxx else []) + ["c++", "g++", "clang++"]
-    for candidate in candidates:
-        found = shutil.which(candidate)
-        if found:
-            return found
-    return None
-
-
-def test_cpp_evaluator_matches_python(tmp_path):
-    """The launch header is the same integer arithmetic as the Python oracle."""
-    if not _HEADER.is_file():
-        pytest.fail(f"missing {_HEADER}")
-    cxx = _find_cxx()
-    if cxx is None:
-        pytest.skip("no C++ compiler found (tried $CXX, c++, g++, clang++)")
-    source = tmp_path / "wgm_match.cpp"
-    source.write_text(
-        """
-#include <Tensile/RocRollerWgmKernargs.hpp>
-#include <cstdint>
-#include <iostream>
-#include <string>
-int main(int argc, char** argv) {
-    using namespace TensileLite;
-    std::string cmd = argv[1];
-    if (cmd == "s32") {
-        int32_t d = static_cast<int32_t>(std::stol(argv[2], nullptr, 0));
-        std::cout << rocRollerMagicMultipleS32(d) << " " << rocRollerMagicShiftAndSignS32(d) << "\\n";
-    } else if (cmd == "u32") {
-        uint32_t d = static_cast<uint32_t>(std::stoul(argv[2], nullptr, 0));
-        std::cout << rocRollerMagicMultipleU32(d) << " " << static_cast<int32_t>(rocRollerMagicShiftsU32(d)) << "\\n";
-    } else if (cmd == "s64") {
-        int64_t d = static_cast<int64_t>(std::stoll(argv[2], nullptr, 0));
-        std::cout << rocRollerMagicMultipleS64(d) << " " << rocRollerMagicShiftAndSignS64(d) << "\\n";
-    } else if (cmd == "wgm") {
-        auto k = evaluateRocRollerWgmKernargs(std::stoll(argv[2]), std::stoll(argv[3]),
-            static_cast<uint32_t>(std::stoul(argv[4])), static_cast<uint32_t>(std::stoul(argv[5])),
-            static_cast<int32_t>(std::stol(argv[6])));
-        std::cout << k.quotientTilesByBlock << " " << k.magicMultipleWgmMainBlock << " "
-                  << k.magicMultipleWgm << " " << k.workgroupMapping << " "
-                  << k.magicMultipleWgmTail << " " << k.magicShiftAndSignWgm << " "
-                  << k.magicMultipleNumTilesN << " " << k.magicShiftAndSignNumTilesN << " "
-                  << k.magicShiftAndSignWgmTail << " " << k.magicShiftAndSignWgmMainBlock << " "
-                  << k.quotientTilesMByWgm << "\\n";
-    }
-    return 0;
-}
-"""
-    )
-    binary = tmp_path / "wgm_match"
-    compiled = subprocess.run(
-        [cxx, "-O2", "-std=c++17", f"-I{_HEADER.parents[1]}", str(source), "-o", str(binary)],
-        capture_output=True,
-        text=True,
-    )
-    assert compiled.returncode == 0, compiled.stderr
-
-    def run(args):
-        out = subprocess.check_output([str(binary), *args], text=True).split()
-        return [int(item) for item in out]
-
-    for kind, divisor, magic, second in _LIBDIVIDE:
-        assert run([kind, str(divisor)]) == [magic, second]
-    for sizes, expected in _WGM:
-        assert run(["wgm", *(str(v) for v in sizes)]) == expected
 
 
 def _args_section(text):

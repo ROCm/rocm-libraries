@@ -772,7 +772,6 @@ endif()
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
-#   share/hipblaslt/tensilelite/headers/      — C++ headers compiled by unit tests
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
@@ -789,15 +788,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     install(
         FILES "${_tensilelite_src}/Tensile/__init__.py"
         DESTINATION "${_tensilelite_install_dest}/Tensile"
-        COMPONENT tests
-    )
-
-    # Compiled by test_rocroller_wgm.py. TheRock's artifact splitter puts any
-    # path with an "include" directory into the dev artifact, which test jobs
-    # do not fetch, so this must not be installed under an include/ directory.
-    install(
-        FILES "${_tensilelite_src}/include/Tensile/RocRollerWgmKernargs.hpp"
-        DESTINATION "${_tensilelite_install_dest}/headers/Tensile"
         COMPONENT tests
     )
 
