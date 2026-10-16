@@ -149,6 +149,11 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
+        /// Minimum WMMA windows between the barrier that frees a buffer for a tensor_load and the
+        /// barrier whose s_wait_tensorcnt waits for it, so the TDM data lands before the wait.
+        /// The barrier windows are derived from the ds_load density, and the density is raised
+        /// (more ds_loads per group, a shorter ds span) until this gap fits. 0 = off.
+        int tensorLoadMinWmmaGap = 0;
         /// The ds_load pace, "Y ds_loads every X cycles": dsPaceCount (Y) and dsPaceCycles (X).
         /// < 0 (count: <= 0) = taken from dsPaceModel if set, else the default: no cycle rate,
         /// only separators between groups.

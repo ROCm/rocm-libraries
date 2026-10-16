@@ -207,6 +207,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-spread-tolerance-cycles=") ||
                 arg.starts_with("--ds-pace-cycles=") || arg.starts_with("--ds-pace-count=") ||
                 arg.starts_with("--ds-pace-separators=") ||
+                arg.starts_with("--tensor-load-min-wmma-gap=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -581,6 +582,9 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-pace-separators=")) {
             passFeatureConfig.dagFeatures.dsPaceSeparators =
                 std::stoi(a.substr(std::string("--ds-pace-separators=").size()));
+        } else if (a.starts_with("--tensor-load-min-wmma-gap=")) {
+            passFeatureConfig.dagFeatures.tensorLoadMinWmmaGap =
+                std::stoi(a.substr(std::string("--tensor-load-min-wmma-gap=").size()));
         } else if (a.starts_with("--wmma-refill-mode=")) {
             const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
             passFeatureConfig.dagFeatures.wmmaRefillMode =

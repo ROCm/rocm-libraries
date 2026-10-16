@@ -124,21 +124,22 @@
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier insertion (user value
 // wins; degenerate main-loop IR falls back to the static Rule3 default). See
 // SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                    \
-    X(LockDsReadOrder, bool, true)                                                              \
-    X(EvenSpreadFillers, bool, true)                                                            \
-    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */ \
-    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */ \
-    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
-    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
-    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */       \
-    X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */              \
-    X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */     \
-    X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */   \
-    X(DsPaceCount, int, -1)               /* Y: ds_loads per group; <= 0 = model */             \
-    X(DsPaceSeparators, int, -1)          /* real instrs between groups; < 0 = model */         \
-    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
-    X(TensorLoadDsLoadGapCycles, int, 64)                                                       \
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                                                      \
+    X(LockDsReadOrder, bool, true)                                                                \
+    X(EvenSpreadFillers, bool, true)                                                              \
+    X(WaitAluHoldStrictCount, int, 2)     /* hold s_wait_alu count <= N to next barrier wait */   \
+    X(WarGateWmmas, int, -1)              /* WMMA src -> ds_load overwrite gap; -1 = derived */   \
+    X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                    \
+    X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                   \
+    X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */         \
+    X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                \
+    X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */       \
+    X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */     \
+    X(DsPaceCount, int, -1)               /* Y: ds_loads per group; <= 0 = model */               \
+    X(DsPaceSeparators, int, -1)          /* real instrs between groups; < 0 = model */           \
+    X(TensorLoadMinWmmaGap, int, 20)      /* WMMAs between a tensor_load and its wait; 0 = off */ \
+    X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                               \
+    X(TensorLoadDsLoadGapCycles, int, 64)                                                         \
     X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
 
 namespace stinkytofu {

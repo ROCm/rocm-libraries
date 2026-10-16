@@ -526,6 +526,12 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(
             0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadDsLoadGapCycles);
     }
+    // Minimum WMMA windows between a tensor_load's after-barrier and the barrier that waits for
+    // its data. 0 = off: the barrier windows follow the even-spread density.
+    int tensorLoadMinWmmaGap() const {
+        return std::max(0,
+                        getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadMinWmmaGap);
+    }
     // WMMA windows reserved inside one signal/wait pair. 0 keeps the pair on
     // one threshold. Negative values are treated as off.
     int barrierHalfSlack() const {
@@ -719,6 +725,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool wmmaRefilling_ = false;
     int wmmaRefillLeft_ = 0;
     DsSpreadPacer dsSpread_;
+    // ds_loads per group the barrier windows are computed for (TensorLoadMinWmmaGap); the pace
+    // carries at least this many per group.
+    int dsPaceCountFloor_ = 1;
     // The region's ds_loads cost more issue cycles than its WMMAs take, so they cannot all hide
     // under a co-issue window: a ds_load the pace has released may issue outside one.
     bool dsOverflow_ = false;
@@ -1863,6 +1872,12 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 // WMMA windows needed to issue dsLoadCount ds_reads at the even-spread density of the region
 // (wmmaTotal / dsTotal windows per ds_load, as DsSpreadPacer plans them).
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
+    // With a tensor_load gap requested the windows follow the actual ds density: one group of
+    // dsPaceCountFloor_ ds_loads per WMMA window, which is what the pace issues.
+    if (tensorLoadMinWmmaGap() > 0 && dsSpreadOn()) {
+        const int perWindow = std::max(1, dsPaceCountFloor_);
+        return (dsLoadCount + perWindow - 1) / perWindow;
+    }
     return DsSpreadPacer::windowsFor(dsLoadCount, wmmaTotalThisRegion_, dsTotalThisRegion_);
 }
 
@@ -2792,6 +2807,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();
+    dsPaceCountFloor_ = 1;
     if (hasWMMAInRegion_) {
         // Layer 1/3 (base merge):
         // Build one threshold map from two independent estimators:
@@ -2799,11 +2815,38 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         //   - beforeThresholds: "barrier should be before/around WMMA N"
         // If a barrier appears in both maps, average them to get a single
         // neutral placement point in barrierWmmaThresholds_.
-        auto afterThresholds = computeBarrierAfterThresholds(regionStart, regionEnd);
+        // TensorLoadMinWmmaGap: the barrier windows follow the ds density, so raise the density
+        // (ds_loads per group) until the after-barrier and the before-barrier, the one waiting
+        // for the tensor_load data, are at least the gap apart. A density set by DsPaceCount is
+        // taken as is.
+        std::unordered_map<StinkyInstruction*, BarrierAfterOutput> afterThresholds;
+        std::unordered_map<StinkyInstruction*, BarrierBeforeOutput> beforeThresholds;
+        {
+            constexpr int kMaxDsPerGroup = 8;
+            const int minGap = tensorLoadMinWmmaGap();
+            const bool fixedDensity = dagFeatures.dsPaceCount > 0;
+            for (int y = fixedDensity ? dagFeatures.dsPaceCount : 1;; ++y) {
+                dsPaceCountFloor_ = y;
+                afterThresholds = computeBarrierAfterThresholds(regionStart, regionEnd);
+                beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
+                if (minGap <= 0 || !dagFeatures.dsSpread || fixedDensity ||
+                    afterThresholds.empty() || beforeThresholds.empty() || y >= kMaxDsPerGroup)
+                    break;
+                int latestAfter = INT_MIN;
+                int earliestBefore = INT_MAX;
+                for (const auto& [barrier, out] : afterThresholds)
+                    latestAfter = std::max(latestAfter, out.afterThreshold);
+                for (const auto& [barrier, out] : beforeThresholds)
+                    earliestBefore = std::min(earliestBefore, out.beforeThreshold);
+                PASS_DEBUG(std::cerr << "[CDNA5 tensorLoadMinWmmaGap] dsPerGroup=" << y
+                                     << " latestAfter=" << latestAfter << " earliestBefore="
+                                     << earliestBefore << " minGap=" << minGap << "\n");
+                if (earliestBefore - latestAfter >= minGap) break;
+            }
+        }
         for (auto& [barrier, afterOutput] : afterThresholds) {
             barrierWmmaThresholds_[barrier] = afterOutput.afterThreshold;
         }
-        auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
         for (auto& [barrier, beforeOutput] : beforeThresholds) {
             auto it = barrierWmmaThresholds_.find(barrier);
             if (it != barrierWmmaThresholds_.end())
@@ -3419,6 +3462,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         if (dagFeatures.dsPaceCycles >= 0) pace.cycles = dagFeatures.dsPaceCycles;
         if (dagFeatures.dsPaceCount > 0) pace.count = dagFeatures.dsPaceCount;
         if (dagFeatures.dsPaceSeparators >= 0) pace.separators = dagFeatures.dsPaceSeparators;
+        if (tensorLoadMinWmmaGap() > 0) pace.count = std::max(pace.count, dsPaceCountFloor_);
         dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
