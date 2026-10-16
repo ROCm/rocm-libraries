@@ -440,8 +440,8 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     }
     out << "]," << std::endl << std::endl;
     ;
-    out << "\"" 
-        << "results" 
+    out << "\""
+        << "results"
         << "\": [";
 
     return HIPSPARSE_STATUS_SUCCESS;
