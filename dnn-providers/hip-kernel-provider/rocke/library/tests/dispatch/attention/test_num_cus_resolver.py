@@ -245,6 +245,9 @@ class TestNumCusResolver(unittest.TestCase):
         try:
             au._RESOLVED_ATTENTION_ARCH = None
             p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
+            # The clamp below the gfx942 decode split rule, which these shapes enter
+            # at some CU counts.
+            p.attr(au, "_gfx942_3d_decode_ctas_per_segment", lambda *a, **k: None)
             # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
             s120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=8192, batch=1))
             s304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=8192, batch=1))

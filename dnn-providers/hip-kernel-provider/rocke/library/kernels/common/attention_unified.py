@@ -2938,6 +2938,15 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
     if arch == "gfx942" and problem.sliding_window == 0:
+        # Decode split rule (``_gfx942_3d_decode_ctas_per_segment``): about 4
+        # CTAs per CU (6 at head size 64), the target of the formula above
+        # without its decode distortions, as on gfx950. The measured counts
+        # below stay for everything else.
+        ctas = _gfx942_3d_decode_ctas_per_segment(problem, arch=arch)
+        if ctas is not None:
+            per_cu = 6 if problem.head_size == 64 else 4
+            cap = 64 if problem.max_seqlen_k < 8192 else 128
+            return max(2, min(per_cu * problem.num_cus // ctas, cap))
         pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
@@ -3124,6 +3133,35 @@ def _gfx950_3d_decode_ctas_per_segment(
     return None
 
 
+def _gfx942_3d_decode_ctas_per_segment(
+    problem: UnifiedAttentionProblem, *, arch: str | None = None
+) -> int | None:
+    """CTAs per split-KV segment (``num_seqs * num_kv_heads``) of a gfx942 3D
+    decode problem in the measured scope of the decode split rule
+    (``_num_segments``), else None.
+
+    Scope as measured: all-decode, fp16/bf16 K/V (paged with 16-token pages, or
+    strided), head_size 64 or 128, no sliding window and no explicit
+    ``target_ctas``; at least ``num_cus / 16`` CTAs per segment or fewer than
+    8K KV tokens. Few CTAs at long KV keep the previous counts, which measured
+    as good there. ``arch`` defaults to the arch ``_num_segments`` clamps for.
+    """
+    arch = arch or problem.clamp_arch or _resolve_attention_arch()
+    ctas = problem.num_seqs * problem.num_kv_heads
+    if (
+        arch == "gfx942"
+        and problem.all_decode
+        and problem.head_size in (64, 128)
+        and problem.block_size == 16
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+        and _kv_storage_dtype(problem) is None
+        and (ctas * 16 >= problem.num_cus or problem.max_seqlen_k < 8192)
+    ):
+        return ctas
+    return None
+
+
 def _gfx950_3d_tile_size_override(
     problem: UnifiedAttentionProblem, *, arch: str | None = None
 ) -> int | None:
@@ -3163,7 +3201,7 @@ def _kv_lds_swizzle_3d(
 ) -> bool:
     """3D ``use_kv_lds_swizzle``. gfx950: on with multi-page KV tiles
     (``_gfx950_3d_tile_size_override``); with page-sized tiles it measured
-    neutral. gfx942, all-decode: head size 128 on the wide K/V loader
+    neutral. gfx942, all-decode: head size 64/128 on the wide K/V loader
     (``_enable_gfx942_3d_wide_kv_load``); head size 256 (async copies) with
     page-sized fp16/bf16 tiles, where it pays only together with the page ids
     (``_wave_page_id_load_3d``): alone it is slower under some compilers."""
@@ -3173,7 +3211,7 @@ def _kv_lds_swizzle_3d(
     if arch == "gfx942":
         if not problem.all_decode:
             return False
-        if problem.head_size == 128:
+        if problem.head_size in (64, 128):
             return _enable_gfx942_3d_wide_kv_load(problem)
         return (
             problem.head_size == 256
