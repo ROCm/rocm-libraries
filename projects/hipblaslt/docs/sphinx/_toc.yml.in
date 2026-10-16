@@ -63,6 +63,8 @@ subtrees:
     title: hipBLASLtExt API
   - file: reference/ext-ops
     title: hipBLASLtExt operation API
+  - file: reference/experimental-api
+    title: hipBLASLt experimental API
 
 - caption: About
   entries:

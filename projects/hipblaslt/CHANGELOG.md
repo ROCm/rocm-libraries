@@ -15,6 +15,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
+### Experimental
+
+* Experimental API tier in the new `hipblaslt/hipblaslt-experimental.h` header (experimental API version 1). The header is installed but not included by `hipblaslt.h`; consumers opt in by defining `HIPBLASLT_ENABLE_EXPERIMENTAL_API` to the experimental API version they have reviewed, and compilation fails on a missing or mismatched value. Adds `hipblasLtExperimentalGetApiVersion` for a runtime version check and reserves `HIPBLASLT_EXPERIMENTAL_ENUM_BIT` for experimental values of stable enums. Experimental APIs can change or be removed in any release.
+
 ### Changed
 
 * `--global-parameters` and `--benchmark-parameters` values are now parsed as Python literals via `ast.literal_eval` instead of `eval`, correctly handling values containing `=` and rejecting non-literal expressions with an `argparse.ArgumentTypeError`.
