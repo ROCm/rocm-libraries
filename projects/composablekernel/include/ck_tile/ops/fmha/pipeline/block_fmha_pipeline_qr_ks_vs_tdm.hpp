@@ -1824,30 +1824,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
-            // Standard causal ranges round their end to N64
-            // (nonpositive ranges already returned above). With no sink/split,
-            // each processed score column is strictly below that physical end.
-            // Other mask types retain this independent tail clamp. Dense keeps
-            // its original control flow for the measured QK/PV loop scheduling.
-            constexpr bool kScoreTailClampRedundant =
-                kTdmBoxesAlwaysInBounds &&
-                std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>;
-            if constexpr(kHasUnevenSplits && !kScoreTailClampRedundant)
-            {
-                if(i_total_loops == (num_total_loop - 1))
-                {
-                    set_tile_if(s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-
-                                    {
-                                        return physical_seqlen_k_end_ <= col;
-                                    }
-                                });
-                }
-            }
-
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check =
