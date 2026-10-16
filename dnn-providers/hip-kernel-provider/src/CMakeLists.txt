@@ -431,6 +431,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
             INSTALL_STAGING_KEY hkp_census_gfx950)
 
+        # GTEST_FILTER, ENVIRONMENT and ENVIRONMENT_MODIFICATION stay out of
+        # _gfx950_attention_unified_2d_category_args for the reason given at the dense
+        # registration above. The filter matches the gpu_ref registration in
+        # integration_tests/CMakeLists.txt and the dense one: the shared SdpaFwd/Default
+        # sweeps, which the engine's support claims name case by case.
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-gfx950-attention-unified-2d-external-integration-check
             PLUGIN_TARGET  hip_kernel_provider
@@ -438,8 +443,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             INSTALL_SUBDIR hip_kernel_provider
             ${_gfx950_shard_args}
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950AttentionUnified2D.toml
-            GTEST_FILTER   "quick_SdpaFwd_bshd_*:standard_SdpaFwd_bshd_*"
+            GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
             ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             ${_gfx950_attention_unified_2d_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-gfx950-attention-unified-2d-external-integration-check target")

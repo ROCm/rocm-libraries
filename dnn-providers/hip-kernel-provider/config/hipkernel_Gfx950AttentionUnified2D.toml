@@ -4,13 +4,15 @@
 [meta]
 version = 1
 
-# All bundles for this engine are causal BSHD SDPA on gfx950, served through a
-# synthesized identity block_tables / seq_lens / query_start_len workspace.
+# This engine serves causal BSHD SDPA forward graphs on gfx950 through a synthesized
+# identity block_tables / seq_lens / query_start_len workspace. The shared SdpaFwd
+# sweeps also carry unmasked cases, which it does not serve.
 #
 # No tolerance overrides needed: the forward pass uses the common SdpaAttributes
 # tolerance (tol::sdpa::getToleranceFwd<T>()).
 #
 # NOTE: This engine declines NO_MASK graphs because the kernel is unconditionally
-# causal (bottom-right). The integration harness will count those as skips rather
-# than failures. An explicit [[test_skips]] entry is not needed: the engine returns
-# no plan for them and the harness records them as "no engine" declines.
+# causal (bottom-right). Those cases carry no support claim for this engine, so the
+# harness records the decline as a skip rather than a failure. An explicit
+# [[test_skips]] entry is not needed: the engine returns no plan for them and the
+# harness records them as "no engine" declines.
