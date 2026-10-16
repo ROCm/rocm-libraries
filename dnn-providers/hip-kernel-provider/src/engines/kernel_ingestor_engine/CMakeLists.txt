@@ -22,18 +22,24 @@ target_sources(hip_kernel_provider_impl PRIVATE
 )
 
 # serialization/ingestor_plan_generated.h is committed, and the build compiles against it.
-# When HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON, regenerate it from the schema with
-# hipDNN's flatc flags. Resolve flatc in hipDNN's order: flatbuffers::flatc, then flatc, then
-# the FLATBUFFERS_FLATC_EXECUTABLE variables, then a search beside the FlatBuffers package.
-# Imported targets are visible only in the directory that found the package, so an
-# installed FlatBuffers usually resolves through the search. With the option ON, a missing
-# flatc or flags file is a configure error.
+# When HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON, the build regenerates it from the
+# schema with the flags in serialization/flatc_flags.txt.
+# The build finds flatc in this order: flatbuffers::flatc, flatc, the
+# FLATBUFFERS_FLATC_EXECUTABLE variables, and then a search beside the FlatBuffers package.
+# An imported target is visible in the directory that imports it and in its subdirectories.
+# A standalone build imports FlatBuffers in the provider root.
+# Thus flatbuffers::flatc is visible in this directory.
+# A superbuild imports FlatBuffers in a sibling directory.
+# Thus flatbuffers::flatc is not visible in this directory.
+# With the option ON, a missing flatc is a configure error.
+# With the option ON, a flatc version that is not the expected FlatBuffers version is a
+# configure error.
 block()
     set(HKP_INGESTOR_PLAN_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/serialization/ingestor_plan.fbs")
     set(HKP_INGESTOR_PLAN_HEADER
         "${CMAKE_CURRENT_SOURCE_DIR}/serialization/ingestor_plan_generated.h"
     )
-    set(HKP_FLATC_FLAGS_FILE "${ROCM_LIBRARIES_ROOT}/projects/hipdnn/cmake/flatc_flags.txt")
+    set(HKP_FLATC_FLAGS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/serialization/flatc_flags.txt")
 
     set(_hkp_flatc_command "")
     set(_hkp_flatc_dependency "")
@@ -83,19 +89,87 @@ block()
                 "header deliberately."
             )
         endif()
-        if(NOT EXISTS "${HKP_FLATC_FLAGS_FILE}")
-            message(FATAL_ERROR
-                "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but the "
-                "flatc flags file ${HKP_FLATC_FLAGS_FILE} does not exist. It is the single source "
-                "of truth for the generation flags, so without it "
-                "${HKP_INGESTOR_PLAN_HEADER} cannot be regenerated and would go stale against "
-                "${HKP_INGESTOR_PLAN_SCHEMA}. Check ROCM_LIBRARIES_ROOT "
-                "(\"${ROCM_LIBRARIES_ROOT}\") points at the repository root, or set the option "
-                "OFF to build against the committed header deliberately."
+        # An in-tree flatc builds from the same source as the FlatBuffers library.
+        set(_hkp_flatc_in_tree FALSE)
+        if(NOT _hkp_flatc_dependency STREQUAL "")
+            get_target_property(_hkp_flatc_imported ${_hkp_flatc_dependency} IMPORTED)
+            if(NOT _hkp_flatc_imported)
+                set(_hkp_flatc_in_tree TRUE)
+            endif()
+        endif()
+
+        if(_hkp_flatc_in_tree)
+            message(VERBOSE
+                "hip-kernel-provider: flatc is built in this tree, so its version is not checked."
+            )
+        else()
+            if(NOT _hkp_flatc_dependency STREQUAL "")
+                get_target_property(_hkp_flatc_path ${_hkp_flatc_dependency} LOCATION)
+            else()
+                set(_hkp_flatc_path "${_hkp_flatc_command}")
+            endif()
+
+            if(DEFINED flatbuffers_VERSION)
+                set(_hkp_expected_flatc_version "${flatbuffers_VERSION}")
+                set(_hkp_expected_flatc_version_source flatbuffers_VERSION)
+            elseif(DEFINED HIPDNN_FLATBUFFERS_VERSION)
+                set(_hkp_expected_flatc_version "${HIPDNN_FLATBUFFERS_VERSION}")
+                set(_hkp_expected_flatc_version_source HIPDNN_FLATBUFFERS_VERSION)
+            else()
+                message(FATAL_ERROR
+                    "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but "
+                    "the expected FlatBuffers version could not be determined: flatbuffers_VERSION "
+                    "and HIPDNN_FLATBUFFERS_VERSION are both undefined. The version of flatc "
+                    "${_hkp_flatc_path} cannot be checked, so ${HKP_INGESTOR_PLAN_HEADER} could "
+                    "be regenerated with a different FlatBuffers version. Set the option OFF to "
+                    "build against the committed header deliberately."
+                )
+            endif()
+
+            execute_process(
+                COMMAND "${_hkp_flatc_path}" --version
+                OUTPUT_VARIABLE _hkp_flatc_version_output
+                ERROR_VARIABLE _hkp_flatc_version_error
+                RESULT_VARIABLE _hkp_flatc_version_result
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE
+            )
+            set(_hkp_flatc_version "")
+            if(_hkp_flatc_version_result EQUAL 0)
+                if(_hkp_flatc_version_output MATCHES "([0-9]+\\.[0-9]+\\.[0-9]+)")
+                    set(_hkp_flatc_version "${CMAKE_MATCH_1}")
+                endif()
+            endif()
+            if(_hkp_flatc_version STREQUAL "")
+                message(FATAL_ERROR
+                    "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but "
+                    "flatc ${_hkp_flatc_path} did not report a version. The expected FlatBuffers "
+                    "version is ${_hkp_expected_flatc_version}. flatc --version gave exit status "
+                    "\"${_hkp_flatc_version_result}\", output \"${_hkp_flatc_version_output}\" and "
+                    "error output \"${_hkp_flatc_version_error}\". Set the option OFF to build "
+                    "against the committed header deliberately."
+                )
+            endif()
+            if(NOT _hkp_flatc_version VERSION_EQUAL _hkp_expected_flatc_version)
+                message(FATAL_ERROR
+                    "hip-kernel-provider: HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS is ON but "
+                    "flatc ${_hkp_flatc_path} reports FlatBuffers version ${_hkp_flatc_version}, "
+                    "and the expected version is ${_hkp_expected_flatc_version} (from "
+                    "${_hkp_expected_flatc_version_source}). A different flatc version can "
+                    "generate a different ${HKP_INGESTOR_PLAN_HEADER}. Use the flatc of the "
+                    "expected version, or set the option OFF to build against the committed "
+                    "header deliberately."
+                )
+            endif()
+            message(VERBOSE
+                "hip-kernel-provider: flatc ${_hkp_flatc_path} reports FlatBuffers version "
+                "${_hkp_flatc_version}; the expected version is ${_hkp_expected_flatc_version} "
+                "(from ${_hkp_expected_flatc_version_source})."
             )
         endif()
 
         file(STRINGS "${HKP_FLATC_FLAGS_FILE}" _hkp_flatc_flag_lines)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HKP_FLATC_FLAGS_FILE}")
         set(_hkp_flatc_flags "")
         foreach(_hkp_line IN LISTS _hkp_flatc_flag_lines)
             string(STRIP "${_hkp_line}" _hkp_stripped)

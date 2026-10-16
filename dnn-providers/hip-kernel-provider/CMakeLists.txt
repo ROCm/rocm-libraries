@@ -47,8 +47,15 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+# A TheRock build compiles the committed serialization headers by default.
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+    set(_hkp_generate_serialize_default OFF)
+else()
+    set(_hkp_generate_serialize_default ON)
+endif()
 option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
-       "Regenerate FlatBuffers serialization headers from schema during build" ON
+       "Regenerate FlatBuffers serialization headers from schema during build"
+       ${_hkp_generate_serialize_default}
 )
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
