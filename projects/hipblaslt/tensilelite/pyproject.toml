@@ -82,7 +82,7 @@ dependencies = [
     "orjson",
     "yappi",
     "setuptools",
-    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
+    "nanobind>=2.14.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
     "cmake",
     "invoke",
     "filelock",
