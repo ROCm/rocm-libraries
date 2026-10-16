@@ -8,6 +8,7 @@
  * SCOPE (this TU only):
  *   - rocke_build_direct_conv_16c / _new
  *   - rocke_build_direct_conv_4c  / _new
+ *   - rocke_direct_conv_lower_to_llvm (generic DirectConvSpec)
  *   - rocke_direct_conv_16c_lower_to_llvm
  *   - rocke_direct_conv_4c_lower_to_llvm
  *
@@ -315,6 +316,52 @@ rocke_status_t rocke_direct_conv_4c_lower_to_llvm(const rocke_direct_conv_4c_spe
         st = rocke_ir_builder_status(&b);
         rocke_dconv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_4c failed");
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
+    }
+
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    return st;
+}
+
+/* ===================================================================== *
+ *  DirectConvSpec (generic) build -> lower .ll
+ *  (the build entry, rocke_build_direct_conv_new, sits beside the MFMA dgrad
+ *  weight transforms)
+ * ===================================================================== */
+rocke_status_t rocke_direct_conv_lower_to_llvm(const rocke_direct_conv_spec_t* spec,
+                                               const char* arch,
+                                               rocke_llvm_flavor_t flavor,
+                                               char** out_ll,
+                                               char* err,
+                                               size_t err_cap)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
+
+    if(out_ll != NULL)
+    {
+        *out_ll = NULL;
+    }
+    if(spec == NULL || out_ll == NULL)
+    {
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
+    }
+    if(arch == NULL)
+    {
+        arch = "gfx950";
+    }
+
+    kernel = rocke_build_direct_conv_new(&b, spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
+            err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv failed");
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }

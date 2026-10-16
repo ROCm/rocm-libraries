@@ -13,6 +13,10 @@
  * Indices 20..29: rocke_direct_conv_4c_spec_t, the 4c dgrad kernel on the
  * transposed problem (fused gathered / LDS-staged weights, the row-staged
  * runtime row stream; 28 and 29 both reject) -- mirrors _FOURC_CFGS.
+ * Indices 30..44: rocke_direct_conv_spec_t, the generic kernel: the
+ * fused-weight dgrad and row-stream knobs, three rejects (39, 40, 44) and
+ * develop's persistent / waves_k / runtime-channel forms -- mirrors
+ * _GENERIC_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,6 +145,90 @@ static int make_fourc_cfg(int idx, rocke_direct_conv_4c_spec_t* spec, const char
     return 0;
 }
 
+/* Generic DirectConvSpec configs, emitted as GENERIC_CFG_BASE + idx (mirrors
+ * _GENERIC_CFGS; every knob column is spelled out, the spec defaults where
+ * the Python leaves them). */
+#define GENERIC_CFG_BASE 30
+typedef struct generic_cfg
+{
+    int N, H, W, G, cpg, kpg, K;
+    const char* dtype;
+    const char* arch;
+    int block_q, block_groups, block_h, double_buffer, waves_q, waves_k, runtime_k_loop,
+        persistent_grid, persistent_rounds, fold_k32, runtime_channels, k_atoms, m_tiles,
+        preload_weights, dgrad_fused_weights, dgrad_weights_lds, waves_per_eu, row_guard,
+        prefetch_rows, lds_only_sync, waves_m, xcd_tiles, lds_pad, stage_out, row_exit;
+} generic_cfg_t;
+
+/* clang-format off */
+static const generic_cfg_t GENERIC_CFGS[] = {
+    /* N, H, W, G, cpg, kpg, K, dtype, arch, then the knob columns in struct order */
+    {2, 9, 17, 8, 16, 16, 3, "bf16", "gfx950", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 8, 16, 16, 3, "fp16", "gfx950", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 1, 4, 1, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 4, 12, 20, 3, "fp16", "gfx950", 16, 2, 16, 0, 1, 1, 0, 0, 64, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0},
+    {9, 10, 13, 32, 16, 16, 3, "bf16", "gfx950", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 1, 4, 1, 2, 1, 1, 1, 8, 1, 0},
+    {8, 11, 19, 32, 16, 16, 3, "fp16", "gfx950", 32, 2, 8, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 1, 0, 1, 2, 1, 1, 1, 8, 0, 1},
+    {8, 7, 14, 16, 32, 32, 3, "bf16", "gfx950", 16, 1, 16, 1, 1, 1, 0, 0, 64, 1, 0, 0, 0, 0, 1, 1, 0, 0, 2, 1, 2, 1, 8, 1, 0},
+    {2, 9, 14, 8, 8, 32, 5, "fp16", "gfx950", 16, 1, 4, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 1, 3, 1, 2, 0, 0, 1, 0},
+    {2, 6, 21, 8, 20, 8, 1, "bf16", "gfx950", 16, 4, 32, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1},
+    {2, 9, 17, 8, 16, 16, 3, "fp16", "gfx942", 16, 2, 4, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 1, 2, 1, 1, 0, 8, 0, 0},
+    {2, 9, 17, 8, 16, 16, 3, "bf16", "gfx942", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {9, 9, 17, 8, 16, 16, 3, "bf16", "gfx942", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0},
+    {2, 9, 17, 4, 16, 16, 3, "fp16", "gfx950", 16, 1, 4, 1, 1, 1, 1, 1, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 4, 32, 16, 3, "bf16", "gfx950", 32, 1, 16, 1, 2, 2, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 4, 24, 24, 3, "fp16", "gfx950", 16, 1, 8, 1, 1, 1, 0, 0, 64, 0, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 8, 16, 16, 3, "bf16", "gfx950", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0},
+};
+/* clang-format on */
+
+static int make_generic_cfg(int idx, rocke_direct_conv_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(GENERIC_CFGS) / sizeof(GENERIC_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    const generic_cfg_t* c = &GENERIC_CFGS[idx];
+    *spec = rocke_direct_conv_spec_default();
+    spec->problem = rocke_direct_conv_problem_default();
+    spec->problem.N = c->N;
+    spec->problem.H = c->H;
+    spec->problem.W = c->W;
+    spec->problem.groups = c->G;
+    spec->problem.cpg = c->cpg;
+    spec->problem.kpg = c->kpg;
+    spec->problem.KH = c->K;
+    spec->problem.KW = c->K;
+    spec->problem.PAD = (c->K - 1) / 2;
+    spec->problem.stride = 1;
+    spec->problem.dtype = c->dtype;
+    spec->block_q = c->block_q;
+    spec->block_groups = c->block_groups;
+    spec->block_h = c->block_h;
+    spec->double_buffer = c->double_buffer != 0;
+    spec->waves_q = c->waves_q;
+    spec->waves_k = c->waves_k;
+    spec->runtime_k_loop = c->runtime_k_loop != 0;
+    spec->persistent_grid = c->persistent_grid != 0;
+    spec->persistent_rounds = c->persistent_rounds;
+    spec->fold_k32 = c->fold_k32 != 0;
+    spec->runtime_channels = c->runtime_channels != 0;
+    spec->k_atoms = c->k_atoms;
+    spec->m_tiles = c->m_tiles;
+    spec->preload_weights = c->preload_weights != 0;
+    spec->dgrad_fused_weights = c->dgrad_fused_weights != 0;
+    spec->dgrad_weights_lds = c->dgrad_weights_lds != 0;
+    spec->waves_per_eu = c->waves_per_eu;
+    spec->row_guard = c->row_guard != 0;
+    spec->prefetch_rows = c->prefetch_rows;
+    spec->lds_only_sync = c->lds_only_sync != 0;
+    spec->waves_m = c->waves_m;
+    spec->xcd_tiles = c->xcd_tiles != 0;
+    spec->lds_pad = c->lds_pad;
+    spec->stage_out = c->stage_out != 0;
+    spec->row_exit = c->row_exit != 0;
+    *arch = c->arch;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -153,9 +241,15 @@ int main(int argc, char** argv)
 
     rocke_direct_depthwise_dgrad_win_spec_t spec;
     rocke_direct_conv_4c_spec_t spec4c;
+    rocke_direct_conv_spec_t specgen;
     const char* arch = "gfx950";
     int is_4c = 0;
-    if(make_fourc_cfg(idx - FOURC_CFG_BASE, &spec4c, &arch) == 0)
+    int is_generic = 0;
+    if(make_generic_cfg(idx - GENERIC_CFG_BASE, &specgen, &arch) == 0)
+    {
+        is_generic = 1;
+    }
+    else if(make_fourc_cfg(idx - FOURC_CFG_BASE, &spec4c, &arch) == 0)
     {
         is_4c = 1;
     }
@@ -166,9 +260,13 @@ int main(int argc, char** argv)
     }
 
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* kernel = is_4c
-                                     ? rocke_build_direct_conv_4c_new(&b, &spec4c, arch)
-                                     : rocke_build_direct_depthwise_dgrad_win_new(&b, &spec, arch);
+    rocke_kernel_def_t* kernel;
+    if(is_generic)
+        kernel = rocke_build_direct_conv_new(&b, &specgen, arch);
+    else if(is_4c)
+        kernel = rocke_build_direct_conv_4c_new(&b, &spec4c, arch);
+    else
+        kernel = rocke_build_direct_depthwise_dgrad_win_new(&b, &spec, arch);
     if(kernel == NULL)
     {
         const char* m = rocke_ir_builder_error(&b);

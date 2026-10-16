@@ -633,8 +633,8 @@ kernel is unchanged):
   block-uniform one-trip loop carrying the accumulators it touches; its LDS
   staging, barrier and flush are unchanged.
 
-Row-stream knobs (also default off; the C++ engine has no twin of this
-builder yet):
+Row-stream knobs (also default off; like the knobs above, mirrored field for
+field by the C++ engine's `rocke_build_direct_conv` and byte-identity gated):
 
 - `prefetch_rows` (0..3): input row `y + prefetch_rows` is loaded into
   registers while row `y` is computed and published to LDS at the end of row
