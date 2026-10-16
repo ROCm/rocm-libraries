@@ -489,7 +489,7 @@ namespace
         {
             (void)hipFree(ptr);
         }
-        DeviceArray(const DeviceArray&)            = delete;
+        DeviceArray(const DeviceArray&) = delete;
         DeviceArray& operator=(const DeviceArray&) = delete;
     };
 

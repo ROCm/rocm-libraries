@@ -104,10 +104,10 @@ namespace hipblaslt::hostnumerics
     {
         using Type = std::remove_cv_t<T>;
 
-        if constexpr(std::is_same_v<Type, uint8_t> || std::is_same_v<Type, int8_t>
-                     || std::is_same_v<Type, int32_t> || std::is_same_v<Type, float>
-                     || std::is_same_v<Type, double> || std::is_same_v<Type, std::complex<float>>
-                     || std::is_same_v<Type, std::complex<double>>)
+        if constexpr(
+            std::is_same_v<
+                Type,
+                uint8_t> || std::is_same_v<Type, int8_t> || std::is_same_v<Type, int32_t> || std::is_same_v<Type, float> || std::is_same_v<Type, double> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>)
             return nativeScalarType<Type>;
         else if constexpr(std::is_same_v<Type, char>)
             return std::is_signed_v<char> ? ScalarType::Int8 : ScalarType::UInt8;

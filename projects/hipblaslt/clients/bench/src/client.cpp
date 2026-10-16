@@ -930,9 +930,9 @@ try
         return 1;
     }
 
-    if(const auto err = hipblaslt_cotenant::validate_options(
-           hipblaslt_bench_options::cotenant_cus(),
-           hipblaslt_bench_options::cotenant_max_occupancy());
+    if(const auto err
+       = hipblaslt_cotenant::validate_options(hipblaslt_bench_options::cotenant_cus(),
+                                              hipblaslt_bench_options::cotenant_max_occupancy());
        !err.empty())
     {
         hipblaslt_cerr << err << std::endl;

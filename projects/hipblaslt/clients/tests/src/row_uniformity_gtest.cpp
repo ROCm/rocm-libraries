@@ -391,7 +391,7 @@ namespace
                 hipblasLtDestroy(m_handle);
         }
 
-        RowUniformityHarness(const RowUniformityHarness&)            = delete;
+        RowUniformityHarness(const RowUniformityHarness&) = delete;
         RowUniformityHarness& operator=(const RowUniformityHarness&) = delete;
 
         // Returns false with a populated skipReason when the environment cannot

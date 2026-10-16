@@ -42,8 +42,6 @@ rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
 option(TENSILELITE_ENABLE_HOST "Build the TensileLite host library." ON)
 option(TENSILELITE_BUILD_SHARED_LIBS "Build the TensileLite host library as shared vs static." ON)
 option(TENSILELITE_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
-cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
-    "Use mxDataGenerator for pre-swizzled MX scale strides." ON "NOT WIN32" OFF)
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
@@ -53,6 +51,7 @@ if(TENSILELITE_STANDALONE)
 
     find_package(hip REQUIRED)
     find_package(origami CONFIG REQUIRED)
+    find_package(HostNumerics CONFIG REQUIRED COMPONENTS AMDGPULayout)
 endif()
 
 if(NOT TENSILELITE_ENABLE_YAML)
@@ -69,10 +68,6 @@ endif()
 
 if(TENSILELITE_ENABLE_YAML AND TENSILELITE_STANDALONE)
     find_package(LLVM REQUIRED)
-endif()
-
-if(TENSILELITE_ENABLE_MXDATAGENERATOR AND NOT TARGET roc::mxDataGeneratorPreSwizzle)
-    message(FATAL_ERROR "TENSILELITE_ENABLE_MXDATAGENERATOR requires roc::mxDataGeneratorPreSwizzle")
 endif()
 
 option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
@@ -179,12 +174,6 @@ if(TENSILELITE_ENABLE_HOST)
             roc::hostnumerics-amd-gpu-layout
             ZLIB::ZLIB
     )
-
-    if(TENSILELITE_ENABLE_MXDATAGENERATOR)
-        target_link_libraries(tensilelite-host
-            PRIVATE $<BUILD_INTERFACE:roc::mxDataGeneratorPreSwizzle>)
-        target_compile_definitions(tensilelite-host PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    endif()
 
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})

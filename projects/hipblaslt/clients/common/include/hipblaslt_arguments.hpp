@@ -201,7 +201,7 @@ struct Arguments
     hipblaslt_bias_source bias_source;
     bool                  bias_vector;
     int32_t
-        bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
+                             bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
     // hipblasLtInt4Encoding_t for the w4a16 path; ignored unless scaleA is a
@@ -990,7 +990,7 @@ namespace ArgumentsHelper
             func("beta", arg.get_beta<decltype(T)>());
         };
 };
-// clang-format on
+    // clang-format on
 
 #else
 #error "Unsupported C++ version"
