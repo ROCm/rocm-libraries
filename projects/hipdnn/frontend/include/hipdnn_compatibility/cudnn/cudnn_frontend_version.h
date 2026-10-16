@@ -16,6 +16,8 @@
 
 // Macros, not an enum: consumers test these in `#if` directives.
 // NOLINTBEGIN(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)
+// Bumping: also update the pinned tag and commit in THIRD_PARTY_LICENSES.md;
+// detail/graph_wrapper.h enforces the node-signature re-diff.
 
 /// @brief cuDNN FE version claimed by the shim (major, minor, patch, and combined).
 #define CUDNN_FRONTEND_MAJOR_VERSION 1

@@ -47,7 +47,9 @@ target_link_libraries(my_app PRIVATE hipdnn_frontend)
 
    All other cuDNN FE code stays as written: `cudnn_frontend::graph::Graph`, `namespace fe = cudnn_frontend;`, `cudnnHandle_t`, `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `create_cudnn_handle()`.
 
-2. Convert CUDA runtime calls to HIP (`cudaMalloc` → `hipMalloc`, `cudaStream_t` → `hipStream_t`, `<cuda_runtime.h>` → `<hip/hip_runtime.h>`, ...), by hand or with a tool such as `hipify-perl`. The shim does not map CUDA runtime symbols. Keep cuDNN identifiers unchanged; the shim expects cuDNN spellings.
+2. Convert CUDA runtime calls to HIP (`cudaMalloc` → `hipMalloc`, `cudaStream_t` → `hipStream_t`, `<cuda_runtime.h>` → `<hip/hip_runtime.h>`, ...). The shim does not map CUDA runtime symbols. Keep cuDNN identifiers unchanged; the shim expects cuDNN spellings.
+
+   `hipify-perl` also rewrites cuDNN identifiers (`cudnnCreate` → `hipdnnCreate`, `cudnnHandle_t` → `hipdnnHandle_t`, `CUDNN_STATUS_*` → `HIPDNN_STATUS_*`, `<cudnn.h>` → `<hipDNN.h>`) and has no option to skip them. Either convert the CUDA calls by hand, or after running `hipify-perl` revert every `cudnn*` → `hipdnn*` and `CUDNN_*` → `HIPDNN_*` rename and remove any `<hipDNN.h>` include, which hipDNN does not ship. A renamed `hipdnnCreate` bypasses the shim's `cudnnCreate`, so `CUDNN_FRONTEND_LOG_*` variables are not mapped.
 
 3. Link `hipdnn_frontend` (see [Install](#install)).
 
@@ -66,7 +68,7 @@ namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
 Do not include NVIDIA's `cudnn.h` or `cudnn_frontend.h` in the same translation unit: the shim declares `cudnnHandle_t`, `cudnnStatus_t`, and the `cudnn*` entry points itself.
 
-[`samples/cudnn_shim/HipifyConvFprop.cpp`](../samples/cudnn_shim/HipifyConvFprop.cpp) is a complete hipified convolution program. Each line hipify changed is marked `// cuDNN: <original line>`. The other samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/) build and validate one node each.
+[`samples/cudnn_shim/HipifyConvFprop.cpp`](../samples/cudnn_shim/HipifyConvFprop.cpp) is a complete hipified convolution program. Each line changed from the cuDNN original is marked `// cuDNN: <original line>`. The other samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/) build and validate one node each.
 
 ## Known divergences
 
@@ -89,12 +91,12 @@ Details: [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md).
 | `warmup` | Takes the execute arguments and runs plan 0 once. cuDNN FE takes only the handle. |
 | Runtime shape overrides | Workspace queries with non-empty overrides return `GRAPH_NOT_SUPPORTED`. `execute` with overrides requires an SDPA-enabled build. |
 | `is_supported_ext` | hipDNN extension with no cuDNN FE counterpart. |
-| Logging | `cudnnCreate` maps `CUDNN_FRONTEND_LOG_INFO` / `CUDNN_FRONTEND_LOG_FILE` to `HIPDNN_LOG_LEVEL` / `HIPDNN_LOG_FILE`. |
+| Logging | `cudnnCreate` maps `CUDNN_FRONTEND_LOG_INFO` / `CUDNN_FRONTEND_LOG_FILE` to `HIPDNN_LOG_LEVEL` / `HIPDNN_LOG_FILE`. Any cuDNN FE logging variable overrides `HIPDNN_LOG_*`. |
 | Versions | `CUDNN_FRONTEND_VERSION` is 12400 (v1.24.0). `CUDNN_VERSION` / `cudnnGetVersion()` report 92200. `cudnnGetCudartVersion()` reports 12000. |
 
 ## Unsupported nodes and APIs
 
-These `Graph` node methods compile but record `GRAPH_NOT_SUPPORTED`, reported by the next `validate()` or `build_operation_graph()`:
+These `Graph` node methods compile but record `GRAPH_NOT_SUPPORTED`, reported by the next `validate()` or `build_operation_graph()`. To request one, open an issue at https://github.com/ROCm/rocm-libraries/issues.
 
 `adalayernorm`, `adalayernorm_backward`, `bn_finalize`, `concatenate`, `dbn_weight`, `diagonal_band_mask`, `genstats`, `instancenorm`, `instancenorm_backward`, `reshape`, `rng`, `rope`, `rope_backward`, `sdpa_fp8` (FP8 and MXFP8), `sdpa_fp8_backward` (FP8 and MXFP8), `slice`, `transpose`.
 
@@ -118,10 +120,11 @@ Not provided (compile error):
 | `cudnn_frontend` is not declared | Missing namespace alias. Add it after the include. |
 | Redefinition of `cudnnHandle_t` or `cudnnCreate` | NVIDIA cuDNN headers are also included. Remove them from shim builds. |
 | v0.x types such as `TensorBuilder` do not compile | Not supported. Port the file to the v9 graph API or exclude it from the ROCm build. |
-| `validate()` returns `cuDNN-shim node '<name>' has no hipDNN equivalent yet` | The graph uses an [unsupported node](#unsupported-nodes-and-apis). |
+| `validate()` returns `cuDNN-shim node '<name>' has no hipDNN equivalent yet` | The graph uses an [unsupported node](#unsupported-nodes-and-apis). To request one, open an issue at https://github.com/ROCm/rocm-libraries/issues. |
 | `validate()` returns `Duplicate tensor UID in graph` | Two tensors share a UID. Give each tensor a unique UID. |
 | `Deviceless build is unsupported for non-empty graphs` | Call `build_operation_graph(handle)`. |
 | `check_support` or `build_plans` returns `GRAPH_NOT_SUPPORTED` | No loaded hipDNN engine supports the graph. Check [Operation Support](./OperationSupport.md) and `HIPDNN_PLUGIN_DIR` ([Environment](./Environment.md)). |
 | `validate()` fails with `... is unsupported by this shim` or a note-filter message | A setter or plan filter recorded the error earlier. See [Known divergences](#known-divergences). |
 | Plan choice or performance differs from cuDNN | Expected: hipDNN engines and ranking differ. Set `HIPDNN_LOG_LEVEL=info` to see engine selection. |
-| No log output | Set `HIPDNN_LOG_LEVEL=info`, or set `CUDNN_FRONTEND_LOG_INFO=1` and `CUDNN_FRONTEND_LOG_FILE` before the first `cudnnCreate`. |
+| No log output | Set either `HIPDNN_LOG_LEVEL=info` with no `CUDNN_FRONTEND_LOG_*` or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` variable in the environment, or `CUDNN_FRONTEND_LOG_INFO=1` and `CUDNN_FRONTEND_LOG_FILE=<path\|stdout\|stderr>` before the first `cudnnCreate`. Any cuDNN FE logging variable overrides `HIPDNN_LOG_*` at every `cudnnCreate`; `CUDNN_FRONTEND_LOG_INFO=0`, or a level without `CUDNN_FRONTEND_LOG_FILE`, turns logging off. See [Logging](./KNOWN_DIVERGENCES.md#logging). |
+| `hipDNN.h` not found, or `CUDNN_FRONTEND_LOG_*` ignored after hipify | `hipify-perl` renamed cuDNN identifiers. Revert them; see [step 2](#hipify-a-cudnn-fe-program). |

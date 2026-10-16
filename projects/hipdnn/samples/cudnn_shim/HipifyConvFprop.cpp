@@ -7,8 +7,8 @@
 // License text and pinned upstream version: frontend/THIRD_PARTY_LICENSES.md
 // (installed to share/doc/hipdnn_frontend).
 
-// A cuDNN FE convolution-fprop program after textual hipify. Each line hipify
-// rewrote is preceded by "// cuDNN: <original line>"; everything else is unchanged
+// A cuDNN FE convolution-fprop program after hipify. Each line changed from the
+// cuDNN original is preceded by "// cuDNN: <original line>"; everything else is unchanged
 // cuDNN FE source. Needs a GPU; without one it prints "SKIPPED: No GPU devices
 // available." and exits 0.
 
@@ -26,7 +26,7 @@
 
 // cuDNN: #include <cudnn_frontend.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
-// cuDNN: (none; added by hipify)
+// cuDNN: (none; added for the shim)
 namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
 namespace
@@ -92,6 +92,18 @@ int fail(const char* step, const cudnn_frontend::error_t& error)
 {
     std::cerr << step << " failed: " << error.get_message() << '\n';
     return 1;
+}
+
+// Small integers that depend on every index, so channel, filter, or layout mix-ups change the
+// output; |y| <= c * 3 * 2 keeps every partial sum exact in FP32.
+float inputValue(int64_t in, int64_t ic, int64_t ih, int64_t iw)
+{
+    return static_cast<float>(((in + (2 * ic) + (3 * ih) + (5 * iw)) % 7) - 3);
+}
+
+float filterValue(int64_t ik, int64_t ic)
+{
+    return static_cast<float>((((3 * ik) + ic) % 5) - 2);
 }
 } // namespace
 
@@ -176,9 +188,18 @@ int main(int argc, char** argv)
             return fail("get_workspace_size", error);
         }
 
-        // 1x1 filter, all ones: every output element equals c exactly.
-        const std::vector<float> xHost(static_cast<size_t>(n * c * h * w), 1.0f);
-        const std::vector<float> filterHost(static_cast<size_t>(k * c * r * s), 1.0f);
+        std::vector<float> xHost(static_cast<size_t>(n * c * h * w));
+        for(size_t i = 0; i < xHost.size(); ++i)
+        {
+            const auto idx = static_cast<int64_t>(i);
+            xHost[i] = inputValue(idx / (c * h * w), (idx / (h * w)) % c, (idx / w) % h, idx % w);
+        }
+        std::vector<float> filterHost(static_cast<size_t>(k * c * r * s));
+        for(size_t i = 0; i < filterHost.size(); ++i)
+        {
+            const auto idx = static_cast<int64_t>(i);
+            filterHost[i] = filterValue(idx / c, idx % c);
+        }
         std::vector<float> yHost(static_cast<size_t>(n * k * h * w), 0.0f);
 
         const DeviceBuffer xDevice(xHost.size() * sizeof(float));
@@ -202,13 +223,27 @@ int main(int argc, char** argv)
         checkRuntime(hipDeviceSynchronize(), "synchronize");
         yDevice.download(yHost);
 
-        const auto expected = static_cast<float>(c);
-        for(size_t i = 0; i < yHost.size(); ++i)
+        // Index the output through the strides the graph inferred for y.
+        const auto& yStride = y->get_stride();
+        for(int64_t idx = 0; idx < n * k * h * w; ++idx)
         {
-            if(yHost[i] != expected)
+            const int64_t in = idx / (k * h * w);
+            const int64_t ik = (idx / (h * w)) % k;
+            const int64_t ih = (idx / w) % h;
+            const int64_t iw = idx % w;
+
+            float expected = 0.0f;
+            for(int64_t ic = 0; ic < c; ++ic)
             {
-                std::cerr << "Mismatch at y[" << i << "]: got " << yHost[i] << ", expected "
-                          << expected << '\n';
+                expected += inputValue(in, ic, ih, iw) * filterValue(ik, ic);
+            }
+
+            const auto offset = static_cast<size_t>((in * yStride[0]) + (ik * yStride[1])
+                                                    + (ih * yStride[2]) + (iw * yStride[3]));
+            if(yHost[offset] != expected)
+            {
+                std::cerr << "Mismatch at y[" << in << "," << ik << "," << ih << "," << iw
+                          << "]: got " << yHost[offset] << ", expected " << expected << '\n';
                 return 1;
             }
         }

@@ -47,6 +47,7 @@ namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 static_assert(CUDNN_FRONTEND_VERSION == 12400,
               "cuDNN FE version pin changed: re-diff every Graph node signature in this "
               "file against upstream graph_interface.h / node_interface.h at the new tag, "
+              "update the upstream version and commit in frontend/THIRD_PARTY_LICENSES.md, "
               "then update this assert.");
 
 // NOLINTBEGIN(readability-identifier-naming): the whole class mirrors cuDNN's

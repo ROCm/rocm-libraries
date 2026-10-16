@@ -121,12 +121,12 @@ These are claims for consumers that gate on version; there is no cuDNN or CUDA r
 
 ## Logging
 
-`cudnnCreate()` maps cuDNN FE logging environment variables to hipDNN before creating the handle:
+Every `cudnnCreate()` call maps cuDNN FE logging environment variables to hipDNN before creating the handle. If any of `CUDNN_FRONTEND_LOG_INFO`, `CUDNN_FRONTEND_LOG_FILE`, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` is set, the mapping overrides any `HIPDNN_LOG_LEVEL` / `HIPDNN_LOG_FILE` already set:
 
 | cuDNN FE | hipDNN |
 |---|---|
 | `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=<path>` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE=<path>` |
-| `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=stdout` or `stderr` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE` unset |
-| any other combination, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` set | `HIPDNN_LOG_LEVEL=off` |
+| `CUDNN_FRONTEND_LOG_INFO` > 0 and `CUDNN_FRONTEND_LOG_FILE=stdout` or `stderr` | `HIPDNN_LOG_LEVEL=info`, `HIPDNN_LOG_FILE` unset; both log to stderr |
+| any other combination, or `NV_CUDNN_FRONTEND_DISABLE_LOGGING` set to a non-zero value | `HIPDNN_LOG_LEVEL=off`, `HIPDNN_LOG_FILE` unset |
 
-Nothing changes when none of these variables is set. The mapping takes effect only if it runs before hipDNN logging initializes. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
+Nothing changes when none of these variables is set. The level applies immediately. hipDNN picks the log destination (file or stderr) once, when its logging initializes: if that happens before `cudnnCreate()` (for example, on an earlier hipDNN call), the file mapping is ignored, and if the level was off at that point there is no console output either. `CUDNN_FE_LOG*` macros forward to hipDNN frontend logging at info level; compiling with `NV_CUDNN_FRONTEND_DISABLE_LOGGING` turns them into no-ops.
