@@ -282,15 +282,15 @@ class TraitSpec:
     # operands to an 8-byte load. Setting 2 reproduces that older emission.
     # No effect on 2-byte operands: f16/bf16 resolve to 2 either way.
     ab_load_elem_bytes: Optional[int] = None
-    # Split the per-K-tile workgroup barrier of the TDM ping-pong loop into its
-    # two halves. Each wave signals as soon as its last fragment read of the
+    # Split the per-K-tile workgroup barrier of the TDM K-loop (the depth-2
+    # ping-pong or the depth >= 3 ring) into its two halves. Each wave signals as soon as its last fragment read of the
     # tile has drained (and, for the waves that issue the mover, once the next
     # tile has landed), then runs the K-tile's final k-atom of WMMAs, and only
     # waits at the top of the next iteration. The barrier skew between waves is
     # absorbed by those WMMAs instead of stalling every wave at a full
     # ``s_barrier``. Same hazards as the joint barrier: the wait still precedes
     # both the refill of the buffer just read and the first read of the new
-    # tile. WMMA ``mem`` pipeline with ``tdm`` and ``tdm_depth == 2`` only.
+    # tile. WMMA ``mem`` pipeline with ``tdm`` and ``tdm_depth >= 2`` only.
     # False (default) keeps the joint barrier and byte-identical output.
     split_barrier: bool = False
 
@@ -730,14 +730,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
     if spec.trait.tdm_depth != 1 and not spec.trait.tdm:
         return False, "tdm_depth is only meaningful with tdm=True"
-    # The signal is raised from inside the WMMA phase of the depth-2 ping-pong
-    # loop. Any other loop shape would wait on a barrier nothing signals, which
-    # hangs the GPU rather than failing, hence the narrow gate.
+    # The signal is raised from inside the WMMA phase of the TDM ping-pong
+    # (depth 2) or ring (depth >= 3) loop. Any other loop shape would wait on a
+    # barrier nothing signals, which hangs the GPU rather than failing, hence
+    # the narrow gate.
     if spec.trait.split_barrier:
         if family != "wmma" or spec.trait.pipeline != "mem":
             return False, "split_barrier needs the WMMA 'mem' pipeline"
-        if not spec.trait.tdm or spec.trait.tdm_depth != 2:
-            return False, "split_barrier needs tdm=True with tdm_depth=2"
+        if not spec.trait.tdm or spec.trait.tdm_depth < 2:
+            return False, "split_barrier needs tdm=True with tdm_depth >= 2"
         if spec.trait.split_k != 1:
             return False, "split_barrier does not support split_k"
 
@@ -2321,6 +2322,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 lds_parity=j,
             )
 
+        # Split barrier: the joint barrier at each iteration's top becomes a
+        # wait there, paired with a signal raised once the previous iteration's
+        # last fragment reads have drained and its tile + 1 has landed -- the
+        # same ``allowed`` count, since the outstanding fills (tiles k+1 ..
+        # k+D-1) are the same set at both points. The prologue raises the
+        # first signal and a wait after the loop consumes the last one.
+        split = spec.trait.split_barrier
+        _WG_SIGNAL, _WG_WAIT = 0xFFFFFFFF, 0xFFFF
+
+        def _signal_next_tile_ready() -> None:
+            b.s_waitcnt(lgkmcnt=0)
+            b.s_wait_tensorcnt(allowed)
+            b.s_barrier_signal(_WG_SIGNAL)
+
+        if split:
+            b.s_wait_tensorcnt(allowed)
+            b.s_barrier_signal(_WG_SIGNAL)
+
         c_ring = b.const_i32(D)
         c_ahead = b.const_i32(D - 1)
         c_one = b.const_i32(1)
@@ -2329,17 +2348,31 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         with for_op as (k0, iter_vars):
             ring = iter_vars[0]
             acc_iter = iter_vars[1:]
-            b.s_wait_tensorcnt(allowed)
-            b.sync_lds_only()
+            if split:
+                b.s_barrier_wait(_WG_WAIT)
+            else:
+                b.s_wait_tensorcnt(allowed)
+                b.sync_lds_only()
             emit_load_phase(
                 A_smem,
                 B_smem,
                 b.smin(b.add(k0, b.const_i32(ahead_k)), last_origin),
                 lds_parity=b.mod(b.add(ring, c_ahead), c_ring),
             )
-            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=ring)
+            if split:
+                new_accs = _emit_wmma_phase(
+                    A_smem,
+                    B_smem,
+                    acc_iter,
+                    lds_parity=ring,
+                    after_last_reads=_signal_next_tile_ready,
+                )
+            else:
+                new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=ring)
             b.scf_yield(b.mod(b.add(ring, c_one), c_ring), *new_accs)
 
+        if split:
+            b.s_barrier_wait(_WG_WAIT)
         # Drain the in-flight look-ahead fills before the epilogue reuses LDS.
         b.s_wait_tensorcnt(0)
         _for_results = for_op.results[1:]

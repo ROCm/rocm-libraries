@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""No-GPU tests for ``TraitSpec.split_barrier`` on the gfx1250 TDM ping-pong.
+"""No-GPU tests for ``TraitSpec.split_barrier`` on the gfx1250 TDM K-loops.
 
 A split barrier fails in two ways that compile cleanly:
 
@@ -13,6 +13,10 @@ A split barrier fails in two ways that compile cleanly:
   be overwritten. Hence: no LDS load between the in-loop signal and the end of
   the iteration, and the wait must come before the iteration's first LDS read
   and before its refill.
+
+Both TDM loop shapes are covered: the depth-2 ping-pong and the depth >= 3 ring,
+whose last signal is consumed by a wait after the loop rather than in an
+epilogue phase.
 
 These are IR-shape assertions on the lowered kernel; they need no GPU.
 """
@@ -75,6 +79,12 @@ def _spec(**trait):
     )
 
 
+def _ring_spec(depth: int, **trait):
+    """The same shape at tile_k 128 / pad 16, where depths 2..4 fit in LDS."""
+    spec = _spec(tdm_depth=depth, lds_k_pad=16, **trait)
+    return replace(spec, tile=replace(spec.tile, tile_k=128))
+
+
 def _lower(spec) -> str:
     from rocke.core.lower_llvm import lower_kernel_to_llvm
     from rocke.instances.common.gemm_universal import (
@@ -106,15 +116,16 @@ class TestGemmSplitBarrierValidity(unittest.TestCase):
 
         return is_valid_spec(spec, arch=arch)
 
-    def test_admitted_on_the_depth2_tdm_wmma_loop(self):
-        ok, why = self._valid(_spec(split_barrier=True))
-        self.assertTrue(ok, why)
+    def test_admitted_on_the_tdm_wmma_loops(self):
+        for depth in (2, 3, 4):
+            with self.subTest(tdm_depth=depth):
+                ok, why = self._valid(_ring_spec(depth, split_barrier=True))
+                self.assertTrue(ok, why)
 
     def test_rejected_where_the_signal_is_never_raised(self):
         """Any other loop shape would wait on a barrier nothing signals."""
         for label, kw in (
             ("depth 1", dict(tdm_depth=1)),
-            ("depth 3 ring", dict(tdm_depth=3)),
             ("no tdm", dict(tdm=False, tdm_depth=1)),
             ("wmma_v1", dict(pipeline="wmma_v1")),
             ("split_k", dict(split_k=2)),
@@ -170,6 +181,39 @@ class TestGemmSplitBarrierEmission(unittest.TestCase):
         self.assertIn(
             "s.wait.tensorcnt", body[sig - 1], "signal before the fill landed"
         )
+
+
+
+class TestGemmSplitBarrierRing(unittest.TestCase):
+    """The depth >= 3 ring: one wait per iteration plus one after the loop."""
+
+    def test_ring_pairs_and_orders(self):
+        for depth in (3, 4):
+            with self.subTest(tdm_depth=depth):
+                ll = _lower(_ring_spec(depth, split_barrier=True))
+                self.assertEqual(ll.count(_SIGNAL), 2, "prologue + in-loop signal")
+                self.assertEqual(ll.count(_WAIT), 2, "in-loop + post-loop wait")
+                body = _loop_body(ll)
+                self.assertFalse(any(_JOINT in l for l in body))
+                wait = next(i for i, l in enumerate(body) if _WAIT in l)
+                first_read = next(i for i, l in enumerate(body) if _LDS_LOAD.search(l))
+                refill = next(
+                    i for i, l in enumerate(body) if "tensor.load.to.lds" in l
+                )
+                self.assertLess(wait, first_read)
+                self.assertLess(wait, refill)
+                sig = next(i for i, l in enumerate(body) if _SIGNAL in l)
+                tail = body[sig + 1 :]
+                self.assertFalse(any(_LDS_LOAD.search(l) for l in tail))
+                self.assertTrue(any(_WMMA.search(l) for l in tail))
+                self.assertIn("s.wait.tensorcnt", body[sig - 1])
+
+    def test_ring_default_is_unchanged(self):
+        for depth in (3, 4):
+            with self.subTest(tdm_depth=depth):
+                ll = _lower(_ring_spec(depth))
+                self.assertNotIn(_SIGNAL, ll)
+                self.assertEqual(ll, _lower(_ring_spec(depth, split_barrier=False)))
 
 
 if __name__ == "__main__":
