@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <queue>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
@@ -3549,9 +3550,31 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             return std::make_pair(start, end);
         };
+        // The ds_loads in the order they can issue: the DAG chains them (hard constraints), and
+        // the chain does not follow the node ids.
+        std::vector<unsigned> dsOrder;
+        {
+            std::vector<int> indegree(deps.dag.nodes.size(), -1);
+            for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
+                if (isDSRead(*deps.dag.nodes[id].inst)) indegree[id] = 0;
+            for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+                if (indegree[id] < 0) continue;
+                for (unsigned succ : deps.dag.graph[id])
+                    if (indegree[succ] >= 0) ++indegree[succ];
+            }
+            std::priority_queue<unsigned, std::vector<unsigned>, std::greater<unsigned>> ready;
+            for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
+                if (indegree[id] == 0) ready.push(id);
+            while (!ready.empty()) {
+                const unsigned id = ready.top();
+                ready.pop();
+                dsOrder.push_back(id);
+                for (unsigned succ : deps.dag.graph[id])
+                    if (indegree[succ] > 0 && --indegree[succ] == 0) ready.push(succ);
+            }
+        }
         std::vector<DsSpreadPacer::Load> loads;
-        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
-            if (!isDSRead(*deps.dag.nodes[id].inst)) continue;
+        for (unsigned id : dsOrder) {
             const auto [secStart, secEnd] = sectionOf(id);
             loads.push_back({id, consumerWindow(id), secStart, secEnd});
         }
