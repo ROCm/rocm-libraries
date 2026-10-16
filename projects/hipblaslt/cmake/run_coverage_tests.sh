@@ -41,6 +41,26 @@ while IFS= read -r category; do
 done <<< "${TIER_CATEGORIES//,/$'\n'}"
 UNTIERED_FILTER+="StreamKNullStream.*"
 
+# Math CI narrows coverage to the pre_checkin data-driven cases. Keep focused
+# adapter and ownership tests in that run without changing unrestricted runs
+# or existing negative exclusions.
+POSITIVE_FILTER="${FILTER%%-*}"
+if [[ -n "${POSITIVE_FILTER}" && "${POSITIVE_FILTER}" != "*" ]]; then
+    for REQUIRED_FILTER in "*HostNumerics*" "HipBuffer.smoke_Move*"; do
+        if [[ "${POSITIVE_FILTER}" != *"${REQUIRED_FILTER}"* ]]; then
+            POSITIVE_FILTER="${POSITIVE_FILTER}:${REQUIRED_FILTER}"
+        fi
+    done
+
+    if [[ "${FILTER}" == *-* ]]; then
+        FILTER="${POSITIVE_FILTER}-${FILTER#*-}"
+    else
+        FILTER="${POSITIVE_FILTER}"
+    fi
+fi
+
+echo "Running coverage with GTEST_FILTER: $FILTER"
+
 SMOKE_MATMUL_FILTER="*matmul_test.matmul/smoke_*"
 CHECK_NUMERICS_FILTER="${SMOKE_MATMUL_FILTER}-*pointer_array*"
 

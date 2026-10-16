@@ -247,7 +247,7 @@ namespace TensileLite
                 ("deterministic-mode",       po::value<bool>()->default_value(false), "Enforce deterministic summation patterns"
                                                                                       "by not splitting U among workgroups")
 
-                ("init-seed",                po::value<unsigned int>()->default_value(0), "The seed for srand")
+                ("init-seed",                po::value<unsigned int>()->default_value(0), "Fixed seed for srand and host initialization; zero is a valid deterministic seed")
                 ("init-a",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for A")
                 ("init-b",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for B")
                 ("init-c",                   po::value<InitMode>()->default_value(InitMode::Random), "Initialization for C")
@@ -269,6 +269,8 @@ namespace TensileLite
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
+                ("freivalds", po::value<bool>()->default_value(false),
+                 "Validate every output with HostNumerics Freivalds instead of a CPU reference. Requires certifiable integer-valued inputs.")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
                 "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
@@ -652,7 +654,8 @@ namespace TensileLite
 #if !(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
             if(args["rocprof-counter"].as<std::vector<std::string>>().size())
             {
-                throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
+                throw std::runtime_error("rocprof-counter is provided but client is not built with "
+                                         "-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
             }
 #endif
             fix_data_types(args);
@@ -697,8 +700,7 @@ namespace TensileLite
 
             Elf64_Ehdr eh{};
             f.read(reinterpret_cast<char*>(&eh), sizeof(eh));
-            if(!f
-               || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+            if(!f || std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
                || eh.e_ident[EI_CLASS] != ELFCLASS64)
                 return 0;
 
@@ -718,9 +720,7 @@ namespace TensileLite
                     symSh = &sh;
                     break;
                 }
-            if(!symSh
-               || symSh->sh_link >= shdrs.size()
-               || symSh->sh_size == 0
+            if(!symSh || symSh->sh_link >= shdrs.size() || symSh->sh_size == 0
                || symSh->sh_size % sizeof(Elf64_Sym) != 0)
                 return 0;
 
@@ -770,9 +770,7 @@ namespace TensileLite
             std::uintmax_t minSize = std::numeric_limits<std::uintmax_t>::max();
             for(auto end : gwEndAddrs)
             {
-                auto it = std::upper_bound(kernelStarts.begin(),
-                                           kernelStarts.end(),
-                                           end);
+                auto it = std::upper_bound(kernelStarts.begin(), kernelStarts.end(), end);
                 if(it == kernelStarts.begin())
                     continue;
                 std::uint64_t start = *(it - 1);
@@ -783,9 +781,8 @@ namespace TensileLite
                     minSize = sz;
             }
 
-            return (minSize == std::numeric_limits<std::uintmax_t>::max())
-                       ? std::uintmax_t{0}
-                       : minSize;
+            return (minSize == std::numeric_limits<std::uintmax_t>::max()) ? std::uintmax_t{0}
+                                                                           : minSize;
         }
 #endif // defined(__linux__)
 
@@ -793,6 +790,7 @@ namespace TensileLite
 } // namespace TensileLite
 
 int main(int argc, const char* argv[])
+try
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
@@ -802,13 +800,11 @@ int main(int argc, const char* argv[])
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
 
-    // Set srand
-    unsigned int seed = args["init-seed"].as<unsigned int>();
-    if(seed == 0)
-    {
-        seed = time(NULL);
-    }
-    std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
+    // Seed legacy rand consumers and component-backed host initialization.
+    const unsigned int seed = args["init-seed"].as<unsigned int>();
+    std::cout << std::endl
+              << "srand and host initialization seed is set to " << seed << std::endl
+              << std::endl;
     srand(seed);
 
     ClientProblemFactory problemFactory(args);
@@ -817,7 +813,7 @@ int main(int argc, const char* argv[])
     calibrateTimingOverhead();
 
     std::shared_ptr<Hardware> hardware;
-    hipStream_t              stream;
+    hipStream_t               stream;
     {
         ScopedTimer timer("hip_initialization");
         hardware = GetHardware(args);
@@ -865,12 +861,10 @@ int main(int argc, const char* argv[])
             ScopedTimer timer("icache_rotate_extra_copies_loading");
             auto const& filenames = args["code-object"].as<std::vector<std::string>>();
             for(auto const& filename : filenames)
-                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
-                                                                    icacheRotateCopies));
+                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename, icacheRotateCopies));
             std::cout << "Loaded " << icacheRotateCopies
                       << " extra rotation copies of each --code-object for I-cache test"
-                      << " (total = " << (icacheRotateCopies + 1) << " modules)"
-                      << std::endl;
+                      << " (total = " << (icacheRotateCopies + 1) << " modules)" << std::endl;
         }
     }
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -879,7 +873,7 @@ int main(int argc, const char* argv[])
 
     {
         ScopedTimer timer("lazy_loading_init");
-        auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
+        auto        result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
         if(result != hipSuccess)
         {
             std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
@@ -894,11 +888,11 @@ int main(int argc, const char* argv[])
         numProblems = problems.size();
     int lastProblemIdx = firstProblemIdx + numProblems - 1;
 
-    bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
-    bool        runKernels       = !args["selection-only"].as<bool>();
-    bool        exitOnError      = args["exit-on-error"].as<bool>();
-    bool        groupedGemm      = args["grouped-gemm"].as<bool>();
-    const auto& icacheFlushArgs  = args["icache-flush-args"].as<std::vector<bool>>();
+    bool        gpuTimer        = args["use-gpu-timer"].as<bool>();
+    bool        runKernels      = !args["selection-only"].as<bool>();
+    bool        exitOnError     = args["exit-on-error"].as<bool>();
+    bool        groupedGemm     = args["grouped-gemm"].as<bool>();
+    const auto& icacheFlushArgs = args["icache-flush-args"].as<std::vector<bool>>();
 
     float skip_slow_solution_ratio = args["skip-slow-solution-ratio"].as<float>();
     if(skip_slow_solution_ratio > 1.0 || skip_slow_solution_ratio < 0.0)
@@ -922,7 +916,7 @@ int main(int argc, const char* argv[])
         solutionIterator = SolutionIterator::Default(library, hardware, args);
     }
 
-    MetaRunListener listeners;
+    MetaRunListener                 listeners;
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
     float                           flushTimeMs{};
 
@@ -934,19 +928,19 @@ int main(int argc, const char* argv[])
 
         if(runKernels)
         {
-            bool hasIcacheFlush
-                = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
+            bool hasIcacheFlush = std::any_of(
+                begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
             flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
             listeners.addListener(std::make_shared<SynchronizerValidator>(args));
-            listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
+            listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit, stream));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-            if (!args["rocprof-counter"].as<std::vector<std::string>>().empty())
+            if(!args["rocprof-counter"].as<std::vector<std::string>>().empty())
                 listeners.addListener(Profiler::Default(args));
 #endif
         }
@@ -968,7 +962,8 @@ int main(int argc, const char* argv[])
         {
             std::string filename = args["log-file"].as<std::string>();
             auto        logFile  = std::make_shared<std::ofstream>(
-                filename.c_str(), args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
+                filename.c_str(),
+                args["log-file-append"].as<bool>() ? std::ios::app : std::ios::out);
 
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
         }
@@ -1069,8 +1064,7 @@ int main(int argc, const char* argv[])
                     int icacheArg = args["icache-rotate-copies"].as<int>();
                     if(icacheArg == -1 && adapter.numRotationModules() == 1)
                     {
-                        auto const& filenames
-                            = args["code-object"].as<std::vector<std::string>>();
+                        auto const& filenames = args["code-object"].as<std::vector<std::string>>();
 
                         // Term 1: align with data rotation cycle.
                         int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
@@ -1092,12 +1086,12 @@ int main(int argc, const char* argv[])
                         if(rotateSizeKB < 0)
                             rotateSizeKB = 0;
                         std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
-                        int extrasFromCache = 0;
+                        int            extrasFromCache   = 0;
                         if(K == 0)
                         {
                             std::cerr << "[icache-rotate] warning: no label_GW_End "
-                                    << "found in any --code-object; cache-based "
-                                    << "term contributes 0" << std::endl;
+                                      << "found in any --code-object; cache-based "
+                                      << "term contributes 0" << std::endl;
                         }
                         else if(kCacheBudgetBytes > K)
                         {
@@ -1115,24 +1109,19 @@ int main(int argc, const char* argv[])
                         {
                             ScopedTimer timer("icache_rotate_extra_copies_loading");
                             for(auto const& filename : filenames)
-                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
-                                    filename, extras));
+                                HIP_CHECK_EXC(
+                                    adapter.loadCodeObjectFileExtraCopies(filename, extras));
                         }
 #if defined(__linux__)
-                        std::cout << "[icache-rotate] auto extras = max("
-                                  << extrasFromDataInit << " from inputArr.size()-1, "
-                                  << extrasFromCache << " from "
-                                  << kCacheBudgetBytes << "/" << K << ") = "
-                                  << extras
-                                  << " (total = " << (extras + 1) << " modules)"
-                                  << std::endl;
+                        std::cout << "[icache-rotate] auto extras = max(" << extrasFromDataInit
+                                  << " from inputArr.size()-1, " << extrasFromCache << " from "
+                                  << kCacheBudgetBytes << "/" << K << ") = " << extras
+                                  << " (total = " << (extras + 1) << " modules)" << std::endl;
 #else
-                        std::cout << "[icache-rotate] auto extras = max("
-                                  << extrasFromDataInit << " from inputArr.size()-1, "
-                                  << extrasFromCache << " from --icache-rotate-size) = "
-                                  << extras
-                                  << " (total = " << (extras + 1) << " modules)"
-                                  << std::endl;
+                        std::cout << "[icache-rotate] auto extras = max(" << extrasFromDataInit
+                                  << " from inputArr.size()-1, " << extrasFromCache
+                                  << " from --icache-rotate-size) = " << extras
+                                  << " (total = " << (extras + 1) << " modules)" << std::endl;
 #endif
                     }
                 }
@@ -1167,8 +1156,8 @@ int main(int argc, const char* argv[])
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    auto inputs = dataInit->prepareGPUInputs(problem);
-                                    inputArr[0] = inputs;
+                                    auto        inputs = dataInit->prepareGPUInputs(problem);
+                                    inputArr[0]        = inputs;
                                 }
                                 resetInput = true;
 
@@ -1232,10 +1221,11 @@ int main(int argc, const char* argv[])
                                         for(int i = 1; i < warmupInvocations; i++)
                                         {
                                             size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
+                                            HIP_CHECK_EXC(
+                                                adapter.launchKernels(kernels[kIdx],
+                                                                      stream,
+                                                                      warmupStartEvents[i],
+                                                                      warmupStopEvents[i]));
                                         }
                                         listeners.postWarmup(
                                             warmupStartEvents, warmupStopEvents, stream);
@@ -1247,10 +1237,11 @@ int main(int argc, const char* argv[])
                                 TimingEvents ProfilerStopEvents(1, warmupEventCount);
                                 listeners.preProfiler();
                                 rotateAndSelect();
-                                HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
-                                                                    stream,
-                                                                    ProfilerStartEvents[0],
-                                                                    ProfilerStopEvents[0]));
+                                HIP_CHECK_EXC(adapter.launchKernels(
+                                    kernels[warmupInvocations % kernels.size()],
+                                    stream,
+                                    ProfilerStartEvents[0],
+                                    ProfilerStopEvents[0]));
                                 listeners.postProfiler();
 #endif
 
@@ -1280,14 +1271,19 @@ int main(int argc, const char* argv[])
 
                                                     if(icacheFlush)
                                                     {
-                                                        hipLaunchKernelGGL(
-                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                        hipLaunchKernelGGL(flush_icache,
+                                                                           flushGridSize,
+                                                                           64,
+                                                                           0,
+                                                                           stream);
                                                     }
                                                 }
 
-                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                listeners.postEnqueues(
+                                                    startEvents, stopEvents, stream);
                                             }
-                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
+                                            listeners.validateEnqueues(
+                                                inputs, startEvents, stopEvents);
                                         }
 
                                     listeners.postSyncs();
@@ -1352,11 +1348,16 @@ int main(int argc, const char* argv[])
     {
         auto flushStart = TimingClock::now();
         flushTimingBuffer();
-        auto flushMs = std::chrono::duration<double, std::milli>(
-            TimingClock::now() - flushStart).count();
+        auto flushMs
+            = std::chrono::duration<double, std::milli>(TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
     }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);
+}
+catch(const std::exception& error)
+{
+    std::cerr << "tensilelite-client: " << error.what() << '\n';
+    return 1;
 }

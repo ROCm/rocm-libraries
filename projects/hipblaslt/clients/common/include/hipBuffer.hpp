@@ -30,9 +30,13 @@
 #include "datatype_interface.hpp"
 #include "hip_placement.hpp"
 #include "hipblaslt_ostream.hpp"
-
+#include <algorithm>
+#include <complex>
 #include <memory>
+#include <roc/hostnumerics/tensor.hpp>
+#include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 class HipDeviceBuffer : public d_vector_type
@@ -74,10 +78,11 @@ public:
     // in memory it no longer owns, which for a placed buffer is not mapped.
     HipDeviceBuffer(HipDeviceBuffer&& other) noexcept
         : d_vector_type(std::move(other))
-        , numBytes(other.numBytes)
+        , numBytes(std::exchange(other.numBytes, 0))
         , placed(std::move(other.placed))
         , buffer(std::exchange(other.buffer, nullptr))
     {
+        other.reset_after_move();
     }
 
     HipDeviceBuffer& operator=(HipDeviceBuffer&& other) noexcept
@@ -85,10 +90,13 @@ public:
         if(this != &other)
         {
             this->device_vector_teardown(placed ? nullptr : static_cast<char*>(buffer));
+            buffer = nullptr;
+
             d_vector_type::operator=(std::move(other));
-            numBytes = other.numBytes;
+            numBytes = std::exchange(other.numBytes, 0);
             placed   = std::move(other.placed);
             buffer   = std::exchange(other.buffer, nullptr);
+            other.reset_after_move();
         }
         return *this;
     }
@@ -139,18 +147,30 @@ private:
 
 class HipHostBuffer
 {
+    struct PooledHostMemory
+    {
+        explicit PooledHostMemory(h_memory memory_)
+            : memory(std::move(memory_))
+        {
+        }
+
+        ~PooledHostMemory()
+        {
+            memory_pool<h_memory>::Restore(memory);
+        }
+
+        h_memory memory;
+    };
+
 public:
     HipHostBuffer(hipDataType dtype, std::size_t numElements)
-        : buffer(memory_pool<h_memory>::Get(realDataTypeSize(dtype) * numElements
-                                                ? realDataTypeSize(dtype) * numElements
-                                                : realDataTypeSize(dtype)))
+        : buffer(std::make_shared<PooledHostMemory>(memory_pool<h_memory>::Get(
+              realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
+                                                    : realDataTypeSize(dtype))))
     {
     }
 
-    ~HipHostBuffer()
-    {
-        memory_pool<h_memory>::Restore(buffer);
-    }
+    ~HipHostBuffer()                               = default;
     HipHostBuffer(const HipHostBuffer&)            = delete;
     HipHostBuffer(HipHostBuffer&&)                 = default;
     HipHostBuffer& operator=(const HipHostBuffer&) = delete;
@@ -158,27 +178,27 @@ public:
 
     void* end()
     {
-        return (void*)((char*)buffer.get() + getNumBytes());
+        return (void*)((char*)buffer->memory.get() + getNumBytes());
     }
 
     const void* end() const
     {
-        return (void*)((const char*)buffer.get() + getNumBytes());
+        return (void*)((const char*)buffer->memory.get() + getNumBytes());
     }
 
     void* buf()
     {
-        return buffer.get();
+        return buffer->memory.get();
     }
 
     const void* buf() const
     {
-        return buffer.get();
+        return buffer->memory.get();
     }
 
     std::size_t getNumBytes() const
     {
-        return buffer.bytes();
+        return buffer->memory.bytes();
     }
 
     template <typename T>
@@ -193,15 +213,29 @@ public:
         return reinterpret_cast<const T*>(buf());
     }
 
+    roc::hostnumerics::Tensor tensor(roc::hostnumerics::ScalarType type,
+                                     roc::hostnumerics::Layout     layout) const
+    {
+        return roc::hostnumerics::Tensor::shareExternalMutableBackingStorage(
+            type,
+            std::move(layout),
+            buffer,
+            std::span<std::byte>(reinterpret_cast<std::byte*>(buffer->memory.get()),
+                                 getNumBytes()));
+    }
+
 private:
-    h_memory buffer;
+    std::shared_ptr<PooledHostMemory> buffer;
 };
 
-inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
+inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
                               const HipHostBuffer& hBuf,
                               std::size_t          block_count = 1,
                               hipStream_t          stream      = nullptr)
 {
+    if(block_count == 0)
+        return hipErrorInvalidValue;
+
     hipError_t hip_err;
 
     // Perform async copy for all blocks
@@ -224,6 +258,9 @@ inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
 
 inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
 {
+    if(repeats == 0)
+        return hipErrorInvalidValue;
+
     hipError_t hip_err = hipSuccess;
     for(size_t i = 1; i < repeats; ++i)
     {
@@ -253,7 +290,7 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
     // lda is only used by the swizzled row-by-row copy below; the plain copy path
     // ignores it, so only the swizzle path can have an out-of-range leading dimension.
     if(needSwizzle && row > lda)
-        hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
+        return hipErrorInvalidValue;
     hipError_t hip_err;
 
     // Synchronize to ensure prior work is complete
@@ -283,165 +320,4 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
     }
 
     return hipStreamSynchronize(stream);
-}
-
-template <typename T1>
-inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst)
-{
-    std::copy(
-        static_cast<T1*>(src.buf()), static_cast<T1*>(src.end()), static_cast<T1*>(dst.buf()));
-}
-
-inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_32F:
-        copy_buf<float>(src, dst);
-        break;
-    case HIP_R_64F:
-        copy_buf<double>(src, dst);
-        break;
-    case HIP_C_32F:
-        copy_buf<std::complex<float>>(src, dst);
-        break;
-    case HIP_C_64F:
-        copy_buf<std::complex<double>>(src, dst);
-        break;
-    case HIP_R_16F:
-        copy_buf<hipblasLtHalf>(src, dst);
-        break;
-    case HIP_R_16BF:
-        copy_buf<hip_bfloat16>(src, dst);
-        break;
-    case HIP_R_8F_E4M3_FNUZ:
-        copy_buf<hipblaslt_f8_fnuz>(src, dst);
-        break;
-    case HIP_R_8F_E5M2_FNUZ:
-        copy_buf<hipblaslt_bf8_fnuz>(src, dst);
-        break;
-    case HIP_R_8F_E4M3:
-        copy_buf<hipblaslt_f8>(src, dst);
-        break;
-    case HIP_R_8F_E5M2:
-        copy_buf<hipblaslt_bf8>(src, dst);
-        break;
-    case HIP_R_32I:
-        copy_buf<int32_t>(src, dst);
-        break;
-    case HIP_R_8I:
-        copy_buf<hipblasLtInt8>(src, dst);
-        break;
-    default:
-        hipblaslt_cerr << "Error type in copy_buf "<< std::endl;
-        break;
-    }
-}
-
-template <typename T1, typename Tc>
-inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
-{
-    constexpr bool requires_real_extraction = !is_std_complex_v<Tc> && is_std_complex_v<T1>;
-    if constexpr(std::is_same<Tc, float>::value
-                 || !(std::is_same<T1, hipblaslt_bf8_fnuz>::value
-                      || std::is_same<T1, hipblaslt_f8_fnuz>::value))
-    {
-        if constexpr(std::is_same<Tc, float>::value
-                     || !(std::is_same<T1, hipblaslt_bf8>::value
-                          || std::is_same<T1, hipblaslt_f8>::value))
-        {
-            std::transform(static_cast<T1*>(src.buf()),
-                           static_cast<T1*>(src.end()),
-                           static_cast<Tc*>(dst.buf()),
-
-                           [](T1 c) -> Tc {
-                               if constexpr(requires_real_extraction)
-                               {
-                                   // If T1 is complex and Tc is real, cast the real part
-                                   return static_cast<Tc>(c.real()); 
-                               }
-                               else
-                               {
-                                   // Standard cast (complex->complex, real->real, or custom)
-                                   return static_cast<Tc>(c);
-                               }
-                           });
-        }
-    }
-}
-
-template <typename T1>
-inline void _transform_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType typeTc)
-{
-    switch(typeTc)
-    {
-    case HIP_R_32F:
-        transform_buf<T1, float>(src, dst);
-        break;
-    case HIP_R_64F:
-        transform_buf<T1, double>(src, dst);
-        break;
-    case HIP_C_32F:
-        transform_buf<T1, std::complex<float>>(src, dst);
-        break;
-    case HIP_C_64F:
-        transform_buf<T1, std::complex<double>>(src, dst);
-        break;
-    case HIP_R_16F:
-        transform_buf<T1, hipblasLtHalf>(src, dst);
-        break;
-    case HIP_R_32I:
-        transform_buf<T1, int32_t>(src, dst);
-        break;
-    default:
-        hipblaslt_cerr << "Error type in transform_buf" << std::endl;
-        break;
-    }
-}
-
-inline void
-    transform_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type, hipDataType typeTc)
-{
-    switch(type)
-    {
-    case HIP_R_32F:
-        _transform_buf<float>(src, dst, typeTc);
-        break;
-    case HIP_R_64F:
-        _transform_buf<double>(src, dst, typeTc);
-        break;
-    case HIP_C_32F:
-        _transform_buf<std::complex<float>>(src, dst, typeTc);
-        break;
-    case HIP_C_64F:
-        _transform_buf<std::complex<double>>(src, dst, typeTc);
-        break;
-    case HIP_R_16F:
-        _transform_buf<hipblasLtHalf>(src, dst, typeTc);
-        break;
-    case HIP_R_16BF:
-        _transform_buf<hip_bfloat16>(src, dst, typeTc);
-        break;
-    case HIP_R_8F_E4M3_FNUZ:
-        _transform_buf<hipblaslt_f8_fnuz>(src, dst, typeTc);
-        break;
-    case HIP_R_8F_E5M2_FNUZ:
-        _transform_buf<hipblaslt_bf8_fnuz>(src, dst, typeTc);
-        break;
-    case HIP_R_8F_E4M3:
-        _transform_buf<hipblaslt_f8>(src, dst, typeTc);
-        break;
-    case HIP_R_8F_E5M2:
-        _transform_buf<hipblaslt_bf8>(src, dst, typeTc);
-        break;
-    case HIP_R_32I:
-        _transform_buf<int32_t>(src, dst, typeTc);
-        break;
-    case HIP_R_8I:
-        _transform_buf<hipblasLtInt8>(src, dst, typeTc);
-        break;
-    default:
-        hipblaslt_cerr << "Error type in transform_buf" << std::endl;
-        break;
-    }
 }

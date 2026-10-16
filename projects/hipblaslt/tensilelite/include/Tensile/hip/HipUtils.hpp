@@ -74,14 +74,14 @@
     } while(0)
 
 #define HIP_CHECK_RETURN_WITH_LOG(expr, logLambda) \
-    do                                              \
-    {                                               \
-        hipError_t e = (expr);                      \
-        if(e)                                       \
-        {                                           \
-            logLambda(e);                           \
-            return e;                               \
-        }                                           \
+    do                                             \
+    {                                              \
+        hipError_t e = (expr);                     \
+        if(e)                                      \
+        {                                          \
+            logLambda(e);                          \
+            return e;                              \
+        }                                          \
     } while(0)
 
 #define HIP_CHECK_RETURN(expr) \
@@ -93,13 +93,13 @@
     } while(0)
 
 #define HIP_CHECK_PRINT(expr, logLambda) \
-    do                                              \
-    {                                               \
-        hipError_t e = (expr);                      \
-        if(e)                                       \
-        {                                           \
-            logLambda(e);                           \
-        }                                           \
+    do                                   \
+    {                                    \
+        hipError_t e = (expr);           \
+        if(e)                            \
+        {                                \
+            logLambda(e);                \
+        }                                \
     } while(0)
 
 namespace TensileLite
@@ -110,7 +110,8 @@ namespace TensileLite
         {
             std::ostringstream msg;
             msg << "\n"
-                << "********************************************************************************\n"
+                << "*******************************************************************************"
+                   "*\n"
                 << "* FATAL ERROR: hipDeviceAttributePciChipId is not supported!\n"
                 << "*\n"
                 << "* The HIP runtime does not support hipDeviceAttributePciChipId.\n"
@@ -122,7 +123,8 @@ namespace TensileLite
                 << "*\n"
                 << "* Please update to a HIP runtime that supports PCI Chip ID queries,\n"
                 << "* or rebuild with an older version of this code that doesn't require it.\n"
-                << "********************************************************************************\n";
+                << "*******************************************************************************"
+                   "*\n";
             return msg.str();
         }
 
@@ -131,7 +133,8 @@ namespace TensileLite
         {
             std::ostringstream msg;
             msg << "\n"
-                << "********************************************************************************\n"
+                << "*******************************************************************************"
+                   "*\n"
                 << "* WARNING: Unregistered PCI Chip ID detected!\n"
                 << "*\n"
                 << "* Device: " << prop.name << "\n"
@@ -140,7 +143,8 @@ namespace TensileLite
                 << "*\n"
                 << "* This chip ID is not registered in Tensile's ChipIdRegistry.\n"
                 << "* Using only fallback kernel selection for the detected architecture.\n"
-                << "********************************************************************************\n";
+                << "*******************************************************************************"
+                   "*\n";
             return msg.str();
         }
 
@@ -185,7 +189,8 @@ namespace TensileLite
 
             size_t maxStride
                 = *std::max_element(strides.begin(), strides.begin() + contiguousDimensions);
-            size_t copyBytes = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1), desc.elementBytes());
+            size_t copyBytes = multiplyElementSize(maxStride * sizes.at(contiguousDimensions - 1),
+                                                   desc.elementBytes());
 
             for(size_t idx = 0; idx < copyCount; idx++)
             {
@@ -195,10 +200,10 @@ namespace TensileLite
                               sizes.begin() + contiguousDimensions,
                               sizes.end());
 
-                auto     beginOffset = desc.index(coord);
-                size_t   bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
-                uint8_t* dstBytes    = (uint8_t*)dst + bytesOffset;
-                uint8_t* srcBytes    = (uint8_t*)dst + bytesOffset;
+                auto           beginOffset = desc.index(coord);
+                size_t         bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
+                uint8_t*       dstBytes    = (uint8_t*)dst + bytesOffset;
+                const uint8_t* srcBytes    = static_cast<const uint8_t*>(src) + bytesOffset;
 
                 HIP_CHECK_EXC(hipMemcpyAsync(dstBytes, srcBytes, copyBytes, direction, stream));
             }
@@ -266,4 +271,3 @@ namespace TensileLite
         }
     } // namespace hip
 } // namespace TensileLite
-

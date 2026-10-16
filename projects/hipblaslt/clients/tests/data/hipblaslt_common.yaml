@@ -649,11 +649,12 @@ Arguments:
   - allclose_check: c_int8
   - unit_check: c_int8
   - ulp_check: c_int8
-  - fast_check: c_int8
+  - freivalds: c_int8
+  - bounds_check: c_int8
   - placement: c_char*16
   - placement_offset: c_size_t
-  - fast_check_repeat: c_int32
-  - fast_check_inject: c_int32
+  - validation_iters: c_int32
+  - validation_inject: c_int32
   - requires_streamk: c_int8
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
@@ -766,11 +767,12 @@ Defaults:
   allclose_check: 0
   unit_check: 1
   ulp_check: 0
-  fast_check: 0
+  freivalds: 0
+  bounds_check: 0
   placement: ''
   placement_offset: 0
-  fast_check_repeat: 1
-  fast_check_inject: -1
+  validation_iters: 1
+  validation_inject: -1
   requires_streamk: 0
   integer_exact_pattern: ''
   allow_no_solution: 0
@@ -793,7 +795,6 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
-  workspace_size: 0
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''

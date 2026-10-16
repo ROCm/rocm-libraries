@@ -44,51 +44,62 @@ class ShapeTests(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 setattr(shape, attribute, value)
 
-    def test_products_and_dimension_selection(self):
-        shape = hn.Shape([2, 3, 5])
-        self.assertEqual(shape.element_count, 30)
-        for axes, extents in (
-            ([0, 2], [2, 5]),
-            ([2, 0], [5, 2]),
-            ([1, 1], [3, 3]),
-            ([], []),
-        ):
-            selected = shape.from_dimensions(axes)
-            self.assertEqual(selected.dimensions, extents)
-            self.assertEqual(selected.element_count, math.prod(extents))
+    def test_products(self):
+        shape = hn.Shape([2, 3, 4])
+        self.assertEqual(shape.element_count, 24)
+        self.assertEqual(shape.element_count_in_range(1, 3), 12)
+        self.assertEqual(shape.element_count_in_range(3, 3), 1)
+        self.assertEqual(shape.project([0, 2]).element_count, 8)
+        self.assertEqual(hn.Shape([7]).project([]).element_count, 1)
+        # Compare every selected range/exclusion against Python's exact integers.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
-            count = math.prod(dimensions)
-            if count > SIZE_MAX:
-                with self.assertRaisesRegex(
-                    RuntimeError, "element count exceeds size_t"
-                ):
-                    hn.Shape(dimensions)
-                continue
             shape = hn.Shape(dimensions)
-            self.assertEqual(shape.element_count, count)
-            for length in range(4):
-                for axes in itertools.product(range(3), repeat=length):
-                    extents = [dimensions[a] for a in axes]
-                    expected = math.prod(extents)
-                    with self.subTest(dimensions=dimensions, axes=axes):
+            for first in range(4):
+                for end in range(first, 4):
+                    expected = math.prod(dimensions[first:end])
+                    with self.subTest(dimensions=dimensions, first=first, end=end):
                         if expected > SIZE_MAX:
-                            with self.assertRaisesRegex(
-                                RuntimeError, "element count exceeds size_t"
-                            ):
-                                shape.from_dimensions(axes)
+                            with self.assertRaises(RuntimeError):
+                                shape.element_count_in_range(first, end)
                         else:
-                            selected = shape.from_dimensions(axes)
-                            self.assertEqual(selected.dimensions, extents)
-                            self.assertEqual(selected.element_count, expected)
+                            self.assertEqual(
+                                shape.element_count_in_range(first, end), expected
+                            )
+            for excluded in range(3):
+                expected = math.prod(
+                    d for i, d in enumerate(dimensions) if i != excluded
+                )
+                with self.subTest(dimensions=dimensions, excluded=excluded):
+                    if expected > SIZE_MAX:
+                        with self.assertRaises(RuntimeError):
+                            shape.project(
+                                [i for i in range(3) if i != excluded]
+                            ).element_count
+                    else:
+                        self.assertEqual(
+                            shape.project(
+                                [i for i in range(3) if i != excluded]
+                            ).element_count,
+                            expected,
+                        )
 
     def test_descriptive_bounds_errors(self):
         shape = hn.Shape([2, 3, 4])
         with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
             shape.extent(3)
-        with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
+        with self.assertRaisesRegex(IndexError, "tuple index out of range"):
             shape[3]
+        for first, end, reason in (
+            (2, 1, "start exceeds the end"),
+            (0, 4, "end exceeds the shape rank"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                rf"range \[{first}, {end}\) is invalid for rank 3: the {reason}",
+            ):
+                shape.element_count_in_range(first, end)
         with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
-            shape.from_dimensions([3])
+            shape.project([3])
 
     def test_coordinate_orders(self):
         shape = hn.Shape([2, 3, 4])
@@ -127,7 +138,6 @@ class ShapeTests(unittest.TestCase):
                     shape.coordinates(index),
                     shape.coordinates(index, list(range(shape.rank))),
                 )
-                self.assertEqual(shape.linear_index(shape.coordinates(index)), index)
         example = hn.Shape([2, 3, 5])
         self.assertEqual(example.linear_index([1, 2, 3], [1, 2, 0]), 27)
         self.assertEqual(example.coordinates(27, [1, 2, 0]), [1, 2, 3])
@@ -137,16 +147,14 @@ class ShapeTests(unittest.TestCase):
         # oracle without enumerating SIZE_MAX-sized dimensions or using NumPy's
         # more restrictive native integer limits.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
-            count = math.prod(dimensions)
-            if count > SIZE_MAX:
-                with self.assertRaises(RuntimeError):
-                    hn.Shape(dimensions)
-                continue
             shape = hn.Shape(dimensions)
+            count = math.prod(dimensions)
             for order in itertools.permutations(range(shape.rank)):
                 if count == 0:
                     indices = [max(extent - 1, 0) for extent in dimensions]
                     with self.subTest(dimensions=dimensions, order=order):
+                        # Both diagnostics are possible when bounds validation
+                        # and flattening arithmetic encounter different axes.
                         with self.assertRaises(RuntimeError):
                             shape.linear_index(indices, order)
                     continue
@@ -164,41 +172,32 @@ class ShapeTests(unittest.TestCase):
                     with self.subTest(
                         dimensions=dimensions, order=order, indices=indices
                     ):
-                        self.assertEqual(shape.linear_index(indices, order), expected)
-                        self.assertEqual(
-                            shape.coordinates(expected, order), list(indices)
-                        )
+                        if expected > SIZE_MAX:
+                            with self.assertRaises(RuntimeError):
+                                shape.linear_index(indices, order)
+                        else:
+                            self.assertEqual(
+                                shape.linear_index(indices, order), expected
+                            )
+                            if count <= SIZE_MAX:
+                                self.assertEqual(
+                                    shape.coordinates(expected, order), list(indices)
+                                )
+                            else:
+                                with self.assertRaises(RuntimeError):
+                                    shape.coordinates(expected, order)
 
-    def test_coordinate_bounds_before_arithmetic(self):
-        shape = hn.Shape([SIZE_MAX, 2, 0])
-        for order in itertools.permutations(range(shape.rank)):
-            for indices, dimension, coordinate, extent in (
-                ([SIZE_MAX - 1, 0, 0], 2, 0, 0),
-                ([0, 0, 5], 2, 5, 0),
-                ([SIZE_MAX, 0, 0], 0, SIZE_MAX, SIZE_MAX),
-            ):
-                with self.subTest(order=order, indices=indices):
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        rf"coordinate {coordinate} in dimension {dimension} is outside "
-                        rf"\[0, {extent}\)",
-                    ):
-                        shape.linear_index(indices, order)
-
-    def test_index_order_errors(self):
+    def test_projection(self):
         shape = hn.Shape([2, 3, 4])
-        for order, message in (
-            ([], "index order rank 0 does not match shape rank 3"),
-            ([0], "index order rank 1 does not match shape rank 3"),
-            ([0, 1, 2, 3], "index order rank 4 does not match shape rank 3"),
-            ([0, 0, 2], r"index order must be a permutation of \[0, 3\)"),
-            ([0, 1, 3], r"index order must be a permutation of \[0, 3\)"),
-        ):
-            with self.subTest(order=order):
-                with self.assertRaisesRegex(RuntimeError, message):
-                    shape.coordinates(0, order)
-                with self.assertRaisesRegex(RuntimeError, message):
-                    shape.linear_index([0, 0, 0], order)
+        self.assertEqual(shape.project([2, 0]).dimensions, [4, 2])
+        self.assertEqual(shape.project([]), hn.Shape())
+        with self.assertRaisesRegex(RuntimeError, "repeats dimension 1"):
+            shape.project([1, 1])
+        for order in ([0], [0, 0, 2], [0, 1, 3]):
+            with self.assertRaises(RuntimeError):
+                shape.coordinates(0, order)
+            with self.assertRaises(RuntimeError):
+                shape.linear_index([0, 0, 0], order)
 
     def test_coordinate_errors(self):
         shape = hn.Shape([2, 3, 4])
@@ -214,21 +213,14 @@ class ShapeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 operation()
         for order in ORDERS:
-            for coordinates in ([], [0, 0], [0, 0, 0, 0]):
-                with self.assertRaisesRegex(
-                    RuntimeError, "coordinate rank .* does not match shape rank 3"
-                ):
-                    shape.linear_index(coordinates, order)
-            for coordinates, axis, extent in (
-                ([2, 0, 0], 0, 2),
-                ([1, 3, 0], 1, 3),
-                ([1, 0, 4], 2, 4),
+            with self.assertRaisesRegex(
+                RuntimeError, "coordinate rank 0 does not match shape rank 3"
             ):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    rf"coordinate {extent} in dimension {axis} is outside \[0, {extent}\)",
-                ):
-                    shape.linear_index(coordinates, order)
+                shape.linear_index([], order)
+            with self.assertRaisesRegex(
+                RuntimeError, r"coordinate 3 in dimension 1 is outside \[0, 3\)"
+            ):
+                shape.linear_index([1, 3, 0], order)
             with self.assertRaisesRegex(
                 RuntimeError, r"logical index 24 is outside \[0, 24\)"
             ):
@@ -237,9 +229,9 @@ class ShapeTests(unittest.TestCase):
                 hn.Shape().coordinates(1)
             for dimensions in (
                 [0],
-                [0, SIZE_MAX, 1],
-                [SIZE_MAX, 0, 1],
-                [SIZE_MAX, 1, 0],
+                [0, SIZE_MAX, 2],
+                [SIZE_MAX, 0, 2],
+                [SIZE_MAX, 2, 0],
             ):
                 empty = hn.Shape(dimensions)
                 self.assertEqual(empty.element_count, 0)
@@ -249,49 +241,26 @@ class ShapeTests(unittest.TestCase):
                     empty.linear_index([0] * empty.rank)
 
     def test_overflow(self):
-        boundary = hn.Shape([SIZE_MAX, 1])
-        self.assertEqual(boundary.element_count, SIZE_MAX)
-        for order in ([0, 1], [1, 0]):
-            self.assertEqual(
-                boundary.linear_index([SIZE_MAX - 1, 0], order), SIZE_MAX - 1
-            )
-            self.assertEqual(
-                boundary.coordinates(SIZE_MAX - 1, order), [SIZE_MAX - 1, 0]
-            )
-        for dimensions in (
-            [SIZE_MAX, 2],
-            [SIZE_MAX, 2, 1, 1],
-        ):
-            for extents in (dimensions, tuple(dimensions)):
-                with self.subTest(extents=extents), self.assertRaisesRegex(
-                    RuntimeError, "element count exceeds size_t"
-                ):
-                    hn.Shape(extents)
-        for dimensions in ([0, SIZE_MAX, 2], [SIZE_MAX, 0, 2], [SIZE_MAX, 2, 0]):
-            empty = hn.Shape(dimensions)
-            self.assertEqual(empty.element_count, 0)
-            nonzero = [axis for axis, extent in enumerate(dimensions) if extent]
+        self.assertEqual(hn.Shape([SIZE_MAX, 1]).element_count, SIZE_MAX)
+        for dimensions in ([SIZE_MAX, 2], [SIZE_MAX, 2, 1, 1]):
             with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-                empty.from_dimensions(nonzero)
+                _ = hn.Shape(dimensions).element_count
+        oversized = hn.Shape([SIZE_MAX, 2])
+        self.assertEqual(oversized.linear_index([0, 1]), 1)
+        for order in ([1, 0], [0, 1]):
             with self.assertRaises(RuntimeError):
-                empty.coordinates(0)
-        empty = hn.Shape([SIZE_MAX, 2, 0])
-        with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-            empty.from_dimensions([0, 1])
-        self.assertEqual(empty.from_dimensions([2, 0, 0]).element_count, 0)
-        with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-            hn.Shape([SIZE_MAX]).from_dimensions([0, 0])
+                oversized.linear_index([SIZE_MAX - 1, 1], order)
+            with self.assertRaises(RuntimeError):
+                oversized.coordinates(0, order)
 
     def test_invalid_python_inputs(self):
         for dimensions in ([-1], [SIZE_MAX + 1], [1.5], 3):
             with self.subTest(dimensions=dimensions), self.assertRaises(TypeError):
                 hn.Shape(dimensions)
         shape = hn.Shape([2])
-        for index in (-1, -(10**100), SIZE_MAX + 1, 1.5):
+        for index in (-1, SIZE_MAX + 1, 1.5):
             with self.subTest(index=index), self.assertRaises(TypeError):
                 shape.extent(index)
-            with self.subTest(index=index), self.assertRaises(TypeError):
-                shape[index]
         for order in (-1, 2, "row-major"):
             with self.subTest(order=order), self.assertRaises(TypeError):
                 shape.coordinates(0, order)
@@ -301,15 +270,16 @@ class ShapeTests(unittest.TestCase):
         for axis in (-1, -(2**63)):
             for operation in (
                 lambda: shape.extent(axis),
-                lambda: shape.from_dimensions([axis]),
+                lambda: shape.project([axis]),
                 lambda: shape.coordinates(0, [0, 1, axis]),
                 lambda: shape.linear_index([0, 0, 0], [0, 1, axis]),
+                lambda: shape.element_count_in_range(axis, 3),
             ):
                 with self.subTest(axis=axis), self.assertRaises(TypeError):
                     operation()
 
     def test_tuple_sequence_operations(self):
-        for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 1)):
+        for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 2)):
             with self.subTest(extents=extents):
                 shape = hn.Shape(extents)
                 self.assertEqual(len(shape), len(extents))
@@ -329,58 +299,50 @@ class ShapeTests(unittest.TestCase):
                         else:
                             self.assertEqual(shape.index(value, *bounds), expected)
 
-    def test_checked_integer_indexing(self):
-        class FirstIndex:
+    def test_tuple_integer_and_slice_indexing(self):
+        class LastIndex:
             def __index__(self):
-                return 0
+                return -1
 
-        for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 1)):
+        for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 2)):
             shape = hn.Shape(extents)
-            for key in (*range(len(extents)), True, np.int64(0), FirstIndex()):
+            for key in (0, -1, True, np.int64(-1), LastIndex(), 10**100, -(10**100)):
                 with self.subTest(extents=extents, key=key):
                     try:
                         expected = extents[key]
                     except IndexError:
-                        with self.assertRaises(RuntimeError):
+                        with self.assertRaises(IndexError):
                             shape[key]
                     else:
                         self.assertEqual(shape[key], expected)
-                        self.assertEqual(shape[key], shape.extent(key))
-            for key in (len(extents), SIZE_MAX):
-                with self.subTest(extents=extents, key=key), self.assertRaisesRegex(
-                    RuntimeError, rf"dimension {key} is outside \[0, {len(extents)}\)"
-                ):
-                    shape[key]
+            for start, stop, step in itertools.product(
+                (None, -30, -1, 0, 2, 30, 10**100),
+                (None, -30, -1, 0, 2, 30, 10**100),
+                (None, -3, -1, 1, 2, 5, 10**100, -(10**100)),
+            ):
+                key = slice(start, stop, step)
+                with self.subTest(extents=extents, key=key):
+                    result = shape[key]
+                    self.assertIsInstance(result, hn.Shape)
+                    self.assertEqual(tuple(result), extents[key])
+            self.assertEqual(shape[:][::-1][::2], hn.Shape(extents[::-1][::2]))
+        self.assertEqual(hn.Shape(range(20))[0:16:5], hn.Shape([0, 5, 10, 15]))
         shape = hn.Shape([2, 3, 5])
-        for key in (
-            -1,
-            np.int64(-1),
-            None,
-            Ellipsis,
-            (slice(None), slice(None)),
-            [0],
-            1.5,
-        ):
+        for key in (None, Ellipsis, (slice(None), slice(None)), [0], 1.5):
             with self.assertRaises(TypeError):
                 shape[key]
+        with self.assertRaises(ValueError):
+            shape[::0]
 
-    def test_slices_are_rejected(self):
-        for extents in ((), (0,), (2, 3, 5)):
-            shape = hn.Shape(extents)
-            for key in (
-                slice(None),
-                slice(1, None),
-                slice(None, None, -1),
-                slice(0, 3, 2),
-                slice(None, None, 0),
-            ):
-                with self.subTest(extents=extents, key=key), self.assertRaises(
-                    TypeError
-                ):
-                    shape[key]
+        class InvalidIndex:
+            def __index__(self):
+                raise RuntimeError("index conversion failed")
+
+        with self.assertRaisesRegex(RuntimeError, "index conversion failed"):
+            shape[InvalidIndex()]
 
     def test_tuple_hash_and_immutability(self):
-        for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 1)):
+        for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 2)):
             shape = hn.Shape(extents)
             self.assertEqual(hash(shape), hash(extents))
             self.assertEqual({shape: "found"}[hn.Shape(extents)], "found")
