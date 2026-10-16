@@ -1533,8 +1533,19 @@ struct BlockFmhaPipelineQRKSVSTdm
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
 
-        constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
-        constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
+        // These feed block_sync_lds<N>, whose N lands in the hardware lgkmcnt field: 6 bits
+        // on gfx12, so 63 is the maximum and also the "do not wait" sentinel that
+        // s_waitcnt_barrier tests for. An fp8 K tile splits into 64 LDS reads -- one past
+        // the field -- and the raw count fails a static_assert. Clamping is exact rather
+        // than a compromise: this call means "let every read stay outstanding, just
+        // barrier", which is precisely what the sentinel encodes. Types whose count
+        // already fits are unaffected, since they compile today and so are at most 63.
+        constexpr index_t k_lds_access = k_lds_read_window.get_num_of_access();
+        constexpr index_t v_lds_access = v_lds_read_window.get_num_of_access();
+        constexpr index_t k_lds_insts =
+            k_lds_access < waitcnt_arg::kMaxLgkmCnt ? k_lds_access : waitcnt_arg::kMaxLgkmCnt;
+        constexpr index_t v_lds_insts =
+            v_lds_access < waitcnt_arg::kMaxLgkmCnt ? v_lds_access : waitcnt_arg::kMaxLgkmCnt;
 
         // drain-to-2: the prologue issued 3 TDM loads (K->ptrk0 above, V, then
         // K->ptrk1). Wait for the oldest (K->ptrk0) to land so the load_tile
