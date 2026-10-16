@@ -132,7 +132,7 @@
     X(PrefetchLeadWmmas, int, 25)         /* 0 = prefetch issues when ready */                  \
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                 \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */       \
-    X(DsSpread, bool, false)              /* even ds_load spread over the WMMAs */              \
+    X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */              \
     X(DsSpreadToleranceCycles, int, -1)   /* < 0 = automatic */                                 \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                             \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                       \

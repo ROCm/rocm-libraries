@@ -1,7 +1,8 @@
 # WMMA batch refill and even ds_load spread: plan
 
 Status: phases 2-5 are implemented. The legacy ds pacing (cap, throttle, slot-first, hide-budget
-prescan) is removed; the ds credit queue and `DsSpreadPacer` are the only ds pacing. The perf A/B
+prescan) is removed; the ds credit queue and `DsSpreadPacer` are the only ds pacing, and
+`DsSpread` is on by default (its own commit, easy to revert). The perf A/B
 (phase 7) still needs hardware. Scope: the gfx1250 CDNA5 DAG scheduler
 (`src/transforms/asm/dag/CDNA5.hpp`).
 

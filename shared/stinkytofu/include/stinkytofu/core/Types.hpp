@@ -118,7 +118,7 @@ struct PassFeatureConfig {
         /// Spread ds_loads evenly over the region's WMMAs: a ds_load is released at its planned
         /// WMMA window (minus the tolerance) and issues only while the ds queue has a free
         /// credit. Off = ds_loads issue as soon as they are ready and a credit is free.
-        bool dsSpread = false;
+        bool dsSpread = true;
         /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
         /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
         /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are

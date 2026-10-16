@@ -565,6 +565,8 @@ int main(int argc, char** argv) {
                 std::stoi(a.substr(std::string("--wmma-barrier-cover-cycles=").size()));
         } else if (a == "--ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = true;
+        } else if (a == "--no-ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = false;
         } else if (a.starts_with("--ds-spread-tolerance-cycles=")) {
             passFeatureConfig.dagFeatures.dsSpreadToleranceCycles =
                 std::stoi(a.substr(std::string("--ds-spread-tolerance-cycles=").size()));

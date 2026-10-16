@@ -18,8 +18,8 @@ A few values have no module option and are reachable only from
 
 Defaults below are the production (TensileLite → `Gfx1250Backend`) defaults.
 `stinkytofu-opt` and a hand-built pipeline start from the `dagFeatures`
-defaults instead, where `EvenSpreadFillers`, `DsSpread`, the prefetch lead,
-the wait-alu hold and the knob heuristic are all off.
+defaults instead, where `EvenSpreadFillers`, the prefetch lead,
+the wait-alu hold and the knob heuristic are off and `DsSpread` is on.
 
 ### How an unset value is resolved
 
@@ -92,7 +92,7 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | false | `--ds-spread` | Spread the region's ds_loads evenly over its WMMAs. The k-th ds_load is released at WMMA window `k * WMMAs / ds_loads`, less the tolerance, and issues only while the ds queue (`DsReadQueueDepth` credits) has a free one. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
+| `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Spread the region's ds_loads evenly over its WMMAs. The k-th ds_load is released at WMMA window `k * WMMAs / ds_loads`, less the tolerance, and issues only while the ds queue (`DsReadQueueDepth` credits) has a free one. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
 | `DsSpreadToleranceCycles` | -1 → automatic | `--ds-spread-tolerance-cycles=N` | How early, in cycles, a ds_load may issue before its slot. 0 = as even as possible. Automatic = the smallest tolerance that still lets every ds_load reach its first consumer WMMA two windows ahead, i.e. as even as the dependencies allow. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
 | `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
@@ -161,8 +161,8 @@ dependences allow.
 
 | Pattern | Options |
 |---|---|
-| Default: ds_loads as soon as they are ready and a credit is free | none |
+| Default: ds_loads spread evenly over the WMMAs | none |
 | WMMA queue kept covered, refilled in batches of 4 | `WmmaQueueDepth=8, WmmaQueueCoverCycles=32, WmmaBatchSize=4` |
-| ds_loads spread evenly over the WMMAs | `DsSpread=true` |
+| ds_loads as soon as they are ready and a credit is free | `DsSpread=false` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |

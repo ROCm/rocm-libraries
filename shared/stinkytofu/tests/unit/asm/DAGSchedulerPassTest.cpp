@@ -175,11 +175,12 @@ class DAGSchedulerPassTest : public ::testing::Test {
     }
 
     // barrierHalfSlack < 0 leaves DagFeatures' default (0).
-    void runPassWithUnrollGemm(int barrierHalfSlack = -1) {
+    void runPassWithUnrollGemm(int barrierHalfSlack = -1, bool dsSpread = true) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = dsSpread;
         if (barrierHalfSlack >= 0) pfc.dagFeatures.barrierHalfSlack = barrierHalfSlack;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
@@ -1231,7 +1232,7 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
         createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
 
     int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm();
+    runPassWithUnrollGemm(/*barrierHalfSlack=*/-1, /*dsSpread=*/false);
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "hazard deferral must not drop instructions";
 
@@ -2510,6 +2511,7 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueDepth = 4;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
@@ -2528,6 +2530,7 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill)
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
@@ -2545,6 +2548,7 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
@@ -2590,6 +2594,7 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
         pfc.dagFeatures.dsReadQueueDepth = 16;
         pfc.dagFeatures.wmmaQueueDepth = 4;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
