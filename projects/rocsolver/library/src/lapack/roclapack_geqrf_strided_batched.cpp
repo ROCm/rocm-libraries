@@ -116,7 +116,7 @@ try
         I const batch_count = bid_end - bid;
 
         auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid * strideA;
-        auto const ipiv = (ipiv_arg = nullptr) ? nullptr : ipiv_arg + bid * stridep;
+        auto const ipiv = (ipiv_arg == nullptr) ? nullptr : ipiv_arg + bid * stridep;
 
         // execution
         auto const istat = rocsolver_geqrf_template<false, true, T>(
