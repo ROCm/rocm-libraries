@@ -6,15 +6,19 @@
 Drives ``run_unified_attention_torch`` with an fp32 additive bias on both the 2D
 tiled (``backend="tiled"``) and 3D split-KV (``backend="3d"``) paths and checks
 max_abs against an fp32 torch reference of
-``softmax(Q @ K^T * scale + bias, causal) @ V``.
+``softmax(Q @ K^T * scale + bias, causal) @ V``. The 2D lane covers both score
+paths: short prefill (16x16) and long prefill (max_seqlen_q > 256, multi- and
+single-batch), which selects the transposed 32x32 path; those long cases
+assert the selected spec so the coverage cannot silently drift.
 
 Bias addressing (element strides; Sk stride is always 1):
 ``bias[seq_idx*batch_stride + q_head*head_stride + q_local*sq_stride + k_abs]``.
 A stride of 0 broadcasts that dimension. ``q_head`` is the *query* head, so
 the GQA cases check that a per-query-head bias is not collapsed onto KV heads.
 
-Every test is marked ``gpu`` and gated with a device skipif, so it is a graceful
-skip on a CPU CI box. Run standalone:
+The numeric tests are marked ``gpu`` and gated with a device skipif, so they
+are a graceful skip on a CPU CI box. The host-side argument-validation tests at
+the bottom need only torch (CPU tensors) and run everywhere. Run standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
@@ -47,20 +51,29 @@ _TOL = {"fp16": 2e-2, "bf16": 4e-2}
 _HEAD_SIZE = 128
 _BLOCK_SIZE = 16
 
-# (query_len, kv_len) per sequence. 2D covers mixed prefill with a context
-# prefix; 3D covers decode-style split-KV with a tail block.
-_SEQ_LENS = {
-    "tiled": [(37, 101), (64, 64), (5, 130)],
-    "3d": [(1, 300), (3, 517), (1, 64)],
+# case -> (backend, [(query_len, kv_len) per sequence]). ``tiled`` is short
+# mixed prefill with a context prefix (16x16 score path). ``tiled_long``
+# (multi-batch) and ``tiled_long_1seq`` (single-batch) have max_seqlen_q > 256,
+# which routes the 2D kernel onto the transposed 32x32 score path; the test
+# asserts that routing. ``3d`` covers decode-style split-KV with a tail block.
+_CASES = {
+    "tiled": ("tiled", [(37, 101), (64, 64), (5, 130)]),
+    "tiled_long": ("tiled", [(300, 420), (512, 512)]),
+    "tiled_long_1seq": ("tiled", [(384, 640)]),
+    "3d": ("3d", [(1, 300), (3, 517), (1, 64)]),
 }
+_TRANSPOSED_CASES = {"tiled_long", "tiled_long_1seq"}
 
-# bias layouts: name -> (broadcast batch, broadcast head, extra Sk padding)
+# bias layouts: name -> (broadcast batch, broadcast head, broadcast Sq,
+# extra Sk padding). ``bcast_hsq`` is the [B, 1, 1, Sk] key-padding shape.
 _BIAS_MODES = {
-    "full": (False, False, 0),
-    "full_padded_sq": (False, False, 7),
-    "bcast_b": (True, False, 0),
-    "bcast_h": (False, True, 0),
-    "bcast_bh": (True, True, 0),
+    "full": (False, False, False, 0),
+    "full_padded_sq": (False, False, False, 7),
+    "bcast_b": (True, False, False, 0),
+    "bcast_h": (False, True, False, 0),
+    "bcast_bh": (True, True, False, 0),
+    "bcast_sq": (False, False, True, 0),
+    "bcast_hsq": (False, True, True, 0),
 }
 
 _HEADS = {"mha": (8, 8), "gqa": (8, 2)}
@@ -96,12 +109,14 @@ def _make_bias(mode, num_seqs, hq, max_q, max_k):
     ``full_view`` is the logical ``[num_seqs, hq, max_q, max_k]`` bias the
     reference adds; ``storage`` is the compact tensor the kernel reads.
     """
-    bcast_b, bcast_h, pad = _BIAS_MODES[mode]
-    shape = [1 if bcast_b else num_seqs, 1 if bcast_h else hq, max_q, max_k + pad]
+    bcast_b, bcast_h, bcast_sq, pad = _BIAS_MODES[mode]
+    rows = 1 if bcast_sq else max_q
+    row_pitch = max_k + pad
+    shape = [1 if bcast_b else num_seqs, 1 if bcast_h else hq, rows, row_pitch]
     storage = torch.randn(*shape, dtype=torch.float32, device="cuda")
-    sq_stride = max_k + pad
-    head_stride = 0 if bcast_h else max_q * sq_stride
-    batch_stride = 0 if bcast_b else (1 if bcast_h else hq) * max_q * sq_stride
+    sq_stride = 0 if bcast_sq else row_pitch
+    head_stride = 0 if bcast_h else rows * row_pitch
+    batch_stride = 0 if bcast_b else (1 if bcast_h else hq) * rows * row_pitch
     full_view = storage[..., :max_k].expand(num_seqs, hq, max_q, max_k)
     return storage, batch_stride, head_stride, sq_stride, full_view
 
@@ -137,10 +152,10 @@ def _reference(q, k, v, block_table, seq_lens, scale, bias_full):
 @pytest.mark.parametrize("heads", sorted(_HEADS))
 @pytest.mark.parametrize("bias_mode", list(_BIAS_MODES))
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-@pytest.mark.parametrize("backend", ["tiled", "3d"])
-def test_additive_bias_matches_reference(backend, dtype, bias_mode, heads):
+@pytest.mark.parametrize("case", list(_CASES))
+def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
     hq, hkv = _HEADS[heads]
-    seq_lens = _SEQ_LENS[backend]
+    backend, seq_lens = _CASES[case]
     q, k, v, block_table, cu_q, seqused_k = _make_inputs(seq_lens, hq, hkv, dtype)
     max_q = max(s[0] for s in seq_lens)
     max_k = max(s[1] for s in seq_lens)
@@ -162,6 +177,18 @@ def test_additive_bias_matches_reference(backend, dtype, bias_mode, heads):
         use_additive_bias=True,
         num_kv_blocks=int(k.shape[0]),
     )
+    if case in _TRANSPOSED_CASES:
+        # Pin the routing so these cases cannot silently fall back to 16x16.
+        from kernels.common.attention_unified import _tiled_spec_from_problem
+
+        spec = _tiled_spec_from_problem(problem)
+        assert spec.use_additive_bias
+        assert spec.use_mfma_32x32 and spec.use_transposed_qk_32x32, (
+            f"{case}/{dtype}/{heads}: expected the transposed 32x32 path, got "
+            f"use_mfma_32x32={spec.use_mfma_32x32} "
+            f"use_transposed_qk_32x32={spec.use_transposed_qk_32x32}"
+        )
+        assert spec.block_m_per_warp == 32
     out = torch.empty_like(q)
     run_unified_attention_torch(
         problem=problem,
@@ -188,7 +215,189 @@ def test_additive_bias_matches_reference(backend, dtype, bias_mode, heads):
     max_abs = (ref - out.float()).abs().max().item()
     assert (
         max_abs < tol
-    ), f"{backend}/{dtype}/{bias_mode}/{heads}: max_abs={max_abs:.3e} >= {tol}"
+    ), f"{case}/{dtype}/{bias_mode}/{heads}: max_abs={max_abs:.3e} >= {tol}"
     # Guard against a silently ignored bias: the bias must move the output.
     shift = (ref - ref_nobias).abs().max().item()
     assert shift > 10 * tol, f"bias too weak to be observable (shift={shift:.3e})"
+
+
+# Host-side argument validation. These raise before any compile or launch, so
+# they run on CPU tensors and need no GPU.
+
+
+def _bias_problem(use_additive_bias=True):
+    return UnifiedAttentionProblem(
+        total_q=4,
+        num_seqs=1,
+        num_query_heads=8,
+        num_kv_heads=8,
+        head_size=_HEAD_SIZE,
+        block_size=_BLOCK_SIZE,
+        max_seqlen_q=4,
+        max_seqlen_k=64,
+        dtype="bf16",
+        use_additive_bias=use_additive_bias,
+    )
+
+
+def _launch_with_bias(problem, additive_bias, **kwargs):
+    """Call the public entry with placeholder tensors; validation fires first."""
+    run_unified_attention_torch(
+        problem=problem,
+        q=None,
+        k=None,
+        v=None,
+        out=None,
+        cu_seqlens_q=None,
+        seqused_k=None,
+        softmax_scale=1.0,
+        block_table=None,
+        softcap=0.0,
+        additive_bias=additive_bias,
+        **kwargs,
+    )
+
+
+_BIAS = dict(dtype=torch.float32)
+
+
+@pytest.mark.parametrize(
+    "use_bias, make_bias, sq_stride, match",
+    [
+        (True, lambda: None, 64, "requires an additive_bias tensor"),
+        (False, lambda: torch.zeros(4, 64, **_BIAS), 64, "use_additive_bias is False"),
+        (True, lambda: torch.zeros(4, 64, dtype=torch.float16), 64, "float32"),
+        (True, lambda: torch.zeros(64, 4, **_BIAS).t(), 64, "contiguous along Sk"),
+        (True, lambda: torch.zeros(4, 64, **_BIAS), None, "requires additive_bias_sq"),
+        (True, lambda: torch.zeros(4, 64, **_BIAS), 32, "or >= max_seqlen_k=64"),
+    ],
+    ids=["missing", "flag_off", "fp16", "sk_strided", "no_sq_stride", "short_sq"],
+)
+def test_additive_bias_bad_args_rejected(use_bias, make_bias, sq_stride, match):
+    with pytest.raises(ValueError, match=match):
+        _launch_with_bias(
+            _bias_problem(use_bias),
+            make_bias(),
+            additive_bias_sq_stride=sq_stride,
+        )
+
+
+@pytest.mark.parametrize("sq_stride", [0, 64, 71])
+def test_additive_bias_sq_stride_accepted(sq_stride):
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    bias = torch.zeros(4, 71, **_BIAS)
+    assert _validate_additive_bias(_bias_problem(), bias, 0, 0, sq_stride) == sq_stride
+
+
+def test_additive_bias_off_needs_no_sq_stride():
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    assert _validate_additive_bias(_bias_problem(False), None, 0, 0, None) == 0
+
+
+# The reviewer's shape: H=16, Sq=Sk=8192 -> a full [B,H,Sq,Sk] bias is 2**30
+# elements per sequence, so B=2 tops out at index 2**31 - 1 and B=3 wraps i32.
+_LONG = 8192
+_LONG_HEAD = _LONG * _LONG
+_LONG_BATCH = 16 * _LONG_HEAD
+
+
+def _long_bias_problem(num_seqs):
+    return UnifiedAttentionProblem(
+        total_q=num_seqs * _LONG,
+        num_seqs=num_seqs,
+        num_query_heads=16,
+        num_kv_heads=16,
+        head_size=_HEAD_SIZE,
+        block_size=_BLOCK_SIZE,
+        max_seqlen_q=_LONG,
+        max_seqlen_k=_LONG,
+        dtype="bf16",
+        use_additive_bias=True,
+    )
+
+
+def _validate_long(num_seqs, batch_stride, numel=1):
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    # A meta tensor reports its storage size without allocating it.
+    return _validate_additive_bias(
+        _long_bias_problem(num_seqs),
+        torch.empty(numel, device="meta", **_BIAS),
+        batch_stride,
+        _LONG_HEAD,
+        _LONG,
+    )
+
+
+def test_additive_bias_i32_index_overflow_rejected():
+    with pytest.raises(NotImplementedError, match="i32 bias addressing"):
+        _validate_long(3, _LONG_BATCH)
+
+
+@pytest.mark.parametrize(
+    "num_seqs, batch_stride, numel",
+    [(2, _LONG_BATCH, 2 * _LONG_BATCH), (3, 0, _LONG_BATCH)],
+    ids=["max_index_fits", "batch_broadcast"],
+)
+def test_additive_bias_i32_index_limit_accepted(num_seqs, batch_stride, numel):
+    assert _validate_long(num_seqs, batch_stride, numel) == _LONG
+
+
+@pytest.mark.parametrize("batch_stride", [-1, 2**31], ids=["negative", "over_i32"])
+def test_additive_bias_stride_range_rejected(batch_stride):
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    with pytest.raises(ValueError, match="additive_bias_batch_stride"):
+        _validate_additive_bias(
+            _bias_problem(), torch.zeros(4, 64, **_BIAS), batch_stride, 0, 64
+        )
+
+
+# _bias_problem reads index 3*sq_stride + 63 at most, so sq_stride=64 needs 256
+# backed elements past the storage offset.
+@pytest.mark.parametrize(
+    "make_bias, ok",
+    [
+        (lambda: torch.zeros(256, **_BIAS), True),
+        (lambda: torch.zeros(255, **_BIAS), False),
+        (lambda: torch.zeros(320, **_BIAS)[64:], True),
+        (lambda: torch.zeros(320, **_BIAS)[65:], False),
+    ],
+    ids=["exact", "short", "offset_exact", "offset_short"],
+)
+def test_additive_bias_storage_bounds(make_bias, ok):
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    args = (_bias_problem(), make_bias(), 0, 0, 64)
+    if ok:
+        assert _validate_additive_bias(*args) == 64
+    else:
+        with pytest.raises(ValueError, match="only backs"):
+            _validate_additive_bias(*args)
+
+
+def test_additive_bias_attn_values_rejects_null_ptr():
+    """Direct ``_attn_values`` callers (benchmarks, parity builders) bypass the
+    entry-point check; the packer must still refuse a null bias pointer."""
+    from kernels.common.attention_unified import _attn_values
+
+    with pytest.raises(ValueError, match="requires an additive_bias tensor"):
+        _attn_values(
+            problem=_bias_problem(),
+            q=None,
+            k=None,
+            v=None,
+            out=None,
+            cu_seqlens_q=None,
+            seqused_k=None,
+            softmax_scale=1.0,
+            block_table=None,
+            softcap=0.0,
+            sinks=None,
+            bt_stride=0,
+            include_bt_stride=True,
+            additive_bias=None,
+            include_additive_bias_strides=True,
+        )

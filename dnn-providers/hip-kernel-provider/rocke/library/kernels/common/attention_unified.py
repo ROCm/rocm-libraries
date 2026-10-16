@@ -94,9 +94,6 @@ class UnifiedAttentionProblem:
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_additive_bias: bool = False
-    # stride=0 broadcasts that dimension; Sk stride is always 1 (innermost)
-    additive_bias_batch_stride: int = 0
-    additive_bias_head_stride: int = 0
     use_fp8: bool = False
     fp8_fnuz: bool = False
     num_cus: int = 120
@@ -3376,6 +3373,7 @@ def _attn_values(
     v_scale: float = 1.0,
     out_scale: float = 1.0,
 ):
+    _require_additive_bias(problem, additive_bias)
     vals = {
         "output_ptr": out,
         "query_ptr": q,
@@ -3612,6 +3610,7 @@ def _run_3d_tiled(
     )
     cached_values = _3D_BOUND_VALUES.get(bound_key)
     if cached_values is None:
+        _require_additive_bias(problem, additive_bias)
         seg_vals = {
             "segm_output_ptr": segm_output,
             "segm_max_ptr": segm_max,
@@ -4472,6 +4471,98 @@ def _get_scalar_launcher(
     return launcher
 
 
+def _require_additive_bias(problem: UnifiedAttentionProblem, additive_bias) -> None:
+    """Reject a bias-enabled launch without a tensor (it would pack a null ptr)."""
+    if problem.use_additive_bias and additive_bias is None:
+        raise ValueError(
+            "problem.use_additive_bias=True requires an additive_bias tensor"
+        )
+
+
+_I32_LIMIT = 2**31
+
+
+def _validate_additive_bias(
+    problem: UnifiedAttentionProblem,
+    additive_bias,
+    batch_stride: int,
+    head_stride: int,
+    sq_stride: Optional[int],
+) -> int:
+    """Check the additive-bias launch args against ``problem``.
+
+    Returns the Sq stride to pack (0 when bias is off). ``sq_stride`` has no
+    default when bias is on: 0 broadcasts one bias row over every query row,
+    so a forgotten stride would silently apply row 0 everywhere. Pass 0
+    explicitly to broadcast, else a row pitch ``>= max_seqlen_k``.
+
+    The kernels index the bias in i32, so the largest element index the
+    launch can read must stay below 2**31 (8 GiB of f32 bias). Larger
+    layouts are rejected rather than wrapping into an out-of-bounds read.
+    That index must also fall inside the tensor's storage, which catches
+    strides that do not match the tensor passed.
+    """
+    if not problem.use_additive_bias:
+        if additive_bias is not None:
+            raise ValueError(
+                "additive_bias was passed but problem.use_additive_bias is False"
+            )
+        return 0
+    _require_additive_bias(problem, additive_bias)
+    import torch
+
+    if additive_bias.dtype != torch.float32:
+        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
+    if additive_bias.stride(-1) != 1:
+        raise ValueError(
+            "additive_bias must be contiguous along Sk (stride(-1) == 1), "
+            f"got strides {tuple(additive_bias.stride())}"
+        )
+    if sq_stride is None:
+        raise ValueError(
+            "problem.use_additive_bias=True requires additive_bias_sq_stride "
+            "(pass 0 to broadcast the bias over Sq)"
+        )
+    sq_stride = int(sq_stride)
+    if sq_stride != 0 and sq_stride < problem.max_seqlen_k:
+        raise ValueError(
+            f"additive_bias_sq_stride={sq_stride} must be 0 (broadcast over Sq) "
+            f"or >= max_seqlen_k={problem.max_seqlen_k}"
+        )
+    batch_stride, head_stride = int(batch_stride), int(head_stride)
+    for name, stride in (
+        ("additive_bias_batch_stride", batch_stride),
+        ("additive_bias_head_stride", head_stride),
+        ("additive_bias_sq_stride", sq_stride),
+    ):
+        if not 0 <= stride < _I32_LIMIT:
+            raise ValueError(f"{name}={stride} must be in [0, 2**31)")
+    max_idx = (
+        (problem.num_seqs - 1) * batch_stride
+        + (problem.num_query_heads - 1) * head_stride
+        + (problem.max_seqlen_q - 1) * sq_stride
+        + (problem.max_seqlen_k - 1)
+    )
+    if max_idx >= _I32_LIMIT:
+        raise NotImplementedError(
+            f"additive_bias max element index {max_idx} exceeds the kernels' "
+            "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
+            "dimension (stride 0) or split the launch"
+        )
+    # Strides are passed separately from the tensor, so a mismatch would read
+    # past its storage; check the reach against the elements actually backed.
+    avail = (
+        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
+        - additive_bias.storage_offset()
+    )
+    if max_idx >= avail:
+        raise ValueError(
+            f"additive_bias strides reach element {max_idx} but the tensor "
+            f"only backs {avail} elements from its storage offset"
+        )
+    return sq_stride
+
+
 def run_unified_attention_torch(
     *,
     problem: UnifiedAttentionProblem,
@@ -4491,7 +4582,7 @@ def run_unified_attention_torch(
     additive_bias=None,
     additive_bias_batch_stride: int = 0,
     additive_bias_head_stride: int = 0,
-    additive_bias_sq_stride: int = 0,
+    additive_bias_sq_stride: Optional[int] = None,
     warmup: int = 0,
     attempts: int = 1,
     backend: str = "auto",
@@ -4515,12 +4606,27 @@ def run_unified_attention_torch(
     semantics exactly and require the corresponding ``problem.use_alibi`` /
     ``problem.use_qq_bias`` flags to be set.
 
+    ``additive_bias`` is an f32 tensor read as
+    ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
+    (element strides, Sk contiguous); it is required iff
+    ``problem.use_additive_bias``. A stride of 0 broadcasts that dimension.
+    ``additive_bias_sq_stride`` must be given explicitly when bias is on.
+    The bias is indexed in i32, so the largest index the launch can read must
+    be below 2**31 (8 GiB of f32); larger layouts raise ``NotImplementedError``.
+
     ``stream`` is the HIP stream handle (an `int`) to launch on. Pass
     ``torch.cuda.current_stream().cuda_stream`` to make the launches
     visible to ``torch.cuda.graph`` capture; this is how the parity
     harness amortises the segment + reduce launch overhead in the 3D
     path under a hipgraph.
     """
+    additive_bias_sq_stride = _validate_additive_bias(
+        problem,
+        additive_bias,
+        additive_bias_batch_stride,
+        additive_bias_head_stride,
+        additive_bias_sq_stride,
+    )
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
         if tuning_spec.arch != _resolve_attention_arch():

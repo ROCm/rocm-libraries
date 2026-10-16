@@ -153,6 +153,16 @@ and the selector keeps those knobs off when `problem.use_additive_bias` is set.
 Enabled by `UnifiedAttentionProblem.use_additive_bias`; the tensor and strides
 are passed to `run_unified_attention_torch(additive_bias=...,
 additive_bias_batch_stride=..., additive_bias_head_stride=...,
-additive_bias_sq_stride=...)`.  Python engine only for now (no C engine mirror
-yet).  Numeric coverage:
+additive_bias_sq_stride=...)`.  The entry point validates these before launch:
+the tensor must be present iff the flag is on, float32 and contiguous along Sk;
+`additive_bias_sq_stride` has no default when bias is on and must be `0`
+(broadcast over Sq, e.g. a `[B,1,1,Sk]` key-padding bias) or `>= max_seqlen_k`.
+The kernels address the bias with i32 element indices and i32 strides, so each
+stride must be in `[0, 2**31)` and the largest index a launch can read
+(`(num_seqs-1)*batch_stride + (H_q-1)*head_stride + (max_seqlen_q-1)*sq_stride
++ max_seqlen_k-1`) must be below `2**31` (8 GiB of f32); larger layouts raise
+`NotImplementedError` instead of wrapping into an out-of-bounds read.
+Broadcasting a dimension (stride 0) shrinks the index; i64 bias addressing is a
+follow-up.  That same index must also lie inside the tensor's storage (past its
+storage offset), so strides that do not match the tensor raise `ValueError`.  Python engine only for now (no C engine mirror yet).  Numeric coverage:
 [test_attention_additive_bias_gfx950_numeric.py](../../tests/test_attention_additive_bias_gfx950_numeric.py).

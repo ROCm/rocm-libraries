@@ -334,6 +334,24 @@ def bind_dense_attention_torch(
     return TorchBinding(launch=launch, grid=grid_fn(spec), block=block_fn(spec))
 
 
+_ADDITIVE_BIAS_INPUTS = (
+    "additive_bias",
+    "additive_bias_batch_stride",
+    "additive_bias_head_stride",
+    "additive_bias_sq_stride",
+)
+
+
+def _reject_additive_bias_inputs(inputs: Mapping[str, Any], where: str) -> None:
+    supplied = [name for name in _ADDITIVE_BIAS_INPUTS if name in inputs]
+    if supplied:
+        raise ValueError(
+            "explicit tuning bindings do not support additive bias; got "
+            + ", ".join(supplied)
+            + f" in {where}"
+        )
+
+
 def bind_tuning_attention_torch(
     request, spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -362,6 +380,12 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
+    # Explicit specs are built without additive bias (the spec makers reject
+    # it), so refuse a bias-on problem or bias inputs here instead of launching
+    # a kernel that would silently ignore them.
+    if problem.use_additive_bias:
+        raise ValueError("explicit tuning bindings do not support additive bias")
+    _reject_additive_bias_inputs(tensors, "tensors")
     unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
     num_blocks = validate_tuning_attention_tensors(
         problem,
@@ -379,6 +403,7 @@ def bind_tuning_attention_torch(
         scale = 1.0 / math.sqrt(int(problem.head_size))
 
     def launch(**_kw):
+        _reject_additive_bias_inputs(_kw, "launch kwargs")
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -393,24 +418,6 @@ def bind_tuning_attention_torch(
             sinks=_kw.get("sinks", tensors.get("sinks")),
             alibi_slopes=_kw.get("alibi_slopes", tensors.get("alibi_slopes")),
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
-            additive_bias=_kw.get("additive_bias", tensors.get("additive_bias")),
-            additive_bias_batch_stride=int(
-                _kw.get(
-                    "additive_bias_batch_stride",
-                    tensors.get("additive_bias_batch_stride", 0),
-                )
-            ),
-            additive_bias_head_stride=int(
-                _kw.get(
-                    "additive_bias_head_stride",
-                    tensors.get("additive_bias_head_stride", 0),
-                )
-            ),
-            additive_bias_sq_stride=int(
-                _kw.get(
-                    "additive_bias_sq_stride", tensors.get("additive_bias_sq_stride", 0)
-                )
-            ),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
