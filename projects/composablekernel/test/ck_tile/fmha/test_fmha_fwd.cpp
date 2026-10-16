@@ -542,14 +542,14 @@ INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QrTdmLargeHeadDim,
     Combine(Values(mode_enum::batch, mode_enum::group),
-            Values(std::tuple{512, 127, 509, "0", "n", true, false},  // padded seqlens, bshd
-                   std::tuple{512, 128, 256, "0", "n", false, true},  // tile-multiple seqlen_q
-                   std::tuple{512, 99, 256, "1", "n", false, true},   // causal top-left -> _mc
-                   std::tuple{512, 256, 256, "2", "n", false, true},  // causal bottom-r -> _mc
-                   std::tuple{512, 99, 256, "1", "n", true, true},    // lse -> generic _mask
+            Values(std::tuple{512, 127, 509, "0", "n", true, false}, // padded seqlens, bshd
+                   std::tuple{512, 128, 256, "0", "n", false, true}, // tile-multiple seqlen_q
+                   std::tuple{512, 99, 256, "1", "n", false, true},  // causal top-left -> _mc
+                   std::tuple{512, 256, 256, "2", "n", false, true}, // causal bottom-r -> _mc
+                   std::tuple{512, 99, 256, "1", "n", true, true},   // lse -> generic _mask
                    std::tuple{512, 200, 520, "t:128,30", "n", false, true}, // window -> _mask
-                   std::tuple{512, 127, 509, "0", "e", true, true},   // elementwise bias
-                   std::tuple{512, 99, 256, "1", "a", false, true},   // alibi -> generic _mask
+                   std::tuple{512, 127, 509, "0", "e", true, true},         // elementwise bias
+                   std::tuple{512, 99, 256, "1", "a", false, true}, // alibi -> generic _mask
                    std::tuple{256, 127, 509, "0", "n", true, false},
                    std::tuple{256, 128, 256, "0", "n", false, true},
                    std::tuple{256, 99, 256, "1", "n", false, true},
@@ -573,36 +573,36 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
 
         std::string selected_kernel;
         auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                                   2,                  // batch
-                                                   2,                  // nhead
-                                                   2,                  // nhead_k
+                                                   2, // batch
+                                                   2, // nhead
+                                                   2, // nhead_k
                                                    {adjust_seqlen(seqlen_q)},
                                                    {adjust_seqlen(seqlen_k)},
-                                                   adjusted_hdim,      // hdim_q
-                                                   adjusted_hdim,      // hdim_v
-                                                   0,                  // seqlen_knew
-                                                   {-1},               // seqlen_qpads
-                                                   {-1},               // seqlen_kpads
-                                                   {},                 // q_eff_lens_per_batch
-                                                   {},                 // kv_eff_lens_per_batch
-                                                   0,                  // rotary_dim
-                                                   perm,               // i_perm
-                                                   perm,               // o_perm
-                                                   0,                  // scale_s
-                                                   0,                  // logits_soft_cap
-                                                   def_is_v_rowmajor,  // is_v_rowmajor
-                                                   lse,                // lse
-                                                   0,                  // page_block_size
-                                                   false,              // use_cache_batch_idx
-                                                   bias_str,           // bias_str
-                                                   0.0f,               // p_drop
-                                                   0,                  // drop_seed
-                                                   0,                  // drop_offset
-                                                   false,              // drop_prefs
-                                                   mask_str,           // mask_str
+                                                   adjusted_hdim,     // hdim_q
+                                                   adjusted_hdim,     // hdim_v
+                                                   0,                 // seqlen_knew
+                                                   {-1},              // seqlen_qpads
+                                                   {-1},              // seqlen_kpads
+                                                   {},                // q_eff_lens_per_batch
+                                                   {},                // kv_eff_lens_per_batch
+                                                   0,                 // rotary_dim
+                                                   perm,              // i_perm
+                                                   perm,              // o_perm
+                                                   0,                 // scale_s
+                                                   0,                 // logits_soft_cap
+                                                   def_is_v_rowmajor, // is_v_rowmajor
+                                                   lse,               // lse
+                                                   0,                 // page_block_size
+                                                   false,             // use_cache_batch_idx
+                                                   bias_str,          // bias_str
+                                                   0.0f,              // p_drop
+                                                   0,                 // drop_seed
+                                                   0,                 // drop_offset
+                                                   false,             // drop_prefs
+                                                   mask_str,          // mask_str
                                                    qscale_str,
-                                                   true,               // is_rotary_interleaved
-                                                   1,                  // num_splits
+                                                   true, // is_rotary_interleaved
+                                                   1,    // num_splits
                                                    COMMON_ARGS,
                                                    std::nullopt,
                                                    &selected_kernel);
@@ -623,8 +623,7 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
         // Mask variant: no mask stays _nmask_; causal takes the _mc specialisation
         // only when nothing else forces the generic path (see the INSTANTIATE
         // comment); windows and causal+bias/+lse fall back to generic _mask.
-        const bool is_causal =
-            mask_str == std::string("1") || mask_str == std::string("2");
+        const bool is_causal      = mask_str == std::string("1") || mask_str == std::string("2");
         const char* expected_mask = mask_str == std::string("0") ? "_nmask_"
                                     : (is_causal && bias_str == std::string("n") && !lse)
                                         ? "_mc_"

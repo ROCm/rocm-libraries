@@ -528,22 +528,21 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
               typename PositionEncoding>
-    CK_TILE_HOST_DEVICE auto
-    run_single_v_double_k_lds_buffer(
+    CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
         const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
         const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
         const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // M0*N0 tile
         LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,        // M0*1 tile
-                             FmhaMask mask,
-                             PositionEncoding position_encoding,
-                             float scale_s,
-                             void* smem_arena,
-                             float sink_v,
-                             const float* k_descale_ptr,
-                             const float* v_descale_ptr,
-                             index_t block_scale_size_kv,
-                             float v_descale) const
+        FmhaMask mask,
+        PositionEncoding position_encoding,
+        float scale_s,
+        void* smem_arena,
+        float sink_v,
+        const float* k_descale_ptr,
+        const float* v_descale_ptr,
+        index_t block_scale_size_kv,
+        float v_descale) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
@@ -2364,19 +2363,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             1.0f);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
-                                            k_dram_block_window_tmp,
-                                            v_dram_block_window_tmp,
-                                            bias_dram_block_window_tmp,
-                                            lse_acc_dram_window_tmp,
-                                            mask,
-                                            position_encoding,
-                                            scale_s,
-                                            smem_ptr,
-                                            sink_v,
-                                            nullptr,
-                                            nullptr,
-                                            1,
-                                            1.0f);
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_ptr,
+                                                    sink_v,
+                                                    nullptr,
+                                                    nullptr,
+                                                    1,
+                                                    1.0f);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -2419,19 +2418,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             v_descale);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
-                                            k_dram_block_window_tmp,
-                                            v_dram_block_window_tmp,
-                                            bias_dram_block_window_tmp,
-                                            lse_acc_dram_window_tmp,
-                                            mask,
-                                            position_encoding,
-                                            scale_s,
-                                            smem_ptr,
-                                            sink_v,
-                                            k_descale_ptr,
-                                            v_descale_ptr,
-                                            block_scale_size_kv,
-                                            v_descale);
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_ptr,
+                                                    sink_v,
+                                                    k_descale_ptr,
+                                                    v_descale_ptr,
+                                                    block_scale_size_kv,
+                                                    v_descale);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -2469,19 +2468,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             1.0f);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
-                                            k_dram_block_window_tmp,
-                                            v_dram_block_window_tmp,
-                                            bias_dram_block_window_tmp,
-                                            lse_acc_dram_window_tmp,
-                                            mask,
-                                            position_encoding,
-                                            scale_s,
-                                            smem_arena,
-                                            sink_v,
-                                            nullptr,
-                                            nullptr,
-                                            1,
-                                            1.0f);
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_arena,
+                                                    sink_v,
+                                                    nullptr,
+                                                    nullptr,
+                                                    1,
+                                                    1.0f);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -2524,19 +2523,19 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             v_descale);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
-                                            k_dram_block_window_tmp,
-                                            v_dram_block_window_tmp,
-                                            bias_dram_block_window_tmp,
-                                            lse_acc_dram_window_tmp,
-                                            mask,
-                                            position_encoding,
-                                            scale_s,
-                                            smem_arena,
-                                            sink_v,
-                                            k_descale_ptr,
-                                            v_descale_ptr,
-                                            block_scale_size_kv,
-                                            v_descale);
+                                                    k_dram_block_window_tmp,
+                                                    v_dram_block_window_tmp,
+                                                    bias_dram_block_window_tmp,
+                                                    lse_acc_dram_window_tmp,
+                                                    mask,
+                                                    position_encoding,
+                                                    scale_s,
+                                                    smem_arena,
+                                                    sink_v,
+                                                    k_descale_ptr,
+                                                    v_descale_ptr,
+                                                    block_scale_size_kv,
+                                                    v_descale);
     }
 };
 

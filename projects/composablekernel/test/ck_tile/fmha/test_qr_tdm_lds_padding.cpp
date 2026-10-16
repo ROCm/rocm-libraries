@@ -561,8 +561,9 @@ static_assert(validate_arena_layouts<ck_tile::half_t>());
 // cap. d512 spends its whole allowance on one workgroup; everything below it
 // still leaves room for two.
 template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK>
-using HeadDimArena = typename ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy::
-    template LdsArenaLayout<HeadDimProblemM<DataType, M, QK, QK>>;
+using HeadDimArena =
+    typename ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy::template LdsArenaLayout<
+        HeadDimProblemM<DataType, M, QK, QK>>;
 
 template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK>
 constexpr bool fits_lds_budget()

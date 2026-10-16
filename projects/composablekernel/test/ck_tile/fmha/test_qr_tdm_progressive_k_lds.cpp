@@ -130,12 +130,12 @@ using SingleBufferM64Problem = TestFmhaProblem<64>;
 // Progressive K reload on the single-buffer path: the combination the codegen
 // used to reject, and the one d256 and d512 run in production.
 using SingleBufferProgressiveM64Problem = TestFmhaProblem<64, false, true>;
-using DoubleBufferM64Problem    = TestFmhaProblem<64, true>;
-using ProgressiveM64Problem     = TestFmhaProblem<64, true, true>;
-using DoubleBufferM128Problem   = TestFmhaProblem<128, true>;
-using ProgressiveM128Problem    = TestFmhaProblem<128, true, true>;
-using ProgressiveM128D64Problem = TestFmhaProblemForShape<TestFmhaShapeD64, true, true>;
-using ProgressiveM64D256Problem = TestFmhaProblemForShape<TestFmhaShapeD256, true, true>;
+using DoubleBufferM64Problem            = TestFmhaProblem<64, true>;
+using ProgressiveM64Problem             = TestFmhaProblem<64, true, true>;
+using DoubleBufferM128Problem           = TestFmhaProblem<128, true>;
+using ProgressiveM128Problem            = TestFmhaProblem<128, true, true>;
+using ProgressiveM128D64Problem         = TestFmhaProblemForShape<TestFmhaShapeD64, true, true>;
+using ProgressiveM64D256Problem         = TestFmhaProblemForShape<TestFmhaShapeD256, true, true>;
 using SingleBufferSinkM64Problem =
     TestFmhaProblem<64, false, false, ck_tile::half_t, TestCausalMask, TestFmhaSinkTraits>;
 using DoubleBufferSinkM64Problem =
@@ -491,8 +491,9 @@ TEST(QrTdmProgressiveKLds, SingleBufferProgressiveMatchesBaseline)
         const std::string suffix = " at seqlen_k=" + std::to_string(seqlen_k);
         expect_finite_nonzero(progressive);
         expect_close(progressive, single, "progressive output differs from single-buffer" + suffix);
-        expect_close(
-            progressive, baseline, "progressive output differs from double-buffer baseline" + suffix);
+        expect_close(progressive,
+                     baseline,
+                     "progressive output differs from double-buffer baseline" + suffix);
     }
 }
 
@@ -509,7 +510,7 @@ void expect_progressive_matches_single_buffer(const std::string& label,
     static_assert(!ProgressiveProblem::kUseDoubleKVLdsBuffer);
     static_assert(ProgressiveProblem::kProgressiveDsLoadK);
 
-    using DataType = typename BaseProblem::QDataType;
+    using DataType                      = typename BaseProblem::QDataType;
     constexpr ck_tile::index_t hdim     = BaseProblem::BlockFmhaShape::kQKHeaddim;
     constexpr ck_tile::index_t seqlen_q = 64;
 

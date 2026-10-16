@@ -891,12 +891,11 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 namespace detail {
 
 // One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
-// zero and, on the single-V/double-K LDS buffer path, overlaps the later S/V regions: the pipeline loads
-// Q into registers and
-// completes the tensor-count barrier before K/V overwrite that storage. Both paths stage a whole
-// (kN0 x kSubQKHeaddim) K tile per buffer and reserve two K buffers: the double path ping-pongs K
-// and V, the single path ping-pongs only K (V stays single-buffered, S lives past K1). For the
-// measured d=128 K+V configuration the layouts are:
+// zero and, on the single-V/double-K LDS buffer path, overlaps the later S/V regions: the pipeline
+// loads Q into registers and completes the tensor-count barrier before K/V overwrite that storage.
+// Both paths stage a whole (kN0 x kSubQKHeaddim) K tile per buffer and reserve two K buffers: the
+// double path ping-pongs K and V, the single path ping-pongs only K (V stays single-buffered, S
+// lives past K1). For the measured d=128 K+V configuration the layouts are:
 //   double K/V LDS buffer: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
 //   single-V/double-K LDS buffer: Q/K0=0, K1=17408, S=34816, V0=34832, end=53248
 // Region alignment follows one gfx1250 LDS bank row.
@@ -986,8 +985,7 @@ struct QrTdmLdsArenaLayout
     static_assert(!kUseDoubleKVLdsBuffer || kQOffset + kQBytes <= kV0Offset);
     static_assert(kUseDoubleKVLdsBuffer || kK1Offset + kKBytes <= kSOffset);
     static_assert(kUseDoubleKVLdsBuffer || kSOffset + kSBytes <= kV0Offset);
-    static_assert(!KPadding::kEnabled ||
-                  (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
+    static_assert(!KPadding::kEnabled || (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
     static_assert(!kUseDoubleKVLdsBuffer || !VPadding::kEnabled ||
                   (kV1Offset - kV0Offset) % VPadding::kIntervalBytes == 0);
     // gfx1250 has 320 KiB of LDS per CU handed out in 64 KiB granules, so the
