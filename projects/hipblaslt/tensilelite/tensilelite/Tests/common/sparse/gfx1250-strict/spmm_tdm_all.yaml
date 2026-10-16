@@ -104,7 +104,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 256]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
-        - FactorDimArgs: [0]
+        - FactorDimArgs: [0, 1]
         - ActivationArgs:
           - [Enum: none]
 
@@ -181,7 +181,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 96]
           - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
-        - FactorDimArgs: [0]
+        - FactorDimArgs: [0, 1]
         - ActivationArgs:
           - [Enum: none]
 
