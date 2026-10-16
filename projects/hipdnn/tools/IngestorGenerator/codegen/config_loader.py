@@ -40,6 +40,7 @@ from .models import (
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
     PATH_STEM_PATTERN,
+    ROCKE_TARGETS,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -296,6 +297,14 @@ def load_config(path: Path) -> IngestorConfig:
                 (authored_source, authored_where),
             ):
                 _check_kernel_source_keys(source_keys, ks_raw["kind"], source_where)
+            if "target" in ks_raw and ks_raw["target"] not in ROCKE_TARGETS:
+                raise ConfigError(
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source.target is {ks_raw['target']!r}, which hkp_pack "
+                    f"does not compile for. Known targets: {list(ROCKE_TARGETS)} "
+                    f"('native' builds for the shard arch, 'generic' for its LLVM "
+                    f"generic processor)."
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
@@ -308,6 +317,7 @@ def load_config(path: Path) -> IngestorConfig:
                         build=dict(ks_raw.get("build", {})),
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
+                        target=ks_raw.get("target", ""),
                         file=ks_raw.get("file", ""),
                         symbol=ks_raw.get("symbol", ""),
                     ),
@@ -656,6 +666,37 @@ def _expand_one_variant_group(
                 f"instead of failing here."
             )
 
+    # Spec values every shape is crossed with, first axis outermost, so a list
+    # shared by every shape (a head-size bucket list) is stated once instead of
+    # being copied into one shape entry per value.
+    if group.get("shape_axes") is not None:
+        _require_mapping(group["shape_axes"], f"{where} shape_axes")
+    shape_axes = dict(group.get("shape_axes") or {})
+    for axis, values in shape_axes.items():
+        if axis in _SHAPE_CONTROL_KEYS or (
+            spec_order and axis not in spec_order and axis not in spec_defaults
+        ):
+            raise ConfigError(
+                f"{where} shape_axes names '{axis}', which is not a field named in "
+                f"this group's spec_order. An axis value is written into every "
+                f"shape's spec, so a control key or a misspelled field would change "
+                f"the binary the descriptor names."
+            )
+        if not isinstance(values, list) or not values:
+            raise ConfigError(
+                f"{where} shape_axes['{axis}'] must be a non-empty list of values, "
+                f"got {values!r}. An empty axis expands every shape to ZERO kernels "
+                f"instead of failing here."
+            )
+    axis_points = [
+        dict(zip(shape_axes, point))
+        for point in itertools.product(*shape_axes.values())
+    ]
+
+    # A group-level arch restricts every kernel the group expands to, the same
+    # as a hand-authored kernel's own `arch`: it must stay within the pack's,
+    # and an absent one inherits the pack's.
+    group_arch = _unique_arch(group.get("arch", []), f"{where} arch")
     expanded = []
     for index, shape in enumerate(group["shapes"]):
         shape_where = f"{where} shapes[{index}]"
@@ -687,17 +728,25 @@ def _expand_one_variant_group(
             _require_mapping(shape["resolved"], f"{shape_where} resolved")
         resolved = dict(shape.get("resolved") or {})
         ordinal = shape.get("ordinal", 0)
-        shape_spec = {
-            **spec_defaults,
-            **{
-                key: value
-                for key, value in shape.items()
-                if key not in _SHAPE_CONTROL_KEYS
-            },
-        }
-        for arm in knob_sets[set_name]:
-            expanded.append(
-                _expand_one_arm(
+        for point in axis_points:
+            overlap = sorted(set(point) & set(shape))
+            if overlap:
+                raise ConfigError(
+                    f"{shape_where} states {overlap}, which this group's shape_axes "
+                    f"already supply. Either the axis or the shape decides a field, "
+                    f"never both."
+                )
+            shape_spec = {
+                **spec_defaults,
+                **point,
+                **{
+                    key: value
+                    for key, value in shape.items()
+                    if key not in _SHAPE_CONTROL_KEYS
+                },
+            }
+            for arm in knob_sets[set_name]:
+                kernel = _expand_one_arm(
                     arm,
                     shape_spec,
                     resolved,
@@ -710,7 +759,9 @@ def _expand_one_variant_group(
                     shape_where,
                     kmd_field_names,
                 )
-            )
+                if group_arch:
+                    kernel["arch"] = list(group_arch)
+                expanded.append(kernel)
     return expanded
 
 
@@ -963,6 +1014,7 @@ _KNOWN_PACK = frozenset(
 _KNOWN_VARIANT_GROUP = frozenset(
     {
         "name",
+        "arch",
         "metadata",
         "knob_sets",
         "shapes",
@@ -970,6 +1022,7 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "policy_knobs",
         "spec_defaults",
         "spec_order",
+        "shape_axes",
     }
 )
 _KNOWN_KERNEL = frozenset({"name", "kernel_source", "metadata", "priority", "arch"})
@@ -986,6 +1039,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_HIP: ("build",),
+    KERNEL_SOURCE_KIND_ROCKE: ("target",),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.

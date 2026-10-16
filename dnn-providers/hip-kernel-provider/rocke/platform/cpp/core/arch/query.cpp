@@ -581,21 +581,12 @@ static const char* rocke_target_id_start(const char* isa)
 }
 
 /* LLVM defines generic-processor membership explicitly; it is not a naming
- * wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
- * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table */
+ * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
+ * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
+ * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+ * A member without its own catalog row (gfx1100, gfx1200) uses its generic row. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
-    static const char* const gfx11_processors[] = {
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
-    };
     size_t name_len = strcspn(target_id, ":");
     for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
     {
@@ -605,13 +596,15 @@ static const char* rocke_generic_arch_alias(const char* target_id)
            && (len == name_len || target_id[len] == '-'))
             return NULL;
     }
-    for(size_t i = 0; i < sizeof(gfx11_processors) / sizeof(gfx11_processors[0]); ++i)
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
     {
-        const char* processor = gfx11_processors[i];
-        size_t len = strlen(processor);
-        if(len <= name_len && strncmp(target_id, processor, len) == 0
-           && (len == name_len || target_id[len] == '-'))
-            return "gfx11-generic";
+        for(const char* const* member = row->members; *member != NULL; ++member)
+        {
+            size_t len = strlen(*member);
+            if(len <= name_len && strncmp(target_id, *member, len) == 0
+               && (len == name_len || target_id[len] == '-'))
+                return row->generic;
+        }
     }
     return NULL;
 }
@@ -694,6 +687,23 @@ const char* rocke_compiler_target_from_target_id(const char* target_id, char* ou
     memcpy(out, target_id, name_len);
     rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
     return out;
+}
+
+const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    size_t base_len = rocke_base_arch_length(target_id);
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
+    {
+        bool match
+            = strlen(row->generic) == base_len && strncmp(target_id, row->generic, base_len) == 0;
+        for(const char* const* member = row->members; !match && *member != NULL; ++member)
+            match = strlen(*member) == base_len && strncmp(target_id, *member, base_len) == 0;
+        if(match)
+            return rocke_copy_target(row->generic, strlen(row->generic), out, out_cap);
+    }
+    return NULL;
 }
 
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
