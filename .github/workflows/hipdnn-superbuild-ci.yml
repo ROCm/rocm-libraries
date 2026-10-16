@@ -13,6 +13,13 @@ on:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
+      # Docs-only PRs (RFCs, READMEs, guides) do not need a full superbuild.
+      # Negated patterns must come after the patterns they carve out of; a PR
+      # that also touches any non-doc file under the paths above still runs.
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!projects/hipdnn/docs/**'
+      - '!dnn-providers/**/docs/**'
   schedule:
     - cron: '17 7 * * *'
   workflow_dispatch:
