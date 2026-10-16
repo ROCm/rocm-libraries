@@ -201,8 +201,33 @@ inline constexpr bool is_qr_tdm_padding_supported_arch_v =
     false;
 #endif
 
+// fp8 at its own 16x16x128 geometry, kept separate so the bf16/fp16 predicate below is
+// provably unchanged. Those geometry gates are tuning, not correctness: padding only
+// transforms LDS addresses, and writer and reader derive it from one LdsPaddingConfig.
+// Unpadded, a 128 B fp8 row is half the 256 B wrap of the 64 banks, so the 16 rows of
+// a transpose tile start on only two banks -- an 8-way conflict.
 template <typename Problem>
-inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
+inline constexpr bool is_qr_tdm_fp8_padding_enabled_problem_v =
+    is_qr_tdm_padding_supported_arch_v && std::is_same_v<typename Problem::QDataType, fp8_t> &&
+    std::is_same_v<typename Problem::KDataType, fp8_t> &&
+    std::is_same_v<typename Problem::VDataType, fp8_t> && Problem::BlockFmhaShape::NumWarps == 4 &&
+    Problem::BlockFmhaShape::kM0 == 64 && Problem::BlockFmhaShape::kN0 == 128 &&
+    Problem::BlockFmhaShape::kK0 == 128 && Problem::BlockFmhaShape::kK1 == 128 &&
+    Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
+    Problem::BlockFmhaShape::kQKHeaddim < 256 &&
+    (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
+            kQrTdmLdsAccessBytes ==
+        0 &&
+    (Problem::BlockFmhaShape::kN1 * sizeof(typename Problem::VDataType)) % kQrTdmLdsAccessBytes ==
+        0 &&
+    Problem::BlockFmhaShape::IsVLayoutRowMajor &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 128>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 128>>;
+
+template <typename Problem>
+inline constexpr bool is_qr_tdm_bf16_fp16_padding_enabled_problem_v =
     is_qr_tdm_padding_supported_arch_v &&
     ((std::is_same_v<typename Problem::QDataType, bf16_t> &&
       std::is_same_v<typename Problem::KDataType, bf16_t> &&
@@ -237,6 +262,13 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
+
+// Each dtype is admitted only at the geometry its instances are generated at, so adding
+// one cannot widen another.
+template <typename Problem>
+inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
+    is_qr_tdm_bf16_fp16_padding_enabled_problem_v<Problem> ||
+    is_qr_tdm_fp8_padding_enabled_problem_v<Problem>;
 
 template <typename Problem, bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>>
 struct QrTdmPaddingSelection
