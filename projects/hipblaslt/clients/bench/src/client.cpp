@@ -481,7 +481,7 @@ try
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
-         "Iterations to run inside timing loop")
+         "Iterations to run inside timing loop (0 disables fixed-count timing)")
 
         ("cold_iters,j",
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
