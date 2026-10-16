@@ -526,3 +526,6 @@ RFC §9:
   separate `<cudnn_frontend_v8.h>` (stubs). Functionally the same as
   (A) but with explicit consumer opt-in for the v0.x stub surface.
   **Deferred** with (A) — the difference matters only when (A) ships.
+
+The follow-up is [RFC 0021: cuDNN v8 shim](./0021_CuDNN_V8_Shim.md), which takes a functional
+variant of (A) exposed through the existing umbrella.
