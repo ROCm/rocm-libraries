@@ -331,6 +331,18 @@ def test_strided_selection_ignores_hoist_environment(arch, monkeypatch):
     au._validate_strided_3d_spec(problem, explicit)
 
 
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_spec_policy_uses_explicit_arch(arch, monkeypatch):
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    problem = _problem(_strided_request(arch))
+    expected = au._strided_3d_specs_from_problem(problem, arch=arch)
+    other = "gfx950" if arch == "gfx942" else "gfx942"
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: other)
+    assert au._strided_3d_specs_from_problem(problem, arch=arch) == expected
+
+
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
 def test_strided_spec_policy_rejects_other_arches(arch):
     from dispatch.attention.common import _problem
@@ -597,7 +609,8 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
     )
     calls = []
 
-    def stop_before_launch(problem, tuning_spec, kind, arch):
+    def stop_before_launch(problem, tuning_spec, kind, target_arch):
+        assert target_arch == arch
         calls.append((tuning_spec.kernel_spec, kind))
         return False, "paged contract reached"
 
@@ -619,3 +632,23 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
+
+
+def test_strided_runtime_rejects_conflicting_tuning_arch(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, result, tensors = strided_binding_case
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx950")
+    with pytest.raises(
+        ValueError, match="tuning spec targets gfx942, running on gfx950"
+    ):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            tuning_spec=result.spec,
+            kv_layout="strided",
+        )

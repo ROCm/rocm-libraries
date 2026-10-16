@@ -79,14 +79,22 @@ structs; strided symbols carry `_stridedkv`.
 
 The shared 3D runtime resolves `stream=0` to Torch's current stream on Q's
 device. Scratch allocation, initialization, and segment/reduce launches all
-use that effective stream. Callers must make input production visible to it
-and wait before consuming outputs on another stream.
+use that effective stream. When Q is on the active device and the effective
+stream is already current, the runtime submits directly without rebuilding
+Torch device/stream contexts. Other devices and streams keep the explicit
+context boundary and restore the caller's state. Callers must make input
+production visible to it and wait before consuming outputs on another stream.
 
-Compiled kernels are cached. Each eager invocation allocates independent
-scratch, so overlapping calls cannot overwrite each other's partial results.
+Compiled kernels are cached. On gfx942/gfx950, sequential eager invocations
+reuse bounded scratch owned by the problem and effective device/stream. A
+whole-pair submission lock protects segment/reducer ordering; overlapping or
+recursive calls use private scratch. Unchanged pointers and scalars reuse an
+immutable packed pair. Changed bindings rebuild it, retaining previous input
+storage and argument buffers until completion.
 The asynchronous `no_fence()` path retains launch arguments until a runtime
 completion drain such as `synchronize_and_release()`; callers must drain it
-periodically. This adds eager allocator work; no performance claim is made.
+periodically. Request-local input storage is released by that completion drain;
+the eager cache owns only scratch and immutable packed addresses afterward.
 
 For a sequential decoding loop, prepare an execution once outside timing. Keep
 permuted K/V view objects stable, and update their storage and the device length
@@ -110,6 +118,33 @@ with prepare_unified_attention_torch(
         execution.launch()
 ```
 
+For a loop with fixed bindings on gfx942/gfx950, `replay_scope()` validates and
+warms up once on entry, then yields an asynchronous operation with immutable
+launch arguments. It establishes the execution's device and stream for the
+whole scope. Queue content updates on that stream before each replay:
+
+```python
+with prepare_unified_attention_torch(**arguments) as execution:
+    with execution.replay_scope() as replay:
+        for step in range(steps):
+            update_device_contents(step)  # Q/K/V and lengths, within the maximum
+            replay()
+    execution.rebind(q=next_q, out=next_out)
+```
+
+The callable is valid only inside the scope on its entering thread. Keep tensor
+objects, storage addresses, layouts, scalar values and launch configuration fixed
+throughout the scope; content-only updates need no rebind. Scope exit waits for
+queued work before restoring the caller's stream and releasing bound arguments.
+`rebind()` drains and validates new storage or scalar bindings between scopes;
+it also launches once. Ordinary `rebind()` is available on gfx1250 independently
+of the gfx942/gfx950 replay scope. Drain before changing tensor storage metadata. A different
+geometry, dtype, layout, device or stream requires a new execution. Concurrent
+launch, rebind, close or nested scope on one owner is rejected. Do not change the
+active device/stream or begin an outer capture inside a scope; use `launch()`
+for outer capture. Both prepared eager and internal graph execution support
+this scope. A failed completion drain requires `close()` to retry cleanup.
+
 Prepared eager launches reuse three scratch tensors. The complete segment/reducer
 pair is submitted under one owner; concurrent or reentrant submission is rejected.
 Separate streams need separate execution owners. Do not close an execution while
@@ -128,8 +163,17 @@ direct calls keep at most eight paired graph/resource entries, and a prepared
 execution keeps at most one. A binding change that evicts an entry waits only for
 that entry's stream before releasing it. Stable replay has no new allocation or
 extra completion wait beyond the requested fence. `clear_attention_3d_graph_cache()`
-explicitly drains and clears the direct cache. Tensor identity, address, layout,
-scalar parameters and metadata bindings participate in graph identity.
+explicitly drains and clears the direct cache. Tensor identity and scalar
+parameters select the resident graph; live addresses and normalized
+layout metadata are checked before each replay. Content-only updates reuse the
+graph. Rebinding the same tensor objects to new storage drains and replaces
+the captured graph; it does not recompile the cached kernels. Drain queued work
+before mutating storage metadata. Prepared owners still reject geometry, dtype,
+layout, device or stream changes.
+
+The context shortcut and resident-key optimization apply to gfx942/gfx950.
+gfx1250 retains explicit device/stream contexts and includes live storage
+addresses in its graph key, preserving its existing cache eviction behavior.
 
 Asynchronous graph replay retains its resource entry until the stream is drained,
 even if the Python execution owner is discarded. Asynchronous eager launches also
@@ -144,8 +188,9 @@ The [numeric tests](../library/tests/test_strided_kv_decode_numeric.py) compare
 the direct runtime and registered binding against an independent CPU FP32
 reference after input quantization. They include batched BHSD/BSHD, different
 K/V strides, padding, unpadded capacity tails, changing valid lengths, empty
-sequences, windows, paged regressions, and graph replay. Concurrency tests cover
-eager calls, internal graphs, and separate external graphs captured on one
+sequences, windows, paged regressions, graph replay, content updates, and
+same-object Q/output storage rebinding for direct and prepared graph calls.
+Concurrency tests cover eager calls, internal graphs, and separate external graphs captured on one
 stream and replayed on different streams. They check scratch isolation and
 replay after temporary launch references are drained. Set
 `ROCKE_REQUIRE_DECODE_GPU=gfx942` or `gfx950` to require the target GPU rather

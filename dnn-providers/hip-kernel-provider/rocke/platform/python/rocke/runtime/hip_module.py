@@ -481,6 +481,7 @@ class Runtime:
     # :meth:`_reap_completed` (eager non-blocking drain) and
     # :meth:`wait_stream` (event-blocking drain per stream).
     _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
+    _pending_bound_args: "Dict[Tuple[int, int], Dict[int, Any]]" = {}
 
     def load_module(self, blob: bytes) -> Module:
         _ensure_hip_init()
@@ -572,6 +573,7 @@ class Runtime:
         """
         s = int(stream)
         self.stream_sync(s)
+        self._pending_bound_args.pop(self._bound_stream_key(s), None)
         bucket = self._pending_args.pop(s, None)
         if not bucket:
             return
@@ -594,6 +596,10 @@ class Runtime:
                 if evt is not None:
                     evt.destroy()
         self._pending_args.clear()
+        device = _current_device()
+        for key in list(self._pending_bound_args):
+            if key[0] == device:
+                self._pending_bound_args.pop(key, None)
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -606,12 +612,30 @@ class Runtime:
         only need the bookkeeping cleanup.
         """
         s = int(stream)
+        self._pending_bound_args.pop(self._bound_stream_key(s), None)
         bucket = self._pending_args.pop(s, None)
         if not bucket:
             return
         for _refs, evt in bucket:
             if evt is not None:
                 evt.destroy()
+
+    @staticmethod
+    def _bound_stream_key(stream: int):
+        # The HIP null and per-thread default streams have shared handles
+        # across devices. Device synchronization drains only the current one.
+        return (_current_device(), int(stream))
+
+    def retain_until_drain(self, stream: int, owner: Any, *, resources=None) -> None:
+        """Retain an immutable bound launch owner through an explicit drain.
+
+        Repeated submission retains it once. Earlier completion events cannot
+        release it: its latest submission may be later than those events.
+        Call before enqueue so partial submission failures retain their buffers.
+        """
+        bucket = self._pending_bound_args.setdefault(self._bound_stream_key(stream), {})
+        if id(owner) not in bucket:
+            bucket[id(owner)] = owner if resources is None else (owner, resources())
 
     def retain_for_stream(self, stream: int, *objects: Any) -> None:
         """Keep ``objects`` alive until the most-recent launch on

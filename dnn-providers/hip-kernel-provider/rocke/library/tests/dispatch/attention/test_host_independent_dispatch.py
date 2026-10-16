@@ -629,7 +629,9 @@ class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
 _LIVE_ARCH_CALLERS_ALLOWED = frozenset(
     {
         "run_unified_attention_torch",  # the public launch entry
-        "_run_3d_tiled_on_stream",  # split-KV decode launch
+        "_run_3d_tiled",  # split-KV decode stream boundary
+        "_run_3d_tiled_on_stream",  # compile and launch on the established stream
+        "replay_scope",  # validate the prepared target at scoped launch entry
         "_run_2d_graphed",  # 2D graph-replay launch
         # ``_canonical_arch_for_selection`` is the canonicalizer for the public
         # gates (``supports_native_unified_attention_tiled`` etc.).  Its
@@ -737,6 +739,18 @@ class TestDecoratedTargetIds(unittest.TestCase):
         for raw, expected in cases:
             with self.subTest(raw=raw):
                 self.assertEqual(_canonical_arch_for_selection(raw), expected)
+
+    def test_canonical_launch_arch_skips_target_parser(self):
+        from unittest.mock import patch
+        from kernels.common.attention_unified import _canonical_arch_for_selection
+
+        with patch(
+            "rocke.core.arch.base_arch_from_target_id",
+            side_effect=AssertionError("canonical target reparsed"),
+        ):
+            for arch in ("gfx942", "gfx950", "gfx1250"):
+                with self.subTest(arch=arch):
+                    self.assertEqual(_canonical_arch_for_selection(arch), arch)
 
     def test_impl_routers_receive_canonical_arch(self):
         """A decorated ID must canonicalize to the correct arch and therefore
