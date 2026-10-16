@@ -54,12 +54,20 @@ std::shared_ptr<EngineDescriptor>
     EngineDescriptor::createForApplicableEngine(std::shared_ptr<const GraphDescriptor> graph,
                                                 int64_t engineId)
 {
+    THROW_IF_NULL(graph,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "EngineDescriptor::createForApplicableEngine() failed: Graph is null.");
+    THROW_IF_FALSE(graph->isFinalized(),
+                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                   "EngineDescriptor::createForApplicableEngine() failed: Graph is not finalized.");
+    // getHandle() throws on a null handle.
+    auto handle = graph->getHandle();
+
     auto engine = std::make_shared<EngineDescriptor>();
     engine->_graph = std::move(graph);
     engine->_engineId = engineId;
     engine->_engineIdSet = true;
 
-    auto handle = engine->_graph->getHandle();
     engine->loadEngineDetailsAndFinalize(handle->getPluginResourceManager());
     return engine;
 }

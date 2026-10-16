@@ -134,6 +134,12 @@ struct MetadataTupleValuesHash
 /// Neither lock is ever held across a call that takes the other, so the two cannot
 /// deadlock. Matchers, the heuristic, and the accessors below all run outside both.
 ///
+/// `finishCatalog` is the staged form of the per-variant loop and may run on a worker
+/// thread, concurrently with other engines' `finishCatalog` calls and with the caller
+/// thread. A matcher or graph criterion is a plain function of its const arguments and
+/// must stay callable from any thread at once: any state it reaches beyond those
+/// arguments needs its own synchronization.
+///
 /// Everything between a lookup and a store is thread-local: `catalogFor` returns a
 /// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
 /// shared state. Returning a reference into `_catalogCache` instead would make those

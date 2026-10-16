@@ -1400,7 +1400,9 @@ and the other fields `graph.fbs` marks `(cache_ignore)`, so two structurally ide
 separately share an entry. Equality is exact: the hash only narrows the lookup, and a
 structural comparison of the retained bytes decides the match, so which catalog this is never rests
 on a probability. The cost is one verified copy of the serialized bytes and one hash per lookup, on
-a call that arrives a few times per engine per graph. A graph that supplies no serialized bytes has
+a call that arrives a few times per engine per graph; a lookup builds the key once and carries it
+through. Each cached catalog also retains its key's copy, so the cache holds up to its capacity
+(256 per engine) of serialized graphs. A graph that supplies no serialized bytes has
 no content key; its catalog is rematched on every call and never cached.
 
 **Tensor uids are part of the key because the bound token state carries them.** The content key

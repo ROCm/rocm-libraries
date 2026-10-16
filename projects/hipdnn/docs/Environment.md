@@ -249,7 +249,7 @@ export HIPDNN_FORCE_BENCHMARKING=0
 
 ### Engine Applicability Threading
 
-The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, applicability runs on the calling thread exactly as it always has.
+The hip-kernel-provider finishes its kernel ingestor engines' applicability checks on worker threads when that pays for itself. A check that misses the engine's catalog cache walks every arch-eligible kernel variant, about 0.26 µs per variant. With at least two ingestor engines pending in one call, all but the largest can run beside the calling thread. It does so only when enough variants can be handed off; below that, and with fewer than two ingestor engines, every check still runs on the calling thread. A provider with two or more ingestor engines reaches that point through a begin-all, finish-all sequence in which the engines share one device lookup and one catalog key, rather than the one-engine-at-a-time loop.
 
 Applicability results are identical either way: the same engines, in the same order, and the same error when one fails.
 

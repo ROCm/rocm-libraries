@@ -4,6 +4,7 @@
 #include "ApplicabilityPool.hpp"
 
 #include <algorithm>
+#include <new>
 #include <system_error>
 
 #ifdef __linux__
@@ -145,7 +146,6 @@ bool ApplicabilityPool::tryRun(std::size_t taskCount,
         const std::lock_guard<std::mutex> lock(_mutex);
         while(_threads.size() < granted)
         {
-            liveThreadCount.fetch_add(1, std::memory_order_relaxed);
             try
             {
                 _threads.emplace_back([this] { workerLoop(); });
@@ -153,9 +153,15 @@ bool ApplicabilityPool::tryRun(std::size_t taskCount,
             catch(const std::system_error&)
             {
                 // The threads already running still serve; with none, the caller runs inline.
-                liveThreadCount.fetch_sub(1, std::memory_order_relaxed);
                 break;
             }
+            catch(const std::bad_alloc&)
+            {
+                break;
+            }
+            // Counted only once the thread exists. The worker's own decrement cannot run
+            // before this: its first act is to take _mutex, which this scope holds.
+            liveThreadCount.fetch_add(1, std::memory_order_relaxed);
         }
         helpers = std::min(granted, _threads.size());
         if(helpers == 0)

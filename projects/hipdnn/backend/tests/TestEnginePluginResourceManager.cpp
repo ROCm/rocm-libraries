@@ -4173,6 +4173,34 @@ TEST(TestEnginePlugin, ParsedApiVersionIsCapturedOnceAtLoad)
     EXPECT_EQ(plugin.apiVersionCalls(), 0U);
 }
 
+namespace
+{
+
+// NOLINTBEGIN(bugprone-throwing-static-initialization) test constants
+const auto MALFORMED_VERSION_PLUGIN_PATH
+    = hipdnn_backend::platform_utilities::getCurrentModuleDirectory().parent_path()
+      / plugin_constants::getTestPluginDefaultDir() / "custom"
+      / hipdnn_data_sdk::utilities::getLibraryName(TEST_MALFORMED_VERSION_PLUGIN_NAME);
+// NOLINTEND(bugprone-throwing-static-initialization)
+
+} // namespace
+
+// A library whose version string cannot be parsed still loads; it is recorded as an empty
+// parsed version, which is what the plugin manager's load-time check then rejects. The
+// counting subclass proves later reads are served from that record, not re-read.
+TEST(TestEnginePlugin, MalformedApiVersionLoadsAsNulloptThroughRealConstructor)
+{
+    ASSERT_TRUE(std::filesystem::exists(MALFORMED_VERSION_PLUGIN_PATH))
+        << "Test precondition: malformed-version plugin missing at "
+        << MALFORMED_VERSION_PLUGIN_PATH;
+
+    const ApiVersionCountingEnginePlugin plugin(SharedLibrary{MALFORMED_VERSION_PLUGIN_PATH});
+
+    EXPECT_FALSE(plugin.parsedApiVersion().has_value());
+    EXPECT_FALSE(plugin.parsedApiVersion().has_value());
+    EXPECT_EQ(plugin.apiVersionCalls(), 0U);
+}
+
 // ---------------------------------------------------------------------------
 // Malformed plugin answers. The lying fixture supplies one malformed answer per
 // engine id; see tests/test_plugins/TestLyingEngineNamePlugin.cpp.

@@ -254,6 +254,19 @@ TEST_F(TestEngineDescriptor, SetEngineDescriptorGraph)
         HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockGraphWrapper));
 }
 
+TEST_F(TestEngineDescriptor, CreateForApplicableEngineRejectsNullGraph)
+{
+    ASSERT_THROW_HIPDNN_STATUS(EngineDescriptor::createForApplicableEngine(nullptr, 0),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, CreateForApplicableEngineRejectsUnfinalizedGraph)
+{
+    EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(false));
+    ASSERT_THROW_HIPDNN_STATUS(EngineDescriptor::createForApplicableEngine(getMockGraph(), 0),
+                               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
 TEST_F(TestEngineDescriptor, SetEngineDescriptorGlobalId)
 {
     auto engine = getEngineDescriptor();
