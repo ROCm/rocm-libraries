@@ -18,11 +18,13 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+#include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <optional>
 
 namespace asm_sdpa_engine
 {
@@ -803,110 +805,16 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 // Canonical mask-attribute policy (plan_utils::getMaskType)
 // =============================================================================
 //
-// These tests exercise the shared mask-precedence policy directly through
-// plan_utils::getMaskType rather than through isApplicable. When a deprecated
-// causal boolean is set it takes precedence over the modern bounds trio; only
-// setting both deprecated booleans at once throws. The policy is
+// These tests exercise the shared mask policy directly through
+// plan_utils::getMaskType rather than through isApplicable. A deprecated causal
+// boolean is merged with the stored bounds and alignment (see
+// plan_utils::resolveDiagonalBand); only setting both booleans throws. The policy is
 // hardware-agnostic (it runs before any device dispatch and independent of the
 // kernel registry), so testing the helper keeps the assertions meaningful on
 // any device — including this gfx950 box. Driving the policy through
 // isApplicable would not discriminate the policy result from the unrelated "no
 // matching kernel" rejection that gfx950 produces for causal configurations
 // (the gfx950 forward registry carries NO_MASK rows only).
-
-// Build a forward SDPA graph that sets the deprecated causal booleans and the
-// modern bounds trio explicitly, so contradictory combinations can be
-// constructed. Returns the FlatBufferBuilder owning the graph buffer.
-flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithMask(
-    bool causalMask,
-    bool causalMaskBottomRight,
-    flatbuffers::Optional<int64_t> leftBound,
-    flatbuffers::Optional<int64_t> rightBound,
-    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagAlignment)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
-
-    const std::vector<int64_t> dims = {4, 8, 256, 128};
-    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-
-    int64_t uid = 1;
-    const auto qUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
-    const auto kUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
-    const auto vUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
-    const auto oUid = uid++;
-    tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
-
-    const auto sdpaAttributes
-        = CreateSdpaAttributes(builder,
-                               qUid,
-                               kUid,
-                               vUid,
-                               oUid,
-                               flatbuffers::nullopt, // attn_mask_tensor_uid
-                               flatbuffers::nullopt, // scale_tensor_uid
-                               flatbuffers::nullopt, // seq_len_q_tensor_uid
-                               flatbuffers::nullopt, // seq_len_kv_tensor_uid
-                               flatbuffers::nullopt, // seed_tensor_uid
-                               flatbuffers::nullopt, // offset_tensor_uid
-                               flatbuffers::nullopt, // dropout_mask_tensor_uid
-                               flatbuffers::nullopt, // dropout_scale_tensor_uid
-                               flatbuffers::nullopt, // page_table_k_tensor_uid
-                               flatbuffers::nullopt, // page_table_v_tensor_uid
-                               flatbuffers::nullopt, // block_mask_tensor_uid
-                               flatbuffers::nullopt, // sink_token_tensor_uid
-                               flatbuffers::nullopt, // descale_q_tensor_uid
-                               flatbuffers::nullopt, // descale_k_tensor_uid
-                               flatbuffers::nullopt, // descale_v_tensor_uid
-                               flatbuffers::nullopt, // descale_s_tensor_uid
-                               flatbuffers::nullopt, // scale_s_tensor_uid
-                               flatbuffers::nullopt, // scale_o_tensor_uid
-                               flatbuffers::nullopt, // stats_tensor_uid
-                               flatbuffers::nullopt, // max_tensor_uid
-                               flatbuffers::nullopt, // sum_exp_tensor_uid
-                               flatbuffers::nullopt, // rng_dump_tensor_uid
-                               flatbuffers::nullopt, // amax_s_tensor_uid
-                               flatbuffers::nullopt, // amax_o_tensor_uid
-                               flatbuffers::nullopt, // generate_stats
-                               false, // alibi_mask
-                               false, // padding_mask
-                               causalMask,
-                               causalMaskBottomRight,
-                               flatbuffers::nullopt, // dropout_probability
-                               flatbuffers::nullopt, // attn_scale_value
-                               leftBound,
-                               rightBound,
-                               flatbuffers::nullopt, // max_seq_len_kv
-                               diagAlignment,
-                               DataType::UNSET, // mma_core_mode
-                               AttentionImplementation::AUTO);
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(builder,
-                                     "sdpa_fwd",
-                                     DataType::FLOAT,
-                                     NodeAttributes::SdpaAttributes,
-                                     sdpaAttributes.Union()));
-
-    const auto graphOffset = CreateGraphDirect(builder,
-                                               "test",
-                                               DataType::FLOAT,
-                                               DataType::HALF,
-                                               DataType::BFLOAT16,
-                                               &tensorAttributes,
-                                               &nodes);
-    builder.Finish(graphOffset);
-    return builder;
-}
 
 // Resolve the SDPA attributes from a graph buffer and classify the mask.
 plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
@@ -937,94 +845,33 @@ TEST_F(TestSdpaFwdPlanBuilder, AbsentAttnScaleValueIsOne)
     EXPECT_EQ(plan_utils::attnScaleOrDefault(attrs), 1.0f);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
+class TestSdpaFwdDeprecatedCausalMask : public ::testing::TestWithParam<DeprecatedCausalMaskCase>
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+};
 
-    // Both deprecated causal booleans set is a contradiction.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::nullopt,
-        flatbuffers::nullopt,
-        DiagonalAlignment::TOP_LEFT);
-
-    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
+TEST_P(TestSdpaFwdDeprecatedCausalMask, Classifies)
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto& param = GetParam();
+    auto builder = createSdpaFwdGraphWithMask(param.causalMask,
+                                              param.causalMaskBottomRight,
+                                              param.leftBound,
+                                              param.rightBound,
+                                              param.alignment);
 
-    // causal_mask=true takes precedence over the bounds trio, even though the
-    // bounds describe a sliding window (left=64, right=64): result is causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::TOP_LEFT);
-
+    if(!param.expected.has_value())
+    {
+        EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+        return;
+    }
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+    EXPECT_EQ(maskType, param.expected.value());
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though the trio (left=-1, right=0, diag=TOP_LEFT) would derive
-    // TOP_LEFT_CAUSAL: result is bottom-right causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
-    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/true,
-        /*causalMaskBottomRight=*/false,
-        flatbuffers::Optional<int64_t>(-1),
-        flatbuffers::Optional<int64_t>(0),
-        DiagonalAlignment::TOP_LEFT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
-}
-
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    // causal_mask_bottom_right=true takes precedence over the bounds trio, even
-    // though a symmetric sliding window (left=64, right=64) would derive
-    // SLIDING_WINDOW: result is bottom-right causal.
-    auto builder = createSdpaFwdGraphWithMask(
-        /*causalMask=*/false,
-        /*causalMaskBottomRight=*/true,
-        flatbuffers::Optional<int64_t>(64),
-        flatbuffers::Optional<int64_t>(64),
-        DiagonalAlignment::BOTTOM_RIGHT);
-
-    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
-    EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
-}
+INSTANTIATE_TEST_SUITE_P(,
+                         TestSdpaFwdDeprecatedCausalMask,
+                         ::testing::ValuesIn(deprecatedCausalMaskCases()),
+                         deprecatedCausalMaskCaseName);
 
 // Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
 // as unbounded (-1), so a partially specified trio still derives the mask it
