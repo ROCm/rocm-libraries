@@ -328,10 +328,10 @@ class TestNumCusResolver(unittest.TestCase):
         try:
             au._RESOLVED_ATTENTION_ARCH = None
             p.attr(au, "_resolve_attention_arch", lambda: "gfx950")
-            # num_2d=8 -> pre_bump 64. kv 2048 keeps the shape outside the decode
-            # split rule (_gfx950_3d_decode_ctas_per_segment), which replaces the
-            # clamp.
-            shape = dict(nq=8, nk=8, D=128, kv=2048, batch=1)
+            # num_2d=8 -> pre_bump 64. Head size 64 keeps the shape outside the
+            # decode split rule (_gfx950_3d_decode_ctas_per_segment), which
+            # replaces the clamp.
+            shape = dict(nq=8, nk=8, D=64, kv=2048, batch=1)
             ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
 
             # Default callers: clamped to the pre-bump ceiling regardless of the bump.

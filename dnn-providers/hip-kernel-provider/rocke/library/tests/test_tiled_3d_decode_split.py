@@ -42,10 +42,12 @@ def gfx950(monkeypatch):
         ({"max_seqlen_k": 4096}, "gfx950", True),
         ({"dtype": "fp16", "num_kv_heads": 4}, "gfx950", True),
         ({"num_seqs": 64}, "gfx950", True),
+        ({"max_seqlen_k": 1024}, "gfx950", True),
+        ({"head_size": 256, "num_seqs": 4}, "gfx950", True),
         ({}, "gfx942", False),
-        ({"max_seqlen_k": 2048}, "gfx950", False),
         ({"total_q": 4, "max_seqlen_q": 4}, "gfx950", False),
         ({"head_size": 256}, "gfx950", False),
+        ({"head_size": 64}, "gfx950", False),
         ({"block_size": 32}, "gfx950", False),
         ({"sliding_window": 128}, "gfx950", False),
         ({"target_ctas": 8}, "gfx950", False),
@@ -61,23 +63,30 @@ def test_scope(kw, arch, in_scope):
 @pytest.mark.parametrize(
     "num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segments",
     [
-        # Underfilled (CTAs per segment <= num_cus / 32): 64-token tiles.
+        # Underfilled (CTAs per segment <= num_cus / 32): 64-token tiles, at
+        # most one tile per segment.
         (1, 8, 32768, 256, 64, 64),
         (1, 4, 65536, 256, 64, 128),
         (2, 4, 65536, 256, 64, 64),
         (8, 1, 16384, 256, 64, 64),
-        # About 4 CTAs per CU, capped at 64 segments, floored at 4.
+        (1, 8, 2048, 256, 64, 32),
+        (1, 1, 1024, 256, 64, 16),
+        # About 4 CTAs per CU, at most 64 segments below 8K KV tokens and 128
+        # from there, at least 2.
         (2, 8, 16384, 256, None, 64),
         (4, 8, 16384, 256, None, 32),
         (16, 8, 8192, 256, None, 8),
+        (16, 8, 1024, 256, None, 8),
         (32, 4, 8192, 256, None, 8),
         (64, 4, 4096, 256, None, 4),
-        (128, 4, 8192, 256, None, 4),
-        (256, 16, 8192, 256, None, 4),
+        (128, 4, 8192, 256, None, 2),
+        (256, 16, 8192, 256, None, 2),
+        (3, 4, 16384, 256, None, 85),
+        (3, 4, 4096, 256, None, 64),
         # The boundary follows the CU count.
         (1, 8, 16384, 128, None, 64),
         (1, 4, 16384, 128, 64, 64),
-        (1, 8, 16384, 120, None, 32),
+        (1, 8, 16384, 120, None, 60),
     ],
 )
 def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segments):
@@ -99,24 +108,25 @@ def test_split(gfx950, num_seqs, num_kv_heads, max_seqlen_k, num_cus, tile, segm
 
 
 def test_out_of_scope_keeps_the_previous_spec(gfx950):
-    spec = bld._tiled_3d_spec_from_problem(_problem(max_seqlen_k=2048))
+    spec = bld._tiled_3d_spec_from_problem(_problem(sliding_window=128))
     assert spec.tile_size_override is None
     assert not spec.use_kv_lds_swizzle
     assert not spec.use_wave_page_id_load
 
 
-def test_strided_decode_is_not_covered(gfx950, monkeypatch):
-    problem = _problem()
+@pytest.mark.parametrize("num_seqs, tile, segments", [(1, 64, 64), (16, None, 8)])
+def test_strided_decode_follows_the_rule(gfx950, num_seqs, tile, segments):
+    problem = _problem(num_seqs=num_seqs)
     segment, reduce = au._strided_3d_specs_from_problem(problem, arch="gfx950")
+    assert segment.tile_size_override == tile
+    assert segment.num_segments == reduce.num_segments == segments
+    # The swizzle measured slower on strided K/V; page ids need a page table.
     assert not segment.use_kv_lds_swizzle
     assert not segment.use_wave_page_id_load
-    assert segment.tile_size_override is None
-    monkeypatch.setattr(au, "_gfx950_3d_decode_ctas_per_segment", lambda *a, **k: None)
-    assert segment.num_segments == reduce.num_segments == au._num_segments(problem)
 
 
 def test_cache_key_follows_the_rule(gfx950):
     assert au._tiled_3d_cache_key(_problem()) != au._tiled_3d_cache_key(
-        _problem(max_seqlen_k=2048)
+        _problem(sliding_window=128)
     )
     assert au._tiled_3d_cache_key(_problem())[-3:] == (64, True, True)
