@@ -194,8 +194,8 @@ static void call_spsm(hipsparseHandle_t&     handle,
     CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
     // Host SpSM reference
-    J struct_pivot  = -1;
-    J numeric_pivot = -1;
+    J               struct_pivot  = -1;
+    J               numeric_pivot = -1;
     int             device_id;
     hipDeviceProp_t device_prop{};
     CHECK_HIP_ERROR(hipGetDevice(&device_id));
@@ -385,9 +385,9 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(hC_out.data(), dC, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
-                        std::vector<T> hC_gold(hC);
-                        J              struct_pivot  = -1;
-                        J              numeric_pivot = -1;
+                        std::vector<T>  hC_gold(hC);
+                        J               struct_pivot  = -1;
+                        J               numeric_pivot = -1;
                         int             device_id;
                         hipDeviceProp_t device_prop{};
                         CHECK_HIP_ERROR(hipGetDevice(&device_id));
