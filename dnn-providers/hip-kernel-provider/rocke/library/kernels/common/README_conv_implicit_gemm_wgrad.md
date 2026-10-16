@@ -90,9 +90,14 @@ a grid that is too small to fully saturate the device.
 The kernel ABI is identical across `split_k=1` and `split_k>1` — no extra
 parameters are required.
 
-**Auto mode (`split_k=-1`):** The split degree can be chosen automatically at
-build time using `select_split_k_wgrad` (the CK formula:
-`floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
+**Auto mode (`split_k=-1`):** The degree, and whether the split reduces
+through the packed atomic or the two-stage f32 workspace, is chosen by
+`kernels.common.conv_split_k.resolve_conv_split_k` -- the one resolver the
+dispatcher, the builders and the benchmark share. On arches with a fitted
+split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
+(degree, reduction) under that model; elsewhere it uses the CK formula
+(`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
+clamped to `[1, wg_K]`). `ROCKE_CONV_SPLIT_K` overrides it.
 
 ### Split-K cshuffle atomic epilogue
 

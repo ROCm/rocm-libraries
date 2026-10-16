@@ -156,8 +156,8 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     _DEFAULT_WS_REPLICAS as _WGRAD_WS_REPLICAS,
     _GROUP_MERGE_DEGREES,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
-    wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
 )
+from kernels.common.conv_split_k import ConvSplitK, resolve_conv_split_k
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
     is_valid_dgrad_spec as _dgrad_is_valid_spec,
@@ -557,13 +557,14 @@ class ConvGroupedSpec:
     def to_wgrad_spec(self, problem: "ConvProblem") -> "WgradConvSpec":
         """Build a WgradConvSpec with a resolved split_k from this dispatcher spec.
 
-        split_k=-1 (auto) is resolved here via the CK formula so the returned
-        spec always has a concrete split_k >= 1, ready for grid calculation and
-        launch without re-running the formula in the caller.
+        split_k=-1 (auto) is resolved here by the shared split-K resolver, so
+        the returned spec always has a concrete split_k >= 1 and reduction
+        path, ready for grid calculation and launch.
         """
         assert self.direction == "wgrad", "to_wgrad_spec is only valid for wgrad specs"
         target = ArchTarget.from_gfx(self.arch)
-        resolved_split_k, two_stage, _ = _resolve_wgrad_split_k(self, problem)
+        resolved = _resolve_wgrad_split_k(self, problem)
+        resolved_split_k, two_stage = resolved.split_k, resolved.two_stage
         return WgradConvSpec(
             problem=problem,
             name=self.name,
@@ -590,7 +591,7 @@ class ConvGroupedSpec:
             two_stage=two_stage,
             group_merge=self.group_merge,
             # Pin the replica count explicitly rather than inheriting the
-            # dataclass default: _resolve_wgrad_split_k caps the scratch against
+            # dataclass default: the split-K resolver caps the scratch against
             # the i32 ws_bytes ABI using this same constant, and a cap computed
             # over a different R than the spec carries bounds nothing.
             ws_replicas=_WGRAD_WS_REPLICAS,
@@ -644,123 +645,28 @@ def _fwd_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, in
     return (gn, gm, p.groups)
 
 
-# ws_bytes is i32 in the kernel ABI, so a two-stage workspace above this would
-# overflow the argument.
-_MAX_WGRAD_WS_BYTES = (1 << 31) - 4  # 2 GiB - 4
+def _resolve_wgrad_split_k(spec: ConvGroupedSpec, p: "ConvProblem") -> ConvSplitK:
+    """Resolve the wgrad split-K degree and reduction path for ``spec`` on ``p``.
 
-# hipDeviceAttributeMaxGridDimZ. Unlike x, the z extent is a 16-bit field in the
-# dispatch packet on every arch rocke targets, so this is an architectural limit
-# rather than a per-device one and is safe as a constant. Grouped wgrad puts
-# groups*split_k on z, which is the only rocke launch that can reach it.
-_MAX_GRID_DIM_Z = 65535
-
-
-def _resolve_wgrad_split_k(
-    spec: ConvGroupedSpec, p: "ConvProblem"
-) -> Tuple[int, bool, int]:
-    """Resolve wgrad split_k and two-stage eligibility; returns
-    ``(split_k, two_stage, requested_split_k)``.
-
-    Honors a concrete split-K fixed by the candidate (WMMA forces 1 -- it has
-    no split-K path); otherwise auto-resolves via the CK formula on the
-    per-group GEMM dims (== full dims when groups==1). Grouped rides the group
-    on block_id_z alongside the K-slice (z = groups*split_k), so grouped
-    split-K is valid on MFMA.
-
-    The result is then held under the scratch cap: when it bites, split_k
-    falls back to 1 (a plain store, no scratch needed). Shared by
-    ``to_wgrad_spec`` and ``_wgrad_grid`` so the spec and the launch grid can
-    never disagree on split_k.
-
-    Two further constraints, both of which only bite once ``groups`` is large
-    (they are no-ops at groups == 1):
-
-    * **gridDim.z.** The group and the K-slice share the z axis, so the launch
-      needs ``groups * split_k`` blocks there. The CK formula sizes split_k
-      from the *per-group* GEMM and never sees the groups factor, so on a
-      depthwise problem (groups == C, per-group GEMM 1 x Y*X) it happily asks
-      for a degree that overflows the z limit and the launch fails with
-      ``hipErrorInvalidValue``. Clamp here, in the one resolver both the spec
-      and the grid go through, so they cannot desynchronise.
-    * **Atomic availability.** The packed ``<2 x dtype>`` atomic the split-K
-      epilogue emits for a 16-bit dW needs an even dW row length
-      ``wg_N = Y*X*cpg``. When that fails there is no 16-bit atomic to fall
-      back on (gfx9 has no scalar 16-bit atomic add), so the choice is
-      split_k=1 or the two-stage f32-workspace path. Promote to two-stage and
-      keep the parallelism -- collapsing the reduction axis of a wgrad whose
-      K_wg is N*Ho*Wo is the expensive way out.
+    Delegates to :func:`kernels.common.conv_split_k.resolve_conv_split_k`, the
+    resolver the kernel builders and the benchmark use too, so a ``split_k=-1``
+    spec gets the same degree wherever it is resolved. Within this module it is
+    shared by ``to_wgrad_spec``, ``_wgrad_grid``, the signature and the launch
+    values, so the spec, the grid (``z = (groups / group_merge) * split_k``)
+    and the ``ks``/``ks_count`` kernargs can never disagree on the degree.
     """
-    spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
-    wg_M = p.K // p.groups
-    wg_N = spatial * (p.C // p.groups)
-    # Group merging folds Gm groups into one GEMM: the tile covers Gm times the
-    # per-group dims, and there are Gm times fewer of them on the grid. Both
-    # the CK formula and the gridDim.z clamp below are sized off the *launched*
-    # geometry, so feed them the merged numbers -- sizing a degree off the
-    # unmerged grid is how the pre-merge formula came to ask for a z extent the
-    # launch could not express.
-    gm = max(1, int(spec.group_merge))
-    grid_groups = max(1, p.groups // gm)
-    if spec.split_k != -1:
-        requested = spec.split_k
-    else:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        requested = select_split_k_wgrad(
-            wg_M=wg_M * gm,
-            wg_N=wg_N * gm,
-            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-            tile_m=spec.tile_m,
-            tile_n=spec.tile_n,
-            tile_k=spec.tile_k,
-            arch=spec.arch,
-            groups=grid_groups,
-            block_size=_block(spec)[0],
-        ).split_k
-    # The helper already keeps groups*split_k inside the z limit on the auto
-    # path; this clamp still has to run for an explicitly requested split_k.
-    split_k = max(1, min(requested, _MAX_GRID_DIM_Z // grid_groups))
-    # When the packed 16-bit atomic cannot represent this problem, the f32
-    # scratch path is the only way to keep split_k > 1. Delegate rather than
-    # re-deriving the rule: a local copy is exactly how the dispatcher came to
-    # hand the builder a spec the builder then rejected.
-    # vector_size_c is None here by construction: to_wgrad_spec never sets it,
-    # so the epilogue derives the store width from the channel dims.
-    _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
-    # A merged tile cannot use the packed-atomic split-K epilogue at all: that
-    # epilogue has no way to drop an off-diagonal group pair, so it would
-    # accumulate garbage into a live dW element. Route any merged split_k > 1
-    # through two-stage, whose scratch atomic carries the diagonal mask. This
-    # mirrors the kernel-side gate in ``wgrad_group_merge_available``; keeping
-    # the dispatcher's answer inside it is what stops select() from handing the
-    # builder a spec the builder then rejects.
-    #
-    # As written today the ``gm > 1`` term is subsumed and never flips the
-    # result: dispatch admits only fp16/bf16, merging is depthwise-only, and a
-    # depthwise cpg == 1 forces a store-vector width of 1, so _atomic_ok is
-    # already False on every shape that can merge. It is kept because it is the
-    # term that stays true if any of those three premises moves -- an fp32 dW,
-    # or merging extended past depthwise -- and in that world it is the only
-    # thing between a merged tile and a silently wrong gradient. Deriving the
-    # invariant from the merge degree directly is also simply what the rule
-    # means. ``test_merged_split_k_never_takes_the_packed_atomic`` asserts the
-    # subsumption explicitly, so it reports when it lifts.
-    two_stage = ((not _atomic_ok) or gm > 1) and split_k > 1
-    # The scratch carries no split_k factor, but it does carry the replica
-    # factor -- R copies of dW per group. Use the same R this module hands the
-    # spec in to_wgrad_spec, or the cap bounds an allocation nobody makes.
-    #
-    # Deliberately *unmerged*: this mirrors wgrad_two_stage_workspace_nbytes,
-    # which sizes off WgradConvSpec.wg_M/wg_N -- the true per-group dims, kept
-    # separate from grid_M/grid_N for exactly this reason. The scratch is R
-    # copies of dW, and merging does not change how much dW there is; it only
-    # changes how many CTAs write it. Scaling these by gm would overstate the
-    # allocation by gm**2 and start refusing two-stage on problems that fit.
-    ws_bytes = p.groups * _WGRAD_WS_REPLICAS * wg_M * wg_N * 4
-    if two_stage and ws_bytes > _MAX_WGRAD_WS_BYTES:
-        two_stage = False
-        split_k = 1
-    return split_k, two_stage, requested
+    return resolve_conv_split_k(
+        "wgrad",
+        p,
+        arch=spec.arch,
+        dtype=spec.dtype.lower(),
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        block_size=_block(spec)[0],
+        group_merge=max(1, int(spec.group_merge)),
+        split_k=spec.split_k,
+    )
 
 
 def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
@@ -781,7 +687,7 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     wg_N = spatial * cpg * gm  # merged filter spatial × input channel
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
-    split_k, _two_stage, _requested = _resolve_wgrad_split_k(spec, p)
+    split_k = _resolve_wgrad_split_k(spec, p).split_k
     # The merged-group index rides on block_id_z alongside the K-slice: z =
     # (groups/Gm)*split_k, decoded in-kernel as group = z // split_k, slice =
     # z % split_k. For G==1 this reduces to (gx, gy, split_k); for split_k==1
@@ -1906,7 +1812,7 @@ def _signature_for(req: ConvGroupedRequest, spec: ConvGroupedSpec) -> tuple:
         # Two-stage is decided by the resolver, not carried on the dispatcher
         # spec: it is what to_wgrad_spec builds the kernel from, so asking
         # anything else would drop ws_ptr/ws_bytes from a two-stage ABI.
-        _split_k, two_stage, _requested = _resolve_wgrad_split_k(spec, p)
+        two_stage = _resolve_wgrad_split_k(spec, p).two_stage
         return tuple(
             conv_args_signature(
                 dtype,
@@ -1953,7 +1859,8 @@ def launch_values_for(
         # The resolved degree, not spec.split_k: the latter may be -1 (auto)
         # or exceed the clamp, while the kernel and _wgrad_grid both use the
         # resolver's value -- ks_count has to match the z extent it decodes.
-        split_k, two_stage, _requested = _resolve_wgrad_split_k(spec, p)
+        resolved = _resolve_wgrad_split_k(spec, p)
+        split_k, two_stage = resolved.split_k, resolved.two_stage
         # Both workspace fields or neither: a two-stage launch missing only
         # ws_bytes would otherwise encode a zero-byte workspace, and Stage 1's
         # bounded stores would be silently dropped.
@@ -2034,13 +1941,11 @@ def dispatch_conv_grouped(
         f"request_hash={kid.request_hash}",
     ]
     if req.direction == "wgrad":
-        split_k, _two_stage, requested = _resolve_wgrad_split_k(spec, _problem(req))
-        if split_k != requested:
-            explanation.append(
-                f"split_k {requested} -> {split_k}: the two-stage scratch would "
-                f"exceed the {_MAX_WGRAD_WS_BYTES}-byte i32 limit, so the "
-                f"plain store is used instead"
-            )
+        resolved = _resolve_wgrad_split_k(spec, _problem(req))
+        explanation.append(
+            f"split_k={resolved.split_k} two_stage={resolved.two_stage}: "
+            f"{resolved.reason}"
+        )
     # AOT: signature includes all runtime problem-dim args.
     _sig = _signature_for(req, spec)
     return DispatchResult(
