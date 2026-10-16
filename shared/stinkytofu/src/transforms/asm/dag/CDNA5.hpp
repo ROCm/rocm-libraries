@@ -776,11 +776,28 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
-    // True when decidePromote() / pickOne() may consider issuing this barrier
-    // now. No-op when clusterBarrier is off (see sccChainBlocks()).
-    bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !sccChainBlocks(node) && !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+    // An all-wave signal has issued but its wait has not. Barrier groups on different LDS tokens
+    // may swap whole but must not interleave (sig1 .. sig0 wait0 .. wait1): wait0 would pass on
+    // sig1 and the next tensor_load would overwrite LDS still being read. Keep them alternating.
+    bool splitSignalOpen_ = false;
+
+    // True for a workgroup barrier other than an all-wave wait while a signal is open.
+    bool splitSignalBlocks(const DAGNode* node) const {
+        if (!splitSignalOpen_) return false;
+        const StinkyInstruction& inst = *node->inst;
+        if (isBarrierSignal(inst) || isBarrierWait(inst))
+            return isSplitBarrierAllWave(inst) && !isBarrierWait(inst);
+        return true;  // legacy s_barrier
     }
+
+    // True when decidePromote() / pickOne() may consider issuing this barrier
+    // now. Only the open-signal rule applies when clusterBarrier is off (see
+    // sccChainBlocks()).
+    bool isBarrierEligibleNow(const DAGNode* node) const {
+        return !splitSignalBlocks(node) && !sccChainBlocks(node) &&
+               !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+    }
+    DAGNode* dueBarrier() const;
     // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
     // issues right before it (in the tensor_load's window).
     bool stageBarrierAwaitsPrefetch(const DAGNode* barrier) const {
@@ -1006,6 +1023,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
         if (waitAlu_) waitAlu_->commit(inst);
+        if ((isBarrierSignal(inst) || isBarrierWait(inst)) && isSplitBarrierAllWave(inst))
+            splitSignalOpen_ = isBarrierSignal(inst);
     }
 };
 
@@ -1905,32 +1924,27 @@ void CDNA5ReadyQueue::decidePromote() {
     promotedKind_ = -1;
     barrierWaitsForCover_ = false;
 
-    if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
-        for (DAGNode* node : barrierQueue) {
-            if (!isBarrierEligibleNow(node)) continue;
-            auto thIt = barrierWmmaThresholds_.find(node->inst);
-            if (thIt != barrierWmmaThresholds_.end() &&
-                wmmaIssuedCountThisRegion_ >= thIt->second) {
-                // The WMMAs queued behind the barrier hide its stall: refill first.
-                if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
-                    const int latency = wmmaQueue.top()->inst->latencyCycles;
-                    const int heldSince =
-                        barrierCoverHoldStart_.emplace(node, wmmaIssuedCountThisRegion_)
-                            .first->second;
-                    if (!isBarrierWait(*node->inst) &&
-                        wmmaIssuedCountThisRegion_ - heldSince < kBarrierTailWmmas &&
-                        queuedCoverCycles() < wmmaBarrierCover(latency)) {
-                        barrierWaitsForCover_ = true;
-                        continue;
-                    }
-                }
-                promotedPhase_ = PromotePhase::Barrier;
-                promotedNode_ = node;
-                PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
-                                     << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
-                                     << " threshold=" << thIt->second << "\n");
-                return;
-            }
+    if (DAGNode* node = dueBarrier()) {
+        // The WMMAs queued behind the barrier hide its stall: refill first. The cover does
+        // not depend on which barrier is due, so no other barrier is promoted either.
+        bool refill = false;
+        if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
+            const int latency = wmmaQueue.top()->inst->latencyCycles;
+            const int heldSince =
+                barrierCoverHoldStart_.emplace(node, wmmaIssuedCountThisRegion_).first->second;
+            refill = !isBarrierWait(*node->inst) &&
+                     wmmaIssuedCountThisRegion_ - heldSince < kBarrierTailWmmas &&
+                     queuedCoverCycles() < wmmaBarrierCover(latency);
+        }
+        if (refill) {
+            barrierWaitsForCover_ = true;
+        } else {
+            promotedPhase_ = PromotePhase::Barrier;
+            promotedNode_ = node;
+            PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
+                                 << " wmmaIssuedCountThisRegion_=" << wmmaIssuedCountThisRegion_
+                                 << "\n");
+            return;
         }
     }
 
@@ -1973,20 +1987,33 @@ void CDNA5ReadyQueue::decidePromote() {
     }
 }
 
-// Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
-// remove it, and push the rest back. Returns nullptr if no barrier qualifies.
-DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
+// Lowest-id eligible barrier whose WMMA threshold is met. If the first barrier
+// that is due is held back only by an open all-wave signal, return that signal's
+// wait instead: issuing the wait early is always safe and closes the signal, so
+// the due barrier group goes out next instead of being deferred to the drain at
+// region end (which pushed its tensor_load to the loop tail). nullptr if none.
+DAGNode* CDNA5ReadyQueue::dueBarrier() const {
     if (barrierQueue.empty() || barrierWmmaThresholds_.empty()) return nullptr;
 
-    DAGNode* forced = nullptr;
     for (DAGNode* node : barrierQueue) {
-        if (!isBarrierEligibleNow(node)) continue;
         auto thIt = barrierWmmaThresholds_.find(node->inst);
-        if (thIt != barrierWmmaThresholds_.end() && wmmaIssuedCountThisRegion_ >= thIt->second) {
-            forced = node;
-            break;
+        if (thIt == barrierWmmaThresholds_.end() || wmmaIssuedCountThisRegion_ < thIt->second)
+            continue;
+        if (isBarrierEligibleNow(node)) return node;
+        if (!splitSignalBlocks(node)) continue;
+        for (DAGNode* wait : barrierQueue) {
+            const StinkyInstruction& inst = *wait->inst;
+            if (isBarrierWait(inst) && isSplitBarrierAllWave(inst) && isBarrierEligibleNow(wait))
+                return wait;
         }
     }
+    return nullptr;
+}
+
+// Remove and return the barrier dueBarrier() selects. Returns nullptr if no
+// barrier qualifies.
+DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
+    DAGNode* forced = dueBarrier();
     if (forced) barrierQueue.erase(forced);
     return forced;
 }
@@ -2636,8 +2663,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             }
             if (barrier) barrierQueue.erase(barrier);
         } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
+            // Lowest-id barrier, skipping signals held back by an open signal; its
+            // wait (or the work it waits on) issues first.
+            for (DAGNode* cand : barrierQueue) {
+                if (splitSignalBlocks(cand)) continue;
+                barrier = cand;
+                break;
+            }
+            if (barrier) barrierQueue.erase(barrier);
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -2666,6 +2699,18 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
                              << " kind=" << fallbackKind << " wait=" << realWait << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
+    }
+
+    // Only barriers are left and an open signal holds them all back, so its wait cannot
+    // become ready: the input already interleaves barrier groups. Keep program order.
+    if (splitSignalOpen_ && !barrierQueue.empty() &&
+        !(clusterBarrierEnabled() && openSccChain_ != 0)) {
+        DAGNode* barrier = barrierQueue.top();
+        barrierQueue.pop();
+        updateWMMAStatus(barrier);
+        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
+                             << " issued past an open signal (no ready wait)\n");
+        return rememberPick(barrier);
     }
 
     // Only barriers are left and an SCC chain is still holding them back.
@@ -2735,7 +2780,8 @@ bool CDNA5ReadyQueue::empty() const {
 // Per-BB init. Rule (5): cross-BB loop tail WMMA detection.
 // Resets co-issue timeline. Sets WMMA issue config from first WMMA in block.
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
-    regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
+    regionDag_ = nullptr;      // set per region in onInitRegion; the previous region's DAG is gone
+    splitSignalOpen_ = false;  // per-BB: blocks are scheduled in layout, not control-flow, order
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
