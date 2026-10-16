@@ -9,6 +9,8 @@ rocRoller Expression_evaluate_unary.cpp. Tensile magicNumber() is a
 different algorithm and is not what these kernels consume.
 """
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -177,10 +179,24 @@ def test_wgm_kernargs_follow_the_hoisted_formula(sizes, expected):
     assert [got[name] for name in WGM_ROLE_ORDER] == expected
 
 
+def _find_cxx():
+    """Return a usable C++ compiler: $CXX, then c++, g++, clang++ (else None)."""
+    env_cxx = os.environ.get("CXX")
+    candidates = ([env_cxx] if env_cxx else []) + ["c++", "g++", "clang++"]
+    for candidate in candidates:
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
 def test_cpp_evaluator_matches_python(tmp_path):
     """The launch header is the same integer arithmetic as the Python oracle."""
     if not _HEADER.is_file():
         pytest.fail(f"missing {_HEADER}")
+    cxx = _find_cxx()
+    if cxx is None:
+        pytest.skip("no C++ compiler found (tried $CXX, c++, g++, clang++)")
     source = tmp_path / "wgm_match.cpp"
     source.write_text(
         """
@@ -217,7 +233,7 @@ int main(int argc, char** argv) {
     )
     binary = tmp_path / "wgm_match"
     compiled = subprocess.run(
-        ["g++", "-O2", "-std=c++17", f"-I{_HEADER.parents[1]}", str(source), "-o", str(binary)],
+        [cxx, "-O2", "-std=c++17", f"-I{_HEADER.parents[1]}", str(source), "-o", str(binary)],
         capture_output=True,
         text=True,
     )
