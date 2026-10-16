@@ -685,3 +685,47 @@ def test_brotate_mx_rejects_unsupported_scale_layouts():
     assert "DirectToVgprMXSB" in b_rotate_reason(_brot_mx_state(DirectToVgprMXSB=True))
     assert "InMemorySwizzle" in b_rotate_reason(_brot_mx_state(MXScaleFormat="NoSwizzle"))
     assert "(12, 5, 0)" in b_rotate_reason(_brot_mx_state(ISA=(12, 5, 1)))
+
+def _brot_rejects(state, text):
+    reason = b_rotate_reason(state)
+    assert reason is not None and text in reason, reason
+
+def test_brotate_rejects_unsupported_lsi_layouts():
+    for key in ("aBaseline", "bBaseline", "portSplitA", "portSplitB", "componentSplit"):
+        s = _brot_state()
+        s["LDSSegInterleaveOffsets"] = {**s["LDSSegInterleaveOffsets"], key: True}
+        _brot_rejects(s, "LSI layout '%s'" % key)
+
+def test_brotate_rejects_b_reach_and_base():
+    s = _brot_state()
+    o = s["LDSSegInterleaveOffsets"]
+    s["LDSSegInterleaveOffsets"] = {**o, "writeStrideBytes": 100000, "ldsBaseB": 0}
+    _brot_rejects(s, "ldsBaseB below")
+    s["LDSSegInterleaveOffsets"] = {**o, "writeStrideBytes": 131000, "ldsBaseB": 131000}
+    _brot_rejects(s, "reach exceeds")
+
+def test_brotate_rejects_buffering_and_schedule_modes():
+    _brot_rejects(_brot_state(NumLdsBlk=1), "2 LDS buffers")
+    _brot_rejects(_brot_state(**{"1LDSBuffer": 1}), "2 LDS buffers")
+    _brot_rejects(_brot_state(PrefetchGlobalRead=1), "PrefetchGlobalRead=2")
+    _brot_rejects(_brot_state(ExpandPointerSwap=1), "ExpandPointerSwap=0")
+
+def test_brotate_rejects_wave_config():
+    _brot_rejects(_brot_state(MIWaveGroup=[4, 1]), "[2,2]")
+    _brot_rejects(_brot_state(NumWaves=8), "[2,2]")
+    _brot_rejects(_brot_state(WavefrontSize=64), "wave32")
+    _brot_rejects(_brot_state(VectorWidthB=0), "even")
+
+def test_brotate_rejects_mx_matrix_inst_and_sparse():
+    _brot_rejects(_brot_mx_state(MatrixInstN=32), "MatrixInstN")
+    s = _brot_state()
+    s["ProblemType"] = {**s["ProblemType"], "Sparse": 1}
+    _brot_rejects(s, "sparse")
+
+def test_brotate_rejects_each_unsupported_knob():
+    for key in ("UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB", "enableLDSTrA",
+                "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
+                "PrefetchAcrossPersistent", "TDMFuse"):
+        _brot_rejects(_brot_state(**{key: 1}), key)
+    _brot_rejects(_brot_state(LocalSplitU=2), "LocalSplitU")
+    _brot_rejects(_brot_state(NumWaveSplitK=2), "NumWaveSplitK")
