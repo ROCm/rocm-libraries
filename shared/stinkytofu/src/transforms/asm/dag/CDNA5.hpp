@@ -764,6 +764,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
 
     DAGNode* lastPickedNode_ = nullptr;
+    // WMMAs issued since the last non-WMMA instruction. A longer run fills the matrix queue and
+    // blocks the wave at the WMMA issue, where no ds_load can go out.
+    static constexpr int kWmmaRunMax = 8;
+    int wmmaRun_ = 0;
+    bool wmmaRunAtLimit_ = false;
 
     // Set by decidePromote() each pick: which phase is forced (None = normal
     // selection) and the exact node that phase will issue. Read via isPromote()
@@ -1665,7 +1670,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget || (spread && dsOverflow_)) {
-            if (!spread || dsSpread_.released(pickedDS->id, clock_)) {
+            if (!spread || wmmaRunAtLimit_ || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -2341,6 +2346,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                   << "\n");
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
+        wmmaRun_ = isMatrixInstruction(*node->inst) ? wmmaRun_ + 1 : 0;
         noteSccChainIssue(node);
         return node;
     };
@@ -2350,6 +2356,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // isPromote(), and the promoted node issues through its own phase — one entry
     // point, no side effects here.
     decidePromote();
+    wmmaRunAtLimit_ = wmmaRun_ >= kWmmaRunMax;
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
     // A load the spread gate holds does not stand in for the ones it releases: its section may
@@ -2358,7 +2365,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     const bool spreadOn = dsSpreadOn();
     for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
         for (DAGNode* n : localReadQueue) {
-            if (pass == 0 && spreadOn && !dsSpread_.released(n->id, clock_)) continue;
+            if (pass == 0 && spreadOn && !wmmaRunAtLimit_ && !dsSpread_.released(n->id, clock_))
+                continue;
             if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
         }
     }
@@ -2431,14 +2439,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " dsFree=" << dsIssuesFree << " dsHeld=" << dsHeldBySpreadLast_
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
             << " slot=" << (pickedDS ? dsSpread_.slotOf(pickedDS->id) : -2) << " clock=" << clock_
-            << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
-            << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
+            << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1) << " run="
+            << wmmaRun_ << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
             << " cover=" << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
             << "\n");
+        // A run of kWmmaRunMax WMMAs ends here when something else can issue.
+        const bool blockWmmaForRunLimit = wmmaRunAtLimit_ && hasPickableNonWmma;
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
-            !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing) {
+            !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
+            !blockWmmaForRunLimit) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
                                  << "\n");
@@ -2783,6 +2794,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaRefillLeft_ = 0;
     barrierWaitsForCover_ = false;
     lastPickedNode_ = nullptr;
+    wmmaRun_ = 0;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
     // crosses anyway.
