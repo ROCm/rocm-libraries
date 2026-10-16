@@ -210,11 +210,14 @@ protected:
                       CUDNN_TYPE_NAN_PROPOGATION,
                       CUDNN_PROPAGATE_NAN),
                   CUDNN_STATUS_SUCCESS);
-        EXPECT_EQ(set(descriptor,
-                      CUDNN_ATTR_RESAMPLE_PADDING_MODE,
-                      CUDNN_TYPE_PADDING_MODE,
-                      CUDNN_NEG_INF_PAD),
-                  CUDNN_STATUS_SUCCESS);
+        if(skip != CUDNN_ATTR_RESAMPLE_PADDING_MODE)
+        {
+            EXPECT_EQ(set(descriptor,
+                          CUDNN_ATTR_RESAMPLE_PADDING_MODE,
+                          CUDNN_TYPE_PADDING_MODE,
+                          CUDNN_NEG_INF_PAD),
+                      CUDNN_STATUS_SUCCESS);
+        }
         if(skip != CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS)
         {
             EXPECT_EQ(
@@ -545,7 +548,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, ResampleRecordsIntegralFractions)
         = object<backend::ResampleDescriptor>(descriptor, CUDNN_BACKEND_RESAMPLE_DESCRIPTOR);
     EXPECT_EQ(lowered.mode(), ResampleMode_t::MAXPOOL);
     EXPECT_EQ(lowered.computeType(), DataType_t::FLOAT);
-    EXPECT_EQ(lowered.paddingMode(), std::optional<PaddingMode_t>(PaddingMode_t::NEG_INF_PAD));
+    EXPECT_EQ(lowered.paddingMode(), PaddingMode_t::NEG_INF_PAD);
     EXPECT_EQ(lowered.windowDims(), (std::vector<std::int64_t>{2, 3}));
     EXPECT_EQ(lowered.prePaddings(), (std::vector<std::int64_t>{0, 0}));
     EXPECT_EQ(lowered.postPaddings(), (std::vector<std::int64_t>{0, 0}));
@@ -565,8 +568,10 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, ResampleRecordsIntegralFractions)
 
 TEST_F(TestCudnnShimV8ParameterDescriptors, ResampleRequiredAttributesNamed)
 {
-    for(const cudnnBackendAttributeName_t required :
-        {CUDNN_ATTR_RESAMPLE_MODE, CUDNN_ATTR_RESAMPLE_COMP_TYPE, CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS})
+    for(const cudnnBackendAttributeName_t required : {CUDNN_ATTR_RESAMPLE_MODE,
+                                                      CUDNN_ATTR_RESAMPLE_COMP_TYPE,
+                                                      CUDNN_ATTR_RESAMPLE_PADDING_MODE,
+                                                      CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS})
     {
         const std::string name = backend::attributeName(required);
         SCOPED_TRACE(name);

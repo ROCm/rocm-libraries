@@ -538,6 +538,11 @@ protected:
             set(descriptor, CUDNN_ATTR_RESAMPLE_COMP_TYPE, CUDNN_TYPE_DATA_TYPE, CUDNN_DATA_FLOAT),
             CUDNN_STATUS_SUCCESS);
         EXPECT_EQ(set(descriptor,
+                      CUDNN_ATTR_RESAMPLE_PADDING_MODE,
+                      CUDNN_TYPE_PADDING_MODE,
+                      CUDNN_NEG_INF_PAD),
+                  CUDNN_STATUS_SUCCESS);
+        EXPECT_EQ(set(descriptor,
                       CUDNN_ATTR_RESAMPLE_SPATIAL_DIMS,
                       CUDNN_TYPE_INT64,
                       static_cast<std::int64_t>(2)),

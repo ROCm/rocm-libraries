@@ -16,6 +16,7 @@
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/operation_descriptors.h>
+#include <hipdnn_compatibility/cudnn/detail/backend/operation_graph_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/parameter_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/tensor_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
@@ -125,6 +126,8 @@ HIPDNN_HIDDEN inline std::shared_ptr<Descriptor>
         return std::make_shared<ResampleBackwardOperation>();
     case CUDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR:
         return std::make_shared<ResampleForwardOperation>();
+    case CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR:
+        return std::make_shared<OperationGraphDescriptor>();
     case CUDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR:
     case CUDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR:
     case CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR:
@@ -148,7 +151,6 @@ HIPDNN_HIDDEN inline std::shared_ptr<Descriptor>
     case CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
     case CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR:
     case CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR:
-    case CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR:
     case CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR:
         return std::make_shared<StorageOnlyDescriptor>(type);
     default:

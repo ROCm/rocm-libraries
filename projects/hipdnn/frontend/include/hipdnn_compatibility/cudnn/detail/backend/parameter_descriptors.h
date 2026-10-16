@@ -367,7 +367,7 @@ public:
         return _computeType;
     }
 
-    std::optional<PaddingMode_t> paddingMode() const noexcept
+    PaddingMode_t paddingMode() const noexcept
     {
         return _paddingMode;
     }
@@ -401,6 +401,11 @@ protected:
         const auto rawComputeType
             = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_RESAMPLE_COMP_TYPE),
                                CUDNN_ATTR_RESAMPLE_COMP_TYPE);
+        // Upstream's builder refuses to build without a padding mode, and hipDNN's
+        // resample descriptors require one.
+        const auto rawPadding = requireAttribute(
+            scalarAttribute<cudnnPaddingMode_t>(CUDNN_ATTR_RESAMPLE_PADDING_MODE),
+            CUDNN_ATTR_RESAMPLE_PADDING_MODE);
         // Upstream sends 0 when the builder never set it, so this is a finalize
         // check, not a SET check.
         const std::int64_t spatialDims
@@ -419,12 +424,8 @@ protected:
         const ResampleMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_RESAMPLE_MODE);
         const DataType_t computeType
             = requireLowerable(rawComputeType, CUDNN_ATTR_RESAMPLE_COMP_TYPE);
-        std::optional<PaddingMode_t> paddingMode;
-        if(const std::optional<cudnnPaddingMode_t> rawPadding
-           = scalarAttribute<cudnnPaddingMode_t>(CUDNN_ATTR_RESAMPLE_PADDING_MODE))
-        {
-            paddingMode = requireLowerable(*rawPadding, CUDNN_ATTR_RESAMPLE_PADDING_MODE);
-        }
+        const PaddingMode_t paddingMode
+            = requireLowerable(rawPadding, CUDNN_ATTR_RESAMPLE_PADDING_MODE);
         std::vector<std::int64_t> integralWindowDims
             = integral(windowDims, CUDNN_ATTR_RESAMPLE_WINDOW_DIMS);
         std::vector<std::int64_t> integralPrePaddings
@@ -477,7 +478,7 @@ private:
 
     ResampleMode_t _mode = ResampleMode_t::NOT_SET;
     DataType_t _computeType = DataType_t::NOT_SET;
-    std::optional<PaddingMode_t> _paddingMode;
+    PaddingMode_t _paddingMode = PaddingMode_t::NOT_SET;
     std::vector<std::int64_t> _windowDims;
     std::vector<std::int64_t> _prePaddings;
     std::vector<std::int64_t> _postPaddings;
