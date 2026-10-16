@@ -25,6 +25,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -223,7 +224,7 @@ protected:
         }
 
         _dir = std::make_unique<hipdnn_test_sdk::utilities::ScopedDirectory>(
-            std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_artifact");
+            hipdnn_test_sdk::utilities::claimScratchDirectory("uhd_gen_artifact"));
 
         const auto csv = _dir->path() / "corpus.csv";
         std::ofstream(csv) << trainingCsv();
@@ -370,8 +371,7 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
         GTEST_SKIP() << "uhd_gen cannot run from here: " << missing;
     }
 
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(std::filesystem::temp_directory_path()
-                                                          / "hipdnn_uhd_gen_grouped");
+    const auto dir = hipdnn_test_sdk::utilities::claimScratchDirectory("uhd_gen_grouped");
 
     const auto csv = dir.path() / "corpus.csv";
     {

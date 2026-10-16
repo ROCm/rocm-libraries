@@ -318,6 +318,38 @@ def _dataset_command(*arguments):
     )
 
 
+@pytest.mark.parametrize(
+    ("arguments", "said"),
+    [
+        (["remove", "--from", "{missing}", "--contribution", "c"], "dataset remove:"),
+        (["retag", "--in", "{missing}", "--contribution", "c"], "dataset retag:"),
+        (
+            ["export", "--from", "{missing}", "--out", "{out}", "--purpose", "eval"],
+            "dataset export:",
+        ),
+    ],
+    ids=lambda case: case[0] if isinstance(case, list) else "",
+)
+def test_each_subcommand_runs_its_own_handler_and_exits_with_its_status(
+    tmp_path, arguments, said
+):
+    """A refused request exits 1 from the handler it named, not through another one."""
+    filled = [
+        a.format(missing=tmp_path / "missing", out=tmp_path / "out.json")
+        for a in arguments
+    ]
+    result = _dataset_command(*filled)
+    assert result.returncode == 1, result.stderr
+    assert said in result.stderr
+
+
+def test_without_a_subcommand_the_dataset_command_publishes(tmp_path):
+    result = _dataset_command("--out", tmp_path / "out")
+    assert result.returncode == 2
+    assert "usage: python -m uhd_gen.dataset [" in result.stderr
+    assert "--csv" in result.stderr
+
+
 def test_add_and_export_round_trip_on_the_command_line(tmp_path):
     dataset = tmp_path / "ds"
     added = _dataset_command(

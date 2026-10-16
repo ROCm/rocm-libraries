@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -486,6 +487,65 @@ TEST(TestNumericalValidation, EveryCandidateOfAProblemReadsTheSameNonZeroInputs)
     // A type the encoder cannot write exactly keeps the zero fill rather than a guess.
     EXPECT_TRUE(hipdnn_bench::detail::inputFillImage(DataType::FP4_E2M1, ELEMENTS, seed, OUTPUT_UID)
                     .empty());
+}
+
+TEST(TestNumericalValidation, EveryEncodedTypeWritesPlusMinusOneAndTwoExactly)
+{
+    using hipdnn_frontend::DataType;
+    // The standard encodings of +1, +2, -1, -2, as each format's spec writes them. Integers,
+    // the E8M0 block scale and the mask carry no sign; the mask is always true.
+    struct Encoding
+    {
+        DataType type;
+        size_t width;
+        std::array<uint64_t, 4> codes;
+    };
+    const std::vector<Encoding> encodings{
+        {DataType::DOUBLE,
+         8,
+         {0x3FF0000000000000ULL,
+          0x4000000000000000ULL,
+          0xBFF0000000000000ULL,
+          0xC000000000000000ULL}},
+        {DataType::FLOAT, 4, {0x3F800000, 0x40000000, 0xBF800000, 0xC0000000}},
+        {DataType::HALF, 2, {0x3C00, 0x4000, 0xBC00, 0xC000}},
+        {DataType::BFLOAT16, 2, {0x3F80, 0x4000, 0xBF80, 0xC000}},
+        {DataType::FP8_E4M3, 1, {0x38, 0x40, 0xB8, 0xC0}},
+        {DataType::FP8_E5M2, 1, {0x3C, 0x40, 0xBC, 0xC0}},
+        {DataType::FP8_E4M3_FNUZ, 1, {0x40, 0x48, 0xC0, 0xC8}},
+        {DataType::FP8_E5M2_FNUZ, 1, {0x40, 0x44, 0xC0, 0xC4}},
+        {DataType::FP8_E8M0, 1, {0x7F, 0x80, 0x7F, 0x80}},
+        {DataType::INT64, 8, {1, 2, 1, 2}},
+        {DataType::INT32, 4, {1, 2, 1, 2}},
+        {DataType::INT8, 1, {1, 2, 1, 2}},
+        {DataType::UINT8, 1, {1, 2, 1, 2}},
+        {DataType::BOOLEAN, 1, {1, 1, 1, 1}},
+    };
+    const std::array<hipdnn_bench::detail::FillValue, 4> values{{
+        {false, 0},
+        {false, 1},
+        {true, 0},
+        {true, 1},
+    }};
+    for(const auto& encoding : encodings)
+    {
+        for(size_t which = 0; which < values.size(); ++which)
+        {
+            std::array<uint8_t, 8> bytes{};
+            ASSERT_TRUE(
+                hipdnn_bench::detail::encodeFillElement(encoding.type, values[which], bytes.data()))
+                << static_cast<int>(encoding.type);
+            uint64_t written = 0;
+            std::memcpy(&written, bytes.data(), encoding.width);
+            EXPECT_EQ(written, encoding.codes[which])
+                << "type " << static_cast<int>(encoding.type) << ", value " << which;
+            // Nothing past the element's own width is touched.
+            for(size_t past = encoding.width; past < bytes.size(); ++past)
+            {
+                EXPECT_EQ(bytes[past], 0) << "type " << static_cast<int>(encoding.type);
+            }
+        }
+    }
 }
 
 TEST(TestNumericalValidation, ACandidateThatJoinsACohortDoesNotKeepItsImage)

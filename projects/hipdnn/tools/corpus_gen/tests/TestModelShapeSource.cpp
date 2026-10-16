@@ -5,6 +5,7 @@
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -24,23 +25,16 @@ using namespace hipdnn_corpus_gen;
 namespace
 {
 
-/// A scratch tree under the working directory: /tmp is not always writable in containers.
+/// A scratch tree of its own under the working directory: /tmp is not always writable in
+/// containers.
 class TempTree
 {
 public:
     explicit TempTree(const std::string& name)
-        : _root(std::filesystem::current_path() / ("shapes_test_" + name))
+        : _dir(hipdnn_test_sdk::utilities::claimScratchDirectoryUnder(
+              std::filesystem::current_path(), "shapes_test_" + name))
+        , _root(_dir.path())
     {
-        std::error_code ignored;
-        std::filesystem::remove_all(_root, ignored);
-        std::filesystem::create_directories(_root, ignored);
-    }
-    TempTree(const TempTree&) = delete;
-    TempTree& operator=(const TempTree&) = delete;
-    ~TempTree()
-    {
-        std::error_code ignored;
-        std::filesystem::remove_all(_root, ignored);
     }
 
     std::filesystem::path write(const std::string& name, const std::string& text) const
@@ -52,6 +46,7 @@ public:
     }
 
 private:
+    hipdnn_test_sdk::utilities::ScopedDirectory _dir;
     std::filesystem::path _root;
 };
 

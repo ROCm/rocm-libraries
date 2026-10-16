@@ -424,6 +424,51 @@ TEST(TestGraphBuilderRegistry, TheShippedConvolutionMetadataBuildsRealGraphs)
     EXPECT_TRUE(sawOutput) << "no tensor carried the derived 64x64x112x112 output extents";
 }
 
+TEST(TestGraphBuilderRegistry, AConvolutionNodeCarriesItsOwnStrideDilationAndPadding)
+{
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/conv_fwd.opmeta.json");
+    ASSERT_TRUE(file.good()) << "conv_fwd.opmeta.json is not where the build says it is";
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    // Every per-axis value differs from its neighbours, so a swapped field or axis shows.
+    const ProblemPoint layer{{"N", int64_t{2}},
+                             {"C", int64_t{8}},
+                             {"K", int64_t{16}},
+                             {"groups", int64_t{1}},
+                             {"H", int64_t{56}},
+                             {"W", int64_t{56}},
+                             {"R", int64_t{3}},
+                             {"S", int64_t{3}},
+                             {"pad_h", int64_t{3}},
+                             {"pad_w", int64_t{1}},
+                             {"stride_h", int64_t{2}},
+                             {"stride_w", int64_t{1}},
+                             {"dilation_h", int64_t{1}},
+                             {"dilation_w", int64_t{2}},
+                             {"spatial", std::string("2d")},
+                             {"layout", std::string("channels_first")},
+                             {"D", int64_t{1}},
+                             {"T", int64_t{1}},
+                             {"pad_d", int64_t{0}},
+                             {"stride_d", int64_t{1}},
+                             {"dilation_d", int64_t{1}},
+                             {"dtype", std::string("fp32")}};
+
+    const auto built = buildGraphFor(*parsed.metadata, layer);
+    ASSERT_TRUE(built.ok()) << built.error;
+    const auto* attributes
+        = asGraph(built.bytes)->nodes()->Get(0)->attributes_as_ConvolutionFwdAttributes();
+    ASSERT_NE(attributes, nullptr);
+    const auto values = [](const flatbuffers::Vector<int64_t>* vector) {
+        return std::vector<int64_t>(vector->begin(), vector->end());
+    };
+    EXPECT_EQ(values(attributes->stride()), (std::vector<int64_t>{2, 1}));
+    EXPECT_EQ(values(attributes->dilation()), (std::vector<int64_t>{1, 2}));
+    EXPECT_EQ(values(attributes->pre_padding()), (std::vector<int64_t>{3, 1}));
+    EXPECT_EQ(values(attributes->post_padding()), (std::vector<int64_t>{3, 1}));
+}
+
 TEST(TestGraphBuilderRegistry, EveryShippedTensorIsPackedInItsLayout)
 {
     // A stride derived from an unfloored extent (224 at stride 2 is 111.5 wide before the

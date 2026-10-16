@@ -9,6 +9,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include <hipdnn_corpus_gen/OperationDirectory.hpp>
 
@@ -21,36 +22,28 @@ namespace hipdnn_corpus_gen
 namespace
 {
 
-/// A scratch directory that cleans up after itself, named per test.
+/// A scratch directory of its own that cleans up after itself.
 class Scratch
 {
 public:
     explicit Scratch(const std::string& name)
-        : _path(std::filesystem::temp_directory_path() / ("corpus_gen_" + name))
+        : _dir(hipdnn_test_sdk::utilities::claimScratchDirectory("corpus_gen_" + name))
     {
-        std::filesystem::remove_all(_path);
-        std::filesystem::create_directories(_path);
     }
-    ~Scratch()
-    {
-        std::filesystem::remove_all(_path);
-    }
-    Scratch(const Scratch&) = delete;
-    Scratch& operator=(const Scratch&) = delete;
 
     const std::filesystem::path& path() const
     {
-        return _path;
+        return _dir.path();
     }
 
     void write(const std::string& name, const std::string& text) const
     {
-        std::ofstream file(_path / name);
+        std::ofstream file(_dir.path() / name);
         file << text;
     }
 
 private:
-    std::filesystem::path _path;
+    hipdnn_test_sdk::utilities::ScopedDirectory _dir;
 };
 
 std::string declaration(const std::string& operation)

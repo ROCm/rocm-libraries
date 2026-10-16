@@ -444,3 +444,42 @@ class TestCli:
         log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02)])
 
         assert main([str(log), "-o", str(tmp_path / "out.csv")]) == 0
+
+    def test_uhd_gen_export_benchmarks_stamps_the_sweep_it_was_told(
+        self, tmp_path: Path
+    ):
+        """`uhd_gen export-benchmarks` hands every sweep flag to the rows it writes."""
+        from uhd_gen.__main__ import main as uhd_gen_main
+
+        log = _write_log(tmp_path / "sweep.log", [_ok("g", "k1", 0.02)])
+        out = tmp_path / "out.csv"
+        assert (
+            uhd_gen_main(
+                [
+                    "export-benchmarks",
+                    str(log),
+                    "-o",
+                    str(out),
+                    "--collection-mode",
+                    "targeted",
+                    "--problem-complete",
+                    "--shard-id",
+                    "3",
+                    "--config-set-hash",
+                    "sha256:abc",
+                    "--applicability-id",
+                    "pointwise-v1",
+                ]
+            )
+            == 0
+        )
+        (row,) = _read_csv(out)
+        assert (
+            row["collection_mode"],
+            row["problem_complete"],
+            row["shard_id"],
+            row["config_set_hash"],
+            row["applicability_id"],
+        ) == ("targeted", "True", "3", "sha256:abc", "pointwise-v1")
+        empty = _write_log(tmp_path / "empty.log", ["[info] nothing"])
+        assert uhd_gen_main(["export-benchmarks", str(empty), "-o", str(out)]) == 1

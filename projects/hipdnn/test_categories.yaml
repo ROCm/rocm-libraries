@@ -47,6 +47,7 @@ test_categories:
       - "hipdnn_plugin_sdk_tests"
       - "hipdnn_bench_tests"
       - "hipdnn_corpus_gen_tests"
+      - "hipdnn_corpus_gen_frontend_tests"
       # Build tree only: pytest suites registered by tools/CMakeLists.txt with the
       # kernel ingestor, absent from the installed CTestTestfile.cmake.
       - "uhd_gen_tests"

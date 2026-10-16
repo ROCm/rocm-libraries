@@ -6,6 +6,7 @@
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -322,24 +323,17 @@ TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmp
 namespace
 {
 
-/// A directory removed when the test ends.
+/// A corpus directory of its own, with a graphs/ folder, removed when the test ends.
 struct ScratchDirectory
 {
+    hipdnn_test_sdk::utilities::ScopedDirectory claimed;
     std::filesystem::path path;
     explicit ScratchDirectory(const std::string& name)
-        : path(std::filesystem::temp_directory_path()
-               / (name + "-" + std::to_string(::testing::UnitTest::GetInstance()->random_seed())))
+        : claimed(hipdnn_test_sdk::utilities::claimScratchDirectory("corpus_gen_" + name))
+        , path(claimed.path())
     {
-        std::filesystem::remove_all(path);
         std::filesystem::create_directories(path / "graphs");
     }
-    ~ScratchDirectory()
-    {
-        std::error_code ignored;
-        std::filesystem::remove_all(path, ignored);
-    }
-    ScratchDirectory(const ScratchDirectory&) = delete;
-    ScratchDirectory& operator=(const ScratchDirectory&) = delete;
 };
 
 std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)

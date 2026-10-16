@@ -14,7 +14,7 @@ target_compile_options(hipdnn_corpus_gen_tests PRIVATE ${HIPDNN_WARNING_COMPILE_
 # directory-scoped and does not exist here, so do not link nlohmann_json::nlohmann_json.
 target_link_libraries(hipdnn_corpus_gen_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_corpus_gen
-    hipdnn_plugin_sdk)
+    hipdnn_plugin_sdk hipdnn_test_sdk)
 
 # Tests read the shipped operation declarations, staged and installed with the test data
 # and found from the test binary (OperationsDir.hpp), so the installed binary TheRock runs
@@ -49,3 +49,17 @@ target_compile_definitions(hipdnn_corpus_gen_tests PRIVATE
 
 clang_tidy_check(hipdnn_corpus_gen_tests)
 add_hipdnn_test(hipdnn_corpus_gen_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# Reads the built graphs back through the frontend, so it links the backend the pure-logic
+# suite above stays free of.
+add_executable(hipdnn_corpus_gen_frontend_tests TestShippedGraphsValidate.cpp)
+target_compile_options(hipdnn_corpus_gen_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_link_libraries(hipdnn_corpus_gen_frontend_tests
+    GTest::gtest GTest::gtest_main Threads::Threads hipdnn_corpus_gen
+    hipdnn_frontend hipdnn_backend hipdnn_data_sdk)
+add_dependencies(hipdnn_corpus_gen_frontend_tests hipdnn_corpus_gen_test_operations)
+target_compile_definitions(hipdnn_corpus_gen_frontend_tests PRIVATE
+    HIPDNN_TEST_DATA_RELDIR="${HIPDNN_TEST_DATA_RELDIR}"
+    HIPDNN_CORPUS_GEN_OPERATIONS_SUBDIR="${_operations_subdir}")
+clang_tidy_check(hipdnn_corpus_gen_frontend_tests)
+add_hipdnn_test(hipdnn_corpus_gen_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
