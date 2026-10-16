@@ -3,13 +3,17 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Added
+* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info` to get and set the fields of a `HYB` matrix. `set_info` sets every field in one call so a `HYB` matrix can be built from existing arrays without `csr2hyb`. Like `rocsparse_csr_set_pointers`, it does not take ownership of the arrays: the caller frees them, and rocSPARSE frees only the arrays it allocated.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
 * Added the `rocsparse_spsort` and `rocsparse_spsort_buffer_size` generic routines, which sort a sparse matrix in place or into a separate target matrix. COO matrices are sorted by row or by column, and CSR and CSC matrices have the indices within each row or column sorted. The values are reordered with the indices. Uniform strided batched matrices are supported, including broadcasting a single source matrix to every sample of the target matrix.
 * Added the `rocsparse_spsort_descr_create`, `rocsparse_spsort_descr_destroy`, and `rocsparse_spsort_set_input` auxiliary routines, together with the `rocsparse_spsort_descr` type and the `rocsparse_spsort_alg`, `rocsparse_spsort_input`, and `rocsparse_spsort_stage` enums.
 * Added support for the `gfx1250-strict` architecture.
-* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info` to get and set the fields of a `HYB` matrix. `set_info` sets every field in one call so a `HYB` matrix can be built from existing arrays without `csr2hyb`. Like `rocsparse_csr_set_pointers`, it does not take ownership of the arrays: the caller frees them, and rocSPARSE frees only the arrays it allocated.
 * Added the batch support for `rocsparse_sptrsm`.
 * Added the `rocsparse_dnmat_transpose` generic routine for dense matrix transposing.
 * Added the `rocsparse_dnmat_copy_data` generic routine for dense matrix data copying.
