@@ -29,6 +29,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Deprecated stub that redirects to `hipdnn-pr-quality` (author assist). Kept only so the old name still resolves; when invoked it announces its deprecation and defers to the new skill.
 - `tools/ai/skills/hipdnn-review/SKILL.md` *(deprecated)*
   - Deprecated stub that redirects to `hipdnn-pr-quality` (review assist). Same behavior: announce deprecation, then defer.
+- `tools/ai/skills/hipdnn-deep-review/SKILL.md`
+  - Runbook for a multi-agent deep review of a hipDNN or provider PR, branch or commit range: scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. Owns its review policy; the review is advisory and never posts without approval.
+  - Suggest this skill when the user asks for a deep, thorough or multi-agent review, or wants to iterate a review until all findings close. Use `hipdnn-pr-quality` for drafting PR text or a single-pass review. Requires subagents and its sibling skills `hipdnn-superbuild` and `hipdnn-superbuild-test`.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.

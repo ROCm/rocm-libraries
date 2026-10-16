@@ -45,6 +45,24 @@ EXPECTED_SCRIPTS = {
 
 REQUIRED_CLAUDE_COMMAND_FIELDS = ("argument-hint", "allowed-tools")
 
+# Skills registered as Claude commands; each must carry every required field.
+CLAUDE_COMMAND_SKILLS = frozenset(
+    {
+        "hipdnn-deep-review",
+        "hipdnn-ingestor-engine",
+        "hipdnn-integration-testing",
+        "hipdnn-pr-quality",
+        "hipdnn-superbuild",
+        "hipdnn-superbuild-test",
+        "hipdnn-tidy",
+        "rfc-backlog",
+        "rfc-review",
+        "rfc-review-compatibility",
+        "rfc-review-ops",
+        "rfc-review-security",
+    }
+)
+
 # [text](target), with optional angle brackets and an optional quoted title.
 MARKDOWN_LINK_PATTERN = re.compile(
     r"\[[^\]]*\]\(\s*<?([^)>\s]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)"
@@ -348,19 +366,7 @@ def validate_skill(skill: Path) -> list[str]:
             errors.append(f"{skill}: missing scripts/{script}")
 
     # Skills with Claude commands must include argument-hint and allowed-tools in SKILL.md
-    claude_commands = {
-        "hipdnn-ingestor-engine",
-        "hipdnn-integration-testing",
-        "hipdnn-pr-quality",
-        "hipdnn-superbuild",
-        "hipdnn-superbuild-test",
-        "rfc-backlog",
-        "rfc-review",
-        "rfc-review-compatibility",
-        "rfc-review-ops",
-        "rfc-review-security",
-    }
-    if skill.name in claude_commands:
+    if skill.name in CLAUDE_COMMAND_SKILLS:
         for field in REQUIRED_CLAUDE_COMMAND_FIELDS:
             if f"{field}:" not in text:
                 errors.append(f"{skill_md}: missing {field} in frontmatter")
