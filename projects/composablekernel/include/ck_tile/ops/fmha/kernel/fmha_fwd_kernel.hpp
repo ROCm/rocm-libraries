@@ -1732,6 +1732,7 @@ struct FmhaFwdKernel
                 {
                     // Square causal tiles have monotonically increasing work along Q.
                     // Visit the longest tiles across all heads within each batch first.
+                    // Takes precedence over the XCD remap below.
                     if(kargs.seqlen_q == kargs.seqlen_k && kargs.window_size_left < 0 &&
                        kargs.window_size_right == 0 && num_tile_n1 == 1)
                     {
@@ -1820,11 +1821,13 @@ struct FmhaFwdKernel
             //
             // Masked grids reverse the m-tile order below (long tiles first). Their
             // round-robin runs every head's long tiles first; remapped, each XCD
-            // runs its heads one after another, which only keeps the tail short
-            // when every XCD holds at least as many heads as a head has m-tiles.
-            // A single m-tile per (batch, head) (gridDim.y == 1) has no K/V to
-            // share, and per-batch lengths keep the round-robin (see
-            // HasUniformWork).
+            // runs its heads one after another, which keeps the tail short only
+            // when each XCD holds several heads. This is a locality heuristic, not
+            // a grouping guarantee: an XCD segment need not be a multiple of
+            // gridDim.y, so a head can straddle two segments (3 x 10 heads x 3
+            // m-tiles: segments of 12, 12, then 11). A single m-tile per
+            // (batch, head) (gridDim.y == 1) has no K/V to share, and per-batch
+            // lengths keep the round-robin (see HasUniformWork).
             const bool remap_masked =
                 gridDim.x * gridDim.z >= CK_TILE_FMHA_FWD_NUM_XCDS * gridDim.y;
             if(HasUniformWork(kargs) && gridDim.y > 1 && (!kHasMask || remap_masked))

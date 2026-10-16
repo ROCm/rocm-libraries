@@ -411,38 +411,47 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
-// Batch-mode XCD remap of the block index: several m-tiles per (batch, head) on a
-// grid that is not a multiple of the XCD count (3 x 5 x 3 = 45 blocks at bm0=128,
-// 75 at bm0=64), so the remap of the bhsd and bshd tile indices is not the
-// identity; the causal grid also reverses its m-tile order. Per-batch effective
-// lengths keep the round-robin order and return early from the blocks past each
-// batch's seqlen_q.
+// Batch-mode XCD remap of the block index (gfx1250): 3 batches, seqlen_q 300, so
+// 3 (bm0=128) or 5 (bm0=64) m-tiles per (batch, head) on grids that are not a
+// multiple of the XCD count, where the remap is not the identity. Each case names
+// the GetTileIndex branch it reaches. Square causal bhsd grids take the
+// batch-local causal order instead, hence seqlen_k 400 for the bhsd causal case.
+// Masked bshd grids remap only with at least 8 (batch, head) rows per m-tile: 3 x
+// 16 heads covers both m-tile counts, 3 x 5 neither.
 class BatchXCDRemap
-    : public TestWithParam<std::tuple<bool, std::vector<int>, std::vector<int>, const char*>>
+    : public TestWithParam<
+          std::tuple<bool, int, int, std::vector<int>, std::vector<int>, const char*>>
 {
 };
 
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     BatchXCDRemap,
-    // bhsd/bshd, q_eff_lens, kv_eff_lens, mask
-    Values(std::tuple{true, std::vector<int>{}, std::vector<int>{}, "0"},
-           std::tuple{false, std::vector<int>{}, std::vector<int>{}, "0"},
-           std::tuple{true, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
-           std::tuple{false, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
-           std::tuple{true, std::vector<int>{}, std::vector<int>{}, "2"},
-           std::tuple{false, std::vector<int>{}, std::vector<int>{}, "2"}));
+    // bhsd/bshd, nhead, seqlen_k, q_eff_lens, kv_eff_lens, mask
+    Values(
+        // bhsd remap
+        std::tuple{true, 5, 300, std::vector<int>{}, std::vector<int>{}, "0"},
+        std::tuple{true, 5, 400, std::vector<int>{}, std::vector<int>{}, "2"},
+        // bshd remap
+        std::tuple{false, 5, 300, std::vector<int>{}, std::vector<int>{}, "0"},
+        std::tuple{false, 16, 300, std::vector<int>{}, std::vector<int>{}, "2"},
+        // bshd masked, too few heads per m-tile: round-robin
+        std::tuple{false, 5, 300, std::vector<int>{}, std::vector<int>{}, "2"},
+        // per-batch lengths: round-robin, early exit past each batch's seqlen_q
+        std::tuple{true, 5, 300, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "0"},
+        std::tuple{
+            false, 16, 300, std::vector<int>{300, 64, 1}, std::vector<int>{300, 100, 7}, "2"}));
 
 TEST_P(BatchXCDRemap, DataTypeConfig)
 {
-    auto [perm, q_eff_lens, kv_eff_lens, mask_str] = GetParam();
+    auto [perm, nhead, seqlen_k, q_eff_lens, kv_eff_lens, mask_str] = GetParam();
 
     auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
-                                               3,  // batch
-                                               5,  // nhead
+                                               3, // batch
+                                               nhead,
                                                -1, // nhead_k
                                                {adjust_seqlen(300)},
-                                               {adjust_seqlen(300)},
+                                               {adjust_seqlen(seqlen_k)},
                                                adjust_hdim(128),
                                                adjust_hdim(128),
                                                0,    // seqlen_knew
