@@ -571,6 +571,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
     template <typename DeviceArch>
     __host__ __device__ static constexpr auto MakeABlockDescriptor_M0_M1_M2_K(DeviceArch)
     {
+        constexpr index_t MPerXdl_Dim = UseLdsTransposeA ? 5 : 2;
+        constexpr index_t A_K1_Dim    = UseLdsTransposeA ? 2 : 5;
         return transform_tensor_descriptor(
             AK0MK1BlockDesc{},
             make_tuple(
@@ -579,7 +581,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                     make_tuple(Number<MRepeat>{}, Number<MWaves>{}, Number<MPerXDL>{})),
                 make_pass_through_transform(Number<A_K1>{})),
             make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
-            make_tuple(Sequence<3, 4>{}, Sequence<0, 1, 2>{}, Sequence<5>{}));
+            make_tuple(Sequence<3, 4>{}, Sequence<0, 1, MPerXdl_Dim>{}, Sequence<A_K1_Dim>{}));
     }
 
     __device__ static auto CalculateAThreadOriginDataIndex()
@@ -590,13 +592,27 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
 
         const auto xdlops_a_idx = xdlops_gemm.CalculateAThreadOriginDataIndex();
 
-        return make_tuple(
-            0, waveId_m, xdlops_a_idx[I1], KPerThread / KPack * xdlops_a_idx[I0], 0, 0);
+        if constexpr(UseLdsTransposeA)
+        {
+            return make_tuple(0,
+                              waveId_m,
+                              xdlops_a_idx[I1] % A_K1,
+                              KPerThread / KPack * xdlops_a_idx[I0],
+                              0,
+                              (xdlops_a_idx[I1] / A_K1) * (MPerXDL / 2));
+        }
+        else
+        {
+            return make_tuple(
+                0, waveId_m, xdlops_a_idx[I1], KPerThread / KPack * xdlops_a_idx[I0], 0, 0);
+        }
     }
 
     template <typename DeviceArch>
     __host__ __device__ static constexpr auto MakeBBlockDescriptor_N0_N1_N2_K(DeviceArch)
     {
+        constexpr index_t NPerXdl_Dim = UseLdsTransposeB ? 5 : 2;
+        constexpr index_t B_K1_Dim    = UseLdsTransposeB ? 2 : 5;
         return transform_tensor_descriptor(
             BK0NK1BlockDesc{},
             make_tuple(make_unmerge_transform(
@@ -605,7 +621,7 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                            make_tuple(Number<NRepeat>{}, Number<NWaves>{}, Number<NPerXDL>{})),
                        make_pass_through_transform(Number<B_K1>{})),
             make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}),
-            make_tuple(Sequence<3, 4>{}, Sequence<0, 1, 2>{}, Sequence<5>{}));
+            make_tuple(Sequence<3, 4>{}, Sequence<0, 1, NPerXdl_Dim>{}, Sequence<B_K1_Dim>{}));
     }
 
     __device__ static auto CalculateBThreadOriginDataIndex()
@@ -616,8 +632,20 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
 
         const auto xdlops_b_idx = xdlops_gemm.CalculateBThreadOriginDataIndex();
 
-        return make_tuple(
-            0, waveId_n, xdlops_b_idx[I1], KPerThread / KPack * xdlops_b_idx[I0], 0, 0);
+        if constexpr(UseLdsTransposeB)
+        {
+            return make_tuple(0,
+                              waveId_n,
+                              xdlops_b_idx[I1] % B_K1,
+                              KPerThread / KPack * xdlops_b_idx[I0],
+                              0,
+                              (xdlops_b_idx[I1] / B_K1) * (NPerXDL / 2));
+        }
+        else
+        {
+            return make_tuple(
+                0, waveId_n, xdlops_b_idx[I1], KPerThread / KPack * xdlops_b_idx[I0], 0, 0);
+        }
     }
 
     static constexpr auto a_block_desc_m0_m1_m2_k =
@@ -906,7 +934,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                                          Sequence<0, 1, 2, 3, 4, 5>,
                                                          5,
                                                          A_K1,
-                                                         A_K1>;
+                                                         A_K1,
+                                                         UseLdsTransposeA>;
 
     using BThreadCopy = ThreadwiseTensorSliceTransfer_v4<FloatB,
                                                          ElementDataTypeB,
@@ -916,7 +945,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                                          Sequence<0, 1, 2, 3, 4, 5>,
                                                          5,
                                                          B_K1,
-                                                         B_K1>;
+                                                         B_K1,
+                                                         UseLdsTransposeB>;
 
     AThreadCopy a_thread_copy_{CalculateAThreadOriginDataIndex()};
     BThreadCopy b_thread_copy_{CalculateBThreadOriginDataIndex()};
