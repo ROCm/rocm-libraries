@@ -2523,7 +2523,10 @@ struct p2p_enabler
            || src_id >= rocfft_scoped_device::device_count())
             throw std::out_of_range("p2p_enabler: a given device ID is out of range");
         if(peer_id == src_id)
+        {
+            peer_available_ = true;
             return;
+        }
         rocfft_scoped_device scoped_dev(src_id);
         int                  can_access = 0;
         HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&can_access, src_id, peer_id));
@@ -2534,12 +2537,16 @@ struct p2p_enabler
                 enabled_by_us = true;
             else if(err != hipErrorPeerAccessAlreadyEnabled)
                 HIP_EXPECT_SUCCESS(err);
+            peer_available_ = true;
         }
-        else
-        {
-            // peer access not supported between the two devices
-            throw HIPFFT_INTERNAL_ERROR;
-        }
+        // can_access == 0 is not fatal. Some multi-GPU systems (Navi 32 on
+        // Windows) cannot enable peer access; the D2D copy then stages
+        // through host memory.
+    }
+
+    bool peer_available() const
+    {
+        return peer_available_;
     }
     ~p2p_enabler()
     try
@@ -2559,9 +2566,10 @@ struct p2p_enabler
     p2p_enabler& operator=(p2p_enabler&&) = delete;
 
 private:
-    bool      enabled_by_us = false;
-    const int src_id        = hipInvalidDeviceId;
-    const int peer_id       = hipInvalidDeviceId;
+    bool      peer_available_ = false;
+    bool      enabled_by_us   = false;
+    const int src_id          = hipInvalidDeviceId;
+    const int peer_id         = hipInvalidDeviceId;
 };
 
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
@@ -2670,6 +2678,8 @@ try
             const auto  elem_sz   = hipDataType_bytes(elem_type);
             const auto& src_xt    = *src_lib_desc.descriptor;
             const auto& dst_xt    = *dst_lib_desc.descriptor;
+            // Reused when a device pair has no peer access. Sized to one slab.
+            std::vector<char> host_stage;
             for(size_t si = 0; si < src_field.brick_count(); ++si)
             {
                 auto&                cpy_stream = plan->device_contexts[si].stream;
@@ -2689,13 +2699,19 @@ try
                             "hipfftXtMemcpy: unexpected rank of overlap in D2D copy");
                     auto dev_pair
                         = std::make_pair(src_brick.get_device_id(), dst_brick.get_device_id());
-                    p2p_enablers.try_emplace(dev_pair, dev_pair);
-                    const auto spans       = overlap.get_spans();
-                    const auto src_strides = src_brick.get_strides();
-                    const auto dst_strides = dst_brick.get_strides();
+                    const auto& peer  = p2p_enablers.try_emplace(dev_pair, dev_pair).first->second;
+                    const auto  spans = overlap.get_spans();
+                    const auto  src_strides = src_brick.get_strides();
+                    const auto  dst_strides = dst_brick.get_strides();
                     if(src_strides.back() != 1 || dst_strides.back() != 1)
                         throw std::logic_error("hipfftXtMemcpy: unexpected elementary stride "
                                                "(non-unit) in src/dst of D2D copy");
+                    const auto nbytes = spans[1] * elem_sz;
+                    const bool stage_via_host
+                        = src_brick.get_device_id() != dst_brick.get_device_id()
+                          && !peer.peer_available();
+                    if(stage_via_host && host_stage.size() < nbytes)
+                        host_stage.resize(nbytes);
                     for(size_t slab_idx = 0; slab_idx < spans[0]; ++slab_idx)
                     {
                         auto* src_ptr = static_cast<const char*>(src_xt.data[si])
@@ -2704,22 +2720,41 @@ try
                         auto* dst_ptr = static_cast<char*>(dst_xt.data[di])
                                         + (overlap.offset_in(dst_brick) + dst_strides[0] * slab_idx)
                                               * elem_sz;
-                        if(src_brick.get_device_id() != dst_brick.get_device_id())
+                        if(stage_via_host)
+                        {
+                            // Device-to-host on the source stream, then host-to-device
+                            // on the destination stream. The host buffer is reused, so
+                            // each hop is finished before the next slab starts.
+                            HIP_EXPECT_SUCCESS(hipMemcpyAsync(host_stage.data(),
+                                                              src_ptr,
+                                                              nbytes,
+                                                              hipMemcpyDeviceToHost,
+                                                              cpy_stream));
+                            HIP_EXPECT_SUCCESS(hipStreamSynchronize(cpy_stream));
+                            {
+                                rocfft_scoped_device dst_dev(dst_brick.get_device_id());
+                                auto&                dst_stream = plan->device_contexts[di].stream;
+                                HIP_EXPECT_SUCCESS(hipMemcpyAsync(dst_ptr,
+                                                                  host_stage.data(),
+                                                                  nbytes,
+                                                                  hipMemcpyHostToDevice,
+                                                                  dst_stream));
+                                HIP_EXPECT_SUCCESS(hipStreamSynchronize(dst_stream));
+                            }
+                        }
+                        else if(src_brick.get_device_id() != dst_brick.get_device_id())
                         {
                             HIP_EXPECT_SUCCESS(hipMemcpyPeerAsync(dst_ptr,
                                                                   dst_brick.get_device_id(),
                                                                   src_ptr,
                                                                   src_brick.get_device_id(),
-                                                                  spans[1] * elem_sz,
+                                                                  nbytes,
                                                                   cpy_stream));
                         }
                         else
                         {
-                            HIP_EXPECT_SUCCESS(hipMemcpyAsync(dst_ptr,
-                                                              src_ptr,
-                                                              spans[1] * elem_sz,
-                                                              hipMemcpyDeviceToDevice,
-                                                              cpy_stream));
+                            HIP_EXPECT_SUCCESS(hipMemcpyAsync(
+                                dst_ptr, src_ptr, nbytes, hipMemcpyDeviceToDevice, cpy_stream));
                         }
                     }
                 }

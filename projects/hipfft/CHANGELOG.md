@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.27
 
+### Fixed
+
+* `hipfftXtMemcpy` device-to-device copies fall back to a host-staged copy when peer access between GPUs is unavailable. Multi-GPU `hipfftXt` plans therefore work on systems such as Navi 32 on Windows, where `hipDeviceCanAccessPeer` reports that peer access is not available.
+
 ### Changed
 
 * Minor internal changes.
