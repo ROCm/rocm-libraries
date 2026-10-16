@@ -153,7 +153,7 @@ def test_occupancy_probe_signature_layout(numU32, padded):
 
 
 def test_occupancy_probe_kernarg_matches_loads(monkeypatch):
-    """End-to-end SK5 gfx950 emit: metadata offsets match the probe s_loads."""
+    """End-to-end gfx950 StreamK hybrid-assignment emit: metadata offsets match the probe s_loads."""
     from codegen_harness import emit_kernels_from_logic
 
     monkeypatch.setitem(globalParameters, "EmitOccupancyProbe", True)
@@ -162,7 +162,7 @@ def test_occupancy_probe_kernarg_matches_loads(monkeypatch):
     (_, src, err), = emit_kernels_from_logic(logic, limit=1)
     assert err == 0
     args, size = _kernarg_metadata(src)
-    assert "ProbeAddr" in args, "logic file no longer yields an SK5 kernel; repoint the test"
+    assert "ProbeAddr" in args, "logic file no longer yields a StreamK hybrid-assignment kernel; repoint the test"
 
     # KernArgAddress is shifted past the 16-byte common args when the probe loads.
     loads = {}

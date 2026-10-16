@@ -2896,36 +2896,38 @@ class KernelWriterAssembly(KernelWriter):
       return module
     module.addComment1("CU-occupancy probe")
     skipLabel = Label(self.labels.getNameInc("OccupancyProbe_Skip"), "")
-    # tmp+0..1 ProbeAddr; tmp+2 ProbeEpoch then HW_ID/XCC_ID; tmp+3 ProbeGrid.
-    with self.allocTmpSgpr(4, alignment=2, tag="occupancyProbe_tmpSgpr") as tmpSgprInfo:
-      sAddr = tmpSgprInfo.idx
-      sTmp  = sAddr + 2
-      sGrid = sAddr + 3
+    # tmp+0..1 ProbeAddr; tmp+2 ProbeEpoch; tmp+3 ProbeGrid; tmp+4 HW_ID then XCC_ID.
+    # The slot math runs while the args load.
+    with self.allocTmpSgpr(5, alignment=2, tag="occupancyProbe_tmpSgpr") as tmpSgprInfo:
+      sAddr  = tmpSgprInfo.idx
+      sEpoch = sAddr + 2
+      sGrid  = sAddr + 3
+      sId    = sAddr + 4
       module.add(SLoadB64(dst=sgpr(sAddr, 2), base=sgpr("KernArgAddress", 2),
                           soffset=hex(self.states.probeKernArgOffset), comment="load ProbeAddr"))
-      module.add(SLoadB64(dst=sgpr(sTmp, 2), base=sgpr("KernArgAddress", 2),
+      module.add(SLoadB64(dst=sgpr(sEpoch, 2), base=sgpr("KernArgAddress", 2),
                           soffset=hex(self.states.probeKernArgOffset + 8), comment="load ProbeEpoch, ProbeGrid"))
+      vOffset = self.vgprPool.checkOut(1, "occupancyProbe_vOffset")
+      vEpoch  = self.vgprPool.checkOut(1, "occupancyProbe_vEpoch")
+      module.add(SGetRegB32(dst=sgpr(sId), src=HWRegContainer(reg="HW_REG_HW_ID", value=[8, 8]),
+                            comment="HW_ID[15:8]: SE << 5 | SH << 4 | CU"))
+      module.add(VLShiftLeftB32(dst=vgpr(vOffset), shiftHex=2, src=sgpr(sId), comment="CU << 2 in [5:2]"))
+      module.add(SLShiftLeftB32(dst=sgpr(sId), shiftHex=1, src=sgpr(sId), comment="SE << 6 | SH << 5 | CU << 1"))
+      module.add(VBfiB32(dst=vgpr(vOffset), src0=63, src1=vgpr(vOffset), src2=sgpr(sId),
+                         comment="SE << 6 | CU << 2"))
+      module.add(SAndB32(dst=sgpr(sId), src0=sgpr(sId), src1=hex(0x120), comment="SCC = SH != 0 || SE >= 4, live to s_cselect"))
+      module.add(SGetRegB32(dst=sgpr(sId), src=HWRegContainer(reg="HW_REG_XCC_ID", value=[0, 4]),
+                            comment="XCC id"))
+      module.add(SCSelectB32(dst=sgpr(sId), src0=8, src1=sgpr(sId), comment="unmapped CU: XCC = 8"))
+      module.add(VLShiftLeftOrB32(dst=vgpr(vOffset), shiftHex=8, src0=sgpr(sId), src1=vgpr(vOffset),
+                                  comment="probe slot byte offset"))
       module.add(SWaitCnt(kmcnt=0, comment="wait for probe args"))
       module.add(SCmpEQU64(src0=sgpr(sAddr, 2), src1=0, comment="ProbeAddr == 0 ?"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="no probe"))
-      vOffset = self.vgprPool.checkOut(1, "occupancyProbe_vOffset")
-      vEpoch  = self.vgprPool.checkOut(1, "occupancyProbe_vEpoch")
-      module.add(VMovB32(dst=vgpr(vEpoch), src=sgpr(sTmp), comment="ProbeEpoch"))
-      module.add(SGetRegB32(dst=sgpr(sTmp), src=HWRegContainer(reg="HW_REG_HW_ID", value=[8, 8]),
-                            comment="HW_ID[15:8]: SE << 5 | SH << 4 | CU"))
-      module.add(VLShiftLeftB32(dst=vgpr(vOffset), shiftHex=2, src=sgpr(sTmp), comment="CU << 2 in [5:2]"))
-      module.add(SLShiftLeftB32(dst=sgpr(sTmp), shiftHex=1, src=sgpr(sTmp), comment="SE << 6 | SH << 5 | CU << 1"))
-      module.add(VBfiB32(dst=vgpr(vOffset), src0=63, src1=vgpr(vOffset), src2=sgpr(sTmp),
-                         comment="SE << 6 | CU << 2"))
-      module.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=hex(0x120), comment="SCC = SH != 0 || SE >= 4, live to s_cselect"))
-      module.add(SGetRegB32(dst=sgpr(sTmp), src=HWRegContainer(reg="HW_REG_XCC_ID", value=[0, 4]),
-                            comment="XCC id"))
-      module.add(SCSelectB32(dst=sgpr(sTmp), src0=8, src1=sgpr(sTmp), comment="unmapped CU: XCC = 8"))
-      module.add(VLShiftLeftOrB32(dst=vgpr(vOffset), shiftHex=8, src0=sgpr(sTmp), src1=vgpr(vOffset),
-                                  comment="probe slot byte offset"))
+      module.add(VMovB32(dst=vgpr(vEpoch), src=sgpr(sEpoch), comment="ProbeEpoch"))
       execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
       module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0, comment="thread 0 stores"))
-      module.add(VCmpXGtU32(dst=EXEC(), src0=8, src1=sgpr(sTmp), comment="mapped CU (XCC < 8)"))
+      module.add(VCmpXGtU32(dst=EXEC(), src0=8, src1=sgpr(sId), comment="mapped CU (XCC < 8)"))
       module.add(SNop(waitState=4, comment="VALU write exec -> VMEM"))
       module.add(GlobalStoreB32(vaddr=vgpr(vOffset), src=vgpr(vEpoch), saddr=sgpr(sAddr, 2),
                                 comment="ProbeAddr[slot] = ProbeEpoch"))
