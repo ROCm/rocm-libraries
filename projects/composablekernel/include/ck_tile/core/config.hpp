@@ -79,6 +79,17 @@
 #define CK_TILE_USE_CUSTOM_DATA_TYPE 0 // custom data type will generate extra move/bfi code
 #endif
 
+// Whether the compiler exposes the asyncmark / wait_asyncmark builtins, which represent
+// asynchronous global->LDS DMA to the LLVM memory model (so no manual fence is needed around the
+// wait). Present on ROCm 7.13+ (absent on 7.2). When absent, CK falls back to manual vmcnt /
+// s_wait_asynccnt waits plus memory-model fences.
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_asyncmark) && \
+    __has_builtin(__builtin_amdgcn_wait_asyncmark)
+#define CK_TILE_HAS_ASYNCMARK 1
+#else
+#define CK_TILE_HAS_ASYNCMARK 0
+#endif
+
 #define CK_TILE_FLOAT_TO_TF32_TRUNC 0
 #define CK_TILE_FLOAT_TO_TF32_RNE 1
 

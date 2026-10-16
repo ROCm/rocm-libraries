@@ -816,6 +816,11 @@ struct buffer_store_if<1>
 };
 #endif
 
+// NOTE: despite the "_fence" name these are SAME-WAVE completion waits, not cross-wave
+// memory-model fences. The "memory" clobber only orders memory ops within this wave; it carries
+// no release/acquire semantics. For cross-wave visibility (publishing data to the workgroup) use
+// block_sync_lds() / block_sync_lds_async_load() (see arch.hpp), which actually fence the loads.
+// This is, at best, a performance hint, and should be avoided otherwise.
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0)
 {
 #if defined(__gfx12__)
@@ -1068,6 +1073,9 @@ CK_TILE_DEVICE void insert_dummy_dep(Tx& bx, Ty&... by)
 }
 }
 // clang-format on
+// Same-wave completion wait (see note on buffer_load_fence above): drains buffer/global loads
+// to `cnt` outstanding, then pins the loaded VGPRs via insert_dummy_dep so the compiler cannot
+// hoist their uses. Not a cross-wave fence, is basically a performance hint.
 template <typename... T>
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
 {
@@ -1079,6 +1087,7 @@ CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
     impl::insert_dummy_dep(o...);
 }
 
+// Same-wave wait for buffer/global store completion. Not a cross-wave fence.
 CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 {
 #if defined(__gfx12__)
@@ -1088,6 +1097,9 @@ CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 #endif
 }
 
+// Same-wave wait for async (global->LDS) load completion. Not a cross-wave fence; a consumer
+// reading the LDS cross-wave must additionally go through block_sync_lds(). Deprecated and should
+// not be used -- use asyncmark()-producing primitives in new code.
 CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
 {
 #if defined(__gfx125__)
@@ -1457,6 +1469,8 @@ CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
 #undef CK_TILE_ASYNC_LOAD_WITH_INSTR
 }
 
+// Same-wave wait for async buffer-load completion. Not a cross-wave fence (see
+// buffer_load_fence). Only works on gfx9, should be avoided (use asyncmark-producing code instead).
 CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
 {
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
@@ -2006,7 +2020,18 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #endif
-    // Use C-style cast to change address space without dropping llvm noalias attribute
+        // Use C-style cast to change address space without dropping llvm noalias attribute
+#if CK_TILE_HAS_ASYNCMARK
+    // Uses asyncmark/wait_asyncmark so that DMAs are tracked separately from other memory traffic.
+
+    __builtin_amdgcn_raw_ptr_buffer_load_async_lds(rsrc,
+                                                   smem,
+                                                   bytes,
+                                                   v_offset,
+                                                   amd_wave_read_first_lane(src_wave_addr_offset),
+                                                   /*imm*/ IMM,
+                                                   static_cast<index_t>(coherence));
+#else
     __builtin_amdgcn_raw_ptr_buffer_load_lds(rsrc,
                                              smem,
                                              bytes,
@@ -2014,6 +2039,7 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                              amd_wave_read_first_lane(src_wave_addr_offset),
                                              /*imm*/ IMM,
                                              static_cast<index_t>(coherence));
+#endif
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif

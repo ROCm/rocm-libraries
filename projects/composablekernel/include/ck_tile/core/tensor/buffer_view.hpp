@@ -488,6 +488,9 @@ struct buffer_view<address_space_enum::global,
             is_valid_element,
             bool_constant<oob_conditional_check>{});
 #endif
+#if CK_TILE_HAS_ASYNCMARK
+        __builtin_amdgcn_asyncmark();
+#endif
     }
 
     // i is offset of T, not X. i should be aligned to X.
@@ -519,6 +522,9 @@ struct buffer_view<address_space_enum::global,
         auto* lds_ptr = to_lds(reinterpret_cast<remove_cvref_t<X>*>(smem));
 
         cluster_multicast_load_async_to_lds<remove_cvref_t<X>, inst_offset>(g_src, lds_ptr, mask);
+#if CK_TILE_HAS_ASYNCMARK
+        __builtin_amdgcn_asyncmark();
+#endif
 #else
         (void)smem;
         (void)i;
@@ -552,6 +558,9 @@ struct buffer_view<address_space_enum::global,
 
         amd_async_buffer_load_with_oob_raw<remove_cvref_t<T>, t_per_x, Coherence>(
             smem, cached_buf_res_, i, linear_offset, bool_constant<pre_nop>{});
+#if CK_TILE_HAS_ASYNCMARK
+        __builtin_amdgcn_asyncmark();
+#endif
     }
 
     template <amd_buffer_coherence_enum Coherence_ = Coherence>
