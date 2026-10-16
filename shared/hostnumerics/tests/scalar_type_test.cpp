@@ -265,15 +265,22 @@ TEST(Core, ScalarDispatchExceptions) {
                                        static_cast<ScalarType>(0xffff)};
     // NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
     for (const auto type : invalidTypes) {
-        EXPECT_THROW(visitScalarType(type, visitor, std::move(argument)), std::invalid_argument);
+        EXPECT_THROW(visitScalarType(type, visitor, std::move(argument)), std::runtime_error);
         EXPECT_EQ(calls, 0);
         ASSERT_NE(argument, nullptr);
     }
     EXPECT_EQ(visitScalarType(ScalarType::BFloat16, visitor, std::move(argument)), 42);
     EXPECT_EQ(calls, 1);
 
-    EXPECT_THROW(visitScalarType(ScalarType::ComplexFloat64,
-                                 []<typename Tag>() { throw std::runtime_error("visitor"); }),
-                 std::runtime_error);
+    // A visitor's own failure retains its original type and payload.
+    struct VisitorError {
+        int marker;
+    };
+    try {
+        visitScalarType(ScalarType::ComplexFloat64, []<typename Tag>() { throw VisitorError{37}; });
+        FAIL() << "Visitor error was swallowed";
+    } catch (const VisitorError& error) {
+        EXPECT_EQ(error.marker, 37);
+    }
 }
 }  // namespace
