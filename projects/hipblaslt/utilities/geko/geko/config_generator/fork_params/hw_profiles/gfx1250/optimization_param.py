@@ -121,25 +121,9 @@ class GFX1250Params(BaseOptimizationParams):
         return self._make_param("TDMInst", [3])
 
     @param
-    def tdm_iterate_mode(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        """Equality libraries search only the TDM iterate modes this shape can use.
-
-        0 is always included. 1 requires M divisible by 4, 2 requires N
-        divisible by 4, and 3 requires both. OOB keeps the full sweep.
-        """
-        is_equality = str(self.config.get("LIBRARY_TYPE", "OOB")).lower() == "equality"
-        if not is_equality:
-            return self._make_param("TDMIterateMode", [0, 1, 2, 3])
-        values = [0]
-        m_aligned = ctx.M % 4 == 0
-        n_aligned = ctx.N % 4 == 0
-        if m_aligned:
-            values.append(1)
-        if n_aligned:
-            values.append(2)
-        if m_aligned and n_aligned:
-            values.append(3)
-        return self._make_param("TDMIterateMode", values)
+    def tdm_iterate_mode(self, ctx: SizeContext) -> ForkParameter:
+        """0 (default) and -1 (auto, Tensile picks based on shape alignment)."""
+        return self._make_param("TDMIterateMode", [0, -1])
 
     @param
     def init_c_iter_wmma(self, ctx: SizeContext) -> ForkParameter:
@@ -536,7 +520,8 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def tdm_iterate_mode(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMIterateMode", [0, 1, 2, 3])
+        """0 (default) and -1 (auto, Tensile picks based on shape alignment)."""
+        return self._make_param("TDMIterateMode", [0, -1])
 
     @param
     def tdm_split(self, ctx: SizeContext) -> ForkParameter:
@@ -681,24 +666,25 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @group
     def execution_policy(self, ctx: SizeContext) -> Optional[GroupDimension]:
-        """Persistent strategies with their options, when the input config sets ``StreamK: true``.
+        """Persistent strategy with its options, when ``StreamK: true`` (the default).
 
-        StreamK and DataParallel each pair with PrefetchAcrossPersistent [0, 1]
-        and the XCC remap. Both options exist only for a persistent kernel: Tensile
-        raises UnsupportedExecutionPolicy for an explicit PrefetchAcrossPersistent
-        with TileProcessingStrategy None, which aborts the run, and zeroes the XCC
-        remap there. So an Equality library keeps the non-persistent kernel as an
-        entry of its own. An OOB library drops it, since its origami sentinel
-        ``WorkGroupMappingXCC: -1`` needs a persistent kernel, and keeps only XCC
-        remap 0 ("Cannot use auto WGMXCC with SKXCC").
+        OOB libraries use only StreamK (origami needs a persistent kernel for
+        ``WorkGroupMappingXCC: -1``, and a single strategy keeps the search
+        space tight).  Equality libraries search both StreamK and DataParallel,
+        plus a non-persistent ``None`` entry.
+
+        Each persistent strategy pairs with PrefetchAcrossPersistent [0, 1].
+        OOB keeps only XCC remap 0 ("Cannot use auto WGMXCC with SKXCC");
+        Equality searches all divisors of the ARCH's XCC count.
         """
         if not self._sk3():
             return None
         origami = self._origami_picks_wgm()
+        strategies = ("StreamK",) if origami else ("StreamK", "DataParallel")
         entries = [] if origami else [
             {"TileProcessingStrategy": self._make_param("TileProcessingStrategy", ["None"])}
         ]
-        for strategy in ("StreamK", "DataParallel"):
+        for strategy in strategies:
             for prefetch in (0, 1):
                 for remap in [0] if origami else self._xcc_remap_values():
                     entries.append({
