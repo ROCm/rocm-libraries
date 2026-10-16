@@ -788,6 +788,108 @@ void visit(const MoeGroupedMatmulBwdAttributes& op, V& visitor)
     visitor.tensor(std::string_view("dweight"), static_cast<int64_t>(op.dweight_tensor_uid()), false);
 }
 
+template <typename V>
+void visit(const GdnAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("q"), static_cast<int64_t>(op.q_tensor_uid()), false);
+    visitor.tensor(std::string_view("k"), static_cast<int64_t>(op.k_tensor_uid()), false);
+    visitor.tensor(std::string_view("v"), static_cast<int64_t>(op.v_tensor_uid()), false);
+    visitor.tensor(std::string_view("g"), static_cast<int64_t>(op.g_tensor_uid()), false);
+    visitor.tensor(std::string_view("beta"), static_cast<int64_t>(op.beta_tensor_uid()), false);
+    visitor.tensor(std::string_view("cu_seqlens"), static_cast<int64_t>(op.cu_seqlens_tensor_uid()), false);
+    if(const auto uid = op.initial_state_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("initial_state"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.a_log_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("a_log"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.dt_bias_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("dt_bias"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.state_indices_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("state_indices"), static_cast<int64_t>(*uid), false);
+    }
+    visitor.tensor(std::string_view("o"), static_cast<int64_t>(op.o_tensor_uid()), false);
+    if(const auto uid = op.final_state_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("final_state"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.state_checkpoints_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("state_checkpoints"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto value = op.scale(); value.has_value())
+    {
+        visitor.scalar(std::string_view("scale"), static_cast<double>(*value));
+    }
+    visitor.scalar(std::string_view("output_final_state"), static_cast<bool>(op.output_final_state()));
+    visitor.scalar(std::string_view("use_qk_l2norm"), static_cast<bool>(op.use_qk_l2norm()));
+    visitor.scalar(std::string_view("checkpoint_every_n_tokens"), static_cast<int64_t>(op.checkpoint_every_n_tokens()));
+    visitor.scalar(std::string_view("use_beta_sigmoid"), static_cast<bool>(op.use_beta_sigmoid()));
+    visitor.scalar(std::string_view("allow_neg_eigval"), static_cast<bool>(op.allow_neg_eigval()));
+    visitor.scalar(std::string_view("safe_gate"), static_cast<bool>(op.safe_gate()));
+    visitor.scalar(std::string_view("gate_domain"), static_cast<int64_t>(op.gate_domain()));
+    visitor.scalar(std::string_view("batch_invariant"), static_cast<bool>(op.batch_invariant()));
+    visitor.scalar(std::string_view("overwrite_initial_state"), static_cast<bool>(op.overwrite_initial_state()));
+}
+
+template <typename V>
+void visit(const KdaAttributes& op, V& visitor)
+{
+    visitor.tensor(std::string_view("q"), static_cast<int64_t>(op.q_tensor_uid()), false);
+    visitor.tensor(std::string_view("k"), static_cast<int64_t>(op.k_tensor_uid()), false);
+    visitor.tensor(std::string_view("v"), static_cast<int64_t>(op.v_tensor_uid()), false);
+    visitor.tensor(std::string_view("g"), static_cast<int64_t>(op.g_tensor_uid()), false);
+    visitor.tensor(std::string_view("beta"), static_cast<int64_t>(op.beta_tensor_uid()), false);
+    visitor.tensor(std::string_view("cu_seqlens"), static_cast<int64_t>(op.cu_seqlens_tensor_uid()), false);
+    if(const auto uid = op.initial_state_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("initial_state"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.a_log_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("a_log"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.dt_bias_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("dt_bias"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.state_indices_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("state_indices"), static_cast<int64_t>(*uid), false);
+    }
+    visitor.tensor(std::string_view("o"), static_cast<int64_t>(op.o_tensor_uid()), false);
+    if(const auto uid = op.final_state_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("final_state"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.state_checkpoints_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("state_checkpoints"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto value = op.scale(); value.has_value())
+    {
+        visitor.scalar(std::string_view("scale"), static_cast<double>(*value));
+    }
+    visitor.scalar(std::string_view("output_final_state"), static_cast<bool>(op.output_final_state()));
+    visitor.scalar(std::string_view("use_qk_l2norm"), static_cast<bool>(op.use_qk_l2norm()));
+    visitor.scalar(std::string_view("checkpoint_every_n_tokens"), static_cast<int64_t>(op.checkpoint_every_n_tokens()));
+    visitor.scalar(std::string_view("use_beta_sigmoid"), static_cast<bool>(op.use_beta_sigmoid()));
+    visitor.scalar(std::string_view("allow_neg_eigval"), static_cast<bool>(op.allow_neg_eigval()));
+    visitor.scalar(std::string_view("safe_gate"), static_cast<bool>(op.safe_gate()));
+    visitor.scalar(std::string_view("gate_domain"), static_cast<int64_t>(op.gate_domain()));
+    if(const auto value = op.gate_lower_bound(); value.has_value())
+    {
+        visitor.scalar(std::string_view("gate_lower_bound"), static_cast<double>(*value));
+    }
+    visitor.scalar(std::string_view("batch_invariant"), static_cast<bool>(op.batch_invariant()));
+    visitor.scalar(std::string_view("overwrite_initial_state"), static_cast<bool>(op.overwrite_initial_state()));
+}
+
 /// Visits @p node's operands. Returns false, visiting nothing, when the node has
 /// no attributes or a type this header predates.
 template <typename V>
@@ -795,7 +897,7 @@ bool visit(const Node& node, V&& visitor)
 {
     // Fails when NodeAttributes gains a member this header has no case for: rerun
     // scripts/gen_node_operands.py.
-    static_assert(NodeAttributes::MAX == NodeAttributes::MoeGroupedMatmulBwdAttributes,
+    static_assert(NodeAttributes::MAX == NodeAttributes::KdaAttributes,
                   "node_operands_generated.h is stale: rerun scripts/gen_node_operands.py");
     switch(node.attributes_type())
     {
@@ -955,6 +1057,20 @@ bool visit(const Node& node, V&& visitor)
         return false;
     case NodeAttributes::MoeGroupedMatmulBwdAttributes:
         if(const auto* op = node.attributes_as_MoeGroupedMatmulBwdAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::GdnAttributes:
+        if(const auto* op = node.attributes_as_GdnAttributes(); op != nullptr)
+        {
+            visit(*op, visitor);
+            return true;
+        }
+        return false;
+    case NodeAttributes::KdaAttributes:
+        if(const auto* op = node.attributes_as_KdaAttributes(); op != nullptr)
         {
             visit(*op, visitor);
             return true;
