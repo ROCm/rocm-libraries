@@ -104,9 +104,8 @@ public:
                                  hipsparseSetStream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE
-        throw_on_hip_error(
-            "hipStreamBeginCapture",
-            hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
+        throw_on_hip_error("hipStreamBeginCapture",
+                           hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
 
         this->capture_started = true;
 #endif
@@ -127,16 +126,14 @@ public:
 
         if(!this->capture_started)
         {
-            throw std::runtime_error(
-                "hipsparseStreamEndCapture called without an active capture");
+            throw std::runtime_error("hipsparseStreamEndCapture called without an active capture");
         }
 
         hipGraph_t     graph;
         hipGraphExec_t instance;
 
         // END GRAPH CAPTURE
-        throw_on_hip_error("hipStreamEndCapture",
-                           hipStreamEndCapture(this->graph_stream, &graph));
+        throw_on_hip_error("hipStreamEndCapture", hipStreamEndCapture(this->graph_stream, &graph));
         throw_on_hip_error("hipGraphInstantiate",
                            hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
 
@@ -145,8 +142,7 @@ public:
         throw_on_hip_error("hipStreamSynchronize", hipStreamSynchronize(this->graph_stream));
         throw_on_hip_error("hipGraphExecDestroy", hipGraphExecDestroy(instance));
 
-        throw_on_hipsparse_error("hipsparseSetStream",
-                                 hipsparseSetStream(*this, this->old_stream));
+        throw_on_hipsparse_error("hipsparseSetStream", hipsparseSetStream(*this, this->old_stream));
         throw_on_hip_error("hipStreamDestroy", hipStreamDestroy(this->graph_stream));
         this->graph_stream = nullptr;
 
