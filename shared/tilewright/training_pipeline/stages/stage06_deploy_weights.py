@@ -66,13 +66,21 @@ ships is scored on the audit set beside this one, and this one is kept out
 when it regresses against it (`lib.audit.cell_gate`): on the
 --cell-gate-groups, a cell significantly worse beyond --cell-tolerance or
 confidently fallen below --cell-floor, family-wise at --cell-gate-alpha
-over their cells (--audit-bootstrap sign flips); in any group, more new
-picks collapsing below --tail-floor (to at most --tail-collapse of the
-shipped pick) that a repeated measurement confirms than the group lifts
-back above it, plus --tail-budget. cell_gate.json names the cells and
-GEMMs. When the audit set cannot measure both bundles the other gates
-decide. --cell-gate-record-only measures it without keeping the bundle
-out.
+over their cells (--audit-bootstrap sign flips); over every group, more
+than --tail-budget new picks below --tail-floor that a repeated
+measurement confirms, each GEMM of each group counted on its own (a pick
+the shipped bundle had at or above the floor; with --tail-collapse below
+1, only the drops to at most that fraction of its efficiency), however
+many collapses it heals. cell_gate.json names the cells and GEMMs, the
+healed collapses and those both bundles share. When the audit set cannot
+measure both bundles the other gates decide. --cell-gate-record-only
+measures it without keeping the bundle out. The deploy record keeps the
+deploy gate's own verdict before the per-cell gate's (`deploy_gate`), so
+that a bundle the per-cell gate alone keeps out can be repaired: the
+orchestrator repairs the base cells it flagged (gate.repair,
+lib/cell_merge.py `RoundRepair`; full.final_retrain.repair for a final
+retrain) and runs this stage again on the repaired bundle, whose
+metrics.json `repair` the deploy record carries (`repair`).
 
 Outputs (run directory only):
     staged_for_deploy/   the files to install, per-target index fragments and
@@ -85,8 +93,10 @@ Outputs (run directory only):
                          findings per audit group, the baseline it compared
                          with and the verdict
     deploy_record.json   what was written where; stage07 checks the runtime
-                         against it. With --library-dir also the member
-                         order of every candidate key with several members
+                         against it. `models_sha256`: the sha256 of the
+                         <train-dir>/models.pt it packed. With
+                         --library-dir also the member order of every
+                         candidate key with several members
                          in the library the model is served from (the
                          deploy build's when it holds the library, else
                          --library-dir's), as a digest per key
@@ -146,6 +156,7 @@ import yaml  # noqa: E402
 
 from lib import audit as auditlib  # noqa: E402
 from lib import bank_pool  # noqa: E402
+from lib import cell_merge as cm  # noqa: E402
 from lib import correctness as cx  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
 from lib import features as fs  # noqa: E402
@@ -1355,11 +1366,32 @@ def _cell_gate_record(cells: Optional[Mapping[str, Any]]) -> Optional[Dict[str, 
         "n_regressed",
         "n_floor",
         "n_tail",
+        "n_tail_new",
+        "n_tail_healed",
+        "n_tail_persisting",
         "tail_groups",
         "n_reported",
         "not_compared",
     )
     return _json_ready({**{k: cells.get(k) for k in keys}, "file": CELL_GATE_FILE})
+
+
+def repair_record(train_dir: Path) -> Optional[Dict[str, Any]]:
+    """What a repair changed in the bundle of `train_dir` (its metrics.json
+    `repair`: lib/collapse_repair.py `summary`), with the note that the
+    audit GEMMs that flagged its cells also judged it
+    (`selected_by_audit`, `selection_note`); None for a bundle no repair
+    changed."""
+    try:
+        metrics = json.loads((Path(train_dir) / "metrics.json").read_text())
+    except (OSError, ValueError):
+        return None
+    rep = metrics.get("repair") if isinstance(metrics, dict) else None
+    if not isinstance(rep, dict):
+        return None
+    return _json_ready(
+        dict(rep, selected_by_audit=True, selection_note=cm.SELECTION_NOTE)
+    )
 
 
 def print_cell_gate(cells: Mapping[str, Any], gate: CellGate) -> None:
@@ -1687,6 +1719,7 @@ def _deploy(
             quiet=quiet,
         )
         passed, why = gate_decision(measured, gate)
+    deploy_gate = {"passed": passed, "reason": why}
 
     audited: Optional[Dict[str, Any]] = None
     if audit is not None:
@@ -1869,6 +1902,7 @@ def _deploy(
         "weight_dtype": dtype,
         "feature_catalog_hash": parsed["feature_catalog_hash"],
         "sha256": sha,
+        "models_sha256": sha256_file(train_dir / "models.pt"),
         "size": len(data),
         "payload_crc32": parsed["payload_crc32"],
         "n_cells": n_cells,
@@ -1877,8 +1911,10 @@ def _deploy(
         "repo": str(repo) if repo else None,
         "engine_checked": engine_ok,
         "deployed": passed,
+        "deploy_gate": deploy_gate,
         "gate": _gate_record(measured),
         "cell_gate": _cell_gate_record(cells),
+        "repair": repair_record(train_dir),
         "audit": (
             None
             if audited is None
@@ -2178,14 +2214,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         type=float,
         default=defaults["tail_collapse"],
         help="a new pick below --tail-floor counts when it is at most this "
-        "fraction of the shipped pick's efficiency (1: any)",
+        "fraction of the shipped pick's efficiency (1: every step across the "
+        "floor)",
     )
     c.add_argument(
         "--tail-budget",
         type=int,
         default=defaults["tail_budget"],
-        help="new collapses below --tail-floor a group may add beyond the ones "
-        "it lifts back above it",
+        help="new picks below --tail-floor the bundle may add over every group, "
+        "never offset by the collapses it heals",
     )
     c.add_argument(
         "--cell-gate-groups",

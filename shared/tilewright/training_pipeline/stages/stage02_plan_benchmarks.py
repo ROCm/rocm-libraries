@@ -480,6 +480,14 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "in them: contexts/<name>/shapes.yaml and plan.json",
     )
     ap.add_argument(
+        "--targeted-shapes",
+        type=Path,
+        default=None,
+        help="stage01's targeted_shapes.json: with --contexts, the shapes "
+        "drawn near a tail GEMM of a context are among those it re-plans, as "
+        "stage03c benches them there",
+    )
+    ap.add_argument(
         "--seed-commands",
         default=None,
         help="JSON object: stage name (stage03, stage04, stage05) -> argv "
@@ -767,7 +775,7 @@ def _replan_contexts(
     (`build_plan`'s `family_coverage`); writes contexts/<name>/{shapes.yaml,
     plan.json}."""
     from lib import features as fs
-    from lib.contexts import BenchContext, select_shapes
+    from lib.contexts import BenchContext, select_shapes, targeted_for
 
     try:
         wanted = json.loads(args.contexts)
@@ -791,7 +799,12 @@ def _replan_contexts(
         ranker = ModelRanker(
             data, catalog, ptype, hardware, context=ctx, rules=feas.rules
         )
-        chosen = select_shapes(shapes, bench_ctx, context_seed)
+        chosen = select_shapes(
+            shapes,
+            bench_ctx,
+            context_seed,
+            targeted_for(getattr(args, "targeted_shapes", None), bench_ctx),
+        )
         plans, _ = build_plan(
             chosen, feas, params, ranker=ranker, family_coverage=family
         )

@@ -241,6 +241,200 @@ def test_training_gemms_are_each_leafs_training_side():
     assert sorted(g.key for g in every) == sorted(g.key for g in gemms)
     counts = wt.leaf_counts(gemms, {}, 0.3, 7, s5)
     assert sum(a for a, _ in counts.values()) == len(got)
+    train, held = wt.split_gemms(gemms, {}, 0.3, 7, s5)
+    assert [g.key for g in train] == [g.key for g in got]
+    assert sorted(g.key for g in train + held) == sorted(g.key for g in gemms)
+    assert len(held) == sum(v for _, v in counts.values())
+    assert wt.split_gemms(gemms, {}, 0.0, 7, s5)[1] == []
+
+
+# ── the tail guard ───────────────────────────────────────────────────────────
+
+
+def _good(n, cell=0, winner_key=0):
+    """`n` GEMMs the tier key `winner_key` wins and the model ranks first."""
+    return [
+        (10.0, _row(cell, [winner_key, 1, 2], [10.0, 12.0, 15.0], [3.0, 2.0, 1.0]))
+        for _ in range(n)
+    ]
+
+
+# A GEMM whose pick from a tier of key 0 takes 3x its winner's time (key 3),
+# which the model ranks above key 0; key 4 is a near-winner it ranks lower.
+COLLAPSE = (10.0, _row(0, [0, 3, 4], [30.0, 10.0, 10.5], [1.0, 2.0, 0.5]))
+
+
+def test_the_tail_change_counts_new_and_lifted_picks_per_gemm():
+    items = _good(2) + [COLLAPSE]
+    same = wt.tail_change(items, [0], [0])
+    assert (same["n_gemms"], same["n_changed"], same["new"], same["healed"]) == (
+        3,
+        0,
+        [],
+        [],
+    )
+    assert same["geomean_ratio"] == pytest.approx(1.0)
+    up = wt.tail_change(items, [0], [0, 3])
+    assert (up["n_changed"], up["new"], up["healed"]) == (1, [], [2])
+    assert up["geomean_ratio"] == pytest.approx(3.0 ** (1 / 3))
+    down = wt.tail_change(items, [0, 3], [0])
+    assert (down["new"], down["healed"]) == ([2], [])
+    # a GEMM the old tier does not cover is the cascade's, left out
+    lone = [(10.0, _row(0, [5], [10.0], [1.0]))]
+    assert wt.tail_change(lone, [0], [0, 5])["n_gemms"] == 0
+    # a step across the floor counts, however small
+    step = [(10.0, _row(0, [0, 6], [19.0, 21.0], [1.0, 2.0]))]
+    assert wt.tail_change(step, [0], [0, 6])["new"] == [0]
+
+
+def test_the_guard_keeps_the_near_winner_a_collapsing_gemm_needs():
+    train = _good(6) + [COLLAPSE]
+    held = _good(3)
+    added, rec = wt.guard_cell(train, held, [0])
+    assert added == [3]
+    assert (rec["n_collapses"], rec["n_rescuable"], rec["n_lifted"]) == (1, 1, 1)
+    assert rec["check"]["own"]["n_new_below_floor"] == 0
+    assert rec["check"]["held_out"]["geomean_ratio"] == pytest.approx(1.0)
+    assert rec["n_refused"] == 0
+    # nothing to do without a collapse, with the guard off, or without a tier
+    added, rec = wt.guard_cell(_good(4), held, [0])
+    assert added == [] and rec["n_collapses"] == 0
+    assert wt.guard_cell(train, held, [0], max_keys=0)[0] == []
+    assert wt.guard_cell(train, held, [])[0] == []
+
+
+def test_the_guard_takes_the_fastest_near_winner_the_model_ranks_above_the_pick():
+    # the winner (key 3) ranks below the pick: the near-winner key 4 rescues
+    ranked_low = (10.0, _row(0, [0, 3, 4], [30.0, 10.0, 10.8], [1.0, 0.5, 2.0]))
+    assert wt.guard_cell(_good(4) + [ranked_low], [], [0])[0] == [4]
+    # every near-winner ranks below the pick: a ranking error, no rescue
+    wrong = (10.0, _row(0, [0, 3, 4], [30.0, 10.0, 10.8], [3.0, 0.5, 2.0]))
+    added, rec = wt.guard_cell(_good(4) + [wrong], [], [0])
+    assert added == [] and (rec["n_collapses"], rec["n_rescuable"]) == (1, 0)
+    # a key beyond `near` of the winner rescues nothing
+    slow = (10.0, _row(0, [0, 3], [30.0, 12.0], [1.0, 2.0]))
+    assert wt.guard_cell(_good(4) + [slow], [], [0])[0] == []
+    assert wt.guard_cell(_good(4) + [slow], [], [0], near=0.8)[0] == [3]
+
+
+def test_the_guard_refuses_a_key_that_adds_a_collapse_or_costs_the_held_out_mean():
+    train = _good(6) + [COLLAPSE]
+    # on a held-out GEMM the model would serve key 3 at 2.5x the winner's time
+    bad = (10.0, _row(0, [0, 3], [10.0, 25.0], [1.0, 2.0]))
+    added, rec = wt.guard_cell(train, _good(3) + [bad], [0])
+    assert added == [] and rec["n_refused"] == 1
+    (ref,) = rec["refused"]
+    assert ref["key"] == 3 and ref["lifts"] == 1
+    assert ref["held_out"]["n_new_below_floor"] == 1
+    assert "1 on its held-out GEMMs" in ref["why_not"]
+    # the same on the cell's own GEMMs
+    added, rec = wt.guard_cell(train + [bad], _good(3), [0])
+    assert added == [] and rec["refused"][0]["own"]["n_new_below_floor"] == 1
+    # no collapse but slower held-out picks: the mean guard
+    slower = [(10.0, _row(0, [0, 3], [10.0, 12.0], [1.0, 2.0])) for _ in range(3)]
+    added, rec = wt.guard_cell(train, _good(3) + slower, [0])
+    assert added == [] and "geomean" in rec["refused"][0]["why_not"]
+    kept, _ = wt.guard_cell(train, _good(3) + slower, [0], mean_floor=0.5)
+    assert kept == [3]
+    # without held-out GEMMs the mean guard reads the cell's own
+    added, rec = wt.guard_cell(train + slower * 4, [], [0])
+    assert added == [] and "its own picks' geomean" in rec["refused"][0]["why_not"]
+
+
+def test_the_guard_adds_at_most_its_keys_most_lifting_first():
+    def collapse(key):
+        return (10.0, _row(0, [0, key], [30.0, 10.0], [1.0, 2.0]))
+
+    train = _good(20) + [collapse(3), collapse(3), collapse(4), collapse(5)]
+    added, rec = wt.guard_cell(train, [], [0], max_keys=2)
+    assert added == [3, 4] and rec["n_lifted"] == 3
+    assert wt.guard_cell(train, [], [0])[0] == [3, 4, 5]
+
+
+def test_the_guard_adds_no_key_for_a_collapse_a_kept_key_lifted():
+    # key 3 rescues the first collapse; the model ranks it above key 4, the
+    # second collapse's own rescue, which key 3 lifts as well
+    first = (10.0, _row(0, [0, 3, 4], [30.0, 10.0, 10.5], [1.0, 2.0, 0.5]))
+    second = (10.0, _row(0, [0, 3, 4], [30.0, 10.2, 10.0], [1.0, 2.0, 1.5]))
+    added, rec = wt.guard_cell(_good(6) + [first, second], [], [0])
+    assert added == [3] and rec["n_lifted"] == 2
+    assert (rec["n_rescuable"], rec["n_refused"]) == (2, 0)
+
+
+def test_the_guard_keeps_no_key_that_undoes_an_earlier_rescue():
+    # key 3 lifts two collapses; key 5 lifts a third but the model ranks it
+    # above key 3 on the first two, where it takes 2.5x the winner's time
+    undone = (10.0, _row(0, [0, 3, 5], [30.0, 10.0, 25.0], [1.0, 2.0, 3.0]))
+    third = (10.0, _row(0, [0, 5], [30.0, 10.0], [1.0, 2.0]))
+    added, rec = wt.guard_cell(_good(6) + [undone, undone, third], [], [0])
+    assert added == [3] and rec["n_lifted"] == 2
+    (ref,) = rec["refused"]
+    assert ref["key"] == 5 and ref["own"]["n_new_below_floor"] == 2
+    # against the tier before the guard alone those picks were below the
+    # floor already: the tier with key 3 is what key 5 must not undo
+    t = wt.tail_change(_good(6) + [undone, undone, third], [0], [0, 3, 5], 0.5)
+    assert t["new"] == []
+    t = wt.tail_change(
+        _good(6) + [undone, undone, third], [0], [0, 3, 5], 0.5, current=[0, 3]
+    )
+    assert t["new"] == [6, 7] and t["healed"] == [8]
+
+
+def test_the_guard_keys_keep_the_held_out_geomean_together():
+    def collapse(key):
+        return (10.0, _row(0, [0, key], [30.0, 10.0], [1.0, 2.0]))
+
+    def slower(key):
+        return (10.0, _row(0, [0, key], [10.0, 10.2], [1.0, 2.0]))
+
+    # each key alone costs the held-out picks x0.9934 of their geomean, the
+    # two together x0.9869: the second is refused
+    train = _good(6) + [collapse(3), collapse(4)]
+    held = _good(1) + [slower(3), slower(4)]
+    assert wt.guard_cell(train, held, [0], max_keys=1)[0] == [3]
+    added, rec = wt.guard_cell(train, held, [0])
+    assert added == [3]
+    (ref,) = rec["refused"]
+    assert ref["key"] == 4 and "held-out picks' geomean x0.98" in ref["why_not"]
+    assert rec["check"]["held_out"]["geomean_ratio"] == pytest.approx(
+        (10.0 / 10.2) ** (1 / 3)
+    )
+
+
+def test_the_guard_extends_the_tier_of_the_cells_with_collapses():
+    hashes = np.array([1000 + i for i in range(6)], dtype=np.uint64)
+    train = _good(6) + [COLLAPSE] + _good(4, cell=1)
+    tier = wt.Tier(
+        k=1,
+        keys={"a": [1000], "b": [1000]},
+        cells={"a": {"n_gemms": 7, "n_keys": 1}, "b": {"n_gemms": 4, "n_keys": 1}},
+    )
+    n = wt.guard(
+        tier,
+        ["a", "b"],
+        [r for _, r in train],
+        [w for w, _ in train],
+        [r for _, r in _good(2)],
+        [w for w, _ in _good(2)],
+        hashes,
+    )
+    assert n == 1 and tier.keys == {"a": [1000, 1003], "b": [1000]}
+    g = tier.cells["a"]["guard"]
+    assert g["added"] == [1003] and g["n_collapses"] == 1
+    assert g["n_held_out_gemms"] == 2 and tier.cells["a"]["n_keys"] == 2
+    assert "guard" not in tier.cells["b"]
+    off = wt.Tier(k=1, keys={"a": [1000]}, cells={"a": {"n_gemms": 7}})
+    rows, wins = [r for _, r in train], [w for w, _ in train]
+    assert wt.guard(off, ["a"], rows, wins, [], [], hashes, max_keys=0) == 0
+    assert off.keys == {"a": [1000]}
+    rec = {"k": 1, "n_cells": 1, "n_keys": 2}
+    text = wt.record_text({**rec, "guard": {"n_keys_added": 1, "n_lifted": 1,
+                                            "n_collapses": 1}})  # fmt: skip
+    assert text.endswith(
+        "(2 in all; 1 added by the tail guard, lifting 1 of 1 collapses on the "
+        "cells' own GEMMs)"
+    )
+    assert "guard" not in wt.record_text({**rec, "guard": {"n_keys_added": 0}})
 
 
 def test_the_bundle_serves_the_tier_it_is_given():
@@ -645,11 +839,21 @@ def test_stage05_gives_every_cell_a_tier_of_measured_keys(tiered):
     rec = bundle[wt.RECORD]
     assert rec["k"] == 3 and rec["n_cells"] == len(bundle["models"]) == 2
     assert rec["pool"]["n_kernels"] == len(kernel_pool())
-    measured = measured_keys(data, ident)
-    for entry in bundle["models"].values():
-        assert 0 < len(entry["view_key_hashes"]) <= 3
-        assert set(entry["view_key_hashes"]) <= measured
+    assert rec["guard"]["keys"] == wt.GUARD_KEYS
+    assert rec["guard"]["n_held_out_gemms"] > 0
     doc = json.loads((out / wt.TIER_FILE).read_text())
+    measured = measured_keys(data, ident)
+    for label, entry in bundle["models"].items():
+        added = (doc["cells"][label].get("guard") or {}).get("added") or []
+        assert entry["view_key_hashes"][
+            len(entry["view_key_hashes"]) - len(added) :
+        ] == (added)
+        assert 0 < len(entry["view_key_hashes"]) - len(added) <= 3
+        assert len(added) <= wt.GUARD_KEYS
+        assert set(entry["view_key_hashes"]) <= measured
+    assert rec["guard"]["n_keys_added"] == sum(
+        len((c.get("guard") or {}).get("added") or []) for c in doc["cells"].values()
+    )
     assert {k: c["keys"] for k, c in doc["cells"].items()} == {
         k: e["view_key_hashes"] for k, e in bundle["models"].items()
     }
@@ -657,6 +861,7 @@ def test_stage05_gives_every_cell_a_tier_of_measured_keys(tiered):
     assert metrics["whitelist_tier"]["k"] == 3 and metrics["serving"]["whitelist_tier"]
     options = json.loads((out / s5.MODEL_OPTIONS_FILE).read_text())
     assert options["whitelist_tier_k"] == 3
+    assert options["whitelist_tier_guard_keys"] == wt.GUARD_KEYS
     cells = json.loads((out / "cells.json").read_text())["cells"]
     assert all(c["n_whitelist_tier_keys"] == len(
         bundle["models"][c["label"]]["view_key_hashes"]) for c in cells)  # fmt: skip
@@ -833,8 +1038,15 @@ def test_stage05_and_the_rebuild_count_the_contexts_as_asked(tmp_path, tw):
     def keys(b):
         return {k: e["view_key_hashes"] for k, e in b["models"].items()}
 
-    assert all(0 < len(v) <= 3 + wt.RESERVE_KEYS for v in keys(bundle).values())
     doc = json.loads((out / wt.TIER_FILE).read_text())
+
+    def greedy(b, d):
+        return {
+            k: len(v) - len((d["cells"][k].get("guard") or {}).get("added") or [])
+            for k, v in keys(b).items()
+        }
+
+    assert all(0 < n <= 3 + wt.RESERVE_KEYS for n in greedy(bundle, doc).values())
     both = [c["contexts"] for c in doc["cells"].values() if "contexts" in c]
     assert both and all(list(c) == ["exclusive", "cu50"] for c in both)
     assert (
@@ -862,9 +1074,22 @@ def test_stage05_and_the_rebuild_count_the_contexts_as_asked(tmp_path, tw):
     pooled = load_bundle(tmp_path / "pooled" / "models.pt")
     assert pooled[wt.RECORD]["contexts"] == "pooled"
     assert "reserve_k" not in pooled[wt.RECORD]
-    assert all(0 < len(v) <= 3 for v in keys(pooled).values())
+    pooled_doc = json.loads((tmp_path / "pooled" / wt.TIER_FILE).read_text())
+    assert all(0 < n <= 3 for n in greedy(pooled, pooled_doc).values())
     options = json.loads((tmp_path / "pooled" / s5.MODEL_OPTIONS_FILE).read_text())
     assert options["whitelist_tier_contexts"] == "pooled"
+    assert options["whitelist_tier_guard_keys"] == wt.GUARD_KEYS
+    rebuild(tmp_path / "unguarded", "--guard-keys", 0)
+    unguarded = load_bundle(tmp_path / "unguarded" / "models.pt")
+    assert unguarded[wt.RECORD]["guard"]["keys"] == 0
+    assert unguarded[wt.RECORD]["guard"]["n_keys_added"] == 0
+    assert all(0 < len(v) <= 3 + wt.RESERVE_KEYS for v in keys(unguarded).values())
+    assert (
+        json.loads((tmp_path / "unguarded" / s5.MODEL_OPTIONS_FILE).read_text())[
+            "whitelist_tier_guard_keys"
+        ]
+        == 0
+    )
     proc = rebuild(tmp_path / "none", "--k", 0, "--contexts", "balanced", rc=2)
     assert "--k 0 removes it" in proc.stderr
 

@@ -976,6 +976,54 @@ def test_the_per_cell_gate_adds_to_the_deploy_gate(
     assert rec["deployed"] is False and rec["gate"]["passed"] is False
 
 
+def test_the_deploy_record_keeps_the_deploy_gates_own_verdict(
+    tmp_path, trained, shipped, gate_dir, monkeypatch
+):
+    """What a repair of a bundle the per-cell gate keeps out reads
+    (lib/cell_merge.py): the deploy gate's verdict before the per-cell
+    gate's (`deploy_gate`), the sha256 of the models.pt the deploy packed
+    (`models_sha256`), and what a repair changed in the bundle (`repair`,
+    with the note that the audit GEMMs that flagged its cells judged it)."""
+    pytest.importorskip("tilewright")
+    import hashlib
+
+    from lib import cell_merge as cm
+
+    repair = {"schema": "collapse_repair_v1", "outcome": "1 base cell(s) carried"}
+    (trained / "metrics.json").write_text(json.dumps({"repair": repair}))
+    stub_audit(monkeypatch, audit_record(0.85), audit_record(0.95))
+    out = tmp_path / "out"
+    gate = s6.Gate(csv_dirs=[gate_dir], bootstrap=0)
+    assert cell_deploy(tmp_path, trained, out, shipped, gate=gate) == 0
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert rec["deployed"] is False and rec["cell_gate"]["passed"] is False
+    assert rec["deploy_gate"] == {"passed": True, "reason": "no target"}
+    want = hashlib.sha256((trained / "models.pt").read_bytes()).hexdigest()
+    assert rec["models_sha256"] == want
+    assert rec["repair"] == {
+        **repair,
+        "selected_by_audit": True,
+        "selection_note": cm.SELECTION_NOTE,
+    }
+    # a deploy gate that keeps the bundle out says so itself
+    below = tmp_path / "below"
+    gate = s6.Gate(csv_dirs=[gate_dir], target=1.01, bootstrap=0)
+    assert cell_deploy(tmp_path, trained, below, shipped, gate=gate) == 0
+    rec = json.loads((below / "deploy_record.json").read_text())
+    assert rec["deployed"] is False and rec["deploy_gate"]["passed"] is False
+    assert rec["deploy_gate"]["reason"].endswith(
+        "on the gate GEMMs is below the target"
+    )
+    # a bundle no repair changed records none
+    (trained / "metrics.json").write_text(json.dumps({}))
+    stub_audit(monkeypatch, audit_record(0.95), audit_record(0.95))
+    good = tmp_path / "good"
+    assert cell_deploy(tmp_path, trained, good, shipped) == 0
+    rec = json.loads((good / "deploy_record.json").read_text())
+    assert rec["deployed"] is True and rec["repair"] is None
+    assert rec["deploy_gate"] == {"passed": True, "reason": "no gate"}
+
+
 def test_cell_gate_decision():
     gate = s6.CellGate(Path("run/round_2"), {})
     failed = {"passed": False, "reason": "1 cell(s) worse"}

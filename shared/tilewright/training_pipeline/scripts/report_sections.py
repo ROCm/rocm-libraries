@@ -366,6 +366,8 @@ def recommend(ev, settings):
         from lib import subcells
 
         depth = settings.get("max_split_depth", DEFAULT_MAX_SPLIT_DEPTH)
+        if depth <= 0:
+            return "retrain", why + "; splits are off (validate.max_split_depth 0)"
         if not subcells.split_eligible_axes(ev.cell, depth):
             return "retrain", why + "; " + (
                 f"it cannot split: it is at validate.max_split_depth {depth}"

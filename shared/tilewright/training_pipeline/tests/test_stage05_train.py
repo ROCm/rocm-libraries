@@ -2600,6 +2600,24 @@ def test_declared_contexts_and_catalog_selection(tmp_path):
     ]
 
 
+def test_a_model_declares_no_share_below_the_smallest_it_trained():
+    """The declared range starts at the smallest share the training GEMMs
+    had, so that serving falls back below it; --min-cu-fraction can only
+    raise that floor."""
+    gemms = [{}, {"cu_budget": 192}, {"cu_budget": 64}, {"cu_budget": 32}]
+    assert s5.trained_cu_fraction(gemms, 256) == 0.125
+    assert s5.declared_contexts(gemms, 256)["min_cu_fraction"] == 0.125
+    assert s5.declared_contexts(gemms, 256, 0.0625)["min_cu_fraction"] == 0.125
+    assert s5.declared_contexts(gemms[:3], 256, 0.125)["min_cu_fraction"] == 0.25
+    assert s5.declared_contexts(gemms, 256, 0.5)["min_cu_fraction"] == 0.5
+    every = [{}, {"cu_budget": 256}, {"cu_budget": 0, "schedule": "dynamic"}]
+    assert s5.trained_cu_fraction(every, 256) == 1.0
+    assert s5.declared_contexts(every, 256, 0.25)["min_cu_fraction"] == 1.0
+    assert s5.declared_contexts(gemms, 96)["min_cu_fraction"] == 32 / 96
+    with pytest.raises(ValueError, match="must be in"):
+        s5.declared_contexts(gemms, 256, 1.5)
+
+
 # ── training schedule, targets and checkpoints ───────────────────────────────
 
 

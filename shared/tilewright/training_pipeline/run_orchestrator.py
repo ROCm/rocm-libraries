@@ -38,12 +38,16 @@ Modes:
               commands and writes nothing.
     audit     build, resume or extend the audit set in --run-dir (its own
               directory, lib/audit.py): shapes from stage01 with
-              audit.seed, none of the --source-run-dir rounds' shapes,
-              benched over every pool and bank kernel in every context in
+              audit.seed, none of the --source-run-dir rounds' shapes nor
+              of the audit.held_out lists outside the directory, benched
+              over every pool and bank kernel in every context in
               resumable parts; a later pool change benches only the
               changed kernels. A training config points at it with
               audit.dir: rounds exclude its shapes, stage05 refuses it,
               stage04b and stage06 report the models on it (audit.json).
+              audit.held_out names the library's other held-out lists
+              (fresh audits, OOD lists; lib/held_out.py), whose GEMMs the
+              rounds exclude too.
 
 Deploy:
 
@@ -174,14 +178,17 @@ from lib import audit_v2 as v2lib  # noqa: E402
 from lib import bank_pool  # noqa: E402
 from lib import bench_env as benv  # noqa: E402
 from lib import cell_evidence as ce  # noqa: E402
+from lib import cell_merge as cm  # noqa: E402
 from lib import contexts as ctxlib  # noqa: E402
 from lib import correctness as cxlib  # noqa: E402
 from lib import correctness_gate as cgate  # noqa: E402
 from lib import device_values as dvlib  # noqa: E402
+from lib import external_sets as xslib  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_health  # noqa: E402
 from lib import gpu_lease  # noqa: E402
 from lib import hazards as hazlib  # noqa: E402
+from lib import held_out as hol  # noqa: E402
 from lib import hipblaslt_launch as hllib  # noqa: E402
 from lib import host_load  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
@@ -243,6 +250,7 @@ AUDIT_RESULTS_DIR = rb.AUDIT_RESULTS_DIR
 WEAK_SPOTS_DIR = "weak_spots"
 AUDIT_EVAL_SCRIPT = THIS_DIR / "scripts" / "audit_eval.py"
 AUDIT_V2_SCRIPT = THIS_DIR / "scripts" / "audit_v2.py"
+REPAIR_SCRIPT = THIS_DIR / "scripts" / "repair_bundle.py"
 
 
 class ConfigError(Exception):
@@ -320,6 +328,9 @@ _WARMUP_LINE = WARMUP_LINE_DEFAULTS
 _REREAD = rebenchlib.REREAD_DEFAULTS
 # stage05 --whitelist-tier-contexts (lib/whitelist_tier.py CONTEXT_MODES).
 WHITELIST_TIER_CONTEXTS = ("pooled", "balanced", "reserve")
+# stage05's default --whitelist-tier-guard-keys (lib/whitelist_tier.py
+# GUARD_KEYS): the keys the tail guard may add to a cell's tier.
+WHITELIST_TIER_GUARD_KEYS = 8
 _CONTEXT = _section(
     {
         "cu_budget": _int(default=0, minimum=0),
@@ -330,6 +341,7 @@ _CONTEXT = _section(
         "cotenant": _bool(default=False),
         "fraction": _num(default=1.0, minimum=0, maximum=1, exclusive_minimum=True),
         "name": _str(pattern=r"^[A-Za-z0-9_.-]+$"),
+        "enabled": _bool(default=True),
     }
 )
 EXCLUDE_KEYS = (
@@ -402,6 +414,8 @@ SCHEMA = _section(
                 "shapes_per_cell": _int(default=150, minimum=1),
                 "seed": _int(default=42),
                 "n_strata": _int(default=1, minimum=1),
+                "targeted_per_tail_gemm": _int(default=4, minimum=0),
+                "targeted_max_per_leaf": _int(default=32, minimum=0),
                 "exclude": _list(
                     _section({key: _int(minimum=0) for key in EXCLUDE_KEYS})
                 ),
@@ -681,6 +695,7 @@ SCHEMA = _section(
             {
                 "list": _list(_CONTEXT, default=[]),
                 "holdout": _list(_CONTEXT, default=[]),
+                "granule": _int(default=ctxlib.CU_BUDGET_GRANULE, minimum=1),
                 "seed": _int(default=42),
                 "cotenant_binary": _str(nullable=True),
                 "path_append": _list(_str(), nullable=True),
@@ -724,6 +739,9 @@ SCHEMA = _section(
                 "whitelist_tier_k": _int(default=0, minimum=0),
                 "whitelist_tier_contexts": _str(
                     default="pooled", choices=WHITELIST_TIER_CONTEXTS
+                ),
+                "whitelist_tier_guard_keys": _int(
+                    default=WHITELIST_TIER_GUARD_KEYS, minimum=0
                 ),
                 "clip_features": _bool(default=True),
                 "small_batched_rule": _bool(default=False),
@@ -794,6 +812,8 @@ SCHEMA = _section(
                 ),
                 "rebench_misses": _bool(default=True),
                 "rebench_runs": _int(default=3, minimum=1),
+                "tail_floor": Spec("threshold", default=0.7),
+                "collapse_retrain": _bool(default=True),
             }
         ),
         "full": _section(
@@ -804,6 +824,7 @@ SCHEMA = _section(
                         "enabled": _bool(default=False),
                         "gate": _str(default="not-worse", choices=FINAL_GATES),
                         "recipe": Spec("mapping", nullable=True),
+                        "repair": _bool(default=True),
                     }
                 ),
             }
@@ -811,6 +832,7 @@ SCHEMA = _section(
         "audit": _section(
             {
                 "dir": _str(nullable=True),
+                "held_out": _list(_str(), default=[]),
                 "build": _str(default="before", choices=AUDIT_BUILDS),
                 "devices": _list(_int(minimum=0), nullable=True, min_len=1),
                 "v2": _str(default="rounds", choices=AUDIT_V2_MODES),
@@ -935,6 +957,9 @@ SCHEMA = _section(
                     default=auditlib.CELL_GATE_DEFAULTS["groups"],
                     choices=auditlib.CELL_GATE_GROUPS,
                 ),
+                "repair": _bool(default=False),
+                "repair_max_cells": _int(default=cm.DEFAULT_MAX_CELLS, minimum=1),
+                "repair_max_attempts": _int(default=cm.DEFAULT_MAX_ATTEMPTS, minimum=1),
             }
         ),
         "report": _section(
@@ -1545,7 +1570,7 @@ def validate_config(
     _guard_config_checks(cfg, errors, warnings)
     errors += suslib.config_errors(cfg)
     _correctness_config_checks(cfg, errors, mode)
-    _cell_gate_config_checks(cfg, errors)
+    _cell_gate_config_checks(cfg, errors, warnings)
     overrides = [k for k in benv.runtime_env(cfg) if benv.is_launch_override(k)]
     if overrides:
         warnings.append(
@@ -1638,6 +1663,11 @@ def validate_config(
         warnings.append(
             "validate.max_split_depth > 0 but full.total_rounds < 3: the final "
             "round never splits, so no split can happen"
+        )
+    elif float(cfg_get(cfg, "validate.structural_split_min_octaves") or 0) > 0:
+        warnings.append(
+            "validate.structural_split_min_octaves is ignored: "
+            "validate.max_split_depth 0 turns splitting off"
         )
     _context_config_checks(cfg, errors, warnings)
     _audit_config_checks(cfg, errors)
@@ -1766,9 +1796,11 @@ def _whitelist_tier_config_checks(
 ) -> None:
     """train.whitelist_tier_k against the catalog, the smart_K whitelist and
     launch keys of the train section of `cfg`; train.whitelist_tier_contexts
-    against the tier and the contexts the run trains."""
+    against the tier and the contexts the run trains, and
+    train.whitelist_tier_guard_keys against the tier."""
     k = cfg_get(cfg, "train.whitelist_tier_k")
     mode = cfg_get(cfg, "train.whitelist_tier_contexts")
+    guard = cfg_get(cfg, "train.whitelist_tier_guard_keys")
     if mode != "pooled" and not k:
         warnings.append(
             f"train.whitelist_tier_contexts {mode}: ignored, the bundles get no "
@@ -1779,6 +1811,11 @@ def _whitelist_tier_config_checks(
             f"train.whitelist_tier_contexts {mode}: every training GEMM runs "
             f"exclusive (contexts.list trains no other context), so the tier "
             f"is the pooled one"
+        )
+    if guard != WHITELIST_TIER_GUARD_KEYS and not k:
+        warnings.append(
+            f"train.whitelist_tier_guard_keys {guard}: ignored, the bundles get "
+            f"no whitelist tier (train.whitelist_tier_k is 0)"
         )
     if not k:
         return
@@ -2169,9 +2206,10 @@ UNPINNED_KEYS = (
     "hazards.cache_dir",
 )
 # Also unpinned in an audit directory: the keys of the training configs its
-# benches never read, so that the runs sharing the set may differ in them,
-# and the hazard canary's, whose quarantine only leaves kernels out of the
-# pool the set's completeness is checked against (`config_pool_digests`).
+# benches never read, so that the runs sharing the set may differ in them
+# (the held-out lists too, which only its stage01 reads and records), and
+# the hazard canary's, whose quarantine only leaves kernels out of the pool
+# the set's completeness is checked against (`config_pool_digests`).
 AUDIT_UNPINNED_KEYS = (
     "config_id",
     "seed.seed",
@@ -2194,6 +2232,7 @@ AUDIT_UNPINNED_KEYS = (
     "full",
     "deploy",
     "audit.dir",
+    "audit.held_out",
     "audit.target",
     "audit.bootstrap",
     "correctness",
@@ -2221,11 +2260,15 @@ PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # Keys pinned only at a value other than the one at which they change
 # nothing, which is what a pin written before they existed means, so that
 # the runs and audit directories produced before them keep their pins: the
-# re-reads' offsets, and the canaries' absolute floors (0: none).
+# re-reads' offsets, the canaries' absolute floors (0: none), the held-out
+# lists (none) and the CU budget granule (32, lib/contexts.py's
+# PREDATING_GRANULE, not its default, which may change).
 PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     **{f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()},
     "bench.canary.tolerance_us": 0.0,
     "audit.canary_tolerance_us": 0.0,
+    "audit.held_out": [],
+    "contexts.granule": ctxlib.PREDATING_GRANULE,
 }
 
 
@@ -2247,7 +2290,8 @@ def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]
     PINNED_WHEN_SET it does not set and the keys of PINNED_UNLESS_NEUTRAL at
     their neutral values, and the digests of the files `correctness.lists`
     names (`correctness.lists_sha256`), whose contents decide which kernels
-    leave the pool."""
+    leave the pool, and of the GEMMs of the `audit.held_out` lists
+    (`audit.held_out_sha256`), which decide what the rounds may draw."""
     skip = UNPINNED_KEYS + (AUDIT_UNPINNED_KEYS if audit else ())
     skip += tuple(s for s in PINNED_WHEN_SET if not _config_sets(cfg, s))
     out: Dict[str, Any] = {}
@@ -2272,6 +2316,8 @@ def pinned_config(cfg: Mapping[str, Any], audit: bool = False) -> Dict[str, Any]
     walk(SCHEMA, "")
     if "correctness.lists" in out and out["correctness.lists"]:
         out["correctness.lists_sha256"] = cxlib.list_digests(out["correctness.lists"])
+    if out.get("audit.held_out"):
+        out["audit.held_out_sha256"] = hol.digests(out["audit.held_out"])
     return out
 
 
@@ -2297,9 +2343,10 @@ def write_snapshot(
 ) -> Path:
     """Write `<run_dir>/configs/<ts>_<mode>.yaml` (expanded, with the bench
     timing resolved and summed up in its first lines, followed by the
-    invocation's `pin` and the `resolved` lines: what the invocation read
-    from the device) next to the raw source text; never reuses an existing
-    name."""
+    invocation's `pin` and the `resolved` lines: what the invocation
+    resolved when it started, a value read from the bench device naming the
+    device, and the context entries the config turns off) next to the raw
+    source text; never reuses an existing name."""
     out_dir = run_dir / "configs"
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2332,8 +2379,7 @@ def write_snapshot(
             )
         if resolved:
             head += textwrap.wrap(
-                "Resolved from the bench device at the start of this "
-                "invocation: " + "; ".join(resolved),
+                "Resolved at the start of this invocation: " + "; ".join(resolved),
                 width=77,
                 break_on_hyphens=False,
             )
@@ -2506,9 +2552,10 @@ def _context_config_checks(
     if lo is not None and lo < 1 and not any(ctxlib.reduces_cus(m) for m in trained):
         warnings.append(
             f"train.min_cu_fraction {lo}: no trained context (contexts.list) "
-            f"runs on fewer CUs than the device has, so the models would declare "
-            f"budgets down to {lo} of the CUs without data from any; train a "
-            f"reduced-CU context or leave train.min_cu_fraction unset"
+            f"runs on fewer CUs than the device has, so the models declare "
+            f"every CU only (a model declares no share below the smallest it "
+            f"trained); train a reduced-CU context or leave "
+            f"train.min_cu_fraction unset"
         )
     if cfg_get(cfg, "contexts.replan") and not cfg_get(cfg, "planner.enabled"):
         errors.append("contexts.replan needs planner.enabled")
@@ -2529,6 +2576,7 @@ def _audit_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
     devices = cfg_get(cfg, "audit.devices") or []
     if len(set(devices)) != len(devices):
         errors.append("audit.devices: duplicate device indices")
+    errors += held_out_errors(cfg)
     if cfg_get(cfg, "audit.official") == "sustained" and not cfg_get(
         cfg, "audit.sustained"
     ):
@@ -2551,6 +2599,62 @@ def _audit_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
             f"parallel benches the audit set beside the rounds on devices of "
             f"its own"
         )
+
+
+def held_out_errors(cfg: Mapping[str, Any]) -> List[str]:
+    """audit.held_out: every entry a list lib/held_out.py reads whole, none
+    named twice, and none audit.dir's own list, which every round leaves out
+    already."""
+    audit = auditlib.config_dir(cfg)
+    own = (
+        {audit.resolve(), auditlib.shapes_yaml(audit).resolve()}
+        if audit is not None
+        else set()
+    )
+    errors: List[str] = []
+    seen: Dict[Path, str] = {}
+    for entry in auditlib.held_out_entries(cfg):
+        if Path(entry).resolve() in own:
+            errors.append(
+                f"audit.held_out: {entry} is audit.dir's list, which every round "
+                f"leaves out already"
+            )
+            continue
+        try:
+            lst = hol.read(entry)
+        except ValueError as e:
+            errors.append(f"audit.held_out: {e}")
+            continue
+        if lst.file in seen:
+            errors.append(
+                f"audit.held_out: {entry} and {seen[lst.file]} name the same list"
+            )
+        seen.setdefault(lst.file, entry)
+    return errors
+
+
+def held_out_overlaps(cfg: Mapping[str, Any], run_dir: Path) -> List[str]:
+    """One line per audit.held_out list that shares GEMMs with shapes the
+    run's rounds drew (`<round>/stage01/shapes.yaml`): drawn before the list
+    held them out, they are training data of those rounds and of the final
+    retrain; later rounds draw none of them."""
+    lists, _ = hol.read_all(auditlib.held_out_entries(cfg))
+    drawn = [
+        (rd.name, auditlib.read_shapes(rd / "stage01" / "shapes.yaml"))
+        for rd in (round_dirs(run_dir) if lists else [])
+    ]
+    out = []
+    for lst in lists:
+        hits = [(name, len(lst.gemms & shapes)) for name, shapes in drawn]
+        hits = [(name, n) for name, n in hits if n]
+        if hits:
+            where = ", ".join(f"{n} in {name}" for name, n in hits)
+            out.append(
+                f"audit.held_out {lst.entry}: rounds drew its GEMMs before it "
+                f"held them out ({where}); they are training data of those "
+                f"rounds and of the final retrain"
+            )
+    return out
 
 
 # train.* keys a final-retrain recipe cannot set: stage05 reads them from the
@@ -2754,7 +2858,7 @@ def _min_cu_fraction_errors(cfg: Mapping[str, Any], n_cu: int) -> List[str]:
 
 
 def _context_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
-    if not (ctxlib.trained_entries(cfg) or cfg_get(cfg, "contexts.holdout")):
+    if not (ctxlib.trained_entries(cfg) or ctxlib.holdout_entries(cfg)):
         return []
     from lib import hardware as hwlib
 
@@ -2802,12 +2906,13 @@ def resolve_contexts(
     cfg: Dict[str, Any], device: int
 ) -> Tuple[Dict[str, Any], List[str]]:
     """(`cfg` with every contexts entry that gives a cu_fraction resolved
-    for the CU count of bench device `device` (lib/contexts.py
-    `resolve_fractions`), one line per entry saying what it became).
-    ConfigError when the CU count cannot be read or the resolved contexts
-    break a rule."""
+    for the CU count of bench device `device` and without the entries the
+    config turns off (lib/contexts.py `resolve_fractions`), one line per
+    entry saying what it became, after a line naming the CUs the shares are
+    of, `shares_of`). ConfigError when the CU count cannot be read or the
+    resolved contexts break a rule."""
     if not ctxlib.has_unresolved(cfg):
-        return cfg, []
+        return ctxlib.resolve_fractions(cfg, None)
     from lib import hardware as hwlib
 
     try:
@@ -2819,14 +2924,34 @@ def resolve_contexts(
                 f"{device}, which cannot be read ({e})"
             ]
         )
-    try:
-        out, lines = ctxlib.resolve_fractions(cfg, n_cu)
-    except ValueError as e:
-        raise ConfigError([f"contexts: {e}"])
+    out, lines = ctxlib.resolve_fractions(cfg, n_cu)
     errors = ctxlib.context_errors(out, n_cu) + _min_cu_fraction_errors(out, n_cu)
     if errors:
         raise ConfigError(errors)
-    return out, lines
+    return out, [shares_of(cfg, device, n_cu)] + lines
+
+
+def shares_of(cfg: Mapping[str, Any], device: int, n_cu: int) -> str:
+    """The line saying what the contexts' CU shares are shares of: the
+    `n_cu` CUs of bench device `device`, from `hardware.n_cu` or its KFD
+    node, and the compute partition the device is, when it is one partition
+    of its card: there the shares are of the partition's CUs."""
+    from lib import hardware as hwlib
+
+    source = "hardware.n_cu" if cfg_get(cfg, "hardware.n_cu") is not None else None
+    try:
+        _, mode = hwlib.kfd_device_partition(device)
+    except (OSError, RuntimeError, ValueError):
+        mode = None
+    part = (
+        f", one {mode} partition of its card"
+        if mode and mode != kfd.FULL_DEVICE_PARTITION
+        else ""
+    )
+    return (
+        f"contexts: CU shares of the {n_cu} CUs of bench device {device}{part} "
+        f"({source or 'its KFD node'})"
+    )
 
 
 def resolve_num_xcd(
@@ -3024,10 +3149,22 @@ def resolve_correctness(
     return out
 
 
-def _cell_gate_config_checks(cfg: Mapping[str, Any], errors: List[str]) -> None:
+def _cell_gate_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], warnings: List[str]
+) -> None:
     """With the per-cell gate on and an audit set, audit.bootstrap must give
-    its cell tests enough sign flips to reach gate.alpha."""
+    its cell tests enough sign flips to reach gate.alpha; gate.repair
+    repairs what that gate flags, so it warns without one."""
     settings = auditlib.cell_gate_settings(cfg)
+    if cfg_get(cfg, "gate.repair") and (
+        settings is None or auditlib.config_dir(cfg) is None
+    ):
+        warnings.append(
+            "gate.repair repairs the base cells the per-cell gate flags on the "
+            "audit set, which "
+            + ("gate.per_cell false" if settings is None else "no audit.dir")
+            + " turns off: no round bundle is repaired"
+        )
     if settings is None or auditlib.config_dir(cfg) is None:
         return
     need = auditlib.min_flips(settings["alpha"])
@@ -3520,11 +3657,28 @@ def audit_binding(
     }
 
 
+def _bound_text(key: str, have: Any, want: Any) -> Tuple[str, str]:
+    """`have` and `want` of the bound key `key` as a refusal names them:
+    contexts by their labels when those differ."""
+    if key == "contexts" and isinstance(have, list) and isinstance(want, list):
+        was, now = (
+            [c.get("name") if isinstance(c, Mapping) else c for c in v]
+            for v in (have, want)
+        )
+        if was != now:
+            return f"[{', '.join(map(str, was))}]", f"[{', '.join(map(str, now))}]"
+    return repr(have), repr(want)
+
+
 def audit_binding_errors(
-    audit_dir: Path, want: Mapping[str, Any], m: Optional[Mapping[str, Any]] = None
+    audit_dir: Path,
+    want: Mapping[str, Any],
+    m: Optional[Mapping[str, Any]] = None,
+    remedy: str = "point audit.dir at a new audit set for other audit settings",
 ) -> List[str]:
     """Errors when the manifest `m` (default the one in `audit_dir`) was
-    built with another binding than `want` (`audit_binding`)."""
+    built with another binding than `want` (`audit_binding`); each ends
+    with `remedy`."""
     if m is None:
         m = auditlib.manifest(audit_dir)
         if m is None:
@@ -3532,36 +3686,64 @@ def audit_binding_errors(
     if m.get("schema") != auditlib.SCHEMA_VERSION:
         return [f"{Path(audit_dir) / auditlib.MANIFEST} is not an audit manifest"]
     have = dict(m.get("binding") or {})
-    return [
-        f"{audit_dir} was built with {k}={have.get(k)!r}; this config has "
-        f"{want[k]!r} (use another --run-dir for other audit settings)"
-        for k in want
-        if have.get(k) != want[k]
-    ]
+    errs = []
+    for k in want:
+        if have.get(k) == want[k]:
+            continue
+        was, now = _bound_text(k, have.get(k), want[k])
+        why = (
+            "the contexts follow the CU count of the bench device or partition "
+            "and the entries the config turns on; "
+            if k == "contexts"
+            else ""
+        )
+        errs.append(
+            f"{audit_dir} was built with {k}={was}; this config has {now} "
+            f"({why}{remedy})"
+        )
+    return errs
+
+
+def audit_set_binding_errors(cfg: Mapping[str, Any]) -> List[str]:
+    """`audit_binding_errors` of the audit set audit.dir names against the
+    config's binding (of its `lib.audit.bench_config`), complete or not: a
+    run scores its models on the set's groups, which were benched in the
+    contexts the set was built with. Empty without audit.dir or a manifest
+    there."""
+    d = auditlib.config_dir(cfg)
+    m = auditlib.manifest(d) if d is not None else None
+    if m is None:
+        return []
+    acfg = auditlib.bench_config(cfg, audit_devices(cfg))
+    return audit_binding_errors(d, audit_binding(cfg, acfg), m)
 
 
 def _audit_build_errors(
     cfg: Mapping[str, Any], paths: Paths, known: Sequence[str] = ()
 ) -> List[str]:
-    """What keeps a training run from building the audit set it is
-    incomplete for (audit.build before or parallel): the audit directory's
-    place, the settings it was built with, a plan of another hipBLASLt
-    build (`audit_build_refusal`), another builder holding it, and the
-    bench preflight of its config (`lib.audit.bench_config`); errors
-    already in `known` are not repeated. With audit.build off, a final
-    retrain gated on the audit set waits for it at the end of the run: a
-    warning."""
+    """What keeps a training run from using its audit set: one built with
+    other settings or contexts, complete or not (`audit_set_binding_errors`).
+    And from building the audit set it is incomplete for (audit.build
+    before or parallel): the audit directory's place, a plan of another
+    hipBLASLt build (`audit_build_refusal`), another builder holding it,
+    and the bench preflight of its config (`lib.audit.bench_config`);
+    errors already in `known` are not repeated. With audit.build off, a
+    final retrain gated on the audit set waits for it at the end of the
+    run: a warning."""
     d = auditlib.config_dir(cfg)
     if d is None:
         return []
+    bound = audit_set_binding_errors(cfg)
     st, why = audit_status(cfg, paths)
     if st == "ok" or (st == "error" and known):
-        return []
+        return bound
     if st == "error":
-        return [f"audit.dir: {why}"]
+        return bound + [f"audit.dir: {why}"]
     if cfg_get(cfg, "audit.build") == "off":
-        if cfg_get(cfg, "full.final_retrain.enabled") and (
-            cfg_get(cfg, "full.final_retrain.gate") == "not-worse"
+        if (
+            not bound
+            and cfg_get(cfg, "full.final_retrain.enabled")
+            and cfg_get(cfg, "full.final_retrain.gate") == "not-worse"
         ):
             ui.warn(
                 "preflight",
@@ -3569,10 +3751,10 @@ def _audit_build_errors(
                 f"off: full.final_retrain.gate not-worse decides once --mode "
                 f"audit completes it, and the run exits 1 until then",
             )
-        return []
+        return bound
     acfg = auditlib.bench_config(cfg, audit_devices(cfg))
     errs = audit_location_errors(d)
-    errs += audit_binding_errors(d, audit_binding(cfg, acfg))
+    errs += bound
     try:
         refusal = audit_build_refusal(d, config_pool_digests(cfg, paths))
     except (OSError, ValueError, RuntimeError, KeyError):
@@ -3901,7 +4083,8 @@ def _audit_preflight(cfg: Mapping[str, Any], paths: Paths) -> List[str]:
     """With audit.build off, audit.dir names an audit set: an error without
     one, since the run builds none. With before or parallel the run builds
     or extends the set itself (`AuditBuild`; `_audit_build_errors` checks
-    that it can). A set that is still benched or misses kernels of the pool
+    that it can, and in every mode refuses a set built with other settings
+    or contexts). A set that is still benched or misses kernels of the pool
     is reported when the run starts (`AuditBuild.prepare`)."""
     d = auditlib.config_dir(cfg)
     if d is None or cfg_get(cfg, "audit.build") != "off":
@@ -4064,6 +4247,7 @@ def preflight(
             errs += disk_errs
             for w in disk_warns:
                 ui.warn("disk", w)
+    errs += xslib.config_errors(cfg)
     errs += _tilewright_errors(str(cfg_get(cfg, "train.catalog") or "v2"))
     return list(dict.fromkeys(errs))
 
@@ -4685,7 +4869,11 @@ def option_changes(
     return out
 
 
-def record_cell_origins(s5: Path, lineage: Sequence[Path]) -> None:
+def record_cell_origins(
+    s5: Path,
+    lineage: Sequence[Path],
+    carried: Optional[Tuple[Path, Iterable[str]]] = None,
+) -> None:
     """`stage05/cell_origins.json` of the bundle stage05 wrote into `s5`:
     for each cell of its model that it did not train but carried from the
     bundles before it (`lineage`, in the order the run deploys them), the
@@ -4695,7 +4883,9 @@ def record_cell_origins(s5: Path, lineage: Sequence[Path]) -> None:
     (`trained_model_options`), so that the bundle still tells them once
     that bundle has left the run or trained again (a final retrain
     replaced, a round run again). `source` names the latest bundle of
-    `lineage`."""
+    `lineage`. `carried` (a bundle, its labels) names cells a collapse
+    repair took from that bundle (`FinalRetrain.repair`): their origins
+    are that bundle's, from the lineage up to it."""
     cj = _read_json(s5 / "cells.json")
     if not isinstance(cj, dict) or not lineage:
         return
@@ -4704,6 +4894,17 @@ def record_cell_origins(s5: Path, lineage: Sequence[Path]) -> None:
         labels = [c.get("label") for c in cj.get("cells") or [] if isinstance(c, dict)]
     trained = {str(c["label"]) for c in rb.trained_entries(s5.parent)}
     origins = rb.cell_origins(lineage)
+    if carried is not None:
+        base, taken = Path(carried[0]), set(carried[1])
+        upto = [b for b in lineage if rb.bundle_key(b) <= rb.bundle_key(base)]
+        if base not in upto:
+            upto.append(base)
+        theirs = rb.cell_origins(upto)
+        for label in taken:
+            if label in theirs:
+                origins[label] = theirs[label]
+            else:
+                origins.pop(label, None)
     table: Dict[str, Any] = {}
     cells: Dict[str, Any] = {}
     for label in (str(x) for x in labels if x):
@@ -4765,6 +4966,12 @@ def describe_option_changes(
     if unknown:
         parts.append(f"{unknown} trained with unknown options")
     return ", ".join(parts)
+
+
+def _write_record(path: Path, rec: Mapping[str, Any]) -> None:
+    from lib.fs import atomic_write_text
+
+    atomic_write_text(Path(path), json.dumps(_json_safe(rec), indent=2) + "\n")
 
 
 def _sha256_file(path: Path) -> Optional[str]:
@@ -4978,6 +5185,7 @@ def bundle_numbers(run_dir: Path, rec_path: Optional[Path]) -> Dict[str, Any]:
         "deploy_record": str(rec_path),
         "models_sha256": sha,
         "model_file_sha256": rec.get("sha256"),
+        "repair": rec.get("repair") if isinstance(rec.get("repair"), dict) else None,
     }
     gate = _read_json(rd / "stage06" / "gate.json")
     if isinstance(gate, dict) and gate.get("n_evaluated"):
@@ -5205,6 +5413,13 @@ def print_shipped(numbers: Mapping[str, Any], origami_reference: bool) -> None:
                 f"{p['origami_sel_eff'] * 100:.2f}% (shipped bundle "
                 f"{p['model_sel_eff'] * 100:.2f}%)",
             )
+    repaired = (shipped or {}).get("repair") or {}
+    if repaired.get("selection_note") and round_index(Path(str(name))) is not None:
+        ui.info(
+            "done",
+            f"  {name} ships repaired ({repaired.get('outcome')}): "
+            f"{repaired['selection_note']}",
+        )
     if final is not None:
         gse = final.get("gate_sel_eff")
         ui.warn(
@@ -5613,6 +5828,7 @@ class Pipeline:
         out_dir: Optional[Path] = None,
         marker: Optional[Mapping[str, Any]] = None,
         timing_stage: Optional[str] = None,
+        retries: Optional[int] = None,
     ) -> int:
         """Run one stage under the lease of the GPUs it benches on that no
         other process tree holds (lib/gpu_lease.py `hold_usable`), so that
@@ -5621,14 +5837,15 @@ class Pipeline:
         held for longer than runtime.gpu_lease_wait_s fails the attempt with
         2 before it starts.
         A failed attempt that `retry_reason` names is retried up to
-        runtime.stage_retries times, the first time after
+        runtime.stage_retries times (`retries` when given), the first time after
         runtime.stage_retry_backoff_s and then after twice the last wait,
         each attempt in a fresh output directory. The stage neither starts
         nor completes while the code or the engine module differ from the
         ones this invocation started with (`pin_drift`): the run stops with
         2. `marker` adds fields to its stage marker; the timing ledger
         names it `timing_stage` (default `key`)."""
-        retries = int(self.get("runtime.stage_retries"))
+        if retries is None:
+            retries = int(self.get("runtime.stage_retries"))
         wait = float(self.get("runtime.stage_retry_backoff_s"))
         name = self.stage_name(key)
         attempt = 1
@@ -5875,11 +6092,18 @@ class Pipeline:
         else:
             for p in step.priors:
                 args += ["--prior-round-dir", str(p)]
+            base = self.base_bundle(step)
+            if base is not None and base not in step.priors:
+                args += ["--base-bundle-dir", str(base)]
             args += [
                 "--shapes-per-cell",
                 str(self.shapes_per_cell(step)),
                 "--min-cell-gemms",
                 str(self.get("train.min_cell_gemms")),
+                "--targeted-per-gemm",
+                str(self.get("seed.targeted_per_tail_gemm")),
+                "--targeted-max-per-leaf",
+                str(self.get("seed.targeted_max_per_leaf")),
             ]
             if step.targets is not None:
                 args += ["--only-cells", ",".join(step.targets)]
@@ -5894,6 +6118,8 @@ class Pipeline:
                     f"{shapes} does not exist yet: {rd.name} cannot exclude the "
                     f"audit shapes (evaluations drop any it draws)",
                 )
+        for entry in auditlib.held_out_entries(self.cfg):
+            args += ["--exclude-shapes-yaml", entry]
         return args
 
     def shapes_per_cell(self, step: Optional[RoundStep] = None) -> int:
@@ -6002,9 +6228,16 @@ class Pipeline:
         ] + self._pool_only_args()
         if self.planner and self.get("contexts.replan"):
             args += ["--context-shapes-dir", str(self.plan_dir(rd) / "contexts")]
+        args += self.targeted_args(rd)
         for p in self.get("contexts.path_append") or [rocm_bin()]:
             args += ["--path-append", str(p)]
         return args
+
+    def targeted_args(self, rd: Path) -> List[str]:
+        """--targeted-shapes of the round's stage01 (the shapes it drew near
+        tail GEMMs, which their contexts bench) when it drew any."""
+        path = rd / "stage01" / "targeted_shapes.json"
+        return ["--targeted-shapes", str(path)] if path.is_file() else []
 
     def context_shape_yamls(self, rd: Path) -> List[Path]:
         """The bench lines every context draws from: the round's own, plus the
@@ -6248,7 +6481,7 @@ class Pipeline:
                     }
                     for c in self.contexts
                 ]
-                args += ["--contexts", json.dumps(wanted)]
+                args += ["--contexts", json.dumps(wanted), *self.targeted_args(rd)]
         else:
             args += ["--seed-commands", json.dumps(self.seed_commands(rd, step))]
         return args
@@ -6307,6 +6540,14 @@ class Pipeline:
     def per_leaf_budget(self, step: Optional[RoundStep] = None) -> int:
         return max(self.shapes_per_cell(step), int(self.get("train.min_cell_gemms")))
 
+    def collapse_floor(self) -> float:
+        """stage04b's --collapse-floor: the per-cell gate's tail floor with
+        validate.collapse_retrain (a cell passing with a held-out pick below
+        it is retrained), else 0."""
+        if not self.get("validate.collapse_retrain"):
+            return 0.0
+        return float(self.get("gate.tail_floor"))
+
     def args_stage04b(self, rd: Path, step: RoundStep, models_dir: Path) -> List[str]:
         args = [
             "--models-dir",
@@ -6344,6 +6585,10 @@ class Pipeline:
             str(self.get("deploy.gate_frac")),
             "--seed",
             str(self.get("seed.seed")),
+            "--tail-floor",
+            str(self.get("validate.tail_floor")),
+            "--collapse-floor",
+            str(self.collapse_floor()),
         ]
         if self.planner:
             args += ["--plan", str(self.plan_dir(rd) / "plan.json")]
@@ -6378,7 +6623,8 @@ class Pipeline:
         soft rules (the family-wise non-temporal rule included) and launch
         keys train switches on, without the trained-key gate when
         train.trained_key_gate is false, with the whitelist tier of
-        train.whitelist_tier_k chosen as train.whitelist_tier_contexts says,
+        train.whitelist_tier_k chosen as train.whitelist_tier_contexts says
+        and guarded by train.whitelist_tier_guard_keys tail-guard keys,
         and trains on served candidates with train.served_candidates. The
         attribute spec reaches stage05 through the config file."""
         nt = self.get("train.non_temporal_rule")
@@ -6410,6 +6656,9 @@ class Pipeline:
                     "--whitelist-tier-contexts",
                     str(self.get("train.whitelist_tier_contexts")),
                 ]
+            guard = int(self.get("train.whitelist_tier_guard_keys"))
+            if guard != WHITELIST_TIER_GUARD_KEYS:
+                args += ["--whitelist-tier-guard-keys", str(guard)]
         if self.get("train.min_cu_fraction") is not None:
             args += ["--min-cu-fraction", str(self.get("train.min_cu_fraction"))]
         if self.get("train.schedules"):
@@ -7084,6 +7333,12 @@ class Pipeline:
         )
         return 0
 
+    def round_tree(self, rd: Path, step: RoundStep) -> Dict[str, sc.SplitRule]:
+        """The split tree of active round `rd` with its own splits: read
+        through the bundles its stage05 reads (`prior_bundles`), so that the
+        splits its base bundle revoked stay out."""
+        return sc.load_cumulative_split_tree([*self.prior_bundles(step), rd])
+
     def _enhance_retrain(self, rd: Path, step: RoundStep, listed: str) -> str:
         """Cells an enhance round retrains: the requested leaves (children
         replacing a leaf stage04b split) that have enough training GEMMs,
@@ -7092,7 +7347,7 @@ class Pipeline:
         enhance.json."""
         min_gemms = int(self.get("train.min_cell_gemms"))
         n_train = self._training_gemms(rd)
-        tree = sc.load_cumulative_split_tree([*step.priors, rd])
+        tree = self.round_tree(rd, step)
         leaves, _ = ce.requested_leaves(step.targets or [], tree)
         children = {
             c
@@ -7147,7 +7402,7 @@ class Pipeline:
         cell. A carried cell with fewer than train.min_cell_gemms training
         GEMMs stays as it is."""
         cells = [c for c in listed.split(",") if c]
-        tree = sc.load_cumulative_split_tree([*step.priors, rd])
+        tree = self.round_tree(rd, step)
         lineage = self.bundle_lineage(step)
         carried = carried_cells(lineage, cells, tree)
         s5 = stage05_module()
@@ -7282,6 +7537,28 @@ class Pipeline:
         if step.mode == "active":
             held = held_out_sel_eff(rd / "stage04b" / "decisions.json")
         target = self.get("deploy.target_sel_eff")
+        if step.mode == "active":
+            # every path past stage05 comes here, a round resumed from stage 6 too
+            cm.inherit_revocations(rd, self.base_bundle(step), step.priors)
+        should, gate = self.deploy_gate(rd, step)
+        cells = self.cell_gate_plan(step) if should else None
+        fix = cm.RoundRepair(
+            self,
+            rd,
+            step.index,
+            lambda **kw: self.run_stage(
+                rd, "stage06", self.args_stage06(rd, gate, cells), step.index, **kw
+            ),
+            lambda s5, base, labels: record_cell_origins(
+                s5, self.bundle_lineage(step), (base, labels)
+            ),
+            REPAIR_SCRIPT,
+            AUDIT_EVAL_SCRIPT,
+            cells,
+        )
+        rc = fix.resume()
+        if rc:
+            return RoundResult(exit_code(rc), held_out_sel_eff=held)
         self.audit_v2_round(rd, step)
         if not math.isnan(held):
             ui.info(
@@ -7289,11 +7566,9 @@ class Pipeline:
                 f"the previous bundle on this round's held-out GEMMs: "
                 f"{held * 100:.2f}% (stage04b)",
             )
-        should, gate = self.deploy_gate(rd, step)
         if not should:
             self.audit_candidate(rd)
             return RoundResult(0, held_out_sel_eff=held)
-        cells = self.cell_gate_plan(step)
         ui.info(
             "deploy",
             (
@@ -7307,12 +7582,12 @@ class Pipeline:
                 )
             ),
         )
-        rc = self.run_stage(
-            rd, "stage06", self.args_stage06(rd, gate, cells), step.index
-        )
+        rc = fix.measure()
         if rc:
             return RoundResult(exit_code(rc), held_out_sel_eff=held)
-        rec = _read_json(rd / "stage06" / "deploy_record.json") or {}
+        rc, rec = fix.decide(_read_json(rd / "stage06" / "deploy_record.json") or {})
+        if rc:
+            return RoundResult(exit_code(rc), held_out_sel_eff=held)
         deployed = rec.get("deployed", True) is not False
         gate_se = _f((rec.get("gate") or {}).get("sel_eff"))
         reached = (
@@ -8708,7 +8983,12 @@ class AuditRun:
         os.replace(tmp, self.dir / auditlib.MANIFEST)
 
     def manifest_errors(self, m: Mapping[str, Any]) -> List[str]:
-        return audit_binding_errors(self.dir, self.binding(), m)
+        return audit_binding_errors(
+            self.dir,
+            self.binding(),
+            m,
+            remedy="use another --run-dir for other audit settings",
+        )
 
     def current_kernels(self) -> Dict[int, str]:
         return self.p.pool_digests()
@@ -8781,7 +9061,22 @@ class AuditRun:
         ]
         for y in self.source_shape_yamls():
             args += ["--prior-shapes-yaml", str(y)]
+        for entry in self.held_out_entries():
+            args += ["--exclude-shapes-yaml", entry]
         return args
+
+    def held_out_entries(self) -> List[str]:
+        """The config's audit.held_out lists, but those inside this audit
+        directory: the set cannot hold out its own shapes."""
+        here = self.dir.resolve()
+        out = []
+        for entry in auditlib.held_out_entries(self.train_cfg):
+            p = Path(entry).resolve()
+            if p == here or here in p.parents:
+                ui.info("audit", f"audit.held_out {entry} is this audit set's own")
+                continue
+            out.append(entry)
+        return out
 
     def args_stage02(self) -> List[str]:
         return [
@@ -9422,9 +9717,15 @@ class AuditBuild:
 
     def prepare(self) -> int:
         """Build (before) or start (parallel) the audit set when it is not
-        complete; 0, or the exit status that stops the run."""
+        complete; 0, or the exit status that stops the run. An audit set
+        built with other settings or contexts stops it whatever audit.build
+        says, also with --skip-preflight (`audit_set_binding_errors`)."""
         if self.dir is None:
             return 0
+        errs = audit_set_binding_errors(self.p.cfg)
+        if errs:
+            _print_problems("audit", errs, [])
+            return 2
         st, why = audit_status(self.p.cfg, self.p.paths)
         if st == "ok":
             ui.ok("audit", f"the audit set {self.dir} is complete for the pool")
@@ -9666,7 +9967,18 @@ class FinalRetrain:
     against it (`lib.audit.cell_gate` with the config's gate section; a
     decision whose per-cell gate ran with other settings, or that was made
     under another audit.official, is made again); with gate none
-    it ships. A shipped final retrain is deployed by stage06 into
+    it ships. A final retrain not worse on the mean that the per-cell gate
+    keeps out for findings in at most gate.repair_max_cells base cells is
+    repaired, with full.final_retrain.repair (`repair`,
+    scripts/repair_bundle.py, lib/cell_merge.py): each collapse lifted by a
+    key its leaf's own network picks, kept on the leaf's own data, else, and
+    for every cell the cell rules flagged, its base cell carried from the
+    bundle that ships, found by sha256; the repaired bundle is registered
+    with protocol v2, scored and judged again by both rules and the
+    all-group check, under the protocols that refused it, and ships in its
+    place when it passes (`install_repair`; decision.json `repair` records
+    every flagged cell and what was done). A shipped final retrain is
+    deployed by stage06 into
     final_retrain/stage06 and is the run's bundle (lib/run_bundles.py),
     which a later round builds on (`Pipeline.base_bundle`), until a later
     round deploys. final_retrain.json records the rounds it trained on and
@@ -9680,6 +9992,13 @@ class FinalRetrain:
     RECORD = rb.RECORD
     DECISION = rb.DECISION
     AUDIT = rb.FINAL_AUDIT
+    # The repair's working directory, and the bundle files a repair
+    # replaces in stage05/ (the originals kept in <REPAIR_DIR>/unrepaired),
+    # models.pt last: while stage05/ holds the unrepaired models.pt, an
+    # install is not finished (`installed_repair`).
+    REPAIR_DIR = "repair"
+    REPAIRED_FILES = ("cells.json", "whitelist_tier.json", "metrics.json", "models.pt")
+    INSTALLED = "installed.json"
 
     def __init__(
         self,
@@ -9942,29 +10261,35 @@ class FinalRetrain:
         return f"{base.name}'s bundle" + ("" if deployed else " (not deployed)")
 
     def evaluate(
-        self, baseline: Optional[Path]
+        self,
+        baseline: Optional[Path],
+        model: Optional[Path] = None,
+        out: Optional[Path] = None,
     ) -> Optional[Tuple[Optional[Dict[str, Any]], Dict[str, Any]]]:
         """(the record of `baseline`'s bundle, the final retrain's) on the
-        audit set from scripts/audit_eval.py (`audit.json`); None when it
-        fails. The baseline is scored as its round dir (stage06's staged
-        bundle, the bytes it deployed, else its models.pt), leaving out the
-        shapes of the rounds it trained on."""
-        out = self.dir / self.AUDIT
+        audit set from scripts/audit_eval.py (`audit.json`, else `out`);
+        None when it fails. The baseline is scored as its round dir
+        (stage06's staged bundle, the bytes it deployed, else its
+        models.pt), leaving out the shapes of the rounds it trained on; the
+        final retrain as its models.pt, or `model` (a repair of it)."""
+        out = out or self.dir / self.AUDIT
         cmd = [sys.executable, "-u", str(AUDIT_EVAL_SCRIPT)]
         if baseline is not None:
             cmd += ["--round-dir", str(baseline)]
-        cmd += ["--model-file", str(self.models)]
+        cmd += ["--model-file", str(model or self.models)]
         for rd in self.rounds:
             cmd += ["--trained-round-dir", str(rd)]
         cmd += ["--out", str(out), *self.p.audit_eval_common()]
         ui.banner(
-            f"{'new ' if self.candidate else ''}final retrain -- on the audit set",
+            f"{'new ' if self.candidate else ''}final retrain"
+            + (" (repaired)" if model is not None else "")
+            + " -- on the audit set",
             ui.C.BLUE,
         )
-        rc = self.p.run_tool(self.dir, "audit_eval", cmd, None)
+        rc = self.p.run_tool(out.parent, "audit_eval", cmd, None)
         doc = _read_json(out)
         if rc or not isinstance(doc, dict):
-            ui.err("final", f"audit_eval failed (rc={rc}); see {self.dir}")
+            ui.err("final", f"audit_eval failed (rc={rc}); see {out.parent}")
             return None
         recs = doc.get("models") if baseline is not None else [doc]
         if not isinstance(recs, list) or len(recs) != (2 if baseline else 1):
@@ -9995,6 +10320,9 @@ class FinalRetrain:
             "selected_by_audit": False,
         }
         what = self.bundle_text(base, deployed) if base is not None else ""
+        installed = self.installed_repair()
+        if installed is not None:
+            dec["repair"] = installed
         needed = self.gate == "not-worse" and base is not None
         st, why = (
             audit_status(self.p.cfg, self.p.paths)
@@ -10061,6 +10389,35 @@ class FinalRetrain:
                             if cells["passed"] is False
                             else f"; the per-cell gate cannot decide: {cells['reason']}"
                         )
+                if verdict and cells is not None and self.repairs(cells):
+                    assert base is not None
+                    fixed = self.repair(
+                        base, deployed, cells, official, recs[0].get("model_sha256")
+                    )
+                    if fixed is None:
+                        return None
+                    dec["repair"] = fixed["record"]
+                    if fixed["accepted"]:
+                        dec["unrepaired"] = {
+                            "change": change,
+                            "cell_gate": cells,
+                            "final": _audit_brief(recs[1], proto),
+                        }
+                        recs = fixed["recs"]
+                        dec.update(
+                            protocol=fixed["protocol"],
+                            change=fixed["change"],
+                            cell_gate=fixed["cell_gate"],
+                        )
+                        accepted, reason = True, fixed["reason"]
+                    else:
+                        reason += f"; {fixed['why']}"
+                if (dec.get("repair") or {}).get("installed"):
+                    dec["selection_note"] += (
+                        f"; {self.name} is the repaired bundle: the same GEMMs "
+                        f"flagged its cells and verified its repair, so a "
+                        f"fresh audit set must confirm its numbers"
+                    )
         proto = dec["protocol"] or (
             auditlib.view(recs[1], official)[1] if recs is not None else "v1"
         )
@@ -10096,6 +10453,207 @@ class FinalRetrain:
             settings,
             bootstrap,
             official=str(self.p.get("audit.official")),
+        )
+
+    def repairs(self, cells: Mapping[str, Any]) -> bool:
+        """With full.final_retrain.repair, the per-cell gate result `cells`
+        keeps the final retrain out for findings in at most
+        gate.repair_max_cells base cells (`lib.cell_merge.repairable`): new
+        collapses, cells significantly worse or fallen below the floor."""
+        cap = int(self.p.get("gate.repair_max_cells"))
+        return bool(self.p.get("full.final_retrain.repair")) and (
+            cm.repairable(cells, cap)[0]
+        )
+
+    def repair(
+        self,
+        base: Path,
+        deployed: bool,
+        cells: Mapping[str, Any],
+        official: str,
+        base_sha: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """The repair of the base cells the per-cell gate result `cells`
+        flags, against `base`, the bundle the run ships, found again by the
+        sha256 of the model its gate scored (`base_sha`; scripts/
+        repair_bundle.py into REPAIR_DIR), then the repaired bundle
+        registered with protocol v2 (unless audit.v2 is off), scored on the
+        audit set and judged by `lib.audit.not_worse`, the per-cell gate and
+        the all-group check (`lib.cell_merge.judge`) as the final retrain
+        was; installed in its place when all pass (`install_repair`).
+        {record, accepted, and when accepted the audit records, change,
+        protocol, per-cell gate and reason; else why}. None when the
+        repaired bundle cannot be judged now: the audit set did not measure
+        it, or measured a group the gate judged under v2 or the sustained
+        composite only under a weaker protocol (its v2 bench did not
+        finish); the same command tries again."""
+        d = self.dir / self.REPAIR_DIR
+        d.mkdir(parents=True, exist_ok=True)
+        for name in (*self.REPAIRED_FILES, cm.REPAIR_RECORD, "cell_gate.json"):
+            (d / name).unlink(missing_ok=True)
+        for name in (self.AUDIT, sc.REVOKED_SPLITS):
+            (d / name).unlink(missing_ok=True)
+        (d / "cell_gate.json").write_text(json.dumps(_json_safe(cells), indent=2))
+        out: Dict[str, Any] = {"record": {}, "accepted": False}
+        inc = cm.find_incumbent(self.p.run_dir, staged_sha256=base_sha, hint=base)
+        if inc is None:
+            out["why"] = (
+                f"no repair: no bundle of the run is the one the per-cell gate "
+                f"compared with (sha256 {str(base_sha)[:12]})"
+            )
+            return out
+        jobs = max(1, int(self.p.get("train.workers") or 1))
+        cmd = [sys.executable, "-u", str(REPAIR_SCRIPT)]
+        cmd += ["--train-dir", str(self.dir / "stage05")]
+        cmd += ["--baseline-dir", str(inc.dir), "--baseline-sha256", inc.models_sha256]
+        cmd += ["--cell-gate", str(d / "cell_gate.json"), "--out-dir", str(d)]
+        cmd += ["--audit-dir", str(auditlib.config_dir(self.p.cfg))]
+        cmd += ["--config", str(self.p.snapshot)]
+        cmd += ["--library-dir", str(self.p.paths.library_dir)]
+        cmd += ["--hardware-device", str(self.p.devices[0])]
+        cmd += ["--weight-dtype", self.p.weight_dtype, "--official", official]
+        cmd += ["--max-cells", str(self.p.get("gate.repair_max_cells"))]
+        cmd += ["--jobs", str(jobs)]
+        flagged = cm.flagged_cells(cells)
+        ui.banner(
+            f"{'new ' if self.candidate else ''}final retrain -- repairing "
+            f"{len(flagged)} flagged base cell(s)",
+            ui.C.BLUE,
+        )
+        for line in cm.flagged_lines(flagged):
+            ui.info("final", line)
+        rc = self.p.run_tool(self.dir, "repair", cmd, None)
+        record = _read_json(d / cm.REPAIR_RECORD)
+        record = record if isinstance(record, dict) else {}
+        record["incumbent"] = inc.to_json(self.p.run_dir)
+        out["record"] = record
+        repaired = d / "models.pt"
+        if rc or not repaired.is_file():
+            out["why"] = (
+                f"no repair: {record.get('outcome') or f'the repair failed (rc={rc})'}"
+                f" (see {d})"
+            )
+            return out
+        if self.p.get("audit.v2") != "off":
+            self.p.audit_v2(d, [(self.p.v2_name(self.dir), repaired)], None)
+        recs = self.evaluate(inc.dir, model=repaired, out=d / self.AUDIT)
+        if recs is None or not (
+            auditlib.is_measured(recs[0]) and auditlib.is_measured(recs[1])
+        ):
+            ui.err(
+                "final",
+                f"the audit set did not measure the repaired {self.name} (see "
+                f"{d / self.AUDIT}); the same command tries again",
+            )
+            return None
+        other = cm.scored_elsewhere(recs[0], inc)
+        if other:
+            out["why"] = f"no repair: {other}"
+            return out
+        settings = auditlib.cell_gate_settings(self.p.cfg)
+        bootstrap = int(auditlib.settings(self.p.cfg)["bootstrap"])
+        v = cm.judge(
+            recs[0], recs[1], cells, settings or {}, bootstrap, official, mean_rule=True
+        )
+        if v.status == "wait":
+            ui.err(
+                "final",
+                f"the repaired {self.name}: {v.reason}; the same command tries again",
+            )
+            return None
+        assert v.not_worse is not None and v.cell_gate is not None
+        verdict, text, change, proto = v.not_worse
+        record["judged"] = {
+            "not_worse": verdict,
+            "change": text,
+            "cell_gate": v.cell_gate.get("reason"),
+            "n_tail_new": v.cell_gate.get("n_tail_new"),
+            "n_tail_healed": v.cell_gate.get("n_tail_healed"),
+            "all_groups": v.groups,
+        }
+        record["selection_note"] = cm.SELECTION_NOTE
+        if v.status != "pass":
+            out["why"] = (
+                f"its repair ({record.get('outcome')}) does not pass: {v.reason}"
+            )
+            _write_record(d / cm.REPAIR_RECORD, record)
+            return out
+        self.install_repair(d, record, inc.dir)
+        out.update(
+            accepted=True,
+            recs=recs,
+            change=change,
+            protocol=proto,
+            cell_gate=v.cell_gate,
+            reason=(
+                f"repaired ({record.get('outcome')}), then not worse than "
+                f"{self.bundle_text(inc.dir, deployed)} on the audit set: {text}; "
+                f"per-cell gate: {v.cell_gate.get('reason')}; all groups: "
+                f"{(v.groups or {}).get('reason')}"
+            ),
+        )
+        return out
+
+    def install_repair(self, d: Path, record: Dict[str, Any], base: Path) -> None:
+        """Make the repaired bundle in `d` the final retrain's
+        (`lib.cell_merge.install`): the files of REPAIRED_FILES, its revoked
+        splits and its audit record replace those of stage05/ and the final
+        retrain (the originals, with stage05's cell_origins.json, kept once,
+        in `<d>/unrepaired`), the cells it carried from `base` take their
+        origins from it (`record_cell_origins`), and INSTALLED names the
+        installed models.pt, the unrepaired one and `base`'s by their
+        sha256, written before the copy (`copy_repair`, which replaces
+        models.pt last), so that a decision made again after an
+        interruption finishes the install and still tells the repair
+        (`installed_repair`)."""
+        keep = cm.install(
+            self.dir,
+            d,
+            record,
+            base,
+            copy=self.copy_repair,
+            files=self.REPAIRED_FILES,
+            audit=self.AUDIT,
+            installed=self.INSTALLED,
+        )
+        ui.ok(
+            "final",
+            f"{self.name} repaired: {record.get('outcome')}; the bundle before "
+            f"the repair is kept in {keep}",
+        )
+
+    def copy_repair(
+        self, d: Path, record: Mapping[str, Any], base: Optional[Path]
+    ) -> None:
+        """The files of the repair in `d` into stage05/ and the final
+        retrain's audit record, and the origins of the cells it carried from
+        `base`; models.pt last (`lib.cell_merge.copy_repair`)."""
+        cm.copy_repair(
+            self.dir,
+            d,
+            record,
+            base,
+            files=self.REPAIRED_FILES,
+            audit=self.AUDIT,
+            origins=lambda s5, b, labels: record_cell_origins(
+                s5, self.lineage(), (b, labels)
+            ),
+        )
+
+    def installed_repair(self) -> Optional[Dict[str, Any]]:
+        """The record of the repair installed into stage05/ (INSTALLED),
+        while stage05/models.pt is the bundle it installed; an install an
+        interruption left unfinished is finished first, with the cells it
+        carried taking their origins from the bundle the record names by
+        its sha256 (`lib.cell_merge.installed_repair`). None otherwise."""
+        d = self.dir / self.REPAIR_DIR
+        return cm.installed_repair(
+            self.dir,
+            d,
+            finish=lambda rec: self.copy_repair(
+                d, rec, cm.resolve_base(rec, self.p.run_dir)
+            ),
+            installed=self.INSTALLED,
         )
 
     def official_changed(self, dec: Mapping[str, Any]) -> bool:
@@ -10908,7 +11466,8 @@ def _main_logged(
     if args.mode == "audit":
         args.devices = audit_devs
     device = int((args.devices or cfg["runtime"]["devices"])[0])
-    held = cfg_get(cfg, "contexts.holdout")
+    held = ctxlib.holdout_entries(cfg)
+    reduced = any(ctxlib.reduces_cus(m) for m in ctxlib.trained_entries(cfg))
     try:
         cfg, resolved = resolve_contexts(cfg, device)
     except ConfigError as e:
@@ -10921,6 +11480,13 @@ def _main_logged(
             "contexts",
             "contexts.holdout: every entry is left out on this device, so this "
             "run measures the models on no held-out context",
+        )
+    if reduced and not any(ctxlib.reduces_cus(m) for m in ctxlib.trained_entries(cfg)):
+        ui.warn(
+            "contexts",
+            "contexts.list: every context of fewer CUs is left out on this "
+            "device, so this run trains the exclusive context alone and its "
+            "models declare every CU only",
         )
     cfg, read = resolve_num_xcd(cfg, device)
     for line in read:
@@ -11049,6 +11615,8 @@ def _main_logged(
             from_stage=args.from_stage or 7.0,
         )
 
+    for line in held_out_overlaps(cfg, run_dir):
+        ui.warn("held-out", line)
     try:
         if args.mode == "enhance":
             steps = plan_enhance_from_args(args, cfg, run_dir)

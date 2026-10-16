@@ -33,15 +33,15 @@ evaluation goes through the tilewright engine itself.
   `projects/hipblaslt/build/release/clients/hipblaslt-bench` and
   `projects/hipblaslt/build/release/Tensile/library/<arch>/` holding the
   configured library, where `<arch>` is the name the bench device reports
-  (`gfx950`, `gfx1250-strict`, ...). A gfx1250 build also produces
-  hipBLASLt's `gfx1250v0` subtree, gfx1250-strict's logic built for gfx1250:
-  a deploy target, not an `arch`. `runtime.build_dir` overrides the build
+  (`gfx950`, `gfx1250`, ...). `runtime.build_dir` overrides the build
   directory.
-- Bench devices that load that subtree. A gfx1250 device of ASIC revision 0
-  reports `gfx1250-strict` only when the environment of the run has
-  `HSA_DISABLE_GFX12_STRICT=0`; by default it reports `gfx1250` and
-  hipBLASLt loads its `gfx1250v0` subtree. A gfx1250-strict config therefore
-  sets `runtime.env: {HSA_DISABLE_GFX12_STRICT: "0"}`: the orchestrator puts
+- Bench devices that load that subtree. Which subtree a device loads can
+  depend on its mode: a gfx1250 device of ASIC revision 0, which no config
+  here trains for, reports `gfx1250-strict` only when the environment of
+  the run has `HSA_DISABLE_GFX12_STRICT=0`; by default it reports `gfx1250`
+  and hipBLASLt loads its `gfx1250v0` subtree, the gfx1250-strict logic
+  built for gfx1250 (a deploy target, not an `arch`). A config for such a
+  mode sets the variable in `runtime.env`: the orchestrator puts
   `runtime.env` in the environment of every stage, and stages 3 and 7 pass
   it to every bench and cotenant they start, so the command needs no
   exported variable. For an `arch` whose subtree depends on the device's
@@ -172,7 +172,10 @@ audit`, which runs no stage 7) and runs preflight checks: the bench binary,
 the library directory, the configured library stem, the library subtree each
 bench device loads (for an `arch` whose subtree depends on the device's ASIC
 revision and the runtime's mode, such as gfx1250-strict; any other arch is
-not checked), the tilewright module and its feature catalog. Every mode that
+not checked), the tilewright module and its feature catalog, and that no
+shape list the config names (`audit.held_out`, `stage07.bench_yamls`,
+`stage08.datasets`) is an external tuning workflow's evaluation set (see
+*Audit set*). Every mode that
 ends with validation also checks what the enabled validation stages need:
 stage 7's build (its bench, and that its TensileLite holds `MLREC_v3`, or
 `MLREC_v2`, the format `train.catalog` trains, when the kernel pool has a
@@ -185,7 +188,8 @@ after file and only until one matches, has the config's data types and
 layout). `--mode full` also checks that `audit.dir`, when set, holds an
 audit set when `audit.build` is off (an error without one; with `before`
 or `parallel` the run builds or extends it, and the training modes check
-that it can: see *The audit set in the one command*); that stage 7, when
+that it can, and in every mode that it was built with the run's settings
+and contexts: see *The audit set in the one command*); that stage 7, when
 it is on, will have a bundle to validate (an error when the run has
 deployed none and neither a round nor the final retrain will, as in a run
 of one round without `--deploy` or `full.final_retrain`, or with
@@ -395,7 +399,13 @@ they change), what it validates (`stage07`, `stage08`) and what it reports
 its seed recall). The near-winner re-reads' `tolerance_us`, `inline_copies`
 and `align_to_original` are pinned only away from the values at which they
 change nothing (0, 1, false), so that a run or audit directory produced
-before they existed keeps its pin. Stages
+before they existed keeps its pin. `audit.held_out` is pinned only when it
+names a list, together with the digest of each list's GEMMs, so that a list
+that changes what the rounds may not draw is a change the next invocation
+names; an audit directory does not pin it. `contexts.granule` is pinned
+only at a granule other than 32, the one every budget had before the key
+existed (`PREDATING_GRANULE` of `lib/contexts.py`), which a pin without the
+key means whatever the default becomes. Stages
 start from the files on disk, so the orchestrator compares the code and
 engine digests again before every stage starts and before it marks one
 complete: a change while it runs stops the run with 2, and the same command
@@ -981,14 +991,25 @@ the tests use both.
 gfx950 models that select from the Origami library alone
 (`library.kind: origami`): BF16 (`bbs`) and TF32 (`tf32`) in the four
 layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. They size a
-run as the production recipe does, as the gfx1250 configs do:
+run as the production recipe does, as the gfx1250 training configs do:
 `seed.target_per_cell` shapes per cell in round 0, `seed.shapes_per_cell`
 new shapes per leaf in each active round, `full.total_rounds` rounds before
 the final retrain, and a cell below the bar split once a retrain has not
 lifted it (`validate.split_after_attempts`, see *Active learning
 (stage04b)*). Like the gfx1250 configs they hold no host value: set
 `TILEWRIGHT_BENCH_ROOT` and `TILEWRIGHT_AUDIT_ROOT`, and list the host's
-devices and evaluation sets in a run config outside the repository. The
+devices and evaluation sets in a run config outside the repository. Their
+execution contexts are shares of the bench device's CUs, as in the gfx1250
+configs: three quarters, half, a quarter and an eighth, each on a tenth of
+a cell's shapes (`enabled: false` turns the eighth off for its bench time,
+see *Execution contexts (stage03c)*). Each resolves to a whole multiple of
+the 32-CU budget granule, at least one, so the smallest trained budget is
+one granule, one XCD's worth of a gfx950 device, and every
+compute-partition size of the device is also a trained budget;
+`train.min_cu_fraction` stays unset, so the models declare CU shares down
+to the smallest one they trained and no lower. On a whole gfx950 device
+the three larger shares are the CU budgets the shipped models trained,
+and the eighth adds one granule below them. The
 non-temporal rule is on for TN and off for the other layouts, where it
 would keep most of the Prediction table from being served;
 `gfx950_bbs_tn_origami_v3.yaml` also sets the distillation keys its shipped
@@ -996,42 +1017,46 @@ model was trained with.
 
 ## Bringing up a new gfx1250 host
 
-The gfx1250 configs run every round and stage with one command:
-`configs/gfx1250_*_tn_v3.yaml` on devices that report gfx1250 (ASIC revision
-other than 0), `configs/gfx1250-strict_*_tn_v3.yaml` on a device of revision
-0 in strict mode. They hold no device value: a run reads the CU count, LDS,
-L2 and XCD count from the bench device when it starts, and the run config
-that lists the host's devices stays outside the repository. Their kernel
-pool is the Origami library alone (`library.kind: origami`, see *Kernel pool
-(`library`)*): preflight refuses a library file without a Prediction table.
-The `gfx1250_*` configs plan the production recipe's budget and rounds, as
-the gfx950 configs do: *First run on a new gfx1250 host* lists what to
-measure on the host before the run.
+The gfx1250 configs run every round and stage with one command on devices
+that report gfx1250 (ASIC revision other than 0): the training configs
+`configs/gfx1250_*_tn_v3.yaml`, and the sanity configs
+`configs/gfx1250_bbs_tn_sanity.yaml` and
+`configs/gfx1250_192cu_bbs_tn_sanity.yaml` (*Sanity runs*). No config here
+trains for a device of revision 0, which loads hipBLASLt's `gfx1250v0`
+subtree, or `gfx1250-strict` with `HSA_DISABLE_GFX12_STRICT=0`. The configs
+hold no device value: a run reads the CU count, LDS, L2 and XCD count from
+the bench device when it starts, and the run config that lists the host's
+devices stays outside the repository. Their kernel pool is the Origami
+library alone (`library.kind: origami`, see *Kernel pool (`library`)*):
+preflight refuses a library file without a Prediction table. The training
+configs plan the production recipe's budget and rounds, as the gfx950
+configs do: *First run on a new gfx1250 host* lists what to measure on the
+host before the run, and a sanity run gives its first measurements.
 
 1. **Compiler.** hipBLASLt builds the gfx1250 target with a ROCm compiler
-   that accepts `--offload-arch=gfx1250`, and the gfx1250-strict target only
-   with one that accepts `--offload-arch=gfx1250-strict` too, which not
-   every release does. Check before a long build:
+   that accepts `--offload-arch=gfx1250`. Check before a long build:
 
    ```bash
-   echo 'int main() { return 0; }' | amdclang++ -x hip --offload-arch=gfx1250-strict -c - -o /dev/null
+   echo 'int main() { return 0; }' | amdclang++ -x hip --offload-arch=gfx1250 -c - -o /dev/null
    ```
 
    `unsupported HIP gpu architecture` means that compiler cannot build the
-   strict target: build gfx1250 alone and run the gfx1250 configs.
+   target. The gfx1250-strict target, for devices of revision 0 in strict
+   mode only, which no config here trains for, also needs a compiler that
+   accepts `--offload-arch=gfx1250-strict`, which not every release does.
 
 2. **hipBLASLt** of this branch, with its clients and tilewright (on by
-   default), for the host's targets:
+   default), for the host's devices:
 
    ```bash
    cd projects/hipblaslt
    ./install.sh -c -a gfx1250                     # devices that report gfx1250
-   ./install.sh -c -a "gfx1250;gfx1250-strict"    # and the strict target
    ```
 
    A gfx1250 build also builds the `gfx1250v0` subtree, the strict logic
    for revision-0 devices without the strict switch
-   (`HIPBLASLT_BUILD_GFX1250V0`). `projects/hipblaslt/build/release` must
+   (`HIPBLASLT_BUILD_GFX1250V0`), which no config here trains for either.
+   `projects/hipblaslt/build/release` must
    then hold `clients/hipblaslt-bench`, whose argument schema
    (`clients/hipblaslt_common.yaml`) has `solution_index_list` of 4096
    entries and `skip_screen_prepass`, `clients/hipblaslt-cotenant` with its
@@ -1063,6 +1088,9 @@ measure on the host before the run.
    TILEWRIGHT_AUDIT_ROOT=<audit sets> scripts/run_pipeline.sh <run config> --mode full
    ```
 
+   On a new host or partition, run it with a sanity config first
+   (*Sanity runs*), then with the training config of the data type.
+
    It runs the hazard canary, the correctness gate where the config turns
    it on (`correctness.enabled`; the exact harness runs bf16 and f32 data,
    f8 and bf8 data with one f32 scale per tensor, and f8, bf8 and f4 data
@@ -1093,8 +1121,9 @@ operands without a block format in `hipblaslt.scaleA` / `scaleB`.
 
 ## First run on a new gfx1250 host
 
-The `gfx1250_*` configs train with the production recipe's sizing, as the
-gfx950 configs do, with settings for a host nobody has measured yet:
+The `gfx1250_*_tn_v3` configs train with the production recipe's sizing,
+as the gfx950 configs do, with settings for a host nobody has measured
+yet:
 
 - the production budget and rounds: `seed.target_per_cell` shapes per cell
   in round 0, `seed.shapes_per_cell` new shapes per leaf in each active
@@ -1109,12 +1138,17 @@ gfx950 configs do, with settings for a host nobody has measured yet:
   below `fast_below_us` and once for the others (`bench.rebench`);
 - the default stall timeout after the long start-up grace of the library
   load (`bench.stall_timeout_s`, `startup_grace_s`);
-- execution contexts at two thirds and one third of the CUs, none held
-  out: on a small partition quarters and eighths round onto each other's
-  budgets, and no budget below its CU count is left for a held-out context
-  (*Execution contexts (stage03c)*); `train.min_cu_fraction` stays unset,
-  so the models declare CU budgets down to the smallest one they trained
-  and no lower;
+- execution contexts at three quarters, half, a quarter and an eighth of
+  the CUs (WGPs here), as in the gfx950 configs, each a whole multiple of
+  the 32-WGP budget granule, at least one: the smallest trained budget is
+  one granule on any device or partition with a budget below its CUs, one
+  XCD's worth on the 256-WGP part, so every compute-partition size of that
+  part is also a trained budget (`enabled: false` turns the eighth off for
+  its bench time); none held out: no budget below a small partition's CU
+  count is left for a held-out context, and a share the partition cannot
+  give is left out (*Execution contexts (stage03c)*);
+  `train.min_cu_fraction` stays unset, so the models declare CU shares
+  down to the smallest one they trained and no lower;
 - protocol v2 as the official exclusive number (`audit.sustained: false`,
   `audit.official: v2`);
 - the correctness gate for the problem types its harness runs (BF16, FP8
@@ -1176,13 +1210,46 @@ in the run config kept outside the repository:
    library load, so a device that faults on a share of the shapes needs
    GPU time budgeted for it, or a fix first.
 
+### Sanity runs
+
+`configs/gfx1250_bbs_tn_sanity.yaml` runs BF16 TN through every stage of
+the one command (the hazard canary when the pool holds a kernel of a hazard
+class, the correctness gate, the audit set, the production recipe's
+`full.total_rounds` rounds, the final retrain and stage 7) on the smallest
+budgets that still let a cell train, be evaluated and split: a few shapes
+per cell in round 0 and per leaf in each active round, one exhaustive seed
+per cell, short planned lists, an audit set of a few GEMMs per cell, and
+splits at most one level deep. Besides the whole device it benches half
+and an eighth of its CUs with a co-tenant, so that its models declare CU
+budgets from an eighth of the device, rounded to the nearest multiple of
+the budget granule (exactly an eighth on a device of a multiple of eight
+granules, one granule on a smaller one), to all of it, as the training
+configs' models do from their four shares; on a device of two
+granules the eighth meets the half's budget and is left out, and a device
+of a single granule has no budget below its CU count, so a run there
+leaves both out and trains the exclusive context alone. A run on another
+CU count or partition resolves other budgets, and a training run refuses
+an audit set built with other contexts, so each device class and
+partition mode needs an audit set of its own (`audit.dir`). Every other
+key is the BF16 training
+config's (`configs/gfx1250_bbs_tn_v3.yaml`, a config test holds them
+equal), so a sanity run benches, trains, audits and stages its model as a
+production run does and gives the measurements of the list above (which
+rows serve the problem type, the device values and the co-tenant's
+`READY`, the bench cost per line) before a production run spends its
+GPU-days. Its model is staged, never shipped.
+`configs/gfx1250_192cu_bbs_tn_sanity.yaml` is the same run for the device
+class of hipBLASLt's `gfx1250_192cu` logic subtree: the device class comes
+from the bench device, so the two configs differ only in their name and
+their audit sets, one per class.
+
 ## Stages
 
 | Stage | Script | Output |
 |---|---|---|
 | 0 | `stage00a_hazard_canary.py` | `hazards/canary/` (written as `canary.new/`, which replaces it when the canary succeeds): `quarantine.json`, `verdicts.json`, `canary_summary.json`, each run's bench yaml and output in `logs/`; once per invocation, before anything else, with `hazards.enabled` (the default) and a kernel of a hazard class in the pool |
 | 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
-| 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell; re-used history shapes in `reused_shapes.yaml` |
+| 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell, none of them in a held-out list; re-used history shapes in `reused_shapes.yaml`; `categorization.json` with each held-out list it left out (`exclusion_sources`); `targeted_shapes.json` with an active round's targeted shapes (see *Targeted shapes (stage01)*) |
 | 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
 | 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, every bench process led by the discarded warm-up line (`bench.warmup_line`), with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `aborted/`, `probe/` (device probes), `skipped_gemms.txt`, `stage03_summary.json` |
 | 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-winners read again and labelled by their median, `rebench.json`, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
@@ -1204,7 +1271,8 @@ trained before it deploys it. Cells that keep missing the bar after
 retraining are split on the eligible axis (a widest tier: Large M or N,
 LargeK K) whose threshold best separates their well- and badly-served GEMMs
 (the largest variance reduction of the per-GEMM log selection-efficiency
-ratios).
+ratios), unless `validate.max_split_depth` is 0: then a cell that misses
+the bar is retrained.
 
 A cell the round does not retrain is carried forward with the model of its
 latest training round, trained with that round's model-shaping options:
@@ -1510,6 +1578,48 @@ are those trained without it: the tier is chosen after training
   GEMMs ran in several its GEMMs, covered GEMMs and in-sample efficiency
   per context.
 
+The greedy serves each cell's mean, so a key only a few of its GEMMs
+need, such as the winners of a context the cell's GEMMs rarely run in,
+can drop out of the tier while the model's pick from the remaining keys
+takes more than twice the winner's time on those GEMMs. The tail guard
+(`train.whitelist_tier_guard_keys`, `--whitelist-tier-guard-keys`, 8 by
+default, 0 off; `lib/whitelist_tier.py` `guard`) runs after the greedy:
+
+- a GEMM of the cell's own training GEMMs whose pick from the tier is
+  below half its winner's speed (`GUARD_FLOOR`, the per-cell gate's tail
+  floor) is a collapse; its rescue is its fastest measured key outside
+  the tier that is within `GUARD_NEAR` (0.9) of the winner and that the
+  model scores above the tier's pick, so that keeping it moves the pick
+  there (the GEMM's winner when the model ranks the winner above the
+  pick, else the near-winner it does). A collapse whose every near-winner
+  the model ranks below the pick is a ranking error the tier cannot fix,
+  and is only counted;
+- before each try, the collapses still open and their rescues are found
+  again under the tier with the keys kept so far, so that no key joins
+  for a collapse an earlier one lifted; the rescue lifting the most open
+  collapses is tried next, each key at most once. One joins the tier only
+  when, on the cell's training GEMMs and on the GEMMs stage05 held out of
+  the cell's training (its validation GEMMs), the tier with it and the
+  keys kept before it, compared with the tier the greedy chose, adds no
+  new pick below the floor (each GEMM and context on its own), lets none
+  of the picks the keys before it lifted fall back below the floor, and
+  keeps at least `GUARD_MEAN_FLOOR` (0.99, the per-cell gate's tolerance)
+  of the held-out picks' geomean (the training side's when the cell holds
+  none out), so that the keys of a cell keep these bounds together; at
+  most the configured number of keys per cell join.
+
+Guard keys follow a cell's greedy keys in its tier. The tier record names
+the guard (`guard`: its keys, floors, the held-out GEMMs it read, the
+cells with collapses, the keys added and the collapses they lift), and
+`whitelist_tier.json` gives each cell with a collapse what the guard
+found (`guard`: collapses, rescuable ones, added keys, the check of the
+last kept key, which covers every kept key against the greedy's tier,
+and the first refused candidates with why). The guard is
+model-shaping: `model_options.json` records its keys
+(`whitelist_tier_guard_keys`), None without a tier, which it does not
+shape, and a record from before the guard reads as None (stage05's
+`PREDATING_OPTIONS`), so a tier trained before it is trained again.
+
 A problem none of whose tier keys is in the pool or feasible is ranked as
 by the model without the tier: through the cascade (`train.cascade_k`) over
 every feasible key. Keys outside the tier rank behind it, through the
@@ -1552,7 +1662,8 @@ only where the cascade serves. To build the tier again without training:
 
     python scripts/build_whitelist_tier.py --train-dir <run>/<round>/stage05 \
         --out-dir <dir> [--library-dir <dir> --library-stem <stem>] \
-        [--config-yaml <config>] [--k K] [--contexts MODE] [--jobs N]
+        [--config-yaml <config>] [--k K] [--contexts MODE] [--guard-keys G] \
+        [--jobs N]
 
 It chooses the tier on the GEMMs that stage05 recorded (`metrics.json`: the
 enriched folders, the split tree, the validation split, the repeat
@@ -1565,7 +1676,10 @@ with the new tier into `<dir>` (the source stays as it is) for stage06
 tier keeps its size; `--contexts pooled|balanced|reserve` chooses it as
 `train.whitelist_tier_contexts` does, and without it the tier keeps the
 way its record names. A kernel the pool adds enters a tier once training
-data measures it.
+data measures it. `--guard-keys` bounds the keys the tail guard adds per
+cell (default 8; 0 builds the tier without it), checked on the GEMMs
+stage05 trained each cell on and on those it held out;
+`model_options.json` records it as `whitelist_tier_guard_keys`.
 
 The tier differs from the smart_K whitelist (`train.whitelist` `signature`
 or `view-key`, sized by `train.smart_k` or, with `smart_k_max`, at the knee
@@ -1757,9 +1871,9 @@ cluster and screens the winner out of timing on a noticeable share of
 GEMMs; the gfx950 configs use 0.45, which keeps the cluster in and still
 skips the clearly slow kernels. That was measured on planned lines; an
 unplanned line (no `skip_screen_prepass`) has warm-ups that also pay the
-kernel's load and are compared with the fastest so far. The gfx1250 and
-gfx1250-strict configs bench planned lines, as that measurement did, and
-take its 0.45 until gfx1250 has a measurement of its own. Measure that
+kernel's load and are compared with the fastest so far. The gfx1250
+configs bench planned lines, as that measurement did, and take its 0.45
+until gfx1250 has a measurement of its own. Measure that
 cluster (screen off against screen on, same GEMMs) before changing a ratio.
 
 ### Measurement protocol
@@ -2118,8 +2232,15 @@ it. The `library` section names it:
   list of both, taken in its order. The default is `origami`.
 - `bok_rows`: the row kinds a bank of kernels takes, `freesize` and
   `equality` (the default) and `gridbased`, a bridge for a bank built as
-  GridBased rows, from which TensileLite answers problems of their sizes
-  before tilewright ranks (a warning).
+  GridBased rows, whose kernels TensileLite does not rank with the model (a
+  warning). Within one problem type TensileLite orders the rows Equality,
+  Range, Prediction, GridBased, FreeSize, so a GridBased file of the
+  Prediction table's problem type sits behind that table's row, which
+  answers a call first: its kernels are reached only when every solution is
+  enumerated or the Prediction row returns fewer than requested, and
+  `TENSILE_TILEWRIGHT_BANK` takes Equality rows only. In another placement
+  (a placeholder of another problem type, an earlier hardware row) which
+  row answers first depends on their order.
 
 Two files share a problem type when their stems agree once `_ID<chip ids>`
 and then `_CU<count>` are removed before `_<arch>`. A solution index is one
@@ -2320,8 +2441,9 @@ schedules and budgets while the count is unknown), launch keys
 engine score each launch class of a view key on its own instead of the view
 key's first kernel only; the integration's launch model returns the keys
 either way and the model decides, and every evaluation groups as the engine
-does for that model), the declared contexts (`train.min_cu_fraction`,
-`train.schedules`; default the range and schedules in the data), per-cell clip
+does for that model), the declared contexts (the CU fractions from the
+smallest in the data, or `train.min_cu_fraction` when that is larger, to 1;
+`train.schedules`, default the schedules in the data), per-cell clip
 bounds (the training feature ranges; `train.clip_features`), whitelists keyed
 by `train.whitelist` (`none` by default: every feasible kernel through the
 cascade, `train.cascade_k` default 32, whose first stage ranks by the
@@ -2538,9 +2660,10 @@ train:
 
 An entry has `cu_budget` (0 = every CU) or `cu_fraction` (below),
 `schedule` (`default`, `dynamic`, `auto`), `cotenant` (false), `fraction`
-(1.0, the share of the shapes) and `name` (default
-`cu<budget>[_cot][_<schedule>]`). After stage03, stage03c benches each
-non-exclusive context in `stage03c/<name>/`: the shapes it takes (every shape,
+(1.0, the share of the shapes), `name` (default
+`cu<budget>[_cot][_<schedule>]`) and `enabled` (true; below). After
+stage03, stage03c benches each non-exclusive context in
+`stage03c/<name>/`: the shapes it takes (every shape,
 or `ceil(fraction * n)` per cell drawn with `contexts.seed`), with the same
 bench line, kernel list and skip settings as the exclusive bench, through a
 generated `hipblaslt-bench` wrapper that adds `--sm_count_target <cu_budget>`
@@ -2556,15 +2679,30 @@ kernel's measurement under the context it runs in.
 `cu_fraction` (between 0 and 1) gives the budget as a share of the device's
 CUs, so one config fits devices and partition modes of any CU count and
 states none. A run resolves it when it starts, from the CU count of the
-first bench device (`hardware.n_cu`, else the KFD topology): the budget is
-the multiple of 32 nearest `cu_fraction` times the CU count (hipBLASLt
-rounds the SM target down to a multiple of 32, so the kernels then size
-their grids for exactly the CUs the cotenant leaves them), at least 32 and
-below the CU count, and for a trained entry raised to
-`train.min_cu_fraction` of the CUs where a multiple below the CU count
-allows. An entry whose resolved budget and schedule are another's (one with
-a `cu_budget`, or an earlier one) is left out with a warning, as on a device
-too small for all of them. Trained entries come before held-out ones, so a
+first bench device (`hardware.n_cu`, else the KFD topology). Inside a
+compute partition (DPX, QPX, CPX) that is the partition's: each partition
+is a device of its own, with its own KFD node and HIP device, so the shares
+are of the partition's CUs, and the run's first line about its contexts
+says which CUs, and which partition, they are shares of. The budget is
+the multiple of the budget granule nearest `cu_fraction` times the CU
+count, at least one granule and below the CU count, and for a trained
+entry raised to `train.min_cu_fraction` of the CUs where a multiple below
+the CU count allows. The granule is `contexts.granule`, by default 32
+(`CU_BUDGET_GRANULE` of `lib/contexts.py`), in CUs, which are WGPs on
+gfx1250. It is the budgets' own, apart from the launch rule's rounding of
+the SM target (`SM_TARGET_GRANULE` of `lib/hipblaslt_launch.py`), and must
+be a multiple of that (a config error otherwise), so that hipBLASLt takes
+every budget as its SM target as it is and the kernels size their grids
+for exactly the CUs the cotenant leaves them. One granule is one XCD's
+worth of CUs on gfx950 and on gfx1250's 256-WGP part: there the smallest
+budget a share resolves to is one XCD's worth, however small the share,
+and every compute-partition size of the device is a whole number of
+granules. An entry whose resolved budget and schedule are another's (one
+with a `cu_budget`, or an earlier one) is left out with a warning, as on
+a device too small for all of them, and so is one the device has no
+budget for: a device of one granule or fewer CUs has none, so it trains
+the exclusive context alone, and the run warns when every context of
+fewer CUs is left out. Trained entries come before held-out ones, so a
 small device leaves out held-out entries first; when it leaves out every
 one, the run warns that it measures the models on no held-out context, and
 the report says so in its notes. Preflight also warns for each held-out
@@ -2576,17 +2714,33 @@ contexts section names every entry left out, from the run's source config
 and its latest snapshot. The snapshot keeps every resolved entry's
 `cu_fraction` beside its `cu_budget` and its first comment lines say what
 each became; a config that gives both must give the budget the fraction
-resolves to. A device of 32 CUs or fewer has no budget to give. The budgets
-are then checked like configured ones (below the device's CUs, covered by
-`train.min_cu_fraction`).
+resolves to. The budgets are then checked like configured ones (below the
+device's CUs, covered by `train.min_cu_fraction`), and a trained
+`cu_fraction` below `train.min_cu_fraction` is a config error.
+
+`enabled: false` turns an entry off: no stage benches or trains it, the run
+names it when it starts and leaves it out of its snapshot, and the report's
+Execution contexts section names it. The production configs train the
+eighth of the CUs beside three quarters, half and a quarter, each on a
+tenth of a cell's shapes, so that their models train and serve CU budgets
+from one granule up to the whole device; `enabled: false` turns the
+eighth off for its bench time: the fewer the CUs, the longer each shape
+benches. The eighth adds the multiple of the granule nearest an eighth of
+the device's CUs, at least one, where no other share takes that budget,
+and the models then declare it as their smallest share; elsewhere it is
+left out. The exclusive entry cannot be turned off. Turning the eighth on
+or off, or running on another CU count or partition, changes the contexts
+the audit set is bound to (*Audit set*): a run refuses an audit set built
+with other contexts, complete or not, so it needs a new `audit.dir`.
 
 ```yaml
 contexts:
   list:
     - {cu_budget: 0}
-    - {cu_fraction: 0.75, cotenant: true, fraction: 0.15}
-    - {cu_fraction: 0.5, cotenant: true, fraction: 0.15}
-    - {cu_fraction: 0.25, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.125, cotenant: true, fraction: 0.1, enabled: true}
   holdout:
     - {cu_fraction: 0.375, cotenant: true, fraction: 0.03}
 ```
@@ -2594,11 +2748,13 @@ contexts:
 The round's stage04 enriches every trained context's logs with its
 `cu_budget` / `schedule` columns (`--context-log-dir`), so each (shape,
 context) is its own GEMM and ranking group in stages 4.5 and 5 and in the run
-history. stage05's declared `min_cu_fraction` defaults to the smallest
-trained budget fraction; a configured `train.min_cu_fraction` above it, or
-`train.schedules` without a benched schedule, is a config error, and one
-below 1 without a trained context of fewer CUs than the device has is a
-warning: the models would declare budgets they have no data from. The
+history. A model declares the CU fractions from the smallest trained
+budget's to 1 (stage05's `min_cu_fraction`), so that hipBLASLt ranks a call
+of fewer CUs with Origami; `train.min_cu_fraction` can only raise that
+floor. One above the smallest trained budget fraction, or `train.schedules`
+without a benched schedule, is a config error, and one below 1 without a
+trained context of fewer CUs than the device has is a warning: the models
+then declare every CU only. The
 `holdout` contexts are enriched into `stage03c/holdout/stage04`, which no
 stage trains on: stage04b reports the previous round's model per held-out
 context (`aggregate.context_holdout` in `decisions.json`), and per context of
@@ -2649,6 +2805,33 @@ new GEMMs:
   previous measurement): split;
 - otherwise: retrain.
 
+An improvement baseline counts only when another network than the one
+stage04b evaluates measured it. A cell carried since its baseline, such as
+one that passed the round before, has not been retrained, so it has no
+baseline, like every cell in round 1 (below). `decisions.json` names the
+network behind each cell's reading (`model_digest`: a digest of the cell's
+weights, feature statistics and dimensions, which a carried cell keeps; its
+whitelist tier, rebuilt every round, is not part of it) and the baseline the
+cell was judged against (`improvement_baseline_source`:
+`same_data_prior_model`, `cross_round_prior_decisions`, `model_unchanged` or
+`no_baseline`).
+
+A split cuts the cell at the log median of the eligible axis whose cut
+reduces the variance of the cell's per-GEMM log selection-efficiency ratios
+most. Only equal reductions (equal up to rounding) fall to an axis not yet
+in the cell's split path, then M before N before K.
+
+`validate.max_split_depth: 0` turns splitting off: a cell below the
+threshold retrains (reason `splits_off`), and the split keys and the
+structural width trigger have no effect (config validation warns about a
+structural trigger it overrides).
+
+A base cell whose splits a repair revoked (see *Repair on refusal*) never
+splits again: stage04b reads the revocations of its prior rounds and of
+the bundle it evaluates, leaves the revoked splits out of the tree, and
+retrains the cell's leaves instead of splitting them (reason
+`__split_barred`).
+
 A split becomes a retrain when the cell is at `validate.max_split_depth`, has
 fewer than twice `validate.min_cell_gemms` evaluated GEMMs, a child would get
 fewer than `validate.min_cell_gemms` of them or fewer than
@@ -2681,6 +2864,53 @@ produced (the library, the blocklist that filtered them, how the benches
 launched the kernels; not its counts), so that stage05's `metrics.json` and
 the deploy record know the labels of the round's own GEMMs too. Later rounds
 train on the gate GEMMs like on the rest of the round's data.
+
+A cell's mean hides the few GEMMs it serves badly, so stage04b also reads
+every held-out GEMM on its own:
+
+- a held-out GEMM of an evaluated cell whose pick is below
+  `validate.tail_floor` (0.7) of its winner is a tail GEMM. decisions.json
+  lists it per cell, whatever the cell's decision (`tail_gemms`: shape,
+  execution context and efficiency, worst first, at most 64;
+  `n_tail_gemms`), and the next round's stage01 samples new shapes near
+  each (see *Targeted shapes (stage01)*);
+- picks below half the winner's speed are counted (`n_low_seleff_lt_0p50`
+  beside `n_low_seleff_lt_0p70`, and their totals in `aggregate`), and with
+  `validate.collapse_retrain` (true) a cell that passes on its mean with a
+  held-out pick below the per-cell gate's tail floor (`gate.tail_floor`) is
+  retrained in the same round (`collapse_retrain`, listed in
+  `retrain_cells.txt` and `cells_collapse_retrain`; the cell's decision
+  stays `pass`, so it counts as no retrain attempt toward a split). The
+  retrain trains on the GEMMs it collapsed on, and its new tier's tail
+  guard sees them among the cell's own GEMMs.
+
+### Targeted shapes (stage01)
+
+An active round's stage01 draws, besides `seed.shapes_per_cell` new
+shapes per leaf, `seed.targeted_per_tail_gemm` (4; 0 off) new shapes near
+each tail GEMM of the previous round's stage04b (`tail_gemms`, worst
+first), at most `seed.targeted_max_per_leaf` (32) per leaf
+(`--targeted-per-gemm`, `--targeted-max-per-leaf`, `--targeted-from`).
+They are first-principles draws (`lib.shapes.synthesize_near`): each of
+M, N and K log-uniform within an octave of the tail GEMM's own, inside the
+box of the leaf of this round's split tree that holds the GEMM, in its
+alignment class (a value on a macro-tile multiple stays on that multiple,
+an unaligned one stays off the tile grid), its batch class kept (batch 1,
+or a batch within an octave of its own), K on the block of a
+block-scaled type, through the same filter, history dedup and exclusions
+as every other shape: never a shape of an earlier round, of the audit set
+or of an `audit.held_out` list, which stage01 checks again before it
+writes the round. A leaf the round samples nothing in gets none. They are
+new held-out shapes like the others, so the next stage04b measures the
+model there. `targeted_shapes.json` lists, per leaf, each tail GEMM and
+the shapes drawn near it, and categorization.json and per_cell_plan.json
+count them.
+
+A tail GEMM measured under a CU budget or schedule (`contexts.list`) has
+its targeted shapes benched in that context as well: stage03c and the
+context re-plan of stage02 (`--targeted-shapes`) take them among the
+shapes the context draws for their cells (`lib.contexts.select_shapes`,
+`targeted_for`), ahead of the cell's random draw.
 
 ### Hazard canary (stage00a)
 
@@ -3062,35 +3292,35 @@ Either of two rules keeps a candidate out, whatever its other gates say:
   cell rules were off and leaves its verdict undecided, unless the tail
   rule keeps the candidate out: stage06 then leaves the decision to its
   other gates, and the final retrain does not ship.
-- **Tail rule**, in every group, contexts included: a pick that collapses
-  below `gate.tail_floor`, from at or above it to at most
-  `gate.tail_collapse` of the shipped pick's efficiency, is new; a pick
-  the candidate lifts back the other way is lifted. Each counts only when
-  a repeated measurement confirms it: under v2 or the sustained composite
-  (medians of repeated benches) always, under v1 only when the candidate's
-  v2 record of the group says the same, so with `audit.v2: off` the rule
-  only reports.
-  A group keeps the candidate out when its confirmed new picks outnumber
-  its confirmed lifted ones by more than `gate.tail_budget`. This rule is a
-  policy on measured GEMMs, not a test: no test over a cell's few GEMMs can
-  tell one collapse from chance, yet one collapse can sink a context's
-  cell. It therefore keeps out a candidate no worse on average whenever
-  some group holds more of its collapses than of the shipped bundle's;
-  `gate.tail_budget` loosens it and `gate.tail_floor: 0` turns it off.
-
-On the history of a full run (each of its rounds and its final retrain
-judged against the bundle before it), the rules as first written (each
-cell judged by its own 95% interval, any new pick below the tail floor of
-the exclusive group deciding) kept out every step. As they are now, the
-cell rules flag a single cell, in the first step, and the tail rule keeps
-out the steps that add a confirmed collapse in some group without lifting
-another, the final retrain among them: its exclusive collapse is offset
-by the picks it lifts there, but one under a CU budget is not.
+- **Tail rule**, over every group, contexts included, each GEMM of each
+  group on its own: a new collapse is a pick of the candidate below
+  `gate.tail_floor` where the shipped bundle's pick was at or above it (any
+  step across the floor; `gate.tail_collapse` below 1 counts only drops to
+  at most that fraction of the shipped pick's efficiency). A collapse the
+  candidate heals (the shipped pick below the floor, the candidate's at
+  or above it) is reported beside them and never offsets one, and so is a
+  collapse both bundles share. Each new or healed pick counts only when a
+  repeated measurement confirms it: under v2 or the sustained composite
+  (medians of repeated benches) always, under v1 only when the
+  candidate's v2 record of the group says the same, so with `audit.v2:
+  off` the rule only reports. The candidate is kept out when its confirmed
+  new collapses over all groups number more than `gate.tail_budget` (0).
+  This rule is a policy on measured GEMMs, not a test: no test over a
+  cell's few GEMMs can tell one collapse from chance, yet one collapse can
+  sink a context's cell. `gate.tail_budget` loosens it,
+  `gate.tail_collapse` below 1 counts only the deeper drops, and
+  `gate.tail_floor: 0` turns it off. With the default
+  `gate.tail_collapse: 1` a round whose pick steps across the floor on
+  one audit GEMM, however slightly, is kept out. A bundle either rule
+  keeps out for findings in a few base cells is repaired: a round's with
+  `gate.repair` (see *Repair on refusal* below), the final retrain's with
+  `full.final_retrain.repair` (see *Final retrain*).
 
 `cell_gate.json` names every finding of every group (the cells with their
-ratios, intervals and p-values; the new and lifted GEMMs with both
-efficiencies and whether a repeated measurement confirms them), and the
-deploy record and `gate.json` carry the verdict (`cell_gate`) with the
+ratios, intervals and p-values; the new, healed and shared collapses with
+both efficiencies and whether a repeated measurement confirms them), and
+the deploy record and `gate.json` carry the verdict (`cell_gate`, with
+`n_tail_new`, `n_tail_healed` and `n_tail_persisting`) with the
 reason naming the first few cells and GEMMs of each kind. When the audit
 set cannot measure both bundles (incomplete, or a model file missing) the
 other gates decide and the record says why. `--deploy` measures and
@@ -3099,18 +3329,127 @@ records it without keeping a bundle out (`--cell-gate-record-only`);
 once, with its stage06; the final retrain's gate applies the same check
 (see *Final retrain*).
 
+#### Repair on refusal
+
+With `gate.repair` (false; the training recipes set it), a round's bundle
+that stage06 keeps out on the per-cell gate alone (its deploy gate passed:
+`deploy_record.json` `deploy_gate`) is repaired instead of refused whole,
+when every finding that decides names a base cell (a cell of `gate.groups`
+significantly worse or confidently fallen below the floor, or a confirmed
+new collapse in any group) and at most `gate.repair_max_cells` (3) base
+cells are flagged; with more it stays out whole. The new bundle stays the
+default: only the cells the gate itself flags change, never cells that
+merely read lower on the audit's point estimates, since a per-cell best-of
+chooses noise and loses on GEMMs it was not chosen on. Per flagged base
+cell, in this order (`lib/cell_merge.py`, `scripts/repair_bundle.py`, in
+`<round>/repair/`):
+
+1. a collapse gets a tier key of its leaf's own network when the tail
+   guard keeps it, as the final retrain's collapse repair does: the new
+   networks stay;
+2. every finding still open (a collapse no kept key lifts, a cell the cell
+   rules flagged) carries the whole base-cell subtree, the cell and every
+   leaf with its network, tier keys and feature statistics, from the
+   incumbent: the bundle the run ships, which the gate compared with. The
+   incumbent is found by content, as the bundle whose stage06 deployed the
+   model the gate scored (by its sha256) and whose `stage05/models.pt` is
+   the one that deploy packed (`deploy_record.json` `models_sha256`), never
+   by its directory (a final retrain a later one replaced moves to
+   `stale/`), and the repair refuses a `models.pt` of other content. The
+   audit set must score that same model for the incumbent when it judges
+   the repair (its record's `model_sha256`), or the round stays out.
+
+A carried subtree can lack splits the round's tree holds. The repaired
+bundle revokes them (`stage05/revoked_splits.json`): every split tree read
+through that round (stage01, stage04b, stage05 and the final retrain, the
+repair, the reports; `lib/subcells.py`) leaves them and everything under
+them out, and stage04b never splits that base cell again in the run (its
+leaves retrain: reason `__split_barred`, `cells_split_barred` and
+`split_barred_base_cells` in `decisions.json`). Without the revocation the
+next round and the final retrain would train the reverted leaves again. A
+round that builds on a final retrain samples on that bundle's leaves: its
+stage01 takes the bundle's directory (`--base-bundle-dir`), whose
+`stage05/cells.json` gives the plan's labels and whose revocations leave
+the tree before the round samples (`per_cell_plan.json` names both). The
+round copies those revocations into its own `stage05/` before it deploys
+(a round resumed after its stage05 too), and judges the cells it carries
+forward on a tree read through that bundle.
+
+The repaired bundle is registered with protocol v2 (with `audit.v2:
+rounds`), scored on the audit set beside the incumbent
+(`repair/audit.json`) and judged again: by the per-cell gate, each group
+under the protocol the refusal used (while a group lacks it the round
+stops, and the same command tries again), and by an all-group check: no
+audit group, the exclusive context or a CU budget, significantly worse than
+the incumbent beyond `gate.cell_tolerance`, family-wise at `gate.alpha`
+over the groups with the gate's sign flips. A bundle that passes replaces
+the round's `stage05/cells.json`, `whitelist_tier.json`, `metrics.json`,
+revoked splits and, last, `models.pt` (the originals and the refused
+stage06 are kept in `repair/unrepaired/`; `repair/installed.json` names the
+installed, the unrepaired and the incumbent's `models.pt` by sha256 before
+the copy, and an interrupted install is finished before stage06 runs). Its
+carried cells take their origins from the incumbent (`cell_origins.json`),
+and stage06 runs again: it measures the repaired bundle on the round's
+deploy gate (re-benching its misses on the run's GPUs) and per-cell gate,
+and deploys it with what the repair changed in the deploy record
+(`repair`, with `selected_by_audit` and its `selection_note`; the run
+summary repeats the note when it ships that round). When that stage06
+keeps it out, the refusal is recorded first, then the install is withdrawn
+(the unrepaired bundle and its stage06 back in place, the repaired stage06
+kept in `repair/stage06.repaired`) and the round stays out whole, as it
+does when the repair does not pass. An interruption anywhere in between,
+or before the round recorded what a stage06 of the repaired bundle
+decided, is finished by the next invocation before its stage06 runs. The
+refusal that stage06 writes into its deploy record (`deployed: false` with
+`not_deployed`, no `error`, `models_sha256` of the repaired bundle) is the
+decision whether or not the orchestrator marked that stage06 complete (a
+code change found as it ended, or a kill after it wrote the record, leaves
+it unmarked), and the stage06 that measures an installed repair runs in
+one attempt, without `runtime.stage_retries`: a repaired bundle a stage06
+kept out is never measured again.
+`repair/decision.json` records every flagged cell with its findings, what
+was done there (`tier add` or `subtree carry`) and the sha256 of the
+bundle whose networks now serve it, the judgement, the revoked splits, the
+install, the outcome, and that the same audit GEMMs flagged and judged the
+cells (`selected_by_audit`): the fresh audits of a ship decision confirm a
+repaired bundle. A decision for a bundle under the same settings (`refused`,
+`not repairable`, or `not repaired`: no incumbent found, no repair
+possible, or the incumbent scored as another model) is not made again, so
+that measuring once more cannot turn a refusal into a pass; a repair that
+failed on an error (`repair failed`) is tried again by the same command,
+and other settings decide again. A repair the audit set could not judge
+yet (it did not measure the repaired bundle, or measured a group only under
+a weaker protocol than the refusal's) stops the round with 1 (`wait` in
+`decision.json`, with its `attempts`) for the same command to try again,
+at most `gate.repair_max_attempts` (3) times for one bundle under the same
+settings: the attempt that waits for the last time records `not repaired`
+with the attempts in its reason, and the round stays out whole and the run
+goes on, so that a bench that never completes cannot hold a run in a loop.
+That decision stands like the others (`gate.repair_max_attempts` is not
+one of the settings that decide again).
+
+An active round builds on the latest bundle with a `models.pt`, deployed
+or not, while its per-cell gate compares with the bundle the run ships. A
+repaired round is deployed, so the next round's stage04b evaluates the
+repaired bundle (its collapse retrains included) and its stage05 carries
+the repaired networks, the round after takes it as the improvement
+baseline (`--prior-models`), and the next per-cell gate and the final
+retrain's gate compare with it. A round kept out whole is still the bundle
+the next round builds on, while the gates compare with the bundle the run
+ships.
+
 It always stages the result under `<round>/stage06/staged_for_deploy/`
 (the model, an index fragment per target and `INSTALL.md`). With
 `deploy.apply_patch` it installs the model into
 `shared/tilewright/weights/hipblaslt/<t>/<t>/` for every directory `t` of
 `deploy.targets` and registers the library stem in that directory's
-`tilewright_index`. One model can serve several targets (for example a
-gfx1250-strict model also ships for hipBLASLt's `gfx1250v0` subtree, the
-same logic built for gfx1250, which a device of ASIC revision 0 loads
-without the strict switch; devices of other revisions load `gfx1250` and the
-model of a gfx1250 config); for a target whose libraries carry another
-architecture suffix (those of `gfx1250v0` end in `_gfx1250`) the stem is
-rewritten accordingly. The index
+`tilewright_index`. One model can serve several targets: a model of the
+gfx1250-strict logic, for one, can also be installed for hipBLASLt's
+`gfx1250v0` subtree, the same logic built for gfx1250, which a device of
+ASIC revision 0 loads without the strict switch (devices of other revisions
+load `gfx1250` and the model of a gfx1250 config). For a target whose
+libraries carry another architecture suffix (those of `gfx1250v0` end in
+`_gfx1250`) the stem is rewritten accordingly. The index
 merge keeps every other library's entry, resolves a stem listed twice the
 way the engine does (the first line wins) and removes the duplicates. A
 re-deploy keeps the file name the stem already uses; a file that no index
@@ -3183,7 +3522,9 @@ C's library, bank, bench settings and contexts (`lib.audit.bench_config`):
 
 - stage01 draws `audit.shapes_per_cell` shapes per cell with `audit.seed`
   (the first-principles generator, initial mode), leaving out every shape of
-  the `--source-run-dir` runs' rounds;
+  the `--source-run-dir` runs' rounds and every GEMM of the `audit.held_out`
+  lists outside the audit directory (an entry inside it is the set's own and
+  is skipped);
 - stage02 plans them exhaustively: every pool and bank kernel per shape;
 - the bench runs in resumable parts of `audit.part_shapes` shapes:
   `bench/exclusive/` holds every shape, `bench/<label>/` every configured
@@ -3211,8 +3552,12 @@ nothing, one that retunes a kernel under its own index benches that kernel.
 Every generation's rows are read at the indices the current pool gives their
 kernels; kernels that left the pool cost nothing, their rows are ignored.
 `--devices` overrides `runtime.devices` for the audit only. An audit
-directory is bound to its seed, counts, library stem and contexts; other
-settings need another directory.
+directory is bound to its seed, counts, arch, library stem and contexts;
+other settings need another directory, and a training run refuses one built
+with other settings, complete or not. The contexts follow the device: a
+config of CU shares resolves other budgets on another CU count or compute
+partition, and turning an entry on or off adds or removes a context, so
+such a run needs an audit set of its own.
 
 A training config points at it with `audit.dir`. Then:
 
@@ -3227,6 +3572,74 @@ A training config points at it with `audit.dir`. Then:
   round; an entering model that is the previous round's bundle (the same
   model file) has no row of its own, and that bundle's row shows the more
   complete of the two evaluations.
+
+`audit.held_out` registers the library's other held-out lists, those a
+training run must never draw although they are not its `audit.dir`: fresh
+audit sets of the same generator with another seed, out-of-distribution
+lists, an older audit of the library. An entry is an audit directory (any
+directory holding `stage01/shapes.yaml`), a bench yaml, a file of
+`- [M, N, K, B]` rows, or a CSV with `m`, `n`, `k` and `batch` (or
+`batch_count`) columns (`lib/held_out.py`). A GEMM is held out by its exact
+(M, N, K, batch). Then:
+
+- stage01 of every round (initial, active and enhance) excludes the
+  GEMMs of every list as it excludes the audit shapes: none is drawn or
+  re-used by the top-up, and a cell takes its next draws instead, so it
+  keeps its count; an active round's targeted shapes (see *Targeted shapes
+  (stage01)*) are checked against the lists too;
+- a list is read whole or refused: an entry line that names no GEMM, a CSV
+  row without the columns or with a value that is not a positive integer,
+  and a list without any GEMM fail the config check and stage01 (a list read
+  short would hold out less than it names). Two entries that name one file,
+  and an entry naming `audit.dir`'s own list (which every round leaves out
+  already), are errors;
+- every round's `stage01/categorization.json` records each list in
+  `exclusion_sources`: the entry, the file read and its sha256, the number
+  of GEMMs and the digest of their sorted (M, N, K, batch) set
+  (`gemms_sha256`, the same for one set of GEMMs in any format), how many
+  of its GEMMs the round's draws hit and left out (`n_dropped`), and how
+  many of its GEMMs the round's history holds (`n_in_history`, with a
+  warning): GEMMs earlier rounds drew before the list was registered, which
+  are training data of those rounds;
+- every invocation that trains (`full`, `initial`, `active`, `enhance`)
+  warns once per list that shares GEMMs with shapes the run's rounds drew,
+  naming the rounds: they stay in the training data, also of the final
+  retrain, and a measurement on the list must leave them out;
+- `--mode audit` leaves the lists out of the audit set it builds too, so
+  that a fresh audit set is disjoint from the earlier ones.
+
+The lists are pinned when set, with the digest of their GEMMs
+(`audit.held_out_sha256`): adding, removing or changing a list of a run
+needs `--allow-code-change`, which records the change in `pin.json`. A run
+without the key keeps the pin it had before it existed. An audit directory
+does not pin them; its stage01 records what it left out.
+
+No shape list of an external tuning workflow's evaluation sets, or of the
+GEMM corpus it draws them from, trains, tunes or validates a model
+(`lib/external_sets.py`): their sizes were chosen for that workflow's own
+evaluation, their provenance is not documented, and they may overlap the
+sets the models are validated on. A list is recognised whole by its
+fingerprint, the sha256 of its distinct (M, N, K, batch) sorted and written
+one `m,n,k,batch` line each, joined by newlines, whatever its format, order
+or repeats; a CSV also by that workflow's columns (`legacy_category`,
+`refined_category`, or a `source` column holding `log_sample` or
+`model`). The loaders refuse such a list: held-out lists, bench yamls read
+as shapes (rounds, histories, audit sets), stage 7's bench yamls, and stage
+8's datasets (a bench yaml before it is benched, every dataset once its
+GEMMs are read); preflight names the config's lists that are one
+(`audit.held_out`, `stage07.bench_yamls`, `stage08.datasets`). A part of
+such a set, or a list that mixes it with other GEMMs, has another
+fingerprint and is not recognised.
+
+A fresh audit set of a library (built after the training rounds it must not
+contain, for a measurement the existing audit set did not select on): run
+`--mode audit` into a new directory with a copy of the training config
+whose `audit.seed` is a seed no round or audit used, whose `audit.dir` is
+the new directory, and whose `audit.held_out` names the earlier audit sets
+and lists of the library, with `--source-run-dir` naming every run whose
+rounds it must not contain. Then add the new set to `audit.held_out` of
+every later training config of the library, so that no later round draws
+it.
 
 An evaluation runs the engine with the deployed bytes, the pool the runtime
 ranks (library and bank) and `validate.pick_measurement`, and drops audit
@@ -3548,12 +3961,16 @@ orchestrator dies, also by SIGKILL, and carries an attempt token that
 next invocation stops whatever is left of it before preflight checks the
 audit directory's lock.
 
-Before anything runs, preflight refuses a set it could not build: an audit
+Before anything runs, preflight refuses an audit set built with other
+bound settings or contexts, complete or not and whatever `audit.build`
+says, and the run checks it again when it starts, also with
+`--skip-preflight`: its models would be scored on GEMMs benched in other
+contexts. Preflight also refuses a set it could not build: an audit
 directory inside the run directory, holding rounds or inside another
-training run, one built with other bound settings, one whose first
-generation or next increment was planned with another hipBLASLt build, one
-another process is building, or a bench, library, device, context, planner
-or bank problem of the audit's own config (`lib.audit.bench_config`).
+training run, one whose first generation or next increment was planned
+with another hipBLASLt build, one another process is building, or a bench,
+library, device, context, planner or bank problem of the audit's own config
+(`lib.audit.bench_config`).
 
 `audit.v2` measures the run's bundles under protocol v2 with
 `scripts/audit_v2.py run --devices` on the run's devices, under their
@@ -3651,8 +4068,8 @@ are all complete retrains every cell once more, in `final_retrain/`:
   baseline, the per-cell gate finds
   no cell or GEMM that regresses against it (`lib.audit.cell_gate`, the
   `gate` section; see *Deployment (stage06)*): a final retrain better on
-  the mean that adds a confirmed collapse in some group without lifting
-  another there does not ship. `decision.json` keeps the gate's findings
+  the mean that adds a confirmed collapse in any group does not ship as
+  it is (the repair below may fix it). `decision.json` keeps the gate's findings
   (`cell_gate`) and settings (`cell_gate_settings`) when it ran, and the
   official protocol it decided with (`official`, the one used in
   `protocol`, and v2's numbers beside the composite's in `final.v2` and
@@ -3672,6 +4089,68 @@ are all complete retrains every cell once more, in `final_retrain/`:
   the same GEMMs and carry a small optimistic bias: `decision.json`
   (`selected_by_audit`, `selection_note`), the run summary and the report's
   audit headline say so.
+- with `full.final_retrain.repair` (true), a final retrain not worse on the
+  mean that the per-cell gate keeps out for findings in at most
+  `gate.repair_max_cells` base cells (new collapses, cells significantly
+  worse or confidently fallen below the floor) is repaired instead of
+  discarded (`scripts/repair_bundle.py`, `lib/collapse_repair.py`,
+  `lib/cell_merge.py`, in `final_retrain/repair/`), as *Repair on refusal*
+  describes for a round. Each confirmed new collapse is localized to the
+  leaf whose network served it. When that network, ranking every key it
+  serves without the tier, picks another kernel outside the leaf's tier
+  that reads at or above the floor there, its view key joins the leaf's
+  tier, kept only when the tail guard keeps it on the leaf's own data (no
+  new pick below the floor on the leaf's training or held-out GEMMs, its
+  held-out picks' geomean kept; see *Whitelist tier (stage05)*) and it
+  lifts the collapse. A collapse no kept key lifts (the network itself
+  ranks the collapsing kernel first, or the guard refuses the key), and a
+  cell the cell rules flagged, sends its base cell, the cell and every leaf
+  under it, back to the bundle that ships, found by the sha256 of the model
+  its gate scored: their networks, tier keys and feature statistics replace
+  the final retrain's, so its picks there are that bundle's, and the splits
+  that subtree lacks are revoked (`stage05/revoked_splits.json`). The
+  repaired bundle is registered with protocol v2 (unless `audit.v2` is
+  off), scored on the audit set (`repair/audit.json`) and judged again by
+  the same two rules and the all-group check against the same baseline,
+  each group under the protocol the refusal used: while a group of it lacks
+  that protocol (its picks wait for their v2 bench) nothing is decided and
+  the same command tries again. When all pass, the repaired bundle replaces
+  the final retrain's `stage05/cells.json`, `whitelist_tier.json`,
+  `metrics.json`, revoked splits and, last, `models.pt`, and its audit
+  record (the originals, with
+  `cell_origins.json`, are kept in `repair/unrepaired/`), the cells it
+  carried take their origins from the bundle that ships
+  (`cell_origins.json`), and it ships. The repaired `cells.json` keeps the
+  entries of the networks the final retrain trained that the bundle still
+  serves, each counting the tier keys it is served with
+  (`n_whitelist_tier_keys`; `n_repair_tier_keys` of them added by the
+  repair, after stage05 measured the cell), and none for a carried cell,
+  even one the bundle that ships holds under the same label: its origin
+  names the bundle that trained it, so reports, model-option checks and
+  the next round's plan read that bundle's records. `metrics.json` keeps
+  what stage05 trained and measured, with the repaired bundle's tier
+  record, and both files say what the repair changed (`repair`).
+  `decision.json` records every collapse, every flagged cell, what was
+  found and done, the picks after, the sha256 of the bundles the networks
+  come from and the revoked splits (`repair`), and the refused candidate's
+  change and per-cell gate (`unrepaired`); its `selection_note` says that
+  the same audit GEMMs flagged its cells and verified the repair, so a
+  fresh audit set must confirm the repaired bundle's numbers. The repair
+  carries from, and the audit set scores, the bundle found by that sha256
+  wherever it is (a model scored for it of other content leaves the final
+  retrain out). A repair that does not pass, or
+  finds nothing to repair, leaves the final retrain out as before, with
+  why. `repair/installed.json` names the installed bundle, the unrepaired
+  one and the bundle the cells came from by their sha256 and is written
+  before the copy, which replaces `models.pt` last: until
+  `stage05/models.pt` is the repaired one the install is unfinished, and
+  the next decision finishes it before it scores; a decision made again
+  after an interruption still records the repair. The audit only detects
+  and verifies: every added key is the leaf's own network's choice, kept
+  on its own data, and every carried network is one the run shipped; the
+  repaired bundle's audit numbers come from the GEMMs that found its
+  collapses and carry the same small optimistic bias as the decision
+  itself.
 - a final retrain that ships is deployed by stage06 into
   `final_retrain/stage06` (installed with `deploy.apply_patch`, its audit
   record leaving out every round's shapes) and is from then on the run's
@@ -4133,6 +4612,15 @@ identity costs before any model.
   GEMM, both efficiencies, ratio with its interval, the cell's
   family-wise p, whether a repeated measurement confirms a tail pick),
   lifted tail picks included.
+- **Repairs** (see *Repair on refusal*): every round's repair decision
+  (`<round>/repair/decision.json`) and every final retrain's repair
+  (`decision.json` `repair`): the decision (with its attempts while it
+  waits), whether the repaired bundle was deployed, what the repair did,
+  the incumbent, the splits it revoked and the reason; then per flagged
+  base cell its findings, the action (`tier add`, `subtree carry`), the
+  tier keys added and the sha256 of the bundle whose networks now serve it;
+  and the note of every repaired bundle that the same audit GEMMs flagged
+  and judged its cells (`selected_by_audit`).
 - **Where to improve**: every leaf of the bundle ranked by expected gain =
   GEMM share x (target - efficiency), with the efficiency and the action
   taken from held-out evidence only: the audit set's result of the leaf's
@@ -4402,7 +4890,10 @@ comment lines state it, and preflight checks the bench devices with it.
 each round derives its own seed from it), `n_strata` (log-strata per axis
 within a cell, 1), `exclude` (shape regions left out, a list of rules with
 `min_` / `max_` bounds on `m`, `n`, `k`, `batch` and `mn` = min(M, N); a shape
-is left out when it meets every bound of a rule).
+is left out when it meets every bound of a rule), `targeted_per_tail_gemm`
+(4: new shapes near each tail GEMM of the previous round's stage04b, 0 off;
+see *Targeted shapes (stage01)*), `targeted_max_per_leaf` (32: at most that
+many per leaf).
 
 **`planner`** (stage02): `enabled` (false), `mode` (`exhaustive`;
 `planned`, `auto`), `exhaustive_max_kernels` (512), `seed_per_cell` (8),
@@ -4416,8 +4907,13 @@ pinned only when set), `recall_min_ceiling` (0.97; the seed recall's
 warning threshold, unpinned; see *Seed recall*).
 
 **`contexts`** (stage03c; see Execution contexts): `list` and `holdout`
-(entries `{cu_budget or cu_fraction, schedule, cotenant, fraction, name}`;
-a run resolves a `cu_fraction` when it starts), `seed` (42),
+(entries `{cu_budget or cu_fraction, schedule, cotenant, fraction, name,
+enabled}`; a run resolves a `cu_fraction` when it starts, as a share of the
+bench device's CUs, a partition's inside one, and leaves out an entry with
+`enabled: false`), `granule` (32: the CUs every budget a `cu_fraction`
+resolves to is a whole multiple of, at least one; a multiple of the
+launch rule's SM-target granule; pinned only at another value),
+`seed` (42),
 `cotenant_binary` (default: `hipblaslt-cotenant` next to the bench),
 `path_append` (directories appended to the wrapped bench's `PATH`; default
 the ROCm `bin`), `replan` (false).
@@ -4492,7 +4988,10 @@ model-shaping; see *Whitelist tier (stage05)*), `whitelist_tier_contexts`
 (`pooled`; with `whitelist_tier_k`, how the tier counts the execution
 contexts of a cell's GEMMs: `pooled`, `balanced` or `reserve`,
 model-shaping; validation warns when there is no tier or no trained
-context besides exclusive use), `non_temporal_family_rule`
+context besides exclusive use), `whitelist_tier_guard_keys` (8; with
+`whitelist_tier_k`, the keys the tail guard may add to a cell's tier, 0
+off, model-shaping; validation warns when there is no tier; see *Whitelist
+tier (stage05)*), `non_temporal_family_rule`
 (false; v3 with `non_temporal_rule`: the family-wise non-temporal rule,
 model-shaping; stage02 then lists the members it keeps, see *Planned
 benches (stage02)*; preflight refuses it, `non_temporal_rule` and a spec
@@ -4545,21 +5044,32 @@ set; absent, stage05's default applies (see *Student training (stage05)*):
 
 **`validate`** (stage04b): `sel_eff_threshold` (0.95), `split_floor` (0.85;
 0 disables), both numbers, `min_cell_gemms` (20), `split_min_improvement`
-(0.02), `split_after_attempts` (2), `max_split_depth` (6),
+(0.02), `split_after_attempts` (2), `max_split_depth` (6; 0 turns splitting
+off),
 `structural_split_min_octaves` (0 = off), `structural_split_max_depth` (-1),
 `pick_measurement` (`warmup`; `timed`, `any`, see
 *Kernels and execution context*; read by stages 4.5, 5, 6, 7 and 8),
 `rebench_misses` (true: stages 4.5, 6 (gate) and 8 re-bench their misses on
 the GPUs and decide on the measured numbers, same section),
-`rebench_runs` (3, at least 1: runs of that re-bench).
+`rebench_runs` (3, at least 1: runs of that re-bench), `tail_floor` (0.7: a
+held-out pick below it makes a tail GEMM, listed per cell for the next
+round's targeted shapes), `collapse_retrain` (true: a cell that passes with
+a held-out pick below `gate.tail_floor` is retrained in the same round; see
+*Active learning (stage04b)*).
 
 **`full`**: `total_rounds` (3), `final_retrain` (see *Final retrain*):
-`enabled` (false), `gate` (`not-worse`; `none`), `recipe` (a mapping of
+`enabled` (false), `gate` (`not-worse`; `none`), `repair` (true: a final
+retrain the per-cell gate keeps out for findings in at most
+`gate.repair_max_cells` base cells is repaired and judged again; see
+*Final retrain*), `recipe` (a mapping of
 train keys to override and stage05 options to add for the final retrain,
 each named as stage05's option is, `T` included; `distill_lam` and `lam`,
 or `distill_T` and `T`, together are an error).
 
-`audit`** (see *Audit set*): `dir` (null: no audit), `build` (`before`;
+**`audit`** (see *Audit set*): `dir` (null: no audit), `held_out` ([]: the
+library's other held-out lists, audit directories or list files, whose
+GEMMs no round draws; pinned only when set, with the digests of their
+GEMMs), `build` (`before`;
 `parallel`, `off`: when a training run builds an incomplete audit set),
 `devices` (the audit's bench devices; default `runtime.devices`; with
 `build: parallel` required and disjoint from them), `v2` (`rounds`; `final`,
@@ -4611,12 +5121,20 @@ ships by more than this keeps a bundle out), `cell_floor` (0.85; 0 off: a
 cell that confidently falls below it does), `alpha` (0.05: the cell rules'
 family-wise level over their cells; `audit.bootstrap` must give at least
 2 / alpha sign flips), `tail_floor` (0.5; 0 off: the tail rule's floor),
-`tail_collapse` (0.5, in (0, 1]: a new pick below the tail floor counts
+`tail_collapse` (1, in (0, 1]: a new pick below the tail floor counts
 when it is at most this fraction of the shipped pick's efficiency; 1:
-any), `tail_budget` (0: the confirmed new tail picks a group may add
-beyond the ones it lifts), `groups` (`exclusive`; `all`: the audit groups
+every step across the floor), `tail_budget` (0: the confirmed new tail
+picks a bundle may add over every group; healed ones never offset them),
+`groups` (`exclusive`; `all`: the audit groups
 the cell rules judge as one family; the others' cells are reported, and
-the tail rule judges every group).
+the tail rule judges every group), `repair` (false: a round's bundle the
+per-cell gate alone keeps out is repaired in the base cells it flags,
+judged again with an all-group check and deployed when it passes; see
+*Repair on refusal*), `repair_max_cells` (3, at least 1: with more flagged
+base cells a round's bundle or a final retrain stays out whole),
+`repair_max_attempts` (3, at least 1: the attempts of a round's repair
+whose repaired bundle the audit set has not measured yet, or measured under
+a weaker protocol than the refusal, before the round stays out whole).
 
 **`report`**: `origami_reference` (false; true as `--origami-reference`),
 `timeout_s` (3600; seconds the end-of-run report may take, 0: no limit),
@@ -4696,6 +5214,9 @@ scripts/
                          measurement: plan, bench, status
     choose_shipped_subset.py  bank kernels to ship with the library pool
     build_whitelist_tier.py   a trained bundle's whitelist tier, built again
+    repair_bundle.py     repair the base cells the per-cell gate flags in
+                         a trained bundle it keeps out
+                         (lib/collapse_repair.py, lib/cell_merge.py)
     gpu_run.py           run a command on one GPU under its lease
     collect_bench_failures.py
     convert_mlrec_v1_to_v2.py

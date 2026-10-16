@@ -371,6 +371,151 @@ def test_baseline_from_prior_decisions(run, tmp_path):
     )
 
 
+def test_improvement_baseline_is_never_the_model_itself():
+    """A baseline counts only when another network than the evaluated one
+    measured it; a reading that names no network counts as the prior
+    bundle's."""
+    from stage04b_iterate_active_learning import improvement_baseline as base
+
+    assert base("a", 0.9, "b", 0.8, "c") == (0.9, "same_data_prior_model")
+    assert base("a", 0.9, "a", 0.8, None) == (None, "model_unchanged")
+    assert base("a", 0.9, "a", 0.8, "a") == (None, "model_unchanged")
+    assert base("a", 0.9, "a", 0.8, "c") == (0.8, "cross_round_prior_decisions")
+    assert base("a", None, None, 0.8, None) == (0.8, "cross_round_prior_decisions")
+    assert base("a", None, "a", 0.8, None) == (None, "model_unchanged")
+    assert base("a", None, None, 0.8, "a") == (None, "model_unchanged")
+    assert base("a", None, "b", 0.8, "a") == (None, "model_unchanged")
+    assert base("a", None, None, None, None) == (None, "no_baseline")
+
+
+def _always_split(*extra):
+    """Options under which a cell below the threshold splits whenever it has
+    an improvement baseline (any improvement is too small) and only then."""
+    return (
+        "--min-cell-gemms",
+        20,
+        "--train-min-cell-gemms",
+        20,
+        "--sel-eff-threshold",
+        1.01,
+        "--split-floor",
+        0.01,
+        "--split-after-attempts",
+        0,
+        "--split-min-improvement",
+        1.0,
+        *extra,
+    )
+
+
+def test_a_carried_model_is_not_compared_with_itself(run, tmp_path):
+    """The prior bundle holding the evaluated cell's very network (a cell
+    carried since it passed, its tier rebuilt) is no improvement baseline:
+    the cell retrains. A retrained network is one: the cell splits."""
+    import torch
+
+    import stage05_train as s5
+
+    bundle = load_bundle(run / "round_0" / "stage05" / "models.pt")
+    cell = CELLS3[0]
+    digest = s5.network_digest(bundle["models"][cell])
+    carried = {
+        label: dict(e, view_key_hashes=[7, 8]) for label, e in bundle["models"].items()
+    }
+    retrained = dict(carried)
+    sd = dict(carried[cell]["state_dict"])
+    sd["temperature"] = sd["temperature"] * 1.5
+    retrained[cell] = dict(carried[cell], state_dict=sd)
+    assert s5.network_digest(carried[cell]) == digest
+    assert s5.network_digest(retrained[cell]) != digest
+    rows = {}
+    for name, models in (("carried", carried), ("retrained", retrained)):
+        prior = tmp_path / name / "models.pt"
+        prior.parent.mkdir()
+        torch.save(dict(bundle, models=models), prior)
+        d = stage04b(
+            run, tmp_path / f"out_{name}", *_always_split("--prior-models", prior)
+        )
+        rows[name] = next(r for r in d["per_cell"] if r["cell"] == cell)
+        assert rows[name]["model_digest"] == digest
+    same = rows["carried"]
+    assert same["decision"] == "retrain"
+    assert same["reason"] == (
+        "below_threshold__no_split_trigger(no_baseline[model_unchanged])"
+    )
+    assert same["improvement_baseline_source"] == "model_unchanged"
+    assert same["sel_eff_prior_model_same_data"] is not None
+    other = rows["retrained"]
+    assert other["decision"] == "split" and "[same_data_prior_model]" in other["reason"]
+    assert other["improvement_baseline_source"] == "same_data_prior_model"
+
+
+def test_a_reading_of_the_same_network_is_no_baseline(run, tmp_path):
+    """The cross-round baseline (--prior-decisions) names the network that
+    measured it: the evaluated network's own reading is no baseline, another
+    network's is."""
+    import stage05_train as s5
+
+    bundle = load_bundle(run / "round_0" / "stage05" / "models.pt")
+    cell = CELLS3[0]
+    digest = s5.network_digest(bundle["models"][cell])
+    rows = {}
+    for name, by in (("same", digest), ("other", "sha256:" + "0" * 64)):
+        prior = tmp_path / f"{name}.json"
+        prior.write_text(
+            json.dumps(
+                {
+                    "per_cell": [
+                        {
+                            "cell": cell,
+                            "decision": "pass",
+                            "sel_eff_new": 0.5,
+                            "n_eval": 30,
+                            "model_digest": by,
+                        }
+                    ]
+                }
+            )
+        )
+        d = stage04b(
+            run, tmp_path / f"out_{name}", *_always_split("--prior-decisions", prior)
+        )
+        rows[name] = next(r for r in d["per_cell"] if r["cell"] == cell)
+    assert rows["same"]["decision"] == "retrain"
+    assert rows["same"]["improvement_baseline_source"] == "model_unchanged"
+    assert rows["other"]["decision"] == "split"
+    assert "[cross_round_prior_decisions]" in rows["other"]["reason"]
+
+
+def test_depth_zero_turns_splitting_off(run):
+    """--max-split-depth 0: a cell below the threshold retrains, whatever
+    its split trigger, and no split rule is written."""
+    out = run / "splits_off"
+    d = stage04b(
+        run,
+        out,
+        "--min-cell-gemms",
+        20,
+        "--sel-eff-threshold",
+        1.01,
+        "--split-floor",
+        1.01,
+        "--split-after-attempts",
+        0,
+        "--max-split-depth",
+        0,
+    )
+    assert d["max_split_depth"] == 0
+    assert d["cells_split"] == [] and d["cells_split_blocked"] == []
+    for cell in CELLS3[:2]:
+        r = next(r for r in d["per_cell"] if r["cell"] == cell)
+        assert r["decision"] == "retrain"
+        assert r["reason"] == "below_threshold(th=1.010)__splits_off"
+    assert json.loads((out / "splits.json").read_text())["splits"] == {}
+    retrain = (out / "retrain_cells.txt").read_text().split(",")
+    assert set(retrain) == set(CELLS3[:2])
+
+
 def test_split_needing_more_gemms_is_reported(run):
     d = stage04b(
         run,
@@ -514,6 +659,91 @@ def test_final_round_never_splits(run):
     assert any("final_round_no_split" in r["reason"] for r in d["per_cell"])
 
 
+def test_a_base_cell_whose_splits_a_repair_revoked_never_splits_again(run, tmp_path):
+    """round_0's bundle revoked a split of CELLS3[0] (lib/subcells.py
+    REVOKED_SPLITS): that base cell's leaves retrain instead of splitting
+    and are recorded; the other cell is judged as before, and the revoked
+    split stays out of the tree."""
+    import shutil
+
+    from lib import subcells as sc
+
+    copy = tmp_path / "run"
+    shutil.copytree(run / "round_0", copy / "round_0")
+    shutil.copytree(run / "round_1", copy / "round_1")
+    shutil.copy2(run / "config.yaml", copy / "config.yaml")
+    rule = sc.build_split_rule(CELLS3[0], "M", 4096)
+    sc.write_splits_json(copy / "round_0" / "stage04b" / "splits.json", 0, [rule])
+    sc.write_revocations(
+        copy / "round_0" / "stage05" / sc.REVOKED_SPLITS, [rule], [CELLS3[0]]
+    )
+    out = copy / "barred"
+    d = stage04b(
+        copy,
+        out,
+        "--min-cell-gemms",
+        20,
+        "--sel-eff-threshold",
+        1.01,
+        "--split-floor",
+        1.01,
+        "--split-after-attempts",
+        0,
+    )
+    assert d["split_barred_base_cells"] == {CELLS3[0]: "round_0"}
+    assert d["cells_split_barred"] == [CELLS3[0]]
+    assert d["summary"]["split_barred"] == 1
+    barred = next(r for r in d["per_cell"] if r["cell"] == CELLS3[0])
+    assert barred["decision"] == "retrain"
+    assert barred["reason"].endswith("__split_barred")
+    other = next(r for r in d["per_cell"] if r["cell"] == CELLS3[1])
+    assert "split_barred" not in other["reason"]
+    assert d["cells_split_blocked"] == [CELLS3[1]]
+    assert json.loads((out / "splits.json").read_text())["splits"] == {}
+    assert CELLS3[0] in (out / "retrain_cells.txt").read_text().split(",")
+    assert not [
+        r["cell"] for r in d["per_cell"] if r["cell"].startswith(rule.cell + "#")
+    ]
+
+
+def test_the_bundle_it_evaluates_bars_the_cells_its_repair_revoked(run, tmp_path):
+    """A round built on a repaired final retrain evaluates that bundle (its
+    --models-dir is final_retrain/stage05, no prior round's): the splits the
+    final retrain revoked leave the tree and their base cell stays unsplit,
+    although no prior round revoked them."""
+    import shutil
+
+    from lib import subcells as sc
+
+    copy = tmp_path / "run"
+    shutil.copytree(run / "round_0", copy / "round_0")
+    shutil.copytree(run / "round_1", copy / "round_1")
+    shutil.copy2(run / "config.yaml", copy / "config.yaml")
+    rule = sc.build_split_rule(CELLS3[0], "M", 4096)
+    sc.write_splits_json(copy / "round_0" / "stage04b" / "splits.json", 0, [rule])
+    final = copy / "final_retrain"
+    shutil.copytree(run / "round_0" / "stage05", final / "stage05")
+    sc.write_revocations(final / "stage05" / sc.REVOKED_SPLITS, [rule], [CELLS3[0]])
+    out = copy / "barred"
+    args = stage04b_args(copy, out, "--quiet", "--min-cell-gemms", 20)
+    args[1] = final / "stage05"
+    args += ["--sel-eff-threshold", 1.01, "--split-floor", 1.01]
+    run_stage(
+        "stage04b_iterate_active_learning.py",
+        *args,
+        "--split-after-attempts",
+        0,
+    )
+    d = json.loads((out / "decisions.json").read_text())
+    assert d["models_dir"] == str(final / "stage05")
+    assert d["split_barred_base_cells"] == {CELLS3[0]: "final_retrain"}
+    assert d["cells_split_barred"] == [CELLS3[0]]
+    assert json.loads((out / "splits.json").read_text())["splits"] == {}
+    assert not [
+        r["cell"] for r in d["per_cell"] if r["cell"].startswith(rule.cell + "#")
+    ]
+
+
 def test_held_out_contexts_are_reported_per_context(run, tmp_path):
     from test_stage05_train import write_context_round
 
@@ -583,3 +813,64 @@ def test_rows_of_another_build_are_read_at_their_kernels(run, tmp_path):
             for r in d["per_cell"]
         }
     assert got["b"] == got["a"] and got["a"]
+
+
+def test_tail_gemms_are_listed_and_a_passing_collapse_is_retrained(run):
+    out = run / "round_1" / "tails"
+    d = stage04b(
+        run,
+        out,
+        "--min-cell-gemms",
+        20,
+        "--sel-eff-threshold",
+        0.5,
+        "--tail-floor",
+        1.0,
+        "--collapse-floor",
+        0.999,
+    )
+    assert (d["tail_floor"], d["collapse_floor"]) == (1.0, 0.999)
+    rows = {r["cell"]: r for r in d["per_cell"]}
+    tailed = [r for r in rows.values() if r.get("n_tail_gemms")]
+    assert tailed, "the synthetic models pick a slower kernel somewhere"
+    for r in rows.values():
+        if "tail_gemms" not in r:
+            continue
+        effs = [t["sel_eff"] for t in r["tail_gemms"]]
+        assert effs == sorted(effs) and all(e < 1.0 for e in effs)
+        assert len(r["tail_gemms"]) == min(r["n_tail_gemms"], 64)
+        assert r["n_low_seleff_lt_0p50"] == sum(1 for e in effs if e < 0.5)
+        assert r["n_low_seleff_lt_0p50"] <= r["n_low_seleff_lt_0p70"]
+        assert {"m", "n", "k", "batch", "cu_budget", "schedule"} <= set(
+            r["tail_gemms"][0] if r["tail_gemms"] else {"m", "n", "k", "batch",
+                                                         "cu_budget", "schedule"}
+        )  # fmt: skip
+    retrained = [c for c, r in rows.items() if r.get("collapse_retrain")]
+    assert retrained == d["cells_collapse_retrain"] and retrained
+    for c in retrained:
+        assert rows[c]["decision"] == "pass"
+        assert "__collapse_retrain(" in rows[c]["reason"]
+    listed = set(filter(None, (out / "retrain_cells.txt").read_text().split(",")))
+    assert set(retrained) <= listed
+    assert d["summary"]["collapse_retrain"] == len(retrained)
+    assert d["aggregate"]["n_tail_gemms_total"] == sum(
+        r.get("n_tail_gemms") or 0 for r in tailed
+    )
+    # off: the same cells pass and are not retrained
+    off = stage04b(
+        run,
+        run / "round_1" / "tails_off",
+        "--min-cell-gemms",
+        20,
+        "--sel-eff-threshold",
+        0.5,
+        "--collapse-floor",
+        0,
+    )
+    assert off["cells_collapse_retrain"] == []
+    assert not any(r.get("collapse_retrain") for r in off["per_cell"])
+    judged = [r for r in off["per_cell"] if r["decision"] in ("pass", "retrain")]
+    assert judged
+    for r in judged:
+        assert r["tail_floor"] == 0.7
+        assert all(t["sel_eff"] < 0.7 for t in r["tail_gemms"])

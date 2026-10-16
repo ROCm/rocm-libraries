@@ -44,6 +44,20 @@ schedules) count as `train.whitelist_tier_contexts` says (`CONTEXT_MODES`):
 
 A cell whose GEMMs share one context gets the pooled tier in every mode.
 
+The greedy serves a cell's mean, so a key that only a few of its GEMMs
+need, such as the winners of a context its GEMMs rarely run in, can drop
+out while the model's pick from the rest takes more than twice the
+winner's time there. The tail guard (`guard`) then keeps such a key: on a
+GEMM of the cell's own data whose pick from the tier falls below
+GUARD_FLOOR of its winner, the fastest key within GUARD_NEAR of the winner
+that the model scores above that pick joins the tier, when on the cell's
+GEMMs, its own and those stage05 held out of its training alike, the tier
+with it and the keys kept before it adds no new pick below the floor to
+the tier the greedy chose, undoes no rescue of those keys and keeps
+GUARD_MEAN_FLOOR of the held-out picks' geomean (`guard_verdict`); at most
+`guard_keys` per cell, each GEMM and context counting on its own, and only
+for collapses no key kept before it lifted.
+
 The weights do not change, so the tier can be built again for another pool
 without training (scripts/build_whitelist_tier.py). A tier names view keys,
 never solution indices: the engine scores the tier keys a pool holds and
@@ -60,7 +74,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
-from typing import Tuple
+from typing import Set, Tuple
 
 import numpy as np
 
@@ -187,6 +201,36 @@ def universe(
     )
 
 
+def split_gemms(
+    gemms: Sequence[Any],
+    tree: Optional[Mapping[str, Any]],
+    validation_frac: float,
+    seed: int,
+    s5: Any = None,
+) -> Tuple[List[Any], List[Any]]:
+    """(training side, held-out side) of `gemms` (`run_analysis.Gemm`): per
+    leaf of the split tree `tree` (stage05's routing), the GEMMs stage05's
+    `split_validation` keeps for training and those it holds out (its
+    validation GEMMs, which it never trains on), the leaves in the order of
+    their first GEMM and each leaf's GEMMs in their order. Leaves stage05
+    did not train count too: the bundle serves their GEMMs with a model of
+    another cell."""
+    s5 = s5 or stage05_module()
+    by_leaf: Dict[str, List[Any]] = {}
+    for g in gemms:
+        m, n, k, b = (int(v) for v in g.key[:4])
+        by_leaf.setdefault(s5._leaf_of(m, n, k, b, dict(tree or {})), []).append(g)
+    train_out: List[Any] = []
+    held_out: List[Any] = []
+    for group in by_leaf.values():
+        rows = [g.row for g in group]
+        train, _val = s5.split_validation(rows, validation_frac, seed)
+        kept = {id(r) for r in train}
+        for g, r in zip(group, rows):
+            (train_out if id(r) in kept else held_out).append(g)
+    return train_out, held_out
+
+
 def training_gemms(
     gemms: Sequence[Any],
     tree: Optional[Mapping[str, Any]],
@@ -194,24 +238,8 @@ def training_gemms(
     seed: int,
     s5: Any = None,
 ) -> List[Any]:
-    """The training side of `gemms` (`run_analysis.Gemm`): per leaf of the
-    split tree `tree` (stage05's routing), the GEMMs stage05's
-    `split_validation` keeps for training, the leaves in the order of their
-    first GEMM and each leaf's GEMMs in their order. Leaves stage05 did not
-    train count too: the bundle serves their GEMMs with a model of another
-    cell."""
-    s5 = s5 or stage05_module()
-    by_leaf: Dict[str, List[Any]] = {}
-    for g in gemms:
-        m, n, k, b = (int(v) for v in g.key[:4])
-        by_leaf.setdefault(s5._leaf_of(m, n, k, b, dict(tree or {})), []).append(g)
-    out: List[Any] = []
-    for group in by_leaf.values():
-        rows = [g.row for g in group]
-        train, _val = s5.split_validation(rows, validation_frac, seed)
-        kept = {id(r) for r in train}
-        out += [g for g, r in zip(group, rows) if id(r) in kept]
-    return out
+    """The training side of `gemms` (`split_gemms`)."""
+    return split_gemms(gemms, tree, validation_frac, seed, s5)[0]
 
 
 def leaf_counts(
@@ -611,6 +639,313 @@ def choose(
     return tier
 
 
+# ── tail guard ───────────────────────────────────────────────────────────────
+
+# A pick below this fraction of its GEMM's winner is a collapse: the per-cell
+# gate's default tail floor (lib/audit.py CELL_GATE_DEFAULTS).
+GUARD_FLOOR = 0.5
+# A guard key is a near-winner of a GEMM it rescues: within this fraction of
+# the GEMM's winner.
+GUARD_NEAR = 0.9
+# The keys the guard may add to a cell's tier by default (stage05
+# --whitelist-tier-guard-keys).
+GUARD_KEYS = RESERVE_KEYS
+# The guard keys of a cell may cost its held-out picks at most this factor
+# of their geomean: the per-cell gate's default tolerance.
+GUARD_MEAN_FLOOR = 0.99
+# Refused candidates a cell's guard record names.
+_GUARD_SHOWN = 4
+Item = Tuple[float, Tuple[Any, ...]]
+
+
+def _pick(r: Tuple[Any, ...], keys: np.ndarray) -> int:
+    """The position in the scored GEMM `r` (`_score_chunk`) of the model's
+    pick among its measured keys in `keys` (universe indices), the first
+    on equal scores; -1 when none of them is measured."""
+    idx = np.flatnonzero(np.isin(r[1], keys))
+    if not idx.size:
+        return -1
+    return int(idx[np.argmax(r[3][idx])])
+
+
+def _efficiency(w: float, cost: float) -> float:
+    return min(1.0, float(w) / float(cost)) if cost > 0 else 0.0
+
+
+def tail_change(
+    items: Sequence[Item],
+    before: Iterable[int],
+    after: Iterable[int],
+    floor: float = GUARD_FLOOR,
+    current: Optional[Iterable[int]] = None,
+) -> Dict[str, Any]:
+    """How the model's picks among each GEMM's measured keys (the tier's
+    in-sample convention, `_evaluate_keys`) change on `items` ((winner
+    latency, `_score_chunk` result) of one cell's GEMMs) when the cell's
+    tier `before` (universe key indices) becomes `after`: the GEMMs both
+    tiers cover, the picks that change, the positions in `items` of the new
+    picks below `floor` (from at or above it) and of the picks lifted from
+    below it to at or above it, and the geomean ratio after / before over
+    the covered GEMMs (None without any). With `current`, a tier between
+    the two (`before` with keys added since), a pick `current` holds at or
+    above the floor that falls below it under `after` is new too, so that a
+    key cannot undo what the keys before it lifted. A GEMM `before` does
+    not cover is served by the cascade, which this does not model, and is
+    left out."""
+    b = np.array(sorted({int(x) for x in before}), dtype=np.int64)
+    a = np.array(sorted({int(x) for x in after}), dtype=np.int64)
+    c = (
+        None
+        if current is None
+        else np.array(sorted({int(x) for x in current}), dtype=np.int64)
+    )
+    n = changed = 0
+    new: List[int] = []
+    healed: List[int] = []
+    logs = 0.0
+    for i, (w, r) in enumerate(items):
+        pb = _pick(r, b)
+        if pb < 0:
+            continue
+        pa = _pick(r, a)
+        if pa < 0:
+            continue
+        n += 1
+        eb, ea = _efficiency(w, r[2][pb]), _efficiency(w, r[2][pa])
+        ec = eb
+        if c is not None:
+            pc = _pick(r, c)
+            ec = _efficiency(w, r[2][pc]) if pc >= 0 else eb
+        if pa != pb:
+            changed += 1
+        if ea < floor and (eb >= floor or ec >= floor):
+            new.append(i)
+        elif eb < floor <= ea:
+            healed.append(i)
+        logs += math.log(max(ea, 1e-12)) - math.log(max(eb, 1e-12))
+    return {
+        "n_gemms": n,
+        "n_changed": changed,
+        "new": new,
+        "healed": healed,
+        "geomean_ratio": math.exp(logs / n) if n else None,
+    }
+
+
+def guard_verdict(
+    train: Sequence[Item],
+    held: Sequence[Item],
+    before: Iterable[int],
+    after: Iterable[int],
+    *,
+    floor: float = GUARD_FLOOR,
+    mean_floor: float = GUARD_MEAN_FLOOR,
+    current: Optional[Iterable[int]] = None,
+) -> Tuple[bool, Dict[str, Any]]:
+    """(keep, record) of keys a cell's tier `before` would gain to become
+    `after`, on the cell's own GEMMs (`train`, the side its tier was chosen
+    on) and its held-out ones (`held`, never trained on): kept only when no
+    pick of either side falls below `floor` from at or above it under
+    `before`, or under `current` when given (`tail_change`), and the
+    held-out picks keep at least `mean_floor` of their geomean under
+    `before` (the training side's when the cell holds out none). Keys added
+    one at a time pass `before` as the tier before any of them and
+    `current` as the tier with those kept so far, so that the keys together
+    keep both bounds and none undoes the rescue of one before it."""
+    t = tail_change(train, before, after, floor, current)
+    h = tail_change(held, before, after, floor, current)
+    mean_side = h if h["n_gemms"] else t
+    ratio = mean_side["geomean_ratio"]
+    why = []
+    if t["new"] or h["new"]:
+        why.append(
+            f"{len(t['new'])} new pick(s) below {floor:g} on its own GEMMs, "
+            f"{len(h['new'])} on its held-out GEMMs"
+        )
+    if ratio is not None and ratio < mean_floor:
+        side = "held-out" if h["n_gemms"] else "own"
+        why.append(f"its {side} picks' geomean x{ratio:.4f} < x{mean_floor:g}")
+
+    def brief(c: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "n_gemms": c["n_gemms"],
+            "n_changed": c["n_changed"],
+            "n_new_below_floor": len(c["new"]),
+            "n_healed": len(c["healed"]),
+            "geomean_ratio": c["geomean_ratio"],
+        }
+
+    rec = {"own": brief(t), "held_out": brief(h), "why_not": "; ".join(why) or None}
+    return not why, rec
+
+
+def _rescues(
+    train: Sequence[Item], tier: Sequence[int], floor: float, near: float
+) -> Tuple[int, Dict[int, List[int]]]:
+    """(the collapses of `train` under the tier `tier`, {rescue key: the
+    positions in `train` of the collapses it rescues}): a GEMM whose pick
+    from the tier is below `floor` of its winner is a collapse, and its
+    rescue is its fastest measured key outside the tier that is within
+    `near` of the winner and that the model scores above the tier's pick
+    (`guard_cell`); a collapse without one is counted only."""
+    in_tier = {int(x) for x in tier}
+    t_arr = np.array(sorted(in_tier), dtype=np.int64)
+    n = 0
+    rescues: Dict[int, List[int]] = {}
+    for i, (w, r) in enumerate(train):
+        p = _pick(r, t_arr)
+        if p < 0 or _efficiency(w, r[2][p]) >= floor:
+            continue
+        n += 1
+        best: Optional[Tuple[float, float, int]] = None
+        for j in range(r[1].size):
+            key = int(r[1][j])
+            if key in in_tier or not r[3][j] > r[3][p]:
+                continue
+            if _efficiency(w, r[2][j]) < near:
+                continue
+            cand = (float(r[2][j]), -float(r[3][j]), key)
+            if best is None or cand < best:
+                best = cand
+        if best is not None:
+            rescues.setdefault(best[2], []).append(i)
+    return n, rescues
+
+
+def guard_cell(
+    train: Sequence[Item],
+    held: Sequence[Item],
+    tier_keys: Sequence[int],
+    *,
+    max_keys: int = GUARD_KEYS,
+    floor: float = GUARD_FLOOR,
+    near: float = GUARD_NEAR,
+    mean_floor: float = GUARD_MEAN_FLOOR,
+) -> Tuple[List[int], Dict[str, Any]]:
+    """(the universe indices of the keys the tail guard adds to a cell's
+    tier `tier_keys`, what it found) from the cell's own GEMMs `train` and
+    its held-out ones `held` ((winner latency, `_score_chunk` result)).
+
+    A GEMM of `train` whose pick from the tier is below `floor` of its
+    winner is a collapse. Its rescue is its fastest measured key outside
+    the tier that is within `near` of the winner and that the model scores
+    above the tier's pick, so that keeping it moves the pick there: the
+    GEMM's winner when the model ranks the winner above the pick, else the
+    near-winner it does. Before each key is tried, the collapses and their
+    rescues are found again under the tier with the keys kept so far, so
+    that no key joins for a collapse an earlier one lifted; the rescue
+    lifting the most of those still open is tried next, each key once.
+    It joins only when `guard_verdict` keeps the tier with it and the keys
+    kept before it against `tier_keys`: no new pick below `floor` on either
+    side of the cell's GEMMs, none of the picks the keys kept before it
+    lifted falling back below it, and the held-out geomean kept; at most
+    `max_keys` join."""
+    tier = [int(x) for x in tier_keys]
+    rec: Dict[str, Any] = {"n_collapses": 0}
+    if max_keys <= 0 or not tier:
+        return [], rec
+    rec["n_collapses"], rescues = _rescues(train, tier, floor, near)
+    rec["n_rescuable"] = sum(len(v) for v in rescues.values())
+    if not rescues:
+        return [], rec
+    added: List[int] = []
+    tried: Set[int] = set()
+    refused: List[Dict[str, Any]] = []
+    verdict: Optional[Dict[str, Any]] = None
+    while len(added) < int(max_keys):
+        left = [k for k in rescues if k not in tried]
+        if not left:
+            break
+        key = min(left, key=lambda x: (-len(rescues[x]), x))
+        tried.add(key)
+        ok, check = guard_verdict(
+            train,
+            held,
+            tier,
+            tier + added + [key],
+            floor=floor,
+            mean_floor=mean_floor,
+            current=tier + added,
+        )
+        if not ok:
+            refused.append({"key": key, "lifts": len(rescues[key]), **check})
+            continue
+        added.append(key)
+        verdict = check
+        _, rescues = _rescues(train, tier + added, floor, near)
+    rec["added"] = added
+    rec["n_lifted"] = (
+        len(tail_change(train, tier, tier + added, floor)["healed"]) if added else 0
+    )
+    rec["check"] = verdict
+    rec["n_refused"] = len(refused)
+    rec["refused"] = refused[:_GUARD_SHOWN]
+    return added, rec
+
+
+def guard(
+    tier: Tier,
+    labels: Sequence[str],
+    scored: Sequence[Tuple[int, np.ndarray, np.ndarray, np.ndarray]],
+    winner_us: Sequence[float],
+    held_scored: Sequence[Tuple[int, np.ndarray, np.ndarray, np.ndarray]],
+    held_winner_us: Sequence[float],
+    hashes: np.ndarray,
+    *,
+    max_keys: int = GUARD_KEYS,
+    floor: float = GUARD_FLOOR,
+    near: float = GUARD_NEAR,
+    mean_floor: float = GUARD_MEAN_FLOOR,
+) -> int:
+    """The tail guard (`guard_cell`) on every cell of `tier`, from its
+    training GEMMs (`scored` with `winner_us`, as `choose` read them) and
+    its held-out GEMMs (`held_scored`, `held_winner_us`), each routed by
+    the model itself: a cell's guard keys follow its greedy keys in
+    `tier.keys`, and a cell with a collapse records what the guard found
+    (`guard`, its keys named by view-key hash). Returns the keys added."""
+
+    def by_cell(
+        rows: Sequence[Tuple[int, np.ndarray, np.ndarray, np.ndarray]],
+        wins: Sequence[float],
+    ) -> Dict[int, List[Item]]:
+        out: Dict[int, List[Item]] = {}
+        for w, r in zip(wins, rows):
+            if r[0] >= 0 and w > 0 and r[1].size:
+                out.setdefault(int(r[0]), []).append((float(w), r))
+        return out
+
+    index = {int(h): i for i, h in enumerate(hashes.tolist())}
+    train_of, held_of = by_cell(scored, winner_us), by_cell(held_scored, held_winner_us)
+    n_added = 0
+    for ci, label in enumerate(labels):
+        keys = [index[int(h)] for h in tier.keys.get(label, []) if int(h) in index]
+        added, rec = guard_cell(
+            train_of.get(ci, []),
+            held_of.get(ci, []),
+            keys,
+            max_keys=max_keys,
+            floor=floor,
+            near=near,
+            mean_floor=mean_floor,
+        )
+        if not rec["n_collapses"]:
+            continue
+        rec["added"] = [int(hashes[x]) for x in rec.get("added", [])]
+        for r in rec.get("refused", []):
+            r["key"] = int(hashes[r["key"]])
+        rec["n_held_out_gemms"] = len(held_of.get(ci, []))
+        if label in tier.cells:
+            tier.cells[label]["guard"] = rec
+        if added:
+            tier.keys[label] = list(tier.keys.get(label, [])) + [
+                int(hashes[x]) for x in added
+            ]
+            if label in tier.cells:
+                tier.cells[label]["n_keys"] = len(tier.keys[label])
+            n_added += len(added)
+    return n_added
+
+
 def build(
     bundle: Mapping[str, Any],
     gemms: Sequence[Any],
@@ -624,11 +959,15 @@ def build(
     s5: Any = None,
     say: Optional[Callable[[str], None]] = None,
     mode: str = DEFAULT_CONTEXTS,
+    held_out: Sequence[Any] = (),
+    guard_keys: int = GUARD_KEYS,
 ) -> Tier:
     """The tier of `bundle` with `k` keys per cell, chosen on the training
-    GEMMs `gemms` (`training_gemms`) over the universe `u` as `mode`
+    GEMMs `gemms` (`split_gemms`) over the universe `u` as `mode`
     (`CONTEXT_MODES`) counts their execution contexts on `hardware`, with
-    the model file the bundle packs to at `weight_dtype` (`scoring_bundle`).
+    the model file the bundle packs to at `weight_dtype` (`scoring_bundle`),
+    then with up to `guard_keys` keys per cell that the tail guard (`guard`)
+    adds from those GEMMs and the held-out ones `held_out` (0: no guard).
     ValueError for a bundle that cannot get one (`refusal`), k < 1 or an
     unknown mode."""
     why = refusal(bundle)
@@ -640,6 +979,8 @@ def build(
         raise ValueError(
             f"whitelist tier contexts {mode!r} is not one of {list(CONTEXT_MODES)}"
         )
+    if int(guard_keys) < 0:
+        raise ValueError(f"a tail guard of {guard_keys} keys")
     s5 = s5 or stage05_module()
     data = mlrec.write_model(
         scoring_bundle(bundle), None, arch, hwlib.arch_constants(arch), weight_dtype
@@ -649,15 +990,18 @@ def build(
     labels = [
         str(tw.cell_label(model, i)) for i in range(int(tw.describe(model).n_cells))
     ]
+    held = list(held_out) if int(guard_keys) > 0 else []
     if say:
         say(
-            f"scoring {len(gemms):,} training GEMMs over {u.n:,} kernels "
-            f"({u.n_keys:,} view keys) with {max(1, int(workers))} workers"
+            f"scoring {len(gemms):,} training GEMMs"
+            + (f" and {len(held):,} held-out ones" if held else "")
+            + f" over {u.n:,} kernels ({u.n_keys:,} view keys) with "
+            f"{max(1, int(workers))} workers"
         )
-    scored = engine_scores(data, u, hardware, gemms, workers)
+    scored = engine_scores(data, u, hardware, list(gemms) + held, workers)
     tier = choose(
         labels,
-        scored,
+        scored[: len(gemms)],
         [g.winner_us for g in gemms],
         k,
         u.hashes,
@@ -665,7 +1009,20 @@ def build(
         contexts=[served_context(g.context, hardware.n_cu) for g in gemms],
         mode=mode,
     )
+    n_guard = 0
+    if int(guard_keys) > 0:
+        n_guard = guard(
+            tier,
+            labels,
+            scored[: len(gemms)],
+            [g.winner_us for g in gemms],
+            scored[len(gemms) :],
+            [g.winner_us for g in held],
+            u.hashes,
+            max_keys=int(guard_keys),
+        )
     reached = [c for c in tier.cells.values() if c.get("n_gemms")]
+    guarded = [c["guard"] for c in tier.cells.values() if c.get("guard")]
     tier.record = {
         "k": int(k),
         "contexts": mode,
@@ -678,6 +1035,17 @@ def build(
             "n_kernels": int(u.n),
             "n_keys": int(u.n_keys),
             "keys_digest": keys_digest(u.hashes.tolist()),
+        },
+        "guard": {
+            "keys": int(guard_keys),
+            "floor": GUARD_FLOOR,
+            "near": GUARD_NEAR,
+            "mean_floor": GUARD_MEAN_FLOOR,
+            "n_held_out_gemms": len(held),
+            "n_cells_with_collapses": len(guarded),
+            "n_collapses": sum(int(g["n_collapses"]) for g in guarded),
+            "n_keys_added": n_guard,
+            "n_lifted": sum(int(g.get("n_lifted") or 0) for g in guarded),
         },
     }
     return tier
@@ -732,6 +1100,13 @@ def record_text(record: Mapping[str, Any]) -> str:
             f"exclusive use"
         ),
     }.get(str(record.get("contexts") or DEFAULT_CONTEXTS), "")
+    g = record.get("guard") or {}
+    if g.get("n_keys_added"):
+        detail += (
+            f"; {g['n_keys_added']} added by the tail guard, lifting "
+            f"{g.get('n_lifted')} of {g.get('n_collapses')} collapses on the "
+            f"cells' own GEMMs"
+        )
     return (
         f"{record.get('k')} view keys per cell in {record.get('n_cells')} cells "
         f"({record.get('n_keys')} in all{detail})"

@@ -43,7 +43,11 @@ through the stage03c wrapper; the exclusive context benches all of them.
 Never trained on: rounds draw no audit shape (stage01 --exclude-shapes-yaml,
 which also forbids re-use), and stage05 refuses any input inside an audit
 directory (`audit_inputs`). An evaluation also drops audit shapes found in
-the rounds the model trained on and reports how many.
+the rounds the model trained on and reports how many. The other held-out
+lists of the library (fresh audits, OOD lists; `audit.held_out`,
+`held_out_entries`, read by lib/held_out.py) are kept out of every round the
+same way, and out of an audit set the run builds, unless the entry lies in
+that audit's own directory.
 
 A generation records the kernel digest (`kernel_digest`: name, engine config
 and attributes) of every solution index it benched, so its rows follow their
@@ -98,6 +102,7 @@ SCHEMA_VERSION = "audit-v1"
 RESULT_SCHEMA = "audit-eval-v2"
 DEFAULTS: Dict[str, Any] = {
     "dir": None,
+    "held_out": [],
     "shapes_per_cell": 16,
     "shapes_per_context": 4,
     "seed": 4242,
@@ -114,15 +119,16 @@ CLASSES = ("pool_limited", "identity_limited", "model_limited", "passing")
 # section). Its cell rules, on the groups `groups` names: a cell
 # significantly worse beyond `cell_tolerance`, a cell confidently fallen
 # below `cell_floor`, family-wise at `alpha` over their cells. Its tail
-# rule, in every group: more new picks collapsing below `tail_floor` (to at
-# most `tail_collapse` of the shipped pick) than the group lifts back above
-# it, plus `tail_budget`.
+# rule, over every group: more than `tail_budget` new picks below
+# `tail_floor` (from at or above it in the shipped bundle, falling to at
+# most `tail_collapse` of its efficiency; at 1, every such step), counted
+# per GEMM and group, never offset by the picks the candidate lifts.
 CELL_GATE_DEFAULTS: Dict[str, Any] = {
     "cell_tolerance": 0.01,
     "cell_floor": 0.85,
     "alpha": 0.05,
     "tail_floor": 0.5,
-    "tail_collapse": 0.5,
+    "tail_collapse": 1.0,
     "tail_budget": 0,
     "groups": "exclusive",
 }
@@ -156,6 +162,12 @@ def settings(cfg: Mapping[str, Any]) -> Dict[str, Any]:
 def config_dir(cfg: Mapping[str, Any]) -> Optional[Path]:
     d = settings(cfg)["dir"]
     return Path(str(d)) if d else None
+
+
+def held_out_entries(cfg: Mapping[str, Any]) -> List[str]:
+    """The config's other held-out lists (`audit.held_out`): paths of audit
+    directories or list files (lib/held_out.py) whose GEMMs no round draws."""
+    return [str(e) for e in settings(cfg)["held_out"] or []]
 
 
 def official_protocol(cfg: Mapping[str, Any]) -> str:
@@ -2106,16 +2118,17 @@ def _crossings(
     label: str,
     proto: str,
     floor: float,
-    collapse: float,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """(new, lifted) picks of group `label` under `proto`. New: a GEMM whose
-    pick in `after` falls below `floor` from at or above it in `before`, to
-    at most `collapse` of `before`'s efficiency (a collapse, not a step
-    across the line). Lifted: the reverse, `before`'s pick below the floor
-    and at most `collapse` of `after`'s. Each is `confirmed` by a repeated
-    measurement: under v2 or the sustained composite (medians of repeated
-    benches) always; under v1 when `after`'s v2 record evaluated the group
-    and its measurement of the GEMM (`after_v2`) says the same."""
+    collapse: float = 1.0,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(new, lifted, persisting) picks of group `label` under `proto`. New:
+    a GEMM whose pick in `after` is below `floor` where `before`'s was at
+    or above it, at most `collapse` of `before`'s efficiency (at 1, every
+    step across the line). Lifted: the reverse, a collapse of `before`'s
+    that `after` heals. Persisting: below the floor in both. Each new or
+    lifted pick is `confirmed` by a repeated measurement: under v2 or the
+    sustained composite (medians of repeated benches) always; under v1 when
+    `after`'s v2 record evaluated the group and its measurement of the GEMM
+    (`after_v2`) says the same."""
     from .grid import cell_key
 
     a = per_gemm_of(protocol_record(before, proto), label)
@@ -2128,18 +2141,21 @@ def _crossings(
     def falls(x: float, y: float) -> bool:
         return y < floor <= x and y <= collapse * x
 
-    new, lifted = [], []
+    new, lifted, persisting = [], [], []
     for s in sorted(set(a) & set(b)):
-        down = falls(a[s], b[s])
-        if not (down or falls(b[s], a[s])):
-            continue
         entry: Dict[str, Any] = {
             "shape": list(s),
             "cell": cell_key(*s),
             "before": a[s],
             "after": b[s],
-            "confirmed": True,
         }
+        if a[s] < floor and b[s] < floor:
+            persisting.append(entry)
+            continue
+        down = falls(a[s], b[s])
+        if not (down or falls(b[s], a[s])):
+            continue
+        entry["confirmed"] = True
         if check is not None:
             seen = check.get(s)
             entry["after_v2"] = seen
@@ -2147,7 +2163,7 @@ def _crossings(
                 falls(a[s], seen) if down else falls(seen, a[s])
             )
         (new if down else lifted).append(entry)
-    return new, lifted
+    return new, lifted, persisting
 
 
 def cell_gate(
@@ -2178,11 +2194,14 @@ def cell_gate(
     Every other group is tested the same way, as a family of its own, and
     its findings are reported (`deciding` false).
 
-    The tail rule judges every group (`_crossings`): a group keeps `after`
-    out (`tail_refuses`) when its new picks collapsing below tail_floor
-    that a repeated measurement confirms outnumber the confirmed ones it
-    lifts back above it by more than tail_budget; every other new collapse
-    is reported.
+    The tail rule judges every group (`_crossings`), each GEMM of each
+    group on its own: `after` is kept out when the new picks below
+    tail_floor that a repeated measurement confirms number more than
+    tail_budget over all groups (`n_tail_new`); the collapses it heals
+    (`tail_lifted`, `n_tail_healed`) are reported beside them and never
+    offset one, and so are the collapses both bundles share
+    (`tail_persisting`). A group holding a deciding collapse is in
+    `tail_groups`; every other new collapse is reported.
 
     `passed` is False with a finding that decides; else None when no group
     the cell rules judge pairs, or `bootstrap` gives too few flips to reach
@@ -2217,16 +2236,11 @@ def cell_gate(
             continue
         changed[label] = change
         paired[label] = _paired_cells(before, after, label, proto)
-        new, lifted = (
+        new, lifted, persisting = (
             _crossings(before, after, label, proto, tail, collapse)
             if tail > 0
-            else ([], [])
+            else ([], [], [])
         )
-        n_new = sum(1 for t in new if t["confirmed"])
-        n_lifted = sum(1 for t in lifted if t["confirmed"])
-        refuses = n_new > n_lifted + budget
-        for t in new:
-            t["decides"] = bool(refuses and t["confirmed"])
         groups[label] = {
             "protocol": proto,
             "deciding": deciding,
@@ -2237,10 +2251,19 @@ def cell_gate(
             "floor": [],
             "tail": new,
             "tail_lifted": lifted,
-            "n_tail_new": n_new,
-            "n_tail_lifted": n_lifted,
-            "tail_refuses": refuses,
+            "tail_persisting": persisting,
+            "n_tail_new": sum(1 for t in new if t["confirmed"]),
+            "n_tail_lifted": sum(1 for t in lifted if t["confirmed"]),
+            "tail_refuses": False,
         }
+    n_tail_new = sum(g.get("n_tail_new", 0) for g in groups.values())
+    tail_refuses = n_tail_new > budget
+    for g in groups.values():
+        if "reason" in g:
+            continue
+        g["tail_refuses"] = bool(tail_refuses and g["n_tail_new"])
+        for t in g["tail"]:
+            t["decides"] = bool(tail_refuses and t["confirmed"])
     p_of: Dict[Tuple[str, str], float] = {}
     if cell_rules == "on":
         families = [[k for k in paired if groups[k]["deciding"]]]
@@ -2286,7 +2309,7 @@ def cell_gate(
         return sum(len(g[kind]) for g in gs.values())
 
     tail_groups = [k for k, g in compared.items() if g["tail_refuses"]]
-    n_tail = sum(compared[k]["n_tail_new"] for k in tail_groups)
+    n_tail = n_tail_new if tail_refuses else 0
     n_cells = count(deciding_groups, "regressed") + count(deciding_groups, "floor")
     passed: Optional[bool]
     if n_cells or tail_groups:
@@ -2307,6 +2330,9 @@ def cell_gate(
         "n_regressed": count(deciding_groups, "regressed"),
         "n_floor": count(deciding_groups, "floor"),
         "n_tail": n_tail,
+        "n_tail_new": n_tail_new,
+        "n_tail_healed": sum(g["n_tail_lifted"] for g in compared.values()),
+        "n_tail_persisting": count(compared, "tail_persisting"),
         "tail_groups": tail_groups,
         "n_reported": count(compared, "regressed")
         + count(compared, "floor")
@@ -2339,13 +2365,14 @@ def _rule_texts(st: Mapping[str, Any]) -> Tuple[str, str]:
     cells = f"significantly worse beyond {tol}" + (
         f" or confidently fallen below {floor * 100:.1f}%" if floor > 0 else ""
     )
-    budget = int(st["tail_budget"])
     if float(st["tail_floor"]) <= 0:
         return cells, "the tail rule off (gate.tail_floor 0)"
-    tails = (
-        f"more new picks collapsing below {float(st['tail_floor']) * 100:.1f}% "
-        f"than it lifted"
-    ) + (f" plus {budget}" if budget else "")
+    collapse = float(st.get("tail_collapse", 1.0))
+    tails = f"below {float(st['tail_floor']) * 100:.1f}%" + (
+        f" at most {collapse * 100:.1f}% of the shipped pick's efficiency"
+        if collapse < 1.0
+        else ""
+    )
     return cells, tails
 
 
@@ -2372,15 +2399,22 @@ def cell_gate_text(result: Mapping[str, Any]) -> str:
     if result.get("n_reported"):
         notes.append(
             f"{result['n_reported']} finding(s) that do not decide (cells of groups "
-            f"outside gate.groups {st['groups']}; collapses within a group's "
+            f"outside gate.groups {st['groups']}; collapses within the "
             f"budget or that no repeated measurement confirms)"
         )
     note = "".join(f"; {n}" for n in notes)
+    budget = int(st["tail_budget"])
     if result.get("passed") is True:
+        healed = int(result.get("n_tail_healed") or 0)
         tails_ok = (
             tails_text
             if tails_text.startswith("the tail rule off")
-            else f"no group with {tails_text}"
+            else (
+                f"at most {budget} new pick(s) {tails_text} over the groups"
+                if budget
+                else f"no new pick {tails_text} in any group"
+            )
+            + (f" ({healed} healed)" if healed else "")
         )
         return (
             f"no cell {cells_text} (family-wise alpha {float(st['alpha']):g} over "
@@ -2416,7 +2450,7 @@ def cell_gate_text(result: Mapping[str, Any]) -> str:
             f"{float(st['cell_floor']) * 100:.1f}%: " + _listed(fell)
         )
     tails = [
-        f"{k} ({g['n_tail_new']} new, {g['n_tail_lifted']} lifted: "
+        f"{k} ({g['n_tail_new']} new, {g['n_tail_lifted']} healed: "
         + _listed(
             [
                 f"{_shape_text(t['shape'])} ({t['cell']}) {t['after'] * 100:.2f}% "
@@ -2430,7 +2464,13 @@ def cell_gate_text(result: Mapping[str, Any]) -> str:
         if g.get("tail_refuses")
     ]
     if tails:
-        parts.append(f"{len(tails)} group(s) with {tails_text}: " + ", ".join(tails))
+        parts.append(
+            f"{result.get('n_tail')} new pick(s) {tails_text} in {len(tails)} "
+            f"group(s)"
+            + (f", more than the budget of {budget}" if budget else "")
+            + ": "
+            + ", ".join(tails)
+        )
     return "; ".join(parts) + f" ({protos}){note}"
 
 

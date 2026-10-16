@@ -66,10 +66,33 @@ Decision per cell with a model and >= --min-cell-gemms held-out GEMMs:
     --split-min-improvement over the improvement baseline      -> split
   * otherwise                                                  -> retrain
 The improvement baseline is the round_(R-2) bundle (--prior-models) on the
-same GEMMs, else the cell's previous sel_eff_new (--prior-decisions). Without
-a baseline (round 1, a new child) only the split floor triggers a split.
---split-min-improvement <= 0 disables the improvement check (any cell below
-the threshold splits once its attempts are used up).
+same GEMMs, else the cell's previous sel_eff_new (--prior-decisions), each
+only when another network than the evaluated one measured it
+(`improvement_baseline`): a cell carried since, such as one that passed the
+round before, has not been retrained, and its own reading is no baseline.
+Without a baseline (round 1, a new child, an unchanged model) only the split
+floor triggers a split. --split-min-improvement <= 0 disables the
+improvement check (any cell below the threshold splits once its attempts
+are used up). --max-split-depth 0 turns splitting off: a cell below the
+threshold retrains. A base cell whose splits a repair revoked (the
+`stage05/revoked_splits.json` of a prior round or of the evaluated bundle,
+lib/subcells.py) never splits again: its leaves retrain instead (reason
+`__split_barred`, listed in `cells_split_barred`; the barred base cells in
+`split_barred_base_cells`), and the cumulative tree read through those
+directories leaves the revoked splits out.
+
+Tails, per GEMM: a mean hides the few GEMMs a cell serves badly, so every
+held-out GEMM of an evaluated cell whose pick is below --tail-floor (0.70)
+of its winner is a tail GEMM, listed per cell (`tail_gemms`: shape,
+execution context and efficiency, worst first, at most TAIL_LISTED)
+whatever the cell's decision, and stage01 of the next round samples new
+generator shapes near each (`--targeted-per-gemm`). Picks below half the
+winner's speed are counted (`n_low_seleff_lt_0p50`), and a cell that
+passes on its mean with a pick below --collapse-floor (0.5, the per-cell
+gate's tail floor) is retrained this round as well (`collapse_retrain`,
+listed in retrain_cells.txt and `cells_collapse_retrain`; its decision
+stays pass and counts as no retrain attempt); --collapse-floor 0 keeps
+such a cell as it is.
 
 A split needs --min-cell-gemms evaluated GEMMs on each side and, so that
 stage05 can train both children, --train-min-cell-gemms GEMMs on each side
@@ -127,6 +150,11 @@ from lib.fs import write_json  # noqa: E402
 from lib.shapes import read_reused_shapes  # noqa: E402
 
 LOW_SEL_EFF = 0.70
+# The per-cell gate's default tail floor (lib/audit.py CELL_GATE_DEFAULTS):
+# a held-out pick below it is a collapse.
+COLLAPSE_SEL_EFF = 0.5
+# The tail GEMMs a cell's row lists, worst first.
+TAIL_LISTED = 64
 
 
 def _finite(text: str) -> float:
@@ -341,6 +369,66 @@ def _evaluate(
     return by_id, (measured if bench is not None else None)
 
 
+def tail_gemms(
+    gemms: List[Dict[str, Any]], log_ratios: np.ndarray, floor: float
+) -> List[Dict[str, Any]]:
+    """The held-out GEMMs among `gemms` whose pick reaches less than `floor`
+    of the winner (`log_ratios`: log(pick / winner) per GEMM), worst first:
+    shape, execution context (cu_budget, schedule) and selection
+    efficiency."""
+    out = []
+    for g, lr in zip(gemms, log_ratios.tolist()):
+        if math.isnan(lr) or not lr > -math.log(floor):
+            continue
+        c = ev.context_of(g)
+        out.append(
+            {
+                "m": int(g["m"]),
+                "n": int(g["n"]),
+                "k": int(g["k"]),
+                "batch": int(g["batch_count"]),
+                "cu_budget": int(c.cu_budget),
+                "schedule": str(c.schedule),
+                "sel_eff": round(math.exp(-lr), 6),
+            }
+        )
+    out.sort(key=lambda t: (t["sel_eff"], t["m"], t["n"], t["k"], t["batch"]))
+    return out
+
+
+def improvement_baseline(
+    network: Optional[str],
+    same_data: Optional[float],
+    prior_network: Optional[str],
+    reading: Optional[float],
+    reading_network: Optional[str],
+) -> Tuple[Optional[float], str]:
+    """(improvement baseline, its source) of a cell whose evaluated model has
+    the network `network` (stage05 `network_digest`): the --prior-models
+    bundle's selection efficiency on the same GEMMs (`same_data`, measured
+    on `prior_network`), else the cell's latest earlier reading
+    (--prior-decisions, measured on `reading_network`; a record that names
+    no network counts as the prior bundle's). A baseline measured on
+    `network` itself would compare the model with itself, as for a cell
+    carried since it passed: it counts as none, with source
+    `model_unchanged`."""
+    unchanged = False
+    if same_data is not None:
+        if network is None or prior_network != network:
+            return same_data, "same_data_prior_model"
+        unchanged = True
+    if reading is not None:
+        by = reading_network if reading_network is not None else prior_network
+        if network is None or by != network:
+            return reading, "cross_round_prior_decisions"
+        unchanged = True
+    return None, ("model_unchanged" if unchanged else "no_baseline")
+
+
+def _no_baseline_text(source: str) -> str:
+    return "no_baseline" if source == "no_baseline" else f"no_baseline[{source}]"
+
+
 def _context_label(g: Mapping[str, Any]) -> str:
     c = ev.context_of(g)
     return f"{c.cu_budget}/{c.schedule}"
@@ -511,7 +599,8 @@ def main() -> int:
         "--max-split-depth",
         type=int,
         default=6,
-        help="cells at this split depth are never split",
+        help="cells at this split depth are never split; 0 turns splitting "
+        "off (a cell below the threshold retrains)",
     )
     ap.add_argument(
         "--structural-split-min-octaves",
@@ -596,6 +685,20 @@ def main() -> int:
         action="store_true",
         help="demote splits to retrains (no later round trains the children)",
     )
+    ap.add_argument(
+        "--tail-floor",
+        type=_finite,
+        default=LOW_SEL_EFF,
+        help="a held-out pick below this fraction of its winner is a tail "
+        "GEMM: listed per cell (`tail_gemms`) for stage01's targeted shapes",
+    )
+    ap.add_argument(
+        "--collapse-floor",
+        type=_finite,
+        default=COLLAPSE_SEL_EFF,
+        help="a cell that passes with a held-out pick below this fraction of "
+        "its winner is retrained this round (0: off)",
+    )
     ap.add_argument("--quiet", action="store_true")
     mr.add_arguments(ap)
     auditlib.add_arguments(ap)
@@ -638,6 +741,8 @@ def main() -> int:
             "cfg",
             f"threshold / floor: {args.sel_eff_threshold} / {args.split_floor}",
         )
+        if args.max_split_depth <= 0:
+            ui.info("cfg", "splits           : off (--max-split-depth 0)")
 
     models_pt = args.models_dir / "models.pt"
     if not models_pt.exists():
@@ -664,9 +769,20 @@ def main() -> int:
     prior_round_dirs = list(args.prior_round_dir or []) or _discover_prior_rounds(
         args.models_dir, args.round_idx
     )
-    split_tree = sc.load_cumulative_split_tree(prior_round_dirs)
+    evaluated_dir = Path(args.models_dir).resolve().parent
+    tree_dirs = list(prior_round_dirs)
+    if evaluated_dir not in {Path(d).resolve() for d in tree_dirs}:
+        tree_dirs.append(evaluated_dir)
+    split_tree = sc.load_cumulative_split_tree(tree_dirs)
+    barred = sc.barred_base_cells(tree_dirs)
     if split_tree and not args.quiet:
         ui.ok("splits", f"cumulative split tree: {len(split_tree)} split cells")
+    if barred and not args.quiet:
+        ui.info(
+            "splits",
+            f"no split in {len(barred)} base cell(s) whose splits a repair "
+            f"revoked: {sorted(barred)}",
+        )
 
     if (args.library_dir is None) != (args.library_stem is None):
         ui.err("pool", "--library-dir and --library-stem go together")
@@ -773,7 +889,20 @@ def main() -> int:
     except ev.RoutingMismatchError as e:
         ui.err("eval", str(e))
         return 1
-    prior_labels = set((prior_bundle or {}).get("models", {}))
+    prior_entries: Dict[str, Any] = (prior_bundle or {}).get("models") or {}
+    prior_labels = set(prior_entries)
+    networks: Dict[Tuple[int, str], str] = {}
+
+    def network(entries: Mapping[str, Any], label: str) -> Optional[str]:
+        """stage05 `network_digest` of the model `entries` hold for
+        `label`, None without one."""
+        if label not in entries:
+            return None
+        key = (id(entries), label)
+        if key not in networks:
+            networks[key] = _train.network_digest(entries[label])
+        return networks[key]
+
     pre_results: Dict[int, ev.GemmResult] = {}
     if "held_out" in measured:
         pre_results = {
@@ -832,6 +961,7 @@ def main() -> int:
         )
 
     prior_sel_eff_by_cell: Dict[str, Optional[float]] = {}
+    prior_network_by_cell: Dict[str, Optional[str]] = {}
     prior_low_by_cell: Dict[str, Optional[int]] = {}
     prior_low_n_by_cell: Dict[str, Optional[int]] = {}
     last_decision_by_cell: Dict[str, str] = {}
@@ -849,6 +979,7 @@ def main() -> int:
             cell = r["cell"]
             if r.get("sel_eff_new") is not None:
                 prior_sel_eff_by_cell[cell] = r.get("sel_eff_new")
+                prior_network_by_cell[cell] = r.get("model_digest")
             if int(r.get("n_eval") or 0) > 0:
                 prior_low_by_cell[cell] = r.get("n_low_seleff_lt_0p70")
                 prior_low_n_by_cell[cell] = int(r["n_eval"])
@@ -884,6 +1015,8 @@ def main() -> int:
             "no_model",
             "not_trainable",
             "split_blocked",
+            "split_barred",
+            "collapse_retrain",
         )
     }
     split_rules: List[sc.SplitRule] = []
@@ -932,6 +1065,7 @@ def main() -> int:
                 reason = (
                     f"no_prior_model__too_few_training_gemms({n_train}<{train_min})"
                 )
+            served = base_row.get("model_cells") or []
             row = dict(base_row)
             row.update(
                 {
@@ -939,6 +1073,9 @@ def main() -> int:
                     "reason": reason,
                     "n_eval": summ["n_evaluated"] if summ else 0,
                     "sel_eff_new": summ["sel_eff"] if summ else None,
+                    "model_digest": (
+                        network(models, served[0]) if len(served) == 1 else None
+                    ),
                     "origami_sel_eff_new": summ["origami_sel_eff"] if summ else None,
                     "origami_n_eval": summ["n_origami"] if summ else 0,
                 }
@@ -968,6 +1105,7 @@ def main() -> int:
                     "reason": reason,
                     "n_eval": 0,
                     "sel_eff_new": prior_sel_eff_by_cell.get(label),
+                    "model_digest": prior_network_by_cell.get(label),
                     "n_low_seleff_lt_0p70": prior_low_by_cell.get(label),
                     "carried_low_n_eval": prior_low_n_by_cell.get(label),
                     "origami_sel_eff_new": None,
@@ -994,6 +1132,12 @@ def main() -> int:
         n_eval = summ["n_evaluated"]
         per_gemm_log_ratio = np.asarray([r.log_ratio for r in cres], dtype=np.float64)
         n_low = int(np.nansum(per_gemm_log_ratio > -math.log(LOW_SEL_EFF)))
+        n_collapse = int(np.nansum(per_gemm_log_ratio > -math.log(COLLAPSE_SEL_EFF)))
+        tails = (
+            tail_gemms(gemms, per_gemm_log_ratio, float(args.tail_floor))
+            if args.tail_floor > 0
+            else []
+        )
         ori_sel = summ["origami_sel_eff"] if summ["n_origami"] > 0 else None
 
         same_data: Optional[float] = None
@@ -1022,10 +1166,14 @@ def main() -> int:
             and sc.split_depth(label) < min(args.max_split_depth, int(struct_depth))
         )
 
-        if same_data is not None:
-            baseline, baseline_source = same_data, "same_data_prior_model"
-        else:
-            baseline, baseline_source = prior_se, "cross_round_prior_decisions"
+        model_digest = network(models, label)
+        baseline, baseline_source = improvement_baseline(
+            model_digest,
+            same_data,
+            network(prior_entries, label),
+            prior_se,
+            prior_network_by_cell.get(label),
+        )
         if math.isnan(sel_eff_new):
             decision, reason = "retrain", "sel_eff_nan_on_new_data"
         elif force_structural:
@@ -1036,6 +1184,11 @@ def main() -> int:
             )
         elif sel_eff_new >= threshold:
             decision, reason = "pass", f"above_threshold(th={threshold:.3f})"
+        elif args.max_split_depth <= 0:
+            decision, reason = (
+                "retrain",
+                f"below_threshold(th={threshold:.3f})__splits_off",
+            )
         else:
             attempts_ok = attempts >= args.split_after_attempts
             if args.split_min_improvement <= 0:
@@ -1054,7 +1207,7 @@ def main() -> int:
                     else f"below_threshold({threshold:.3f})"
                 )
                 delta = (
-                    "no_baseline"
+                    _no_baseline_text(baseline_source)
                     if baseline is None
                     else f"delta={sel_eff_new - baseline:+.3f}[{baseline_source}]"
                 )
@@ -1072,7 +1225,7 @@ def main() -> int:
                 reason = (
                     "below_threshold__no_split_trigger("
                     + (
-                        "no_baseline"
+                        _no_baseline_text(baseline_source)
                         if baseline is None
                         else f"delta={sel_eff_new - baseline:+.3f}"
                         f">={args.split_min_improvement:.3f}[{baseline_source}]"
@@ -1082,6 +1235,9 @@ def main() -> int:
 
         if args.final_round and decision == "split":
             decision, reason = "retrain", f"{reason}__final_round_no_split"
+        if decision == "split" and sc.base_cell(label) in barred:
+            decision, reason = "retrain", f"{reason}__split_barred"
+            lists["split_barred"].append(label)
 
         split_axis = split_threshold = None
         if decision == "split":
@@ -1137,6 +1293,18 @@ def main() -> int:
         if decision == "retrain" and n_train < train_min:
             reason = f"{reason}__too_few_training_gemms({n_train}<{train_min})"
             lists["not_trainable"].append(label)
+        collapse_retrain = False
+        if decision == "pass" and args.collapse_floor > 0:
+            n_below = int(
+                np.nansum(per_gemm_log_ratio > -math.log(float(args.collapse_floor)))
+            )
+            if n_below and n_train >= train_min:
+                collapse_retrain = True
+                reason = (
+                    f"{reason}__collapse_retrain({n_below}_held_out_below_"
+                    f"{float(args.collapse_floor):.2f})"
+                )
+                lists["collapse_retrain"].append(label)
 
         row = dict(base_row)
         row.update(
@@ -1146,11 +1314,18 @@ def main() -> int:
                 "validation_kind": "held_out_new_data",
                 "n_eval": n_eval,
                 "sel_eff_new": sel_eff_new,
+                "model_digest": model_digest,
                 "pick_us_geomean": summ["pick_us_geomean"],
                 "winner_us_geomean": summ["winner_us_geomean"],
                 "n_low_seleff_lt_0p70": n_low,
+                "n_low_seleff_lt_0p50": n_collapse,
+                "collapse_retrain": collapse_retrain,
+                "tail_floor": float(args.tail_floor),
+                "n_tail_gemms": len(tails),
+                "tail_gemms": tails[:TAIL_LISTED],
                 "sel_eff_prior_model_same_data": same_data,
                 "prior_sel_eff_new": prior_se,
+                "improvement_baseline_source": baseline_source,
                 "prior_retrain_attempts": attempts,
                 "origami_sel_eff_new": ori_sel,
                 "origami_n_eval": summ["n_origami"],
@@ -1170,6 +1345,8 @@ def main() -> int:
                 pse, where = same_data, "same GEMMs"
             else:
                 pse, where = _ancestor_value(prior_sel_eff_by_cell, label), "other"
+            if baseline_source == "model_unchanged":
+                where += ", same model"
             prior_str = (
                 f"  prior={_train.fmt_pct(pse)}"
                 f"(d={(sel_eff_new - pse) * 100:+7.2f}, {where})"
@@ -1235,6 +1412,10 @@ def main() -> int:
         "n_low_seleff_lt_0p70_total": sum(
             int(r.get("n_low_seleff_lt_0p70") or 0) for r in evaluated
         ),
+        "n_low_seleff_lt_0p50_total": sum(
+            int(r.get("n_low_seleff_lt_0p50") or 0) for r in evaluated
+        ),
+        "n_tail_gemms_total": sum(int(r.get("n_tail_gemms") or 0) for r in evaluated),
         "n_miss_total": sum(int(r.get("n_miss") or 0) for r in evaluated),
         "pick_measurement": (
             ev.REBENCH_PICK_MEASUREMENT if bench is not None else args.pick_measurement
@@ -1290,8 +1471,11 @@ def main() -> int:
         "hardware": asdict(hardware),
         "sel_eff_threshold": args.sel_eff_threshold,
         "split_floor": args.split_floor,
+        "tail_floor": args.tail_floor,
+        "collapse_floor": args.collapse_floor,
         "split_min_improvement": args.split_min_improvement,
         "split_after_attempts": args.split_after_attempts,
+        "max_split_depth": args.max_split_depth,
         "train_min_cell_gemms": train_min,
         "split_budget_check": budget_check,
         "gate": gate_record,
@@ -1304,9 +1488,11 @@ def main() -> int:
             "train": len(lists["train"]),
             "split": len(lists["split"]),
             "split_blocked": len(lists["split_blocked"]),
+            "split_barred": len(lists["split_barred"]),
             "no_model": len(lists["no_model"]),
             "not_trainable": len(lists["not_trainable"]),
             "no_data": len(lists["no_data"]),
+            "collapse_retrain": len(lists["collapse_retrain"]),
             "fallback_parents": len(fallback_parents),
             "total_evaluated": len(all_labels),
         },
@@ -1318,9 +1504,12 @@ def main() -> int:
         "cells_train": lists["train"],
         "cells_split": lists["split"],
         "cells_split_blocked": lists["split_blocked"],
+        "cells_split_barred": lists["split_barred"],
+        "split_barred_base_cells": barred,
         "cells_no_model": lists["no_model"],
         "cells_not_trainable": lists["not_trainable"],
         "cells_no_data": lists["no_data"],
+        "cells_collapse_retrain": lists["collapse_retrain"],
         "cells_fallback_parents": fallback_parents,
         "per_cell": results_rows,
     }
@@ -1330,6 +1519,7 @@ def main() -> int:
     blocked = set(lists["not_trainable"])
     retrain_targets = [c for c in lists["retrain"] if c not in blocked]
     retrain_targets += lists["train"]
+    retrain_targets += lists["collapse_retrain"]
     for rule in split_rules:
         retrain_targets += [rule.lo_label, rule.hi_label]
     (args.out_dir / "retrain_cells.txt").write_text(",".join(retrain_targets))
@@ -1399,6 +1589,7 @@ def main() -> int:
             ("no_change", "too few held-out GEMMs, no earlier pass"),
             ("no_model", "no model of its own in the prior bundle"),
             ("not_trainable", "to retrain, but too few GEMMs for stage05"),
+            ("collapse_retrain", "passed, retrained for a held-out collapse"),
         ):
             ui.ok("done", f"{k:14s}: {len(lists[k]):3d} cells ({what})")
         if lists["split_blocked"]:

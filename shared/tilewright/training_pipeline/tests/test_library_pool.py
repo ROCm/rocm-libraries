@@ -239,7 +239,15 @@ def test_config_problems():
     _, warnings = lp.config_problems(
         {"library": {"kind": ["origami", "bok"], "bok_rows": "gridbased"}, "train": v3}
     )
-    assert len(warnings) == 1 and "bridge" in warnings[0]
+    (warning,) = warnings
+    assert warning.startswith(
+        "library.bok_rows gridbased: a bridge for a bank of kernels built as "
+        "GridBased rows, which TensileLite does not rank with the model."
+    )
+    assert "Equality, Range, Prediction, GridBased, FreeSize" in warning
+    assert "sits behind that table's row" in warning
+    assert "TENSILE_TILEWRIGHT_BANK takes Equality rows only" in warning
+    assert "before tilewright ranks" not in warning
     assert lp.config_problems({"library": {"bok_rows": ["equality"]}}) == (
         [],
         ["library.bok_rows is ignored: library.kind has no bok"],

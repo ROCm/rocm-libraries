@@ -189,6 +189,24 @@ def test_split_budget_must_be_feasible(base_cfg):
     assert not any("split budget" in e for e in _errors(cfg))
 
 
+def test_split_depth_zero_turns_splitting_off(base_cfg):
+    """validate.max_split_depth 0 leaves no split to check, and a structural
+    width trigger it overrides is reported as ignored."""
+    cfg = copy.deepcopy(base_cfg)
+    cfg["validate"]["max_split_depth"] = 0
+    assert not ro._split_rounds_possible(cfg)
+    assert not ro._structural_splits_possible(cfg)
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == [] and not any("split" in w for w in warnings), warnings
+    cfg["validate"]["structural_split_min_octaves"] = 3.0
+    errors, warnings = ro.validate_config(cfg)
+    assert errors == []
+    assert any(
+        w.startswith("validate.structural_split_min_octaves is ignored")
+        for w in warnings
+    ), warnings
+
+
 def test_round_count_without_split_room_warns(base_cfg):
     cfg = copy.deepcopy(base_cfg)
     cfg["full"]["total_rounds"] = 2
@@ -430,19 +448,25 @@ def _sizing(cfg):
 
 
 GFX1250_CONFIGS = [p for p in CONFIGS if p.name.startswith("gfx1250")]
+# Sanity runs of a new gfx1250 host or partition: every stage through the
+# production recipe's rounds on the smallest budgets, not a training recipe.
+SANITY_CONFIGS = [p for p in GFX1250_CONFIGS if p.stem.endswith("_sanity")]
+RECIPE_GFX1250_CONFIGS = [p for p in GFX1250_CONFIGS if p not in SANITY_CONFIGS]
 # Data types whose gfx1250 library hipBLASLt does not build yet.
 WITHOUT_LIBRARY = ("f8bs", "mxf6bs")
 
 
 def test_gfx1250_has_tn_configs_of_every_datatype():
-    assert sorted(p.name for p in GFX1250_CONFIGS) == [
-        "gfx1250-strict_bbs_tn_v3.yaml",
-        "gfx1250-strict_mxf8bs_tn_v3.yaml",
+    assert sorted(p.name for p in RECIPE_GFX1250_CONFIGS) == [
         "gfx1250_bbs_tn_v3.yaml",
         "gfx1250_f8bs_tn_v3.yaml",
         "gfx1250_mxf4bs_tn_v3.yaml",
         "gfx1250_mxf6bs_tn_v3.yaml",
         "gfx1250_mxf8bs_tn_v3.yaml",
+    ]
+    assert sorted(p.name for p in SANITY_CONFIGS) == [
+        "gfx1250_192cu_bbs_tn_sanity.yaml",
+        "gfx1250_bbs_tn_sanity.yaml",
     ]
 
 
@@ -543,11 +567,10 @@ def _harness_runs(cfg):
     return True
 
 
-# The configs of devices that report gfx1250 hold the production recipe's
-# sizing with the settings of a first run on a host nobody has measured
-# (README.md, First run on a new gfx1250 host); the gfx1250-strict ones keep
-# their own settings.
-FIRST_RUN_CONFIGS = [p for p in GFX1250_CONFIGS if p.name.startswith("gfx1250_")]
+# The training configs of devices that report gfx1250 hold the production
+# recipe's sizing with the settings of a first run on a host nobody has
+# measured (README.md, First run on a new gfx1250 host).
+FIRST_RUN_CONFIGS = [p for p in RECIPE_GFX1250_CONFIGS if p.name.startswith("gfx1250_")]
 # planner.top_k by data type, sized to each library's kernel pool; FP8 and
 # MXFP6, whose libraries are not built yet, take MXFP8's.
 FIRST_RUN_TOP_K = {"bbs": 96, "mxf4bs": 80, "mxf8bs": 64, "f8bs": 64, "mxf6bs": 64}
@@ -600,37 +623,15 @@ def test_gfx1250_configs_reread_near_winners_in_a_wide_band(path, config_env):
     assert reread["fast_below_us"] > REREAD_DEFAULTS["fast_below_us"]
 
 
-@pytest.mark.parametrize("path", FIRST_RUN_CONFIGS, ids=lambda p: p.name)
-def test_gfx1250_contexts_keep_every_entry_on_devices_of_three_granules_up(
-    path, config_env
-):
-    from lib import contexts as ctxlib
-    from lib.hipblaslt_launch import SM_TARGET_GRANULE as granule
-
-    cfg = _load(path)
-    fractions = [m["cu_fraction"] for m in ctxlib.trained_entries(cfg)]
-    assert len(fractions) == 2
-    for n_cu in range(3 * granule, 16 * granule + 1):
-        resolved, lines = ctxlib.resolve_fractions(cfg, n_cu)
-        assert not [ln for ln in lines if ln.endswith("left out")], lines
-        assert ctxlib.context_errors(cfg, n_cu) == []
-        assert ro._min_cu_fraction_errors(cfg, n_cu) == []
-        budgets = [m["cu_budget"] for m in ctxlib.trained_entries(resolved)]
-        assert len(set(budgets)) == len(fractions)
-        assert all(b % granule == 0 for b in budgets)
-        if n_cu % (3 * granule) == 0:
-            assert budgets == [round(f * n_cu) for f in fractions], n_cu
-
-
 @pytest.mark.parametrize("path", GFX1250_CONFIGS, ids=lambda p: p.name)
 def test_gfx1250_models_declare_no_budget_below_the_smallest_they_trained(
     path, config_env
 ):
-    """A v3 model declares the CU fractions from train.min_cu_fraction, else
-    from the smallest budget it trained (stage05 declared_contexts), up to
-    1. On no device of 3 to 16 SM-target granules may that floor reach a
-    budget the SM target takes below the smallest trained one, which the
-    model would serve without data."""
+    """A v3 model declares the CU fractions from the smallest budget it
+    trained, or train.min_cu_fraction when that is larger (stage05
+    declared_contexts), up to 1. On no device of 3 to 16 SM-target granules
+    may that floor reach a budget the SM target takes below the smallest
+    trained one, which the model would serve without data."""
     import stage05_train as s5
     from lib import contexts as ctxlib
     from lib.hipblaslt_launch import SM_TARGET_GRANULE as granule
@@ -666,6 +667,19 @@ def test_gfx1250_configs_point_to_the_first_run_checklist():
             if ln.startswith("#")
         )
         assert '"First run on a new gfx1250 host"' in header, path.name
+
+
+def test_no_config_here_trains_for_a_revision_0_gfx1250_device():
+    """The README describes how a run would serve a gfx1250 device of
+    revision 0 (gfx1250-strict, or the gfx1250v0 subtree without the strict
+    switch) and says that no config here trains for one: a config that does
+    must say so there, and the README claims no model of it."""
+    readme = " ".join((CONFIGS[0].parent.parent / "README.md").read_text().split())
+    assert "revision 0, which no config here trains for" in readme
+    assert "also ships for hipBLASLt's `gfx1250v0`" not in readme
+    assert "A gfx1250-strict config therefore sets" not in readme
+    for path in CONFIGS:
+        assert yaml.safe_load(path.read_text())["arch"] != "gfx1250-strict", path.name
 
 
 def test_gfx1250_configs_are_named_for_their_subtree():
@@ -741,6 +755,129 @@ def test_a_missing_library_names_the_built_ones_of_its_type(tmp_path):
     assert ro._library_errors(libdir, kin, "bench") == []
 
 
+@pytest.mark.parametrize("path", SANITY_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_sanity_configs_run_every_stage_through_the_production_rounds(
+    path, config_env
+):
+    """A sanity config runs every stage of the one command through the
+    production recipe's rounds and the final retrain, on budgets below the
+    recipe's, and stages its model only; it validates cleanly."""
+    cfg = _load(path)
+    get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
+    assert ro.validate_config(cfg, "full") == ([], [])
+    assert get("full.total_rounds") == PRODUCTION_SIZING["full.total_rounds"]
+    assert get("full.final_retrain.enabled") and ro._split_rounds_possible(cfg)
+    assert get("validate.split_after_attempts") <= get("full.total_rounds") - 3
+    for key in ("seed.target_per_cell", "seed.shapes_per_cell"):
+        assert get(key) < PRODUCTION_SIZING[key], key
+    assert get("audit.dir") and get("audit.build") == "before"
+    assert get("hazards.enabled") and get("correctness.enabled")
+    assert ro.stage07_enabled(cfg)
+    assert get("deploy.apply_patch") is False
+    assert "Its model is not one to ship" in path.read_text().replace("\n# ", " ")
+
+
+# The keys a sanity config sizes for itself. Every other key is the BF16
+# training config's, so that a sanity run benches, trains, audits and stages
+# its model as a production run of the library does.
+SANITY_SIZING_KEYS = {
+    "seed.target_per_cell",
+    "seed.shapes_per_cell",
+    "bench.blocks_per_gpu",
+    "planner.seed_per_cell",
+    "planner.neighbors_k",
+    "planner.top_k",
+    "planner.families_top_f",
+    "planner.explore_random_k",
+    "planner.min_coverage",
+    "planner.max_list",
+    "contexts.list",
+    "train.min_cell_gemms",
+    "validate.min_cell_gemms",
+    "validate.max_split_depth",
+    "audit.shapes_per_cell",
+    "audit.shapes_per_context",
+    "audit.seed",
+    "stage07.parity_sample_audit",
+}
+
+
+def _dotted(node, prefix=""):
+    """{dotted key: value} of the leaves of a parsed config."""
+    out = {}
+    for key, value in node.items():
+        if isinstance(value, dict) and value:
+            out.update(_dotted(value, f"{prefix}{key}."))
+        else:
+            out[prefix + key] = value
+    return out
+
+
+@pytest.mark.parametrize("path", SANITY_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_sanity_configs_take_the_bf16_training_config_but_its_budgets(
+    path, config_env
+):
+    """A sanity run benches, trains, audits and stages its model as a run of
+    the BF16 training config does: the two configs differ only in the
+    sanity run's budgets and CU contexts, its name and its audit set."""
+    recipe = _dotted(_load(path.parent / "gfx1250_bbs_tn_v3.yaml"))
+    sanity = _dotted(_load(path))
+    differ = {k for k in set(recipe) | set(sanity) if recipe.get(k) != sanity.get(k)}
+    assert differ - SANITY_SIZING_KEYS == {"config_id", "audit.dir"}
+
+
+@pytest.mark.parametrize("path", SANITY_CONFIGS, ids=lambda p: p.name)
+def test_gfx1250_sanity_configs_train_an_eighth_to_all_of_the_cus(path, config_env):
+    """Half and an eighth of the bench device's CUs beside the whole device,
+    with a co-tenant: the run's models declare CU budgets from the eighth's
+    budget to all of the CUs, from an eighth exactly on a device of a
+    multiple of eight budget granules. On a device of three granules or
+    more both budgets stay apart; on one of two the eighth meets the half's
+    budget and is left out; one of a single granule has no budget to give,
+    so both are left out and the run trains the exclusive context alone."""
+    import stage05_train as s5
+    from lib import contexts as ctxlib
+
+    granule = ctxlib.CU_BUDGET_GRANULE
+    cfg = _load(path)
+    entries = ctxlib.trained_entries(cfg)
+    assert [m["cu_fraction"] for m in entries] == [0.5, 0.125]
+    assert all(m.get("cotenant") for m in entries)
+    assert ro.cfg_get(cfg, "contexts.holdout") == []
+    assert ro.cfg_get(cfg, "train.min_cu_fraction") is None
+    resolved, lines = ctxlib.resolve_fractions(cfg, granule)
+    assert ctxlib.contexts_from_config(resolved) == []
+    assert len([ln for ln in lines if ln.endswith("left out")]) == 2
+    for n_cu in range(2 * granule, 16 * granule + 1):
+        resolved, lines = ctxlib.resolve_fractions(cfg, n_cu)
+        assert ctxlib.context_errors(cfg, n_cu) == []
+        assert ro._min_cu_fraction_errors(cfg, n_cu) == []
+        trained = [c for c in ctxlib.contexts_from_config(resolved) if not c.holdout]
+        budgets = [c.cu_budget for c in trained]
+        left = [ln for ln in lines if ln.endswith("left out")]
+        assert len(budgets) + len(left) == 2, (n_cu, lines)
+        assert budgets[0] == ctxlib.fraction_budget(0.5, n_cu)
+        if n_cu >= 3 * granule:
+            assert not left and budgets[1] < budgets[0], (n_cu, lines)
+        else:
+            assert left and left[0].startswith("contexts.list[2]"), (n_cu, lines)
+        gemms = [{}] + [{"cu_budget": b} for b in budgets]
+        declared = s5.declared_contexts(gemms, n_cu)["min_cu_fraction"]
+        assert declared == min(budgets) / n_cu
+        if n_cu % (8 * granule) == 0:
+            assert budgets == [n_cu // 2, n_cu // 8] and declared == 0.125
+
+
+def test_gfx1250_sanity_configs_differ_only_in_their_name_and_audit_set(config_env):
+    """The device class comes from the bench device; the configs of two
+    classes differ only in their id and their own audit set."""
+    a, b = (_load(p) for p in SANITY_CONFIGS)
+    for cfg in (a, b):
+        cfg.pop("config_id")
+        cfg["audit"].pop("dir")
+    assert a == b
+
+
 # The gfx950 configs whose kernel pool is the Origami library alone, one per
 # library with a shipped model: the recipe its model trains with, the host's
 # values left to a run config outside the repository.
@@ -775,7 +912,7 @@ def test_gfx950_has_an_origami_config_of_every_shipped_library():
 
 
 @pytest.mark.parametrize(
-    "path", GFX950_ORIGAMI_CONFIGS + GFX1250_CONFIGS, ids=lambda p: p.name
+    "path", GFX950_ORIGAMI_CONFIGS + RECIPE_GFX1250_CONFIGS, ids=lambda p: p.name
 )
 def test_training_recipe_configs_size_their_runs_as_production(path, config_env):
     """Every config of a training recipe, gfx950 and gfx1250 alike, plans the
@@ -784,6 +921,8 @@ def test_training_recipe_configs_size_their_runs_as_production(path, config_env)
     cfg = _load(path)
     assert _sizing(cfg) == PRODUCTION_SIZING
     assert ro.cfg_get(cfg, "full.final_retrain.enabled")
+    assert ro.cfg_get(cfg, "gate.repair") is True
+    assert ro.cfg_get(cfg, "full.final_retrain.repair") is True
     assert ro._split_rounds_possible(cfg)
     assert ro.validate_config(cfg, "full") == ([], [])
     assert not re.search(r"first run's|first-run", path.read_text(), re.I)
@@ -921,13 +1060,27 @@ def test_gfx950_origami_configs_keep_the_recipe_of_their_models(path, config_env
         assert _comment_above(path, key).startswith("The production recipe's"), key
     assert get("full.final_retrain.enabled")
     assert get("full.final_retrain.gate") == "not-worse"
-    budgets = [(m.get("cu_budget"), m.get("fraction")) for m in get("contexts.list")]
-    assert budgets == [(0, None), (192, 0.1), (128, 0.1), (64, 0.1)]
+    assert get("contexts.list")[0] == {"cu_budget": 0}
+    shares = [
+        (m.get("cu_fraction"), m.get("fraction"), ctxlib.enabled(m))
+        for m in get("contexts.list")[1:]
+    ]
+    assert shares == [
+        (0.75, 0.1, True),
+        (0.5, 0.1, True),
+        (0.25, 0.1, True),
+        (0.125, 0.1, True),
+    ]
     assert all(m.get("cotenant") for m in get("contexts.list")[1:])
     assert get("contexts.holdout") == [] and get("contexts.replan")
-    assert get("train.min_cu_fraction") == 0.25
-    # Budgets of a whole gfx950 device, down to the fraction the models
-    # declare.
+    assert get("train.min_cu_fraction") is None
+    # On a whole gfx950 device the three larger shares are the budgets these
+    # models trained, and the eighth adds one granule below them, which the
+    # models declare.
+    resolved, _ = ctxlib.resolve_fractions(cfg, 256)
+    trained = ctxlib.contexts_from_config(resolved)
+    assert [c.cu_budget for c in trained] == [192, 128, 64, 32]
+    assert ctxlib.trained_fractions(trained, 256)[0] == 0.125
     assert ctxlib.context_errors(cfg, 256) == []
     assert ro._min_cu_fraction_errors(cfg, 256) == []
     assert (get("audit.shapes_per_cell"), get("audit.shapes_per_context")) == (8, 2)

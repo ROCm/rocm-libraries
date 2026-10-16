@@ -2641,9 +2641,11 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
 
     floors = {"bench.canary.tolerance_us", "audit.canary_tolerance_us"}
     assert set(ro.PINNED_UNLESS_NEUTRAL) == floors | {
-        f"bench.rebench.{k}" for k in NEUTRAL_REREADS
-    }
+        "audit.held_out",
+        "contexts.granule",
+    } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS}
     assert all(ro.PINNED_UNLESS_NEUTRAL[k] == 0 for k in floors)
+    assert ro.PINNED_UNLESS_NEUTRAL["audit.held_out"] == []
     assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
     assert all(PREDATING_REREADS[k] == v for k, v in NEUTRAL_REREADS.items())
     cfg = yaml.safe_load(make_config(tmp_path).read_text())
@@ -2667,6 +2669,72 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
         assert sorted(d.split(":")[0] for d in diffs) == [
             f"config bench.rebench.{k}" for k in sorted(on)
         ]
+
+
+def test_the_cu_budget_granule_is_pinned_only_away_from_its_default(tmp_path):
+    """contexts.granule defaults to lib/contexts.py's budget granule, today
+    the one a pin written before the key existed means: a config that leaves
+    it out or sets the default keeps that pin, in an audit directory too,
+    and one that sets another granule pins it. It must be positive (schema)
+    and a multiple of the SM-target granule (contexts rule)."""
+    from lib import contexts as ctxlib
+    from lib import pinning
+
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+    assert ro.cfg_get(cfg, "contexts.granule") == ctxlib.CU_BUDGET_GRANULE
+    assert ro.PINNED_UNLESS_NEUTRAL["contexts.granule"] == ctxlib.PREDATING_GRANULE
+    assert ctxlib.PREDATING_GRANULE == 32 == ctxlib.CU_BUDGET_GRANULE
+
+    def with_granule(granule):
+        return dict(cfg, contexts=dict(cfg.get("contexts") or {}, granule=granule))
+
+    def pin(values):
+        return {"config": pinning.config_record(values)}
+
+    for audit in (False, True):
+        before = ro.pinned_config(cfg, audit)
+        assert "contexts.granule" not in before and "contexts.list" in before
+        same = ro.pinned_config(with_granule(ctxlib.CU_BUDGET_GRANULE), audit)
+        assert pinning.differences(pin(before), pin(same), ("config",)) == []
+        coarse = ro.pinned_config(with_granule(64), audit)
+        assert coarse == {**before, "contexts.granule": 64}
+    assert ro.validate_config(with_granule(64))[0] == []
+    assert ro.validate_config(with_granule(0))[0] == [
+        "contexts.granule: must be >= 1, got 0"
+    ]
+    assert ro.validate_config(with_granule(16))[0] == [
+        "contexts.granule 16: must be a multiple of 32, the SM-target granule of "
+        "hipBLASLt's launch rule, so that hipBLASLt sizes the kernels for exactly "
+        "the CUs of each budget"
+    ]
+
+
+def test_a_pin_without_the_granule_means_32_whatever_the_default(tmp_path):
+    """A run or audit directory pinned before contexts.granule existed has
+    budgets of 32-CU multiples: with another module default, a config that
+    leaves the key out pins that default (the run then names the change),
+    and one that sets 32 keeps the old pin."""
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+    code = (
+        "import json, sys\n"
+        "from lib import contexts\n"
+        "contexts.CU_BUDGET_GRANULE = 64\n"
+        "import run_orchestrator as ro\n"
+        "cfg = json.loads(sys.argv[1])\n"
+        "old = dict(cfg, contexts=dict(cfg.get('contexts') or {}, granule=32))\n"
+        "print(json.dumps([ro.cfg_get(cfg, 'contexts.granule'),\n"
+        "                  ro.pinned_config(cfg).get('contexts.granule'),\n"
+        "                  ro.pinned_config(cfg, True).get('contexts.granule'),\n"
+        "                  'contexts.granule' in ro.pinned_config(old)]))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code, json.dumps(cfg)],
+        cwd=Path(ro.__file__).parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert json.loads(out.splitlines()[-1]) == [64, 64, 64, False]
 
 
 def test_top_k_round0_is_pinned_only_when_set(tmp_path):
@@ -4015,3 +4083,105 @@ def test_the_report_runs_to_its_limit_and_pairs_origami_from_the_config(
     flag = ro.parse_args(argv[:2] + ["--mode", "full", "--origami-reference"])
     assert ro.origami_reference_on(flag, {})
     assert not ro.origami_reference_on(ro.parse_args(argv), {})
+
+
+def test_the_rounds_get_the_tail_options(tmp_path):
+    p = _pipeline(tmp_path, make_config(tmp_path))
+    rd = tmp_path / "run" / "round_1"
+    active = ro.RoundStep(1, "active", [tmp_path / "run" / "round_0"], None, False)
+    s04b = p.args_stage04b(rd, active, rd / "m")
+    assert _after(s04b, "--tail-floor") == ["0.7"]
+    assert _after(s04b, "--collapse-floor") == ["0.5"]
+    s01 = p.args_stage01(rd, active)
+    assert _after(s01, "--targeted-per-gemm") == ["4"]
+    assert _after(s01, "--targeted-max-per-leaf") == ["32"]
+    initial = ro.RoundStep(0, "initial", [], None, False)
+    assert "--targeted-per-gemm" not in p.args_stage01(rd, initial)
+    tuned = _pipeline(
+        tmp_path,
+        make_config(
+            tmp_path,
+            **{
+                "validate.collapse_retrain": False,
+                "validate.tail_floor": 0.8,
+                "seed.targeted_per_tail_gemm": 0,
+                "gate.tail_floor": 0.4,
+            },
+        ),
+    )
+    s04b = tuned.args_stage04b(rd, active, rd / "m")
+    assert _after(s04b, "--tail-floor") == ["0.8"]
+    assert _after(s04b, "--collapse-floor") == ["0.0"]
+    assert _after(tuned.args_stage01(rd, active), "--targeted-per-gemm") == ["0"]
+    gate_floor = _pipeline(tmp_path, make_config(tmp_path, **{"gate.tail_floor": 0.4}))
+    assert _after(
+        gate_floor.args_stage04b(rd, active, rd / "m"), "--collapse-floor"
+    ) == ["0.4"]
+    errors, _ = ro.validate_config(
+        {
+            "validate": {"tail_floor": 1.5, "collapse_retrain": "yes"},
+            "seed": {"targeted_per_tail_gemm": -1, "targeted_max_per_leaf": -1},
+        }
+    )
+    for key in (
+        "validate.tail_floor",
+        "validate.collapse_retrain",
+        "seed.targeted_per_tail_gemm",
+        "seed.targeted_max_per_leaf",
+    ):
+        assert any(e.startswith(f"{key}:") for e in errors), key
+
+
+def test_the_tail_guard_keys_reach_stage05_only_with_a_tier(tmp_path):
+    rd = tmp_path / "run" / "round_1"
+    step = ro.RoundStep(1, "active", [tmp_path / "run" / "round_0"], None, False)
+    v3 = {"train.catalog": "v3", "train.whitelist": "none"}
+
+    def args(**kw):
+        return _pipeline(tmp_path, make_config(tmp_path, **v3, **kw)).args_stage05(
+            rd, step, None
+        )
+
+    assert "--whitelist-tier-guard-keys" not in args(**{"train.whitelist_tier_k": 32})
+    got = args(**{"train.whitelist_tier_k": 32, "train.whitelist_tier_guard_keys": 0})
+    assert _after(got, "--whitelist-tier-guard-keys") == ["0"]
+    assert "--whitelist-tier-guard-keys" not in args(
+        **{"train.whitelist_tier_guard_keys": 0}
+    )
+    _, warnings = ro.validate_config(
+        yaml.safe_load(
+            make_config(
+                tmp_path, **v3, **{"train.whitelist_tier_guard_keys": 2}
+            ).read_text()
+        )
+    )
+    assert any("train.whitelist_tier_guard_keys 2: ignored" in w for w in warnings)
+    errors, _ = ro.validate_config({"train": {"whitelist_tier_guard_keys": -1}})
+    assert any(e.startswith("train.whitelist_tier_guard_keys:") for e in errors)
+    assert ro.cfg_get({}, "train.whitelist_tier_guard_keys") == 8
+
+
+def test_the_contexts_bench_the_shapes_targeted_at_their_tails(tmp_path, pipeline_dir):
+    cfg = make_config(
+        tmp_path,
+        **{
+            "contexts.list": [{"cu_budget": 64, "cotenant": True}],
+            "train.catalog": "v3",
+        },
+    )
+    p = _pipeline(tmp_path, cfg)
+    rd = tmp_path / "run" / "round_1"
+    assert "--targeted-shapes" not in p.args_stage03c(rd)
+    (rd / "stage01").mkdir(parents=True)
+    (rd / "stage01" / "targeted_shapes.json").write_text("{}")
+    path = str(rd / "stage01" / "targeted_shapes.json")
+    assert _after(p.args_stage03c(rd), "--targeted-shapes") == [path]
+    for key in ("stage02", "stage03c"):
+        script = pipeline_dir / "stages" / ro.STAGE_DEFS[key].script
+        proc = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, COLUMNS="80"),
+        )
+        assert "--targeted-shapes" in defined_options(proc.stdout), key

@@ -17,6 +17,11 @@ Modes:
                    (stage04b decides from the sel_eff measured on the new
                    shapes). `--only-cells` limits the round to the leaves
                    under the labels given, with or without a model.
+                   `--base-bundle-dir` names the bundle the round builds on
+                   when it is none of the prior rounds (a final retrain):
+                   its stage05/cells.json gives the labels, and the splits
+                   its repair revoked (stage05/revoked_splits.json,
+                   lib/subcells.py) leave the tree before the round samples.
 
 Both modes:
 
@@ -33,6 +38,24 @@ Both modes:
     ones exist, re-using history shapes as a last resort. Those are
     re-benched training data, not held-out data, and are listed in
     `reused_shapes.yaml`.
+  - Held-out lists (`--exclude-shapes-yaml`, repeatable; any format
+    `lib.held_out` reads, read whole or refused): no GEMM of theirs is drawn,
+    by exact (M, N, K, B), nor re-used by the top-up; a cell takes its next
+    draw instead. categorization.json records each list (file, sha256, its
+    GEMMs' digest, the draws it removed, and how many of its GEMMs the
+    history holds: GEMMs earlier rounds drew before the list held them out).
+
+Targeted shapes (active mode, `--targeted-per-gemm` N > 0): the previous
+round's stage04b lists, per cell, the held-out GEMMs whose pick fell below
+its tail floor (decisions.json `tail_gemms`, read from `--targeted-from`,
+by default the last --prior-round-dir's stage04b). Each such GEMM, routed
+to the leaf of this round's tree that holds it, gets N more new shapes
+near it (`lib.shapes.synthesize_near`: each axis within an octave, in its
+alignment class, its batch class kept, inside the leaf's box), worst GEMM
+first and at most `--targeted-max-per-leaf` per leaf, under the same
+filter, history dedup and exclusions as every other shape, so never an
+audit shape; a leaf this round samples nothing in gets none. They are new
+held-out shapes like the others, whatever the cell's mean.
 
 Outputs in `--out-dir`:
 
@@ -42,6 +65,8 @@ Outputs in `--out-dir`:
                        `lib.shapes.read_reused_shapes`)
   categorization.json  per-cell targets and counts, seeds, filter settings
   per_cell_plan.json   active mode only: per-cell plan and prior sel_eff
+  targeted_shapes.json active mode with targeted shapes: per leaf, each
+                       tail GEMM and the shapes drawn near it
 """
 from __future__ import annotations
 
@@ -64,11 +89,13 @@ if str(PIPELINE_DIR) not in sys.path:
 
 import yaml  # noqa: E402
 
+from lib import held_out as hol  # noqa: E402
 from lib import subcells as sc  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.bench_yaml import parse_shapes_yaml, write_bench_yaml  # noqa: E402
 from lib.fs import read_json, write_json  # noqa: E402
 from lib.grid import TIER_RANGES_K, TIER_RANGES_MN, all_cell_labels  # noqa: E402
+from lib.grid import cell_key  # noqa: E402
 from lib.shapes import (  # noqa: E402
     MEMORY_SAFE_FRACTION,
     REUSED_SHAPES_FILE,
@@ -77,11 +104,17 @@ from lib.shapes import (  # noqa: E402
     ShapeTuple,
     device_memory_budget,
     synthesize_cell_shapes,
+    synthesize_near,
     write_reused_shapes,
 )
 
 # Fresh-shape pools drawn per cell before falling back to history re-use.
 _FRESH_POOLS = 3
+TARGETED_FILE = "targeted_shapes.json"
+# Targeted shapes per tail GEMM and per leaf (`--targeted-per-gemm`,
+# `--targeted-max-per-leaf`).
+TARGETED_PER_GEMM = 4
+TARGETED_MAX_PER_LEAF = 32
 
 
 def derive_seed(*parts: object) -> int:
@@ -223,6 +256,7 @@ class SampleResult:
     reused_per_cell: Dict[str, int] = field(default_factory=dict)
     n_history_dropped: int = 0
     n_excluded: int = 0
+    excluded_hits: Set[ShapeTuple] = field(default_factory=set)
 
 
 def _axis_bounds(cell: str, base: str) -> Optional[Dict[str, Tuple[int, int]]]:
@@ -322,6 +356,87 @@ def sample_shapes(
         out.reused_per_cell[cell] = len(reused)
         out.n_history_dropped += len(history_hits)
         out.n_excluded += len(excluded_hits)
+        out.excluded_hits |= excluded_hits
+    return out
+
+
+# ── targeted shapes ──────────────────────────────────────────────────────────
+
+
+def leaf_box(leaf: str) -> Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]]:
+    """((M lo, hi), (N lo, hi), (K lo, hi)) of a leaf: its base cell's tier
+    ranges narrowed by the splits above it."""
+    base = sc.base_cell(leaf)
+    mt, nt, kt, _bt = base.split("|")
+    box = [TIER_RANGES_MN[mt], TIER_RANGES_MN[nt], TIER_RANGES_K[kt]]
+    bounds = _axis_bounds(leaf, base) or {}
+    for i, ax in enumerate("MNK"):
+        if ax in bounds:
+            lo, hi = bounds[ax]
+            box[i] = (max(box[i][0], lo), min(box[i][1], hi))
+    return box[0], box[1], box[2]
+
+
+def read_tails(path: Optional[Path]) -> List[Dict[str, Any]]:
+    """The tail GEMMs of every cell of a stage04b decisions.json
+    (`tail_gemms`), worst first; none without the file."""
+    doc = read_json(path) if path is not None and Path(path).is_file() else None
+    out: List[Dict[str, Any]] = []
+    for row in (doc or {}).get("per_cell") or []:
+        for t in row.get("tail_gemms") or []:
+            out.append(dict(t, cell=row.get("cell")))
+    out.sort(key=lambda t: (float(t["sel_eff"]), t["m"], t["n"], t["k"], t["batch"]))
+    return out
+
+
+def targeted_shapes(
+    tails: List[Dict[str, Any]],
+    leaves: Set[str],
+    split_tree: Dict[str, "sc.SplitRule"],
+    round_seed: int,
+    shape_filter: ShapeFilter,
+    *,
+    per_gemm: int,
+    max_per_leaf: int,
+    taken: Set[ShapeTuple],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """{leaf: [{tail GEMM, the shapes drawn near it}]}: up to `per_gemm`
+    shapes near each tail GEMM of `tails` (`synthesize_near`) in the leaf
+    of `split_tree` that holds it, for the leaves of `leaves` only, worst
+    GEMM first and at most `max_per_leaf` per leaf, none of them in
+    `taken` (the history, the exclusions and the round's other shapes),
+    which the drawn shapes join. Each GEMM draws from its own RNG stream."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    count: Dict[str, int] = {}
+    for t in tails:
+        m, n, k, b = int(t["m"]), int(t["n"]), int(t["k"]), int(t["batch"])
+        leaf = sc.assign_subcell(cell_key(m, n, k, b), m, n, k, b, split_tree)
+        room = max_per_leaf - count.get(leaf, 0)
+        if leaf not in leaves or room <= 0:
+            continue
+        rng = random.Random(
+            derive_seed(
+                round_seed, "targeted", leaf, m, n, k, b, t.get("cu_budget", 0),
+                t.get("schedule", "default"),
+            )
+        )  # fmt: skip
+        want = min(per_gemm, room)
+        drawn = synthesize_near(
+            (m, n, k, b), want * 3, rng, shape_filter, leaf_box(leaf)
+        )
+        new = []
+        for s in drawn:
+            if len(new) >= want:
+                break
+            if s not in taken:
+                taken.add(s)
+                new.append(s)
+        if not new:
+            continue
+        out.setdefault(leaf, []).append(
+            {"tail": dict(t), "shapes": [list(x) for x in new]}
+        )
+        count[leaf] = count.get(leaf, 0) + len(new)
     return out
 
 
@@ -380,7 +495,17 @@ def main() -> int:
         type=Path,
         default=None,
         help="(active mode) explicit prior cells.json; overrides the one "
-        "found under --prior-round-dir.",
+        "found under --prior-round-dir or --base-bundle-dir.",
+    )
+    ap.add_argument(
+        "--base-bundle-dir",
+        type=Path,
+        default=None,
+        help="(active mode) the bundle directory the round builds on when it "
+        "is none of the --prior-round-dir (a final retrain): its "
+        "stage05/cells.json provides the per-cell plan, and the splits it "
+        "revoked leave the cumulative split tree, after the prior rounds' "
+        "splits, before the round samples.",
     )
     ap.add_argument(
         "--shapes-per-cell",
@@ -429,12 +554,35 @@ def main() -> int:
         type=Path,
         action="append",
         default=None,
-        help="repeatable; shape yamls none of whose shapes this round may draw "
-        "or re-use (the audit set).",
+        help="repeatable; a held-out list (the audit set, a fresh audit, an OOD "
+        "list) none of whose GEMMs this round may draw or re-use: " + hol.FORMATS + ".",
+    )
+    ap.add_argument(
+        "--targeted-per-gemm",
+        type=int,
+        default=TARGETED_PER_GEMM,
+        help="(active mode) new shapes near each tail GEMM the previous "
+        "round's stage04b lists (0: none)",
+    )
+    ap.add_argument(
+        "--targeted-max-per-leaf",
+        type=int,
+        default=TARGETED_MAX_PER_LEAF,
+        help="(active mode) targeted shapes a leaf gets at most",
+    )
+    ap.add_argument(
+        "--targeted-from",
+        type=Path,
+        default=None,
+        help="(active mode) the stage04b decisions.json whose tail GEMMs get "
+        "targeted shapes (default: the last --prior-round-dir's)",
     )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
+    if args.targeted_per_gemm < 0 or args.targeted_max_per_leaf < 0:
+        ui.err("err", "--targeted-per-gemm and --targeted-max-per-leaf are >= 0")
+        return 1
     round_index = _resolve_round_index(args)
     if round_index is None:
         ui.err(
@@ -465,6 +613,9 @@ def main() -> int:
     per_cell: Dict[str, int]
     plan: Optional[Dict[str, Dict[str, Any]]] = None
     cells_json_path: Optional[Path] = None
+    split_tree: Dict[str, "sc.SplitRule"] = {}
+    revoked: List[str] = []
+    tails_from: Optional[Path] = None
     if args.mode == "initial":
         per_cell = _build_initial_budget(args.target_per_cell)
         if not args.quiet:
@@ -490,16 +641,35 @@ def main() -> int:
             cj = rd / "stage05" / "cells.json"
             if cj.exists():
                 auto_cells_json = cj
+        tree_dirs = list(prior_round_dirs)
+        if args.base_bundle_dir is not None:
+            auto_cells_json = args.base_bundle_dir / "stage05" / "cells.json"
+            tree_dirs.append(args.base_bundle_dir)
         cells_json_path = args.prior_cells or auto_cells_json
         if cells_json_path is None or not cells_json_path.exists():
             ui.err(
                 "err",
-                "--mode active requires --prior-cells or a --prior-round-dir "
-                "with stage05/cells.json; got prior_cells="
-                f"{args.prior_cells} prior_round_dirs={prior_round_dirs}",
+                "--mode active requires --prior-cells, or a --base-bundle-dir or "
+                "--prior-round-dir with stage05/cells.json; got prior_cells="
+                f"{args.prior_cells} base_bundle_dir={args.base_bundle_dir} "
+                f"prior_round_dirs={prior_round_dirs}",
             )
             return 1
-        split_tree = sc.load_cumulative_split_tree(prior_round_dirs)
+        try:
+            split_tree = sc.load_cumulative_split_tree(tree_dirs)
+            revoked = (
+                sc.revoked_parents(args.base_bundle_dir)
+                if args.base_bundle_dir is not None
+                else []
+            )
+        except ValueError as e:
+            ui.err("err", str(e))
+            return 1
+        tails_from = args.targeted_from or (
+            prior_round_dirs[-1] / "stage04b" / "decisions.json"
+            if prior_round_dirs
+            else None
+        )
         plan = _build_active_plan(cells_json_path, args.shapes_per_cell, split_tree)
         if args.only_cells is not None:
             only = [c.strip() for c in args.only_cells.split(",") if c.strip()]
@@ -530,6 +700,12 @@ def main() -> int:
                     f"cumulative split tree: {len(split_tree)} split cells "
                     f"-> {n_extra} extra leaves in the plan",
                 )
+            if revoked:
+                ui.ok(
+                    "splits",
+                    f"left out, as {args.base_bundle_dir.name} revoked them: the "
+                    f"splits of {', '.join(revoked)}",
+                )
             n_with = sum(1 for p in plan.values() if p["has_prior_model"])
             ui.ok(
                 "plan",
@@ -559,14 +735,19 @@ def main() -> int:
                 "bench.device_memory_gib is not set; set it to make shape "
                 "generation independent of the host",
             )
+    held, errors = hol.read_all(args.exclude_shapes_yaml or [])
+    for e in errors:
+        ui.err("err", f"--exclude-shapes-yaml {e}")
+    if errors:
+        return 1
     excluded: Set[ShapeTuple] = set()
-    for p in args.exclude_shapes_yaml or []:
-        if not p.is_file():
-            ui.err("err", f"--exclude-shapes-yaml {p} does not exist")
-            return 1
-        excluded |= set(parse_shapes_yaml(p))
+    for lst in held:
+        excluded |= lst.gemms
     if excluded and not args.quiet:
-        ui.ok("exclude", f"excluded shapes: {len(excluded):,}")
+        ui.ok(
+            "exclude",
+            f"excluded shapes: {len(excluded):,} from {len(held)} held-out list(s)",
+        )
     t0 = time.time()
     result = sample_shapes(
         per_cell,
@@ -577,11 +758,35 @@ def main() -> int:
         min_per_cell=int(args.min_cell_gemms or 0),
         excluded=excluded,
     )
+    leaked = set(result.shapes) & excluded
+    if leaked:
+        ui.err(
+            "exclude",
+            f"{len(leaked)} drawn shapes are held out (e.g. {sorted(leaked)[0]}); "
+            f"nothing written",
+        )
+        return 1
+    sources = [
+        lst.record(
+            n_dropped=len(lst.gemms & result.excluded_hits),
+            n_in_history=len(lst.gemms & history),
+        )
+        for lst in held
+    ]
+    for src in sources:
+        if src["n_in_history"]:
+            ui.warn(
+                "exclude",
+                f"{src['entry']}: {src['n_in_history']} of its {src['n_gemms']} "
+                f"GEMMs are in the history: rounds drew them before the list "
+                f"held them out, so they are training data",
+            )
     if not args.quiet:
         ui.ok(
             "sample",
             f"sampled={len(result.shapes):,}  reused_history={len(result.reused):,}  "
             f"history_dedup_dropped={result.n_history_dropped:,}  "
+            f"held_out_dropped={result.n_excluded:,}  "
             f"({time.time() - t0:.1f}s)",
         )
         n_populated = sum(1 for v in result.actual_per_cell.values() if v > 0)
@@ -599,9 +804,47 @@ def main() -> int:
                 f"filter accepts)",
             )
 
+    targeted: Dict[str, List[Dict[str, Any]]] = {}
+    tails: List[Dict[str, Any]] = []
+    if args.mode == "active" and args.targeted_per_gemm > 0:
+        tails = read_tails(tails_from)
+        if tails:
+            targeted = targeted_shapes(
+                tails,
+                {c for c, v in per_cell.items() if v > 0},
+                split_tree,
+                round_seed,
+                shape_filter,
+                per_gemm=args.targeted_per_gemm,
+                max_per_leaf=args.targeted_max_per_leaf,
+                taken=set(history) | excluded | set(result.shapes),
+            )
+    targeted_per_cell = {
+        leaf: sum(len(e["shapes"]) for e in entries)
+        for leaf, entries in targeted.items()
+    }
+    extra = [tuple(s) for es in targeted.values() for e in es for s in e["shapes"]]
+    leaked = set(extra) & excluded
+    if leaked:
+        ui.err(
+            "exclude",
+            f"{len(leaked)} targeted shapes are held out (e.g. {sorted(leaked)[0]}); "
+            f"nothing written",
+        )
+        return 1
+    if not args.quiet and args.mode == "active" and args.targeted_per_gemm > 0:
+        ui.ok(
+            "targeted",
+            f"{len(extra):,} shapes near {sum(len(v) for v in targeted.values())} "
+            f"of {len(tails)} tail GEMMs in {len(targeted)} leaves "
+            f"({tails_from if tails else 'no tail GEMMs'})",
+        )
+
     if not args.quiet:
         ui.banner("Stage 3/3  Write outputs", ui.C.BLUE)
-    shape_objs = [Shape(m=s[0], n=s[1], k=s[2], batch=s[3]) for s in result.shapes]
+    shape_objs = [
+        Shape(m=s[0], n=s[1], k=s[2], batch=s[3]) for s in result.shapes + extra
+    ]
     # stage03 benches contiguous blocks of this file, one process each, and
     # finishes with its slowest block; a shuffled file makes every block a
     # random sample of the round instead of a run of similar shapes.
@@ -621,12 +864,13 @@ def main() -> int:
             "round_index": round_index,
             "round_seed": round_seed,
             "config_yaml": str(args.config_yaml),
-            "n_final": len(result.shapes),
+            "n_final": len(result.shapes) + len(extra),
             "n_reused": len(result.reused),
             "n_history_dropped": result.n_history_dropped,
             "exclude_shapes_yaml": [str(p) for p in (args.exclude_shapes_yaml or [])],
             "n_excluded_shapes": len(excluded),
             "n_excluded_dropped": result.n_excluded,
+            "exclusion_sources": sources,
             "memory_budget": {
                 "source": budget.source,
                 "device_bytes": budget.device_bytes,
@@ -641,8 +885,30 @@ def main() -> int:
             "target_per_cell": per_cell,
             "actual_per_cell": result.actual_per_cell,
             "reused_per_cell": result.reused_per_cell,
+            "targeted": {
+                "per_gemm": args.targeted_per_gemm,
+                "max_per_leaf": args.targeted_max_per_leaf,
+                "source": str(tails_from) if tails else None,
+                "n_tail_gemms": len(tails),
+                "n_shapes": len(extra),
+                "per_cell": targeted_per_cell,
+            },
         },
     )
+    targeted_path = args.out_dir / TARGETED_FILE
+    if targeted:
+        write_json(
+            targeted_path,
+            {
+                "source": str(tails_from),
+                "per_gemm": args.targeted_per_gemm,
+                "max_per_leaf": args.targeted_max_per_leaf,
+                "n_shapes": len(extra),
+                "leaves": targeted,
+            },
+        )
+    else:
+        targeted_path.unlink(missing_ok=True)
     if not args.quiet:
         ui.ok("write", "categorization.json")
 
@@ -654,6 +920,10 @@ def main() -> int:
                 "only_cells": args.only_cells,
                 "prior_cells_json": str(cells_json_path),
                 "prior_round_dirs": [str(p) for p in (args.prior_round_dir or [])],
+                "base_bundle_dir": (
+                    str(args.base_bundle_dir) if args.base_bundle_dir else None
+                ),
+                "revoked_by_base_bundle": revoked,
                 "prior_shapes_yaml": [str(p) for p in (args.prior_shapes_yaml or [])],
                 "prior_enriched_csv_dir": [
                     str(p) for p in (args.prior_enriched_csv_dir or [])
@@ -664,6 +934,7 @@ def main() -> int:
                         **info,
                         "n_actual": result.actual_per_cell.get(cell, 0),
                         "n_reused": result.reused_per_cell.get(cell, 0),
+                        "n_targeted": targeted_per_cell.get(cell, 0),
                     }
                     for cell, info in plan.items()
                 },
@@ -674,7 +945,7 @@ def main() -> int:
 
     if not args.quiet:
         ui.banner("Done", ui.C.GREEN)
-        ui.ok("done", f"total shapes  : {len(result.shapes):,}")
+        ui.ok("done", f"total shapes  : {len(result.shapes) + len(extra):,}")
         ui.ok("done", f"output dir    : {args.out_dir}")
     return 0
 

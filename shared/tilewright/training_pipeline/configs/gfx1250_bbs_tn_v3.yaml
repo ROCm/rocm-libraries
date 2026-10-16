@@ -2,7 +2,7 @@
 # library hipBLASLt loads from Tensile/library/gfx1250 for a device that
 # reports gfx1250. That is every device of ASIC revision other than 0; a
 # revision-0 device loads gfx1250v0, or gfx1250-strict with
-# HSA_DISABLE_GFX12_STRICT=0, and runs a gfx1250-strict config instead.
+# HSA_DISABLE_GFX12_STRICT=0, and no config here trains for it.
 # Catalog v3 with the planner, execution contexts as fractions of the bench
 # device's CUs, the audit set and the final retrain. Device values (CU count,
 # LDS, L2, XCDs) come from the bench device when the run starts, and
@@ -124,18 +124,30 @@ planner:
   seed: 42
 
 contexts:
-  # CU budgets as fractions of the bench device's CUs, resolved to
-  # multiples of the SM-target granule when the run starts; entries that
-  # meet on one budget keep the first, and the run says which it left out.
-  # Thirds: their budgets stay apart on small devices and partitions,
-  # where quarters and eighths round onto each other, and come out
-  # exact where the CU count allows. No held-out context: a small
-  # partition has no budget left for one, every budget below its CU
-  # count being a trained one.
+  # CU budgets as shares of the bench device's CUs, which are WGPs here
+  # (inside a compute partition, of the partition's): three quarters,
+  # half, a quarter and an eighth, each on a tenth of a cell's shapes, as
+  # in the gfx950 configs. A run resolves each to a whole multiple of a
+  # 32-WGP granule when it starts, at least one, so the smallest trained
+  # budget is one granule on any device or partition with a budget below
+  # its CUs, however small an eighth of it is. On the 256-WGP part one
+  # granule is one XCD's worth, so every compute-partition size of that
+  # part is also a trained budget. The models train and serve CU budgets
+  # from one granule up to the whole device. enabled: false turns the
+  # eighth off for its bench time, which grows as the CUs shrink. Shares
+  # that meet on one budget keep the first, a share the device has no
+  # budget for is left out, and the run says which. Turning the eighth on
+  # or off, or running on another CU count or partition, changes the
+  # contexts the audit set is bound to: point audit.dir at a new one (a run
+  # refuses a set built with others). No held-out context: a small
+  # partition has no budget left for one, every budget below its CU count
+  # being a trained one.
   list:
     - {cu_budget: 0}
-    - {cu_fraction: 0.6667, cotenant: true, fraction: 0.15}
-    - {cu_fraction: 0.3333, cotenant: true, fraction: 0.15}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.125, cotenant: true, fraction: 0.1, enabled: true}
   holdout: []
   seed: 42
   replan: true
@@ -176,8 +188,8 @@ train:
   fine_tune_epochs: 12
   fine_tune_lr: 0.001
   pooled_threads: 32
-  # No min_cu_fraction: the models declare CU budgets down to the
-  # smallest one they trained, the lower third's on the bench device.
+  # No min_cu_fraction: the models declare CU shares down to the smallest
+  # one they trained on the bench device, and no lower.
   schedules: [default]
   min_cell_gemms: 30
   off_list_sel_eff: auto
@@ -201,6 +213,14 @@ full:
   final_retrain:
     enabled: true
     gate: not-worse
+
+gate:
+  # A bundle the per-cell gate keeps out for findings in at most
+  # repair_max_cells (3) base cells ships with those cells repaired, a tier
+  # key of the cell's own network, else the cell's subtree from the bundle
+  # the run ships, once the repaired bundle passes every gate again; above
+  # that it stays out whole.
+  repair: true
 
 audit:
   dir: ${TILEWRIGHT_AUDIT_ROOT}/gfx1250_bbs_tn_v3

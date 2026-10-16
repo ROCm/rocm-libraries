@@ -4237,6 +4237,56 @@ def model_entry(r: Mapping[str, Any]) -> Dict[str, Any]:
     return entry
 
 
+# The fields of a models.pt entry that, with its state_dict, score a cell's
+# kernels; its whitelist tier (`view_key_hashes`), rebuilt for every cell of
+# a bundle each round, only restricts which kernels are scored.
+NETWORK_FIELDS = (
+    "embed_dim",
+    "hidden_dim",
+    "inter_hidden",
+    "feature_norms",
+    "feature_bounds",
+)
+
+
+def network_digest(entry: Mapping[str, Any]) -> str:
+    """Digest of the trained network of a models.pt entry (`model_entry`):
+    its weights and `NETWORK_FIELDS`, bit for bit. A cell a bundle carries
+    keeps it, a retrain changes it."""
+    h = hashlib.sha256()
+
+    def feed(value: Any) -> None:
+        if _TORCH_OK and isinstance(value, torch.Tensor):
+            t = value.detach().cpu().contiguous().reshape(-1)
+            h.update(f"T{t.dtype}{tuple(value.shape)}".encode())
+            h.update(t.view(torch.uint8).numpy().tobytes())
+        elif isinstance(value, np.ndarray):
+            a = np.ascontiguousarray(value)
+            h.update(f"A{a.dtype.str}{a.shape}".encode())
+            h.update(a.tobytes())
+        elif isinstance(value, Mapping):
+            h.update(b"{")
+            for key in sorted(value, key=str):
+                h.update(repr(str(key)).encode())
+                feed(value[key])
+            h.update(b"}")
+        elif isinstance(value, (list, tuple)):
+            h.update(b"[")
+            for v in value:
+                feed(v)
+            h.update(b"]")
+        elif isinstance(value, float):
+            h.update(b"f" + value.hex().encode())
+        else:
+            h.update(repr(value).encode())
+
+    feed(entry.get("state_dict") or {})
+    for key in NETWORK_FIELDS:
+        h.update(key.encode())
+        feed(entry.get(key))
+    return "sha256:" + h.hexdigest()
+
+
 def _brief(summary: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         "sel_eff": summary["sel_eff"],
@@ -4465,7 +4515,9 @@ def whitelist_tier(
     kernels alone) and split as it split them, over the pool of
     --library-dir / --library-stem, with the scores of the bundle at
     --weight-dtype, their execution contexts counted as
-    --whitelist-tier-contexts says, in --train-workers processes."""
+    --whitelist-tier-contexts says, in --train-workers processes; then
+    with up to --whitelist-tier-guard-keys keys of the tail guard per cell,
+    checked on both sides of the split."""
     this = sys.modules[__name__]
     workers = max(1, int(args.train_workers or 1))
     u = wt.universe(
@@ -4479,9 +4531,10 @@ def whitelist_tier(
         blocklist=blocklist,
         pool_indices=u.sids.tolist(),
     )
-    gemms = wt.training_gemms(
+    gemms, held_out = wt.split_gemms(
         bench.gemms, split_tree, args.validation_frac, args.seed, s5=this
     )
+    guard_keys = getattr(args, "whitelist_tier_guard_keys", wt.GUARD_KEYS)
     return wt.build(
         bundle,
         gemms,
@@ -4494,6 +4547,8 @@ def whitelist_tier(
         s5=this,
         say=None if args.quiet else (lambda m: ui.info("tier", m)),
         mode=args.whitelist_tier_contexts,
+        held_out=held_out,
+        guard_keys=guard_keys,
     )
 
 
@@ -4613,23 +4668,33 @@ def drop_non_exclusive(
     return out, n
 
 
+def trained_cu_fraction(gemms: Sequence[Mapping[str, Any]], n_cu: int) -> float:
+    """The smallest usable-CU fraction of `gemms` on a device of `n_cu` CUs:
+    the lowest share a model trained on them saw (1 when every GEMM had
+    every CU)."""
+    return min(
+        (ev.context_of(g).effective_cus(n_cu) / float(n_cu) for g in gemms),
+        default=1.0,
+    )
+
+
 def declared_contexts(
     gemms: Sequence[Mapping[str, Any]],
     n_cu: int,
     min_cu_fraction: Optional[float] = None,
     schedules: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """The contexts an MLREC_v3 model declares: usable-CU fractions from
-    `min_cu_fraction` (default: the smallest in `gemms`) to 1, and the
-    `schedules` (default: default plus those in `gemms`)."""
+    """The contexts an MLREC_v3 model declares: usable-CU fractions from the
+    smallest share it trained (`trained_cu_fraction` of `gemms`), or from
+    `min_cu_fraction` when that is larger, to 1, so that serving falls back
+    below the lowest trained share; and the `schedules` (default: default
+    plus those in `gemms`)."""
     seen = [ev.context_of(g) for g in gemms]
-    if min_cu_fraction is None:
-        min_cu_fraction = min(
-            (c.effective_cus(n_cu) / float(n_cu) for c in seen), default=1.0
-        )
-    lo = float(min_cu_fraction)
-    if not 0.0 < lo <= 1.0:
-        raise ValueError(f"min CU fraction {lo} must be in (0, 1]")
+    if min_cu_fraction is not None and not 0.0 < float(min_cu_fraction) <= 1.0:
+        raise ValueError(f"min CU fraction {min_cu_fraction} must be in (0, 1]")
+    lo = trained_cu_fraction(gemms, n_cu)
+    if min_cu_fraction is not None:
+        lo = max(lo, float(min_cu_fraction))
     if schedules:
         names = {x.strip().lower() for x in schedules.split(",") if x.strip()}
         unknown = names - set(fs.SCHEDULES)
@@ -4981,6 +5046,16 @@ def arg_parser(
         f"{wt.RESERVE_KEYS} more on its other GEMMs; lib/whitelist_tier.py)",
     )
     ap.add_argument(
+        "--whitelist-tier-guard-keys",
+        type=int,
+        default=wt.GUARD_KEYS,
+        help="with --whitelist-tier-k, keys the tail guard may add to a "
+        "cell's tier: a near-winner of a GEMM of the cell whose pick from the "
+        "tier is below half its winner's speed, kept when it adds no such pick "
+        "on the cell's own and held-out GEMMs and keeps the held-out picks' "
+        "geomean (lib/whitelist_tier.py `guard`; 0: no guard)",
+    )
+    ap.add_argument(
         "--no-clip-features",
         action="store_true",
         help="v3: do not store the training feature ranges the engine clamps to",
@@ -5031,8 +5106,8 @@ def arg_parser(
         "--min-cu-fraction",
         type=float,
         default=None,
-        help="v3: smallest usable-CU fraction the model declares (default: the "
-        "smallest in the training data)",
+        help="v3: smallest usable-CU fraction the model may declare; it declares "
+        "the smallest in the training data, or this when larger",
     )
     ap.add_argument(
         "--schedules",
@@ -5399,12 +5474,16 @@ def recorded_options(args: argparse.Namespace) -> Dict[str, Any]:
     pseudo-negatives' options resolved (`resolve_pseudo_negatives`) and the
     draw None where --unmeasured-samples implies it
     (`default_pseudo_negatives`), so that a record from before the draws
-    compares equal while its training is the same."""
+    compares equal while its training is the same; the tail guard's keys
+    None without a whitelist tier, which they do not shape, as a record
+    from before the guard names them (PREDATING_OPTIONS)."""
     resolved = argparse.Namespace(**vars(args))
     resolve_pseudo_negatives(resolved)
     opts = vars(resolved)
     if opts["pseudo_negatives"] == default_pseudo_negatives(opts["unmeasured_samples"]):
         opts["pseudo_negatives"] = None
+    if not int(opts.get("whitelist_tier_k") or 0):
+        opts["whitelist_tier_guard_keys"] = None
     return opts
 
 
@@ -5425,9 +5504,11 @@ def model_options(args: argparse.Namespace, catalog: fs.Catalog) -> Dict[str, An
 
 
 # The values model-shaping options had before they were options: a record
-# or command without one was trained with this value, not with its default.
+# or command without one was trained with this value, not with its default
+# (a tier from before the tail guard has none, as one without a tier).
 PREDATING_OPTIONS: Dict[str, Any] = {
     "repeat_aggregation": repeats.PREDATING_AGGREGATION,
+    "whitelist_tier_guard_keys": None,
 }
 # The same for what `model_options` records beside the arguments. No pool
 # trained before the identity rule was recorded held a kernel with a
@@ -5552,6 +5633,7 @@ def main() -> int:
             ("fine_tune_epochs", lambda v: v >= 0),
             ("fine_tune_lr", lambda v: v > 0),
             ("whitelist_tier_k", lambda v: v >= 0),
+            ("whitelist_tier_guard_keys", lambda v: v >= 0),
         )
         if not ok(getattr(args, name))
     ]
@@ -5711,9 +5793,7 @@ def main() -> int:
     prior_models, prior_trained = _load_prior_models(
         args.prior_round_dir or [], catalog
     )
-    split_tree = sc.load_cumulative_split_tree(args.prior_round_dir or [])
-    if args.current_round_dir is not None:
-        split_tree.update(sc.load_cumulative_split_tree([args.current_round_dir]))
+    split_tree = sc.load_split_tree(args.prior_round_dir or [], args.current_round_dir)
     if split_tree and not args.quiet:
         ui.ok("splits", f"split tree: {len(split_tree)} split cells")
         for line in sc.format_split_tree(split_tree).splitlines():
@@ -5818,6 +5898,13 @@ def main() -> int:
     )
     if v3 and not args.quiet:
         ui.info("context", f"declared contexts: {contexts}")
+        floor = args.min_cu_fraction
+        if floor is not None and float(floor) < contexts["min_cu_fraction"]:
+            ui.info(
+                "context",
+                f"--min-cu-fraction {floor:g} is below the smallest share the "
+                f"model trained; it declares {contexts['min_cu_fraction']:.4g}",
+            )
     if v3:
         trained_keys = trained_view_keys(all_gemms, catalog) | set(prior_trained)
         bundle_meta["trained_view_keys"] = sorted(trained_keys)

@@ -17,11 +17,17 @@ children. A sub-cell label is its parent's label plus one
     Large|Large|LargeK|Bany#M>4096#K>2048
 
 `<round>/stage04b/splits.json` records the splits decided in a round; the
-cumulative tree is the union over rounds (`load_cumulative_split_tree`). A
-deployed model carries its own tree, rebuilt from its cell labels
-(`split_tree_from_labels`). Routing (`assign_subcell` + `resolve_model_cell`)
-must match the engine: walk from the base cell to the leaf (`value <=
-threshold` goes to the lo child), then up to the nearest trained ancestor.
+cumulative tree is the union over rounds (`load_cumulative_split_tree`),
+less the splits a bundle revoked: a repair that gives a base cell back the
+subtree of the bundle the run shipped writes, into the repaired bundle's
+`stage05/`, the splits that subtree lacks (`REVOKED_SPLITS`), and every
+tree loaded through that bundle's directory drops them, with everything
+under them, and stage04b splits nothing in that base cell again
+(`barred_base_cells`). A deployed model carries its own tree, rebuilt from
+its cell labels (`split_tree_from_labels`). Routing (`assign_subcell` +
+`resolve_model_cell`) must match the engine: walk from the base cell to the
+leaf (`value <= threshold` goes to the lo child), then up to the nearest
+trained ancestor.
 
 SPLIT DECISION (`choose_split_for_cell`):
   1. The caller supplies per-GEMM log ratios log(pick_us / winner_us).
@@ -30,9 +36,11 @@ SPLIT DECISION (`choose_split_for_cell`):
      gain is the CART variance reduction of the log ratios.
   3. Axes spanning less than the depth-aware log range, or leaving a child
      with fewer than `min_split_count` GEMMs, are rejected.
-  4. The largest gain wins; ties prefer an axis not yet in the cell's split
+  4. The largest gain wins. Gains are variances of small log ratios, so
+     only gains equal up to rounding tie (relative `GAIN_TIE_REL`, never a
+     fixed tolerance); ties prefer an axis not yet in the cell's split
      path, then M before N before K.
-  5. Cells at `max_split_depth` are never split.
+  5. Cells at `max_split_depth` are never split; 0 turns splitting off.
 """
 from __future__ import annotations
 
@@ -48,6 +56,9 @@ from . import grid as _grid
 # B (Bnone vs Bany) is binary and never split.
 SPLITTABLE_AXES: Tuple[str, ...] = ("M", "N", "K")
 ROUTING_AXES: Tuple[str, ...] = ("M", "N", "K", "B")
+# Relative difference below which two axes' split gains are equal: the
+# rounding of sums over the same GEMMs, never a difference in error.
+GAIN_TIE_REL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -192,11 +203,104 @@ def _load_one_splits_file(path: Path) -> Dict[str, SplitRule]:
 def load_cumulative_split_tree(round_dirs: Iterable[Path]) -> Dict[str, SplitRule]:
     """Merge every `<round>/stage04b/splits.json` of `round_dirs` (in order;
     a later round's rule for the same parent wins) into one tree mapping a
-    parent label to its rule."""
+    parent label to its rule. After each directory's splits, the splits its
+    bundle revoked (`revoked_parents`) leave the tree with every rule under
+    them, so that a directory given later may split again only what no
+    bundle before it revoked."""
     tree: Dict[str, SplitRule] = {}
     for rd in round_dirs:
         tree.update(_load_one_splits_file(Path(rd) / "stage04b" / "splits.json"))
+        for parent in revoked_parents(rd):
+            revoke(tree, parent)
     return tree
+
+
+def load_split_tree(
+    prior_dirs: Iterable[Path], current_dir: Optional[Path] = None
+) -> Dict[str, SplitRule]:
+    """The split tree of a stage05 that read `prior_dirs` (--prior-round-dir)
+    and `current_dir` (--current-round-dir, whose splits and revocations
+    come last)."""
+    dirs = [Path(d) for d in prior_dirs]
+    if current_dir:
+        dirs.append(Path(current_dir))
+    return load_cumulative_split_tree(dirs)
+
+
+# ── revoked splits ───────────────────────────────────────────────────────────
+
+# In a bundle's stage05/: the splits the bundle's repair revoked.
+REVOKED_SPLITS = "revoked_splits.json"
+REVOKED_SCHEMA = "tilewright_revoked_splits_v1"
+
+
+def revoke(tree: Dict[str, SplitRule], parent: str) -> List[str]:
+    """Drop `parent`'s rule and every rule under it from `tree`; the
+    parents dropped."""
+    gone = [k for k in tree if k == parent or k.startswith(parent + "#")]
+    for k in gone:
+        del tree[k]
+    return sorted(gone)
+
+
+def revocations(bundle_dir: Path) -> Dict[str, Any]:
+    """`<bundle_dir>/stage05/REVOKED_SPLITS`, {} when it has none. A file
+    that is not a revocation record is an error: a tree read without it
+    would bring back splits a repair took away."""
+    path = Path(bundle_dir) / "stage05" / REVOKED_SPLITS
+    if not path.is_file():
+        return {}
+    with path.open() as f:
+        doc = json.load(f)
+    if not isinstance(doc, dict) or doc.get("schema") != REVOKED_SCHEMA:
+        raise ValueError(f"{path} is not a {REVOKED_SCHEMA} record")
+    return doc
+
+
+def revoked_parents(bundle_dir: Path) -> List[str]:
+    """The parents whose splits the bundle in `bundle_dir` revoked."""
+    return sorted(
+        {
+            str(r["cell"])
+            for r in revocations(bundle_dir).get("revoked") or []
+            if isinstance(r, dict) and r.get("cell")
+        }
+    )
+
+
+def barred_base_cells(bundle_dirs: Iterable[Path]) -> Dict[str, str]:
+    """{base cell: the directory whose bundle barred it} over `bundle_dirs`:
+    the base cells in which a repair revoked splits, which stage04b never
+    splits again."""
+    out: Dict[str, str] = {}
+    for d in bundle_dirs:
+        doc = revocations(d)
+        cells = set(doc.get("barred_cells") or [])
+        cells |= {base_cell(p) for p in revoked_parents(d)}
+        for c in sorted(cells):
+            out.setdefault(str(c), Path(d).name)
+    return out
+
+
+def write_revocations(
+    path: Path, revoked: Iterable[SplitRule], barred: Iterable[str], **extra: Any
+) -> Dict[str, Any]:
+    """Write a revocation record of the rules `revoked` (each with its base
+    cell) and the base cells `barred` to `path`; the record."""
+    doc: Dict[str, Any] = {
+        "schema": REVOKED_SCHEMA,
+        "revoked": [
+            dict(r.to_json(), base_cell=base_cell(r.cell))
+            for r in sorted(revoked, key=lambda r: r.cell)
+        ],
+        "barred_cells": sorted(set(barred)),
+        **extra,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f".{path.name}.tmp"
+    tmp.write_text(json.dumps(doc, indent=2) + "\n")
+    tmp.replace(path)
+    return doc
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
@@ -348,7 +452,7 @@ def _large_axes_in(cell_label: str) -> List[str]:
 
 def split_eligible_axes(cell_label: str, max_split_depth: int) -> List[str]:
     """Axes `choose_split_for_cell` may split `cell_label` on (none at the
-    depth cap)."""
+    depth cap, so none for any cell when the cap is 0)."""
     if split_depth(cell_label) >= max_split_depth:
         return []
     return _large_axes_in(cell_label)
@@ -362,14 +466,15 @@ def choose_split_for_cell(
     min_split_count: int = 20,
     min_gain: float = 0.0,
     max_split_depth: int = 6,
-    tie_eps: float = 1e-3,
 ) -> Optional[Tuple[str, int]]:
     """(axis, threshold) to split `cell_label` on, or None when no eligible
     axis gives two children of at least `min_split_count` GEMMs.
 
     `gemms` are the cell's GEMM dicts (m, n, k, batch_count); `log_ratios`
-    is the parallel list of log(pick_us / winner_us). Without log ratios the
-    widest axis (largest log range) wins."""
+    is the parallel list of log(pick_us / winner_us). The axis whose split
+    reduces the variance of the log ratios most wins; without log ratios the
+    widest axis (largest log range) does. Only equal gains (`GAIN_TIE_REL`)
+    fall to the tie order of the module docstring."""
     if not gemms:
         return None
     depth = split_depth(cell_label)
@@ -436,17 +541,11 @@ def choose_split_for_cell(
             return None
 
     axis_order = {a: i for i, a in enumerate(SPLITTABLE_AXES)}
-
-    def _key(c: Tuple[float, str, int, float]):
-        gain, axis, _t, _lr = c
-        axis_unused = 0 if axis in path_axes else 1
-        return (-gain, -axis_unused, axis_order[axis])
-
-    candidates.sort(key=_key)
-    best_gain = candidates[0][0]
-    tied = [c for c in candidates if abs(c[0] - best_gain) <= tie_eps]
-    tied.sort(key=lambda c: (0 if c[1] not in path_axes else 1, axis_order[c[1]]))
-    _, axis, threshold, _ = tied[0]
+    best_gain = max(c[0] for c in candidates)
+    tied = [c for c in candidates if best_gain - c[0] <= GAIN_TIE_REL * abs(best_gain)]
+    _, axis, threshold, _ = min(
+        tied, key=lambda c: (c[1] in path_axes, axis_order[c[1]])
+    )
     return axis, threshold
 
 

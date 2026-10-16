@@ -1067,6 +1067,10 @@ def test_only_a_cell_that_can_split_is_told_to_split():
     assert got == "split" and "2 retrain attempt(s) did not reach" in why
     got, why = rs.recommend(_ev(retrain_attempts=3, decomp=ranking), _settings())
     assert got == "split" and "3 retrain attempt(s) did not reach" in why
+    got, why = rs.recommend(
+        _ev(retrain_attempts=3, decomp=ranking), _settings(max_split_depth=0)
+    )
+    assert got == "retrain" and "splits are off (validate.max_split_depth 0)" in why
 
 
 def test_held_out_evidence_takes_the_audit_then_the_measurements():

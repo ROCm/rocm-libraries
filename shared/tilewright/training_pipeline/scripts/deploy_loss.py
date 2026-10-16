@@ -115,9 +115,9 @@ def prepare(ns: argparse.Namespace) -> None:
     hw_override = [int(v) for v in ns.hardware.split(",")] if ns.hardware else None
     metrics, args, cfg = run_config(stage05_dir, hw_override, ns.pci_chip_id)
     hardware = hwlib.device_hardware(cfg, int(args.get("hardware_device") or 0))
-    split_tree = sc.load_cumulative_split_tree(args.get("prior_round_dir") or [])
-    if args.get("current_round_dir"):
-        split_tree.update(sc.load_cumulative_split_tree([args["current_round_dir"]]))
+    split_tree = sc.load_split_tree(
+        args.get("prior_round_dir") or [], args.get("current_round_dir")
+    )
     identity = (
         ev.library_identity(
             args["library_dir"],

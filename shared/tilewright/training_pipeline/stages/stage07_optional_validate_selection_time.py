@@ -207,6 +207,7 @@ import yaml  # noqa: E402
 
 from lib import bank_pool  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
+from lib import external_sets as xs  # noqa: E402
 from lib import fingerprint  # noqa: E402
 from lib import gpu_lease  # noqa: E402
 from lib import hazards  # noqa: E402
@@ -305,11 +306,16 @@ def _entry_matches(entry: Mapping[str, Any], wf: Mapping[str, str]) -> bool:
 
 
 def load_bench_entries(path: Path) -> List[Dict[str, Any]]:
+    """The problem mappings of a bench yaml; ValueError for a file of
+    another shape, and for an external tuning workflow's evaluation set
+    (lib/external_sets.py)."""
     with path.open() as f:
         data = yaml.safe_load(f)
     if not isinstance(data, list):
         raise ValueError(f"{path}: a bench yaml is a list of problem mappings")
-    return [dict(e) for e in data if isinstance(e, dict)]
+    entries = [dict(e) for e in data if isinstance(e, dict)]
+    xs.check(xs.entry_gemms(entries), path)
+    return entries
 
 
 def normalized_entries(

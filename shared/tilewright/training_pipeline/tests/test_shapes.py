@@ -218,3 +218,44 @@ def test_reused_shapes_round_trip(tmp_path):
     shapes.write_reused_shapes(path, [], 0)
     assert shapes.read_reused_shapes(path) == set()
     assert shapes.read_reused_shapes(tmp_path / "nope") == set()
+
+
+# ── shapes near a GEMM ───────────────────────────────────────────────────────
+
+BOX = ((513, 1 << 20), (129, 512), (33, 512))
+
+
+def test_alignment_classes():
+    assert shapes.alignment(1280) == 256 and shapes.alignment(1000) == 1
+    assert shapes.alignment(144) == 16 and shapes.alignment(96) == 32
+    assert shapes.alignment(256) == 256
+
+
+def test_shapes_near_a_gemm_stay_near_in_its_classes():
+    f = _filter()
+    tail = (1000, 256, 150, 64)
+    got = shapes.synthesize_near(tail, 12, random.Random(3), f, BOX)
+    assert len(got) == 12 and len(set(got)) == 12 and tail not in got
+    assert got == shapes.synthesize_near(tail, 12, random.Random(3), f, BOX)
+    for m, n, k, b in got:
+        assert 513 <= m <= 2000 and m % 16  # unaligned M stays off the grid
+        assert 129 <= n <= 512 and n % 256 == 0  # N = 256 keeps its 256 class
+        assert 75 <= k <= 300 and k % 16
+        assert b > 1 and 32 <= b <= 128 and f.accepts(m, n, k, b)
+    flat = shapes.synthesize_near(
+        (4096, 256, 128, 1), 8, random.Random(1), f, ((513, 1 << 20),) + BOX[1:]
+    )
+    assert flat and all(b == 1 and m % 256 == 0 and k % 128 == 0 for m, _, k, b in flat)
+    # the box bounds every axis, and a box that misses the octave gives none
+    assert (
+        shapes.synthesize_near(tail, 4, random.Random(1), f, ((5000, 9000),) + BOX[1:])
+        == []
+    )
+
+
+def test_shapes_near_an_mx_gemm_keep_k_on_the_block():
+    f = _filter(scale_a=3, scale_b=3)
+    got = shapes.synthesize_near(
+        (700, 300, 96, 1), 6, random.Random(5), f, ((513, 4096), (129, 512), (33, 512))
+    )
+    assert got and all(k % 32 == 0 for _, _, k, _ in got)

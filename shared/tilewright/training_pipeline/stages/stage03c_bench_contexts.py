@@ -9,7 +9,9 @@ stage03 benches the exclusive context. For every entry of the config's
 `contexts.list` and `contexts.holdout` this stage
 
   1. picks the shapes the context benches: every shape, or
-     ceil(fraction * n) per cell drawn with `contexts.seed`;
+     ceil(fraction * n) per cell drawn with `contexts.seed`, the shapes
+     stage01 drew near the round's tail GEMMs of that context
+     (--targeted-shapes, `lib.contexts.targeted_for`) among them;
   2. writes their bench lines (the round's own lines: the same kernel list
      per shape as the exclusive bench, or the context's re-planned lines from
      --context-shapes-dir) to `<label>/shapes.yaml`;
@@ -66,6 +68,7 @@ from lib.contexts import (  # noqa: E402
     context_errors,
     contexts_from_config,
     select_shapes,
+    targeted_for,
     write_wrapper,
 )
 from lib.fs import atomic_write_text  # noqa: E402
@@ -110,6 +113,13 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
         help="JSON object: stage03, stage04 -> argv (script first) with "
         "{ctx_dir} for a context's directory; stage04 (held-out contexts) "
         "gets one --context-log-dir per context appended",
+    )
+    ap.add_argument(
+        "--targeted-shapes",
+        type=Path,
+        default=None,
+        help="stage01's targeted_shapes.json: the shapes drawn near a tail "
+        "GEMM of a context are benched in that context",
     )
     ap.add_argument(
         "--context-shapes-dir",
@@ -315,7 +325,7 @@ def _bench_context(
             own_lines = {**lines, **round_lines([replanned])}
             p = replanned.with_name("plan.json")
             plan = str(p) if p.is_file() else None
-    chosen = select_shapes(shapes, ctx, seed)
+    chosen = select_shapes(shapes, ctx, seed, targeted_for(args.targeted_shapes, ctx))
     atomic_write_text(ctx_dir / "shapes.yaml", "".join(own_lines[s] for s in chosen))
     record: Dict[str, Any] = {
         **ctx.to_dict(),

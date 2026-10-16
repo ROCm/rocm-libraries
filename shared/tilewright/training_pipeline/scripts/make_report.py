@@ -564,8 +564,8 @@ def audit_by_context(audit, cfg):
 def left_out_contexts(config_text, cfg):
     """(section key, index, entry) of the context entries of the run's
     source config (`config_text`) that its expanded config `cfg` left out:
-    fractions whose CU budget was another entry's on the bench device; []
-    when either is unreadable."""
+    fractions whose CU budget was another entry's on the bench device, or
+    that the device had no budget for; [] when either is unreadable."""
     rs.pipeline_on_path()
     try:
         import yaml
@@ -580,6 +580,38 @@ def left_out_contexts(config_text, cfg):
         return []
 
 
+def off_contexts(config_text):
+    """(section key, index, entry) of the context entries the run's source
+    config (`config_text`) turns off (`enabled: false`); [] when it is
+    unreadable."""
+    rs.pipeline_on_path()
+    try:
+        import yaml
+
+        from lib.contexts import off_entries
+
+        source = yaml.safe_load(config_text or "")
+        return off_entries(source) if isinstance(source, dict) else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def off_html(off):
+    """The contexts section's note on the entries `off_contexts` found;
+    empty without any."""
+    if not off:
+        return ""
+    from lib.contexts import describe
+
+    names = ", ".join(f"contexts.{key}[{i}] ({describe(m)})" for key, i, m in off)
+    return (
+        f'<p class="cap"><b>Off in the config:</b> {esc(names)}. The run '
+        "benched and trained none of them, and its models declare no CU share "
+        "below the smallest they trained: hipBLASLt ranks a call below it with "
+        "Origami.</p>"
+    )
+
+
 def no_holdout_left(gone, cfg):
     """True when the entries `left_out_contexts` found are every held-out
     context of the config."""
@@ -592,14 +624,19 @@ def left_out_html(gone, cfg):
     found; empty without any."""
     if not gone:
         return ""
+    rs.pipeline_on_path()
+    from lib.contexts import budget_granule
+
     names = ", ".join(
         f"contexts.{key}[{i}] (cu_fraction {float(m['cu_fraction']):g})"
         for key, i, m in gone
     )
+    granule = budget_granule(cfg if isinstance(cfg, dict) else {})
     text = (
         f"<b>Left out on this run's bench device:</b> {esc(names)}. The CU "
-        "budget each resolves to (a multiple of 32 below the device's CUs) is "
-        "another context's, so the run did not bench it."
+        f"budget each resolves to (a multiple of {granule} below the device's "
+        "CUs) is another context's, or the device has no such budget, so the "
+        "run did not bench it."
     )
     if no_holdout_left(gone, cfg):
         text += (
@@ -2046,21 +2083,24 @@ def cell_gate_findings(bundle, cells):
     """One row per finding of a per-cell gate (`lib.audit.cell_gate`) in
     every group it compared: each cell significantly worse beyond the
     tolerance or confidently fallen below the floor (with its family-wise
-    p), each pick that collapsed below the tail floor and each one lifted
-    back above it; `deciding` when it keeps the bundle out (a cell of a
-    group the cell rules judge; a confirmed collapse of a group whose new
-    collapses outnumber its lifted ones beyond the budget)."""
+    p), each new pick below the tail floor (a collapse), each collapse of
+    the shipped bundle this one heals and each one both share; `deciding`
+    when it keeps the bundle out (a cell of a group the cell rules judge; a
+    confirmed new collapse, when those over every group number more than
+    the budget, however many the bundle heals)."""
     out = []
     for label, g in ((cells or {}).get("groups") or {}).items():
         if not isinstance(g, dict) or "reason" in g:
             continue
-        for kind in ("regressed", "floor", "tail", "tail_lifted"):
+        for kind in ("regressed", "floor", "tail", "tail_lifted", "tail_persisting"):
             for f in g.get(kind) or []:
                 shape = f.get("shape")
                 if kind == "tail":
                     deciding = bool(f.get("decides", g.get("deciding", True)))
                 else:
-                    deciding = kind != "tail_lifted" and bool(g.get("deciding", True))
+                    deciding = kind in ("regressed", "floor") and bool(
+                        g.get("deciding", True)
+                    )
                 before, after = _num(f.get("before")), _num(f.get("after"))
                 ratio = _num(f.get("ratio"))
                 if ratio is None and shape and before and after is not None:
@@ -2234,14 +2274,15 @@ def deploy_gates_html(rows):
             "cells (<b>p</b>: GEMM-wise sign flips, Westfall-Young step-down; the "
             "chance of any such finding between two equally good bundles is at most "
             "<code>gate.alpha</code>); the other groups' cells are tested the same way "
-            "and reported. Tail rule, in every group: picks that collapsed below the "
-            "tail floor and picks lifted back above it (<b>measured</b>: a repeated "
-            "measurement confirms it); a group keeps the bundle out when its confirmed "
-            "collapses outnumber its lifted picks by more than "
-            "<code>gate.tail_budget</code>. This rule is a policy on measured GEMMs, "
-            "not a test: one collapse can keep out a bundle no worse overall. Rows that "
-            "decide (highlighted) kept the bundle out unless the gate only "
-            "recorded.</p>"
+            "and reported. Tail rule, over every group, each GEMM of each group on its "
+            "own: new picks below the tail floor where the shipped bundle's was at or "
+            "above it, the shipped bundle's collapses this one heals, and the "
+            "collapses both share (<b>measured</b>: a repeated measurement confirms "
+            "it); the bundle is kept out when its confirmed new collapses over every "
+            "group number more than <code>gate.tail_budget</code>, however many it "
+            "heals. This rule is a policy on measured GEMMs, not a test: one collapse "
+            "can keep out a bundle no worse overall. Rows that decide (highlighted) "
+            "kept the bundle out unless the gate only recorded.</p>"
             '<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr>'
             '<th class="c">bundle</th><th class="c">group</th><th class="c">decides</th>'
             '<th class="c">finding</th><th class="c">cell</th><th class="c">GEMM</th>'
@@ -2259,7 +2300,190 @@ CELL_FINDING_KINDS = {
     "floor": "confidently fell below the floor",
     "tail": "pick collapsed below the tail floor",
     "tail_lifted": "pick lifted above the tail floor",
+    "tail_persisting": "pick below the tail floor in both bundles",
 }
+
+
+def _repair_row(bundle, dec, rec, outcome, deployed, reason):
+    """One bundle's repair (`repair_decisions`): the repair record `rec`
+    (scripts/repair_bundle.py's, as the decision `dec` holds it)."""
+    rs.pipeline_on_path()
+    from lib import cell_merge as cm
+
+    flagged = dec.get("flagged") or rec.get("flagged") or {}
+    cells = dec.get("cells") or rec.get("cells") or {}
+    inc = dec.get("incumbent") or rec.get("incumbent") or {}
+    origins = rec.get("origins") or {}
+    out = []
+    for cell in sorted(set(flagged) | set(cells)):
+        act = cells.get(cell) or {}
+        origin = act.get("origin_sha256")
+        source = (
+            "incumbent"
+            if origin and origin == inc.get("models_sha256")
+            else "candidate" if origin else None
+        )
+        out.append(
+            {
+                "cell": cell,
+                "findings": [
+                    cm.finding_text(f)
+                    for f in flagged.get(cell) or act.get("findings") or []
+                ],
+                "action": act.get("action"),
+                "tier_keys": sum(
+                    len(v) for v in (act.get("tier_keys_added") or {}).values()
+                ),
+                "origin": origin,
+                "origin_of": source,
+            }
+        )
+    return {
+        "bundle": bundle,
+        "outcome": outcome,
+        "deployed": deployed,
+        "reason": reason,
+        "repair": rec.get("outcome"),
+        "attempts": dec.get("attempts"),
+        "incumbent": inc.get("dir"),
+        "incumbent_sha256": inc.get("models_sha256"),
+        "candidate_sha256": dec.get("candidate_sha256") or origins.get("candidate"),
+        "cells": out,
+        "revoked": [
+            f"{r.get('cell')} at {r.get('axis')}{r.get('threshold')}"
+            for r in rec.get("revoked_splits") or []
+            if isinstance(r, dict)
+        ],
+        "barred": list(rec.get("barred_cells") or []),
+        "selected_by_audit": bool(
+            dec.get("selected_by_audit") or rec.get("selection_note")
+        ),
+        "selection_note": dec.get("selection_note") or rec.get("selection_note"),
+    }
+
+
+def repair_decisions(run_dir):
+    """Per round with a repair decision (`<round>/repair/decision.json`,
+    lib/cell_merge.py `RoundRepair`), then per final retrain whose decision
+    holds a repair (`decision.json` `repair`): the outcome, the flagged base
+    cells with their findings, what was done in each (tier add, subtree
+    carry) and the sha256 of the bundle whose networks now serve it, the
+    incumbent, the splits the carries revoked, and whether the same audit
+    GEMMs flagged and judged the cells (`selected_by_audit`)."""
+    rs.pipeline_on_path()
+    from lib import cell_merge as cm
+
+    rows = []
+    for d in round_dirs(run_dir):
+        dec = load_json(os.path.join(d, cm.REPAIR_DIR, cm.DECISION))
+        if not isinstance(dec, dict):
+            continue
+        rec = dec.get("repair") if isinstance(dec.get("repair"), dict) else {}
+        rows.append(
+            _repair_row(
+                os.path.basename(d),
+                dec,
+                rec,
+                dec.get("outcome"),
+                dec.get("deployed"),
+                dec.get("reason"),
+            )
+        )
+    for name in (FINAL_RETRAIN_DIR, run_bundles.FINAL_RETRAIN_NEXT_DIR):
+        dec = load_json(os.path.join(run_dir, name, run_bundles.DECISION))
+        rec = dec.get("repair") if isinstance(dec, dict) else None
+        if not isinstance(rec, dict) or not rec:
+            continue
+        repaired = bool(dec.get("accepted")) and bool(
+            (rec.get("installed") or {}).get("models_sha256")
+        )
+        outcome = (
+            "repaired"
+            if repaired
+            else "refused" if rec.get("judged") else "not repaired"
+        )
+        deployed = (
+            repaired
+            and name == FINAL_RETRAIN_DIR
+            and os.path.isfile(
+                os.path.join(run_dir, name, "stage06", run_bundles.STAGE_MARKER)
+            )
+        )
+        rows.append(_repair_row(name, dec, rec, outcome, deployed, dec.get("reason")))
+    return rows
+
+
+def repairs_html(rows):
+    """The repairs of the run's bundles (`repair_decisions`); empty
+    without any."""
+    if not rows:
+        return ""
+
+    def yes_no(v):
+        return "" if v is None else ("yes" if v else "no")
+
+    def sha(v):
+        return esc(str(v)[:12]) if v else ""
+
+    trs = "".join(
+        f'<tr class="{"win" if r["deployed"] else ""}"><td class="c">{esc(r["bundle"])}</td>'
+        f'<td class="c">{esc(r["outcome"] or "")}'
+        + (f' (attempt {intf_(r["attempts"])})' if r.get("attempts") else "")
+        + f'</td><td class="c">{yes_no(r["deployed"])}</td>'
+        f'<td class="c">{esc(", ".join(c["cell"] for c in r["cells"]))}</td>'
+        f'<td class="c">{esc(r["repair"] or "")}</td>'
+        f'<td class="c">{esc(r["incumbent"] or "")} {sha(r["incumbent_sha256"])}</td>'
+        f'<td class="c">{esc("; ".join(r["revoked"]))}</td>'
+        f'<td class="c">{esc(r["reason"] or "")}</td></tr>'
+        for r in rows
+    )
+    ctrs = "".join(
+        f'<tr><td class="c">{esc(r["bundle"])}</td><td class="c">{esc(c["cell"])}</td>'
+        f'<td class="c">{esc("; ".join(c["findings"]))}</td>'
+        f'<td class="c">{esc(c["action"] or "")}</td><td>{intf_(c["tier_keys"])}</td>'
+        f'<td class="c">{sha(c["origin"])}'
+        + (f' ({esc(c["origin_of"])})' if c.get("origin_of") else "")
+        + "</td></tr>"
+        for r in rows
+        for c in r["cells"]
+    )
+    notes = list(
+        dict.fromkeys(
+            f'{r["bundle"]}: {r["selection_note"]}'
+            for r in rows
+            if r["selected_by_audit"] and r.get("selection_note")
+        )
+    )
+    return (
+        "<h3>Repairs of bundles the per-cell gate kept out</h3>"
+        '<p class="cap">A bundle the per-cell gate keeps out for findings in a few '
+        "base cells is repaired there (<code>gate.repair</code> for a round, "
+        "<code>full.final_retrain.repair</code> for the final retrain; "
+        "<code>lib/cell_merge.py</code>): a collapse gets a tier key of its leaf's "
+        "own network (tier add), every other finding carries the base cell's whole "
+        "subtree from the incumbent, the bundle the gate compared with (subtree "
+        "carry), and the splits a carry takes back are revoked. <b>origin</b>: the "
+        "sha256 of the bundle whose networks serve the cell after the repair. "
+        "Records: <code>&lt;round&gt;/repair/decision.json</code>, "
+        "<code>final_retrain/decision.json</code> <code>repair</code>.</p>"
+        '<table style="max-width:1100px"><thead><tr><th class="c">bundle</th>'
+        '<th class="c">decision</th><th class="c">deployed</th>'
+        '<th class="c">flagged base cells</th><th class="c">repair</th>'
+        '<th class="c">incumbent</th><th class="c">revoked splits</th>'
+        f'<th class="c">reason</th></tr></thead><tbody>{trs}</tbody></table>'
+        + (
+            '<div class="scroll"><table style="margin-bottom:0;font-size:11px"><thead><tr>'
+            '<th class="c">bundle</th><th class="c">base cell</th>'
+            '<th class="c">findings</th><th class="c">action</th><th>tier keys added</th>'
+            f'<th class="c">origin</th></tr></thead><tbody>{ctrs}</tbody></table></div>'
+            if ctrs
+            else ""
+        )
+        + "".join(
+            f'<p class="cap"><b>Selected by the audit set:</b> {esc(n)}</p>'
+            for n in notes
+        )
+    )
 
 
 def bundle_html(sb, target, gates=(), next_reason=None):
@@ -4423,16 +4647,20 @@ def build(
         + "</details>"
         for name, d in sorted(s8_dec.items())
     )
-    contexts = left_out_html(gone, cfg) + (
-        rs.contexts_html(
-            analysis,
-            s4b_ctx,
-            settings,
-            context_names(cfg),
-            audit_by_context(audit, cfg),
+    contexts = (
+        off_html(off_contexts(config_text))
+        + left_out_html(gone, cfg)
+        + (
+            rs.contexts_html(
+                analysis,
+                s4b_ctx,
+                settings,
+                context_names(cfg),
+                audit_by_context(audit, cfg),
+            )
+            if rs.has_contexts(analysis, s4b_ctx)
+            else '<p class="mut">every row of this run is of the exclusive context.</p>'
         )
-        if rs.has_contexts(analysis, s4b_ctx)
-        else '<p class="mut">every row of this run is of the exclusive context.</p>'
     )
     data = {
         "TRAJ": traj_js,
@@ -4480,7 +4708,8 @@ def build(
         "INSAMPLE": insample_html(summary),
         "NOTES": "".join(f'<p class="mut">{esc(n)}</p>' for n in notes),
         "BUNDLE_NAME": esc(name),
-        "SHIPPED": bundle_html(sb, tgt, deploy_gates(run_dir), reasons.get("next")),
+        "SHIPPED": bundle_html(sb, tgt, deploy_gates(run_dir), reasons.get("next"))
+        + repairs_html(repair_decisions(run_dir)),
         "AUDIT": rs.audit_html(
             run_dir,
             tgt,

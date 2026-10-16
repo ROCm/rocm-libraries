@@ -109,9 +109,9 @@ def recover(
         return out
 
     s5 = s5 or stage05_module()
-    tree = sc.load_cumulative_split_tree(args.get("prior_round_dir") or [])
-    if args.get("current_round_dir"):
-        tree.update(sc.load_cumulative_split_tree([args["current_round_dir"]]))
+    tree = sc.load_split_tree(
+        args.get("prior_round_dir") or [], args.get("current_round_dir")
+    )
     by_leaf: Dict[str, List[Any]] = {}
     for g in gemms:
         m, n, k, b = (int(v) for v in g.key[:4])

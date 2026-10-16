@@ -175,6 +175,63 @@ def test_active_plan_covers_carried_and_fallback_cells(tmp_path):
     assert plan[carried]["n_target"] == 0 and rule.hi_label not in plan
 
 
+def test_a_round_on_a_repaired_final_retrain_samples_its_leaves(
+    tmp_path, monkeypatch, config_path
+):
+    """round_0 split a cell, and the final retrain the round builds on
+    carried that cell from a bundle without the split and revoked it: with
+    the final retrain as --base-bundle-dir the round samples the cell whole
+    (the final retrain's labels, the split left out of the tree), not its
+    two halves."""
+    from lib import subcells as sc
+
+    parent, other = "Large|Large|LargeK|Bnone", "Mid|Mid|MidK|Bnone"
+    rule = sc.build_split_rule(parent, "M", 4096)
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    sc.write_splits_json(prior / "stage04b" / "splits.json", 0, [rule])
+    halves = [rule.lo_label, rule.hi_label]
+    (prior / "stage05").mkdir()
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c} for c in [other, *halves]]})
+    )
+    final = tmp_path / "final_retrain"
+    (final / "stage05").mkdir(parents=True)
+    (final / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c} for c in [other, parent]]})
+    )
+    sc.write_revocations(final / "stage05" / sc.REVOKED_SPLITS, [rule], [parent])
+    base = ["--mode", "active", "--config-yaml", config_path, "--quiet"]
+    base += ["--prior-round-dir", prior, "--shapes-per-cell", 6]
+
+    def plan(name, *more):
+        out = tmp_path / name / "stage01"
+        assert _run(monkeypatch, *base, "--out-dir", out, *more) == 0
+        doc = json.loads((out / "per_cell_plan.json").read_text())
+        planned = {c for c, v in doc["cells"].items() if v["n_target"]}
+        return doc, planned, parse_shapes_yaml(out / "shapes.yaml")
+
+    doc, planned, _ = plan("without")
+    assert planned == {other, *halves}
+    assert doc["base_bundle_dir"] is None and doc["revoked_by_base_bundle"] == []
+    doc, planned, drawn = plan("with", "--base-bundle-dir", final)
+    assert planned == {other, parent}
+    assert doc["prior_cells_json"] == str(final / "stage05" / "cells.json")
+    assert doc["base_bundle_dir"] == str(final)
+    assert doc["revoked_by_base_bundle"] == [parent]
+    assert doc["cells"][parent]["n_actual"] == 6
+    assert {grid.cell_key(*s) for s in drawn} == {other, parent}
+    # a base bundle without cells.json, or with a record that is no
+    # revocation record, stops the round
+    (final / "stage05" / sc.REVOKED_SPLITS).write_text("{}")
+    out = tmp_path / "bad" / "stage01"
+    assert _run(monkeypatch, *base, "--out-dir", out, "--base-bundle-dir", final) == 1
+    (final / "stage05" / "cells.json").unlink()
+    assert _run(monkeypatch, *base, "--out-dir", out, "--base-bundle-dir", final) == 1
+
+
 def test_bad_inputs_are_rejected(tmp_path, monkeypatch, config_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text(yaml.safe_dump({**CONFIG, "seed": {"exclude": [{"max_q": 1}]}}))
@@ -235,3 +292,152 @@ def test_only_cells_end_to_end(tmp_path, monkeypatch, config_path):
     assert plan["cells"]["Large|Small|LargeK|Bnone"]["n_target"] == 0
     assert _run(monkeypatch, *args, "--only-cells", "Nope|Mid|MidK|Bnone") == 1
     assert _run(monkeypatch, *args, "--only-cells", ",") == 1
+
+
+def _tail(m, n, k, b, se, cu=0):
+    return {"m": m, "n": n, "k": k, "batch": b, "cu_budget": cu,
+            "schedule": "default", "sel_eff": se}  # fmt: skip
+
+
+def test_tail_gemms_of_the_previous_round_get_shapes_near_them(
+    tmp_path, monkeypatch, config_path
+):
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    (prior / "stage05").mkdir()
+    planned = ["Mid|Mid|MidK|Bnone", "Large|Small|LargeK|Bnone"]
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c, "best_sel_eff": 0.97} for c in planned]})
+    )
+    tails = [_tail(300, 300, 288, 1, 0.42, cu=128), _tail(260, 200, 96, 1, 0.6)]
+    unplanned = _tail(4000, 4000, 4000, 1, 0.3)
+    (prior / "stage04b").mkdir()
+    (prior / "stage04b" / "decisions.json").write_text(
+        json.dumps(
+            {
+                "per_cell": [
+                    {"cell": planned[0], "decision": "pass", "tail_gemms": tails},
+                    {"cell": "x", "decision": "pass", "tail_gemms": [unplanned]},
+                ]
+            }
+        )
+    )
+    audit = tmp_path / "audit.yaml"
+    out = tmp_path / "round_1" / "stage01"
+    base = ["--mode", "active", "--out-dir", out, "--config-yaml", config_path]
+    base += ["--prior-round-dir", prior, "--shapes-per-cell", 6, "--quiet"]
+    assert _run(monkeypatch, *base, "--targeted-per-gemm", 3) == 0
+    doc = json.loads((out / s01.TARGETED_FILE).read_text())
+    (entries,) = doc["leaves"].values()
+    assert [e["tail"]["sel_eff"] for e in entries] == [0.42, 0.6]
+    near = [tuple(s) for e in entries for s in e["shapes"]]
+    assert len(near) == 6 and doc["n_shapes"] == 6
+    written = parse_shapes_yaml(out / "shapes.yaml")
+    old = set(parse_shapes_yaml(prior / "stage01" / "shapes.yaml"))
+    assert set(near) <= set(written) and not set(near) & old
+    assert len(written) == len(set(written))
+    for m, n, k, b in near:
+        assert grid.cell_key(m, n, k, b) == planned[0] and b == 1
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["targeted"]["n_tail_gemms"] == 3 and cat["targeted"]["n_shapes"] == 6
+    assert cat["n_final"] == len(written)
+    plan = json.loads((out / "per_cell_plan.json").read_text())
+    assert plan["cells"][planned[0]]["n_targeted"] == 6
+    # the cap per leaf, and never a shape of an excluded (audit) list
+    first = near[0]
+    audit.write_text(
+        "- {rotating_buffer: 512, transA: T, transB: N, "
+        f"M: {first[0]}, N: {first[1]}, K: {first[2]}, batch_count: 1}}\n"
+    )
+    capped = tmp_path / "capped"
+    capped_args = [*base[:3], capped, *base[4:], "--targeted-max-per-leaf", 4]
+    assert _run(monkeypatch, *capped_args, "--exclude-shapes-yaml", audit) == 0
+    doc = json.loads((capped / s01.TARGETED_FILE).read_text())
+    got = [tuple(s) for es in doc["leaves"].values() for e in es for s in e["shapes"]]
+    assert len(got) == 4 and first not in got
+    assert first not in parse_shapes_yaml(capped / "shapes.yaml")
+    # off, or nothing listed: no targeted shapes and no file
+    off = tmp_path / "off"
+    assert _run(monkeypatch, *base[:3], off, *base[4:], "--targeted-per-gemm", 0) == 0
+    assert not (off / s01.TARGETED_FILE).exists()
+    assert (
+        json.loads((off / "categorization.json").read_text())["targeted"]["n_shapes"]
+        == 0
+    )
+    (prior / "stage04b" / "decisions.json").unlink()
+    none = tmp_path / "none"
+    assert _run(monkeypatch, *base[:3], none, *base[4:]) == 0
+    assert not (none / s01.TARGETED_FILE).exists()
+
+
+def test_a_held_out_targeted_shape_stops_the_round(
+    tmp_path, monkeypatch, config_path, capsys
+):
+    """The targeted shapes are checked against the held-out lists as the
+    round's draws are: one that is held out stops the round before it
+    writes anything."""
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    cell = "Mid|Mid|MidK|Bnone"
+    (prior / "stage05").mkdir()
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": cell, "best_sel_eff": 0.97}]})
+    )
+    (prior / "stage04b").mkdir()
+    (prior / "stage04b" / "decisions.json").write_text(
+        json.dumps(
+            {
+                "per_cell": [
+                    {
+                        "cell": cell,
+                        "decision": "pass",
+                        "tail_gemms": [_tail(300, 300, 288, 1, 0.42)],
+                    }
+                ]
+            }
+        )
+    )
+    held = (320, 320, 256, 1)
+    audit = tmp_path / "audit.yaml"
+    audit.write_text(
+        "- {rotating_buffer: 512, transA: T, transB: N, "
+        f"M: {held[0]}, N: {held[1]}, K: {held[2]}, batch_count: 1}}\n"
+    )
+    out = tmp_path / "round_1" / "stage01"
+    base = ["--mode", "active", "--out-dir", out, "--config-yaml", config_path]
+    base += ["--prior-round-dir", prior, "--shapes-per-cell", 6, "--quiet"]
+    base += ["--targeted-per-gemm", 3, "--exclude-shapes-yaml", audit]
+    assert _run(monkeypatch, *base) == 0
+    monkeypatch.setattr(
+        s01,
+        "targeted_shapes",
+        lambda *a, **kw: {cell: [{"tail": {}, "shapes": [list(held)]}]},
+    )
+    for name in ("shapes.yaml", s01.TARGETED_FILE):
+        (out / name).unlink(missing_ok=True)
+    capsys.readouterr()
+    assert _run(monkeypatch, *base) == 1
+    assert "1 targeted shapes are held out" in capsys.readouterr().err
+    assert not (out / "shapes.yaml").exists()
+    assert not (out / s01.TARGETED_FILE).exists()
+
+
+def test_a_tail_gemm_goes_to_the_leaf_of_this_rounds_tree(config_path):
+    from lib import subcells as sc
+
+    parent = "Large|Small|LargeK|Bnone"
+    rule = sc.build_split_rule(parent, "M", 4096)
+    f = _filter()
+    tails = [_tail(9000, 100, 1000, 1, 0.3), _tail(2000, 100, 1000, 1, 0.4)]
+    out = s01.targeted_shapes(
+        tails, {rule.hi_label}, {rule.cell: rule}, 7, f,
+        per_gemm=2, max_per_leaf=8, taken=set(),
+    )  # fmt: skip
+    (entries,) = out.values()
+    assert list(out) == [rule.hi_label] and len(entries) == 1
+    assert all(m > 4096 for m, _, _, _ in entries[0]["shapes"])
+    assert s01.leaf_box(rule.hi_label)[0] == (4097, grid.TIER_RANGES_MN["Large"][1])

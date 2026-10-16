@@ -12,10 +12,12 @@ audit set finds it not worse, then validated). With stub stages and stub
 audit scripts, and end to end on the fake bench."""
 
 import json
+import math
 import os
 import signal
 import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,7 @@ import run_orchestrator as ro
 from lib import audit as al
 from lib import audit_sustained as asus
 from lib import audit_v2 as v2
+from lib import contexts as ctxlib
 from lib import procs
 from lib import run_bundles as rb
 from lib import run_layout
@@ -91,9 +94,14 @@ def record(what, model):
     return rec
 
 
+def model_name(f):
+    both = f"{Path(f).parent.name}/{Path(f).name}"
+    return both if both in scores else Path(f).name
+
+
 recs = [record(Path(rd).name, str(Path(rd) / "stage05" / "models.pt"))
         for rd in values("--round-dir")]
-recs += [record(Path(f).name, f) for f in values("--model-file")]
+recs += [record(model_name(f), f) for f in values("--model-file")]
 out = Path(values("--out")[0])
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(recs[0] if len(recs) == 1 else {"models": recs}))
@@ -106,6 +114,51 @@ if os.environ.get("STUB_LOG"):
     with open(os.environ["STUB_LOG"], "a") as f:
         f.write(json.dumps({"stage": "audit_v2", "argv": sys.argv[1:]}) + "\n")
 sys.exit(int(os.environ.get("STUB_RC_audit_v2", "0")))
+"""
+
+
+REPAIR_STUB = r"""
+import json, os, shutil, sys
+from pathlib import Path
+
+argv = sys.argv[1:]
+
+
+def opt(name):
+    return argv[argv.index(name) + 1]
+
+
+if os.environ.get("STUB_LOG"):
+    with open(os.environ["STUB_LOG"], "a") as f:
+        f.write(json.dumps({"stage": "repair", "argv": argv}) + "\n")
+out = Path(opt("--out-dir"))
+out.mkdir(parents=True, exist_ok=True)
+gate = json.loads(Path(opt("--cell-gate")).read_text())
+rec = {"schema": "collapse_repair_v1", "n_collapses": gate.get("n_tail")}
+if not os.environ.get("STUB_REPAIR"):
+    rec["outcome"] = "cannot repair: the stub repairs nothing"
+    (out / "repair.json").write_text(json.dumps(rec))
+    sys.exit(3)
+train = Path(opt("--train-dir"))
+(out / "models.pt").write_bytes((train / "models.pt").read_bytes() + b"repaired")
+carried = json.loads(os.environ.get("STUB_REPAIR_CARRIED", "{}"))
+rec.update(outcome=os.environ["STUB_REPAIR"], carried_cells=carried, tier_adds={})
+# the records of the repaired bundle, as scripts/repair_bundle.py writes them
+sys.path.insert(0, os.environ["STUB_PIPELINE"])
+from lib import collapse_repair as cr
+
+cells = json.loads((train / "cells.json").read_text())
+gone = {x for m in carried.values() for x in m["removed"]}
+labels = {x for x in cells["model_labels"] if x not in gone}
+labels |= {x for m in carried.values() for x in m["carried"]}
+bundle = {"models": {x: {} for x in labels}}
+(out / "cells.json").write_text(json.dumps(cr.cells_doc(cells, bundle, rec)))
+if (train / "metrics.json").is_file():
+    met = json.loads((train / "metrics.json").read_text())
+    (out / "metrics.json").write_text(json.dumps(cr.metrics_doc(met, bundle, rec)))
+if (train / "whitelist_tier.json").is_file():
+    shutil.copy2(train / "whitelist_tier.json", out / "whitelist_tier.json")
+(out / "repair.json").write_text(json.dumps(rec))
 """
 
 
@@ -151,8 +204,11 @@ def audit_stubs(tmp_path, monkeypatch, stubs):
     d.mkdir()
     (d / "audit_eval.py").write_text(AUDIT_EVAL_STUB)
     (d / "audit_v2.py").write_text(AUDIT_V2_STUB)
+    (d / "repair_bundle.py").write_text(REPAIR_STUB)
     monkeypatch.setattr(ro, "AUDIT_EVAL_SCRIPT", d / "audit_eval.py")
     monkeypatch.setattr(ro, "AUDIT_V2_SCRIPT", d / "audit_v2.py")
+    monkeypatch.setattr(ro, "REPAIR_SCRIPT", d / "repair_bundle.py")
+    monkeypatch.setenv("STUB_PIPELINE", str(Path(ro.__file__).parent))
     monkeypatch.setattr(ro, "audit_status", lambda cfg, paths: ("ok", None))
     for k in (
         "STUB_AUDIT",
@@ -160,6 +216,8 @@ def audit_stubs(tmp_path, monkeypatch, stubs):
         "STUB_AUDIT_NO_SUSTAINED",
         "STUB_RC_audit_v2",
         "STUB_CELL_GATE",
+        "STUB_REPAIR",
+        "STUB_REPAIR_CARRIED",
     ):
         monkeypatch.delenv(k, raising=False)
     return stubs
@@ -170,6 +228,13 @@ def audited_config(tmp_path, **overrides):
         tmp_path,
         **{"audit.dir": str(tmp_path / "audit"), "audit.v2": "off", **overrides},
     )
+
+
+def bound_to(cfg_path):
+    """The binding of the audit set the config at `cfg_path` builds
+    (`ro.audit_binding`), as its manifest records it."""
+    cfg, _ = ro.load_config(cfg_path)
+    return ro.audit_binding(cfg, al.bench_config(cfg, ro.audit_devices(cfg)))
 
 
 def values(entry, name):
@@ -846,10 +911,15 @@ def test_a_final_retrain_that_adds_a_collapsed_pick_does_not_ship(
     assert tail["confirmed"] and tail["decides"]
     assert dec["reason"].startswith("not worse than round_2's bundle on the audit set")
     assert (
-        "the per-cell gate keeps it out: 1 group(s) with more new picks collapsing "
-        "below 50.0% than it lifted: exclusive (1 new, 0 lifted: 8192x64x8192 "
-        "(Large|Small|LargeK|Bnone) 30.00% (was 90.00%))"
+        "the per-cell gate keeps it out: 1 new pick(s) below 50.0% in 1 group(s): "
+        "exclusive (1 new, 0 healed: 8192x64x8192 (Large|Small|LargeK|Bnone) "
+        "30.00% (was 90.00%))"
     ) in dec["reason"]
+    assert dec["reason"].endswith(
+        f"; no repair: cannot repair: the stub repairs nothing (see "
+        f"{final / ro.FinalRetrain.REPAIR_DIR})"
+    )
+    assert dec["repair"]["n_collapses"] == 1 and "unrepaired" not in dec
     assert not (final / "stage06").exists()
     assert ro.run_bundles(run_dir)[-1] == run_dir / "round_2"
     assert "the per-cell gate keeps it out" in capsys.readouterr().err
@@ -884,6 +954,347 @@ def test_a_final_retrain_that_adds_a_collapsed_pick_does_not_ship(
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
     assert "audit_eval" not in [c["stage"] for c in calls(env)[n:]]
     assert rb.final_retrain(run_dir) == final
+
+
+COLLAPSING = [1.0, 1.0, 1.0, 0.3]
+
+
+def _repair_world(tmp_path, monkeypatch, repaired, **overrides):
+    """A full run whose final retrain is better on the mean but collapses on
+    one audit GEMM, and whose repair stub (STUB_REPAIR) gives a bundle the
+    audit set scores `repaired`."""
+    monkeypatch.setenv("STUB_GATE", "1")
+    monkeypatch.setenv("STUB_GATE_SE", "0.97")
+    monkeypatch.setenv("STUB_AUDIT_V2", "1")
+    monkeypatch.setenv("STUB_REPAIR", "1 tier key(s) added in 1 leaf(s)")
+    scores = {
+        "models.pt": COLLAPSING,
+        "repair/models.pt": repaired,
+        "default": [0.6, 0.6, 0.6, 0.9],
+    }
+    monkeypatch.setenv("STUB_AUDIT", json.dumps(scores))
+    return _final_config(tmp_path, **{"audit.v2": "final", **overrides})
+
+
+def test_a_final_retrain_kept_out_by_a_collapse_ships_repaired(
+    tmp_path, audit_stubs, env, monkeypatch, capsys
+):
+    cfg = _repair_world(tmp_path, monkeypatch, [1.0, 1.0, 1.0, 0.95])
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    rep = final / ro.FinalRetrain.REPAIR_DIR
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is True
+    before = dec["unrepaired"]["cell_gate"]
+    assert before["passed"] is False and before["n_tail"] == 1
+    assert dec["unrepaired"]["final"]["cell_mean"] == pytest.approx(
+        math.exp(sum(math.log(x) for x in COLLAPSING) / 4)
+    )
+    assert dec["cell_gate"]["passed"] is True and dec["cell_gate"]["n_tail"] == 0
+    assert dec["cell_gate"]["n_tail_new"] == 0
+    assert dec["repair"]["outcome"] == "1 tier key(s) added in 1 leaf(s)"
+    assert dec["repair"]["judged"]["not_worse"] is True
+    assert dec["repair"]["installed"]["unrepaired"] == "repair/unrepaired"
+    assert dec["change"]["cell_mean_ratio"] > 1
+    assert dec["final"]["cell_mean"] == pytest.approx(
+        math.exp(sum(math.log(x) for x in [1.0, 1.0, 1.0, 0.95]) / 4)
+    )
+    assert dec["reason"].startswith(
+        "repaired (1 tier key(s) added in 1 leaf(s)), then not worse than "
+        "round_2's bundle on the audit set: cell mean x"
+    )
+    assert "per-cell gate: no cell significantly worse" in dec["reason"]
+    assert dec["selection_note"].endswith(
+        "; the final retrain is the repaired bundle: the same GEMMs flagged its "
+        "cells and verified its repair, so a fresh audit set must confirm "
+        "its numbers"
+    )
+    # the repaired bundle is the final retrain's; the original is kept
+    s5 = final / "stage05"
+    assert (s5 / "models.pt").read_bytes() == (rep / "models.pt").read_bytes()
+    assert (rep / "unrepaired" / "models.pt").read_bytes() + b"repaired" == (
+        s5 / "models.pt"
+    ).read_bytes()
+    assert (rep / "unrepaired" / "audit.json").is_file()
+    assert json.loads((final / "audit.json").read_text())["models"][1]["what"] == (
+        "repair/models.pt"
+    )
+    inst = json.loads((rep / ro.FinalRetrain.INSTALLED).read_text())
+    assert inst["installed"]["models_sha256"] == ro._sha256_file(s5 / "models.pt")
+    st = by_stage(calls(env))
+    (r,) = st["repair"]
+    assert arg(r, "--train-dir") == str(s5)
+    assert arg(r, "--baseline-dir") == str(run_dir / "round_2")
+    assert arg(r, "--cell-gate") == str(rep / "cell_gate.json")
+    assert arg(r, "--out-dir") == str(rep)
+    assert arg(r, "--official") == "sustained"
+    assert json.loads((rep / "cell_gate.json").read_text())["n_tail"] == 1
+    v2 = [c for c in st["audit_v2"] if f"={rep / 'models.pt'}" in " ".join(c["argv"])]
+    assert len(v2) == 1
+    (ev,) = [c for c in st["audit_eval"] if arg(c, "--out") == str(rep / "audit.json")]
+    assert values(ev, "--model-file") == [str(rep / "models.pt")]
+    assert values(ev, "--round-dir") == [str(run_dir / "round_2")]
+    d06 = st["stage06"][-1]
+    assert arg(d06, "--train-dir") == str(s5)
+    assert rb.final_retrain(run_dir) == final
+    assert "final retrain repaired: 1 tier key(s) added" in capsys.readouterr().out
+    # decided: the same command neither repairs nor decides again
+    n = len(calls(env))
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    assert [c["stage"] for c in calls(env)[n:]] == []
+
+    import make_report as mr
+
+    gates = mr.deploy_gates(str(run_dir))
+    assert gates[-1]["round"] == ro.FINAL_RETRAIN_DIR
+    assert gates[-1]["cell_gate"] == "passed"
+
+
+def test_a_repair_that_still_collapses_leaves_the_final_retrain_out(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    cfg = _repair_world(tmp_path, monkeypatch, [1.0, 1.0, 1.0, 0.31])
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    rep = final / ro.FinalRetrain.REPAIR_DIR
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is False and "unrepaired" not in dec
+    assert dec["cell_gate"]["passed"] is False
+    assert dec["reason"].endswith(
+        "; its repair (1 tier key(s) added in 1 leaf(s)) does not pass: the "
+        "per-cell gate keeps it out: 1 new pick(s) below 50.0% in 1 group(s): "
+        "exclusive (1 new, 0 healed: 8192x64x8192 (Large|Small|LargeK|Bnone) "
+        "31.00% (was 90.00%)) (exclusive sustained)"
+    )
+    assert dec["repair"]["judged"]["n_tail_new"] == 1
+    assert "repaired bundle" not in dec["selection_note"]
+    assert not (rep / "unrepaired").exists()
+    assert not (rep / ro.FinalRetrain.INSTALLED).exists()
+    assert not (final / "stage05" / "models.pt").read_bytes().endswith(b"repaired")
+    assert not (final / "stage06").exists()
+    assert ro.run_bundles(run_dir)[-1] == run_dir / "round_2"
+
+
+def test_the_repaired_bundle_is_judged_under_the_protocols_that_refused_it(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    cfg = _repair_world(tmp_path, monkeypatch, [1.0, 1.0, 1.0, 0.95])
+    run_dir = tmp_path / "run"
+    stub = Path(str(ro.AUDIT_EVAL_SCRIPT))
+    # the repaired bundle's picks have no repeated measurement yet
+    stub.write_text(
+        stub.read_text().replace(
+            'if os.environ.get("STUB_AUDIT_V2"):',
+            'if os.environ.get("STUB_AUDIT_V2") and not model.endswith('
+            '"/repair/models.pt"):',
+        )
+    )
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 1
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    assert not (final / ro.FinalRetrain.DECISION).exists()
+    assert not (final / ro.FinalRetrain.REPAIR_DIR / "unrepaired").exists()
+
+
+def test_without_full_final_retrain_repair_a_collapse_keeps_it_out(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    assert ro.cfg_get({}, "full.final_retrain.repair") is True
+    errors, _ = ro.validate_config({"full": {"final_retrain": {"repair": 1}}})
+    assert any(e.startswith("full.final_retrain.repair:") for e in errors)
+    cfg = _repair_world(
+        tmp_path,
+        monkeypatch,
+        [1.0, 1.0, 1.0, 0.95],
+        **{"full.final_retrain.repair": False},
+    )
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    dec = json.loads(
+        (run_dir / ro.FINAL_RETRAIN_DIR / ro.FinalRetrain.DECISION).read_text()
+    )
+    assert dec["accepted"] is False and "repair" not in dec
+    assert "repair" not in by_stage(calls(env))
+
+
+def test_a_decision_made_again_keeps_the_installed_repair(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    cfg = _repair_world(tmp_path, monkeypatch, [1.0, 1.0, 1.0, 0.95])
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    final = run_dir / ro.FINAL_RETRAIN_DIR
+    first = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    # an interruption after the install: the decision is made again on the
+    # installed bundle, which the audit set measures as repaired
+    (final / ro.FinalRetrain.DECISION).unlink()
+    scores = json.loads(os.environ["STUB_AUDIT"])
+    scores["models.pt"] = scores["repair/models.pt"]
+    monkeypatch.setenv("STUB_AUDIT", json.dumps(scores))
+    n = len(calls(env))
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    assert "repair" not in [c["stage"] for c in calls(env)[n:]]
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is True and dec["cell_gate"]["passed"] is True
+    assert dec["repair"]["installed"] == first["repair"]["installed"]
+    # an interruption inside the install: stage05 still holds the original,
+    # and the next decision finishes the install before it scores
+    rep = final / ro.FinalRetrain.REPAIR_DIR
+    s5 = final / "stage05"
+    (final / ro.FinalRetrain.DECISION).unlink()
+    (s5 / "models.pt").write_bytes((rep / "unrepaired" / "models.pt").read_bytes())
+    n = len(calls(env))
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    assert "repair" not in [c["stage"] for c in calls(env)[n:]]
+    assert (s5 / "models.pt").read_bytes() == (rep / "models.pt").read_bytes()
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is True and "installed" in dec["repair"]
+    # stage05 holding a bundle that is neither: the repair is not its own
+    (final / ro.FinalRetrain.DECISION).unlink()
+    (s5 / "models.pt").write_bytes(b"another bundle")
+    scores["models.pt"] = COLLAPSING
+    monkeypatch.setenv("STUB_AUDIT", json.dumps(scores))
+    monkeypatch.delenv("STUB_REPAIR")
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    assert (s5 / "models.pt").read_bytes() == b"another bundle"
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is False and "installed" not in dec["repair"]
+    # an install record of another bundle names no repair of this one
+    (final / ro.FinalRetrain.REPAIR_DIR / ro.FinalRetrain.INSTALLED).write_text(
+        json.dumps({"installed": {"models_sha256": "0" * 64}})
+    )
+    fr = types.SimpleNamespace(
+        dir=final,
+        REPAIR_DIR=ro.FinalRetrain.REPAIR_DIR,
+        INSTALLED=ro.FinalRetrain.INSTALLED,
+    )
+    assert ro.FinalRetrain.installed_repair(fr) is None
+
+
+def test_a_cell_the_repair_carries_under_the_shipped_label_keeps_its_origin(
+    tmp_path, audit_stubs, env, monkeypatch
+):
+    """The repair carries TINY's base cell from round_2, which ships it under
+    the label the final retrain trained it under: the repaired cells.json
+    keeps no entry of it, so cell_origins.json and the run's records name
+    round_2's network, its cells.json entry and its training."""
+    monkeypatch.setenv("STUB_CELLS", json.dumps([TINY, LARGE]))
+    cfg = _repair_world(tmp_path, monkeypatch, [1.0, 1.0, 1.0, 0.95])
+    carried = {TINY: {"removed": [TINY], "carried": [TINY]}}
+    monkeypatch.setenv("STUB_REPAIR_CARRIED", json.dumps(carried))
+    run_dir = tmp_path / "run"
+    assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 0
+    final, r2 = run_dir / ro.FINAL_RETRAIN_DIR, run_dir / "round_2"
+    dec = json.loads((final / ro.FinalRetrain.DECISION).read_text())
+    assert dec["accepted"] is True and dec["repair"]["carried_cells"] == carried
+    s5 = final / "stage05"
+    cj = json.loads((s5 / "cells.json").read_text())
+    assert cj["model_labels"] == sorted([TINY, LARGE])
+    assert [c["label"] for c in cj["cells"]] == [LARGE]
+    assert cj["repair"]["carried_cells"] == carried
+    rec = json.loads((s5 / rb.CELL_ORIGINS).read_text())
+    assert list(rec["cells"]) == [TINY]
+    assert rec["origins"][rec["cells"][TINY]["origin"]]["bundle"] == "round_2"
+    assert rec["origins"][rec["cells"][TINY]["origin"]]["finished"] == (
+        rb.stage05_finished(r2)
+    )
+    assert rec["cells"][TINY]["entry"] == {"label": TINY}
+    origins = rb.cell_origins(ro.run_bundles(run_dir))
+    assert (origins[TINY]["trained_in"], origins[TINY]["bundle"]) == ("round_2", r2)
+    assert origins[LARGE]["trained_in"] == ro.FINAL_RETRAIN_DIR
+    unrepaired = final / ro.FinalRetrain.REPAIR_DIR / "unrepaired"
+    kept = json.loads((unrepaired / "cells.json").read_text())
+    assert sorted(c["label"] for c in kept["cells"]) == sorted([TINY, LARGE])
+
+
+def _install_world(root):
+    """A final retrain with a repair in repair/ ready to install, which
+    carries TINY from round_2 under the label the final retrain trained."""
+    FR = ro.FinalRetrain
+    run_dir = root / "run"
+    base, final = run_dir / "round_2", run_dir / ro.FINAL_RETRAIN_DIR
+    s5, d = final / "stage05", final / FR.REPAIR_DIR
+    for p in (base / "stage05", s5, d):
+        p.mkdir(parents=True)
+
+    def cells(entries):
+        return json.dumps(
+            {"model_labels": [LARGE, TINY], "cells": [{"label": x} for x in entries]}
+        )
+
+    (base / "stage05" / "cells.json").write_text(cells([TINY]))
+    (base / "stage05" / rb.STAGE_MARKER).write_text(json.dumps({"finished": "T2"}))
+    (s5 / rb.STAGE_MARKER).write_text(json.dumps({"finished": "TF"}))
+    (s5 / "cells.json").write_text(cells([LARGE, TINY]))
+    (d / "cells.json").write_text(cells([LARGE]))
+    for name in ("models.pt", "whitelist_tier.json", "metrics.json"):
+        (s5 / name).write_text(f"unrepaired {name}")
+        (d / name).write_text(f"repaired {name}")
+    (final / FR.AUDIT).write_text("unrepaired audit")
+    (d / FR.AUDIT).write_text("repaired audit")
+    fr = types.SimpleNamespace(
+        dir=final,
+        p=types.SimpleNamespace(run_dir=run_dir),
+        name="the final retrain",
+        lineage=lambda: [base],
+    )
+    for k in ("REPAIR_DIR", "REPAIRED_FILES", "INSTALLED", "AUDIT"):
+        setattr(fr, k, getattr(FR, k))
+    fr.copy_repair = lambda *a: FR.copy_repair(fr, *a)
+    moved = {TINY: {"removed": [TINY], "carried": [TINY]}}
+    return fr, d, {"outcome": "carried", "carried_cells": moved}, base
+
+
+def test_an_install_interrupted_anywhere_is_finished_by_the_next_decision(
+    tmp_path, monkeypatch
+):
+    FR = ro.FinalRetrain
+    real = os.replace
+    count = {"n": 0, "stop": None}
+
+    def replace(src, dst):
+        if count["n"] == count["stop"]:
+            raise KeyboardInterrupt
+        count["n"] += 1
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    fr, d, rec, base = _install_world(tmp_path / "whole")
+    FR.install_repair(fr, d, rec, base)
+    steps = count["n"]
+    assert (fr.dir / "stage05" / "models.pt").read_text() == "repaired models.pt"
+
+    def installed(fr):
+        s5 = fr.dir / "stage05"
+        return (
+            all(
+                (s5 / name).read_text() == (d / name).read_text()
+                for name in FR.REPAIRED_FILES
+            )
+            and (fr.dir / FR.AUDIT).read_text() == "repaired audit"
+        )
+
+    for stop in range(steps):
+        fr, d, rec, base = _install_world(tmp_path / f"stop{stop}")
+        count.update(n=0, stop=stop)
+        with pytest.raises(KeyboardInterrupt):
+            FR.install_repair(fr, d, rec, base)
+        count["stop"] = None
+        s5 = fr.dir / "stage05"
+        # models.pt goes last: an unfinished install leaves the unrepaired one
+        assert (s5 / "models.pt").read_text() == "unrepaired models.pt", stop
+        got = FR.installed_repair(fr)
+        if not (d / FR.INSTALLED).is_file():
+            assert got is None and not installed(fr), stop
+            continue
+        assert got is not None and installed(fr), stop
+        assert got["installed"]["carried_from"] == "round_2"
+        origins = json.loads((s5 / rb.CELL_ORIGINS).read_text())
+        assert list(origins["cells"]) == [TINY], stop
+        unrepaired = d / "unrepaired"
+        assert (unrepaired / "models.pt").read_text() == "unrepaired models.pt"
+        assert (unrepaired / "metrics.json").read_text() == "unrepaired metrics.json"
 
 
 def test_with_the_per_cell_gate_off_the_final_retrain_is_judged_as_before(
@@ -928,7 +1339,7 @@ def test_each_round_gates_per_cell_against_the_bundle_that_ships(
         arg(s06["round_2"], "--tail-collapse"),
         arg(s06["round_2"], "--tail-budget"),
         arg(s06["round_2"], "--cell-gate-groups"),
-    ) == ("0.01", "0.8", "0.05", "0.5", "0.5", "0", "exclusive")
+    ) == ("0.01", "0.8", "0.05", "0.5", "1.0", "0", "exclusive")
     assert "--cell-gate-record-only" not in s06["round_2"]["argv"]
     assert arg(s06["round_2"], "--audit-dir") == str(tmp_path / "audit")
 
@@ -2674,6 +3085,70 @@ def test_preflight_refuses_an_audit_set_the_run_could_not_build(
         assert got and all(e.startswith("audit set: planner.enabled") for e in got)
 
 
+def test_preflight_refuses_a_complete_audit_set_of_other_settings_or_contexts(
+    one_command,
+):
+    """A run scores its models on the audit set's groups, benched in the
+    settings and contexts the set was built with: a complete set built with
+    others is refused too."""
+    w = one_command
+    paths = ro.derive_paths(w["cfg"])
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ro, "_tilewright_errors", lambda catalog="v2": [])
+        cfg = json.loads(json.dumps(w["cfg"]))
+        assert ro.preflight(cfg, paths, "full") == []
+        cfg["audit"]["seed"] = 12
+        (err,) = ro.preflight(cfg, paths, "full")
+        assert err == (
+            f"{w['audit']} was built with seed=11; this config has 12 "
+            f"(point audit.dir at a new audit set for other audit settings)"
+        )
+        cfg = json.loads(json.dumps(w["cfg"]))
+        cfg["contexts"]["holdout"][0]["enabled"] = False
+        (err,) = ro.preflight(cfg, paths, "full")
+        assert err.startswith(
+            f"{w['audit']} was built with contexts=[cu16_cot, cu32_cot]; this "
+            f"config has [cu16_cot] (the contexts follow the CU count of the "
+            f"bench device or partition"
+        ), err
+
+
+@pytest.mark.parametrize("state", ["complete", "benching"])
+def test_a_run_refuses_an_audit_set_built_with_other_contexts_when_it_starts(
+    tmp_path, audit_stubs, env, monkeypatch, capsys, state
+):
+    """With --skip-preflight the run checks the audit set's binding when it
+    starts (`AuditBuild.prepare`): one built with other contexts stops it
+    before its first round, complete or still benched with audit.build off;
+    one built with its own does not."""
+    cfg = audited_config(tmp_path, **{"audit.build": "off"})
+    want = bound_to(cfg)
+    other = dict(want, contexts=[ctxlib.BenchContext(64, cotenant=True).to_dict()])
+    d = tmp_path / "audit"
+    d.mkdir()
+    if state == "benching":
+        monkeypatch.setattr(
+            ro, "audit_status", lambda cfg, paths: ("incomplete", "still benched")
+        )
+    else:
+        (d / al.COMPLETE_MARKER).write_text("{}")
+
+    def start(binding, run_dir):
+        manifest = {"schema": al.SCHEMA_VERSION, "binding": binding, "generations": []}
+        (d / al.MANIFEST).write_text(json.dumps(manifest))
+        env.write_text("")
+        capsys.readouterr()
+        return run(audit_stubs, cfg, run_dir, "--mode", "initial")
+
+    assert start(other, tmp_path / "refused") == 2
+    assert calls(env) == [] and not ro.round_dirs(tmp_path / "refused")
+    err = capsys.readouterr().err
+    assert f"{d} was built with contexts=[cu64_cot]; this config has []" in err
+    assert "point audit.dir at a new audit set" in err
+    assert start(want, tmp_path / "used") == 0
+    assert calls(env) and ro.round_dirs(tmp_path / "used")
+
+
 def _same(a, b):
     import torch
 
@@ -2859,6 +3334,7 @@ def test_a_build_refused_for_another_hipblaslt_build_is_named_so(
 ):
     """Of an audit directory in either layout (stage01b/ when written before
     the planner became stage02)."""
+    cfg = audited_config(tmp_path)
     audit = tmp_path / "audit"
     if planner == "stage02":
         run_layout.settle(audit)
@@ -2866,6 +3342,7 @@ def test_a_build_refused_for_another_hipblaslt_build_is_named_so(
     (audit / planner / ro.STAGE_MARKER).write_text("{}")
     m = {
         "schema": al.SCHEMA_VERSION,
+        "binding": bound_to(cfg),
         "generations": [],
         "planned_kernels": {"3": "aaa", "4": "bbb"},
     }
@@ -2898,7 +3375,6 @@ def test_a_build_refused_for_another_hipblaslt_build_is_named_so(
     )
     current = {3: "aaa", 4: "bbb", 5: "eee"}
     monkeypatch.setattr(ro.Pipeline, "pool_digests", lambda self: current)
-    cfg = audited_config(tmp_path)
     run_dir = tmp_path / "run"
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 2
     err = capsys.readouterr().err

@@ -1217,6 +1217,37 @@ def test_the_report_says_which_contexts_the_device_left_out(tmp_path):
     assert "Left out" not in contexts and "every held-out context" not in notes
 
 
+def test_the_left_out_note_names_the_runs_budget_granule():
+    gone = [("holdout", 1, {"cu_fraction": 0.8})]
+    note = mr.left_out_html(gone, {"contexts": {"holdout": [], "granule": 64}})
+    assert "(a multiple of 64 below the device's CUs)" in html.unescape(note)
+    note = mr.left_out_html(gone, {"contexts": {"holdout": []}})
+    assert "(a multiple of 32 below the device's CUs)" in html.unescape(note)
+    assert mr.left_out_html([], {"contexts": {"granule": 64}}) == ""
+
+
+def test_the_report_names_the_contexts_the_config_turns_off(tmp_path):
+    run = fraction_run(tmp_path / "run")
+    off = FRACTION_SOURCE.replace(
+        "  holdout:\n",
+        "    - {cu_fraction: 0.125, cotenant: true, enabled: false}\n  holdout:\n",
+    )
+    write(run / "configs" / "20261009_000000_full.source.yaml", off)
+    stage04b_of_fractions(run)
+    out = tmp_path / "report.html"
+    mr.build(str(run), str(out), bench=False)
+    text = out.read_text()
+    contexts = text[text.index('<h2 id="contexts">') : text.index('<h2 id="identity">')]
+    assert (
+        "Off in the config:</b> contexts.list[2] (cu_fraction 0.125). The run "
+        "benched and trained none of them" in contexts
+    )
+    assert "Left out on this run's bench device:</b> contexts.holdout[1] " in contexts
+    assert "contexts.list[2]" not in contexts.split("Left out")[1]
+    assert mr.off_html(mr.off_contexts(FRACTION_SOURCE)) == ""
+    assert mr.off_contexts("not: [yaml") == []
+
+
 def test_diagnostics_flag(tmp_path):
     run = tmp_path / "empty"
     run.mkdir()
@@ -1720,6 +1751,14 @@ def test_the_deploy_gates_name_the_per_cell_findings(tmp_path):
                             "confirmed": True,
                         }
                     ],
+                    "tail_persisting": [
+                        {
+                            "shape": [4102, 4096, 4096, 1],
+                            "cell": LARGE,
+                            "before": 0.4,
+                            "after": 0.3,
+                        }
+                    ],
                 },
                 "cu64": {"protocol": "v1", "deciding": False, "reason": "no group"},
             },
@@ -1729,8 +1768,8 @@ def test_the_deploy_gates_name_the_per_cell_findings(tmp_path):
     (r,) = rows
     assert r["cell_gate"] == "kept it out" and r["cell_against"] == "round_9's bundle"
     kinds = [f["kind"] for f in r["findings"]]
-    assert kinds == ["regressed", "floor", "tail", "tail_lifted"]
-    assert [f["deciding"] for f in r["findings"]] == [True, True, True, False]
+    assert kinds == ["regressed", "floor", "tail", "tail_lifted", "tail_persisting"]
+    assert [f["deciding"] for f in r["findings"]] == [True, True, True, False, False]
     assert r["findings"][2]["gemm"] == "4100x4096x4096"
     assert r["findings"][3]["gemm"] == "4101x4096x4096 batch 2"
     assert r["findings"][2]["ratio"] == pytest.approx(0.25)
@@ -1741,6 +1780,9 @@ def test_the_deploy_gates_name_the_per_cell_findings(tmp_path):
     assert "&times;0.9000" in page and "20.00" in page and "0.012" in page
     assert "pick collapsed below the tail floor" in page
     assert "pick lifted above the tail floor" in page
+    assert "pick below the tail floor in both bundles" in page
+    assert r["findings"][4]["confirmed"] is None
+    assert "however many it heals" in page and "outnumber" not in page
     assert "a policy on measured GEMMs" in page
     assert mr._cell_gate_text(None) == "not run"
     assert mr._cell_gate_text({"passed": None}) == "not measured"
@@ -1749,6 +1791,148 @@ def test_the_deploy_gates_name_the_per_cell_findings(tmp_path):
     assert mr._cell_gate_text({"passed": False, "record_only": True}).startswith(
         "would keep it out"
     )
+
+
+def _repairs_world(run):
+    """round_0 shipped repaired (LARGE carried from round_9, its split
+    revoked), round_1's repair still waits, and the final retrain shipped
+    repaired by a tier add in TINY."""
+    import run_orchestrator as ro
+    from lib import cell_merge as cm
+
+    inc, cand = "1" * 64, "2" * 64
+    collapse = {
+        "kind": "collapse",
+        "group": "cu64",
+        "shape": [4100, 4096, 4096, 1],
+        "before": 0.9,
+        "after": 0.3,
+    }
+    rule = {"cell": LARGE, "axis": "M", "threshold": 4096, "base_cell": LARGE}
+    write(
+        run / "round_0" / cm.REPAIR_DIR / cm.DECISION,
+        {
+            "outcome": "repaired",
+            "deployed": True,
+            "reason": "repaired (1 base cell(s) carried): per-cell gate: passed",
+            "candidate_sha256": cand,
+            "flagged": {LARGE: [collapse]},
+            "incumbent": {"dir": "round_9", "models_sha256": inc},
+            "cells": {
+                LARGE: {
+                    "findings": [collapse],
+                    "action": "subtree carry",
+                    "tier_keys_added": {},
+                    "origin_sha256": inc,
+                }
+            },
+            "repair": {
+                "outcome": "0 tier key(s) added, 1 base cell(s) carried",
+                "origins": {"candidate": cand, "incumbent": inc},
+                "revoked_splits": [rule],
+                "barred_cells": [LARGE],
+            },
+            "selected_by_audit": True,
+            "selection_note": cm.SELECTION_NOTE,
+        },
+    )
+    write(
+        run / "round_1" / cm.REPAIR_DIR / cm.DECISION,
+        {
+            "outcome": "wait",
+            "deployed": False,
+            "attempts": 2,
+            "reason": "the audit set did not measure the repaired bundle",
+            "flagged": {TINY: [dict(collapse, group="exclusive")]},
+            "repair": {"outcome": "1 tier key(s) added"},
+        },
+    )
+    final = run / ro.FINAL_RETRAIN_DIR
+    write(
+        final / "decision.json",
+        {
+            "accepted": True,
+            "reason": "repaired (1 tier key(s) added), then not worse than round_0",
+            "repair": {
+                "outcome": "1 tier key(s) added",
+                "flagged": {TINY: [collapse]},
+                "incumbent": {"dir": "round_0", "models_sha256": inc},
+                "cells": {
+                    TINY: {
+                        "action": "tier add",
+                        "tier_keys_added": {f"{TINY}#M<=2": [7, 9]},
+                        "origin_sha256": cand,
+                    }
+                },
+                "judged": {"not_worse": True},
+                "installed": {"models_sha256": "3" * 64},
+                "selection_note": cm.SELECTION_NOTE,
+            },
+        },
+    )
+    ro.mark_stage_complete(final / "stage06", None)
+    write(run / "final_retrain_next" / "decision.json", {"accepted": False})
+    return inc, cand
+
+
+def test_the_report_renders_the_repair_decisions(tmp_path):
+    run = staged_run(tmp_path / "run")
+    assert mr.repair_decisions(str(run)) == [] and mr.repairs_html([]) == ""
+    inc, cand = _repairs_world(run)
+    rows = mr.repair_decisions(str(run))
+    assert [r["bundle"] for r in rows] == ["round_0", "round_1", "final_retrain"]
+    r0, r1, fr = rows
+    assert (r0["outcome"], r0["deployed"], r0["selected_by_audit"]) == (
+        "repaired",
+        True,
+        True,
+    )
+    (cell,) = r0["cells"]
+    assert cell["cell"] == LARGE and cell["action"] == "subtree carry"
+    assert cell["origin"] == inc and cell["origin_of"] == "incumbent"
+    assert cell["findings"] == ["cu64 4100x4096x4096 collapsed 30.00% (was 90.00%)"]
+    assert r0["revoked"] == [f"{LARGE} at M4096"] and r0["barred"] == [LARGE]
+    assert r0["incumbent"] == "round_9" and r0["candidate_sha256"] == cand
+    assert (r1["outcome"], r1["deployed"], r1["attempts"]) == ("wait", False, 2)
+    assert r1["cells"][0]["action"] is None and not r1["selected_by_audit"]
+    assert (fr["outcome"], fr["deployed"]) == ("repaired", True)
+    (cell,) = fr["cells"]
+    assert (cell["action"], cell["tier_keys"], cell["origin_of"]) == (
+        "tier add",
+        2,
+        "candidate",
+    )
+    assert fr["selection_note"] == r0["selection_note"]
+    page = mr.repairs_html(rows)
+    assert "<h3>Repairs of bundles the per-cell gate kept out</h3>" in page
+    assert page.count('<tr class="win">') == 2
+    assert "wait (attempt 2)" in page
+    assert html.escape(f"{LARGE} at M4096") in page
+    assert f"round_9 {inc[:12]}" in page and f"{inc[:12]} (incumbent)" in page
+    assert "subtree carry" in page and "tier add" in page
+    assert html.escape("collapsed 30.00% (was 90.00%)") in page
+    assert page.count("Selected by the audit set:") == 2
+    assert html.escape(f"final_retrain: {r0['selection_note']}") in page
+    out = tmp_path / "report.html"
+    mr.build(str(run), str(out), bench=False)
+    shipped = out.read_text()
+    shipped = shipped[shipped.index('<h2 id="shipped">') :]
+    shipped = shipped[: shipped.index("<h2", 1)]
+    assert "<h3>Repairs of bundles the per-cell gate kept out</h3>" in shipped
+    # a repaired final retrain stage06 has not deployed is not deployed
+    marker = next((run / "final_retrain" / "stage06").glob(".stage_complete*"))
+    marker.rename(marker.with_name("not_the_marker"))
+    assert mr.repair_decisions(str(run))[-1]["outcome"] == "repaired"
+    assert mr.repair_decisions(str(run))[-1]["deployed"] is False
+    # an unaccepted or unjudged final retrain repair is not a repaired bundle
+    dec = json.loads((run / "final_retrain" / "decision.json").read_text())
+    dec["accepted"] = False
+    write(run / "final_retrain" / "decision.json", dec)
+    assert mr.repair_decisions(str(run))[-1]["outcome"] == "refused"
+    dec["repair"].pop("judged")
+    write(run / "final_retrain" / "decision.json", dec)
+    assert mr.repair_decisions(str(run))[-1]["outcome"] == "not repaired"
+    assert mr.repair_decisions(str(run))[-1]["deployed"] is False
 
 
 def test_a_partial_audit_without_the_exclusive_group_is_not_measured(tmp_path):

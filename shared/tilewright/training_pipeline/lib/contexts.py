@@ -25,16 +25,27 @@ round's own stage03 bench; the contexts here are the others. A
 `holdout` context is benched and enriched separately and never trained on:
 stage04b reports the model on it (interpolation between trained budgets).
 
-A config entry gives its budget as CUs (`cu_budget`) or as a fraction of
-the device's CUs (`cu_fraction`), which `resolve_fractions` turns into CUs
-when a run starts, from the bench device's CU count: the multiple of
-hipBLASLt's SM-target granule nearest the fraction, so that the kernels
-size their grids for exactly the CUs the cotenant leaves them, and for a
-trained entry not below `train.min_cu_fraction` where the device allows.
-An entry that resolves to the budget and schedule of another (one with a
-budget of its own, or an earlier one: trained entries come before held-out
-ones) is left out (`left_out` names them). The run's snapshot keeps each
-fraction beside the budget it became.
+A config entry gives its budget as CUs (`cu_budget`) or as a share of the
+device's CUs (`cu_fraction`), which `resolve_fractions` turns into CUs
+when a run starts, from the CU count of the bench device. Inside a compute
+partition that is the partition's: each partition is a device of its own,
+with its own KFD node and HIP device, so the shares are sized for it. The
+budget is the multiple of the budget granule (`budget_granule`) nearest the
+share, at least one granule, and for a trained entry not below
+`train.min_cu_fraction` where the device allows. The granule is the
+budgets' own, apart from the rounding of the SM target in hipBLASLt's
+launch rule (`hipblaslt_launch.SM_TARGET_GRANULE`), and a multiple of it, so
+that hipBLASLt takes every budget as its SM target as it is and the kernels
+size their grids for exactly the CUs the cotenant leaves them. An entry is
+left out (`left_out` names them) when it resolves to the budget and
+schedule of another (one with a budget of its own, or an earlier one:
+trained entries come before held-out ones), or when the device has no
+budget to give (no multiple of the granule below its CU count), so a device
+too small for every share trains the exclusive context alone. An entry with
+`enabled: false` is off (`off_entries`): no stage benches or trains it and
+a run's snapshot leaves it out, so a config can carry a share that costs
+too much to bench by default. The run's snapshot keeps each fraction beside
+the budget it became.
 """
 from __future__ import annotations
 
@@ -45,14 +56,30 @@ import os
 import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
+from typing import Tuple
 
 from .hipblaslt_launch import SM_TARGET_GRANULE
+
+# The CU budgets a cu_fraction resolves to are whole multiples of this many
+# CUs (WGPs on gfx1250), and at least one, so the smallest budget a run
+# trains is one granule however small its share: one XCD's worth of CUs on
+# gfx950. It must stay a multiple of the launch rule's rounding of the SM
+# target (SM_TARGET_GRANULE), so that hipBLASLt sizes the kernels for exactly
+# the CUs the cotenant leaves them; `contexts.granule` sets another for a
+# config.
+CU_BUDGET_GRANULE = 32
+# The granule of the budgets of a run or audit directory pinned before
+# `contexts.granule` existed, whose budgets were whole multiples of 32 CUs:
+# what a pin without the key means, whatever CU_BUDGET_GRANULE becomes
+# (run_orchestrator.py PINNED_UNLESS_NEUTRAL).
+PREDATING_GRANULE = 32
 
 SCHEDULES: Tuple[str, ...] = ("default", "dynamic", "auto")
 HYBRID_POLICY = {"dynamic": "DynamicWorkQueue", "auto": "Auto"}
 SPEC_FILE = "context.json"
 WRAPPER_NAME = "hipblaslt-bench"
+SECTIONS: Tuple[str, ...] = ("list", "holdout")
 ShapeKey = Tuple[int, int, int, int]
 
 
@@ -111,27 +138,54 @@ def unresolved(m: Mapping[str, Any]) -> bool:
     return m.get("cu_fraction") is not None and m.get("cu_budget") is None
 
 
+def enabled(m: Mapping[str, Any]) -> bool:
+    """False for an entry the config turns off (`enabled: false`)."""
+    return m.get("enabled", True) is not False
+
+
 def has_unresolved(cfg: Mapping[str, Any]) -> bool:
-    """True when an entry of the config gives a cu_fraction and no
+    """True when an entry the config turns on gives a cu_fraction and no
     cu_budget."""
     return any(unresolved(m) for _, _, m in _entries(cfg))
 
 
-def _entries(cfg: Mapping[str, Any]) -> List[Tuple[str, int, Mapping[str, Any]]]:
+def _all_entries(cfg: Mapping[str, Any]) -> List[Tuple[str, int, Mapping[str, Any]]]:
     """(section key, index, entry) of every mapping in `contexts.list` and
     `contexts.holdout`."""
     sec = cfg.get("contexts") or {}
     return [
         (key, i, m)
-        for key in ("list", "holdout")
+        for key in SECTIONS
         for i, m in enumerate(sec.get(key) or [])
         if isinstance(m, Mapping)
     ]
 
 
+def _entries(cfg: Mapping[str, Any]) -> List[Tuple[str, int, Mapping[str, Any]]]:
+    """`_all_entries` the config turns on, with their indices in the
+    config."""
+    return [(key, i, m) for key, i, m in _all_entries(cfg) if enabled(m)]
+
+
+def off_entries(cfg: Mapping[str, Any]) -> List[Tuple[str, int, Mapping[str, Any]]]:
+    """(section key, index, entry) of the entries the config turns off."""
+    return [(key, i, m) for key, i, m in _all_entries(cfg) if not enabled(m)]
+
+
+def describe(m: Mapping[str, Any]) -> str:
+    """An entry's budget as the config gives it: `cu_fraction <share>` or
+    `cu_budget <CUs>`, with a schedule other than the default."""
+    if m.get("cu_fraction") is not None:
+        what = f"cu_fraction {float(m['cu_fraction']):g}"
+    else:
+        what = f"cu_budget {int(m.get('cu_budget') or 0)}"
+    return what if _schedule(m) == "default" else f"{what} / schedule {_schedule(m)}"
+
+
 def trained_entries(cfg: Mapping[str, Any]) -> List[Mapping[str, Any]]:
-    """The entries of `contexts.list` other than the exclusive one, as the
-    config gives them (an entry with a cu_fraction is never exclusive)."""
+    """The entries of `contexts.list` the config turns on other than the
+    exclusive one, as the config gives them (an entry with a cu_fraction is
+    never exclusive)."""
     return [
         m
         for key, _, m in _entries(cfg)
@@ -140,23 +194,57 @@ def trained_entries(cfg: Mapping[str, Any]) -> List[Mapping[str, Any]]:
     ]
 
 
+def holdout_entries(cfg: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """The entries of `contexts.holdout` the config turns on."""
+    return [m for key, _, m in _entries(cfg) if key == "holdout"]
+
+
 def reduces_cus(m: Mapping[str, Any]) -> bool:
     """True for an entry that leaves the kernels fewer than every CU."""
     return m.get("cu_fraction") is not None or int(m.get("cu_budget") or 0) > 0
 
 
-def fraction_budget(fraction: float, n_cu: int, floor: Optional[float] = None) -> int:
+def budget_granule(cfg: Mapping[str, Any]) -> int:
+    """The granule of the CU budgets the cu_fraction entries of `cfg`
+    resolve to: `contexts.granule`, else CU_BUDGET_GRANULE."""
+    sec = cfg.get("contexts")
+    granule = sec.get("granule") if isinstance(sec, Mapping) else None
+    return CU_BUDGET_GRANULE if granule is None else int(granule)
+
+
+def granule_errors(cfg: Mapping[str, Any], where: str = "contexts") -> List[str]:
+    """The budget granule of `cfg` (`budget_granule`) as an error unless it
+    is a whole multiple of SM_TARGET_GRANULE, so that hipBLASLt takes every
+    budget as its SM target as it is."""
+    granule = budget_granule(cfg)
+    if granule >= SM_TARGET_GRANULE and granule % SM_TARGET_GRANULE == 0:
+        return []
+    return [
+        f"{where}.granule {granule}: must be a multiple of {SM_TARGET_GRANULE}, "
+        f"the SM-target granule of hipBLASLt's launch rule, so that hipBLASLt "
+        f"sizes the kernels for exactly the CUs of each budget"
+    ]
+
+
+def fraction_budget(
+    fraction: float,
+    n_cu: int,
+    floor: Optional[float] = None,
+    granule: Optional[int] = None,
+) -> int:
     """The CU budget `fraction` of a device with `n_cu` CUs stands for: the
-    multiple of SM_TARGET_GRANULE (hipBLASLt rounds the SM target down to
-    one) nearest fraction * n_cu, at least one granule and below n_cu, and
-    raised to at least `floor` * n_cu where a multiple below n_cu allows.
-    ValueError when no multiple of the granule lies below n_cu."""
-    granule = SM_TARGET_GRANULE
+    multiple of `granule` (default CU_BUDGET_GRANULE) nearest fraction *
+    n_cu, at least one granule and below n_cu, and raised to at least
+    `floor` * n_cu where a multiple below n_cu allows. ValueError when no
+    multiple of the granule lies below n_cu."""
+    granule = CU_BUDGET_GRANULE if granule is None else int(granule)
+    if granule < 1:
+        raise ValueError(f"a CU budget granule must be positive, got {granule}")
     top = (int(n_cu) - 1) // granule * granule
     if top < granule:
         raise ValueError(
-            f"a device of {n_cu} CUs has no budget below its CU count that "
-            f"hipBLASLt's SM target takes (a multiple of {granule})"
+            f"a device of {n_cu} CUs has no CU budget below its CU count (a "
+            f"budget is a multiple of {granule} CUs)"
         )
     budget = int(math.floor(float(fraction) * n_cu / granule + 0.5)) * granule
     budget = min(max(budget, granule), top)
@@ -171,13 +259,18 @@ def _schedule(m: Mapping[str, Any]) -> str:
 
 def _resolution(
     cfg: Mapping[str, Any], n_cu: int
-) -> Tuple[Dict[Tuple[str, int], int], Dict[Tuple[str, int], str]]:
-    """({(section key, index): budget} of the entries that give a
-    cu_fraction and no cu_budget on a device of `n_cu` CUs, the floor of a
-    trained entry being `train.min_cu_fraction`; {(section key, index): the
-    entry it repeats} of those whose budget and schedule are those of an
-    entry with a cu_budget of its own or of an earlier one)."""
+) -> Tuple[Dict[Tuple[str, int], int], Dict[Tuple[str, int], Optional[str]]]:
+    """({(section key, index): budget} of the entries the config turns on
+    that give a cu_fraction and no cu_budget, on a device of `n_cu` CUs, the
+    floor of a trained entry being `train.min_cu_fraction`; {(section key,
+    index): the entry it repeats, or None} of those left out: whose budget
+    and schedule are those of an entry with a cu_budget of its own or of an
+    earlier one, or, None, that the device has no budget for). Budgets are
+    multiples of `budget_granule`; ValueError when that is not positive."""
     floor = (cfg.get("train") or {}).get("min_cu_fraction")
+    granule = budget_granule(cfg)
+    if granule < 1:
+        raise ValueError(f"contexts.granule {granule}: must be positive")
     entries = _entries(cfg)
     taken: Dict[Tuple[int, str], str] = {}
     for key, i, m in entries:
@@ -185,53 +278,79 @@ def _resolution(
             ident = (int(m["cu_budget"]), _schedule(m))
             taken.setdefault(ident, f"contexts.{key}[{i}]")
     budgets: Dict[Tuple[str, int], int] = {}
-    repeats: Dict[Tuple[str, int], str] = {}
+    left: Dict[Tuple[str, int], Optional[str]] = {}
     for key, i, m in entries:
         if not unresolved(m):
             continue
-        budget = fraction_budget(
-            float(m["cu_fraction"]), n_cu, floor if key == "list" else None
-        )
+        try:
+            budget = fraction_budget(
+                float(m["cu_fraction"]),
+                n_cu,
+                floor if key == "list" else None,
+                granule,
+            )
+        except ValueError:
+            left[(key, i)] = None
+            continue
         budgets[(key, i)] = budget
         ident = (budget, _schedule(m))
         if ident in taken:
-            repeats[(key, i)] = taken[ident]
+            left[(key, i)] = taken[ident]
         else:
             taken[ident] = f"contexts.{key}[{i}]"
-    return budgets, repeats
+    return budgets, left
 
 
 def resolve_fractions(
-    cfg: Mapping[str, Any], n_cu: int
+    cfg: Mapping[str, Any], n_cu: Optional[int]
 ) -> Tuple[Dict[str, Any], List[str]]:
     """(`cfg` with a cu_budget in each entry that gives a cu_fraction and no
-    cu_budget, for a device of `n_cu` CUs, and without the entries that
-    repeat another's budget and schedule (`_resolution`); one line per
-    entry resolved or left out). ValueError when the device has no budget
-    to give."""
+    cu_budget, for a device of `n_cu` CUs, without the entries `_resolution`
+    leaves out and those the config turns off (`off_entries`); one line per
+    entry resolved, left out or off, in config order). `n_cu` may be None
+    when no entry the config turns on gives only a cu_fraction (ValueError
+    otherwise)."""
     out = copy.deepcopy(dict(cfg))
-    budgets, repeats = _resolution(out, n_cu)
-    if not budgets:
-        return out, []
-    lines: List[str] = []
+    if n_cu is None:
+        if has_unresolved(out):
+            raise ValueError("a cu_fraction needs the device's CU count")
+        budgets: Dict[Tuple[str, int], int] = {}
+        left: Dict[Tuple[str, int], Optional[str]] = {}
+    else:
+        budgets, left = _resolution(out, n_cu)
+    said: Dict[Tuple[str, int], str] = {}
     for (key, i), budget in budgets.items():
         m = out["contexts"][key][i]
         what = f"contexts.{key}[{i}]: cu_fraction {float(m['cu_fraction']):g} is"
-        if (key, i) in repeats:
-            lines.append(
+        if left.get((key, i)):
+            said[(key, i)] = (
                 f"{what} {budget} of {n_cu} CUs, the budget of "
-                f"{repeats[(key, i)]}; left out"
+                f"{left[(key, i)]}; left out"
             )
         else:
             m["cu_budget"] = budget
-            lines.append(f"{what} {budget} of {n_cu} CUs")
-    for key in ("list", "holdout"):
-        gone = {i for k, i in repeats if k == key}
-        if gone:
+            said[(key, i)] = f"{what} {budget} of {n_cu} CUs"
+    for key, i in left:
+        if (key, i) not in budgets:
+            m = out["contexts"][key][i]
+            said[(key, i)] = (
+                f"contexts.{key}[{i}]: cu_fraction {float(m['cu_fraction']):g} "
+                f"has no budget on a device of {n_cu} CUs (a budget is a "
+                f"multiple of {budget_granule(out)} CUs below its CU count); "
+                f"left out"
+            )
+    off = off_entries(out)
+    for key, i, m in off:
+        said[(key, i)] = f"contexts.{key}[{i}]: {describe(m)} is off (enabled: false)"
+    gone = set(left) | {(key, i) for key, i, _ in off}
+    for key in SECTIONS:
+        drop = {i for k, i in gone if k == key}
+        if drop:
             out["contexts"][key] = [
-                m for j, m in enumerate(out["contexts"][key]) if j not in gone
+                m for j, m in enumerate(out["contexts"][key]) if j not in drop
             ]
-    return out, lines
+    order = sorted(said, key=lambda ki: (SECTIONS.index(ki[0]), ki[1]))
+    return out, [said[ki] for ki in order]
 
 
 def left_out(
@@ -256,16 +375,18 @@ def contexts_from_config(
     cfg: Mapping[str, Any], n_cu: Optional[int] = None
 ) -> List[BenchContext]:
     """The non-exclusive contexts of `contexts.list` and every
-    `contexts.holdout` entry, in config order; entries that give a
-    cu_fraction are resolved for a device of `n_cu` CUs (ValueError without
-    it)."""
+    `contexts.holdout` entry the config turns on, in config order; entries
+    that give a cu_fraction are resolved for a device of `n_cu` CUs
+    (ValueError without it)."""
     if n_cu is not None:
         cfg = resolve_fractions(cfg, n_cu)[0]
     sec = cfg.get("contexts") or {}
-    out = [BenchContext.from_mapping(m) for m in sec.get("list") or []]
+    out = [BenchContext.from_mapping(m) for m in sec.get("list") or [] if enabled(m)]
     out = [c for c in out if not c.is_exclusive()]
     out += [
-        BenchContext.from_mapping(m, holdout=True) for m in sec.get("holdout") or []
+        BenchContext.from_mapping(m, holdout=True)
+        for m in sec.get("holdout") or []
+        if enabled(m)
     ]
     return out
 
@@ -275,25 +396,52 @@ def context_errors(
 ) -> List[str]:
     """Rules the schema cannot state. `n_cu` (when known) bounds budgets and
     resolves fractions; without it an entry that gives only a cu_fraction
-    is checked for what needs no budget."""
+    is checked for what needs no budget. Of the entries the config turns
+    off only the exclusive one is an error: it is the round's own bench. A
+    budget granule that is no multiple of the SM-target granule is the only
+    error reported, since every budget follows from it."""
+    bad = granule_errors(cfg, where)
+    if bad:
+        return bad
+    granule = budget_granule(cfg)
     budgets: Dict[Tuple[str, int], int] = {}
-    repeats: Dict[Tuple[str, int], str] = {}
+    repeats: Dict[Tuple[str, int], Optional[str]] = {}
     if n_cu is not None:
-        try:
-            budgets, repeats = _resolution(cfg, n_cu)
-        except ValueError as e:
-            return [f"{where}: {e}"]
+        budgets, repeats = _resolution(cfg, n_cu)
     floor = (cfg.get("train") or {}).get("min_cu_fraction")
     errors: List[str] = []
+    for key, i, m in off_entries(cfg):
+        if not unresolved(m) and BenchContext.from_mapping(m).is_exclusive():
+            errors.append(
+                f"{where}.{key}[{i}]: the exclusive context cannot be turned off "
+                f"(it is the round's own bench)"
+            )
     seen: Dict[Any, str] = {}
     labels: Dict[str, str] = {}
     for key, i, m in _entries(cfg):
         at = f"{where}.{key}[{i}]"
+        f = m.get("cu_fraction")
+        if (
+            key == "list"
+            and f is not None
+            and floor is not None
+            and float(f) < float(floor)
+        ):
+            errors.append(
+                f"{at}: cu_fraction {f:g} is below train.min_cu_fraction "
+                f"{floor:g}, the smallest share the models may declare; lower "
+                f"train.min_cu_fraction, leave it unset, or turn the entry off "
+                f"(enabled: false)"
+            )
         if (key, i) in repeats:
             continue
-        f = m.get("cu_fraction")
         if f is not None and m.get("cu_budget") is not None and n_cu is not None:
-            want = fraction_budget(float(f), n_cu, floor if key == "list" else None)
+            try:
+                want: Any = fraction_budget(
+                    float(f), n_cu, floor if key == "list" else None, granule
+                )
+            except ValueError:
+                want = "the device has none"
             if int(m["cu_budget"]) != want:
                 errors.append(
                     f"{at}: cu_budget {m['cu_budget']} is not cu_fraction {f:g} "
@@ -389,25 +537,59 @@ def trained_fractions(contexts: Sequence[BenchContext], n_cu: int) -> List[float
 
 
 def select_shapes(
-    shapes: Sequence[ShapeKey], ctx: BenchContext, seed: int
+    shapes: Sequence[ShapeKey],
+    ctx: BenchContext,
+    seed: int,
+    forced: Iterable[ShapeKey] = (),
 ) -> List[ShapeKey]:
     """The shapes `ctx` benches: all of them at fraction 1, else
-    ceil(fraction * n) per cell (at least one), drawn with `seed`; in the
-    order of `shapes`."""
+    ceil(fraction * n) per cell (at least one): the shapes of `forced` it
+    holds (`targeted_for`), then as many more as that leaves, drawn with
+    `seed`; in the order of `shapes`. Without `forced` a cell's draw is the
+    one it always was."""
     from .planner import shape_cell, stable_rng
 
     distinct = list(dict.fromkeys(shapes))
     if ctx.fraction >= 1.0:
         return distinct
+    must = set(forced) & set(distinct)
     by_cell: Dict[str, List[ShapeKey]] = {}
     for s in distinct:
         by_cell.setdefault(shape_cell(s), []).append(s)
-    chosen = set()
+    chosen = set(must)
     for cell, members in sorted(by_cell.items()):
         k = min(len(members), max(1, math.ceil(ctx.fraction * len(members))))
         rng = stable_rng(seed, "context", ctx.label, cell)
-        chosen.update(rng.sample(sorted(members), k))
+        pool = sorted(s for s in members if s not in must)
+        rest = max(0, k - (len(members) - len(pool)))
+        chosen.update(rng.sample(pool, min(rest, len(pool))))
     return [s for s in distinct if s in chosen]
+
+
+def targeted_for(path: Optional[Path], ctx: BenchContext) -> Set[ShapeKey]:
+    """The shapes stage01 drew near tail GEMMs that ran in the context
+    `ctx` (its targeted_shapes.json at `path`), which `select_shapes`
+    benches in that context beside its own draw: none for the exclusive
+    context, which benches every shape, or without the file."""
+    if path is None or ctx.is_exclusive() or not Path(path).is_file():
+        return set()
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return set()
+    out: Set[ShapeKey] = set()
+    for entries in (doc.get("leaves") or {}).values():
+        for e in entries or []:
+            t = e.get("tail") or {}
+            if int(t.get("cu_budget") or 0) != ctx.cu_budget:
+                continue
+            if str(t.get("schedule") or "default") != ctx.schedule:
+                continue
+            out.update(
+                (int(s[0]), int(s[1]), int(s[2]), int(s[3]))
+                for s in e.get("shapes") or []
+            )
+    return out
 
 
 # ── bench wrapper ────────────────────────────────────────────────────────────

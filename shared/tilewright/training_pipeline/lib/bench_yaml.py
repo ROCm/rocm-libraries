@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from . import external_sets as xs
 from .fs import atomic_write_text
 from .shapes import Shape, bytes_per_element, footprint_bytes, known_bytes_per_element
 
@@ -665,12 +666,15 @@ def heavy_line(line: str, gib: float) -> bool:
 
 
 def parse_shapes_yaml(path: Path) -> List[Tuple[int, int, int, int]]:
-    """(M, N, K, batch) of every entry of a bench yaml, in file order."""
+    """(M, N, K, batch) of every entry of a bench yaml, in file order; an
+    external tuning workflow's evaluation set is refused
+    (lib/external_sets.py `ExternalSet`)."""
     out: List[Tuple[int, int, int, int]] = []
     for line in read_bench_lines(path):
         shape = shape_of_line(line)
         if shape is not None:
             out.append(shape)
+    xs.check(out, path)
     return out
 
 

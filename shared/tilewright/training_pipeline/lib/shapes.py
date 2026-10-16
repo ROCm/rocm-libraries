@@ -577,6 +577,105 @@ def synthesize_cell_shapes(
     return out[:n]
 
 
+# ── shapes near a GEMM ───────────────────────────────────────────────────────
+
+# How far `synthesize_near` draws from the GEMM it samples near, per axis.
+NEAR_OCTAVES = 1.0
+_TILE_GRID = 16
+
+
+def alignment(v: int) -> int:
+    """The largest macro-tile multiple (256 .. 16) that divides `v`, else
+    1: the alignment class `synthesize_near` keeps."""
+    for mult in (256, 128, 64, 32, _TILE_GRID):
+        if v % mult == 0:
+            return mult
+    return 1
+
+
+def _near_value(
+    rng: random.Random, v: int, lo: int, hi: int, octaves: float, align: int
+) -> Optional[int]:
+    """A value log-uniform within `octaves` of `v`, clamped to [lo, hi], in
+    `v`'s alignment class `align`: snapped down to a multiple of it, or,
+    for an unaligned `v` (1), moved off the tile grid; None when the range
+    is empty or holds no value of the class."""
+    a = max(lo, int(math.floor(v / 2.0**octaves)))
+    b = min(hi, int(math.ceil(v * 2.0**octaves)))
+    if a > b:
+        return None
+    x = _log_unif(rng, a, b)
+    if align > 1:
+        y = (x // align) * align
+        if y < a:
+            y += align
+        return y if a <= y <= b else None
+    if x % _TILE_GRID:
+        return x
+    for d in rng.sample(range(1, _TILE_GRID), _TILE_GRID - 1):
+        for y in (x + d, x - d):
+            if a <= y <= b and y % _TILE_GRID:
+                return y
+    return None
+
+
+def synthesize_near(
+    shape: ShapeTuple,
+    n: int,
+    rng: random.Random,
+    shape_filter: ShapeFilter,
+    box: Box,
+    *,
+    octaves: float = NEAR_OCTAVES,
+    attempts: int = 40,
+) -> List[ShapeTuple]:
+    """Up to `n` distinct shapes near `shape` that `shape_filter` accepts,
+    each M, N and K log-uniform within `octaves` of the shape's own (inside
+    the cell box `box`, ((M lo, hi), (N lo, hi), (K lo, hi))) and in its
+    alignment class (`alignment`: a value the shape holds on a macro-tile
+    multiple stays on that multiple, an unaligned one stays off the tile
+    grid), its batch class kept: B 1 for an unbatched shape, else one of
+    BANY_VALUES within `octaves` of its batch that the filter accepts. For
+    block-scaled (MX) configs K is a multiple of the block size. The shape
+    itself is never drawn; `attempts` draws per shape at most."""
+    m0, n0, k0, b0 = (int(v) for v in shape)
+    (mlo, mhi), (nlo, nhi), (klo, khi) = box
+    aligns = (alignment(m0), alignment(n0), alignment(k0))
+    block = shape_filter.mx_block
+    seen: Set[ShapeTuple] = {(m0, n0, k0, b0)}
+    out: List[ShapeTuple] = []
+    tries = 0
+    while len(out) < n and tries < n * attempts:
+        tries += 1
+        mv = _near_value(rng, m0, mlo, mhi, octaves, aligns[0])
+        nv = _near_value(rng, n0, nlo, nhi, octaves, aligns[1])
+        kv = _near_value(rng, k0, klo, khi, octaves, aligns[2])
+        if mv is None or nv is None or kv is None:
+            continue
+        if block > 1:
+            kv = _mx_align_k(kv, klo, khi, block)
+            if kv is None:
+                continue
+        if b0 <= 1:
+            bv = 1
+        else:
+            near = [
+                b
+                for b in BANY_VALUES
+                if b0 / 2.0**octaves <= b <= b0 * 2.0**octaves
+                and shape_filter.accepts(mv, nv, kv, b)
+            ]
+            if not near:
+                continue
+            bv = rng.choice(near)
+        s = (mv, nv, kv, bv)
+        if s in seen or not shape_filter.accepts(*s):
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
 # ── re-used history shapes ───────────────────────────────────────────────────
 
 # Written by stage01 into its output directory: the shapes of this round that

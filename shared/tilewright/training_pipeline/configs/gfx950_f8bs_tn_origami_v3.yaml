@@ -99,16 +99,26 @@ planner:
   seed: 42
 
 contexts:
-  # Co-tenant CU budgets of three quarters, half and a quarter of the
-  # device's CUs, each on a tenth of a cell's shapes, and no held-out
-  # budget; train.min_cu_fraction declares the quarter. On a device or
-  # partition of another CU count, the run config lists budgets that fit it
-  # (preflight refuses those that do not).
+  # Co-tenant CU budgets as shares of the bench device's CUs, resolved
+  # when the run starts (inside a compute partition, shares of the
+  # partition's CUs): three quarters, half, a quarter and an eighth, each
+  # on a tenth of a cell's shapes, and no held-out budget. Each resolves to
+  # a whole multiple of a 32-CU granule, at least one, so the smallest
+  # trained budget is one granule, one XCD's worth of CUs, and every
+  # compute-partition size of the device is also a trained budget: the
+  # models train and serve CU budgets from one granule up to the whole
+  # device. enabled: false turns the eighth off for its bench time, which
+  # grows as the CUs shrink. A share the device has no budget for, or that
+  # meets another's budget, is left out, and the run says which. Turning
+  # the eighth on or off, or running on another CU count or partition,
+  # changes the contexts the audit set is bound to: point audit.dir at a
+  # new one (a run refuses a set built with others).
   list:
     - {cu_budget: 0}
-    - {cu_budget: 192, cotenant: true, fraction: 0.1}
-    - {cu_budget: 128, cotenant: true, fraction: 0.1}
-    - {cu_budget: 64, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.75, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.5, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.25, cotenant: true, fraction: 0.1}
+    - {cu_fraction: 0.125, cotenant: true, fraction: 0.1, enabled: true}
   holdout: []
   seed: 42
   replan: true
@@ -157,8 +167,8 @@ train:
   fine_tune_epochs: 12
   fine_tune_lr: 0.001
   pooled_threads: 32
-  # The models declare CU fractions down to the smallest trained budget's.
-  min_cu_fraction: 0.25
+  # No min_cu_fraction: the models declare CU shares down to the smallest
+  # one they trained on the bench device, and no lower.
   schedules: [default]
   min_cell_gemms: 30
   off_list_sel_eff: auto
@@ -183,6 +193,14 @@ full:
   final_retrain:
     enabled: true
     gate: not-worse
+
+gate:
+  # A bundle the per-cell gate keeps out for findings in at most
+  # repair_max_cells (3) base cells ships with those cells repaired, a tier
+  # key of the cell's own network, else the cell's subtree from the bundle
+  # the run ships, once the repaired bundle passes every gate again; above
+  # that it stays out whole.
+  repair: true
 
 deploy:
   target_sel_eff: 0.95

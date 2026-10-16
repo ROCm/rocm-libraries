@@ -59,7 +59,9 @@ kernel id); plus <out-dir>/summary.json over all datasets.
 
 A dataset fails (rc 1 in summary.json, the stage exits 1) when it cannot be
 evaluated or when the engine serves any of its GEMMs from another cell than
-lib/subcells routes it to; its outputs are still written.
+lib/subcells routes it to; its outputs are still written. A dataset whose
+GEMMs are an external tuning workflow's evaluation set (lib/external_sets.py)
+fails before it is benched or evaluated.
 """
 from __future__ import annotations
 
@@ -85,6 +87,7 @@ import yaml  # noqa: E402
 
 from lib import bank_pool  # noqa: E402
 from lib import evaluate as ev  # noqa: E402
+from lib import external_sets as xs  # noqa: E402
 from lib import hardware as hwlib  # noqa: E402
 from lib import kernel_identity as ki  # noqa: E402
 from lib import miss_rebench as mr  # noqa: E402
@@ -219,6 +222,9 @@ def _bench_yaml(
     entries = yaml.safe_load(path.read_text()) or []
     if isinstance(entries, dict):
         entries = [entries]
+    why = xs.refusal(xs.entry_gemms(entries))
+    if why is not None:
+        return None, why
     shapes, counts = dataset_shapes(list(entries), cfg["hipblaslt"])
     if not shapes:
         return None, f"no problem of the config's data types and layout ({counts})"
@@ -445,6 +451,9 @@ def _evaluate_dataset(
         blocklist=ctx.get("blocklist"),
     )
     gemms = [g for gs in cells.values() for g in gs]
+    why = xs.refusal((g["m"], g["n"], g["k"], g["batch_count"]) for g in gemms)
+    if why is not None:
+        return _fail(name, path, why)
     n_before = len(gemms)
     wf = {
         k: _norm_field(k, v)

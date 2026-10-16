@@ -100,18 +100,124 @@ def test_context_errors(sec, n_cu, needle):
         (0.5, 33, None, 32),
     ],
 )
-def test_fraction_budget_is_a_multiple_of_the_sm_target_granule(
+def test_fraction_budget_is_a_multiple_of_the_budget_granule(
     fraction, n_cu, floor, budget
 ):
     from lib.hipblaslt_launch import SM_TARGET_GRANULE
 
     got = cx.fraction_budget(fraction, n_cu, floor)
-    assert got == budget and got % SM_TARGET_GRANULE == 0 and 0 < got < n_cu
+    assert got == budget and got % cx.CU_BUDGET_GRANULE == 0 and 0 < got < n_cu
+    assert got % SM_TARGET_GRANULE == 0
 
 
 def test_a_device_without_a_granule_below_its_cus_has_no_budget():
     with pytest.raises(ValueError, match="multiple of 32"):
         cx.fraction_budget(0.5, 32)
+    with pytest.raises(ValueError, match="multiple of 64"):
+        cx.fraction_budget(0.5, 64, granule=64)
+    with pytest.raises(ValueError, match="must be positive"):
+        cx.fraction_budget(0.5, 256, granule=0)
+
+
+EIGHTHS = [
+    {"cu_budget": 0},
+    {"cu_fraction": 0.75, "cotenant": True, "fraction": 0.1},
+    {"cu_fraction": 0.5, "cotenant": True, "fraction": 0.1},
+    {"cu_fraction": 0.25, "cotenant": True, "fraction": 0.1},
+    {"cu_fraction": 0.125, "cotenant": True, "fraction": 0.1},
+]
+
+
+def _budgets(cfg, n_cu):
+    return [c.cu_budget for c in cx.contexts_from_config(cfg, n_cu)]
+
+
+def test_shares_from_an_eighth_resolve_to_whole_granules_from_one_granule_up():
+    """Three quarters, half, a quarter and an eighth of the device's CUs are
+    whole multiples of the budget granule, one granule the smallest: an
+    eighth exactly on a device of eight granules, one granule where an
+    eighth is less. However small a share, its budget is never below one
+    granule, and it is an SM target hipBLASLt takes as it is."""
+    from lib.hipblaslt_launch import SM_TARGET_GRANULE
+
+    granule = cx.CU_BUDGET_GRANULE
+    assert granule == 32 and granule % SM_TARGET_GRANULE == 0
+    cfg = {"contexts": {"list": EIGHTHS}}
+    assert cx.budget_granule(cfg) == granule == cx.budget_granule({})
+    assert _budgets(cfg, 256) == [192, 128, 64, 32]
+    assert _budgets(cfg, 192) == [160, 96, 64, 32]
+    out, lines = cx.resolve_fractions(cfg, 192)
+    assert lines[-1] == "contexts.list[4]: cu_fraction 0.125 is 32 of 192 CUs"
+    assert cx.context_errors(cfg, 256) == [] == cx.context_errors(out, 192)
+    for n_cu in range(granule + 1, 16 * granule + 1):
+        for share in (0.001, 0.01, 0.05, 0.1, 0.125, 0.2, 0.25):
+            budget = cx.fraction_budget(share, n_cu)
+            assert budget % granule == 0 and granule <= budget < n_cu, (n_cu, share)
+        lowest = min(_budgets(cfg, n_cu))
+        assert lowest == cx.fraction_budget(0.125, n_cu), n_cu
+        assert lowest == granule or n_cu >= 12 * granule, n_cu
+
+
+def test_the_budgets_keep_their_granule_when_the_sm_target_is_exact(monkeypatch):
+    """The budget granule is the budgets' own: were hipBLASLt's launch rule to
+    take the SM target as it is (a granule of one CU), launches would follow
+    every budget exactly, and the shares would still resolve to the same
+    whole granules, the eighth's to one granule on a device of 192 CUs."""
+    from lib import hipblaslt_launch as hl
+
+    cfg = {"contexts": {"list": EIGHTHS}}
+    assert cx.sm_target(40, 112) == 32
+    monkeypatch.setattr(hl, "SM_TARGET_GRANULE", 1)
+    monkeypatch.setattr(cx, "SM_TARGET_GRANULE", 1)
+    assert cx.sm_target(40, 112) == 40
+    assert _budgets(cfg, 256) == [192, 128, 64, 32]
+    assert _budgets(cfg, 192) == [160, 96, 64, 32]
+    assert cx.fraction_budget(0.125, 192) == 32 == cx.fraction_budget(0.01, 256)
+    assert cx.context_errors(cfg, 192) == []
+
+
+def test_a_config_granule_sets_the_budgets_and_must_be_an_sm_target():
+    """`contexts.granule` replaces the default granule for every budget a
+    share resolves to, and for the check of a budget given beside its
+    share; it must be a multiple of the SM-target granule, the only error
+    reported then."""
+    coarse = {"contexts": {"list": EIGHTHS, "granule": 64}}
+    assert cx.budget_granule(coarse) == 64
+    assert _budgets(coarse, 256) == [192, 128, 64]
+    out, lines = cx.resolve_fractions(coarse, 256)
+    assert lines[-1] == (
+        "contexts.list[4]: cu_fraction 0.125 is 64 of 256 CUs, the budget of "
+        "contexts.list[3]; left out"
+    )
+    assert _budgets(coarse, 192) == [128, 64]
+    _, (*_, line) = cx.resolve_fractions(coarse, 64)
+    assert line == (
+        "contexts.list[4]: cu_fraction 0.125 has no budget on a device of 64 CUs "
+        "(a budget is a multiple of 64 CUs below its CU count); left out"
+    )
+    assert cx.context_errors(coarse, 256) == [] == cx.context_errors(out, 256)
+    given = {"list": [{"cu_fraction": 0.125, "cu_budget": 64}]}
+    assert cx.context_errors({"contexts": dict(given, granule=64)}, 256) == []
+    (err,) = cx.context_errors({"contexts": given}, 256)
+    assert err.endswith("is not cu_fraction 0.125 of the device's 256 CUs (32)")
+    for bad in (16, 48):
+        cfg = {"contexts": {"list": EIGHTHS, "granule": bad}}
+        want = [
+            f"contexts.granule {bad}: must be a multiple of 32, the SM-target "
+            f"granule of hipBLASLt's launch rule, so that hipBLASLt sizes the "
+            f"kernels for exactly the CUs of each budget"
+        ]
+        assert cx.context_errors(cfg, 256) == want == cx.context_errors(cfg)
+    with pytest.raises(ValueError, match="must be positive"):
+        cx.resolve_fractions({"contexts": {"list": EIGHTHS, "granule": 0}}, 256)
+    # a granule of no CUs, or fewer, is no multiple of the SM-target granule
+    for bad in (0, -32):
+        cfg = {"contexts": {"list": EIGHTHS, "granule": bad}}
+        (err,) = cx.granule_errors(cfg)
+        assert err.startswith(f"contexts.granule {bad}: must be a multiple of 32")
+        assert cx.context_errors(cfg) == [err]
+    assert cx.granule_errors({"contexts": {"granule": 32}}) == []
+    assert cx.granule_errors({"contexts": {"granule": 96}}) == []
 
 
 FRACTIONS = {
@@ -190,8 +296,14 @@ def test_context_errors_of_fractions():
     assert "contexts.list[1]: cu_fraction 0.5 / schedule default is also" in err
     named = {"list": [{"cu_fraction": 0.5, "name": "a"}, {"cu_budget": 8, "name": "a"}]}
     assert any("name 'a'" in e for e in cx.context_errors({"contexts": named}))
-    (err,) = cx.context_errors({"contexts": {"list": [{"cu_fraction": 0.5}]}}, 16)
-    assert "has no budget below its CU count" in err
+    small = {"contexts": {"list": [{"cu_fraction": 0.5}]}}
+    assert cx.context_errors(small, 16) == []
+    out, (line,) = cx.resolve_fractions(small, 16)
+    assert out["contexts"]["list"] == [] and line == (
+        "contexts.list[0]: cu_fraction 0.5 has no budget on a device of 16 CUs "
+        "(a budget is a multiple of 32 CUs below its CU count); left out"
+    )
+    assert cx.left_out(small, out) == [("list", 0, {"cu_fraction": 0.5})]
     both = {"list": [{"cu_fraction": 0.5, "cu_budget": 96}]}
     (err,) = cx.context_errors({"contexts": both}, 256)
     assert err == (
@@ -211,6 +323,105 @@ def test_trained_entries_and_reduced_cus():
     assert trained == FRACTIONS["list"][1:] + [{"schedule": "dynamic"}]
     assert [cx.reduces_cus(m) for m in trained] == [True, True, True, False]
     assert cx.reduces_cus({"cu_budget": 64})
+
+
+SHARES = {
+    "list": [
+        {"cu_budget": 0},
+        {"cu_fraction": 0.75, "cotenant": True, "fraction": 0.1},
+        {"cu_fraction": 0.5, "cotenant": True, "fraction": 0.1},
+        {"cu_fraction": 0.25, "cotenant": True, "fraction": 0.1},
+        {"cu_fraction": 0.125, "cotenant": True, "fraction": 0.1, "enabled": False},
+    ],
+    "holdout": [{"cu_fraction": 0.375, "cotenant": True, "enabled": False}],
+}
+
+
+def test_an_entry_turned_off_is_left_out_everywhere():
+    cfg = {"contexts": SHARES}
+    assert [(k, i) for k, i, _ in cx.off_entries(cfg)] == [("list", 4), ("holdout", 0)]
+    assert cx.trained_entries(cfg) == SHARES["list"][1:4]
+    assert cx.holdout_entries(cfg) == [] and cx.has_unresolved(cfg)
+    assert [c.cu_budget for c in cx.contexts_from_config(cfg, 256)] == [192, 128, 64]
+    out, lines = cx.resolve_fractions(cfg, 256)
+    assert out["contexts"]["holdout"] == [] and cfg["contexts"] == SHARES
+    assert [m.get("cu_fraction") for m in out["contexts"]["list"]] == [
+        None,
+        0.75,
+        0.5,
+        0.25,
+    ]
+    assert [m["cu_budget"] for m in out["contexts"]["list"]] == [0, 192, 128, 64]
+    assert lines == [
+        "contexts.list[1]: cu_fraction 0.75 is 192 of 256 CUs",
+        "contexts.list[2]: cu_fraction 0.5 is 128 of 256 CUs",
+        "contexts.list[3]: cu_fraction 0.25 is 64 of 256 CUs",
+        "contexts.list[4]: cu_fraction 0.125 is off (enabled: false)",
+        "contexts.holdout[0]: cu_fraction 0.375 is off (enabled: false)",
+    ]
+    assert cx.left_out(cfg, out) == [] and cx.context_errors(cfg, 256) == []
+    explicit = {"contexts": {"list": [{"cu_budget": 64}, dict(SHARES["list"][4])]}}
+    assert not cx.has_unresolved(explicit)
+    with pytest.raises(ValueError, match="needs the device's CU count"):
+        cx.resolve_fractions(cfg, None)
+    out, (line,) = cx.resolve_fractions(explicit, None)
+    assert out["contexts"]["list"] == [{"cu_budget": 64}]
+    assert line == "contexts.list[1]: cu_fraction 0.125 is off (enabled: false)"
+    assert [c.label for c in cx.contexts_from_config(explicit)] == ["cu64"]
+    budget = {"cu_budget": 32, "schedule": "dynamic", "enabled": False}
+    assert cx.describe(budget) == "cu_budget 32 / schedule dynamic"
+
+
+def test_turned_on_the_eighth_resolves_on_devices_of_eight_granules_up():
+    on = {"contexts": {"list": [dict(m, enabled=True) for m in SHARES["list"]]}}
+    budgets = [c.cu_budget for c in cx.contexts_from_config(on, 256)]
+    assert budgets == [192, 128, 64, 32]
+    out, lines = cx.resolve_fractions(on, 128)
+    assert [m["cu_budget"] for m in out["contexts"]["list"]] == [0, 96, 64, 32]
+    assert lines[-1] == (
+        "contexts.list[4]: cu_fraction 0.125 is 32 of 128 CUs, the budget of "
+        "contexts.list[3]; left out"
+    )
+
+
+def test_a_device_too_small_for_every_share_keeps_the_exclusive_context():
+    cfg = {"contexts": SHARES}
+    out, lines = cx.resolve_fractions(cfg, 32)
+    assert out["contexts"] == {"list": [{"cu_budget": 0}], "holdout": []}
+    assert [ln.split(":")[0] for ln in lines if ln.endswith("left out")] == [
+        "contexts.list[1]",
+        "contexts.list[2]",
+        "contexts.list[3]",
+    ]
+    assert cx.context_errors(cfg, 32) == [] and cx.contexts_from_config(cfg, 32) == []
+    assert [(k, i) for k, i, _ in cx.left_out(cfg, out)] == [
+        ("list", 1),
+        ("list", 2),
+        ("list", 3),
+    ]
+    tiny = {"contexts": {"list": [{"cu_budget": 64, "cotenant": True}]}}
+    (err,) = cx.context_errors(tiny, 32)
+    assert "cu_budget 64 must be below the device's 32 CUs" in err
+
+
+def test_a_share_below_the_cu_floor_and_an_exclusive_entry_turned_off_are_errors():
+    floored = {"contexts": SHARES, "train": {"min_cu_fraction": 0.25}}
+    assert cx.context_errors(floored) == []
+    on = json.loads(json.dumps(floored))
+    on["contexts"]["list"][4]["enabled"] = True
+    (err,) = cx.context_errors(on)
+    assert err.startswith(
+        "contexts.list[4]: cu_fraction 0.125 is below train.min_cu_fraction 0.25, "
+        "the smallest share the models may declare"
+    )
+    on["contexts"]["holdout"][0].update(enabled=True, cu_fraction=0.1)
+    assert cx.context_errors(on) == [err]
+    off = {"contexts": {"list": [{"cu_budget": 0, "enabled": False}]}}
+    (err,) = cx.context_errors(off)
+    assert err == (
+        "contexts.list[0]: the exclusive context cannot be turned off (it is the "
+        "round's own bench)"
+    )
 
 
 def test_orchestrator_validates_contexts(tmp_path):
@@ -297,12 +508,88 @@ def test_a_run_resolves_fractional_contexts_when_it_starts(
     assert [m.get("cu_fraction") for m in snapped["list"]] == [None, 0.75, 0.5, 0.25]
     assert snapped["holdout"] == []
     head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
-    assert "Resolved from the bench device at the start of this invocation:" in head
+    assert "Resolved at the start of this invocation: contexts: CU shares" in head
     assert "contexts.list[1]: cu_fraction 0.75 is 96 of 128 CUs;" in head
     s04 = [c for c in log if c["stage"] == "stage04"][0]["argv"]
     budgets = [s04[i + 1] for i, a in enumerate(s04) if a == "--context-log-dir"]
     assert budgets == ["96", "64", "32"]
     assert ro.validate_config(yaml.safe_load(text))[0] == []
+
+
+def test_a_run_benches_the_shares_it_turns_on_that_fit_its_device(
+    tmp_path, stubs, env, capsys
+):
+    """The shares the config turns on that the device can give are benched;
+    those turned off are named and dropped from the snapshot; on a device
+    with no budget below its CU count the run trains the exclusive context
+    alone and says so."""
+
+    def start(n_cu, run_dir):
+        path = _context_config(
+            tmp_path,
+            **{
+                "contexts.list": SHARES["list"],
+                "contexts.holdout": SHARES["holdout"],
+                "hardware.n_cu": n_cu,
+            },
+        )
+        env.write_text("")
+        capsys.readouterr()
+        assert run(stubs, path, run_dir, "--mode", "initial") == 0
+        log = calls(env)
+        (snap,) = {
+            Path(arg(c, "--config-yaml")) for c in log if arg(c, "--config-yaml")
+        }
+        return log, capsys.readouterr(), yaml.safe_load(snap.read_text())["contexts"]
+
+    log, out, snapped = start(256, tmp_path / "whole")
+    assert "contexts: CU shares of the 256 CUs of bench device 0 (hardware.n_cu)" in (
+        out.out
+    )
+    assert "contexts.list[4]: cu_fraction 0.125 is off (enabled: false)" in out.out
+    assert "contexts.holdout[0]: cu_fraction 0.375 is off" in out.out
+    assert "left out" not in out.err
+    assert [m.get("cu_budget") for m in snapped["list"]] == [0, 192, 128, 64]
+    assert snapped["holdout"] == [] and "enabled" not in str(snapped)
+    s04 = [c for c in log if c["stage"] == "stage04"][0]["argv"]
+    budgets = [s04[i + 1] for i, a in enumerate(s04) if a == "--context-log-dir"]
+    assert budgets == ["192", "128", "64"]
+
+    log, out, snapped = start(32, tmp_path / "small")
+    assert "contexts.list[1]: cu_fraction 0.75 has no budget on a device of 32 CUs" in (
+        out.err
+    )
+    assert "contexts.list: every context of fewer CUs is left out on this device" in (
+        out.err
+    )
+    assert "contexts.holdout: every entry is left out" not in out.err
+    assert snapped == dict(snapped, list=[{"cu_budget": 0}], holdout=[])
+    assert "stage03c" not in [c["stage"] for c in log]
+    s04 = [c for c in log if c["stage"] == "stage04"][0]["argv"]
+    assert "--context-log-dir" not in s04
+
+
+def test_a_snapshot_names_the_entries_turned_off_as_read_from_no_device(tmp_path):
+    """With no share to resolve, the snapshot's resolved lines are the
+    entries the config turns off; it says no device value was read."""
+    cfg, _ = ro.load_config(make_config(tmp_path))
+    cfg["contexts"] = {
+        "list": [
+            {"cu_budget": 0},
+            {"cu_budget": 64, "cotenant": True, "fraction": 0.1, "enabled": False},
+        ]
+    }
+    out, lines = ro.resolve_contexts(cfg, 0)
+    assert lines == ["contexts.list[1]: cu_budget 64 is off (enabled: false)"]
+    snap = ro.write_snapshot(tmp_path / "run", out, "", "initial", None, lines)
+    text = snap.read_text()
+    head = " ".join(ln[2:] for ln in text.splitlines() if ln.startswith("# "))
+    assert (
+        "Resolved at the start of this invocation: contexts.list[1]: cu_budget "
+        "64 is off (enabled: false)" in head
+    )
+    assert "bench device" not in head
+    assert yaml.safe_load(text)["contexts"]["list"] == [{"cu_budget": 0}]
 
 
 def test_a_cu_floor_without_a_trained_reduced_context_warns(tmp_path):
@@ -330,21 +617,41 @@ def test_preflight_needs_the_cotenant_kernel(tmp_path, monkeypatch):
     clients = tmp_path / "clients"
     clients.mkdir()
     launcher = clients / "hipblaslt-cotenant"
-    assert any("not found" in e for e in ro._cotenant_errors(launcher))
+
+    def errors():
+        """The errors with the launcher's path, which holds any text the
+        test's base directory holds, as LAUNCHER."""
+        return [
+            e.replace(str(launcher), "LAUNCHER") for e in ro._cotenant_errors(launcher)
+        ]
+
+    assert errors() == ["hipblaslt-cotenant not found: LAUNCHER"]
     launcher.write_text("#!/bin/sh\n")
     launcher.chmod(0o755)
     monkeypatch.delenv("HIPCC", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "nothing"))
     monkeypatch.setattr(ro, "rocm_bin", lambda: str(tmp_path / "nothing"))
-    (err,) = ro._cotenant_errors(launcher)
-    assert "hipblaslt-cotenant-kernel" in err and "no hipcc" in err
+    fix = (
+        "; build the bench's hipblaslt-cotenant-kernel target or set "
+        "contexts.cotenant_binary"
+    )
+    assert errors() == [
+        "contexts: LAUNCHER has no executable hipblaslt-cotenant-kernel beside it "
+        "nor hipblaslt-cotenant-kernel.hip and no hipcc to build it" + fix
+    ]
     source = clients / "hipblaslt-cotenant-kernel.hip"
     source.write_text("")
-    (err,) = ro._cotenant_errors(launcher)
-    assert "nor" not in err and "no hipcc" in err
+    assert errors() == [
+        "contexts: LAUNCHER has no executable hipblaslt-cotenant-kernel beside it "
+        "and no hipcc to build it" + fix
+    ]
     monkeypatch.setenv("HIPCC", "/opt/hipcc")
     assert ro._cotenant_errors(launcher) == []
     source.unlink()
+    assert errors() == [
+        "contexts: LAUNCHER has no executable hipblaslt-cotenant-kernel beside it "
+        "nor hipblaslt-cotenant-kernel.hip" + fix
+    ]
     kernel = clients / "hipblaslt-cotenant-kernel"
     kernel.write_text("#!/bin/sh\n")
     kernel.chmod(0o755)
@@ -417,6 +724,42 @@ def test_select_shapes_by_fraction_per_cell():
         assert len(picked) == max(1, -(-len(members) // 2))
     other = cx.BenchContext(cu_budget=32, fraction=0.5)
     assert len(cx.select_shapes(shapes, other, 1)) == len(a)
+
+
+def test_a_context_benches_the_shapes_targeted_at_its_tails(tmp_path):
+    from lib.planner import shape_cell
+
+    cell = [(4096 + i, 8192, 256, 1) for i in range(20)]
+    other = [(16 + i, 64, 256, 1) for i in range(10)]
+    shapes = cell + other
+    ctx = cx.BenchContext(cu_budget=128, cotenant=True, fraction=0.1)
+    plain = cx.select_shapes(shapes, ctx, 3)
+    assert cx.select_shapes(shapes, ctx, 3, ()) == plain
+    forced = {cell[5], cell[6], cell[7], (1, 1, 1, 1)}
+    got = cx.select_shapes(shapes, ctx, 3, forced)
+    assert forced - {(1, 1, 1, 1)} <= set(got) and (1, 1, 1, 1) not in got
+    # the forced shapes take the cell's quota first, and the rest is drawn
+    assert sum(1 for s in got if shape_cell(s) == shape_cell(cell[0])) == 3
+    assert [s for s in got if s in other] == [s for s in plain if s in other]
+    doc = {
+        "leaves": {
+            "L": [
+                {"tail": {"cu_budget": 128, "schedule": "default"}, "shapes": [
+                    list(cell[5]), list(cell[6])]},
+                {"tail": {"cu_budget": 0, "schedule": "default"}, "shapes": [
+                    list(cell[7])]},
+                {"tail": {"cu_budget": 64, "schedule": "default"}, "shapes": [
+                    list(cell[8])]},
+            ]
+        }
+    }  # fmt: skip
+    path = tmp_path / "targeted_shapes.json"
+    path.write_text(json.dumps(doc))
+    assert cx.targeted_for(path, ctx) == {cell[5], cell[6]}
+    assert cx.targeted_for(path, cx.BenchContext(cu_budget=64)) == {cell[8]}
+    assert cx.targeted_for(path, cx.BenchContext()) == set()
+    assert cx.targeted_for(None, ctx) == set()
+    assert cx.targeted_for(tmp_path / "missing.json", ctx) == set()
 
 
 # ── bench wrapper ────────────────────────────────────────────────────────────

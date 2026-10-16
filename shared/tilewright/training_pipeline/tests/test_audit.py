@@ -1330,8 +1330,8 @@ def test_the_cell_gate_finds_cells_significantly_worse_beyond_the_tolerance():
     assert same["passed"] is True
     assert same["reason"].startswith(
         "no cell significantly worse beyond 1.0% or confidently fallen below 85.0% "
-        "(family-wise alpha 0.05 over 12 cells of exclusive), and no group with more "
-        "new picks collapsing below 50.0% than it lifted (exclusive v1)"
+        "(family-wise alpha 0.05 over 12 cells of exclusive), and no new pick "
+        "below 50.0% in any group (exclusive v1)"
     )
 
 
@@ -1431,8 +1431,8 @@ def test_decline_p_is_family_wise_with_one_sign_per_shape():
     assert al.decline_p({"a": (shapes, down)}, 39)["a"] >= 0.05
 
 
-def test_the_tail_rule_counts_new_collapses_net_of_the_lifted_ones():
-    vals = [0.9, 0.6, 0.9, 0.3, 0.55] + [0.99] * 3
+def test_the_tail_rule_counts_every_new_collapse_and_reports_the_healed_ones():
+    vals = [0.9, 0.6, 0.9, 0.3, 0.55, 0.4] + [0.99] * 2
     before = _gate_rec({al.EXCLUSIVE: _cells(vals)}, v2={al.EXCLUSIVE: _cells(vals)})
 
     def gate(after_vals, **st):
@@ -1440,34 +1440,51 @@ def test_the_tail_rule_counts_new_collapses_net_of_the_lifted_ones():
         after = _gate_rec(per, v2=per)
         return al.cell_gate(before, after, {"cell_floor": 0, **st}, bootstrap=200)
 
-    # 0.9 -> 0.3 collapses, 0.6 -> 0.45 and 0.55 -> 0.4 step across the
-    # line, 0.3 -> 0.95 is lifted
-    out = gate([0.3, 0.45, 0.9, 0.95, 0.4] + [0.99] * 3)
+    # 0.9 -> 0.3 halves, 0.6 -> 0.45 and 0.55 -> 0.4 only step across the
+    # line: all three are new; 0.3 -> 0.95 is healed, 0.4 -> 0.2 persists
+    out = gate([0.3, 0.45, 0.9, 0.95, 0.4, 0.2] + [0.99] * 2)
     g = out["groups"][al.EXCLUSIVE]
-    assert [t["shape"] for t in g["tail"]] == [list(SMALL[0])]
+    assert [t["shape"] for t in g["tail"]] == [
+        list(SMALL[0]),
+        list(SMALL[1]),
+        list(SMALL[4]),
+    ]
     assert [t["shape"] for t in g["tail_lifted"]] == [list(SMALL[3])]
-    assert (g["n_tail_new"], g["n_tail_lifted"], g["tail_refuses"]) == (1, 1, False)
-    assert out["passed"] is True and out["n_tail"] == 0
-    assert "1 finding(s) that do not decide" in out["reason"]
-    # without the lifted pick the new collapse keeps the bundle out
-    out = gate([0.3, 0.45, 0.9, 0.3, 0.4] + [0.99] * 3)
-    g = out["groups"][al.EXCLUSIVE]
+    assert [t["shape"] for t in g["tail_persisting"]] == [list(SMALL[5])]
+    assert (g["n_tail_new"], g["n_tail_lifted"], g["tail_refuses"]) == (3, 1, True)
+    assert all(t["decides"] for t in g["tail"])
+    # the healed pick offsets none of them
     assert (out["passed"], out["n_tail"], out["tail_groups"]) == (
         False,
-        1,
+        3,
         [al.EXCLUSIVE],
     )
-    assert g["tail"][0]["decides"] is True
-    assert out["reason"].startswith(
-        "1 group(s) with more new picks collapsing below 50.0% than it lifted: "
-        "exclusive (1 new, 0 lifted: 100x100x100 (Small|Small|MidK|Bnone) 30.00% "
-        "(was 90.00%)) (exclusive v2)"
+    assert (out["n_tail_new"], out["n_tail_healed"], out["n_tail_persisting"]) == (
+        3,
+        1,
+        1,
     )
-    assert gate([0.3, 0.45, 0.9, 0.3, 0.4] + [0.99] * 3, tail_budget=1)["passed"]
-    # with tail_collapse 1 any step across the floor counts
-    out = gate([0.9, 0.45, 0.9, 0.3, 0.55] + [0.99] * 3, tail_collapse=1.0)
-    assert out["n_tail"] == 1 and out["passed"] is False
-    assert gate([0.9, 0.45, 0.9, 0.3, 0.55] + [0.99] * 3)["passed"] is True
+    assert out["reason"].startswith(
+        "3 new pick(s) below 50.0% in 1 group(s): exclusive (3 new, 1 healed: "
+        "100x100x100 (Small|Small|MidK|Bnone) 30.00% (was 90.00%), "
+    )
+    assert out["reason"].endswith(" (exclusive v2)")
+    # the budget allows that many, over every group
+    assert gate([0.3, 0.45, 0.9, 0.95, 0.4, 0.2] + [0.99] * 2, tail_budget=3)["passed"]
+    within = gate([0.3, 0.45, 0.9, 0.95, 0.4, 0.2] + [0.99] * 2, tail_budget=3)
+    assert within["n_tail"] == 0 and within["n_tail_new"] == 3
+    assert "3 finding(s) that do not decide" in within["reason"]
+    # healing alone passes, and says so
+    healed = gate([0.9, 0.6, 0.9, 0.95, 0.55, 0.4] + [0.99] * 2)
+    assert healed["passed"] is True and healed["n_tail_healed"] == 1
+    assert "no new pick below 50.0% in any group (1 healed)" in healed["reason"]
+    # tail_collapse below 1 counts only the drops to that fraction of before
+    halving = gate([0.3, 0.45, 0.9, 0.95, 0.4, 0.2] + [0.99] * 2, tail_collapse=0.5)
+    assert halving["n_tail"] == 1 and halving["passed"] is False
+    assert halving["reason"].startswith(
+        "1 new pick(s) below 50.0% at most 50.0% of the shipped pick's "
+        "efficiency in 1 group(s)"
+    )
     off = gate([0.3, 0.45, 0.9, 0.3, 0.4] + [0.99] * 3, tail_floor=0)
     assert off["passed"] is True and off["groups"][al.EXCLUSIVE]["tail"] == []
     assert "the tail rule off (gate.tail_floor 0)" in off["reason"]
@@ -1496,9 +1513,7 @@ def test_the_tail_rule_judges_every_group_and_the_cell_rules_their_own():
     assert cu64["tail_refuses"] is True and out["tail_groups"] == ["cu64"]
     assert out["passed"] is False and out["n_groups"] == 1
     assert (out["n_regressed"], out["n_tail"], out["n_reported"]) == (0, 1, 1)
-    assert out["reason"].startswith(
-        "1 group(s) with more new picks collapsing below 50.0% than it lifted: cu64"
-    )
+    assert out["reason"].startswith("1 new pick(s) below 50.0% in 1 group(s): cu64")
     every = al.cell_gate(before, after, {**no_floor, "groups": "all"}, bootstrap=200)
     assert every["n_groups"] == 2 and every["n_regressed"] == 1
     assert every["n_reported"] == 0 and "cu64" in every["reason"]
@@ -1626,7 +1641,7 @@ def test_the_gate_section_gives_the_cell_gate_settings(tmp_path):
         assert any(f"gate.{key}" in e for e in errors), key
     assert ro.validate_config(dict(base, gate={"per_cell": False}))[0] == []
     assert ro.cfg_get(base, "gate.cell_tolerance") == 0.01
-    assert ro.cfg_get(base, "gate.tail_collapse") == 0.5
+    assert ro.cfg_get(base, "gate.tail_collapse") == 1.0
     assert ro.cfg_get(base, "report.pool_gap_fraction") == 0.3
     # the cell tests take audit.bootstrap as their sign flips
     audited = dict(base, audit={"dir": str(tmp_path / "audit"), "bootstrap": 10})

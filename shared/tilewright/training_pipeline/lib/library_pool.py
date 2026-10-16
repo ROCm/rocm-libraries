@@ -292,8 +292,16 @@ def config_problems(cfg: Optional[Mapping[str, Any]]) -> Tuple[List[str], List[s
     if "gridbased" in source.bok_rows:
         warnings.append(
             "library.bok_rows gridbased: a bridge for a bank of kernels built as "
-            "GridBased rows, from which TensileLite answers problems of their "
-            "sizes before tilewright ranks"
+            "GridBased rows, which TensileLite does not rank with the model. "
+            "Within one problem type it orders the rows Equality, Range, "
+            "Prediction, GridBased, FreeSize, so a GridBased file of the "
+            "Prediction table's problem type sits behind that table's row, "
+            "which answers a call first (its kernels are reached only when "
+            "every solution is enumerated, or when the Prediction row returns "
+            "fewer than requested), and TENSILE_TILEWRIGHT_BANK takes Equality "
+            "rows only; in another placement (a placeholder of another problem "
+            "type, an earlier hardware row) which row answers first depends on "
+            "their order"
         )
     if str(train.get("catalog") or "v2") != "v3":
         errors.append(
