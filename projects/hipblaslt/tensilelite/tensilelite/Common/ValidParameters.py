@@ -1288,7 +1288,7 @@ validParameters = { # we need to make sure this matches develop
     # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
     # -1: Disabled
     # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
-    "ClusterAIDMapping": list(range(-2, 8)),
+    "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
     # 1: Use PLR 0.5 for A
