@@ -39,8 +39,13 @@ Three modes:
     Numeric gate: every timed arm's output is checked against the fp32 oracle
     :func:`builders.mla.ref_mla_attn.ref_mla_prefill` -- rocke's ``out`` and
     ``lse``; aiter's latent output projected through ``W_UV`` (its gfx942 ASM
-    prefill kernel leaves the LSE buffer unwritten) -- with the bf16 attention bar,
-    ``max|got - ref| <= --tol`` (default 4e-2). The oracle runs on a subset: up
+    prefill kernel leaves the LSE buffer unwritten) -- with the bars of
+    :mod:`builders.mla.verify_score_probe_gfx942`. Both arms: ``out``
+    ``max|got - ref| <= --tol`` (default ``BF16_ATTN_ATOL``, 4e-2) and, per gate
+    window, ``out`` ``max_abs / peak(|ref|) <= --rel-tol`` (default
+    ``OUT_REL_PEAK_TOL``, 2e-2). The rocke arm also: ``lse``
+    ``max|got - ref| <= --lse-tol`` (default ``LSE_ATOL``, 1.7e-2); the aiter
+    arm has no LSE to check. The oracle runs on a subset: up
     to four evenly spaced head pairs ``(h, h + 1)`` -- both waves of a two-head
     workgroup -- plus the last head, and the first and last ``_GATE_ROWS``
     query rows of each sequence. No ratio is reported for a shape unless both
@@ -72,7 +77,11 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.common.mla_shapes import MLAShape, filter_shapes, load_mla_shapes
-from builders.mla.verify_score_probe_gfx942 import BF16_ATTN_ATOL
+from builders.mla.verify_score_probe_gfx942 import (
+    BF16_ATTN_ATOL,
+    LSE_ATOL,
+    OUT_REL_PEAK_TOL,
+)
 
 _ARCH = "gfx942"
 _DEFAULT_SHAPES = Path(__file__).resolve().parent / "mla_prefill_shapes.json"
@@ -703,16 +712,29 @@ def _reference(shape: MLAShape, rocke_data: dict) -> list[tuple[slice, Any, Any]
     return refs
 
 
-def _gate(out, lse, refs, *, tol: float) -> dict:
-    """``max|got - ref|`` of ``out [total_q, h, d_v]`` and, if given, ``lse [total_q, h]``.
+def _gate(
+    out,
+    lse,
+    refs,
+    *,
+    tol: float = BF16_ATTN_ATOL,
+    rel_tol: float = OUT_REL_PEAK_TOL,
+    lse_tol: float = LSE_ATOL,
+) -> dict:
+    """Gate ``out [total_q, h, d_v]`` and, if given, ``lse [total_q, h]``.
 
-    ``out`` and ``lse`` are already restricted to the gate heads. All rows are
-    live (``S_k >= S_q``), so every gated slot must be finite. ``lse=None``
-    gates ``out`` alone, for an arm that does not produce an LSE.
+    The verifier's bars (:mod:`builders.mla.verify_score_probe_gfx942`):
+    ``out`` ``max_abs <= tol`` and, per gate window, ``max_abs / peak(|ref|)
+    <= rel_tol`` -- ``out`` shrinks as S_k grows, so a lost key tile can stay
+    under the absolute bar -- and ``lse`` ``max_abs <= lse_tol``. ``out`` and
+    ``lse`` are already restricted to the gate heads. All rows are live
+    (``S_k >= S_q``), so every gated slot must be finite. ``lse=None`` gates
+    ``out`` alone, for an arm that does not produce an LSE.
     """
     import numpy as np
 
     worst_o = 0.0
+    worst_rel = 0.0
     worst_l = 0.0 if lse is not None else None
     finite = True
     for rows, ref_out, ref_lse in refs:
@@ -720,7 +742,10 @@ def _gate(out, lse, refs, *, tol: float) -> dict:
         if not np.all(np.isfinite(o)):
             finite = False
             continue
-        worst_o = max(worst_o, float(np.max(np.abs(o - ref_out))))
+        err = float(np.max(np.abs(o - ref_out)))
+        peak = float(np.max(np.abs(ref_out))) if ref_out.size else 0.0
+        worst_o = max(worst_o, err)
+        worst_rel = max(worst_rel, err / (peak if peak > 0 else 1.0))
         if lse is not None:
             lv = lse[rows].float().cpu().numpy()
             if not np.all(np.isfinite(lv)):
@@ -728,9 +753,13 @@ def _gate(out, lse, refs, *, tol: float) -> dict:
                 continue
             worst_l = max(worst_l, float(np.max(np.abs(lv - ref_lse))))
     return {
-        "ok": finite and worst_o <= tol and (worst_l is None or worst_l <= tol),
+        "ok": finite
+        and worst_o <= tol
+        and worst_rel <= rel_tol
+        and (worst_l is None or worst_l <= lse_tol),
         "finite": finite,
         "max_abs_out": worst_o,
+        "max_rel_peak_out": worst_rel,
         "max_abs_lse": worst_l,
     }
 
@@ -745,6 +774,7 @@ def _gate_error(exc: BaseException) -> dict:
         "ok": False,
         "finite": False,
         "max_abs_out": None,
+        "max_rel_peak_out": None,
         "max_abs_lse": None,
         "error": repr(exc),
     }
@@ -760,7 +790,10 @@ def _gate_str(name: str, gate: dict | None) -> str:
     verdict = "ok" if gate["ok"] else "FAIL"
     lse = gate["max_abs_lse"]
     lse_part = f" lse {lse:.1e}" if lse is not None else " lse n/a"
-    return f" {name}_gate={verdict}(out {gate['max_abs_out']:.1e}{lse_part})"
+    return (
+        f" {name}_gate={verdict}(out {gate['max_abs_out']:.1e}"
+        f" rel {gate['max_rel_peak_out']:.1e}{lse_part})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -826,8 +859,21 @@ def main(argv=None) -> int:
         "--tol",
         type=float,
         default=BF16_ATTN_ATOL,
-        help="absolute max|got - ref| bar for out and lse against the fp32 "
-        "oracle (default: the bf16 attention bar, 4e-2)",
+        help="absolute max|got - ref| bar for out against the fp32 oracle, "
+        f"both arms (default: the bf16 attention bar, {BF16_ATTN_ATOL:g})",
+    )
+    parser.add_argument(
+        "--rel-tol",
+        type=float,
+        default=OUT_REL_PEAK_TOL,
+        help="max|got - ref| / peak|ref| bar for out per gate window, both arms "
+        f"(default {OUT_REL_PEAK_TOL:g})",
+    )
+    parser.add_argument(
+        "--lse-tol",
+        type=float,
+        default=LSE_ATOL,
+        help=f"absolute bar for lse, rocke arm only (default {LSE_ATOL:g})",
     )
     parser.add_argument(
         "--no-aiter",
@@ -908,6 +954,7 @@ def main(argv=None) -> int:
     )
     print("flydsl:  no MLA prefill kernel in FlyDSL (decode-only as of Sep 2026)")
 
+    bars = {"tol": args.tol, "rel_tol": args.rel_tol, "lse_tol": args.lse_tol}
     results = []
     n_ok = 0
     n_aiter_ran = 0
@@ -968,7 +1015,7 @@ def main(argv=None) -> int:
                 iters=args.iterations,
             )
             refs = _reference(shape, rocke_data)
-            rocke_gate = _gate(r_out[:, heads], r_lse[:, heads], refs, tol=args.tol)
+            rocke_gate = _gate(r_out[:, heads], r_lse[:, heads], refs, **bars)
             del r_out, r_lse
             if rocke_gate["ok"]:
                 n_ok += 1
@@ -1006,7 +1053,7 @@ def main(argv=None) -> int:
                 a_out = torch.einsum(
                     "thr,hrv->thv", a_latent[:, heads].float(), w_uv.float()
                 )
-                aiter_gate = _gate(a_out, None, refs, tol=args.tol)
+                aiter_gate = _gate(a_out, None, refs, **bars)
                 del a_latent, a_out
                 if not aiter_gate["ok"]:
                     n_gate_fail += 1
@@ -1060,6 +1107,8 @@ def main(argv=None) -> int:
             "aiter_skip_reason": aiter_skip_reason if not aiter_ok else None,
             "speedup_rocke_vs_aiter": speedup_vs_aiter,
             "gate_tol": args.tol,
+            "gate_rel_tol": args.rel_tol,
+            "gate_lse_tol": args.lse_tol,
             "tflop": tflop,
             "unfused_split_ms": dict(_UNFUSED_SPLIT) if args.absorbed_query else None,
             # FlyDSL: no MLA prefill kernel available (decode-only)
@@ -1091,7 +1140,10 @@ def main(argv=None) -> int:
         print(f"{tag}  {rocke_str}{aiter_str}")
 
     # summary
-    print(f"\n=== SUMMARY (arch={args.arch}, gate tol {args.tol:g}) ===")
+    print(
+        f"\n=== SUMMARY (arch={args.arch}, gate out {args.tol:g} abs / "
+        f"{args.rel_tol:g} of peak, lse {args.lse_tol:g}) ==="
+    )
     # Gated shapes only: a gate_fail shape's timing is not a result.
     ok_recs = [r for r in results if r.get("status") == "ok"]
     if ok_recs:

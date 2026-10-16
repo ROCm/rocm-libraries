@@ -16,9 +16,10 @@ masked rows are held to ``out == 0`` / ``lse == -inf`` exactly.
 
 Specs come from the MLA dispatcher, so each case compiles the layout that ships
 for it: two heads per workgroup for even head counts, the single-head layout for
-odd ones, and agpr_acc for key ranges >= 4096 that fill every CU. Two extra
-lanes cover what dispatch only picks on some shapes: agpr_acc forced on at
-shorter / ragged key ranges, and the unfused ``absorbed_query`` composition.
+odd ones, and agpr_acc for batches averaging >= 320 query rows per sequence
+(``sk4096_h128``). Two extra lanes cover what dispatch only picks on some
+shapes: agpr_acc forced on for short / ragged batches, and the unfused
+``absorbed_query`` composition.
 
 Every test is marked ``gpu`` and skips without a gfx942 device and ROCm torch
 (torch also runs the ``absorbed_query`` lane's head projections). Run:
@@ -187,12 +188,14 @@ def test_negative_control_one_zeroed_page_fails_the_bars():
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-def test_long_keys_dispatch_agpr_and_odd_heads_single_head():
+def test_rows_per_sequence_dispatch_agpr_and_odd_heads_single_head():
     """The numeric cases above exercise the layouts they claim to.
 
-    sk4096_h128 is 576 workgroups at key length 4096, which dispatch serves with
-    agpr_acc on any CDNA3 part (<= 304 CUs); single_head_h5 has an odd head
-    count, which dispatch cannot pack two to a workgroup.
+    sk4096_h128 is one 512-query sequence, at least 320 rows per sequence, which
+    dispatch serves with agpr_acc on any CU count; every other two-heads
+    scenario averages fewer rows and runs the 16-row layout (agpr_acc is covered
+    for those by the forced lane). single_head_h5 has an odd head count, which
+    dispatch cannot pack two to a workgroup.
     """
     probe = _probe()
     arch = _arch()
@@ -203,6 +206,9 @@ def test_long_keys_dispatch_agpr_and_odd_heads_single_head():
 
     if _agpr_flavor_ok():
         assert spec("sk4096_h128").agpr_acc
+    for name in _ALL_SCENARIOS:
+        if name != "sk4096_h128":
+            assert not spec(name).agpr_acc, name
     single = spec("single_head_h5")
     assert (single.heads_per_wg, single.q_tiles_per_wg, single.agpr_acc) == (
         1,

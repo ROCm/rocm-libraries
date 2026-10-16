@@ -129,7 +129,7 @@ def _cases():
         "mla_prefill_gfx942/probe_h64": probe(64),
         "mla_prefill_gfx942/dispatch_fwd_h128": dispatched(128),
         "mla_prefill_gfx942/dispatch_fwd_h64": dispatched(64),
-        # Long keys filling the device: the agpr_acc layout at llvm22 (llvm20
+        # 4096 query rows per sequence: the agpr_acc layout at llvm22 (llvm20
         # refuses it and dispatch falls back to 16 rows per wave).
         "mla_prefill_gfx942/dispatch_fwd_h128_long": dispatched(128, 8192, 8192),
         "mla_prefill_gfx942/fwd_h128_agpr": agpr(128),

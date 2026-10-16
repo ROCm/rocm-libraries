@@ -212,7 +212,7 @@ One lever per step. Full 8-case parity after each. Keep or revert, never stack.
 | 42 | Query tiles per head (`q_tiles_per_wg`), shipped as two heads x two tiles | **Kept** | each head's W_UK / W_UV fetch and epilogue staging serve two waves; half the epilogue rounds; registers and LDS unchanged; L2 misses fell sharply; large gain on short full-prompt shapes, neutral to small on chunked |
 | 43 | XCD-aware workgroup order (`num_xcds`, from the device CU count) | **Kept** | each XCD walks short runs of a head-major order, so its L2 holds a few heads' weights; gain on short shapes |
 | 44 | One head x four query tiles per workgroup | Not selected | lowest weight traffic, but a large regression on some chunked shapes that is not explained |
-| 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 / llvm23 only; three dwords spill outside the loop; gain on long key ranges that fill the device |
+| 45 | `agpr_acc`: 32 rows per wave, accumulator in AGPRs, one workgroup per CU | **Kept, by rule** | in-place asm MFMAs into fixed AGPRs; llvm22 / llvm23 only; three dwords spill outside the loop; gain at many query rows per sequence |
 | 46 | Double-buffered key tile with the loop unrolled by two (agpr_acc) | **Kept** | one barrier per tile; static slot offsets |
 | 47 | Direct-to-LDS key tiles (`buffer_load ... lds`), DMA spread over the score fences | **Kept** | needs lever 48; without it the backend waits on each DMA before the next LDS read and the spread is much slower than one burst |
 | 48 | `lds_alias_scopes` (platform, both engines) | **Kept** | per-allocation LDS alias scopes; a read waits only for DMA into its own allocation |
@@ -892,8 +892,8 @@ golden fixture pins a 228-CU device so it does not depend on the host.
 
 Levers 45–49: the aiter-style layout, one workgroup of four waves per CU with
 32 query rows per wave, on the two-heads-by-two-tiles mapping. It is a second
-variant of the one-wave-per-head builder, selected by dispatch for long key
-ranges; the 16-row layout stays the default elsewhere.
+variant of the one-wave-per-head builder, selected by dispatch for batches with
+many query rows per sequence; the 16-row layout stays the default elsewhere.
 
 ### Accumulator in AGPRs
 
@@ -937,14 +937,43 @@ becomes rare. It also helps the 16-row layout.
 
 ### When dispatch picks it
 
-Only when (a) the flavor is llvm22 or llvm23, (b) the key range is at least
-4096, and (c) the agpr_acc launch grid -- packed varlen q-blocks
-(`total_q // block_q + num_seqs`, as `num_q_blocks_for` counts them) times
-head pairs -- at least fills every CU. Shorter ranges are
-dominated by the per-workgroup absorb and `W_UV`, which a second workgroup
-per CU hides; fewer workgroups than CUs leave CUs idle that the 16-row layout,
-with twice the workgroups, uses; and a grid just over one round pays a whole
-second round.
+Only when (a) the flavor is llvm22 or llvm23, (b) the batch averages at least
+320 query rows per sequence (`total_q / num_seqs`), and (c) the agpr_acc
+workgroups that carry rows -- at least `max(ceil(total_q / 64), num_seqs)` per
+head pair, not counting the per-sequence padding workgroups -- number at least
+half the CUs. That is the
+[`_use_agpr_layout`](../../../dispatch/mla/gfx942.py) rule. The key length does
+not enter it, and an unknown CU count fails (c).
+
+Term (c) only binds at low head counts. On the 304-CU part at H 16, 32 and 64,
+grids with too few row-carrying workgroups for a one-per-CU layout lost with
+agpr_acc and slightly larger ones won, and half the CUs splits the two. Low
+head counts are unmeasured on the 228-CU part.
+
+The rule was chosen from gated sweeps of both layouts, forced on the same
+inputs, on a 304-CU gfx942 (the primary target) and a 228-CU gfx942. It is the
+only rule tested that never selected the slower layout on the 304-CU part. Key
+ranges were measured down to 512 on the 304-CU part and down to 2048 on the
+228-CU part, with no dependence on key length; shorter key ranges are
+unmeasured. Rules that counted launched
+workgroups against the CU count, or cut on key length, picked agpr_acc for
+batches of many short sequences, where it loses.
+
+The rule is conservative. At H=128 agpr_acc also wins with 128 to 319 rows per
+sequence, and the rule leaves those wins unused, because of padding-workgroup
+placement: the agpr_acc grid launches one padding workgroup per sequence per
+head group, and where those land across the shader engines can strand CUs and
+push a grid that fits into a second round. Ragged batches are layout-sensitive
+in a way no request field shows dispatch. Dispatching the padding workgroups
+last is a follow-up; the threshold should be re-swept on both CU counts after
+it lands.
+
+Both layouts stay reachable for tuning. Two opt-in candidates pin one layout
+each, `mla_prefill_fwd_gfx942_agpr_acc` and `mla_prefill_fwd_gfx942_row16`
+(16 rows per wave); a request pinned to one always gets that layout or a
+refusal (agpr_acc refuses llvm20). `mla_sweep_space`, `registered_mla_combos`
+and `dispatch_mla_all` return the layout the rule ships first, then the other
+layout through its opt-in candidate, so each appears once.
 
 ### Measured and not kept in the seventh pass
 

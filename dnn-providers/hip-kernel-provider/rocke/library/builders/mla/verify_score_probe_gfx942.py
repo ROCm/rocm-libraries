@@ -175,10 +175,9 @@ _EXTRA = (
         128,
         (512,),
         (4096,),
-        "S_q < S_k at 256 key tiles, the longest rescale chain. 512 queries x 128 "
-        "heads launch (512 // 64 + 1) x 64 = 576 agpr_acc workgroups, which "
-        "fills every CU of a CDNA3 part, so dispatch picks the agpr_acc layout "
-        "(key length >= 4096)",
+        "S_q < S_k at 256 key tiles, the longest rescale chain. One sequence of "
+        "512 queries is at least 320 rows per sequence, so dispatch picks the "
+        "agpr_acc layout",
     ),
     Scenario(
         "ragged_long",
@@ -1072,7 +1071,7 @@ def run_case(
     # The score probe is single-tile (block_q == 16); the forward kernel runs
     # the spec dispatch ships for this case, so parity covers the shipped
     # layout (two heads per workgroup when the head count is even, the
-    # single-head default otherwise; agpr_acc for long keys filling the device).
+    # single-head default otherwise; agpr_acc at >= 320 query rows per sequence).
     if mode == "scores":
         spec = MlaPrefillSpec(num_heads=heads, block_q=16)
     else:
@@ -1166,7 +1165,7 @@ def main(argv=None) -> int:
         choices=("auto", "on", "off"),
         default="auto",
         help="--mode full only: force dispatch's agpr_acc layout on/off "
-        "(auto: the shipped rule, key length >= 4096 with every CU filled)",
+        "(auto: the shipped rule in dispatch.mla.gfx942._use_agpr_layout)",
     )
     ap.add_argument("--arch", default=None, help="default: the local device")
     ap.add_argument(
