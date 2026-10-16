@@ -518,6 +518,28 @@ def test_strided_runtime_rejects_other_launch_arches(
         )
 
 
+@pytest.mark.parametrize(
+    "spec_arch,live_arch", [("gfx942", "gfx950"), ("gfx950", "gfx942")]
+)
+def test_strided_runtime_rejects_spec_arch_mismatch(
+    strided_binding_case, monkeypatch, spec_arch, live_arch
+):
+    from kernels.common import attention_unified as au
+
+    _, result, tensors = strided_binding_case
+    spec = replace(result.spec, arch=spec_arch)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: live_arch)
+    with pytest.raises(ValueError, match="tuning spec targets"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            tuning_spec=spec,
+            kv_layout="strided",
+        )
+
+
 @pytest.mark.parametrize("missing", ["kv_layout", "kv_storage_dtype"])
 def test_strided_runtime_rejects_missing_semantic_field(
     strided_binding_case, monkeypatch, missing

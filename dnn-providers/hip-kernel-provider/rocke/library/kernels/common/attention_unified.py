@@ -4952,12 +4952,18 @@ def run_unified_attention_torch(
         if backend not in ("auto", "3d"):
             raise ValueError("prepared execution requires the 3D backend")
         backend = "3d"
+    # The launch arch. This is the one place the *launch* path is allowed to ask the
+    # running box: compile-then-run must target the local device, and every gate
+    # below is a launch decision, not a selection decision. Bound once, above the
+    # tuning-spec check and both the strided and paged branches; the selection-side
+    # arch is the explicit ``arch`` parameter threaded through
+    # ``supports_native_unified_attention*``.
+    _launch_arch = _resolve_attention_arch()
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
-        if tuning_spec.arch != _resolve_attention_arch():
+        if tuning_spec.arch != _launch_arch:
             raise ValueError(
-                f"tuning spec targets {tuning_spec.arch}, running on "
-                f"{_resolve_attention_arch()}"
+                f"tuning spec targets {tuning_spec.arch}, running on {_launch_arch}"
             )
         implied = "3d" if tuning_spec.path == "3d" else "tiled"
         if backend not in ("auto", implied):
@@ -4969,12 +4975,6 @@ def run_unified_attention_torch(
 
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
-    # The launch arch. This is the one place the *launch* path is allowed to ask the
-    # running box: compile-then-run must target the local device, and every gate
-    # below is a launch decision, not a selection decision. Bound once, above both the
-    # strided and the paged branches; the selection-side arch is the explicit ``arch``
-    # parameter threaded through ``supports_native_unified_attention*``.
-    _launch_arch = _resolve_attention_arch()
     if kv_layout == "strided":
         from .attention_kv_cache import StridedKvCacheLayout
 
@@ -5003,6 +5003,7 @@ def run_unified_attention_torch(
         if tuning_spec is not None:
             _validate_strided_3d_spec(problem, tuning_spec)
         else:
+            # Validation only: result unused, specs are rebuilt in _run_3d_tiled.
             _strided_3d_specs_from_problem(problem, arch=_launch_arch)
         layout = StridedKvCacheLayout.from_tensors(k, v)
         batch, heads, capacity, dim = layout.key.shape
