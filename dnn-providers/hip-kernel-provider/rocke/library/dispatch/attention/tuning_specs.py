@@ -18,7 +18,6 @@ from kernels.common.attention_unified import (
     _tiled_3d_impl,
 )
 
-
 TILE_POLICIES: Tuple[str, ...] = (
     "half",
     "1x",
@@ -151,6 +150,7 @@ _SEMANTIC_FIELDS = frozenset(
         "use_additive_bias",
         "num_seqs",
         "kv_storage_dtype",
+        "kv_layout",
         "use_i64_kv_addr",
     }
 )

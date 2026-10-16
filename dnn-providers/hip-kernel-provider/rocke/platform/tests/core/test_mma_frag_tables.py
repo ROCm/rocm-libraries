@@ -26,7 +26,13 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch.target import _MMA_FRAGMENT_INFO, _op_id_c_dtype
+from rocke.core.arch.target import (
+    _MMA_FRAGMENT_INFO,
+    _frag_info,
+    _load_specs,
+    _op_id_c_dtype,
+    _op_id_physical_op_id,
+)
 from rocke.core.ir import (
     _MMA_RESULT_HINT,
     _mma_c_frag_len,
@@ -44,6 +50,25 @@ def _sizable_op_ids():
 
 
 class TestMmaFragTables(unittest.TestCase):
+    def test_every_scaled_catalog_atom_has_the_same_padded_abi(self):
+        rows = [
+            row
+            for row in _load_specs()["gfx1250"]["mma"]
+            if row["family"] == "wmma_scaled"
+        ]
+        self.assertEqual(len(rows), 86)
+        for row in rows:
+            info = _MMA_FRAGMENT_INFO[row["op_id"]]
+            self.assertEqual(
+                (info.a_frag_len, info.b_frag_len, info.c_frag_len, info.wave_size),
+                (16, 16, 8, 32),
+            )
+            self.assertEqual(info.a_scale_frag_len, 128 // row["scale_block_k"])
+            self.assertEqual(info.b_scale_frag_len, info.a_scale_frag_len)
+            self.assertEqual(_mma_c_frag_len(row["op_id"]), 8)
+            with self.assertRaises(ValueError):
+                _mma_c_frag_len(row["op_id"] + "_unknown")
+
     def test_frag_lengths_are_positive(self):
         sizable = _sizable_op_ids()
         self.assertTrue(sizable, "the frag-length SSOT must expose at least one atom")
@@ -75,6 +100,20 @@ class TestMmaFragTables(unittest.TestCase):
                 msg=f"int-accumulator op_id {op_id!r} has no SSOT frag length, so "
                 f"IRBuilder.mma would raise for it",
             )
+
+    def test_emulated_op_ids_size_through_their_physical_atom(self):
+        # An emulated atom borrows its fragment from the instruction it issues
+        # rather than restating it, so its bare op_id must size exactly as that
+        # physical atom does -- or IRBuilder.mma("<logical op_id>") would raise.
+        emulated = _op_id_physical_op_id()
+        self.assertTrue(emulated, "expected at least one emulated atom in the catalog")
+        for op_id, physical in emulated.items():
+            with self.subTest(op_id=op_id):
+                self.assertNotIn(op_id, _MMA_FRAGMENT_INFO)
+                self.assertIs(_frag_info(op_id), _MMA_FRAGMENT_INFO[physical])
+                self.assertEqual(
+                    _mma_c_frag_len(op_id), _MMA_FRAGMENT_INFO[physical].c_frag_len
+                )
 
     def test_result_hint_op_ids_have_frag_lengths(self):
         for op_id in _MMA_RESULT_HINT:

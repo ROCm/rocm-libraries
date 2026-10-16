@@ -39,7 +39,7 @@ The catalog currently contains the following operation IDs.
   - f16: `wmma_f32_16x16x16_f16`
   - bf16: `wmma_f32_16x16x16_bf16`
   - integer: `wmma_i32_16x16x16_iu4`, `wmma_i32_16x16x16_iu8`
-- **`gfx1201` (wave32)**
+- **`gfx1201` and `gfx12-generic` (wave32)**
   - f16: `wmma_gfx12_f32_16x16x16_f16`
   - bf16: `wmma_gfx12_f32_16x16x16_bf16`
 - **`gfx1250` (wave32)**
@@ -87,12 +87,14 @@ and exact gfx targets.
 | `build_implicit_gemm_conv` | [L/common/conv_implicit_gemm.py](../../../library/kernels/common/conv_implicit_gemm.py) | convolution as GEMM | catalog-selected matrix MMA | owning validator |
 | `build_direct_conv_16c` | [L/common/conv_direct_grouped.py](../../../library/kernels/common/conv_direct_grouped.py) | grouped direct convolution | `mfma_f32_16x16x16_f16`, or `mfma_f32_16x16x32_f16` with K folding | owning validator |
 | `build_direct_conv_4c` | [L/common/conv_direct_grouped.py](../../../library/kernels/common/conv_direct_grouped.py) | small-channel grouped convolution | direct `mfma_f32_4x4x4_f16` intrinsic outside `MmaCatalog` | validated exact gfx target |
+| `build_direct_conv_nongrouped` | [L/common/conv_direct_nongrouped.py](../../../library/kernels/common/conv_direct_nongrouped.py) | non-grouped (`groups == 1`) direct convolution, LDS halo reuse | square `mfma_f32_{32x32x16,32x32x8,16x16x32,16x16x16}` | owning validator |
 | `build_deep_fused_conv_pool` | [L/common/deep_fused_conv_pool.py](../../../library/kernels/common/deep_fused_conv_pool.py), [L/gfx1151/deep_fused_conv_pool.py](../../../library/kernels/gfx1151/deep_fused_conv_pool.py), [L/gfx1201/deep_fused_conv_pool.py](../../../library/kernels/gfx1201/deep_fused_conv_pool.py), [L/gfx950/deep_fused_conv_pool.py](../../../library/kernels/gfx950/deep_fused_conv_pool.py) | convolution plus pooling | target-specific matrix MMA plus VALU/window reduction | exact implementation selected by target |
 | `build_moe_gate_up_silu_gemm`, `build_moe_interleaved_gate_up_silu_gemm`, `build_moe_down_reduce_gemm`, `build_moe_down_silu_reduce_gemm` | [P/common/moe_gemm_fused.py](../../python/rocke/instances/common/moe_gemm_fused.py) | expert GEMM plus activation or reduction | catalog-selected matrix MMA plus fused VALU/reduction | owning validator |
 | `build_moe_fused_mega_gemm`, `build_moe_fused_mega_gemm_fp8`, `build_moe_fused_mega_wmma` | [P/common/moe_fused_mega.py](../../python/rocke/instances/common/moe_fused_mega.py), [P/common/moe_fused_mega_fp8.py](../../python/rocke/instances/common/moe_fused_mega_fp8.py), [P/gfx1250/fused_moe_mega_wmma.py](../../python/rocke/instances/gfx1250/fused_moe_mega_wmma.py) | persistent expert GEMM pipeline | target-selected matrix MMA plus fused routing/activation | owning validator or exact-target module |
 | `build_wmma_gemm` | [P/gfx1151/wmma_gemm.py](../../python/rocke/instances/gfx1151/wmma_gemm.py), [P/gfx1201/wmma_gemm.py](../../python/rocke/instances/gfx1201/wmma_gemm.py), [P/gfx1250/wmma_gemm.py](../../python/rocke/instances/gfx1250/wmma_gemm.py) | exact-target GEMM | target-catalog WMMA | module's exact gfx target |
 | `build_wmma_gemm_int8`, `build_wmma_gemm_iu8`, `build_wmma_gemm_iu8_dequant` | [P/gfx1151/wmma_gemm_int8.py](../../python/rocke/instances/gfx1151/wmma_gemm_int8.py), [P/gfx1151/wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py), [P/gfx1151/wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py) | integer GEMM, optionally dequantized | target-catalog integer WMMA plus optional conversion | `gfx1151` |
 | `build_block_scaled_gemm` | [P/gfx1250/block_scaled_gemm.py](../../python/rocke/instances/gfx1250/block_scaled_gemm.py) | block-scaled low-precision GEMM | target-catalog WMMA plus scale handling | `gfx1250` |
+| `build_block_scaled_gemm` | [P/gfx950/block_scaled_gemm.py](../../python/rocke/instances/gfx950/block_scaled_gemm.py) | packed RCR block-scaled low-precision GEMM | target-catalog 32x32x64 scaled MFMA with independent A/B K32 E8M0 scales | `gfx950`; direct spec-driven builder |
 
 ## Reduction, Pointwise, And Data-Movement Kernels
 

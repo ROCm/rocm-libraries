@@ -6117,8 +6117,10 @@ public:
      *
      * Computes scaled dot-product attention:
      * @code
-     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
      * @endcode
+     *
+     * `scale` comes from the attributes and is 1.0 (no scaling) when none is set.
      *
      * Supports optional causal masking, attention bias, dropout, paged
      * attention, and FP8 quantization via descale/scale tensors.
@@ -6188,8 +6190,10 @@ public:
      *
      * Computes gradients dQ, dK, dV for the backward pass of SDPA:
      * @code
-     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * Attention(Q, K, V) = softmax(scale * Q * K^T) * V
      * @endcode
+     *
+     * `scale` comes from the attributes and is 1.0 (no scaling) when none is set.
      *
      * Requires softmax statistics (logsumexp) from the forward pass, which
      * are generated when the forward pass is configured with

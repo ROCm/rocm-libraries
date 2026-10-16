@@ -181,7 +181,7 @@ def test_additive_bias_matches_reference(case, dtype, bias_mode, heads):
         # Pin the routing so these cases cannot silently fall back to 16x16.
         from kernels.common.attention_unified import _tiled_spec_from_problem
 
-        spec = _tiled_spec_from_problem(problem)
+        spec = _tiled_spec_from_problem(problem, "gfx950")
         assert spec.use_additive_bias
         assert spec.use_mfma_32x32 and spec.use_transposed_qk_32x32, (
             f"{case}/{dtype}/{heads}: expected the transposed 32x32 path, got "

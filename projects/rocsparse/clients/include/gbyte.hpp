@@ -877,6 +877,37 @@ constexpr double coosort_gbyte_count(rocsparse_int nnz, bool permute)
     return ((4.0 * nnz + (permute ? 2.0 * nnz : 0.0)) * sizeof(rocsparse_int)) / 1e9;
 }
 
+template <typename I, typename T>
+constexpr double spsort_coo_gbyte_count(int64_t nnz, int64_t batch_count)
+{
+    // The indices are sorted once while tracking the permutation. Every batch then gathers its
+    // values, and every batch but the first copies the sorted row and column indices.
+    const double sort   = 6.0 * nnz * sizeof(I);
+    const double gather = nnz * sizeof(I) + 2.0 * nnz * sizeof(T);
+    const double copy   = 4.0 * nnz * sizeof(I);
+    return (sort + batch_count * gather + (batch_count - 1) * copy) / 1e9;
+}
+
+template <typename I, typename J, typename T>
+constexpr double
+    spsort_csr_gbyte_count(int64_t m, int64_t nnz, int64_t batch_count, bool shared_offsets)
+{
+    // The row pointer is copied and the column indices are sorted within each row once, while
+    // tracking the permutation. Every batch then gathers its values, and every batch but the
+    // first copies the sorted column indices, and the row pointer unless it is shared.
+    const double sort   = 3.0 * (m + 1) * sizeof(I) + 4.0 * nnz * sizeof(J) + 4.0 * nnz * sizeof(I);
+    const double gather = nnz * sizeof(I) + 2.0 * nnz * sizeof(T);
+    const double copy = 2.0 * nnz * sizeof(J) + (shared_offsets ? 0.0 : 2.0 * (m + 1) * sizeof(I));
+    return (sort + batch_count * gather + (batch_count - 1) * copy) / 1e9;
+}
+
+template <typename I, typename J, typename T>
+constexpr double
+    spsort_csc_gbyte_count(int64_t n, int64_t nnz, int64_t batch_count, bool shared_offsets)
+{
+    return spsort_csr_gbyte_count<I, J, T>(n, nnz, batch_count, shared_offsets);
+}
+
 /*
  * ===========================================================================
  *    utility SPARSE

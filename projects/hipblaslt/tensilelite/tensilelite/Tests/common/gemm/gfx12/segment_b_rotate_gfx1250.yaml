@@ -1,0 +1,434 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+# Functional test for LDSSegmentBRotate on gfx1250: on top of the [2,2] aligned segment interleave
+# (seg0={A0,B0}, seg1={A1,B1}), SIMD pair 1 reads its B vIdx groups rotated by half and swaps its
+# accumulator halves back before the epilogue. Each problem runs B-rotate off (0) and on (1) vs the
+# CPU reference; K covers one unroll iteration, several, and a tail loop.
+# Group 1: MT128x128x256 on the aligned layout (S = 64K).
+# Group 2: MT256x256x256 + HalfPLR on the tight layout (64K < S < 128K, StoreSwapAddr).
+# Groups 3/4/5: MXF8 (tight) / MXF4 block-32 and block-16 (aligned) MT256 with VWB = WaveTileB/2;
+# pair 1 also flips its MXSB half-wave select so the scales follow the rotated B columns.
+# Group 6: BF16 MT128x192 VWB1 on the tight layout; B extent is exactly 128 KiB, which must still use two B
+# local-read addresses (regression for the numVgprMultiplierB off-by-one).
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  ValidationMaxToPrint: 16
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeMXSA: 3              # random scales: a mismatched MXSB column must not validate
+  DataInitTypeMXSB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  Architecture: gfx1250
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN, F8 in / F32 out (no MX)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]  # MT128x128, wave tile 64x64
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMSplit: [False]
+        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (needs PGR=2)
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]                    # resolves to WaveTileA (coarse A)
+        - VectorWidthB: [1, 2]                  # WaveTileB/VWB = 4, 2 (must be even)
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]     # one unroll iteration
+          - Exact: [256, 256, 1, 512]
+          - Exact: [256, 128, 1, 1024]
+          - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, F8 in / F32 out (no MX)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
+        - HalfPLR: [1, 2, 3]                    # MT256 needs HalfPLR to fit VGPRs
+        - TDMSplit: [False]
+        - LDSSegmentInterleave: [1]             # tight [2,2] layout (component stride 64K..128K)
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]                     # WaveTileA (coarse A)
+        - VectorWidthB: [1, 2, 4]               # WaveTileB/VWB = 8, 4, 2 (must be even)
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]     # two unroll iterations
+          - Exact: [264, 256, 1, 544]     # M edge + tail loop
+          - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, MXF8 block-32 e8 scales
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
+        - HalfPLR: [1, 2, 3]
+        - TDMSplit: [False]
+        - LDSSegmentInterleave: [1]             # tight [2,2] layout
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]                     # WaveTileA (coarse A)
+        - VectorWidthB: [4]                     # WaveTileB/VWB = 2: MXSB rotates via the half-wave select
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]     # two unroll iterations
+          - Exact: [264, 256, 1, 544]     # M edge + tail loop
+          - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, MXF4 block-32 e8 scales
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
+        - HalfPLR: [1]
+        - TDMSplit: [False]
+        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (S = 64K)
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]                     # WaveTileA (coarse A)
+        - VectorWidthB: [4]                     # WaveTileB/VWB = 2: MXSB rotates via the half-wave select
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]     # two unroll iterations
+          - Exact: [264, 256, 1, 544]     # M edge + tail loop
+          - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, MXF4 block-16 f8 scales
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 16
+      MXBlockB: 16
+      DataTypeMXSA: f8
+      DataTypeMXSB: f8
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, wave tile 128x128
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]                  # A pad interval 2048B needs iterate mode
+        - HalfPLR: [1]
+        - TDMSplit: [False]
+        - LDSSegmentInterleave: [1]             # aligned [2,2] layout (S = 64K)
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]                     # WaveTileA (coarse A)
+        - VectorWidthB: [4]                     # WaveTileB/VWB = 2: MXSB rotates via the half-wave select
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 512]     # two unroll iterations
+          - Exact: [264, 256, 1, 544]     # M edge + tail loop
+          - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, BF16 in / BF16 out
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  4, 6,  2, 2]  # MT128x192, wave tile 4x6
+        - DepthU: [256]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [1]
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [1]                     # WaveTileB/VWB = 6 (even)
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 384, 1, 512]
+          - Exact: [256, 384, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
