@@ -1211,6 +1211,9 @@ TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 // Test calling rocfft_destroy after any library singletons are torn down
 TEST(rocfft_DeathTest, plan_destroyed_at_exit)
 {
+    SKIP_ON_QUICK_TESTS();
+    PROB_SKIP_UNITTEST();
+
     struct exit_time_plan
     {
         rocfft_plan plan = nullptr;
