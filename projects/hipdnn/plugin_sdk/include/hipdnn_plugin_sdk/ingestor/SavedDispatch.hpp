@@ -18,7 +18,12 @@ namespace hipdnn_plugin_sdk::ingestor
 struct SavedLaunchInputs
 {
     /// The versioned name the dispatch handler is registered under. The version names
-    /// the contract that gives `values` their meaning.
+    /// the contract between `values` and the launch. A saved plan pairs an older code
+    /// object with the current launch. Use a new version for a change to the names,
+    /// types or meanings of `values`, to the kernel arguments the launch passes (order,
+    /// count, kinds, sizes or meanings), or to how the launch derives grid, block or
+    /// dynamic LDS from `values`. Keep the handler of the old version registered while
+    /// plans saved under it must load.
     std::string dispatchSymbol;
     /// The named, typed inputs the launch is computed from. Never computed grid or
     /// argument values.

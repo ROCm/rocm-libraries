@@ -18,8 +18,13 @@
  *        a versioned dispatch name and the named, typed values the launch is computed from.
  *        The pack also reads its saved form back into its launch inputs.
  *
- * The version in a dispatch name identifies the contract of its values. A change to the
- * names, types or meanings of the values needs a new version.
+ * The version in a dispatch name identifies the contract between the saved values and the
+ * launch. A saved plan pairs an older code object with this launch. Use a new version for
+ * a change to any of these:
+ *   - the names, types or meanings of the values.
+ *   - the kernel arguments the launch passes: their order, count, kinds, sizes or meanings.
+ *   - how the launch derives grid, block or dynamic LDS from the values.
+ * Keep the handler of the old version registered while plans saved under it must load.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {

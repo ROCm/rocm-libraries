@@ -35,6 +35,7 @@
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 
 /**
@@ -364,9 +365,9 @@ private:
 std::unique_ptr<PreparedDispatch> makePreparedPointwise(IngestorKernelCode code,
                                                         const PointwiseLaunchInputs& launch)
 {
-    const auto blockSize = static_cast<unsigned int>(launch.blockSize);
-    code.setBlockSize(blockSize, 1, 1);
-    code.setGridSize(1, 1, 1);
+    const PointwiseLaunchGeometry geometry = pointwiseLaunchGeometry(launch);
+    code.setBlockSize(geometry.block, 1, 1);
+    code.setGridSize(geometry.gridX, 1, 1);
     return std::make_unique<PreparedPointwise>(std::move(code), launch.binding, launch.blockSize);
 }
 

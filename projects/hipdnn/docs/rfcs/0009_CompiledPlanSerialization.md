@@ -287,6 +287,16 @@ SHA-256 of the schema file and compares it with this value. After each schema ch
 version change and then update the value.
 
 The dispatch handler contract has a separate version. That version is part of the dispatch name.
+It is not the format version of the saved file. The dispatch version identifies the contract between
+the saved launch values and the launch. A saved plan can pair an older code object with the current
+launch. Use a new dispatch version when one of these items changes:
+
+- The names, types, or meanings of the launch values.
+- The kernel arguments that the launch passes: their order, count, kinds, sizes, or meanings.
+- How the launch calculates the grid, the block, or the dynamic LDS from the launch values.
+
+Keep the dispatch handler of the old version registered while plans saved with that version must
+load.
 
 The provider version never controls a load. A reader accepts a header larger than 48 bytes when its
 size is a multiple of 16.

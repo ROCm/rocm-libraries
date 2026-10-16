@@ -34,6 +34,7 @@
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 
 /**
@@ -389,22 +390,12 @@ private:
 std::unique_ptr<PreparedDispatch> makePreparedConvFwd(IngestorKernelCode code,
                                                       const ConvFwdLaunchInputs& launch)
 {
-    const auto& extents = launch.extents;
-    const auto blockSize = static_cast<unsigned int>(launch.blockSize);
-    const auto p = extents.h - extents.r + 1;
-    const auto q = extents.width - extents.s + 1;
-    // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
-    // product would wrap, corrupting both the grid size and the kernel's own bounds
-    // guard (ConvFwd.cpp).
-    const int64_t total = static_cast<int64_t>(extents.n) * extents.k * p * q;
-    const auto gridSize = static_cast<unsigned int>((total + static_cast<int64_t>(blockSize) - 1)
-                                                    / static_cast<int64_t>(blockSize));
-
-    code.setBlockSize(blockSize, 1, 1);
-    code.setGridSize(gridSize, 1, 1);
+    const ConvFwdLaunchGeometry geometry = convFwdLaunchGeometry(launch);
+    code.setBlockSize(geometry.block, 1, 1);
+    code.setGridSize(geometry.gridX, 1, 1);
 
     return std::make_unique<PreparedConvFwd>(
-        std::move(code), launch.binding, extents, launch.blockSize);
+        std::move(code), launch.binding, launch.extents, launch.blockSize);
 }
 
 /// The C++ type the kernel is compiled for, from the kernel's dtype metadata.

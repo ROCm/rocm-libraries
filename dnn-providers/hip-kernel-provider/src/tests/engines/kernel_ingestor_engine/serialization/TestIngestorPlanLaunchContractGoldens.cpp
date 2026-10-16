@@ -18,9 +18,11 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/ConvFwdGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
@@ -444,7 +446,7 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleStillRea
     EXPECT_EQ(launch.blockM, 128);
 }
 
-// The grid and block the sample's values give. A value that keeps its name and type but
+// The grid and block each sample's values give. A value that keeps its name and type but
 // changes meaning passes the field assertions above and lands here as a different launch.
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleGivesTheSameGeometry)
 {
@@ -462,6 +464,28 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleGivesThe
     EXPECT_EQ(geometry.gridX, 2U);
     EXPECT_EQ(geometry.gridY, 8U);
     EXPECT_EQ(geometry.gridZ, 2U);
+}
+
+TEST(TestIngestorPlanLaunchContractGoldens, ConvFwdV1SampleGivesTheSameGeometry)
+{
+    const ConvFwdLaunchInputs launch
+        = readConvFwdLaunchInputs(readSample(CONV_FWD_V1_GOLDEN, convFwdSamplePayload()));
+
+    const ConvFwdLaunchGeometry geometry = convFwdLaunchGeometry(launch);
+
+    EXPECT_EQ(geometry.block, 64U);
+    EXPECT_EQ(geometry.gridX, 2U);
+}
+
+TEST(TestIngestorPlanLaunchContractGoldens, PointwiseV1SampleGivesTheSameGeometry)
+{
+    const PointwiseLaunchInputs launch
+        = readPointwiseLaunchInputs(readSample(POINTWISE_V1_GOLDEN, pointwiseSamplePayload()));
+
+    const PointwiseLaunchGeometry geometry = pointwiseLaunchGeometry(launch);
+
+    EXPECT_EQ(geometry.block, 256U);
+    EXPECT_EQ(geometry.gridX, 1U);
 }
 
 // ---------------------------------------------------------------------------
