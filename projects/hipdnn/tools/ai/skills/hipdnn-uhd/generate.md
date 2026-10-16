@@ -134,7 +134,7 @@ binding decides everything below:
    installed with: build a candidate tree first with `python3
    $UHD/scripts/candidate_tree.py
    --root <per-arch root> --farm <new dir> --promote <engine> sort_kernel_catalog <arch key>
-   <L2 model dir>`, pass that `--farm` as `--descriptor-tree`, and run the collection with
+   <L2 model dir> --feature-evaluator <build>/bin/hipdnn_uhd_features`, pass that `--farm` as `--descriptor-tree`, and run the collection with
    `HIPDNN_CACHE_DIR` set to a new empty directory, so no benchmark winner record decides the
    kernel in the L2's place. Several GPUs of the device: one `--shard K/N` each, one
    collection each.

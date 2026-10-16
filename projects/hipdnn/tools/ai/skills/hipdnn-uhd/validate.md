@@ -35,6 +35,7 @@ python3 $UHD/scripts/validate_l1.py --bench <build>/bin/hipdnn_bench \
   --plugin-dir <abs plugin dir> --engine-id <id> \
   --descriptor-root <tree> --candidate-dir <model dir> --declared-id <uhd id> \
   --sample sample.json --metric <metric> --work-dir <new dir> --out rows.json \
+  --feature-evaluator <build>/bin/hipdnn_uhd_features \
   [--promote <engine> sort_kernel_catalog <arch key> <L2 model dir> \
    --promote <engine> predict_engine <arch key> <model dir>]
 python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> --out report.json
@@ -78,7 +79,8 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
    python3 $UHD/scripts/validate_l2.py --bench <build>/bin/hipdnn_bench --plugin-dir <abs plugin dir> \
      --engine-id <id> --engine <engine> --root <per-arch root> --role sort_kernel_catalog \
      --arch-key <arch key> --candidate-dir <model dir> --sample sample.json \
-     --ranking-metric <metric> --work-dir <new dir> --out rows.json
+     --ranking-metric <metric> --feature-evaluator <build>/bin/hipdnn_uhd_features \
+     --work-dir <new dir> --out rows.json
    python3 $UHD/scripts/decide.py l2 --rows rows.json --candidate-report candidate.json \
      [--incumbent-report incumbent.json] [--baseline model|native|none] --out report.json
    ```

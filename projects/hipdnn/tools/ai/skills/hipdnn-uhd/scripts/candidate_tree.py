@@ -31,7 +31,8 @@ actually exercised.
 
     candidate_tree.py --root <per-arch descriptor root> --farm <new dir>
         [--opaque <declared id> <model dir>] [--promote <engine> <role> <arch> <model dir>]
-        [--cache-dir <new dir>] [--record installed.json] [-- <command> ...]
+        [--cache-dir <new dir>] [--feature-evaluator <hipdnn_uhd_features>]
+        [--record installed.json] [-- <command> ...]
 """
 
 from __future__ import annotations
@@ -119,9 +120,18 @@ def install_opaque(farm: Path, candidate_dir: Path, declared_id: str) -> dict:
 
 
 def install_promoted(
-    farm: Path, candidate_dir: Path, engine: str, role: str, arch: str
+    farm: Path,
+    candidate_dir: Path,
+    engine: str,
+    role: str,
+    arch: str,
+    feature_evaluator: str | None = None,
 ) -> dict:
-    """`uhd_gen promote` the candidate into the copy: installed, and bound in the engine's UED."""
+    """`uhd_gen promote` the candidate into the copy: installed, and bound in the engine's UED.
+
+    `feature_evaluator` is the build's `hipdnn_uhd_features`; without it promote looks the
+    evaluator up itself (`HIPDNN_UHD_FEATURE_EVALUATOR`, a build under the checkout, PATH).
+    """
     ueds = [p for p in farm.rglob("*.ued.json") if _safe(p).get("name") == engine]
     if len(ueds) != 1:
         raise SystemExit(
@@ -143,6 +153,8 @@ def install_promoted(
         "--arch",
         arch,
     ]
+    if feature_evaluator:
+        command += ["--feature-evaluator", feature_evaluator]
     proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(
@@ -194,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--cache-dir", help="A scratch HIPDNN_CACHE_DIR, so no winner record decides"
     )
+    parser.add_argument(
+        "--feature-evaluator",
+        help="The build's hipdnn_uhd_features, for --promote",
+    )
     parser.add_argument("--record", help="Write what was installed here (JSON)")
     args = parser.parse_args(argv)
 
@@ -201,7 +217,8 @@ def main(argv: list[str] | None = None) -> int:
     build_farm(Path(args.root), farm)
     installed = [install_opaque(farm, Path(d), i.lower()) for i, d in args.opaque]
     installed += [
-        install_promoted(farm, Path(d), e, r, a) for e, r, a, d in args.promote
+        install_promoted(farm, Path(d), e, r, a, args.feature_evaluator)
+        for e, r, a, d in args.promote
     ]
     record = {"root": args.root, "farm": str(farm), "installed": installed}
     if args.record:

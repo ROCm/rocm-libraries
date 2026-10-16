@@ -1005,6 +1005,38 @@ def test_a_promoted_candidate_is_bound_in_the_copy_and_the_build_is_untouched(
         )
 
 
+def test_a_promote_runs_the_evaluator_it_is_given(
+    tree, promotable, tmp_path, monkeypatch
+):
+    """A build outside the checkout is found by nothing but its name: promote without it
+    fails, and with the build's evaluator named it installs."""
+    from uhd_gen.features import resolve_feature_evaluator
+
+    evaluator = resolve_feature_evaluator()
+    monkeypatch.setenv("PYTHONPATH", promotable["env"]["PYTHONPATH"])
+    monkeypatch.delenv("HIPDNN_UHD_FEATURE_EVALUATOR", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    unnamed = tmp_path / "unnamed"
+    tree.build_farm(promotable["root"], unnamed)
+    with pytest.raises(SystemExit, match="hipdnn_uhd_features was not found"):
+        tree.install_promoted(
+            unnamed, promotable["model"], "test:engine", "sort_kernel_catalog", "gfx942"
+        )
+    named = tmp_path / "named"
+    tree.build_farm(promotable["root"], named)
+    install = tree.install_promoted(
+        named,
+        promotable["model"],
+        "test:engine",
+        "sort_kernel_catalog",
+        "gfx942",
+        evaluator,
+    )
+    assert install["roles_after"]["sort_kernel_catalog"]["gfx942"] == [
+        promotable["new_id"]
+    ]
+
+
 _FAKE_L2_BENCH = (
     _ISOLATION_GUARD
     + _STAGED_ONLY_IN_ROOT

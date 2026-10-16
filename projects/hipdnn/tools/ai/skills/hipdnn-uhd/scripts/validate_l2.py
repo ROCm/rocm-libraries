@@ -29,6 +29,7 @@ Writes the rows; `decide.py l2` turns them into the verdict.
         --root <per-arch descriptor root> --role sort_kernel_catalog --arch-key <gfx...|default>
         --candidate-dir <model dir> (--sample sample.json | --graphs ...) --work-dir <new dir>
         --out rows.json [--ranking-metric tflops|time] [--timeout 300]
+        [--feature-evaluator <hipdnn_uhd_features>]
 """
 
 from __future__ import annotations
@@ -141,6 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--timeout", type=int, default=300, help="seconds per hipdnn_bench call"
     )
+    parser.add_argument(
+        "--feature-evaluator", help="The build's hipdnn_uhd_features, for promote"
+    )
     parser.add_argument("--work-dir", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
@@ -150,7 +154,12 @@ def main(argv: list[str] | None = None) -> int:
     farm = work / "descriptor_tree"
     candidate_tree.build_farm(Path(args.root), farm)
     install = candidate_tree.install_promoted(
-        farm, Path(args.candidate_dir), args.engine, args.role, args.arch_key
+        farm,
+        Path(args.candidate_dir),
+        args.engine,
+        args.role,
+        args.arch_key,
+        args.feature_evaluator,
     )
 
     graphs = engine_run.graphs_of(args.sample, args.graphs or [], args.limit)

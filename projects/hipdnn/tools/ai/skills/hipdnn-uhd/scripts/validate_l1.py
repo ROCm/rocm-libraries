@@ -36,6 +36,7 @@ Writes the rows; `decide.py l1` turns them into the verdict.
         --descriptor-root <dir> --candidate-dir <model dir> --declared-id <uuid>
         (--sample sample.json | --graphs <dir or file> ...) --work-dir <new dir> --out rows.json
         [--metric tflops|time] [--promote ENGINE ROLE ARCH DIR ...] [--timeout 300]
+        [--feature-evaluator <hipdnn_uhd_features>]
 """
 
 from __future__ import annotations
@@ -80,11 +81,12 @@ def promoted_tree(
     promotes: list,
     candidate_dir: Path,
     declared_id: str,
+    feature_evaluator: str | None = None,
 ) -> dict:
     """A descriptor engine's tree: each model promoted into its UED, in order."""
     candidate_tree.build_farm(descriptor_root, farm)
     installs = [
-        candidate_tree.install_promoted(farm, Path(d), e, r, a)
+        candidate_tree.install_promoted(farm, Path(d), e, r, a, feature_evaluator)
         for e, r, a, d in promotes
     ]
     found = candidate_tree.carrying(farm, declared_id)
@@ -175,6 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--sample", help="eval_slice.py sample output")
     source.add_argument("--graphs", nargs="+")
+    parser.add_argument(
+        "--feature-evaluator", help="The build's hipdnn_uhd_features, for --promote"
+    )
     parser.add_argument("--work-dir", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--limit", type=int)
@@ -204,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
             args.promote,
             Path(args.candidate_dir),
             declared,
+            args.feature_evaluator,
         )
     else:
         tree = opaque_tree(
