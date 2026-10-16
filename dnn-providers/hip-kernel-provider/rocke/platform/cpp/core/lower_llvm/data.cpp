@@ -342,6 +342,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"rint.f32", "declare float @llvm.rint.f32(float)"},
     {"smax.i32", "declare i32 @llvm.smax.i32(i32, i32)"},
     {"smin.i32", "declare i32 @llvm.smin.i32(i32, i32)"},
+    /* Unsigned u8 maximum / minimum (u8 renders as i8). */
+    {"umax.i8", "declare i8 @llvm.umax.i8(i8, i8)"},
+    {"umin.i8", "declare i8 @llvm.umin.i8(i8, i8)"},
     {"amdgcn.perm", "declare i32 @llvm.amdgcn.perm(i32, i32, i32)"},
     {"amdgcn.cvt.scalef32.pk.f32.fp8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
