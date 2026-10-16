@@ -608,8 +608,8 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte overrun).
-               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte
+               overrun). Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 8) * 8;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {

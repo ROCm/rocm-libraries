@@ -2053,7 +2053,8 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
             /* Note: AVX loop stores 16 pixels (48 PKD3 elements) but advances by 14 pixels
-               (42 PKD3 elements). Subtract overshoot of 6 PKD3 elements to prevent buffer overrun. */
+               (42 PKD3 elements). Subtract overshoot of 6 PKD3 elements to prevent buffer overrun.
+             */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 6) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {

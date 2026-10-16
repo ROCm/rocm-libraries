@@ -335,8 +335,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-               /* Note: AVX loop processes 42 floats per iteration but stores 48 floats.
-               Subtract overshoot of 6 floats to prevent buffer overrun. */
+            /* Note: AVX loop processes 42 floats per iteration but stores 48 floats.
+            Subtract overshoot of 6 floats to prevent buffer overrun. */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 6) / 14) * 14;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
@@ -591,8 +591,8 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte overrun).
-               Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
+            /* Note: U8/I8 store functions write 32 bytes but should write 24 bytes (8-byte
+               overrun). Subtract 8 to prevent buffer overrun at row boundaries in multithreading */
             Rpp32u alignedLength = ((bufferLength - (2 * padLength) - 8) / 8) * 8;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
