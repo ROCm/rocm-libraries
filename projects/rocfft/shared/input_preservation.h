@@ -181,8 +181,7 @@ private:
 
         return params.transform_type == fft_transform_type_complex_forward
                || params.transform_type == fft_transform_type_complex_inverse
-               || params.transform_type == fft_transform_type_real_forward
-               || params.transform_type == fft_transform_type_real_inverse; // TEMP: probe C2R
+               || params.transform_type == fft_transform_type_real_forward;
     }
 
     std::vector<uint64_t> digest_device_buffers()
