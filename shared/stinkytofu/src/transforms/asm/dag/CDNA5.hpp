@@ -2440,8 +2440,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " dsFree=" << dsIssuesFree << " dsHeld=" << dsHeldBySpreadLast_
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
             << " slot=" << (pickedDS ? dsSpread_.slotOf(pickedDS->id) : -2) << " clock=" << clock_
-            << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1) << " run="
-            << wmmaRun_ << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
+            << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
+            << " run=" << wmmaRun_ << " credFull=" << dsReadInflight_.full()
+            << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
             << " cover=" << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
