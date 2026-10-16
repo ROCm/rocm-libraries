@@ -26,7 +26,7 @@ import pytest
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.helpers.transforms import (
+from rocke.helpers.magic_division import (
     calculate_magic_numbers,
     do_magic_division,
     do_magic_division_dynamic,
