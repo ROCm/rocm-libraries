@@ -302,10 +302,13 @@ namespace llvm
             }
         };
 
-        template <>
-        struct MappingTraits<std::shared_ptr<TensileLite::MasterContractionLibrary>>
+        // Keep the mapping dependent so including this adapter does not
+        // instantiate serializers for every library subtype.
+        template <typename MyProblem, typename MySolution>
+        struct MappingTraits<
+            std::shared_ptr<TensileLite::MasterSolutionLibrary<MyProblem, MySolution>>>
         {
-            using obj = TensileLite::MasterContractionLibrary;
+            using obj = TensileLite::MasterSolutionLibrary<MyProblem, MySolution>;
 
             static void mapping(IO& io, std::shared_ptr<obj>& o)
             {
