@@ -1,6 +1,9 @@
 # RFC 0019: Universal Heuristic Descriptor (UHD): Data-Driven Kernel Selection
 
 - Contributors: Jason Campbell, Chris Erb
+- **Status**: In progress
+- **Status notes**: Only the bootstrap path ships: a UHD has `kind: "native"` and names a `ScoreFn` symbol in `payload`, and a UED names at most one UHD through `heuristic` (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp`, `IKernelHeuristic.hpp`, #10606). The `adapter` header, role maps, `features_signature`, `tree_data`, ranking metrics, and the generation tool are not built. A benchmarked winner overrides the heuristic order (#11068, #11101).
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
   - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
@@ -118,6 +121,12 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ### 3.1 Descriptor Relationships
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The UED that ships has no role maps. `parseEngineDescriptor()`
+> in `DescriptorLoader.hpp` reads one optional `heuristic` key, a single UHD UUID with no arch key and
+> no metric. `sort_kernel_catalog`, `predict_engine`, and `predict_applicable_kernels` are refused as
+> unknown keys, and so is the `schema` key in the JSON below.
+
 ```
 UED (engine)
  ├── sort_kernel_catalog:       {arch → [UHD id]} ← kernel-selection heuristics (the main UHD), one per metric
@@ -167,7 +176,7 @@ In JSON form:
 }
 ```
 
-**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md)):
+**An engine names up to three role-scoped UHDs, each mapped by architecture** ([RFC 0020 §4.6](0020_UniversalEngineDescriptor.md#46-heuristic-roles-and-arch-keying)):
 
 | UED field | Role | When it runs | This RFC |
 |---|---|---|---|
@@ -391,6 +400,16 @@ engine rather than folded into one model. **OPEN:** See [Open Question 2](#schem
 ---
 
 ## 4. UHD Schema
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The schema below is not built. `parseHeuristicDescriptor()`
+> in `DescriptorLoader.hpp` accepts only `version`, `id`, `name`, `kind`, and `payload`. `kind` is
+> `native` or `model` (`HeuristicKind` in `Descriptors.hpp`). For `native`, `payload` is a symbol in
+> `ScoreRegistry`. `model` parses, but `makeKernelHeuristic()` has no adapter for it and refuses it.
+> Every UHD in the tree (17 `*.uhd.json` files) uses `kind: "native"`. The claim in
+> [Section 4.1](#41-field-reference-normative) that the schema was validated against shipping
+> `tree_data` descriptors does not hold on `develop`: no such descriptors exist, and no
+> `uhd/1.0.json` file exists.
 
 A UHD is a small, reusable scoring recipe. It names an `adapter` (ranking mechanism), a
 `features_signature` (model inputs), an objective, and — for model adapters — a model artifact.
@@ -837,6 +856,16 @@ comparable number — but it answers no prediction and is invisible to engine se
 
 ## 5. Selection Flow
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `IKernelHeuristic::rank()` (`IKernelHeuristic.hpp`) sorts by
+> score descending, then `priority` descending, then descriptor id bytes ascending. There is no
+> `objective`: a higher score always wins. A NaN score is mapped to negative infinity and ranks last,
+> to keep the sort total. An engine with no UHD uses `UnrankedKernelHeuristic` and logs a warning
+> (step 6). Step 9 is built (`WinnerCache.hpp`, `WinnerCacheFile.hpp`, #11068, #11101), with these
+> differences: the record key is the graph content and the device, the on-disk shard is per hipDNN
+> data SDK version, engine name, and arch, staleness is checked through each entry's pack and
+> dispatch ids, and the store never evicts (it warns once at 4096 entries).
+
 The generic engine first builds the **catalog**: the set of the engine's kernels that pass every matcher
 for this graph ([RFC 0017 §5](0017_UniversalKernelDescriptor.md#5-matching-the-ueds-pattern-and-the-umds-criteria)), each carrying
 its build `metadata`. The catalog is engine-scoped — the union across every KDP that joins the engine —
@@ -1116,14 +1145,18 @@ operation, and uses checked-width integers. A computation outside this closed se
 occupancy model) uses a compiled scorer ([Section 7](#7-model-adapters)) rather than extending the
 interpreter.
 
-**Implementation status.** The shared implementation provides the arithmetic and comparison operators
+**Implementation status.** The shared implementation
+(`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/JsonExpression.hpp`, #11632, documented in
+[`docs/JsonExpression.md`](../JsonExpression.md)) provides the arithmetic and comparison operators
 this RFC's features need (`+ - * /`, `min`, `max`, `ceil_div`, `abs`, `pow`, `log2`, `rsqrt`,
 `value_or_default`, `if`) as a compile-once / evaluate-many `Expression<DataT>` over any
 `getData(path) → Value` source, which is the shape the feature extractor requires
-([Section 9](#9-performance)). Two caveats carry into this RFC:
+([Section 9](#9-performance)). The descriptor loader does not use it yet. Two caveats carry into
+this RFC:
 
-- **`shape` is a compiler short-hand, not a runtime op**; the compiler lowers it at compile time. A
-  feature spec treats `shape`/`rank`-style helpers as lowered forms rather than runtime operators.
+- **`shape` is not in the shipped compiler, and neither is `all`.** The design lowers `shape` at
+  compile time (above), but that lowering is not built. A feature spec treats `shape`/`rank`-style
+  helpers as lowered forms rather than runtime operators.
 - **The custom-operation (native-predicate) hook is deferred.** Until it lands, a UHD needing a
   computation outside the closed operator set has no in-language path; that is the boundary at which a
   compiled scorer ([Section 7](#7-model-adapters)) takes over.
@@ -1464,6 +1497,14 @@ function; `tree_data` next, as the shipping path; `custom_library` last, because
 dependency audit.
 
 ### 7.1 First: `native`
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** This adapter ships in a reduced form: `"kind": "native"` with
+> the symbol in `payload`, not `"adapter": "native"` with `native.symbol`, and no `objective` or
+> `score`. The scorer is a `ScoreFn`, `double(const MatchContext&, const BoundTokens&, const KernelDefinition&)`,
+> registered in `ScoreRegistry` (`NativeRegistry.hpp`) and wrapped by `NativeKernelHeuristic`. It is
+> not the `score(const double* feats, size_t n)` ABI of [Section 7.3](#73-escape-hatch-custom_library).
+> An example is `hipkernel.gfx950_attention_dense.score`.
 
 > **Two unrelated uses of "native."** This is the UHD's `native` *adapter* — a compiled **scorer**.
 > RFC 0020 § 4.5 defines a `graph_match` `native` *arm* — a compiled **matcher**. Different layers,
@@ -1811,6 +1852,14 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   and any serialized model-table.
 
 ### 9.2 Loading and Caching
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Each engine's `KernelIngestorStateManager` holds an LRU
+> catalog cache (`DEFAULT_CATALOG_CACHE_CAPACITY` = 256) keyed by `CatalogKey`: graph id and device
+> id. The key has no descriptor-set version and no metric. The ranked order rides with the catalog
+> (`Catalog::isSorted` in `Catalog.hpp`). The only persistent cache stores benchmarked winners, under
+> `<cacheRoot>/ingestor-winners/<hipDNN version>/<engine>/<arch>/winners.jsonl`
+> (`WinnerCacheFile.hpp`, #11101). Model rankings are not persisted.
 
 - **Load on demand, and never before applicability.** Two rules govern loading:
   1. The UHD is never consulted to decide applicability; that is the matcher's job
@@ -2345,6 +2394,14 @@ refitting manufactures any.
 
 ### 13.2 Benchmarking via the hipDNN Bench CLI
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** No `hipdnn_bench` tool exists in the tree. The ingestor sweep
+> tooling (`tools/IngestorGenerator/tools/sweep.py`, documented in
+> [`README-sweeps.md`](../../tools/IngestorGenerator/tools/README-sweeps.md)) drives `dnn-benchmark`
+> from the separate dnn-benchmarking project. The generator (`tools/IngestorGenerator/codegen/generator.py`)
+> emits only `kind: "native"` UHDs. No tool trains a model into a UHD. rocKE trains LightGBM models
+> outside the descriptor path, in `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/heuristics/`.
+
 The timing substrate is **`hipdnn_bench`**, hipDNN's own benchmark tool, driving hipDNN's timing loop
 over explicitly enrolled candidates. It is provider-agnostic: it times whatever engine/kernel actually
 runs, so it exercises a rocKE pack exactly as it would any other engine. **The UHD itself never runs
@@ -2818,6 +2875,11 @@ pack (all knobs) → benchmark → heuristic → prune knobs → regenerate pack
 
 ## 15. Phased Delivery
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Phase 1 is partly built: the no-UHD default
+> (`UnrankedKernelHeuristic`) ships, but `static_order` does not. Phase 2 ships in the reduced form
+> of [Section 7.1](#71-first-native). Phases 3 to 10 are not started.
+
 Each phase is independently shippable and validated against the SDPA path and the reference tooling,
 using the parity and overhead checks of [RFC 0017 §14.1](0017_UniversalKernelDescriptor.md#141-testing-and-performance).
 
@@ -2968,6 +3030,9 @@ dependency-gated and land only when a concrete need appears.
    before building it: whether persisting *rankings* repays its complexity at all when compilation and
    matching dominate the cost, and whether it should instead ride along with a persistent applicability
    or compiled-kernel cache. Defer until that policy is designed.
+   Code status (2026-10-15): the in-process catalog cache keys on `(graph id, device id)` per
+   engine, with no generation counter. Benchmarked winners already persist across runs
+   (`WinnerCacheFile.hpp`, #11101); model rankings do not.
    *(Impacts [Section 9.2](#92-loading-and-caching).)*
 
 10. **Shape corpus location.** The variant space is fixed (the pack's UKDs, timed via autotune), but
@@ -3009,6 +3074,9 @@ dependency-gated and land only when a concrete need appears.
     it — a mis-built pack would ship and silently rank by `static_order`. What validates descriptor
     sets in CI, what does it check (hash agreement, KMD pairing, signature resolvability, knob-tuple
     uniqueness), and does it run per-provider or centrally over all shipped packs?
+    Code status (2026-10-15): `hipdnn_validate_descriptors` (`tools/IngestorGenerator/ValidateDescriptors.cpp`,
+    #11508) runs the loader's validation over a descriptor tree, and CTest runs it on fixtures as
+    `hipdnn_validate_descriptors_smoke`. It cannot check feature contracts, which are not built.
     *(Impacts [Section 6.3](#63-contract-enforcement), [Section 12](#12-observability).)*
 
 15. **The expression-language reference.** The descriptor expression language is specified in its own
@@ -3017,6 +3085,9 @@ dependency-gated and land only when a concrete need appears.
     settle when it lands: the normative operator list this RFC recaps, and whether the custom-operation
     hook arrives, which fixes the boundary at which a compiled scorer takes over
     ([Section 7](#7-model-adapters)). Until then, the operator set recapped here is the working contract.
+    Code status (2026-10-15): the expression-language RFC is still not written, but the library ships
+    as `JsonExpression.hpp` (#11632), documented in [`docs/JsonExpression.md`](../JsonExpression.md).
+    It has no custom-operation hook.
     *(Impacts [Section 6.2](#62-the-features_signature), [Section 7](#7-model-adapters).)*
 
 16. **Out-of-distribution detection — partially resolved.** Training-arch coverage now rides in the
@@ -3028,6 +3099,8 @@ dependency-gated and land only when a concrete need appears.
     carrying the affected and total counts for the request. What remains open is the *continuous* case:
     whether per-feature training ranges ship alongside the arch list, and what a row outside them costs.
     Deciding that before more artifact fields land keeps it additive.
+    Code status (2026-10-15): no model adapter is built, so these runtime checks exist only in the
+    design.
     *(Impacts [Section 8.3](#83-out-of-distribution-inputs), [Section 7.2](#72-default-tree_data).)*
 
 17. **Categorical ordering semantics.** Integer codes imply an order a tree model will split on

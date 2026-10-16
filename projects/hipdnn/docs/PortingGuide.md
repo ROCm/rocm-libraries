@@ -51,10 +51,14 @@ ninja
 | **Namespace** | cudnn_frontend | hipdnn_frontend |
 | **Handle Creation** | cudnnCreate(&handle) | hipdnnCreate(&handle) |
 | **Handle Destruction** | cudnnDestroy(handle) | hipdnnDestroy(handle) |
-| **Heuristics Modes** | All cuDNN heuristic modes | Currently only HeurMode_t::FALLBACK |
+| **Heuristics Modes** | All cuDNN heuristic modes | `HeurMode_t::A`, `B`, `FALLBACK`, and `OPENSOURCE` are accepted; all currently map to the backend fallback heuristic |
 | **Operation Support** | All cuDNN operations | [Operation Support](./OperationSupport.md) |
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
+
+### cuDNN Compatibility Headers
+
+hipDNN also provides cuDNN-spelled headers under `frontend/include/hipdnn_compatibility/cudnn/` (for example, `#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>`). These headers let hipified code keep cuDNN type names. They are installed only when hipDNN is built with `HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. See the samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/).
 
 ### Tensor Dimensions and Layouts
 
@@ -148,11 +152,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 ### 2. Lack of Heuristic Modes
 
-**Error**: Missing Heuristic modes A and B
+**Error**: Heuristic modes A, B, and OPENSOURCE do not change engine selection
 
-**Cause**: The heuristic implementation in hipDNN has yet to be implemented
+**Cause**: hipDNN does not implement these heuristic modes yet. They map to the fallback heuristic.
 
-**Fix**: Use a combination of `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
+**Fix**: Use a combination of `Graph::get_ranked_engine_ids()` and `Graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
 
 ### 3. Device Memory Utilities
 

@@ -1,8 +1,9 @@
 # RFC 0020: The Universal Engine Descriptor (UED)
 
 - Contributors: TBD
-- **Status**: Draft
-- **Implementation Version**: TBD
+- **Status**: In progress
+- **Status notes**: The UED loads and registers a generic engine, with only the `native` arm of `graph_match` (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). The `nodes` pattern, the op-schema registry, the root-opcode index, the role-scoped heuristic maps, and the JSON Schema file are not built. The code reads one optional `heuristic` UUID instead of the role maps.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
@@ -174,7 +175,7 @@ to be a UED.
   "version":         "1.0",                        // major.minor; gated at load (§ 14)
   "id":              "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // UUID; referenced by KDPs (§ 3a)
   "name":            "rocke:example_attention_fwd",  // globally-unique, scoped engine name (§ 3b)
-  "sdk_version":     "1.0",                        // graph schema this pattern was authored against
+  "sdk_version":     "1.0.0",                      // graph schema this pattern was authored against
   // optional, arch-keyed heuristic roles (§ 4.6); each maps a gfx target or "default" to a UHD
   "sort_kernel_catalog":   {"gfx950": "ae896b07-80cd-473c-b3f4-6a8892998519",
                             "default": "c93e17aa-2d6b-4f10-8e75-3a9c04b6f2e1"},
@@ -209,6 +210,18 @@ outside `graph_match` is unchanged:
 
 ### 4.2 Normative schema
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `parseEngineDescriptor()` in `DescriptorLoader.hpp` accepts
+> `version`, `id`, `name`, `sdk_version`, `heuristic`, `metadata`, `knobs`, `behavior_notes`,
+> `numerical_notes`, and `graph_match`. The differences from this section are:
+> `heuristic` is one optional UHD UUID, and `sort_kernel_catalog`, `predict_engine`, and
+> `predict_applicable_kernels` are refused as unknown keys. `graph_match` accepts only `native`.
+> `sdk_version` is parsed as `MAJOR.MINOR.PATCH` (`Version` in `VersionUtils.hpp`), defaults to
+> `K_ENGINE_PLUGIN_API_VERSION_BASELINE` (`1.0.0`), and is checked only at match time
+> (`GenericPlanBuilder.hpp`), not at load. `behavior_notes` accepts only `runtime_compilation`.
+> A key that starts with `x-` or `_`, or the key `provenance`, is warned about and ignored. No
+> `ued.json` schema file ships; the checks are hand-written in the loader.
+
 A conforming UED is a JSON object with the members below. Unknown members are rejected. Every
 member but `graph_match` is inert data — a version, identity, two references, and optional
 annotations; `graph_match` is the one member carrying structure, and it holds whichever of the
@@ -221,7 +234,7 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
+| `sdk_version` | no | string | `<major>.<minor>.<patch>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0.0` when omitted. Compared numerically by `(major, minor, patch)`: the loader only parses and stores it, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). A refusal at load of a value newer than the runtime's own graph schema is not built. This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
 | `sort_kernel_catalog` | no | object (arch → UUID or [UUID]) | The **kernel-selection heuristic** map (§ 4.6): each key a gfx target or the literal `default`, each value a UHD UUID, or a list of them — at most one per ranking metric (RFC 0019 § 3.1, § 4.4) — each of which must resolve at load (§ 13.2). Absent => the engine ships no kernel-selection heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). An empty map, an empty list, or a key naming nothing, is an error. |
 | `predict_engine` | no | object (arch → UUID or [UUID]) | Optional **engine-estimate** map (§ 4.6): cheap `f(graph) → expected metric value` UHDs, one per ranking metric, consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. |
 | `predict_applicable_kernels` | no | object (arch → UUID) | Optional, **future** **candidate-generator** map (§ 4.6): a UHD producing the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form and resolution. |
@@ -296,9 +309,9 @@ provider's native registry (is this symbol registered) is semantic and runs in �
       "addedInVersion": "1.0"
     },
     "sdk_version": {
-      "description": "Graph schema version this pattern was authored against; defaults to 1.0 when absent (see RFC 0020 section 4.2).",
+      "description": "Graph schema version this pattern was authored against; defaults to 1.0.0 when absent (see RFC 0020 section 4.2).",
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+$",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "addedInVersion": "1.0"
     },
     "sort_kernel_catalog": {
@@ -578,6 +591,11 @@ A failure here is a load error naming the UED, the node `id`, and the unresolved
 
 ### 4.4 Serialization
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The loader has no comment-stripping parser. It reads only
+> the seven `*.<kind>.json` suffixes, and it warns about and skips a `.jsonc` file
+> (`DescriptorLoader.hpp`). Shipped descriptors are plain JSON.
+
 The UED is authored and shipped as **JSONC** (JSON with comments), consistent with how RFC 0017
 presents every descriptor. Comments are stripped before validation (§ 4.2, § 14.3).
 
@@ -628,6 +646,12 @@ the same slot in the same object, so that migration is a change within `graph_ma
 format break.
 
 ### 4.6 Heuristic roles and arch keying
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The role maps are not built. A UED names at most one UHD
+> through the optional `heuristic` key, with no arch key and no metric. With no `heuristic`, the
+> engine ranks by `priority`, then descriptor id, and logs a warning (`makeKernelHeuristic()` in
+> `IKernelHeuristic.hpp`).
 
 A UED carries **three role-scoped heuristic maps**, because an engine has more than one distinct
 selection job and they run at different points in the pipeline:
@@ -724,7 +748,7 @@ size, batch, and head count are **not** attributes; they are specific tensor dim
 as an attribute read (§ 6).
 
 **Device and arch are out-of-band.** The graph carries no device identity. Arch comes from the
-stream via `getDeviceString(handle.getStream())` (`HipDeviceUtils.hpp:48`); for AOT it gates *pack
+stream via `getDeviceString(handle.getStream())` (`HipDeviceUtils.hpp:49`); for AOT it gates *pack
 selection*, not a match criterion. Other device properties resolve against the `Handle` the matcher
 receives alongside the graph rather than against a graph field, and are the matcher's namespace, not
 the pattern's ([RFC 0018 § 2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)).
@@ -901,6 +925,12 @@ knowable at a given stage, which is the drift the shared order exists to prevent
 
 ## 7. Pattern Matching: Stage One
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** No pattern compiler or root-opcode index is built. Every
+> engine runs its `native` match, or binds nothing when `graph_match` is absent. The arch gate and
+> the lazy match are built: `KernelIngestorStateManager.hpp` runs `graph_match` once, on the first
+> pack that clears the arch gate (tests in `plugin_sdk/tests/ingestor/TestArchGate.cpp`).
+
 Matching a graph is two stages, and the pattern is the first of them. This section specifies the
 pattern's half: when it is compiled, how engines are pruned before any pattern runs, and what the
 bind step does. The second stage — a pack's criteria
@@ -959,6 +989,12 @@ already declares the field's type and default (RFC 0017 § 4). The UED's contrac
 
 ## 9. Behavior and Numerical Notes
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `behavior_notes` maps to `hipdnnBackendBehaviorNote_t`, and
+> only `runtime_compilation` is accepted. hipDNN has no numerical-note vocabulary yet, so
+> `numerical_notes` is kept as text and nothing reads it (`EngineDescriptor::numericalNotes` in
+> `Descriptors.hpp`).
+
 `behavior_notes` and `numerical_notes` are hipDNN's existing per-engine annotations
 ([RFC 0010](0010_BehaviorNotes.md)) carried on the UED. They are optional string lists. This
 RFC adds no new note vocabulary; it specifies only that the UED is where a descriptor-backed
@@ -1016,6 +1052,13 @@ serialization.
 
 ## 12. Engine Registration
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Steps 1, 3, and 5 are built (`GenericEngine.hpp`,
+> `MakeEngine.hpp`, `DescriptorLoader.hpp`; the HIP kernel provider adds the engines in
+> `dnn-providers/hip-kernel-provider/src/core/Container.cpp`). Step 2 handles only `native` and an
+> absent `graph_match`: an unregistered symbol drops the engine's whole descriptor set before
+> registration (`loadValidatedDescriptorSets()` in `DescriptorLoader.hpp`). Step 4 is not built.
+
 **Registration** is the process that turns a validated UED into an engine the provider exposes
 to hipDNN. The destination is the provider's existing engine list (the one that already holds
 hand-written engines), and registration is the descriptor-driven equivalent of the provider's
@@ -1064,6 +1107,13 @@ catches errors before shipping; run-time validation ensures integrity of the loa
 implementation may fold them into one pass.
 
 ### 13.1 Structural validation
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The structural check is hand-written in
+> `DescriptorLoader.hpp` (`requireKnownKeys()` and the `parse*Descriptor()` functions), not a JSON
+> Schema. It allows `x-` and `_` prefixed keys and `provenance` with a warning. The standalone tool
+> `hipdnn_validate_descriptors` (`tools/IngestorGenerator/ValidateDescriptors.cpp`) runs the same
+> loader over a descriptor tree.
 
 The **structural check** validates the UED against the schema (§ 4.2, § 14.3), confirming six
 things:
@@ -1150,6 +1200,11 @@ This RFC fixes only that a UED's own `heuristic` and `metadata` references are s
 both build and run time.
 
 #### 13.2.1 Duplicate detection (descriptor `id` and `name`)
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** UEDs follow this section. Packs and standalone UKDs are keyed
+> by `(id, arch)` instead, because each per-arch shard ships the same id
+> (`DescriptorLoader.hpp`).
 
 Duplicate detection runs over the complete loaded set (§ 11.1), so a drop-in UED is checked against
 every other UED exactly as any other.
@@ -1245,7 +1300,7 @@ a requirement.
 
 **`ued/1.0` is this rule applied to this RFC's own change.** Both members this RFC adds are
 **additive and absence-safe**, so the format stays on the `1.0` line and no shipped UED is
-orphaned. `sdk_version` defaults to `1.0`. `graph_match` is optional, and its absence is
+orphaned. `sdk_version` defaults to `1.0.0`. `graph_match` is optional, and its absence is
 well-defined as the behavior before the member existed: an engine that states no graph shape binds
 nothing and leaves applicability to its packs' criteria (§ 4.2). Neither member removes, renames,
 retypes, or changes the meaning of an existing field, and neither makes an optional field required.
@@ -1287,6 +1342,11 @@ any version-accurate check be performed.
 
 ## 15. Lifecycle and Operational Policy
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `HIPDNN_DISABLE_ENGINES` is built as described
+> (`isEngineDisabled()` in `DescriptorLoader.hpp`). `HIPDNN_DISABLE_KDPS` and `HIPDNN_DISABLE_UKDS`
+> do not exist.
+
 - **Load failure => log and skip.** A UED that fails validation is **logged as an error and
   skipped**; the provider does not hard-fail, and the skipped UED registers no engine. This
   matches RFC 0017's "reported in load diagnostics like any other exclusion" and the
@@ -1307,6 +1367,12 @@ any version-accurate check be performed.
   follow-up); this RFC adds no trust policy.
 
 ## 16. Testing
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The UED unit tests live in `plugin_sdk/tests/ingestor/`,
+> mainly `TestDescriptorLoader.cpp`, `TestArchGate.cpp`, and `TestKernelIngestorStateManager.cpp`.
+> Tests for the `nodes` pattern, the op-schema registry, and the schema file cannot exist yet,
+> because those parts are not built.
 
 Reusing the existing tiers (RFC 0006 harness) and RFC 0017 § 14.1's descriptor-pipeline
 fuzzing, this RFC adds UED-specific coverage.
@@ -1363,8 +1429,9 @@ fuzzing, this RFC adds UED-specific coverage.
   return fails closed at match time rather than at load. The test pins the *difference*, so the
   guarantee the hatch trades away stays visible rather than being assumed absent.
 - **`sdk_version` floor** (§ 4.2): a UED below the graph's reported floor declines the whole engine
-  before binding, taking every pack naming it; a UED above the runtime's own graph schema is
-  refused at load; an omitted `sdk_version` reads as `1.0`.
+  before binding, taking every pack naming it; an omitted `sdk_version` reads as `1.0.0`. The
+  loader does not refuse a UED newer than the runtime's own graph schema: the version is compared
+  only at match time.
 - **Duplicate detection, drop-all** (§ 13.2.1): two UEDs differing in content but sharing an
   `id`; two sharing a `name`; two sharing both; a UED colliding by name with a built-in engine. In
   each case *every* colliding UED is dropped and named in diagnostics, and no engine is left bound
@@ -1438,6 +1505,11 @@ The descriptor pipeline parses untrusted input on the drop-in path, so the loade
 
 ## 19. Appendix: Fully-Populated UED Examples
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** These examples use the declarative arm and the role maps,
+> which the current loader refuses. A UED that loads today is
+> `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.ued.json`.
+
 The examples in § 4 keep optional fields minimal. This appendix shows UEDs that populate **all**
 optional fields, which requires knowing the KMD they reference, since every `knobs` entry must
 name a field the KMD declares. § A.1 sketches only as much of the KMD as the UED depends on; the
@@ -1480,7 +1552,7 @@ declares (§ A.1); the notes are RFC 0010 annotations.
   "version":         "1.0",
   "id":              "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",   // UUID; KDPs name this via "engine"
   "name":            "rocke:attention_dense_fwd",              // globally-unique, scoped; hashed to the 64-bit engine id
-  "sdk_version":     "1.0",                                    // graph schema this pattern was authored against
+  "sdk_version":     "1.0.0",                                  // graph schema this pattern was authored against
   "sort_kernel_catalog": {"gfx950": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
                           "default": "8e0d5f31-7c2a-4b16-93e8-1a6f4d902c57"},
   "metadata":        "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",   // the KMD (§ A.1)
@@ -1506,7 +1578,7 @@ tensors — `$q`, `$k`, `$v`, `$o` unconditionally and `$attn_mask`, `$scale` op
 ### A.3 A minimal engine, for contrast (all optional fields omitted)
 
 The same engine with only required fields: no knobs, no notes, and no `sdk_version`, which then
-defaults to `1.0`. `graph_match` is optional but populated here, since an engine that omits it
+defaults to `1.0.0`. `graph_match` is optional but populated here, since an engine that omits it
 binds nothing at all (§ 4.2) and would make a poor contrast — the minimal form still states a
 graph shape, here the required operands only, which narrows the engine to graphs supplying nothing
 else the pattern would have to bind:
@@ -1534,6 +1606,12 @@ under § A.2 and is a load error under § A.3 (§ 13.2).
 ---
 
 ## Appendix B: Op-Schema Registry Generation
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** This generator is not built. No `.fbs` file carries
+> `umd_opcode`, `umd_input_tensor`, `umd_output_tensor`, or `umd_name`. The schemas do carry the
+> `cache_uid` family of attributes (`flatbuffers_sdk/schemas/graph.fbs`), which mark tensor-uid
+> fields for graph cache-key generation, not for pattern binding.
 
 The op-schema registry (§ 5) is the table the matcher
 consults to reconstruct a UID-centric graph's edges and to auto-bind symbols

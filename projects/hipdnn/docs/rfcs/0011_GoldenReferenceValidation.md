@@ -1,7 +1,11 @@
 # RFC 0011: Golden Reference Validation
 
 > Owner: Integration Test Team
-> Last updated: 2026-06-22
+> Last updated: 2026-10-15
+
+- **Status**: In progress
+- **Status notes**: The generic bundle runner, template sweeps, `--verification-mode`, the `hipdnn_golden_data_tests` binary, and `verify_golden_bundles.py` shipped (#8228, #8926, #8641, #10416, #11494). Bundle `.meta.json` tolerance, tolerance calibration, the `forward_source` check, the 800 MB budget check, and a pre-commit hook are not built. Code is in `dnn-providers/integration-tests/src/harness/bundle/`.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 1. [Summary](#summary)
@@ -85,20 +89,28 @@ The golden reference pattern is already in production for batchnorm: six bundles
 
 ### Code map for implementers
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The class names in this RFC were not used. The engine
+> runner is `IntegrationBundleVerificationHarness` (`dnn-providers/integration-tests/src/harness/bundle/`).
+> `BundleReferenceValidationHarness` (`src/harness/reference-validation/`) checks golden data
+> against the CPU and GPU reference executors in the separate `hipdnn_golden_data_tests` binary
+> (#11494). The per-operation golden classes were removed (#10162, #10343). The scripts are in
+> `dnn-providers/integration-tests/reference-data-scripts/`.
+
 The functional changes are described in the relevant Detailed Design subsections; this table is just a pointer to the affected files.
 
 | File | Disposition | Notes |
 |------|-------------|-------|
 | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | Kept, extended | Add tensor-size check after load ([Data Integrity #1](#data-integrity)) |
-| [`GoldenReferenceCpu.hpp`](../../test_sdk/tests/utilities/GoldenReferenceCpu.hpp) | -> `TestCpuReferenceUsingGoldenValues.hpp` | Subclass; CPU reference executor execution step |
+| `GoldenReferenceCpu.hpp` | -> `TestCpuReferenceUsingGoldenValues.hpp` | Subclass; CPU reference executor execution step |
 | (new) `TestGpuReferenceUsingGoldenValues.hpp` | New | Subclass; GPU reference executor execution step |
-| [`GoldenReferenceGpu.hpp`](../../../../dnn-providers/miopen-provider/tests/common/GoldenReferenceGpu.hpp) | -> `IntegrationGpuGoldenReferenceEngineValidation.hpp` | Subclass; engine execution step, "unsupported" -> SKIP |
-| [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | Removed | Per-operation C++ class no longer needed |
+| `GoldenReferenceGpu.hpp` | -> `IntegrationGpuGoldenReferenceEngineValidation.hpp` | Subclass; engine execution step, "unsupported" -> SKIP |
+| [`TestCpuFpReferenceBatchnorm.cpp`](../../test_sdk/tests/utilities/TestCpuFpReferenceBatchnorm.cpp) | Kept as a CPU reference unit test | Its golden-data part was removed (#7480); the file still exists and is built |
 | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) | Kept, extended | Generic runner adds operation-type lookup |
 | [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | Kept as-is | Existing TOML overrides apply to golden tests unchanged |
 | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | Future | Wired in later as the per-operation default |
-| [`reference-data-scripts/utilities/`](../../reference-data-scripts/utilities/) | Kept, enhanced | Generators auto-derive output path from graph content |
-| [`hipdnn_reference_data/`](../../hipdnn_reference_data/BatchnormFwdInference/) (6 batchnorm bundles) | Relocated | Moves to `integration-test-bundles/quick/BatchnormFwdInference/` |
+| [`reference-data-scripts/utilities/`](../../../../dnn-providers/integration-tests/reference-data-scripts/utilities/) | Kept, enhanced | Generators take an explicit output name (`-f/--base-filename`); auto-deriving the path is not built |
+| `hipdnn_reference_data/` (6 batchnorm bundles) | Relocated | Moves to `integration-test-bundles/quick/BatchnormFwdInference/` |
 | (new) `IntegrationGraphGoldenReferenceVerificationHarness` | New | Owns discovery, loading, tolerance lookup, comparison |
 
 ---
@@ -128,6 +140,13 @@ Either bundle kind can be **full** or **graph-only**. A **full bundle** carries 
 
 ##### Bundle metadata
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The loader (`src/harness/BundleMetadata.hpp`) requires
+> only `format_version` (must be `1`). It reads `generator`, `reference_source`,
+> `reference_strategy`, `gpu_architecture`, `minimum_vram_mb`, `seed`, `notes`, and
+> `enforcement_level`. It does not read `tolerance` or `forward_source`.
+> `verify_golden_bundles.py` requires only `generator` and `reference_source`.
+
 Provenance and calibration data is stored in a **separate companion file** (`{Name}.meta.json`), not in the graph JSON. This keeps the graph schema 1:1 with the hipDNN `graph.fbs` format and avoids polluting the computation definition with test infrastructure details. The test runner loads this file to read calibrated tolerance values (see [Tolerance Framework](#tolerance-framework)); all other fields are for humans, tooling, and traceability.
 
 ```
@@ -149,7 +168,7 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
   "reference_source": "PyTorch 2.3.0",
   "reference_source_hash": "a3f8c2e1",
   "reference_strategy": "precision_uplift",
-  "generation_command": "python generate_batchnorm_reference.py --name typical",
+  "generation_command": "python generate_batchnorm_reference.py -f typical ...",
   "notes": "baseline for RFC 0011 migration",
   "seed": 42,
   "minimum_vram_mb": 8192
@@ -176,7 +195,7 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
 
 When `gpu_architecture` is present, the arch guard skips the test if the current device doesn't match. When absent (as in the first example), the data is portable across all ASICs.
 
-The `.meta.json` file itself is optional for forward bundles. A bundle without one is valid: it falls back to the per-operation default tolerance (see [Tolerance Framework](#tolerance-framework)) and is never skipped or rejected on that basis — this is the expected state for bundles migrated from the old test system. When a `.meta.json` *is* present, the `generator`, `reference_source`, and `reference_strategy` fields are mandatory and the pre-commit bundle verifier rejects a `.meta.json` missing them. Remaining fields are optional. Generator scripts populate the metadata file automatically. (Backward bundles are the exception: they must include a `.meta.json` with a `forward_source` field — see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint).)
+The `.meta.json` file itself is optional for forward bundles. A bundle without one is valid: it falls back to the per-operation default tolerance (see [Tolerance Framework](#tolerance-framework)) and is never skipped or rejected on that basis — this is the expected state for bundles migrated from the old test system. When a `.meta.json` *is* present, the `generator` and `reference_source` fields are mandatory and `verify_golden_bundles.py` rejects a `.meta.json` missing them. `reference_strategy` and the remaining fields are optional. Generator scripts populate the metadata file automatically. (Backward bundles are the exception: they must include a `.meta.json` with a `forward_source` field — see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint).)
 
 **Field reference:**
 
@@ -190,7 +209,7 @@ The `.meta.json` file itself is optional for forward bundles. A bundle without o
 | `rocm_version` | No | string | ROCm version used during generation. |
 | `reference_source` | Yes | string | What computed the reference output (e.g. `"PyTorch 2.3.0"`, `"AITER 0.1.13"`, `"CpuReferenceGraphExecutor"`). Informational — used for traceability, not for guard logic. |
 | `reference_source_hash` | No | string | Commit hash or checksum of the reference source for traceability. |
-| `reference_strategy` | Yes | string | How reference precision was chosen (see table below). |
+| `reference_strategy` | No | string | How reference precision was chosen (see table below). |
 | `generation_command` | No | string | Full command line used to generate the bundle. |
 | `notes` | No | string | Free-text notes for humans. |
 | `seed` | No | integer | RNG seed used for input generation. Enables reproducible regeneration. |
@@ -207,7 +226,7 @@ Unknown fields are ignored by the reader, so generators may include additional f
 
 #### Golden Data Format
 
-A bundle is a **directory** containing files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). The existing `LoadGraphAndTensors.hpp` (C++ reader) and [`Graph.save()`](../../reference-data-scripts/utilities/graph.py) (Python writer) already implement this format.
+A bundle is a **directory** containing files with a shared base name: one `.json` file (graph definition conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema) and one `.tensor{uid}.bin` file per tensor (raw contiguous data matching the tensor's declared `data_type`, `dims`, and `strides`). The existing `LoadGraphAndTensors.hpp` (C++ reader) and [`Graph.save()`](../../../../dnn-providers/integration-tests/reference-data-scripts/utilities/graph.py) (Python writer) already implement this format.
 
 ```
 {Name}/                    # One directory per bundle
@@ -336,6 +355,16 @@ Validation rules for template sweeps:
 
 #### Folder Convention
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Discovery has no fixed folder schema.
+> `discoverBundles()` in `src/harness/bundle/BundleDiscovery.hpp` walks the whole data root once.
+> Any graph `.json` in any sub-folder becomes a test. The tier is the first folder name.
+> Single-graph bundles hold `{Name}.json`, `{Name}.meta.json`, `{Name}.support.json`, and
+> `{Name}.tensors.dvc` in a `{Name}/` folder, for example
+> `quick/BatchnormFwdInference/nchw/fp32/Small/`. Some operations use extra levels, for example
+> `standard/SdpaFwd/bhsd/bf16/hd128_causal_batch/Gqa/`. Most sweeps use the topology name
+> `Default`, for example `standard/SdpaFwd/Default/`.
+
 The top-level directory is organized by **tier**. Below that, the runner discovers both single-graph bundles and template-sweep bundles. Single-graph bundles keep the legacy `{Operation}/{Layout}/{DataType}/{BundleName}/` convention. Template sweeps use `{Operation}/{TopologyName}/` because layout, data type, dims, and strides are case data in `sweep.json`.
 
 ```
@@ -351,18 +380,18 @@ integration-test-bundles/
       golden/{CaseId}/tensors.dvc
 ```
 
-In the source tree, bundle data lives with the integration test suite at `dnn-providers/integration-tests/integration-test-bundles/`. At runtime, the test binary reads directly from the source tree location -- no CMake copy step. The default path is resolved relative to the executable, and `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
+In the source tree, bundle data lives with the integration test suite at `dnn-providers/integration-tests/integration-test-bundles/`. CMake copies this folder to `<build>/lib/integration-test-bundles/` at configure time and installs it. The default path is `<exe_dir>/../lib/integration-test-bundles/`, and `--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR` can override it.
 
 ##### Tier folders
 
 The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers):
 
-| Folder | GTest prefix | `ctest -L` |
+| Folder | GTest suite prefix | `ctest -L` |
 |--------|-------------|------------|
-| `quick/` | (none) | `quick` |
-| `standard/` | `Standard` | `standard` |
-| `comprehensive/` | `Comprehensive` | `comprehensive` |
-| `full/` | `Full` | `full` |
+| `quick/` | `quick_` | `quick` |
+| `standard/` | `standard_` | `standard` |
+| `comprehensive/` | `comprehensive_` | `comprehensive` |
+| `full/` | `full_` | `full` |
 
 Note: the ctest label uses `quick` for the smoke tier.
 
@@ -419,15 +448,15 @@ integration-test-bundles/
 
 ##### Filtering by generated test name
 
-Single-graph bundles keep the legacy naming pattern: graph-derived suite plus bundle directory name. Template sweeps use a sweep-derived suite plus `cases[].id`.
+The suite name is the bundle folder path relative to the data root, sanitized and joined with `_`. The test name is the graph `.json` stem for a single-graph bundle, and the sanitized `cases[].id` for a template sweep.
 
 | Bundle source | Generated GTest name |
 |---------------|---------------------|
-| `quick/BatchnormFwdInference/nchw/fp32/miopen/miopen.json` | `BatchnormFwdInference_nchw_fp32.miopen` |
-| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp32_nchw` | `BatchnormFwdInference_Inference.small_fp32_nchw` |
-| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp16_nchw` | `BatchnormFwdInference_Inference.small_fp16_nchw` |
-| `standard/SdpaFwd/BhsdNoMask/sweep.json`, case `gqa_bf16` | `Standard/SdpaFwd_BhsdNoMask.gqa_bf16` |
-| `quick/customer_issues/CASE-12345/repro/repro.json` | `ConvFwd_nchw_fp32.repro` |
+| `quick/BatchnormFwdInference/nchw/fp32/Small/Small.json` | `quick_BatchnormFwdInference_nchw_fp32_Small.Small` |
+| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp32_nchw` | `quick_BatchnormFwdInference_Inference.small_fp32_nchw` |
+| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp16_nchw` | `quick_BatchnormFwdInference_Inference.small_fp16_nchw` |
+| `standard/SdpaFwd/Default/sweep.json`, case `{CaseId}` | `standard_SdpaFwd_Default.{CaseId}` |
+| `quick/customer_issues/CASE-12345/repro/repro.json` | `quick_customer_issues_CASE_12345_repro.repro` |
 
 **Collision handling**: Single-graph bundles collide when they produce the same suite and test name. Template-sweep bundles collide when two cases in the same sweep use the same `id`, or when two registered cases produce the same sanitized suite/test pair. Discovery rejects collisions with an error naming both sources.
 
@@ -454,14 +483,14 @@ Filters match the generated test name:
 # All bundles testing ResNet50 shapes
 --gtest_filter=*resnet50*
 
-# Standard-tier tests only (GTest prefix)
---gtest_filter=Standard/*
+# Standard-tier tests only (suite prefix)
+--gtest_filter=standard_*
 
 # One specific template-sweep case
 --gtest_filter=*BatchnormFwdInference_Inference.small_fp32_nchw
 
 # One specific single-graph bundle
---gtest_filter=*BatchnormFwdInference_nchw_fp32.odd_spatial
+--gtest_filter=quick_BatchnormFwdInference_nchw_fp32_Small.Small
 ```
 
 ---
@@ -470,13 +499,25 @@ Filters match the generated test name:
 
 #### Generation Pipeline
 
-Golden data is generated by Python scripts in [`reference-data-scripts/`](../../reference-data-scripts/). The reference source is configurable per operation (see [Reference Sources](#reference-sources)); the existing batchnorm generators use PyTorch. Each generator follows the same three-step pattern:
+> [!NOTE]
+> **Implementation note (2026-10-15):** The scripts are in
+> `dnn-providers/integration-tests/reference-data-scripts/`. The generators are
+> `generate_batchnorm_reference.py`, `generate_sdpa_fwd_golden.py`, and
+> `generate_sdpa_runtime_scale_test_bundle.py`. `generate_batchnorm_reference.py` takes
+> `-f/--base-filename`. It has no `--name` option and does not derive the output path. Most
+> bundles are graph-only: they are captured from C++ graph tests with `--capture-bundles` and
+> placed with the tools in `migration-scripts/`.
+
+Golden data is generated by Python scripts in [`reference-data-scripts/`](../../../../dnn-providers/integration-tests/reference-data-scripts/). The reference source is configurable per operation (see [Reference Sources](#reference-sources)); the existing batchnorm generators use PyTorch. Each generator follows the same three-step pattern:
 
 1. **Define** -- create graph and input tensors
 2. **Compute** -- run the reference source using a **per-operation precision strategy** and cast outputs to the target type. The strategy depends on the operation's rounding depth:
    - **Precision uplift** (shallow operations -- batchnorm, pointwise, activations): compute in higher precision than the target (e.g., fp64 for fp32 bundles). Few rounding events, so the trajectory divergence between reference and DUT is minimal.
    - **Matched-precision** (deep operations -- SDPA backward, multi-step chains): compute with the same intermediate precision as the DUT's accumulation contract (e.g., BF16 inputs with FP32 intermediates for a32 accumulator kernels). Higher-precision references diverge from the DUT's rounding trajectory at every stage, producing deltas dominated by accumulated precision loss rather than kernel bugs -- forcing artificially loose tolerances that hide real regressions.
 3. **Write** -- save the bundle (`.json` + `.tensor{uid}.bin`) in the target precision
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Auto-deriving the output path is not built. The `--name` option shown below does not exist; see the note above for the real generator options.
 
 The generator should **auto-derive the output path** from the graph content. The developer supplies only the **bundle name**; the generator computes the directory from the graph's operation type, layout, and data type:
 
@@ -488,6 +529,10 @@ python generate_batchnorm_reference.py --name typical
 Only batchnorm has generators and data today. Generators for the remaining operations will be added incrementally.
 
 #### Forward-Backward Generation Constraint
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Not built. `BundleMetadata.hpp` has no `forward_source`
+> field, and no check compares backward bundles with forward bundles.
 
 Backward operations (SDPA backward, batchnorm backward, conv backward) consume **saved tensors from the forward pass** as inputs -- `O` and `LSE` for SDPA, `saved_mean` and `inv_variance` for batchnorm, `mask` for dropout. These are not arbitrary tensors: they must be the actual outputs of a mathematically consistent forward computation. Filling them with random values produces a backward bundle whose expected outputs are numerically meaningless.
 
@@ -536,6 +581,14 @@ The golden data format is **reference-source-agnostic**. Any tool that produces 
 
 #### Generic Test Runner
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Built differently. `hipdnn_integration_tests` runs each
+> bundle through the engine with `IntegrationBundleVerificationHarness`. `hipdnn_golden_data_tests`
+> checks golden data against the reference executors with `BundleReferenceValidationHarness`
+> (suites end in `_CpuRef` or `_GpuRef`). Discovery is one `discoverBundles(bundleDir)` call over
+> the whole data root, not one call per tier. A missing data root gives a warning and no tests.
+> Only `verify_golden_bundles.py` warns about unexpected top-level folders.
+
 The runner is a **base class** (`IntegrationGraphGoldenReferenceVerificationHarness`) with three concrete subclasses: `TestCpuReferenceUsingGoldenValues` (CPU reference executor), `TestGpuReferenceUsingGoldenValues` (GPU reference executor), and `IntegrationGpuGoldenReferenceEngineValidation` (GPU plugin). The base class owns discovery, loading, tolerance lookup, and comparison. Each subclass overrides the execution step. Neither subclass knows what operation a bundle contains until it loads the graph JSON at runtime.
 
 The CPU and GPU reference subclasses validate the reference executors themselves against golden data. The engine subclass validates the engine. All three share the same base class and the same bundles — only the execution step differs.
@@ -544,7 +597,7 @@ The CPU and GPU reference subclasses validate the reference executors themselves
 
 For a **full single-graph bundle** (`.json` + `.bin` files):
 
-1. **Discover** -- at GTest startup, `discoverGoldenBundles(tierDir)` recursively scans the tier directory for single-graph `.json` files. Each graph path becomes one logical bundle case -- no C++ code per test.
+1. **Discover** -- at GTest startup, `discoverBundles(bundleDir)` recursively scans the data root for single-graph `.json` files. Each graph path becomes one logical bundle case -- no C++ code per test.
 2. **Load** -- when a test case runs, the runner calls `loadGraphAndTensors()` which deserializes the `.json` into an executable graph object and loads the corresponding `.bin` files into tensors. If a `.meta.json` file exists, the runner reads calibrated tolerance values from it.
 3. **Execute** -- run the graph through the engine under test
 4. **Compare** -- check engine output against golden output from the `.bin` files using the [three-level tolerance chain](#three-levels) -- PASS or FAIL
@@ -572,11 +625,11 @@ FAIL: ConvFwd_nhwc_fp16.resnet50_layer3
 
 ##### Test discovery
 
-At GTest startup, `discoverGoldenBundles(tierDir)` recursively scans a tier directory, discovers single-graph bundles, expands template-sweep bundles into logical cases, and registers one test case per logical bundle case. Discovery is shared — the same cases are available to all runner subclasses. The [verification mode](#verification-modes) determines which runner executes each test (golden, GPU ref, CPU ref, or auto-fallback). Registration is per tier, not per operation — it never changes as new operations, bundles, or sweep rows are added.
+At GTest startup, `discoverBundles(bundleDir)` recursively scans the data root, discovers single-graph bundles, expands template-sweep bundles into logical cases, and registers one test case per logical bundle case. Discovery is shared — the same cases are available to all runner subclasses. The [verification mode](#verification-modes) determines which runner executes each test (golden, GPU ref, CPU ref, or auto-fallback). Registration is per data root, not per operation — it never changes as new operations, bundles, or sweep rows are added.
 
 **Decided: [`::testing::RegisterTest`](https://google.github.io/googletest/advanced.html#registering-tests-programmatically).** Each logical bundle case is registered as its own test at static initialization time. This eliminates per-operation C++ registration code and gives direct control over test naming (see [Test naming scheme](#test-naming-scheme)). `RegisterTest` applies to golden reference tests only; GPU integration tests continue to use `INSTANTIATE_TEST_SUITE_P`.
 
-If the tier directory is empty or missing, `discoverGoldenBundles` returns an empty list (no tests, no failure). Unexpected top-level directories (e.g., `quik/` instead of `quick/`) trigger a warning to catch typos.
+If the data root is empty or missing, no tests are registered and the run does not fail. The bundle verifier (`verify_golden_bundles.py`) warns about unexpected top-level directories (e.g., `quik/` instead of `quick/`) to catch typos.
 
 ##### Test naming scheme
 
@@ -584,10 +637,10 @@ Single-graph and template-sweep bundles use different sources for the final gtes
 
 | Bundle kind | Suite source | Test source | Example |
 |-------------|--------------|-------------|---------|
-| Single graph | Graph content (`operation`, layout, data type) | Bundle directory name | `BatchnormFwdInference_nchw_fp32.miopen` |
-| Template sweep | Sweep location (`Operation`, `TopologyName`) | Sanitized `cases[].id` | `BatchnormFwdInference_Inference.small_fp32_nchw` |
+| Single graph | Bundle folder path relative to the data root | Graph `.json` stem | `quick_BatchnormFwdInference_nchw_fp32_Small.Small` |
+| Template sweep | Sweep folder path relative to the data root | Sanitized `cases[].id` | `quick_BatchnormFwdInference_Inference.small_fp32_nchw` |
 
-The tier prefix still comes from the top-level folder: `standard/` adds `Standard/`; `quick/` omits the prefix.
+The tier is the first part of the suite name: `standard/` gives `standard_`, and `quick/` gives `quick_`.
 
 **GTest identifier validity**: All components use `[a-zA-Z0-9_]` only. The sanitizer replaces invalid characters with underscores.
 
@@ -595,20 +648,20 @@ The tier prefix still comes from the top-level folder: `standard/` adds `Standar
 
 | Bundle source | Generated GTest name |
 |---------------|---------------------|
-| `quick/BatchnormFwdInference/nchw/fp32/miopen/miopen.json` | `BatchnormFwdInference_nchw_fp32.miopen` |
-| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp32_nchw` | `BatchnormFwdInference_Inference.small_fp32_nchw` |
-| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp16_nchw` | `BatchnormFwdInference_Inference.small_fp16_nchw` |
-| `standard/SdpaFwd/BhsdNoMask/sweep.json`, case `gqa_bf16` | `Standard/SdpaFwd_BhsdNoMask.gqa_bf16` |
-| `quick/customer_issues/CASE-12345/repro/repro.json` | `ConvFwd_nchw_fp32.repro` |
+| `quick/BatchnormFwdInference/nchw/fp32/Small/Small.json` | `quick_BatchnormFwdInference_nchw_fp32_Small.Small` |
+| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp32_nchw` | `quick_BatchnormFwdInference_Inference.small_fp32_nchw` |
+| `quick/BatchnormFwdInference/Inference/sweep.json`, case `small_fp16_nchw` | `quick_BatchnormFwdInference_Inference.small_fp16_nchw` |
+| `standard/SdpaFwd/Default/sweep.json`, case `{CaseId}` | `standard_SdpaFwd_Default.{CaseId}` |
+| `quick/customer_issues/CASE-12345/repro/repro.json` | `quick_customer_issues_CASE_12345_repro.repro` |
 
-**Collision handling**: see [Collision handling](#collision-handling) above. Discovery rejects duplicate sanitized suite/test pairs with an error naming both sources. Within one template sweep, duplicate `cases[].id` values are also an error.
+**Collision handling**: see the collision rules under [Filtering by generated test name](#filtering-by-generated-test-name) above. Discovery rejects duplicate sanitized suite/test pairs with an error naming both sources. Within one template sweep, duplicate `cases[].id` values are also an error.
 
 ##### What changes from today
 
 | Aspect | Current (batchnorm only) | This RFC |
 |--------|--------------------------|----------|
 | Test class | One per operation/layout/datatype | One generic class for all |
-| Discovery | `getGoldenReferenceParams(subDir)` -- shallow scan, one call per directory | `discoverGoldenBundles(tierDir)` -- recursive scan plus template-sweep expansion, one call per tier |
+| Discovery | `getGoldenReferenceParams(subDir)` -- shallow scan, one call per directory | `discoverBundles(bundleDir)` -- recursive scan plus template-sweep expansion, one call per data root |
 | Adding a test | Drop files (existing op) or write C++ class (new op) | Drop a single-graph bundle or append a row to `sweep.json` plus golden data. |
 | Tier assignment | GTest prefix per instantiation call | Tier folder at top level |
 | Tolerance | Hard-coded per test class | Looked up from graph content and case metadata at runtime |
@@ -638,13 +691,21 @@ The `--verification-mode` flag overrides this default. In every mode, the **engi
 | Mode | Reference source | When reference unavailable |
 |------|-----------------|---------------------------|
 | `auto` (default) | Per-test fallback: golden → GPU ref → CPU ref | FAIL -- indicates a validation gap |
-| `golden` | Pre-computed data from bundle | SKIP -- bundle has no golden data |
-| `gpu` | GPU reference executor at runtime | SKIP -- no GPU ref for this operation |
-| `cpu` | CPU reference executor at runtime | SKIP -- no CPU ref for this operation |
+| `golden` | Pre-computed data from bundle | FAIL -- bundle has no golden data |
+| `gpu` | GPU reference executor at runtime | FAIL -- GPU ref cannot verify this bundle |
+| `cpu` | CPU reference executor at runtime | FAIL -- CPU ref cannot verify this bundle |
 
 **Floating-point edge case**: `-0.0` vs `+0.0` uses value comparison, not bitwise. NaN handling is covered in [Data Integrity](#data-integrity).
 
 #### Tolerance Framework
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Only levels 1 and 3 are built.
+> `src/harness/tolerance/ToleranceResolver.hpp` starts from the per-operation default in
+> `TestTolerances.hpp` and applies a matching engine TOML `[[tolerance_overrides]]` entry. No
+> code reads a bundle `tolerance` block, and no calibration tool exists. `hipdnn_golden_data_tests`
+> uses the per-operation default only. Engine TOML can also select a validator per tensor with
+> `[[validator_overrides]]` (#11716).
 
 Tolerance is determined by a **three-level priority chain**. The highest-priority source that provides a value wins.
 
@@ -705,6 +766,10 @@ This evolution changes *how* the default is computed -- it does not change the t
 
 ##### Current gap
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** These classes were removed (#10343). The bundle harness
+> uses the TOML override and the per-operation default. The bundle-metadata step is not built.
+
 The golden ref framework (`TestCpuReferenceUsingGoldenValues` / `TestGpuReferenceUsingGoldenValues` / `IntegrationGpuGoldenReferenceEngineValidation`) takes tolerances as hard-coded function parameters -- it bypasses both the TOML override lookup and the bundle metadata lookup. Golden tests must be connected to the three-level flow: check TOML override first, then bundle metadata, then fall back to per-operation default.
 
 **Acceptance criteria**:
@@ -715,24 +780,33 @@ The golden ref framework (`TestCpuReferenceUsingGoldenValues` / `TestGpuReferenc
 
 #### Data Integrity
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Check 1 is built: the bundle loader
+> (`src/harness/bundle/IntegrationTestBundle.hpp`) throws when a tensor blob is unreadable or the
+> wrong size. The verifier is `reference-data-scripts/verify_golden_bundles.py` (#8641). It is a
+> CLI, not a pre-commit hook. It checks graph and sweep parsing, required metadata fields,
+> NaN/Inf in outputs, missing or wrong-size `.bin` files, and tier folder names. It warns at
+> 1 MiB and fails at 2 MiB per bundle. Checks 8 (`forward_source`) and the 800 MB aggregate
+> budget in check 9 are not built. `generate_sdpa_fwd_golden.py` rejects NaN/Inf output.
+
 Internal consistency is guaranteed by construction for generated bundles: `Graph.save()` writes single-graph JSON and `.bin` files from the same in-memory graph in a single call, so UIDs and tensor data correspond. Template-sweep tooling must provide the same guarantee after expansion: each row in `sweep.json` expands to a valid graph, and tensor data is loaded from that case's `golden/{CaseId}/` directory or explicit `golden.path`, never from the template directory. Corruption can only enter after generation -- partial downloads, disk errors, manual edits, or incorrect sweep rows.
 
 Three checks catch the real tensor-data failure modes:
 
-1. **Tensor size validation (load time)** -- *proposed*. Verify that the loaded byte count matches `element_space x sizeof(element_type)` declared in the expanded graph JSON (see [binary tensor format](#binary-tensor-format)). Not performed today -- a truncated file silently produces garbage. This is the primary load-time integrity check -- fast and sufficient to catch truncated downloads and wrong-file swaps.
+1. **Tensor size validation (load time)** -- *built* in the bundle loader. Verify that the loaded byte count matches `element_space x sizeof(element_type)` declared in the expanded graph JSON (see [binary tensor format](#binary-tensor-format)). This is the primary load-time integrity check -- fast and sufficient to catch truncated downloads and wrong-file swaps.
 
-2. **NaN/Inf rejection (generation time)** -- *proposed*. Reject output tensors containing NaN or Inf before writing any files. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
+2. **NaN/Inf rejection (generation time)** -- *built for `generate_sdpa_fwd_golden.py` only*. Reject output tensors containing NaN or Inf before writing any files. All-same-value tensors are valid (e.g., a bias-only layer can produce uniform output).
 
-3. **NaN/Inf rejection (pre-commit)** -- *proposed*. Safety net for bundles generated by external tools or before check #2 is added. The **pre-commit bundle verifier** scans output tensors and rejects any containing NaN or Inf.
+3. **NaN/Inf rejection (verifier)** -- *built* in `verify_golden_bundles.py`. Safety net for bundles generated by external tools. The **bundle verifier** scans output tensors and rejects any containing NaN or Inf.
 
-The **pre-commit bundle verifier** runs checks #1-#3 across a directory tree before bundles are committed. DVC content-addressing handles file integrity, so no separate checksum is needed. The verifier also validates structural conventions and data-size budgets:
+The **bundle verifier** (`verify_golden_bundles.py`, a CLI run by hand, not a pre-commit hook) runs checks #1-#3 across a directory tree before bundles are committed. DVC content-addressing handles file integrity, so no separate checksum is needed. The verifier also validates structural conventions and data-size budgets:
 
 4. **Tier folder validation** -- warn about top-level directories that are not one of the four tier names
 5. **Single-graph JSON validation** -- verify each single-graph `.json` file is a parseable graph (not a stray `README.json` or editor config)
 6. **Template-sweep validation** -- verify `graph.template.json`, `sweep.json`, placeholder coverage, per-case tensor UID/dims/strides/data-type coverage, duplicate ids, golden DVC pointer paths, and expanded graph schema validity
 7. **Missing `.bin` files** -- for full single-graph bundles and expanded template cases, verify that every tensor UID in the graph has a corresponding `.bin` file in that bundle or case directory
 8. **Forward-backward consistency** -- for backward bundles, verify that `meta.json` includes a `forward_source` field (see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint))
-9. **DVC payload budget** -- warn when one expanded case's tensor payload exceeds 2 MB, report aggregate tensor payload for the tree, and fail when committed golden tensor payload exceeds the 800 MB project budget from [Bundle size considerations](#bundle-size-considerations)
+9. **DVC payload budget** -- warn when one bundle's tensor payload exceeds 1 MiB and fail above 2 MiB (built). Reporting the aggregate tensor payload for the tree and failing when committed golden tensor payload exceeds the 800 MB project budget from [Bundle size considerations](#bundle-size-considerations) is not built.
 
 **Acceptance criteria**:
 - [ ] All checks implemented with actionable error messages naming the file and tensor UID
@@ -744,6 +818,14 @@ The **pre-commit bundle verifier** runs checks #1-#3 across a directory tree bef
 ---
 
 ### 4.4 CLI and Configuration
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Both flags are in `hipdnn_integration_tests`
+> (`src/main.cpp`). In every mode, a test whose requested reference cannot verify the bundle
+> fails; it is not skipped. The old `golden-check` mode was retired: the
+> `hipdnn_golden_data_tests` binary (`--reference cpu|gpu|both`) validates golden data. Other
+> bundle flags are `--validator` (`HIPDNN_TEST_VALIDATOR`), `--no-bundles`
+> (`HIPDNN_TEST_ALLOW_BUNDLES=0`), and `--capture-bundles`.
 
 `--verification-mode` controls **what** runs. `--golden-data-dir` controls **where** golden data is read from (ignored when mode is `cpu` or `gpu`).
 
@@ -771,6 +853,13 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Bundles became the CI driver in #10416.
+> `.github/workflows/hipdnn-superbuild-ci.yml` runs
+> `dvc pull --recursive dnn-providers/integration-tests/integration-test-bundles` and then the
+> ctest targets, including `hipdnn_golden_data_tests`. No CI workflow sets
+> `--verification-mode`, so CI uses `auto`. Tier labels come from `test_categories.yaml`.
+
 Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#how-tiers-cascade) as all other integration tests.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
@@ -782,8 +871,14 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 
 ### Workflows
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** A provider does not subclass a harness. It calls
+> `add_external_integration_test_target()` from
+> `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake` (see "Add an engine
+> lane" in the [integration tests docs](../../../../dnn-providers/integration-tests/docs/adding-tests.md#add-an-engine-lane)).
+
 **Add a test -- any operation, any data type** (developer):
-1. Write a generation script following the [`generate_batchnorm_reference.py`](../../reference-data-scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
+1. Write a generation script following the [`generate_batchnorm_reference.py`](../../../../dnn-providers/integration-tests/reference-data-scripts/generate_batchnorm_reference.py) pattern, run it to produce a bundle
 2. Run the pre-commit bundle verifier to verify the bundle is well-formed
 3. Drop the bundle folder into the appropriate tier directory (e.g., `integration-test-bundles/quick/ConvFwd/nhwc/fp16/MyTest/`) and commit (DVC for large tensors). No C++ changes, no recompile -- the generic runner discovers it automatically
 
@@ -806,6 +901,13 @@ Tiers are determined by the top-level folder (see [Folder Convention](#folder-co
 
 ## Migration Plan
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Phase 1 shipped (#7480, #7548, #8228). Phase 2 shipped
+> in part: TOML overrides apply and the bundle verifier exists (#8641), but bundle-metadata
+> tolerance does not. Phase 3 shipped as bundles for conv, matmul, and pointwise. Phase 4 shipped
+> (#10416). Phase 5 shipped in part: bundles exist for SDPA, layernorm, RMS norm, and reduction,
+> and the per-operation golden classes were removed (#10343). Calibrated tolerance is not built.
+
 The transition from per-operation test classes to the generic runner is incremental. Old and new coexist at every phase -- no flag day.
 
 | Phase | What ships | Coexistence |
@@ -824,9 +926,9 @@ The transition from per-operation test classes to the generic runner is incremen
 
 Golden data lives in two places -- **source tree** and **runtime**:
 
-- **Source tree**: Bundle data lives at `dnn-providers/integration-tests/integration-test-bundles/`. The existing batchnorm data currently lives at `projects/hipdnn/hipdnn_reference_data/` and will be moved here.
+- **Source tree**: Bundle data lives at `dnn-providers/integration-tests/integration-test-bundles/`. The batchnorm data that lived at `projects/hipdnn/hipdnn_reference_data/` was moved here (#7480, #7548).
 
-- **Runtime**: The test binary reads golden data directly from the source tree -- no CMake copy step. The default path is resolved relative to the executable. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
+- **Runtime**: CMake copies the bundles to `<build>/lib/integration-test-bundles/` at configure time and installs them. The default path is `<exe_dir>/../lib/integration-test-bundles/`. The `--golden-data-dir` CLI flag or `HIPDNN_TEST_GOLDEN_DATA_DIR` env var overrides this location.
 
 ##### Hybrid storage: git for metadata, DVC for tensors
 

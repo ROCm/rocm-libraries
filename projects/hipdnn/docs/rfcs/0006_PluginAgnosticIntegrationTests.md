@@ -1,5 +1,9 @@
 # RFC 0006: Plugin-Agnostic Integration Tests
 
+- **Status**: Implemented
+- **Status notes**: The suite shipped as `dnn-providers/integration-tests` (#4087). #5948 replaced `BuildEngineTestMatrix` and the TheRock TOML-to-JSON config with a command-line tool (`--test-article`, `--test-engine`, `--test-config`) that each provider runs against its own engine. Graph-verification coverage is now mostly data bundles (RFC 0011); C++ graph tests build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
 2. [Problem Statement](#problem-statement)
@@ -12,7 +16,7 @@
    - [GTest Test Discovery](#aside-gtest-test-discovery)
    - [Configuration System](#configuration-system)
 6. [TheRock CI Integration](#therock-ci-integration)
-   - [Test Configurations](#test-configurations)
+   - [Build configurations for tests](#build-configurations-for-tests)
    - [Managing CI Time Budgets](#managing-ci-time-budgets)
 7. [Adding New Tests](#adding-new-tests)
 
@@ -42,6 +46,9 @@ Each plugin (MIOpen, fusilli, etc.) needs numerical integration tests for all gr
 
 ### Overview
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The suite is in `dnn-providers/integration-tests/` and builds one binary, `hipdnn_integration_tests`. See its [README](../../../../dnn-providers/integration-tests/README.md). Pieces 2 and 3 below were replaced in #5948, as the notes in each section describe. Bundles and sweeps under `integration-test-bundles/` ([RFC 0011](./0011_GoldenReferenceValidation.md)) are now the default way to test that a graph runs on an engine. C++ graph tests are kept for special cases and build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+
 Most of the testing infrastructure can be taken directly from existing MIOpen integration test suite:
 
 **IntegrationGraphVerificationHarness**: Base class providing GTest support and CPU reference execution for validation.
@@ -59,6 +66,9 @@ TheRock CI integration requires two additional considerations:
 ## Implementation Details
 
 ### IntegrationGraphVerificationHarness Base Class
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The class is in `src/harness/IntegrationGraphVerificationHarness.hpp`. `SetUp()` does not create a handle or call `verifyExpectedPlugins()`. It initializes HIP and applies `[[test_skips]]` from the TOML config. `verifyGraph(graph)` takes no seed. It checks engine support, builds plans, and compares the result against a CPU or GPU reference executor (`--reference-executor`).
 
 This is relatively unchanged from existing MIOpen plugin infrastructure, it provides a numerical validation framework:
 
@@ -154,6 +164,9 @@ public:
 
 ### BuildEngineTestMatrix Function
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `BuildEngineTestMatrix`, `EngineTestCase`, and `EngineTestNameGenerator` were removed in #5948. Each run tests one plugin (`--test-article`/`--ta`) and, optionally, one engine (`--test-engine`/`--te`). `INSTANTIATE_TEST_SUITE_P` uses plain generators. At run time `checkEngineSupportOrSkip()` calls `get_ranked_engine_ids()`. It skips the test (or fails with `--fail-on-unsupported`) if no engine, or not the named engine, supports the graph. If an engine is named, it then calls `set_preferred_engine_id_ext()`. Without `--test-engine`, hipDNN picks the engine (OOTB mode, #6141).
+
 The core filtering logic queries engine capabilities at test instantiation time:
 
 ```cpp
@@ -201,6 +214,9 @@ std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
 
 ### ASIDE: GTest Test Discovery
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** This aside explains the removed `BuildEngineTestMatrix` design. Engine support is now checked inside each test, not during `InitGoogleTest()`.
+
 GTest parameterized test discovery happens in two phases:
 
 1. **Static initialization**: `INSTANTIATE_TEST_SUITE_P` registers parameter generator functions with GTest's internal registry. The generators are not called yet.
@@ -237,11 +253,14 @@ int main(int argc, char** argv)
 
 ### Configuration System
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The TOML-to-JSON environment-variable config was removed in #5948. Each provider now keeps a per-engine TOML file, for example `dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml`. The binary reads it with `--test-config`/`--tc` and parses it in C++ with toml++. The file has `[meta]`, `[[tolerance_overrides]]` (`filters`, `atol`, `rtol`), and `[[test_skips]]` (`archs`, `filters`, `reason`). There is no expected-plugins list and no named tolerance functions; default tolerances come from `src/harness/tolerance/ToleranceResolver.hpp`.
+
 While the test suite has no compile-time dependency on plugins, runtime configuration is still needed for:
 
 - **expected failures**: mark specific (engine, test) combinations as expected to fail, so known issues don't block CI
 - **expected plugins**: given the runtime test discovery, we need a way to verify that expected plugins are actually loaded - otherwise missing plugins generate no tests therefore no test _failures_.
-  - NOTE: The TOML config lists ALL available plugins. At test time the expected plugins may be filtered down based on test configuration - see [Test Configurations](#test-configurations) for details.
+  - NOTE: The TOML config lists ALL available plugins. At test time the expected plugins may be filtered down based on test configuration - see [Configuration System](#configuration-system) for details.
 - **numerical tolerance configuration**: allow for engine specific tolerance configuration.
 
 Following the standard pattern in `TheRock`, a Python script is responsible for running the tests (see [`build_tools/github_actions/test_executable_scripts/`](https://github.com/ROCm/TheRock/tree/main/build_tools/github_actions/test_executable_scripts)). The test runner converts user-edited TOML configuration to JSON and passes it to the C++ test harness via environment variable.
@@ -288,6 +307,9 @@ Users only interact with the TOML file.
 
 #### Filtering plugin-loaded checks based on enabled plugins
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** This manifest is not used by the code in this repository. Each provider passes its own plugin to the suite with `add_external_integration_test_target()` from `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake`, so the suite does not need to know which plugins are enabled.
+
 The test harness needs to know which plugins are expected to load. The TOML config lists all available plugins, but a given build may only include a subset. So that the test runner knows what _should_ be loaded, `TheRock` build (will) install an enabled plugin manifest as part of the super-build.
 
 NOTE: the `THEROCK_ENABLE_*_PLUGIN` variables are set by the build topology infrastructure not necessarily by the user; so, for example, `THEROCK_ENABLE_FUSILLI_PLUGIN` is set even when the user only specified `THEROCK_ENABLE_IREE_LIBS`.
@@ -333,6 +355,9 @@ The infrastructure for test filtering and individual test timeouts is defined in
 [PR #3513](https://github.com/ROCm/rocm-libraries/pull/3513) introduces `test_categories.yaml` to map test name patterns to CTest labels and define per-test timeouts. CI invokes tests via labels: `ctest -L Smoke` for pre-submit, `ctest -L Full` for post-submit.
 
 ##### Test Categories
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The categories are `quick`, `standard`, `comprehensive`, and `full`. Each provider defines them for this suite in `test_categories_integration.yaml` (for example `dnn-providers/miopen-provider/test_categories_integration.yaml`). Higher categories include the patterns of lower ones, so `ctest -L standard` also runs the quick tests. C++ suites use the prefixes `Smoke`, `Quick`, `Standard`, `Comprehensive`, and `Full`. Bundle tests are named after their tier directory (`quick_*`, `standard_*`, and so on). The table and YAML below are the original proposal.
 
 NOTE: the number and names of categories can be changed later, hopefully `TheRock` standardizes names over time.
 
@@ -417,6 +442,9 @@ Two strategies are available:
 This RFC suggests setting CI stage timeouts at the maximum acceptable budget, then sharding or recategorizing as headroom runs out.
 
 ## Adding New Tests
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** New graph-verification coverage must be a bundle. `src/integration-tests/CMakeLists.txt` enforces this. Use a C++ test only for behavior other than "a graph runs and matches a reference", for example error paths or serialization round-trips. See the integration-tests README. In C++ tests, Step 5 no longer uses `BuildEngineTestMatrix` or `EngineTestNameGenerator`. In Step 4, `GetParam()` returns the test case directly, the handle comes from `getSharedHandle()`, and the calls are `this->getTolerance(graphObj, outputs.y)` and `this->verifyGraph(graphObj)`.
 
 ### Step 1: Define the Test Case Type
 

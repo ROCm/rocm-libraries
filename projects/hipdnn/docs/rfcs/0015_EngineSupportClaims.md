@@ -1,6 +1,9 @@
 # RFC 0015: Per-Graph Engine Support Claims
 
 - Contributors: Adam Dickin
+- **Status**: In progress
+- **Status notes**: Claim loader, enforcement, write tool, pre-commit verifier, and CI log harvest shipped (#10244, #10554, #10594, #12338, #12675). The committed-data matrix renderer and failure runbook (§11) are not built. The §12 harvest was built differently (see the note there).
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -730,6 +733,9 @@ the claim is meant to gate.
 
 ## 11. Support Matrix Generation and Documentation
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** `tools/render_support_matrix.py`, `docs/support-claims-failures.md`, `support-claims-schema.md`, and `support-claims-bringup.md` do not exist. The only matrix is the runtime `SupportMatrixCollector` (`--generate-support-matrix`). Claim behaviour is documented in `dnn-providers/integration-tests/docs/support-claim-enforcement.md`.
+
 **Generated from committed data, not a hardware run.** The engine support matrix is generated
 **purely from the data checked into the repo** — each single-graph bundle's `{Name}.json`, or a
 template-sweep case (`graph.template.json` + the `cases[].id` from `sweep.json`), for the row
@@ -776,6 +782,9 @@ implementation; PRs that change schema or verifier behaviour without updating th
 review.
 
 ## 12. CI Support-Observation Harvest
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `--emit-support-observations`, the `[[HIPDNN_SUPPORT_OBS]]` tag, `support_observations.jsonl`, and `tools/harvest_support_observations.py` were not built. Instead, each run prints a `SUPPORT CLAIM SUMMARY` JSON block with an `unclaimed_support` list. `dnn-providers/integration-tests/scripts/harvest_support_claims.py` reads CI logs and prints the claim cells to add; with `--write` it updates the sidecars (#12675).
 
 §9's `--write-support-claims` tool refreshes claims by running the suite on one target ASIC.
 But CI is where the broadest matrix of ASICs and platforms actually runs, nightly — and every

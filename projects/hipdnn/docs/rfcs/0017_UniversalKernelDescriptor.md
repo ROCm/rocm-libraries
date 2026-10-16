@@ -1,6 +1,9 @@
 # RFC 0017: Universal Kernel Descriptors (UKD/UMD/UDD/UED/UHD/KMD/KDP): A Data-Driven Kernel Ingestor
 
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
+- **Status**: In progress
+- **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The declarative `nodes`/`criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -108,6 +111,9 @@ named escape hatch covers a step needing C++; anything needing a new runtime dep
 stays a full provider, one per dependency. This complements build-time codegen.
 
 ### 1.1 What Ships Now Versus Later
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The single-kernel path ships, but every UMD, UDD, and UHD names a native C++ symbol (`matchSymbol`, `dispatchSymbol`, and a `NATIVE` UHD `payload` in `Descriptors.hpp`). The declarative criteria of RFC 0018 and the UDD formulas are not parsed yet. The `jsonexpr` interpreter in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/jsonexpr/` is not wired into the loader. `HeuristicKind::MODEL` (a trained model such as LightGBM) has no adapter yet.
 
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
@@ -1322,6 +1328,9 @@ rules for drop-in packages.
 
 ## 7. Kernel Source
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The runtime loader (`DescriptorLoader.hpp`) accepts the kinds `embedded_source`, `kpack`, `hsaco_file`, and `rocke_builder`. Only `embedded_source` and `kpack` have adapters. A `kpack` source also carries `toc_key`, `sha256`, and the packager-read `signature`, beside `library` and `symbol`. Authored `hip`, `hsaco`, and `rocke` sources are packed into kpack at build time (#10820, #11165, #12729).
+
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
 source; a multi-launch UKD supplies one per Launch. The initial variants:
@@ -1770,6 +1779,9 @@ operators use to work with these descriptors.
 
 ## 11. Tooling
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Authoring and validation tools exist. `tools/IngestorGenerator` generates KMD/UED/UMD/UHD/UDD/KDP JSON and native stubs from YAML, and `tools/IngestorGenerator/ValidateDescriptors.cpp` validates descriptor sets. The agentic skill is `tools/ai/skills/hipdnn-ingestor-engine`. Packaging tools live in `dnn-providers/hip-kernel-provider/descriptor-packaging`.
+
 The descriptor formats in this document are the base representation: precise, diffable, and
 machine-checkable, but low-level. Tooling grows around the format during rollout to handle
 hand-writing, reviewing, and validating descriptors at scale, and much of it is expected to be
@@ -2019,6 +2031,9 @@ Four areas are new here:
   resolve — all of them mechanically detectable, none of them caught by reading.
 
 ### 14.2 Follow-up RFCs
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** State of each row on `develop`. KDP + AOT packaging: implemented (kpack, #10820, #11165, #11144). UED + graph matching: [RFC 0020](0020_UniversalEngineDescriptor.md); only the `graph_match.native` arm is built. UMD + applicability: [RFC 0018](0018_UniversalMatchDescriptor.md); only native `matchSymbol` matchers are built. UHD + kernel selection: [RFC 0019](0019_UniversalHeuristicDescriptor.md); only `NATIVE` heuristics are built. UDD + dispatch and KMD + metadata schema: no RFC yet; the UDD is a native `dispatchSymbol`, and the KMD loads as `MetadataSchema`. Expression language: no RFC yet; the `jsonexpr` interpreter exists but is not wired into the loader. Shape matching, runtime drop-in, adapters, composition, and JIT: not started.
 
 The pieces this document frames but does not design land in focused follow-up RFCs, each bundling
 a descriptor format with the subsystem it drives. Together they form the planned series below.

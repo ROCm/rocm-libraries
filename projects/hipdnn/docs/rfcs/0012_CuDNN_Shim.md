@@ -1,7 +1,9 @@
 # RFC: cuDNN shim for hipDNN
 
-- **Status**: Accepted
 - **Authors**: Mitch Ousdahl
+- **Status**: In progress
+- **Status notes**: The shim headers live in `frontend/include/hipdnn_compatibility/cudnn/` behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` (default `OFF`), with graph nodes, SDPA, heuristics, knobs, notes, and logging (#8238, #9361, #9738, #10226, #11388). The upstream sample corpus builds in CI (#12124). PyTorch validation, the overhead gate, and the `docs/cudnn-shim.md` user guide are not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 
@@ -873,6 +875,9 @@ hipDNN-native PyTorch that ships in 2027.
 
 ### 7.1 Phase 1 — Foundations (compiles, builds, has CI)
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** There is no `hipdnn_cudnn_shim` target, no `detail/type_mapping.h`, no `cuda_runtime_compat.h`, and no `tensor_wrapper.h` or `handle_wrapper.h`. The file tree above is the proposed layout, not the shipped one. The headers are part of the `hipdnn_frontend` include tree and install as the `cudnn_compatibility` package component. `cudnnStatus_t` is in `cudnn_status.h` and `cudnnHandle_t` aliases `hipdnnHandle_t` in `cudnn.h`. Status translation is in `detail/status_translation.h`.
+
 - Add `projects/hipdnn/frontend/include/hipdnn_compatibility/cudnn/` to the
   source tree.
 - Stand up `cudnn_frontend.h` umbrella header (empty but installable).
@@ -1055,6 +1060,9 @@ PyTorch build (or rewritten to v9 first).
 
 ### 8.1 Unit tests
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** The unit tests are flat files in `projects/hipdnn/frontend/tests/` (`TestCudnnShim*.cpp`), listed in `frontend/tests/CMakeLists.txt` and gated on `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`. There is no `TestCudnnShimTypeMapping`. Status translation is tested in `TestCudnnShimStatusTranslationStandalone.cpp`.
+
 Location: `projects/hipdnn/frontend/tests/hipdnn_compatibility/cudnn/`. Same
 gtest framework as the rest of the frontend tests; same naming convention
 (`TestCudnnShim*.cpp`, suites prefixed `TestCudnnShim*`).
@@ -1074,6 +1082,9 @@ gtest framework as the rest of the frontend tests; same naming convention
   preservation through `hipdnn_frontend::Error`.
 
 ### 8.2 Integration tests (AMD-authored)
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** `projects/hipdnn/samples/cudnn_shim/` holds `ConvFprop`, `Layernorm`, `Matmul`, `Pointwise`, and `SdpaRoundTrip` samples. Shim integration tests are in `projects/hipdnn/tests/frontend/` (`IntegrationCudnnShimHandle.cpp`, `IntegrationCudnnShimUmbrella.cpp`).
 
 Location: `projects/hipdnn/samples/cudnn_shim/` (or under
 `projects/hipdnn/samples/` next to the existing `convolution`, `sdpa`, etc.
@@ -1095,6 +1106,9 @@ than re-proving upstream's samples.
 
 ### 8.3 Compatibility / "build the cuDNN FE samples" test
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Built in #12124. `projects/hipdnn/tests/cudnn_samples/` clones the corpus pinned in `manifest.json` (`v1.24.0`) at configure time, or uses `HIPDNN_CUDNN_SAMPLES_CORPUS_DIR`. It builds against the installed shim. When hipDNN was built without `HIPDNN_ENABLE_CUDNN_COMPATIBILITY`, it registers one skipped test and builds no samples.
+
 This is the **source-compatibility proof** and is deliberately separate
 from the AMD-authored integration tests in §8.2: here we compile and run
 NVIDIA's *unmodified* sources (only the includes repointed) to demonstrate
@@ -1111,6 +1125,9 @@ shim.
 
 ### 8.4 Performance / overhead testing
 
+> [!NOTE]
+> **Implementation note (2026-10-15):** Not built. No shim overhead benchmark or CI gate exists.
+
 - Microbenchmarks comparing native `hipdnn_frontend` Graph construction +
   execute vs. the shim equivalent for a handful of representative graphs.
 - **Gate (from §2)**: CI fails when the shim adds more than **1 %** to
@@ -1119,6 +1136,9 @@ shim.
 - Baselines re-captured on every hipDNN minor-version bump.
 
 ### 8.5 Install / package testing
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** The headers install in the `Development` component only when `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` is on (`frontend/CMakeLists.txt`). The package exports them as the optional `cudnn_compatibility` component of `hipdnn_frontend` (#10968). There is no `projects/hipdnn/tests/install/`. The `tests/cudnn_samples` harness consumes the installed package.
 
 - The shim headers must be installed by the `Development` CMake component
   alongside `hipdnn_frontend` headers.
@@ -1132,6 +1152,9 @@ project would be the natural host for shim-level perf or Python-side testing
 *if* such bindings are ever built.
 
 ### 8.6 PyTorch end-to-end smoke test
+
+> [!NOTE]
+> **Implementation note (2026-10-15):** Not built.
 
 A small set of PyTorch tests run on a nightly schedule against a PyTorch
 build whose `aten/src/ATen/native/cudnn/MHA.cpp` has been hipified to use

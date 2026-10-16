@@ -4,7 +4,7 @@ This file lists known limits in current hipDNN testing.
 
 ## Integration test bundles
 
-Integration test bundles are off by default. See [Bundles are opt-in at runtime](https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md#bundles-are-opt-in-at-runtime-for-now).
+Integration test bundles run by default (#10416). The C++ graph tests under `dnn-providers/integration-tests/src/integration-tests/` build only with `-DBUILD_CPP_GRAPH_TESTS=ON`, which is off by default, so provider CI runs bundles only. See [In CI](../../../../dnn-providers/integration-tests/docs/running-tests.md#in-ci).
 
 ## Sanitizers and platforms
 

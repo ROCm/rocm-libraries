@@ -67,10 +67,20 @@ a request to run the class. See the
     --config configs/scale_add.yaml \
     --output-dir /tmp/scale-add-bundle \
     --force
+
+# Do not generate. Report unfilled stub markers in the files this config's
+# engine emits. --emitted-root is repeatable and defaults to --output-dir.
+.venv/bin/python generate.py \
+    --config configs/scale_add.yaml \
+    --output-dir /tmp/scale-add-bundle \
+    --check-placeholders \
+    --emitted-root <provider-engine-dir> \
+    --emitted-root <provider-tests-dir>
 ```
 
-Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
-`2` from argparse itself on a bad flag.
+Exit codes: `0` success; `1` on a `ConfigError`, a template-rendering failure, a non-empty
+output directory without `--force`, or when `--check-placeholders` finds unfilled, missing
+or ambiguous files; `2` from argparse itself on a bad flag.
 
 ## Output
 
@@ -390,6 +400,8 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/gfx950_attention_dense.yaml` | The shipped `hipkernel:Gfx950AttentionDense` catalog (840 packaged rocKE kernels, a builder lowered by `hkp_pack` at build time), generated entirely from `variants`; also the packaged-dialect reference config the tests load |
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
+| `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
+| `configs/gfx950_attention_dense.profile.yaml` | Not a generator config: the gfx950 dense attention profile that the `tools/` scripts read through `--profile` |
 
 ## Generated variant sets: `variants`
 
@@ -537,17 +549,20 @@ Run, in this order, **before any UUID is minted**:
 Configs accept generic `arch` targets under the
 [packaging rules](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#generic-gpu-targets).
 `build_kdp` refuses a tuple shared by two kernels only at the same arch tier
-([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#4-resolve-the-kernel-packs-that-name-this-engine-and-apply-the-arch-gate)). The generated census gives every member of
+([RFC 0017](../../docs/rfcs/0017_UniversalKernelDescriptor.md#81-applicability-once-per-engine)). The generated census gives every member of
 a generic row the generic's descriptors.
 
 ## Source adapters (`codegen/sources/`)
 
-One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), two v1
+One protocol (`SourceAdapter.infer(*sources) -> SourceAdapterResult`), three
 implementations:
 
 - `InteractiveAdapter` -- no inference; a human or the driving skill fills every field.
 - `HiprtcAdapter` -- scans `.cpp`/`.hip` files for `extern "C" __global__` entry points and
   candidate KMD fields (externally-supplied `HIP_PLUGIN_*` defines, template parameters).
+- `RockeAdapter` -- introspects a rocKE builder (`source`/`builder` pair) and reports its
+  spec dataclass fields as candidate KMD fields. rocKE is imported lazily; an
+  unreadable builder raises `RockeIntrospectionError`.
 
 `rocke` authoring uses the packaged path, its effective policy observations belonging to the
 producing compiler. `hsaco` authoring also uses the packaged path: `kernel_source` is
