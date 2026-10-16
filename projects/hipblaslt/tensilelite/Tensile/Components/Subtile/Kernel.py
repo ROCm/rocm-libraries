@@ -1410,7 +1410,25 @@ def mainLoop(writer, kernel):
       schedulerDoubleBuffer = ('A', 'B')
       # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
       # grid (8x4 -> 4x2 for the 8-wave MI, 8x8 -> 4x4 for the 4-wave MI).
-      forcedPartition = (max(1, M // 2), max(1, N // 2))
+      #
+      # The half must be rounded UP to the local-read granularity mn (the MX
+      # scale LR subtileShape, 2).  Rounding down would ask for a size that
+      # divides the dim an ODD number of times whenever dim/mn is odd (6, 10,
+      # 14, 18 -> [2,2,2], [4,2,4], [6,2,6], [8,2,8]), and the partition-directed
+      # prefetch is a CYCLE whose operand VGPR set is picked by partition-index
+      # parity -- an odd cycle is not 2-colourable, so the last partition would
+      # prefetch into the operand set it is still reading.  Rounding up lands on
+      # the normalizer's num_full==1 branch instead, giving the even 2-way splits
+      # [4,2] / [6,4] / [8,6] / [10,8].
+      mnM = max(1, int(lrSAGran.mn) if lrSAGran else 1)
+      mnN = max(1, int(lrSBGran.mn) if lrSBGran else 1)
+
+      def _halfUpToMn(dim, mn):
+        half = -(-dim // 2)                       # ceil(dim / 2)
+        return min(dim, ((half + mn - 1) // mn) * mn)
+
+      forcedPartition = (max(1, _halfUpToMn(M, mnM)),
+                         max(1, _halfUpToMn(N, mnN)))
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
