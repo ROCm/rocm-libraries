@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
@@ -17,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -26,7 +29,9 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -47,10 +52,13 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
+using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
+/// The mask type graph_match derives and kernel_match compares, as the engine names it.
+constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -174,6 +182,10 @@ struct GraphSpec
     StrideLayout vLayout = StrideLayout::BSHD;
     StrideLayout oLayout = StrideLayout::BSHD;
     bool omitStrides = false;
+    // The one operand whose dims are left out, and the one operand tensor the graph does
+    // not carry at all (the node still names its uid).
+    std::optional<int64_t> omitDimsUid;
+    std::optional<int64_t> omitTensorUid;
 
     // Per-operand dimension overrides, each falling back to the shared value. Strides follow
     // the override, so a perturbed operand is still dense BSHD for its own extents.
@@ -247,6 +259,8 @@ struct GraphSpec
         = data_objects::AttentionImplementation::AUTO;
 
     bool twoNodes = false;
+    /// One RELU node from Q to O in place of the SDPA node: a graph with no SDPA in it.
+    bool pointwiseOnly = false;
 
     void setEveryLayout(StrideLayout layout)
     {
@@ -303,7 +317,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                           nullptr,
                                                           dataType,
                                                           strides,
-                                                          &dims,
+                                                          spec.omitDimsUid == uid ? nullptr : &dims,
                                                           spec.virtualUid == uid,
                                                           data_objects::TensorValue::NONE,
                                                           0,
@@ -311,10 +325,25 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    tensors.push_back(tensorFor(Q_UID, spec.dataType, qStridesPtr, qDims));
-    tensors.push_back(tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStridesPtr, kDims));
-    tensors.push_back(tensorFor(V_UID, spec.vDataType.value_or(spec.dataType), vStridesPtr, vDims));
-    tensors.push_back(tensorFor(O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims));
+    if(spec.omitTensorUid != Q_UID)
+    {
+        tensors.push_back(tensorFor(Q_UID, spec.dataType, qStridesPtr, qDims));
+    }
+    if(spec.omitTensorUid != K_UID)
+    {
+        tensors.push_back(
+            tensorFor(K_UID, spec.kDataType.value_or(spec.dataType), kStridesPtr, kDims));
+    }
+    if(spec.omitTensorUid != V_UID)
+    {
+        tensors.push_back(
+            tensorFor(V_UID, spec.vDataType.value_or(spec.dataType), vStridesPtr, vDims));
+    }
+    if(spec.omitTensorUid != O_UID)
+    {
+        tensors.push_back(
+            tensorFor(O_UID, spec.oDataType.value_or(spec.dataType), oStridesPtr, oDims));
+    }
 
     const auto attributesFor = [&]() {
         data_objects::SdpaAttributesBuilder attributesBuilder(builder);
@@ -455,11 +484,34 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     };
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "sdpa",
-                                                   data_objects::DataType::FLOAT,
-                                                   data_objects::NodeAttributes::SdpaAttributes,
-                                                   attributesFor().Union()));
+    if(spec.pointwiseOnly)
+    {
+        const auto relu
+            = data_objects::CreatePointwiseAttributes(builder,
+                                                      data_objects::PointwiseMode::RELU_FWD,
+                                                      flatbuffers::nullopt, // relu_lower_clip
+                                                      flatbuffers::nullopt, // relu_upper_clip
+                                                      flatbuffers::nullopt, // relu_lower_clip_slope
+                                                      flatbuffers::nullopt, // axis_tensor_uid
+                                                      Q_UID, // in_0_tensor_uid
+                                                      flatbuffers::nullopt, // in_1_tensor_uid
+                                                      flatbuffers::nullopt, // in_2_tensor_uid
+                                                      O_UID); // out_0_tensor_uid
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "relu",
+                                           data_objects::DataType::FLOAT,
+                                           data_objects::NodeAttributes::PointwiseAttributes,
+                                           relu.Union()));
+    }
+    else
+    {
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributesFor().Union()));
+    }
     if(spec.twoNodes)
     {
         nodes.push_back(data_objects::CreateNodeDirect(builder,
@@ -579,6 +631,24 @@ bool matchesKernelDefinition(const GraphSpec& graphSpec,
 bool matchesKernel(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
 {
     return matchesKernelDefinition(graphSpec, makeKernel(kernelSpec));
+}
+
+/// Runs kernel_match alone on @p graphSpec with @p bound, the binding a well-formed graph
+/// produced. kernel_match is reached here without graph_match having accepted this graph,
+/// which is the only way to exercise its own guards.
+bool kernelMatchesWithBinding(const GraphSpec& graphSpec,
+                              const BoundTokens& bound,
+                              const KernelSpec& kernelSpec)
+{
+    registerNativeIngestorSymbols();
+    const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(KERNEL_MATCHER_SYMBOL));
+    auto builder = buildSdpaGraph(graphSpec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    return kernelMatcher(context, bound, makeKernel(kernelSpec));
 }
 
 double scoreOf(const KernelSpec& kernelSpec)
@@ -967,6 +1037,135 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+// ---------------------------------------------------------------------------
+// Decline logging. hipDNN tells the caller only "No engine configurations available for
+// the graph", so the engine's INFO line is the one place the cause shows. Each line
+// carries a cause key in brackets; these tests check the key and the operand named, not
+// the wording around them.
+// ---------------------------------------------------------------------------
+
+struct LoggedDecline
+{
+    std::string cause;
+    std::string detail;
+};
+
+/// The decline the engine logged at INFO for @p spec, or an empty cause when it logged
+/// none.
+LoggedDecline loggedDecline(const GraphSpec& spec)
+{
+    const std::string marker
+        = std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME) + " declined the graph [";
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(marker);
+        const auto causeEnd
+            = at == std::string::npos ? at : log.message.find(']', at + marker.size());
+        if(log.severity == HIPDNN_SEV_INFO && causeEnd != std::string::npos)
+        {
+            return {log.message.substr(at + marker.size(), causeEnd - at - marker.size()),
+                    log.message.substr(causeEnd + 1)};
+        }
+    }
+    return {};
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIsNotBshd)
+{
+    GraphSpec spec;
+    spec.qLayout = StrideLayout::BHSD;
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "layout");
+    EXPECT_NE(decline.detail.find("Q (uid 1)"), std::string::npos) << decline.detail;
+    // The BSHD strides for dims [2, 4, 256, 128].
+    EXPECT_NE(decline.detail.find("131072, 128, 512, 1"), std::string::npos) << decline.detail;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOIsNotBshd)
+{
+    GraphSpec spec;
+    spec.oLayout = StrideLayout::BHSD;
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "layout");
+    EXPECT_NE(decline.detail.find("O (uid 4)"), std::string::npos) << decline.detail;
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
+{
+    struct Case
+    {
+        const char* name;
+        GraphSpec spec;
+        const char* cause;
+    };
+    std::vector<Case> cases;
+
+    // Two SDPA nodes: an attention graph this engine cannot take whole, so it says why.
+    GraphSpec twoNodes;
+    twoNodes.twoNodes = true;
+    cases.push_back({"two nodes", twoNodes, "node"});
+
+    // Null strides: the operand description must survive them.
+    GraphSpec noStrides;
+    noStrides.omitStrides = true;
+    cases.push_back({"no strides", noStrides, "operand"});
+
+    GraphSpec fp32;
+    fp32.dataType = data_objects::DataType::FLOAT;
+    cases.push_back({"fp32", fp32, "data_type"});
+
+    GraphSpec d256;
+    d256.headSize = 256;
+    d256.headSizeV = 256;
+    cases.push_back({"D256", d256, "head_size"});
+
+    GraphSpec window;
+    window.leftBound = 128;
+    cases.push_back({"sliding window", window, "mask"});
+
+    GraphSpec sinks;
+    sinks.sinkTokenUid = EXTRA_UID;
+    cases.push_back({"sinks", sinks, "sinks"});
+
+    GraphSpec composite;
+    composite.implementation = data_objects::AttentionImplementation::COMPOSITE;
+    cases.push_back({"implementation", composite, "implementation"});
+
+    GraphSpec largeScale;
+    largeScale.attnScaleValue = 0x1p5F;
+    cases.push_back({"scale", largeScale, "scale"});
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto decline = loggedDecline(testCase.spec);
+        EXPECT_EQ(decline.cause, testCase.cause) << decline.detail;
+        EXPECT_FALSE(decline.detail.empty());
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphItServes)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
+    EXPECT_FALSE(recorder.hasLogContaining(std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME)
+                                           + " declined the graph"));
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForwardNode)
+{
+    // graph_match sees every graph the catalog misses on. One with no SDPA-forward node
+    // was never this engine's, so it declines without a line.
+    GraphSpec spec;
+    spec.pointwiseOnly = true;
+    const auto decline = loggedDecline(spec);
+    EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
 {
     // Exact-equality rule, same as the inputs: a dense-but-padded row stride is not the
@@ -1153,6 +1352,79 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMultiNodeGraph)
     GraphSpec spec;
     spec.twoNodes = true;
     EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandWithNoDims)
+{
+    // dims is optional in the schema, so a verified graph can carry an operand without
+    // one. Every extent the matcher reads comes from it.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE(uid);
+        GraphSpec spec;
+        spec.omitDimsUid = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAGraphMissingAnOperandTensor)
+{
+    // The node names a uid the graph holds no tensor for: there is nothing to read a shape
+    // from, and nothing for that operand's pointer argument to address.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE(uid);
+        GraphSpec spec;
+        spec.omitTensorUid = uid;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesANonSdpaNode)
+{
+    // One node, but not an SDPA one. DeclinesMultiNodeGraph covers the node count; this
+    // covers the node's type, without which its attributes would be read as SDPA's.
+    GraphSpec spec;
+    spec.pointwiseOnly = true;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAGraphWithoutASingleSdpaNode)
+{
+    // kernel_match re-reads the node instead of trusting graph_match to have vetted it.
+    // The binding is the well-formed graph's, so only the node can refuse.
+    const auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_TRUE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
+
+    {
+        SCOPED_TRACE("two nodes");
+        GraphSpec spec;
+        spec.twoNodes = true;
+        EXPECT_FALSE(kernelMatchesWithBinding(spec, *bound, KernelSpec{}));
+    }
+    {
+        SCOPED_TRACE("non-SDPA node");
+        GraphSpec spec;
+        spec.pointwiseOnly = true;
+        EXPECT_FALSE(kernelMatchesWithBinding(spec, *bound, KernelSpec{}));
+    }
+}
+
+TEST(TestGfx950AttentionDenseKernelMatch, RefusesAGraphMissingTheQueryOrKeyTensor)
+{
+    // kernel_match reads the problem's extents from Q and K itself, so it must find both.
+    const auto bound = matchGraph(GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_TRUE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
+
+    for(const int64_t uid : {Q_UID, K_UID})
+    {
+        SCOPED_TRACE(uid);
+        GraphSpec spec;
+        spec.omitTensorUid = uid;
+        EXPECT_FALSE(kernelMatchesWithBinding(spec, *bound, KernelSpec{}));
+    }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandOfAnotherRank)
@@ -1475,6 +1747,32 @@ TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOne)
               ieee754Bits(0.5F));
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAttentionScaleOutsideSupportedRange)
+{
+    for(const float scale : {0.0F,
+                             -0.0F,
+                             -0.5F,
+                             std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity(),
+                             1e-30F,
+                             0x1p-65F,
+                             0x1p5F})
+    {
+        GraphSpec spec;
+        spec.attnScaleValue = scale;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << "scale=" << scale;
+    }
+
+    // The range is inclusive: both bounds are still served.
+    for(const float scale : {0x1p-64F, 0x1p4F})
+    {
+        GraphSpec spec;
+        spec.attnScaleValue = scale;
+        EXPECT_TRUE(matchGraph(spec).has_value()) << "scale=" << scale;
+    }
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
 {
     GraphSpec spec;
@@ -1766,23 +2064,37 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsTheSixteenBitMmaCoreModes)
     // mma_core_mode is the MMA operand precision, and this kernel's operands are the
     // graph's fp16/bf16 inputs. HALF is also what the cuDNN-compat shim sets whenever the
     // caller leaves the field unset, so declining it would decline every shim graph.
-    for(const auto mode : {data_objects::DataType::UNSET,
-                           data_objects::DataType::HALF,
-                           data_objects::DataType::BFLOAT16})
+    // Each graph is matched against the kernel built for its own dtype.
+    for(const auto dataType : {data_objects::DataType::BFLOAT16, data_objects::DataType::HALF})
     {
-        SCOPED_TRACE(data_objects::EnumNameDataType(mode));
-        GraphSpec spec;
-        spec.mmaCoreMode = mode;
-        EXPECT_TRUE(matchGraph(spec).has_value());
+        for(const auto mode : {data_objects::DataType::UNSET,
+                               data_objects::DataType::HALF,
+                               data_objects::DataType::BFLOAT16})
+        {
+            SCOPED_TRACE(std::string("graph ") + data_objects::EnumNameDataType(dataType)
+                         + ", mma_core_mode " + data_objects::EnumNameDataType(mode));
+            GraphSpec spec;
+            spec.dataType = dataType;
+            spec.mmaCoreMode = mode;
+            KernelSpec kernel;
+            kernel.dtype = dataType == data_objects::DataType::HALF ? "FP16" : "BF16";
+            EXPECT_TRUE(matchesKernel(spec, kernel));
+        }
     }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMmaCoreModeFloat)
 {
     // An fp32-operand MMA is a computation this kernel never performs.
-    GraphSpec spec;
-    spec.mmaCoreMode = data_objects::DataType::FLOAT;
-    EXPECT_FALSE(matchGraph(spec).has_value());
+    for(const auto dataType : {data_objects::DataType::BFLOAT16, data_objects::DataType::HALF})
+    {
+        SCOPED_TRACE(std::string("graph ") + data_objects::EnumNameDataType(dataType)
+                     + ", mma_core_mode FLOAT");
+        GraphSpec spec;
+        spec.dataType = dataType;
+        spec.mmaCoreMode = data_objects::DataType::FLOAT;
+        EXPECT_FALSE(matchGraph(spec).has_value());
+    }
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryFp8MmaCoreMode)
@@ -1847,6 +2159,55 @@ TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoB
     spec.leftBound = std::nullopt;
     spec.rightBound = std::nullopt;
     EXPECT_TRUE(matchGraph(spec).has_value());
+}
+
+/// Both spellings of one causal mask must bind identically, as causal, so neither reaches a
+/// candidate the other would not: served by the causal kernel, refused by the unmasked one.
+void expectOneCausalMask(const GraphSpec& bounds, const GraphSpec& flag)
+{
+    const auto boundsBinding = matchGraph(bounds);
+    const auto flagBinding = matchGraph(flag);
+    ASSERT_TRUE(boundsBinding.has_value());
+    ASSERT_TRUE(flagBinding.has_value());
+    EXPECT_EQ(tryGetBoundInt(*boundsBinding, CAUSAL_TOKEN), std::optional<int64_t>{1});
+    EXPECT_EQ(tryGetBoundInt(*flagBinding, CAUSAL_TOKEN), std::optional<int64_t>{1});
+    EXPECT_TRUE(*boundsBinding == *flagBinding);
+
+    KernelSpec causal;
+    causal.causal = 1;
+    KernelSpec unmasked;
+    unmasked.causal = 0;
+    for(const GraphSpec* spec : std::initializer_list<const GraphSpec*>{&bounds, &flag})
+    {
+        SCOPED_TRACE(spec == &bounds ? "bounds" : "deprecated flag");
+        EXPECT_TRUE(matchesKernel(*spec, causal));
+        EXPECT_FALSE(matchesKernel(*spec, unmasked));
+    }
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch, BoundsAndTheDeprecatedFlagSpellTheSameTopLeftCausalMask)
+{
+    // left -1 / right 0 / TOP_LEFT and causal_mask=true with no bounds are one mask.
+    const GraphSpec bounds;
+    GraphSpec flag;
+    flag.causalMaskDeprecated = true;
+    flag.leftBound = std::nullopt;
+    flag.rightBound = std::nullopt;
+    expectOneCausalMask(bounds, flag);
+}
+
+TEST(TestGfx950AttentionDenseGraphMatch,
+     BoundsAndTheDeprecatedFlagSpellTheSameBottomRightCausalMask)
+{
+    // left -1 / right 0 / BOTTOM_RIGHT and causal_mask_bottom_right=true with no bounds are
+    // one mask. At the default Sq == Skv the corners coincide, so both are served as causal.
+    GraphSpec bounds;
+    bounds.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    GraphSpec flag;
+    flag.causalMaskBottomRightDeprecated = true;
+    flag.leftBound = std::nullopt;
+    flag.rightBound = std::nullopt;
+    expectOneCausalMask(bounds, flag);
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)

@@ -784,6 +784,12 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)),
+        HIPBLAS_STATUS_NOT_SUPPORTED);
+
+    float* no_scale_e = nullptr;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &no_scale_e, sizeof(float*)),
         HIPBLAS_STATUS_SUCCESS);
 
     // For HIPBLASLT_MATMUL_DESC_POINTER_MODE
@@ -2672,6 +2678,9 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E4M3)} == "R_8F_E4M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E5M2)} == "R_8F_E5M2");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8I)} == "R_8I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_32I)} == "R_32I");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_32F)} == "C_32F");
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_C_64F)} == "C_64F");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
                 == "R_6F_E2M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2))}

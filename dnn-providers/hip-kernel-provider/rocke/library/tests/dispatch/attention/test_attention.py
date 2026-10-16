@@ -20,15 +20,49 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
-_GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
+# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
+# kernels write LSE, so every other candidate must keep declining it.
+_GFX950_DENSE_FEATURES = {"causal", "lse", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+_RDNA_WMMA_FEATURES = {
+    "causal",
+    "causal_bottom_right",
+    "sliding_window",
+    "window_bounds",
+    "noncausal_window",
+    "lse",
+    "sinks",
+    "fp8",
+    "softcap",
+    "alibi",
+    "qq_bias",
+    "window_right",
+    "attn_bias",
+    "layout_dense",
+    "layout_bhsd",
+    "layout_ragged",
+    "layout_paged",
+    "runtime_head_dims",
+}
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal", "sliding_window"},
+    "attention_strided_decode": {
+        "strided_kv",
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+    },
+    "attention_gfx942_dense": {"causal", "lse", "sinks", "sliding_window"},
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
+    "attention_gfx1151_wmma": _RDNA_WMMA_FEATURES,
+    # The opt-in tuned RDNA WMMA candidates serve exactly what the auto route does.
+    **{
+        f"attention_{arch}_wmma_fwd": _RDNA_WMMA_FEATURES
+        for arch in ("gfx11_generic", "gfx1151", "gfx12_generic", "gfx1201")
+    },
     "attention_gfx942_dense_pipe": {
         "causal",
         "causal_bottom_right",

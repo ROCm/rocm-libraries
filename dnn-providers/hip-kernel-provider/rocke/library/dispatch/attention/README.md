@@ -69,8 +69,8 @@ requires every candidate to provide:
 - `block`;
 - `bind_torch`.
 
-Routing-only path labels are absent. Dense gfx942/gfx950, gfx1250 WMMA, and
-explicit unified-tuning candidates are executable.
+Routing-only path labels are absent. Dense gfx942/gfx950, gfx1151/gfx1250 WMMA,
+and explicit unified-tuning candidates are executable.
 
 ```python
 from dispatch.attention import AttentionRequest, dispatch_attention_all
@@ -121,7 +121,8 @@ candidate            one geometry variant, fixed at registration
 The axes and production stacks are data in `axes.py`; `dense_rules.py` and
 `unified_rules.py` state attention's legality rules as `KnobSpace`
 subclasses (through `waves.py`'s `WavesPerEuSpace`); `candidate.py` turns a
-variant into a registered candidate.
+variant into a registered candidate. The RDNA WMMA forward kernel has no
+occupancy loop: `wmma_rules.py`'s `WmmaSpace` is a plain `KnobSpace`.
 Walking, sampling, canonicalizing and naming are the shared
 `rocke.dispatch.tuning` (platform `ARCHITECTURE.md` section 14). Geometry
 catalogs live in the arch modules.
@@ -133,6 +134,7 @@ catalogs live in the arch modules.
 | Unified tiled tuning | `AttentionGeometryVariant` catalog: 109 on gfx950, 75 on gfx942 | `gfx{942,950}_unified.py` | path, codepath, builder, tile policy, warps, rows per warp, segments, compile backend |
 | gfx950 dense | three `Gfx950DenseVariant`s under two algorithms: `attention_dense_grid` (grid) and `attention_dense_persist` (persist, persist + wide DMA) | `gfx950_dense.py` | `persistent`, `wide_lds_dma`; the tile is a knob |
 | gfx942 dense | one candidate (`attention_dense`) | `gfx942_dense.py` | nothing; persistence and the tile are knobs |
+| RDNA WMMA forward | one per RDNA arch, `attention_{arch}_wmma_fwd` under `wmma_fmha_fwd` (see [RDNA WMMA](#rdna-wmma-inference-gfx11-and-gfx12)) | `gfx1151.py` | the policy's codepath (`transposed_qk`); every other policy choice is a knob |
 
 The gfx950 grid and persistent bodies are separate algorithms because they
 serve different requests (only the grid body runs a moving bottom-right causal
@@ -174,7 +176,8 @@ Every knob is its own axis, on dense as on unified. Knobs the kernel refuses
 to combine (for example gfx950 IGLP with the manual PV fence) are separate
 axes, and the kernel's validator prunes the illegal combinations.
 
-`_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each arch.
+`_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each CDNA
+arch, and for `wmma` on each RDNA arch.
 The unified test `test_every_kernel_tuning_field_is_swept` and the dense
 field-classification tests fail when a kernel spec gains a field that no axis
 or exemption covers.
@@ -293,6 +296,12 @@ Selection pins a spec the same way for dense and unified:
   reason; nothing falls back. An id from
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
+- `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
+  normalizer). It is the `lse` request feature; only the dense candidates declare
+  it, so an unpinned LSE request is refused instead of reaching a kernel without
+  the output. It is a dense output field (`DENSE_OUTPUT_FIELDS`), so sweeps
+  never vary it. The caller passes the buffer to `bind_torch` as `tensors["lse"]`;
+  the dense runner validates its shape, dtype, device, and overlap.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.
@@ -383,6 +392,90 @@ In every case the coverage tests in
 `tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
 on an axis or in an exemption.
 
+## RDNA WMMA inference (gfx11 and gfx12)
+
+`attention_gfx1151_wmma` is the RDNA auto route and an execution candidate for
+`gfx11-generic`, `gfx1151`, `gfx12-generic` and `gfx1201` requests. Requests for
+a generic target compile one code object set that loads on every device of the
+generation (gfx1100-gfx1153, or gfx1200/gfx1201); map a device name with
+`rocke.core.arch.generic_arch_from_target_id`. Its explicit selectors are
+`algorithm="wmma_fmha_fwd"` and `spec_id="gfx1151_wmma_fmha_fwd"`. Other
+architecture defaults are unchanged.
+
+The request describes layout (`dense`, `ragged`, or `paged`) and score features
+(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, legacy
+`sliding_window`, optional `window_right`, or explicit `window_left`) before
+selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
+FP16/BF16 Q/O and head dimensions that are multiples of 16 up to 256 (Q/K and
+V/O widths may differ) are supported. Legacy `sliding_window` remains the left
+width; `window_right` supplies an optional runtime right bound, while
+`window_bottom_right=True` bottom-right-aligns a `SLIDING_WINDOW` request.
+`use_attn_bias=True` adds the `attn_bias` feature and requires an `attn_bias`
+tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
+`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
+expanded, permuted, and row-padded views are accepted without copies; invalid
+dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
+requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
+`[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
+contract uses rank-4 stats. Fully masked rows store `-inf`.
+Explicit layout or feature requirements reject candidates that do not declare
+them; `layout="auto"` retains legacy layout conventions and resolves to dense
+on this candidate. `runtime_head_dims=True` (the `runtime_head_dims` feature,
+which only the RDNA WMMA candidates declare) selects a bucket object:
+`hdim_q`/`hdim_v` become the compiled maxima and any multiple-of-16 widths up
+to them run at launch. A bucket object always runs the standard body without
+output-column tiling or the small-head V-LDS staging, which is what the
+shipped catalog's bucket objects are.
+
+The dense binding accepts either BSHD or BHSD shapes (`tensor_layout` disambiguates
+equal sequence/head extents) and preserves independently padded, non-overlapping
+batch/token/head strides. Set `emit_lse=True` and provide an FP32 `lse` tensor
+to receive row-wise log-sum-exp values. The binding otherwise takes `q`, `k`,
+`v`, and `out`; packed inputs also provide the selected prefix sums or paged
+metadata. Runtime kwargs are `softmax_scale`, positive `softcap` when selected,
+and explicit FP32 `k_scale`/`v_scale` for FP8 storage.
+
+Aligned dense FP16 and BF16 D64/D128 requests use the transposed-QK fast path on
+gfx11 targets; gfx12 targets run the standard path for them.
+Its compiled identity excludes sequence lengths, query/KV head counts, and
+window widths; these and all dense strides are runtime arguments. Modules are
+cached and stream handles are forwarded. Use `fence=False` for asynchronous or
+graph-captured launches, then release retained owners after the appropriate
+synchronization and graph-destruction boundary.
+
+The shipped `hipkernel:Gfx1151WmmaAttention` catalog uses the same dense ABI:
+FP16/BF16 `runtime_head_dims` buckets (D64/D96/D128/D160/D256) of no-mask,
+band (no-mask/causal/window) and band-plus-additive-bias objects, with causal
+objects in the D160/D256 buckets, plus exact D192/D256 no-mask, causal and band
+objects, compiled for each shard's generic target (gfx11 shards add exact
+D64/D128 transposed-QK objects; gfx12 shards do not). Runtime dimensions, head
+widths within a bucket and strides do not multiply the AOT object count.
+See the [RDNA WMMA ABI, tensor-layout and generic-target guide](../../builders/gfx1151/attention/README.md).
+
+### Tuned RDNA WMMA candidates
+
+Each RDNA arch also registers an opt-in tuned candidate built with
+`make_tuned_candidate`: `attention_gfx11_generic_wmma_fwd`,
+`attention_gfx1151_wmma_fwd`, `attention_gfx12_generic_wmma_fwd` and
+`attention_gfx1201_wmma_fwd`, pinned by `algorithm="wmma_fmha_fwd"` and
+`spec_id` without the `attention_` prefix. `tuning_id="auto"` returns the auto
+route's policy spec, wrapped in an `AttentionTuningSpec` with `path="wmma"`;
+the base takes the request's `num_cus` (else the 40-CU reference part's), never
+the live device, so a pin or a catalog enumeration is host-independent.
+
+`WmmaSpace` (`wmma_rules.py`) walks `tuning_axes(arch, "wmma")`: on the
+standard body `v_lds_stage`, `causal_tile_skip` (causal only),
+`value_tile_size` (dense, V/O width at least 128) and `scheduler_strategy`
+(`None` or `"max-ilp"`; `WmmaFmhaFwdSpec.resolved_scheduler_strategy()` names
+the unset value `"default"`); on the transposed-QK body (gfx11 only) `block_n`
+and `num_waves`, which production crosses. `transposed_qk` stays a policy
+codepath. The policy resolves every knob per problem, so each in-scope knob is
+recorded in `tuning_id`. Illegal settings (output tiles on a bucket object, a
+tile that does not divide the V/O width, transposed geometry on gfx12, a key
+tile that does not divide `seqlen_k`) are refused with the kernel's reason.
+The auto candidate's `sweep_space` is the same space's production stream,
+unwrapped.
+
 ## Capability versus support
 
 `Capability` is declarative and queryable without constructing a kernel spec.
@@ -463,6 +556,9 @@ from the gfx942 spec rather than from a free field.
 - `common.py` — arch-neutral request/spec types and shared gates.
 - `generic.py` — candidates that cover more than one architecture.
 - `gfx1250.py` — architecture-owned candidates.
+- `gfx1151.py` — RDNA WMMA candidates: the auto route
+  (`attention_gfx1151_wmma`) and one tuned `attention_{arch}_wmma_fwd` per
+  RDNA arch, sharing the selection policy.
 - `gfx942_dense.py` — the gfx942 dense-kernel candidate (geometry swept by its
   knob space).
 - `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
@@ -477,6 +573,8 @@ from the gfx942 spec rather than from a free field.
   the `DenseSpace` hooks.
 - `unified_rules.py` — unified geometry variants, codepath rules, and the
   gfx950 2D LDS / KQ-pad legality, stated as the `UnifiedSpace` hooks.
+- `wmma_rules.py` — RDNA WMMA knob scope and launch legality, stated as the
+  `WmmaSpace` hooks.
 - `waves.py` — `waves_per_eu` as the attention spaces' outer knob: the WPE
   sweep values and `WavesPerEuSpace`, which sets the outer knob and the
   `{variant_id}_wpe{N}` id stem for both spaces.
