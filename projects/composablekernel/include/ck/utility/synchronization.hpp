@@ -91,27 +91,30 @@ __device__ void block_sync_lds_direct_load()
 #endif
 }
 
-// Completes the outstanding asynchronous global->LDS DMA loads and publishes the LDS to the
-// workgroup with a barrier. On the asyncmark path this is arch-agnostic -- wait_asyncmark(0) drains
-// the async loads and is visible to the LLVM memory model (no manual fence/waitcnt needed other
-// than what you get from block_sync_lds), then block_sync_lds() barriers. The #else fallbacks
-// reproduce the pre-asyncmark behavior per arch.
+// Waits for the outstanding asynchronous global->LDS DMA loads to drain down to `vmcnt` still in
+// flight (0 == wait for all), then publishes the LDS to the workgroup with a barrier. Leaving a
+// nonzero count outstanding lets callers keep the next iteration's prefetch running (software
+// pipelining). On the asyncmark path this is arch-agnostic -- wait_asyncmark(vmcnt) is visible to
+// the LLVM memory model (no manual fence/waitcnt needed other than what you get from
+// block_sync_lds), then block_sync_lds() barriers. The #else fallbacks reproduce the pre-asyncmark
+// behavior per arch.
+template <index_t vmcnt = 0>
 __device__ void block_sync_lds_async_load()
 {
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_wait_asyncmark(0);
+    __builtin_amdgcn_wait_asyncmark(vmcnt);
     block_sync_lds();
 #elif defined(__gfx125__)
     // Fallback: async-engine completion wait + "local" fences + manual barrier (avoids the
     // redundant s_wait_loadcnt_dscnt that __syncthreads would inject).
-    __builtin_amdgcn_s_wait_asynccnt(0);
+    __builtin_amdgcn_s_wait_asynccnt(vmcnt);
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
-    // Fallback (gfx9, no asyncmark): explicit vmcnt(0) + "global" ordering fence + LDS barrier.
-    __builtin_amdgcn_s_waitcnt(3952); // vmcnt(0)
+    // Fallback (gfx9, no asyncmark): explicit vmcnt(vmcnt) + "global" ordering fence + LDS barrier.
+    __builtin_amdgcn_s_waitcnt(3952 + vmcnt % 16 + vmcnt / 16 * 16384); // vmcnt(vmcnt)
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
     block_sync_lds();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
