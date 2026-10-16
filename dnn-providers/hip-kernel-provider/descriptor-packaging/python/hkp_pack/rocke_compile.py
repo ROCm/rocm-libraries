@@ -35,6 +35,53 @@ def _is_union(origin):
 # this is about provenance being true, not about the bytes differing.
 _BACKEND = "python"
 
+# `kernel_source.target` vocabulary for a rocke UKD. "native" compiles for the
+# shard arch itself; "generic" compiles for the LLVM generic processor
+# (gfx11-generic, gfx12-generic, ...) that rocKE maps the shard arch to, so one
+# code object serves every member of the family. The shard stays concrete
+# either way: only the processor the object is built for changes.
+ROCKE_TARGET_NATIVE = "native"
+ROCKE_TARGET_GENERIC = "generic"
+ROCKE_TARGETS = (ROCKE_TARGET_NATIVE, ROCKE_TARGET_GENERIC)
+
+
+def _generic_arch_for(arch):
+    """rocKE's generic processor for a concrete arch, or None if it has none.
+
+    Behind a function, like `_load_compiler`, so the hip-only path never imports
+    rocke and tests can substitute the mapping.
+    """
+    try:
+        from rocke.core.arch import generic_arch_from_target_id
+    except Exception as exc:
+        raise HkpPackError(
+            f"kernel_source.target '{ROCKE_TARGET_GENERIC}' needs rocke's "
+            f"generic-target map, which is not importable: {exc}"
+        ) from exc
+    return generic_arch_from_target_id(arch)
+
+
+def rocke_compile_arch(arch, target=ROCKE_TARGET_NATIVE):
+    """The processor a rocke UKD packed into the `arch` shard is compiled for.
+
+    "native" is the shard arch. "generic" is the shard arch's LLVM generic
+    processor, and a shard arch without one is a hard error rather than a quiet
+    native fallback: the descriptor asked for an object that runs family-wide.
+    """
+    if target == ROCKE_TARGET_NATIVE:
+        return arch
+    if target == ROCKE_TARGET_GENERIC:
+        generic = _generic_arch_for(arch)
+        if not generic:
+            raise HkpPackError(
+                f"kernel_source.target '{ROCKE_TARGET_GENERIC}' requested for shard "
+                f"arch '{arch}', which has no LLVM generic processor target"
+            )
+        return generic
+    raise HkpPackError(
+        f"kernel_source.target '{target}' is not one of {list(ROCKE_TARGETS)}"
+    )
+
 
 def _reset_backend_audit():
     """Clear rocKE's fallback ledger before a compile, if it exposes one.
@@ -142,18 +189,20 @@ def build_spec(cls, data):
     return cls(**kwargs)
 
 
-def rocke_variant_key(source, builder, spec):
-    """Stable input hash over (source, builder, spec) for a rocke variant.
+def rocke_variant_key(source, builder, spec, target=ROCKE_TARGET_NATIVE):
+    """Stable input hash over (source, builder, spec[, target]) for a rocke variant.
 
-    Keyed on all three: two rocke UKDs sharing source+spec but naming different
+    Keyed on all of them: two rocke UKDs sharing source+spec but naming different
     builders produce different kernels and must not collapse to one blob, so the
-    builder is part of the key. The nested spec dict hashes deterministically
-    (sort_keys) regardless of key order.
+    builder is part of the key; likewise a generic and a native compile of one
+    spec are different objects. The default "native" target is left out of the
+    payload so native keys stay what they were before targets existed. The
+    nested spec dict hashes deterministically (sort_keys) regardless of key order.
     """
-    return _hash_payload(
-        Path(source).stem,
-        {"source": source, "builder": builder, "spec": spec},
-    )
+    payload = {"source": source, "builder": builder, "spec": spec}
+    if target != ROCKE_TARGET_NATIVE:
+        payload["target"] = target
+    return _hash_payload(Path(source).stem, payload)
 
 
 def _resolve_spec_class(module, builder_fn):
@@ -341,7 +390,14 @@ def _check_support_predicate(module, builder, spec_obj, arch):
 
 
 def compile_rocke_variant(
-    source, builder, spec, arch, out_dir, requests=None, origins=None
+    source,
+    builder,
+    spec,
+    arch,
+    out_dir,
+    requests=None,
+    origins=None,
+    target=ROCKE_TARGET_NATIVE,
 ):
     """Compile one variant, returning (code object, captured symbol, observations).
 
@@ -352,7 +408,12 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+
+    `arch` is the shard the object is packed for; `target` (the UKD's
+    `kernel_source.target`) decides the processor it is compiled for, which the
+    support predicate, the builder and comgr all receive. See `rocke_compile_arch`.
     """
+    compile_arch = rocke_compile_arch(arch, target)
     dotted = _module_from_source(source)
     try:
         module = import_module(dotted)
@@ -378,7 +439,7 @@ def compile_rocke_variant(
     except Exception as exc:
         raise HkpPackError(f"invalid spec for {spec_cls.__name__}: {exc}") from exc
 
-    _check_support_predicate(module, builder, spec_obj, arch)
+    _check_support_predicate(module, builder, spec_obj, compile_arch)
     # Observed BEFORE the builder runs, on the object `builder_fn` is about to be
     # handed: reading the same attributes afterwards would observe whatever the
     # builder left behind.
@@ -386,10 +447,10 @@ def compile_rocke_variant(
     observations = observe(spec_obj, builder_fn, requests or {}, origins)
 
     try:
-        kernel = builder_fn(spec_obj, arch=arch)
+        kernel = builder_fn(spec_obj, arch=compile_arch)
     except NotImplementedError as exc:
         raise HkpPackError(
-            f"arch not supported by builder '{builder}' @ {arch}: {exc}"
+            f"arch not supported by builder '{builder}' @ {compile_arch}: {exc}"
         ) from exc
     except Exception as exc:
         raise HkpPackError(
@@ -400,24 +461,28 @@ def compile_rocke_variant(
     _reset_backend_audit()
     try:
         artifact = compile_kernel(
-            kernel, arch=arch, capture_ir_text=False, backend=_BACKEND
+            kernel, arch=compile_arch, capture_ir_text=False, backend=_BACKEND
         )
     except ComgrError as exc:
         raise HkpPackError(
-            f"comgr compile failed for {source} @ {arch}: {exc} "
+            f"comgr compile failed for {source} @ {compile_arch}: {exc} "
             f"(comgr loaded from {_resolved_comgr_path()}; set ROCKE_COMGR_LIB "
             "to override)"
         ) from exc
-    _assert_no_backend_fallback(source, builder, arch)
+    _assert_no_backend_fallback(source, builder, compile_arch)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    co_path = out_dir / f"{rocke_variant_key(source, builder, spec)}.co"
+    co_path = out_dir / f"{rocke_variant_key(source, builder, spec, target)}.co"
     co_path.write_bytes(artifact.hsaco)
     origins.stable()
-    # The arch, captured symbol and code object identify which compile these
+    # The shard arch, captured symbol and code object identify which compile these
     # observations came from; a reader binds all three to the shipped descriptor.
+    # `compile_target` is the processor the object was built for -- the shard
+    # arch itself, or its generic family -- and is bound to the shipped
+    # provenance's own `compile_target`.
     observations["arch"] = arch
+    observations["compile_target"] = compile_arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
     return co_path, artifact.kernel_name, observations
