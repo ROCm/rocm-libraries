@@ -7,8 +7,8 @@
 // Every table field carries an explicit `(id: N)`, so its vtable slot comes from that number
 // rather than from its position in the table. A new field takes the next unused id for its
 // table and may be written anywhere in the declaration; the id of an existing field never
-// changes. A union field occupies two slots: the declared id holds the value, and the id one
-// below it holds the implicit type byte.
+// changes within a major version. A union field occupies two slots: the declared id holds the
+// value, and the id one below it holds the implicit type byte.
 //
 // The format version rule:
 // - A minor version can make only these changes:
@@ -17,13 +17,17 @@
 //   - Add a member at the end of a union.
 //   - Add a value at the end of an enum.
 //   - Declare a new table or enum that only a new field or a new union member uses.
+//   - Retire a field: mark it `(deprecated)`. Keep its id.
 //   The reader of the new minor version accepts an absent field and a file of an older minor.
-// - Never make these changes, in any version:
+// - In a minor version, never:
 //   - Change the type or the default of a field.
 //   - Add or remove `(required)` on an existing field.
 //   - Change or reuse an id.
-//   - Delete a field. To retire a field, mark it `(deprecated)` in a new major version.
-// - Any other change is a major version.
+//   - Delete a field.
+// - Any other change needs a new major version. The reader refuses a file of another major
+//   version before it reads the body, so a major version can change this schema freely.
+// - Never change the fields of the first 48 bytes of the header, in any version: a reader uses
+//   them to refuse a file.
 // - After each edit to this file, set INGESTOR_PLAN_SCHEMA_SHA256 in IngestorPlanPayload.hpp.
 //   A unit test prints the new value.
 // - The dispatch handler contract has its own version, in the dispatch name.

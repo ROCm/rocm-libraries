@@ -34,7 +34,7 @@ inline constexpr uint16_t INGESTOR_PLAN_FORMAT_MINOR = 0;
 
 /// The SHA-256 of ingestor_plan.fbs, with LF line ends. Set it again after each schema edit.
 inline constexpr std::string_view INGESTOR_PLAN_SCHEMA_SHA256
-    = "984f27496867ba4b803e13fcf67f56eda03835eb17b8eaa86d810535749f3ba8";
+    = "65cc97481be3c66e98f5bcf6e1e6d36ca62db83b52b2ce863185fa8abcef129a";
 
 /// The header size this provider writes. A reader accepts a larger header that keeps the
 /// alignment rule.

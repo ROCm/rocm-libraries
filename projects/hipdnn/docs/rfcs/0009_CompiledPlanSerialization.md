@@ -268,18 +268,23 @@ A new minor version can make only these changes to the schema:
 - Add a member at the end of a union.
 - Add a value at the end of an enum.
 - Declare a new table or enum that only a new field or a new union member uses.
+- Retire a field: mark the field `(deprecated)`. Keep its field ID.
 
 The reader of the new minor version accepts a payload without the new field, and a payload of an
 older minor version.
 
-Never make these changes, in any version:
+Never make these changes in a minor version:
 
 - Change the type or the default value of a field.
 - Add or remove `(required)` on a field that exists.
 - Change or reuse a field ID.
-- Delete a field. To retire a field, mark it `(deprecated)` in a new major version.
+- Delete a field.
 
-All other changes need a new major version.
+All other changes need a new major version. The reader refuses a payload of a different major
+version before it reads the body. Thus a new major version can change the schema freely.
+
+Never change the fields of the first 48 bytes of the header, in any version. A reader uses them to
+refuse a payload.
 
 `IngestorPlanPayload.hpp` holds `INGESTOR_PLAN_SCHEMA_SHA256` next to the format version constants.
 This value is the SHA-256 of `ingestor_plan.fbs` with LF line ends. A unit test calculates the
