@@ -15,6 +15,7 @@
 #include <flatbuffers/verifier.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <mutex>
 #include <vector>
 
 namespace hipdnn_backend
@@ -416,8 +417,9 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: resource manager is "
                   "null.");
 
-    // Build and cache the serialized plan once; reuse it for all later
-    // size/fill calls (mirrors GraphDescriptor's _graphSerializedBuffer cache).
+    const std::lock_guard<std::mutex> lock(_serializedPlanCacheMutex);
+
+    // Build the serialized plan on the first call. Reuse it for all later size and fill calls.
     if(_serializedPlanCache.empty())
     {
         std::vector<uint8_t> pluginPayload;

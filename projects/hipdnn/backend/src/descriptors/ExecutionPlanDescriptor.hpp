@@ -6,6 +6,7 @@
 #include "BackendDescriptor.hpp"
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <mutex>
 #include <vector>
 
 namespace hipdnn_backend
@@ -37,6 +38,8 @@ private:
     // serializeBackendPlan() call and reused by all subsequent size/fill calls.
     // A finalized plan is immutable, so this never needs invalidation.
     mutable std::vector<uint8_t> _serializedPlanCache;
+    // Guards _serializedPlanCache. serializeBackendPlan() is const and can run on several threads.
+    mutable std::mutex _serializedPlanCacheMutex;
 
     void getWorkspaceSize(hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
