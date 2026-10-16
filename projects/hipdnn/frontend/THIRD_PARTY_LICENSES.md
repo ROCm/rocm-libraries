@@ -12,9 +12,10 @@ hipDNN contains source code derived from the following third-party project.
 - **Use:** Portions of the cuDNN-compatibility shim (`include/hipdnn_compatibility/`)
   and of `hipdnn_frontend/Types.hpp` and `hipdnn_frontend/Error.hpp` are derived
   from cuDNN frontend. The cuDNN-shim samples (`samples/cudnn_shim/ConvFprop.cpp`,
-  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror
-  upstream samples. Each such file carries a "Portions derived from NVIDIA cuDNN
-  frontend" header naming its upstream sources.
+  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror upstream samples, and
+  `tests/TestCudnnShimV8CApiStandalone.cpp` mirrors part of upstream
+  `samples/legacy_samples/test_list.cpp`. Each such file carries a "Portions
+  derived from NVIDIA cuDNN frontend" header naming its upstream sources.
 
 ```
 Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
@@ -46,5 +47,6 @@ same MIT terms as above.
 Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 ```
