@@ -376,9 +376,10 @@ class TestGfx950RealBundle:
     #: `Skv % block_n`, per Gfx950AttentionDenseNative.cpp.
     _DIVIDES = {"block_m": "sq", "block_n": "skv"}
 
-    #: mask_type 2 is windowed. No windowed variant ships, so those shapes are out of
-    #: scope rather than uncovered, and counting them would understate coverage.
-    _WINDOWED = 2
+    #: mask_type 3 (rocKE's SLIDING_WINDOW) is windowed. No windowed variant ships, so
+    #: those shapes are out of scope rather than uncovered, and counting them would
+    #: understate coverage.
+    _WINDOWED = 3
 
     @classmethod
     def _shapes_path(cls) -> Path:
@@ -422,7 +423,7 @@ class TestGfx950RealBundle:
             if raw.get("hdim_q") not in head_sizes:
                 continue
             shape = variant_reachability._remap(raw, cls._FIELD_MAP)
-            shape["causal"] = 1 if shape.pop("mask_type") == 1 else 0
+            shape["causal"] = 1 if shape.pop("mask_type") != 0 else 0
             for vestigial in ("batch", "hdim_v", "_provenance"):
                 shape.pop(vestigial, None)
             shapes.append(shape)

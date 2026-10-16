@@ -1,12 +1,120 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Headers both command-line tools below share; tools-internal, never installed.
+    add_library(hipdnn_tools_common INTERFACE)
+    target_include_directories(hipdnn_tools_common
+        INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
+    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk)
+
+    # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
+    # training tooling.
+    add_subdirectory(bench)
+
+    # Both evaluate UHD descriptor expressions through plugin_sdk's heuristics/uhd/, which
+    # exists only with the kernel ingestor.
+    add_subdirectory(corpus_gen)
+
+    add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# uhd_gen's Python tests pin the features_hash contract against the C++ FeatureExtractor, and
+# mine_shapes mines the shapes the IngestorGenerator consumes; both are ingestor tooling, so
+# a build without the ingestor, or with HIPDNN_SKIP_TESTS, registers neither. The suites self-skip (pytest.importorskip)
+# when lightgbm/flatbuffers/numpy/pandas are absent; HIPDNN_REQUIRE_UHD_GEN_TESTS turns
+# the skips of all four suites into failures (uhd_gen/conftest.py, which the two suites outside
+# uhd_gen/ load with `-p`) and a missing pytest into a configure error.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT HIPDNN_SKIP_TESTS)
+    if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+        set(_uhd_gen_missing_severity FATAL_ERROR)
+    else()
+        set(_uhd_gen_missing_severity WARNING)
+    endif()
+
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        # Probe for pytest: `python -m pytest` exits 1 when it is missing, which is
+        # indistinguishable from a test failure.
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import pytest"
+            RESULT_VARIABLE UHD_GEN_PYTEST_PROBE
+            OUTPUT_QUIET ERROR_QUIET)
+        if(UHD_GEN_PYTEST_PROBE EQUAL 0)
+            add_test(
+                NAME uhd_gen_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            # pytest exits 5 when it collects nothing (the importorskip guards skipped
+            # everything).
+            set_tests_properties(uhd_gen_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            # Separate test because the suite above does not collect uhd_gen/dataset/tests,
+            # and this one needs no ML dependencies.
+            add_test(
+                NAME uhd_gen_dataset_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                        ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # Only this file: the rest of IngestorGenerator/tests needs PyYAML/Jinja2 via its
+            # conftest. --noconftest because test_mine_shapes.py must not inherit those
+            # imports.
+            add_test(
+                NAME mine_shapes_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q --noconftest -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests/test_mine_shapes.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(mine_shapes_tests PROPERTIES SKIP_RETURN_CODE 5)
+
+            # The hipdnn-uhd skill's scripts, against a fake hipdnn_bench. Its uhd_gen-backed
+            # cases (promotion into a candidate tree) need the evaluator too.
+            add_test(
+                NAME uhd_skill_scripts_tests
+                COMMAND ${Python3_EXECUTABLE} -m pytest -q -p uhd_gen.conftest
+                        ${CMAKE_CURRENT_SOURCE_DIR}/ai/tests/test_uhd_skill_scripts.py
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(uhd_skill_scripts_tests PROPERTIES
+                SKIP_RETURN_CODE 5
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+
+            if(HIPDNN_REQUIRE_UHD_GEN_TESTS)
+                set_property(TEST uhd_gen_tests uhd_gen_dataset_tests mine_shapes_tests
+                             uhd_skill_scripts_tests APPEND PROPERTY
+                             ENVIRONMENT "HIPDNN_REQUIRE_UHD_GEN_TESTS=1")
+            endif()
+
+            # Build tree only: none of the four is installed.
+            _apply_hipdnn_test_category_labels(uhd_gen_tests)
+            _apply_hipdnn_test_category_labels(uhd_gen_dataset_tests)
+            _apply_hipdnn_test_category_labels(mine_shapes_tests)
+            _apply_hipdnn_test_category_labels(uhd_skill_scripts_tests)
+        else()
+            message(${_uhd_gen_missing_severity}
+                    "uhd_gen tests NOT registered: pytest is not importable by "
+                    "${Python3_EXECUTABLE}. These pin the features_hash contract between "
+                    "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
+                    "lightgbm, flatbuffers, numpy) so they run.")
+        endif()
+    else()
+        message(${_uhd_gen_missing_severity}
+                "uhd_gen tests NOT registered: no Python3 interpreter found")
+    endif()
+endif()
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
 # own engine name rather than a hexadecimal fallback.
