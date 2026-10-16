@@ -21,7 +21,17 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-replay-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp")
+    # The replay backend reads this tree. It is a compile-time path, not an
+    # environment variable. A HipKittens build does not use it for heuristic queries.
+    if(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/clients/tests/jit/data")
+        target_compile_definitions(hipblaslt PRIVATE
+            "HIPBLASLT_JIT_REPLAY_DATA=\"${PROJECT_SOURCE_DIR}/clients/tests/jit/data\"")
+    endif()
 endif()
 
 if(HIPBLASLT_BUILD_TESTING)
