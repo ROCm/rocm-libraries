@@ -478,29 +478,6 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # Library attention dispatch CPU tests (no GPU required; dispatcher selection and
-    # signature guards). Pointed at the DIRECTORY, not a file list, so a new file
-    # in tests/dispatch/attention/ runs automatically.
-    #
-    # PYTHONPATH must resolve the installed rocke/ package, which lives two levels
-    # above tests/dispatch/attention/ in the install tree. Using
-    # PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library (the library root, same as
-    # every other library target) puts rocke/ on the path correctly.
-    #
-    # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
-    # because tests/__init__.py exists while rocke/library/__init__.py does not,
-    # so pytest's prepend-mode basedir is already tests/library regardless of CWD
-    # (confirmed by tests/dispatch/attention/test_import_resolution.py).
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
-           " -v -rs --timeout=30)\n")
-    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
-           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
-           "  TIMEOUT 180)\n")
-
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_reference_common_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -509,22 +486,26 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
 
-    # RDNA WMMA attention CPU tests: spec validation, dispatch selection and
-    # the tuned-candidate contract. Same PYTHONPATH rule as the conv entry.
-    set(_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS
-        "tests/library/tests/test_wmma_fmha_fwd_spec.py"
-        "tests/library/tests/dispatch/attention/test_gfx1151_attention_selection.py"
-        "tests/library/tests/dispatch/attention/test_tuning_contract.py")
-    set(_ROCKE_LIBRARY_ATTENTION_TESTS "")
-    foreach(_rocke_attention_test ${_ROCKE_LIBRARY_ATTENTION_TEST_RELPATHS})
-      string(APPEND _ROCKE_LIBRARY_ATTENTION_TESTS
-             " \"${ROCKE_TEST_CTEST_REL}${_rocke_attention_test}\"")
-    endforeach()
+    # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
+    # signature guards, spec validation and the tuned-candidate contract. Pointed at the
+    # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
+    # automatically; test_wmma_fmha_fwd_spec.py sits outside it and is named beside it.
+    # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
+    # ignored here. Same PYTHONPATH rule as the conv entry.
+    #
+    # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
+    # because tests/__init__.py exists while rocke/library/__init__.py does not,
+    # so pytest's prepend-mode basedir is already tests/library regardless of CWD
+    # (confirmed by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_library_attention_pytest python -m pytest${_ROCKE_LIBRARY_ATTENTION_TESTS} -v -rs --timeout=60)\n")
+           "add_test(rocke_library_attention_pytest python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
+           " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
+           " -v -rs --timeout=60)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
-           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
 
