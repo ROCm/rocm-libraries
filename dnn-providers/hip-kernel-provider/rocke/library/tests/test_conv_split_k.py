@@ -469,3 +469,42 @@ def test_two_stage_builder_spec_is_never_resolved_unsplit(monkeypatch):
     build_implicit_gemm_conv_wgrad(spec, arch="gfx950")
     assert seen["allow_unsplit"] is False
     assert seen["ws_replicas"] == 4
+
+
+def test_cost_fit_keeps_each_workspace_replica_count_its_own_option():
+    # Two workspace binaries of one main loop that differ only in replica
+    # count: each time must stay paired with its own setup traffic.
+    from benchmarks.common.split_k_cost_fit import _decisions, _Kernel
+    from rocke.helpers.split_k_planner import (
+        SplitKKernel,
+        SplitKProblem,
+        SplitKReduction,
+        split_k_cost_model,
+    )
+
+    problem = SplitKProblem(m=64, n=64, k=1 << 16)
+    tile = SplitKKernel(64, 64, 64, 4)
+
+    def kernel(reduction, times):
+        return _Kernel(
+            "log", "cmd", "label", problem, tile, reduction, ("loop",), times
+        )
+
+    def ws(copies):
+        return SplitKReduction(
+            "workspace", "fp32", workspace=True, workspace_copies=copies
+        )
+
+    (d,) = _decisions(
+        [
+            kernel(None, {1: 10.0}),
+            kernel(ws(1), {8: 1.0}),
+            kernel(ws(8), {8: 2.0}),
+        ],
+        split_k_cost_model("gfx950"),
+        max_degree=8,
+    )
+    out = 64 * 64 * 2
+    pairs = {(float(nb), float(ms)) for nb, ms in zip(d.setup_bytes, d.measured) if nb}
+    assert (2 * 1 * 64 * 64 * 4 + out, 1.0) in pairs
+    assert (2 * 8 * 64 * 64 * 4 + out, 2.0) in pairs

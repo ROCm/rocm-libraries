@@ -441,9 +441,9 @@ def _decisions(kernels: list[_Kernel], cost, max_degree: int = 1024) -> list[_De
         }
         if len(kinds) < 2:
             continue  # nothing to decide between
-        # One option per (reduction kind, degree): binaries of one kind differ
-        # only in vector width / epilogue, which the model does not see, so
-        # each option is timed at the best binary of its kind.
+        # One option per (reduction kind, degree, workspace copies): binaries
+        # of one option differ only in vector width / epilogue, which the model
+        # does not see, so each option is timed at its best binary.
         opts: dict[tuple, list] = {}
         for m in members:
             p, red = m.problem, m.reduction
@@ -461,8 +461,12 @@ def _decisions(kernels: list[_Kernel], cost, max_degree: int = 1024) -> list[_De
                         nb = 2 * ws + out_bytes
                     else:
                         nb = float(out_bytes)
-                prev = opts.get((kind, degree))
-                opts[(kind, degree)] = [b, nb, min(ms, prev[2]) if prev else ms]
+                # Workspace binaries differ in setup traffic by replica count,
+                # so each count is its own option: a time stays paired with
+                # the setup bytes of the binary that produced it.
+                key = (kind, degree, red.workspace_copies if kind == "ws" else 0)
+                prev = opts.get(key)
+                opts[key] = [b, nb, min(ms, prev[2]) if prev else ms]
         base = [v[0] for v in opts.values()]
         nbytes = [v[1] for v in opts.values()]
         measured = [v[2] for v in opts.values()]

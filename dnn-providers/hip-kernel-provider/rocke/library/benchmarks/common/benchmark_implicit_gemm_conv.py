@@ -3609,6 +3609,7 @@ def _run_wgrad_sweep(
                     group_merge=spec.group_merge,
                     two_stage=True,
                     degrees=args.split_k_degrees,
+                    ws_replicas=spec.ws_replicas,
                 )
                 if args.split_k == 0
                 else (resolved_split_k,)
