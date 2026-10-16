@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .target import ArchTarget, MmaOp, MmaScaleDType
+from .target import ArchTarget, MmaOp, MmaScaleDType, _gfx1250_scale_combination_valid
 from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 
@@ -102,24 +102,36 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if atom is None or atom.family != "wmma_scaled":
         return None
     formats = {"fp8e4m3": 0, "bf8e5m2": 1, "fp6e2m3": 2, "fp6e3m2": 3, "fp4e2m1": 4}
-    # The current backend supports E8M0 for both inputs and a shared K-group size.
-    # Keep these restrictions here, independently of the catalog query model.
+    scale_selectors = {
+        MmaScaleDType.E8M0: 0,
+        MmaScaleDType.E5M3: 1,
+        MmaScaleDType.E4M3: 2,
+    }
+    # Matrix and scale formats are independent selectors for each operand.
+    # Validate the backend contract independently of the catalog query model.
     if (
         atom.a_dtype not in formats
         or atom.b_dtype not in formats
-        or atom.a_scale_dtype != MmaScaleDType.E8M0
-        or atom.b_scale_dtype != MmaScaleDType.E8M0
+        or atom.a_scale_dtype not in scale_selectors
+        or atom.b_scale_dtype not in scale_selectors
         or atom.scale_block_k not in (16, 32)
         or atom.c_dtype != "fp32"
         or atom.shape != (16, 16, 128)
     ):
         raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")
+    if not _gfx1250_scale_combination_valid(
+        atom.a_dtype, atom.b_dtype, atom.a_scale_dtype, atom.b_scale_dtype
+    ):
+        raise ValueError("unsupported scaled WMMA matrix/scale format combination")
     counts = (atom.a_scale_frag_len, atom.b_scale_frag_len)
     if any(count != atom.k // atom.scale_block_k for count in counts):
         raise ValueError(f"unsupported scaled WMMA scale fragment lengths: {counts}")
     return ScaledWmmaOp(
         atom=atom,
         matrix_formats=(formats[atom.a_dtype], formats[atom.b_dtype]),
-        scale_formats=(0, 0),  # E8M0 for each source.
+        scale_formats=(
+            scale_selectors[atom.a_scale_dtype],
+            scale_selectors[atom.b_scale_dtype],
+        ),
         scales=ScalePacking(count=atom.a_scale_frag_len, block_k=atom.scale_block_k),
     )

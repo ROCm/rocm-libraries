@@ -516,3 +516,88 @@ def test_mixed_type_per_tensor_bpe():
     assert r["applicable"] is True and r["reason"] == "tight"
     assert r["offsets"]["ldsBaseB"] == fA
     assert r["offsets"]["writeStrideBytes"] == fA + fB
+
+
+def _tdmfuse_state(tdmFuse, **ovr):
+    # TDMFuse 1-3 are accepted only with TDM on both tensors and MX scales.
+    pt = dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0), MXBlockA=32, MXBlockB=32)
+    pt.update(ovr.pop("ProblemType", {}))
+    kw = dict(TDMFuse=tdmFuse, TDMInst=3, DepthU=256)
+    kw.update(ovr)
+    return _vw8_state(ProblemType=pt, **kw)
+
+# [2,2] tight, [2,2] with B kept whole, [4,1] with A active and its [1,4] mirror.
+_TDMFUSE_LAYOUTS = {
+    "tight": dict(),
+    "bcontig": dict(MIWaveTile=[8, 7], VectorWidthB=4),
+    "asym_4x1": dict(MIWaveGroup=[4, 1], MIWaveTile=[4, 8], VectorWidthA=4),
+    "asym_1x4": dict(MIWaveGroup=[1, 4], MIWaveTile=[8, 4], VectorWidthB=4),
+    "tight_f8f4": dict(DepthU=512, ProblemType=dict(MacDataTypeA=_FakeDataType(bf16=False, f8=True, nbytes=1.0),
+                                        MacDataTypeB=_FakeDataType(bf16=False, f4=True, nbytes=0.5))),
+}
+
+def _tc_bpe(state, tc):
+    pt = state["ProblemType"]
+    return pt.get("MacDataType%s" % tc, pt["DataType"]).numBytes()
+
+def _tc_mt(state, tc):
+    return state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+
+def _piece_lds_addrs(state, tc):
+    """LDS address of every TDM piece of `tc`, run through the writer's SGPR arithmetic."""
+    from Tensile.Components.TDMFuse import tdmWavePartition
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+
+    class _Writer:
+        tdmWaveLdsAddr = KernelWriterAssembly.tdmWaveLdsAddr
+
+    numComp = tdmWavePartition(state, tc)[0]
+    bpe = _tc_bpe(state, tc)
+    mod = _Writer().tdmWaveLdsAddr(state, tc, numComp,
+                                   int(_tc_mt(state, tc) // numComp * state["DepthU"] * bpe),
+                                   state.get("LdsOffset%s" % tc, 0),
+                                   state["LdsBlockSizePerPad%s" % tc],
+                                   int(state["LdsPad%s" % tc] * bpe), 1, 2)
+    ops = {"s_and_b32": lambda x, y: x & y, "s_mul_i32": lambda x, y: x * y,
+           "s_lshr_b32": lambda x, y: x >> y, "s_add_u32": lambda x, y: x + y}
+    addrs = []
+    for piece in range(numComp):
+        regs = {"s1": piece}
+        for item in mod.flatitems():
+            op, dst, *srcs = str(item).split("//")[0].replace(",", " ").split()
+            regs[dst] = ops[op](*[regs[s] if s in regs else int(s, 0) for s in srcs])
+        addrs.append(regs["s1"])
+    return addrs
+
+def _read_addr(state, offsets, tc, row):
+    """Where the local reads expect `row` of `tc`: component jump plus the padded offset in it."""
+    bpe = _tc_bpe(state, tc)
+    whole = offsets.get("aBaseline" if tc == "A" else "bBaseline", False)
+    compRows = _tc_mt(state, tc) // (1 if whole else 2)
+    jump = 0 if whole else row // compRows * offsets["writeStrideBytes"]
+    x = int(row % compRows * state["DepthU"] * bpe)
+    pad = x // state["LdsBlockSizePerPad%s" % tc] * int(state["LdsPad%s" % tc] * bpe)
+    return offsets.get("ldsBase%s" % tc, state.get("LdsOffset%s" % tc, 0)) + jump + x + pad
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("mode", [-1, 1])
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+def test_tdmfuse_rows_keep_the_two_component_layout(tdmFuse, mode, layout):
+    r = evaluate(_tdmfuse_state(tdmFuse, LDSSegmentInterleave=mode, **_TDMFUSE_LAYOUTS[layout]))
+    assert r["applicable"] is True, r["reason"]
+    assert r == evaluate(_tdmfuse_state(0, LDSSegmentInterleave=mode, **_TDMFUSE_LAYOUTS[layout]))
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
+def test_tdm_pieces_land_where_the_local_reads_expect_them(tdmFuse, layout):
+    from Tensile.Components.TDMFuse import tdmWavePartition
+
+    state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, **_TDMFUSE_LAYOUTS[layout])
+    r = evaluate(state)
+    assert r["applicable"] is True, r["reason"]
+    state["LDSSegInterleaveOffsets"] = r["offsets"]
+    for tc in ("A", "B"):
+        numComp = tdmWavePartition(state, tc)[0]
+        rows = _tc_mt(state, tc) // numComp
+        expected = [_read_addr(state, r["offsets"], tc, p * rows) for p in range(numComp)]
+        assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)

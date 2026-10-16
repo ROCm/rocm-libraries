@@ -3048,8 +3048,13 @@ namespace TensileLite
         const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
         const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
         const size_t descriptorStrideCD = usesDataParallelArgsV1 ? startStrideCD : 1;
-        auto const& descriptorA = usesDataParallelArgsV1 && problemType.sparse == 1 ? problem.compressed() : problem.a();
-        auto const& descriptorB = usesDataParallelArgsV1 && problemType.sparse == 2 ? problem.compressed() : problem.b();
+        bool         sparseA = problemType.sparse == 1;
+        bool         sparseB = problemType.sparse == 2;
+        auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
+        auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
+        void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
+        void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
+
         const bool pointerArrayBatch
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
@@ -3201,11 +3206,11 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        problem.a().strides()[1] * problem.a().elementBytes(), arg.type);
+                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        problem.b().strides()[1] * problem.b().elementBytes(), arg.type);
+                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
@@ -3292,8 +3297,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
                                    ? static_cast<void const*>(inputs.batchA)
-                                   : problemType.sparse == 1 ? inputs.compressed : inputs.a)
-                            : inputs.a);
+                                   : aAddress)
+                            : aAddress);
                     break;
                 case CustomArgSemantic::AddressB:
                     rv.args.template append<void const*>(
@@ -3301,8 +3306,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
                                    ? static_cast<void const*>(inputs.batchB)
-                                   : problemType.sparse == 2 ? inputs.compressed : inputs.b)
-                            : inputs.b);
+                                   : bAddress)
+                            : bAddress);
                     break;
                 case CustomArgSemantic::AddressC:
                 {

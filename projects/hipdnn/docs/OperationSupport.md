@@ -30,7 +30,12 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[CPU Reference Implementation](./OperationSupport-ReferenceImpl.md)** - CPU-based reference implementation for validation and testing
   - Provides ground-truth results for validating GPU implementations
-  - Supports core operations (Convolution, Batchnorm, Pointwise)
+  - Supports Convolution, Batchnorm, Matmul, Layernorm, RMSNorm, Reduction, Resample, SDPA, block-scale quantization, MoE grouped matmul and Pointwise
+  - Not intended for performance or production use
+
+- **[GPU Reference Implementation](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md)** - GPU-based reference implementation in the integration test project
+  - Used as the oracle for graph-only integration test bundles
+  - Supports a subset of the CPU operations (e.g. Convolution forward, Batchnorm forward, Layernorm, RMSNorm, Reduction, SDPA forward, Matmul, Pointwise)
   - Not intended for performance or production use
 
 ## Roadmap
