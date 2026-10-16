@@ -52,6 +52,12 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.project([0, 2]).element_count, 8)
         self.assertEqual(hn.Shape([7]).project([]).element_count, 1)
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
+            if math.prod(dimensions) > SIZE_MAX:
+                with self.assertRaisesRegex(
+                    RuntimeError, "element count exceeds size_t"
+                ):
+                    hn.Shape(dimensions)
+                continue
             shape = hn.Shape(dimensions)
             for first in range(4):
                 for end in range(first, 4):
@@ -146,8 +152,12 @@ class ShapeTests(unittest.TestCase):
         # oracle without enumerating SIZE_MAX-sized dimensions or using NumPy's
         # more restrictive native integer limits.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
-            shape = hn.Shape(dimensions)
             count = math.prod(dimensions)
+            if count > SIZE_MAX:
+                with self.assertRaises(RuntimeError):
+                    hn.Shape(dimensions)
+                continue
+            shape = hn.Shape(dimensions)
             for order in itertools.permutations(range(shape.rank)):
                 if count == 0:
                     indices = [max(extent - 1, 0) for extent in dimensions]
@@ -169,20 +179,10 @@ class ShapeTests(unittest.TestCase):
                     with self.subTest(
                         dimensions=dimensions, order=order, indices=indices
                     ):
-                        if expected > SIZE_MAX:
-                            with self.assertRaises(RuntimeError):
-                                shape.linear_index(indices, order)
-                        else:
-                            self.assertEqual(
-                                shape.linear_index(indices, order), expected
-                            )
-                            if count <= SIZE_MAX:
-                                self.assertEqual(
-                                    shape.coordinates(expected, order), list(indices)
-                                )
-                            else:
-                                with self.assertRaises(RuntimeError):
-                                    shape.coordinates(expected, order)
+                        self.assertEqual(shape.linear_index(indices, order), expected)
+                        self.assertEqual(
+                            shape.coordinates(expected, order), list(indices)
+                        )
 
     def test_coordinate_bounds_before_arithmetic(self):
         shape = hn.Shape([SIZE_MAX, 2, 0])
@@ -254,17 +254,33 @@ class ShapeTests(unittest.TestCase):
                     empty.linear_index([0] * empty.rank)
 
     def test_overflow(self):
-        self.assertEqual(hn.Shape([SIZE_MAX, 1]).element_count, SIZE_MAX)
+        boundary = hn.Shape([SIZE_MAX, 1])
+        self.assertEqual(boundary.element_count, SIZE_MAX)
+        for order in ([0, 1], [1, 0]):
+            self.assertEqual(
+                boundary.linear_index([SIZE_MAX - 1, 0], order), SIZE_MAX - 1
+            )
+            self.assertEqual(
+                boundary.coordinates(SIZE_MAX - 1, order), [SIZE_MAX - 1, 0]
+            )
         for dimensions in ([SIZE_MAX, 2], [SIZE_MAX, 2, 1, 1]):
+            for extents in (dimensions, tuple(dimensions)):
+                with self.assertRaisesRegex(
+                    RuntimeError, "element count exceeds size_t"
+                ):
+                    hn.Shape(extents)
+        empty = hn.Shape([SIZE_MAX, 2, 0])
+        self.assertEqual(empty.element_count, 0)
+        for operation in (
+            lambda: empty.element_count_in_range(0, 2),
+            lambda: empty.project([0, 1]),
+            lambda: empty[:2],
+            lambda: empty[::-1][1:],
+        ):
             with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-                _ = hn.Shape(dimensions).element_count
-        oversized = hn.Shape([SIZE_MAX, 2])
-        self.assertEqual(oversized.linear_index([0, 1]), 1)
-        for order in ([1, 0], [0, 1]):
-            with self.assertRaises(RuntimeError):
-                oversized.linear_index([SIZE_MAX - 1, 1], order)
-            with self.assertRaises(RuntimeError):
-                oversized.coordinates(0, order)
+                operation()
+        self.assertEqual(empty.project([1, 2, 0]).element_count, 0)
+        self.assertEqual(empty[::-1].element_count, 0)
 
     def test_invalid_python_inputs(self):
         for dimensions in ([-1], [SIZE_MAX + 1], [1.5], 3):
@@ -292,7 +308,7 @@ class ShapeTests(unittest.TestCase):
                     operation()
 
     def test_tuple_sequence_operations(self):
-        for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 2)):
+        for extents in ((), (0,), (2, 3, 2, 5), (SIZE_MAX, 1)):
             with self.subTest(extents=extents):
                 shape = hn.Shape(extents)
                 self.assertEqual(len(shape), len(extents))
@@ -317,7 +333,7 @@ class ShapeTests(unittest.TestCase):
             def __index__(self):
                 return -1
 
-        for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 2)):
+        for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 1)):
             shape = hn.Shape(extents)
             for key in (0, -1, True, np.int64(-1), LastIndex(), 10**100, -(10**100)):
                 with self.subTest(extents=extents, key=key):
@@ -355,7 +371,7 @@ class ShapeTests(unittest.TestCase):
             shape[InvalidIndex()]
 
     def test_tuple_hash_and_immutability(self):
-        for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 2)):
+        for extents in ((), (0,), (2, 3, 5), (SIZE_MAX, 1)):
             shape = hn.Shape(extents)
             self.assertEqual(hash(shape), hash(extents))
             self.assertEqual({shape: "found"}[hn.Shape(extents)], "found")
