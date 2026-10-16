@@ -759,7 +759,17 @@ def normalize_band(
 
 
 def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
-    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``."""
+    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``.
+
+    Requests the unified family does not serve (other arches, and the explicit
+    ``window_*`` fields, which carry their own bounds) get the default mask: the
+    problem is then only a geometry carrier, e.g. for the gfx1151 launch grid.
+    """
+    explicit = req.window_left is not None or (
+        req.window_right is not None and int(req.window_right) >= 0
+    )
+    if not _uses_band_dispatch(req, explicit):
+        return False, 0
     band = normalize_band(req)
     return band.top_left, band.kernel_right_bound
 

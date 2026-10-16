@@ -308,6 +308,24 @@ class TestBandInputRules(unittest.TestCase):
             with self.subTest(kw=kw):
                 self.assertEqual(self._errors(mask_type=SLIDING_WINDOW, **kw), [])
 
+    def test_unserved_arches_and_explicit_windows_get_the_default_mask(self):
+        # The gfx1151 / RDNA candidates build a unified problem only as a geometry
+        # carrier (launch grid); it must not trip the band rules.
+        for arch in ("gfx1151", "gfx1201", "gfx11-generic", "gfx12-generic"):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    _attention_band(
+                        _req(arch=arch, mask_type=SLIDING_WINDOW, window_left=31)
+                    ),
+                    (False, 0),
+                )
+        self.assertEqual(
+            _attention_band(
+                _req(mask_type=SLIDING_WINDOW, window_left=31, window_right=0)
+            ),
+            (False, 0),
+        )
+
     def test_explicit_window_fields_cannot_be_mixed_with_the_trio(self):
         for arch in ("gfx950", "gfx1151"):
             for extra in (dict(right_bound=4), dict(diagonal_alignment=BR_ALIGN)):
