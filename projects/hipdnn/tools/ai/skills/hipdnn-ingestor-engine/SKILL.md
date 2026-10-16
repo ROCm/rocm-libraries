@@ -41,9 +41,7 @@ AMDGPU code object resolved relative to the descriptor that names it (inside the
 root, no root-relative fallback) and `symbol` is authored. The packer copies the bytes
 as-is into the arch's archive with no compile step, reads the signature from the
 object's metadata, and declares `metadata_fields: []`. It does not check the object's
-format or target processor, so every `hsaco` kernel must state a non-empty `arch` listing the arch(es) its
-object runs on (a generic-target object lists each one); the generator rejects a kernel
-without one, since an unrestricted one would ship the same bytes to every shard. `hsaco_file` (direct load) remains unsupported.
+format or target processor; `arch` follows [hsaco kernels and `arch`](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch). `hsaco_file` (direct load) remains unsupported.
 
 Both dialects are packed and staged per architecture, and **neither registers a
 descriptor in CMake**: the authored subpath is the whole mechanism. Only
@@ -69,6 +67,9 @@ Completion requires:
 - Exact-engine quick/standard numerics and required negative cases, with selected,
   served, skipped and failed counts. Zero selected, all-skipped or another engine's work
   is not correctness evidence. An extension must dispatch its new candidate.
+- Packaging probes run and passing (RUNBOOK's final step): the automatic
+  `hkp-probe-<arch>` for the bundle's architecture (no edit), plus any named `UKDS` probe
+  the integration adds in `descriptor-packaging/probes/probes.cmake`.
 - Rebuilt/reinstalled artifacts after tuning or regeneration, then fresh final gates.
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing, ambiguous or error outcomes block

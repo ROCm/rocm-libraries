@@ -25,9 +25,6 @@ SOFTWARE.
 #include <type_traits>
 
 #include "host_tensor_executors.hpp"
-#if __AVX2__
-#include <immintrin.h>
-#endif
 
 /* median filter algorithm explanation
 
