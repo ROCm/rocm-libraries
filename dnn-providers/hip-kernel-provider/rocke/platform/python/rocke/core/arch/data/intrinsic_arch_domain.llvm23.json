@@ -25,6 +25,24 @@
     "av.store.b128.p0": "llvm.amdgcn.av.store.b128.p0",
     "av.store.b128.p1": "llvm.amdgcn.av.store.b128.p1",
     "ballot.i64": "llvm.amdgcn.ballot.i64",
+    "cluster.id.x": "llvm.amdgcn.cluster.id.x",
+    "cluster.id.y": "llvm.amdgcn.cluster.id.y",
+    "cluster.id.z": "llvm.amdgcn.cluster.id.z",
+    "cluster.load.async.to.lds.b128": "llvm.amdgcn.cluster.load.async.to.lds.b128",
+    "cluster.load.async.to.lds.b32": "llvm.amdgcn.cluster.load.async.to.lds.b32",
+    "cluster.load.async.to.lds.b64": "llvm.amdgcn.cluster.load.async.to.lds.b64",
+    "cluster.load.async.to.lds.b8": "llvm.amdgcn.cluster.load.async.to.lds.b8",
+    "cluster.load.b128.v4i32": "llvm.amdgcn.cluster.load.b128.v4i32",
+    "cluster.load.b32.i32": "llvm.amdgcn.cluster.load.b32.i32",
+    "cluster.load.b64.v2i32": "llvm.amdgcn.cluster.load.b64.v2i32",
+    "cluster.workgroup.flat.id": "llvm.amdgcn.cluster.workgroup.flat.id",
+    "cluster.workgroup.id.x": "llvm.amdgcn.cluster.workgroup.id.x",
+    "cluster.workgroup.id.y": "llvm.amdgcn.cluster.workgroup.id.y",
+    "cluster.workgroup.id.z": "llvm.amdgcn.cluster.workgroup.id.z",
+    "cluster.workgroup.max.flat.id": "llvm.amdgcn.cluster.workgroup.max.flat.id",
+    "cluster.workgroup.max.id.x": "llvm.amdgcn.cluster.workgroup.max.id.x",
+    "cluster.workgroup.max.id.y": "llvm.amdgcn.cluster.workgroup.max.id.y",
+    "cluster.workgroup.max.id.z": "llvm.amdgcn.cluster.workgroup.max.id.z",
     "ds.bpermute": "llvm.amdgcn.ds.bpermute",
     "ds.load.tr16.b128.v8bf16": "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
     "ds.load.tr16.b128.v8f16": "llvm.amdgcn.ds.load.tr16.b128.v8f16",
@@ -33,6 +51,7 @@
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
+    "flat.prefetch": "llvm.amdgcn.flat.prefetch",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
     "fmuladd.f32": "llvm.fmuladd.f32",
@@ -55,6 +74,7 @@
     "global.load.tr.b128.v8bf16": "llvm.amdgcn.global.load.tr.b128.v8bf16",
     "global.load.tr.b128.v8f16": "llvm.amdgcn.global.load.tr.b128.v8f16",
     "global.load.tr.b128.v8i16": "llvm.amdgcn.global.load.tr.b128.v8i16",
+    "global.prefetch": "llvm.amdgcn.global.prefetch",
     "global.store.async.from.lds.b128": "llvm.amdgcn.global.store.async.from.lds.b128",
     "global.store.async.from.lds.b32": "llvm.amdgcn.global.store.async.from.lds.b32",
     "global.store.async.from.lds.b64": "llvm.amdgcn.global.store.async.from.lds.b64",
@@ -95,6 +115,7 @@
     "mov.dpp8.f32": "llvm.amdgcn.mov.dpp8.f32",
     "mov.dpp8.i32": "llvm.amdgcn.mov.dpp8.i32",
     "raw.ptr.buffer.load.async.lds": "llvm.amdgcn.raw.ptr.buffer.load.async.lds",
+    "raw.ptr.buffer.load.f16": "llvm.amdgcn.raw.ptr.buffer.load.f16",
     "raw.ptr.buffer.load.i16": "llvm.amdgcn.raw.ptr.buffer.load.i16",
     "raw.ptr.buffer.load.i32": "llvm.amdgcn.raw.ptr.buffer.load.i32",
     "raw.ptr.buffer.load.lds": "llvm.amdgcn.raw.ptr.buffer.load.lds",
@@ -119,10 +140,16 @@
     "s.barrier.signal": "llvm.amdgcn.s.barrier.signal",
     "s.barrier.signal.var": "llvm.amdgcn.s.barrier.signal.var",
     "s.barrier.wait": "llvm.amdgcn.s.barrier.wait",
+    "s.buffer.prefetch.data": "llvm.amdgcn.s.buffer.prefetch.data",
+    "s.cluster.barrier": "llvm.amdgcn.s.cluster.barrier",
+    "s.prefetch.data.p0": "llvm.amdgcn.s.prefetch.data.p0",
+    "s.prefetch.data.p1": "llvm.amdgcn.s.prefetch.data.p1",
+    "s.prefetch.data.p4": "llvm.amdgcn.s.prefetch.data.p4",
     "s.prefetch.inst.p0": "llvm.amdgcn.s.prefetch.inst.p0",
     "s.prefetch.inst.p1": "llvm.amdgcn.s.prefetch.inst.p1",
     "s.prefetch.inst.p4": "llvm.amdgcn.s.prefetch.inst.p4",
     "s.setprio": "llvm.amdgcn.s.setprio",
+    "s.setreg": "llvm.amdgcn.s.setreg",
     "s.wait.asynccnt": "llvm.amdgcn.s.wait.asynccnt",
     "s.wait.dscnt": "llvm.amdgcn.s.wait.dscnt",
     "s.wait.event": "llvm.amdgcn.s.wait.event",
@@ -180,6 +207,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -210,6 +241,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.f32.bf8",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -245,6 +280,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -276,6 +315,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.bf8.f32",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -311,6 +354,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -342,6 +389,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.f32.fp8",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -377,6 +428,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -406,6 +461,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
         "verified_on": "llvm23"
@@ -444,6 +504,11 @@
         "status": "toolchain_crash",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
@@ -473,6 +538,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -506,6 +575,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -536,6 +609,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -563,6 +640,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -601,6 +682,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.permlane32.swap",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.permlane32.swap",
         "status": "arch_absent",
@@ -635,6 +721,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -662,6 +752,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -698,6 +792,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -725,6 +823,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -760,6 +862,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.asyncmark",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.asyncmark",
         "status": "arch_absent",
@@ -788,6 +895,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -821,6 +932,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -848,6 +963,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -881,6 +1000,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -908,6 +1031,678 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.id.x": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.id.y": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.id.z": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.async.to.lds.b128": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.async.to.lds.b32": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.async.to.lds.b64": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.async.to.lds.b8": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.b128.v4i32": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.b32.i32": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.load.b64.v2i32": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.load.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.flat.id": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cluster.workgroup.flat.id",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.id.x": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.id.y": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.id.z": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.max.flat.id": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.max.id.x": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.max.id.y": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "cluster.workgroup.max.id.z": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -941,6 +1736,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -969,6 +1768,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.load.tr16.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.load.tr16.b128",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -1009,6 +1813,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.load.tr16.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.load.tr16.b128",
         "status": "arch_absent",
@@ -1041,6 +1850,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "not an intrinsic in llvm23",
+        "status": "name_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "not an intrinsic in llvm23",
         "status": "name_absent",
         "verified_on": "llvm23"
@@ -1082,6 +1896,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64",
         "status": "arch_absent",
@@ -1116,6 +1935,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1143,6 +1966,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1176,6 +2003,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1206,6 +2037,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1227,12 +2062,57 @@
         "verified_on": "llvm23"
       }
     },
+    "flat.prefetch": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
     "fmuladd.bf16": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1266,6 +2146,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1293,6 +2177,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1326,6 +2214,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1353,6 +2245,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1386,6 +2282,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1413,6 +2313,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1446,6 +2350,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1473,6 +2381,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1506,6 +2418,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1533,6 +2449,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1566,6 +2486,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1593,6 +2517,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -1626,6 +2554,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1654,6 +2586,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b128",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -1694,6 +2631,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b32",
         "status": "arch_absent",
@@ -1726,6 +2668,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b64",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -1766,6 +2713,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.async.to.lds.b8",
         "status": "arch_absent",
@@ -1798,6 +2750,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.lds",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.lds",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -1839,6 +2796,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1872,6 +2833,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.load.tr.b128",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -1909,6 +2874,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -1933,6 +2902,47 @@
         "verified_on": "llvm23"
       }
     },
+    "global.prefetch": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.prefetch",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
     "global.store.async.from.lds.b128": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b128",
@@ -1940,6 +2950,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b128",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b128",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -1980,6 +2995,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b32",
         "status": "arch_absent",
@@ -2012,6 +3032,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b64",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b64",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2052,6 +3077,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.global.store.async.from.lds.b8",
         "status": "arch_absent",
@@ -2086,6 +3116,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -2113,6 +3147,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -2146,6 +3184,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -2173,6 +3215,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -2206,6 +3252,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -2233,6 +3283,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -2266,6 +3320,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -2293,6 +3351,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -2326,6 +3388,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -2354,6 +3420,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "not an intrinsic in llvm23",
+        "status": "name_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "not an intrinsic in llvm23",
         "status": "name_absent",
         "verified_on": "llvm23"
@@ -2395,6 +3466,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
         "status": "arch_absent",
@@ -2427,6 +3503,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x16bf16.1k",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2465,6 +3546,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x16f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x16f16",
         "status": "arch_absent",
@@ -2495,6 +3581,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.bf16",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2535,6 +3626,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.bf8.bf8",
         "status": "arch_absent",
@@ -2566,6 +3662,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.f16",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2606,6 +3707,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8",
         "status": "arch_absent",
@@ -2637,6 +3743,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x4f32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x4f32",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2675,6 +3786,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x8.xf32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x8.xf32",
         "status": "arch_absent",
@@ -2707,6 +3823,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "not an intrinsic in llvm23",
+        "status": "name_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "not an intrinsic in llvm23",
         "status": "name_absent",
         "verified_on": "llvm23"
@@ -2748,6 +3869,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.bf16",
         "status": "arch_absent",
@@ -2784,6 +3910,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.bf8.bf8",
         "status": "arch_absent",
@@ -2815,6 +3946,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2855,6 +3991,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.fp8.fp8",
         "status": "arch_absent",
@@ -2890,6 +4031,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x2f32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x2f32",
         "status": "arch_absent",
@@ -2920,6 +4066,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x4.xf32",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x4.xf32",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -2960,6 +4111,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x8bf16.1k",
         "status": "arch_absent",
@@ -2990,6 +4146,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x8f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x8f16",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -3028,6 +4189,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.4x4x4f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.4x4x4f16",
         "status": "arch_absent",
@@ -3058,6 +4224,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -3098,6 +4269,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4",
         "status": "arch_absent",
@@ -3132,6 +4308,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3159,6 +4339,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3192,6 +4376,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3219,6 +4407,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3252,6 +4444,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3282,6 +4478,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3320,6 +4520,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Do not know how to expand this operator's operand!",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Do not know how to expand this operator's operand!",
         "status": "arch_absent",
@@ -3343,12 +4548,50 @@
         "verified_on": "llvm23"
       }
     },
+    "raw.ptr.buffer.load.f16": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
     "raw.ptr.buffer.load.i16": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3382,6 +4625,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3410,6 +4657,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Do not know how to expand this operator's operand!",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Do not know how to expand this operator's operand!",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -3446,6 +4698,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3473,6 +4729,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3506,6 +4766,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3533,6 +4797,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3566,6 +4834,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3593,6 +4865,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3626,6 +4902,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3653,6 +4933,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3686,6 +4970,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3713,6 +5001,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3746,6 +5038,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3776,6 +5072,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3803,6 +5103,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -3838,6 +5142,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3871,6 +5179,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3901,6 +5213,10 @@
       "gfx1151": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -3938,6 +5254,10 @@
         "status": "toolchain_crash",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -3971,6 +5291,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.barrier.leave",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -4008,6 +5332,10 @@
         "status": "toolchain_crash",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4041,6 +5369,10 @@
       "gfx1151": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -4078,6 +5410,10 @@
         "status": "toolchain_crash",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4102,6 +5438,201 @@
         "verified_on": "llvm23"
       }
     },
+    "s.buffer.prefetch.data": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: ch = AMDGPUISD::SBUFFER_PREFETCH_DATA<(dereferenceable load (s32) from `ptr addrspace(8) poison`, align 1, addrspace 8)> 0xADDR:1, undef:v4i32, Ta",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: ch = AMDGPUISD::SBUFFER_PREFETCH_DATA<(dereferenceable load (s32) from `ptr addrspace(8) poison`, align 1, addrspace 8)> 0xADDR:1, undef:v4i32, Ta",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: ch = AMDGPUISD::SBUFFER_PREFETCH_DATA<(dereferenceable load (s32) from `ptr addrspace(8) poison`, align 1, addrspace 8)> 0xADDR:1, undef:v4i32, Ta",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: ch = AMDGPUISD::SBUFFER_PREFETCH_DATA<(dereferenceable load (s32) from `ptr addrspace(8) poison`, align 1, addrspace 8)> 0xADDR:1, undef:v4i32, Ta",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: ch = AMDGPUISD::SBUFFER_PREFETCH_DATA<(dereferenceable load (s32) from `ptr addrspace(8) poison`, align 1, addrspace 8)> 0xADDR:1, undef:v4i32, Ta",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "s.cluster.barrier": {
+      "gfx11-generic": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      }
+    },
+    "s.prefetch.data.p0": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "s.prefetch.data.p1": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
+    "s.prefetch.data.p4": {
+      "gfx11-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.data",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      }
+    },
     "s.prefetch.inst.p0": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.inst",
@@ -4111,6 +5642,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.prefetch.inst",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -4148,6 +5683,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4183,6 +5722,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4216,6 +5759,44 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      }
+    },
+    "s.setreg": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4244,6 +5825,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.asynccnt",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.asynccnt",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -4284,6 +5870,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4314,6 +5904,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4353,6 +5947,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4387,6 +5985,10 @@
       "gfx1151": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.kmcnt",
         "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "status": "ok",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -4424,6 +6026,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4459,6 +6065,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4490,6 +6100,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.tensorcnt",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.tensorcnt",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -4528,6 +6143,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4557,6 +6176,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wakeup.barrier",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wakeup.barrier",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -4595,6 +6219,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4622,6 +6250,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4655,6 +6287,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4682,6 +6318,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4715,6 +6355,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4743,6 +6387,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
         "verified_on": "llvm23"
@@ -4783,6 +6432,11 @@
         "status": "toolchain_crash",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "Segmentation fault",
         "status": "toolchain_crash",
@@ -4814,6 +6468,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4849,6 +6507,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wait.asyncmark",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wait.asyncmark",
         "status": "arch_absent",
@@ -4877,6 +6540,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4910,6 +6577,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4937,6 +6608,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -4970,6 +6645,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -4997,6 +6676,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -5028,6 +6711,11 @@
       },
       "gfx1151": {
         "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x16.bf16",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -5063,6 +6751,11 @@
       },
       "gfx1151": {
         "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x16.f16",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -5102,6 +6795,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5138,6 +6835,10 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5170,6 +6871,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x32.bf16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x32.bf16",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -5210,6 +6916,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x32.f16",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x32.f16",
         "status": "arch_absent",
@@ -5242,6 +6953,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -5282,6 +6998,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8",
         "status": "arch_absent",
@@ -5314,6 +7035,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -5354,6 +7080,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8",
         "status": "arch_absent",
@@ -5386,6 +7117,11 @@
       },
       "gfx1151": {
         "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu4",
+        "status": "arch_absent",
         "verified_on": "llvm23"
       },
       "gfx1201": {
@@ -5423,6 +7159,11 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu8",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.i32.16x16x16.iu8",
         "status": "arch_absent",
@@ -5456,6 +7197,11 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4",
         "status": "arch_absent",
         "verified_on": "llvm23"
@@ -5496,6 +7242,11 @@
         "status": "arch_absent",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
+        "status": "arch_absent",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4",
         "status": "arch_absent",
@@ -5530,6 +7281,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5557,6 +7312,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -5590,6 +7349,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5617,6 +7380,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -5650,6 +7417,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5677,6 +7448,10 @@
         "verified_on": "llvm23"
       },
       "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
+      "gfx12-generic": {
         "status": "ok",
         "verified_on": "llvm23"
       },
@@ -5710,6 +7485,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5740,6 +7519,10 @@
         "status": "ok",
         "verified_on": "llvm23"
       },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm23"
+      },
       "gfx1201": {
         "status": "ok",
         "verified_on": "llvm23"
@@ -5767,6 +7550,7 @@
     "arches": [
       "gfx11-generic",
       "gfx1151",
+      "gfx12-generic",
       "gfx1201",
       "gfx1250",
       "gfx90a",

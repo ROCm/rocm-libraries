@@ -343,6 +343,16 @@ def test_strided_spec_policy_uses_explicit_arch(arch, monkeypatch):
     assert au._strided_3d_specs_from_problem(problem, arch=arch) == expected
 
 
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_spec_policy_rejects_other_arches(arch):
+    from dispatch.attention.common import _problem
+    from kernels.common import attention_unified as au
+
+    problem = _problem(_strided_request("gfx942"))
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au._strided_3d_specs_from_problem(problem, arch=arch)
+
+
 @pytest.fixture
 def strided_binding_case():
     from dispatch.attention import dispatch_attention
@@ -499,6 +509,46 @@ def test_strided_runtime_rejects_ignored_scaling(
             tuning_spec=result.spec,
             kv_layout="strided",
             **{"softcap": 0, **overrides},
+        )
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_runtime_rejects_other_launch_arches(
+    strided_binding_case, monkeypatch, arch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
+    with pytest.raises(ValueError, match="targets gfx942/gfx950"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            kv_layout="strided",
+        )
+
+
+@pytest.mark.parametrize(
+    "spec_arch,live_arch", [("gfx942", "gfx950"), ("gfx950", "gfx942")]
+)
+def test_strided_runtime_rejects_spec_arch_mismatch(
+    strided_binding_case, monkeypatch, spec_arch, live_arch
+):
+    from kernels.common import attention_unified as au
+
+    _, result, tensors = strided_binding_case
+    spec = replace(result.spec, arch=spec_arch)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: live_arch)
+    with pytest.raises(ValueError, match="tuning spec targets"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            tuning_spec=spec,
+            kv_layout="strided",
         )
 
 

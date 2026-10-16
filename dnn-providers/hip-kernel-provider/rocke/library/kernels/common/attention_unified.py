@@ -5286,12 +5286,18 @@ def run_unified_attention_torch(
         if backend not in ("auto", "3d"):
             raise ValueError("prepared execution requires the 3D backend")
         backend = "3d"
+    # The launch arch. This is the one place the *launch* path is allowed to ask the
+    # running box: compile-then-run must target the local device, and every gate
+    # below is a launch decision, not a selection decision. Bound once, above the
+    # tuning-spec check and both the strided and paged branches; the selection-side
+    # arch is the explicit ``arch`` parameter threaded through
+    # ``supports_native_unified_attention*``.
+    _launch_arch = _resolve_attention_arch()
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
-        if tuning_spec.arch != _resolve_attention_arch():
+        if tuning_spec.arch != _launch_arch:
             raise ValueError(
-                f"tuning spec targets {tuning_spec.arch}, running on "
-                f"{_resolve_attention_arch()}"
+                f"tuning spec targets {tuning_spec.arch}, running on {_launch_arch}"
             )
         implied = "3d" if tuning_spec.path == "3d" else "tiled"
         if backend not in ("auto", implied):
@@ -5306,7 +5312,7 @@ def run_unified_attention_torch(
     if kv_layout == "strided":
         from .attention_kv_cache import StridedKvCacheLayout
 
-        if _resolve_attention_arch() not in ("gfx942", "gfx950"):
+        if _launch_arch not in ("gfx942", "gfx950"):
             raise ValueError("strided KV decode targets gfx942/gfx950")
         if backend not in ("auto", "3d"):
             raise ValueError("strided KV decode requires the 3D tiled backend")
@@ -5328,11 +5334,11 @@ def run_unified_attention_torch(
             raise ValueError("strided decode does not support K/V/output scaling")
         if (softcap > 0) != (problem.softcap > 0):
             raise ValueError("strided softcap enablement disagrees with problem")
-        arch = _resolve_attention_arch()
         if tuning_spec is not None:
             _validate_strided_3d_spec(problem, tuning_spec)
         else:
-            _strided_3d_specs_from_problem(problem, arch=arch)
+            # Validation only: result unused, specs are rebuilt in _run_3d_tiled.
+            _strided_3d_specs_from_problem(problem, arch=_launch_arch)
         layout = StridedKvCacheLayout.from_tensors(k, v)
         batch, heads, capacity, dim = layout.key.shape
         if (batch, heads, dim) != (
@@ -5373,7 +5379,7 @@ def run_unified_attention_torch(
             raise ValueError("query offsets must be a contiguous int32 [B+1] tensor")
         # Caller-owned device metadata: lengths are in [0, max_seqlen_k], and
         # query offsets are [0, 1, ..., B]. No host read/synchronization here.
-        ok, why = _explicit_path_supported(problem, tuning_spec, "3d", arch)
+        ok, why = _explicit_path_supported(problem, tuning_spec, "3d", _launch_arch)
         if not ok:
             raise ValueError(why)
         return _run_3d_tiled(
@@ -5430,14 +5436,6 @@ def run_unified_attention_torch(
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
-
-    # The launch arch. This is the one place the *launch* path is allowed to
-    # ask the running box: compile-then-run must target the local device, and
-    # every gate below is a launch decision, not a selection decision. Bound
-    # once here (above the 3D branch) so both branches share a single answer --
-    # the selection-side arch is the explicit ``arch`` parameter threaded
-    # through ``supports_native_unified_attention*``.
-    _launch_arch = _resolve_attention_arch()
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
