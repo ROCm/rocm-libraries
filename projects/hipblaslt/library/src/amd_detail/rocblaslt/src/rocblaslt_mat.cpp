@@ -162,7 +162,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         if(emulDecision.apply)
         {
             /* Build per-call settings from matmul desc attributes + env var fallbacks. */
-            const int desc_strat = matmul_descr ? matmul_descr->emulation_strategy : -1;
+            const int desc_strat = (matmul_descr && matmul_descr->emulation_desc)
+                                       ? matmul_descr->emulation_desc->emulation_strategy
+                                       : -1;
             const bool emul_eager = (desc_strat == 2) || (desc_strat != 1 && fixedPointEmulationIsEager());
             FixedPointEmulationSettings emulSettings{};
             /* Translate resolved bitmask → hipblasltEmulationSpecialValuesSupport_t enum:

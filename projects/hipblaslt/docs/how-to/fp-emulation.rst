@@ -44,12 +44,28 @@ results.  Similarly, if the dynamic range of the input is too large for the
 configured number of moduli, the call falls back to native GEMM automatically.
 
 
-Per-matmul descriptor attributes
-=================================
+Emulation descriptor (per-matmul settings)
+===========================================
 
-Emulation settings can be overridden on a per-call basis using
-``hipblasLtMatmulDescSetAttribute`` with the following attributes.
-These take precedence over the process-wide environment variables.
+Per-matmul emulation settings are configured through an opaque
+``hipblasLtEmulationDesc_t`` sub-descriptor that is created separately,
+configured via ``hipblasLtEmulationDescSetAttribute``, and then attached
+to a matmul descriptor through the single matmul attribute
+``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``.
+
+The sub-descriptor is **non-owning**: the matmul descriptor stores only a
+pointer to it.  The caller must keep the emulation descriptor alive for
+the entire lifetime of any matmul call that uses the matmul descriptor,
+and must destroy it with ``hipblasLtEmulationDescDestroy`` when done.
+
+**Lifecycle API:**
+
+* ``hipblasLtEmulationDescCreate(hipblasLtEmulationDesc_t* desc)``
+* ``hipblasLtEmulationDescDestroy(hipblasLtEmulationDesc_t desc)``
+* ``hipblasLtEmulationDescSetAttribute(hipblasLtEmulationDesc_t desc, hipblasLtEmulationDescAttributes_t attr, const void* buf, size_t sizeInBytes)``
+* ``hipblasLtEmulationDescGetAttribute(hipblasLtEmulationDesc_t desc, hipblasLtEmulationDescAttributes_t attr, void* buf, size_t sizeInBytes, size_t* sizeWritten)``
+
+**Emulation descriptor attributes** (``hipblasLtEmulationDescAttributes_t``):
 
 .. list-table::
    :header-rows: 1
@@ -58,19 +74,16 @@ These take precedence over the process-wide environment variables.
    * - Attribute
      - Type
      - Description
-   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT``
-     - ``int32_t``
-     - ``1`` = force emulation on; ``0`` = force off; ``-1`` = inherit from env var (default).
-   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT``
+   * - ``HIPBLASLT_EMULATION_DESC_STRATEGY``
      - ``int32_t``
      - ``HIPBLASLT_EMULATION_STRATEGY_DEFAULT`` (0) = inherit from env var;
        ``HIPBLASLT_EMULATION_STRATEGY_PERFORMANT`` (1) = only when predicted faster;
        ``HIPBLASLT_EMULATION_STRATEGY_EAGER`` (2) = always emulate.
-   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT``
+   * - ``HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT``
      - ``int32_t``
      - ADP precision target in mantissa bits: ``1``..``52`` for FP64 (``1``..``23`` for FP32).
        ``0`` = inherit from env var (default = full precision).
-   * - ``HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT``
+   * - ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
      - ``int32_t``
      - Inf/NaN detection support level.  See ``hipblasltEmulationSpecialValuesSupport_t``:
        ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT`` (0) = inherit from env var (default = Inf+NaN);
@@ -78,40 +91,58 @@ These take precedence over the process-wide environment variables.
        ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY`` (2) = Inf only;
        ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN`` (3) = NaN only.
 
+**Attaching to a matmul descriptor** — use the single matmul attribute
+``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR`` (value = 107):
+
+.. code-block:: c
+
+   hipblasLtMatmulDescSetAttribute(matmul_desc,
+       HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+       &emul_desc, sizeof(emul_desc));
+
+Set the pointer to ``NULL`` to detach the emulation descriptor.
+
 Example: enable FP64 emulation eagerly with reduced precision:
 
 .. code-block:: c
 
-   hipblasLtMatmulDesc_t desc;
-   hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+   hipblasLtMatmulDesc_t    matmul_desc;
+   hipblasLtEmulationDesc_t emul_desc;
 
-   // Force emulation on for this descriptor regardless of env vars
-   int32_t emul_on = 1;
-   hipblasLtMatmulDescSetAttribute(desc,
-       HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT,
-       &emul_on, sizeof(emul_on));
+   hipblasLtMatmulDescCreate(&matmul_desc, HIPBLAS_COMPUTE_64F, HIP_R_64F);
+   hipblasLtEmulationDescCreate(&emul_desc);
 
    // Use eager strategy (always emulate, skip performance gate)
    int32_t strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER;
-   hipblasLtMatmulDescSetAttribute(desc,
-       HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT,
+   hipblasLtEmulationDescSetAttribute(emul_desc,
+       HIPBLASLT_EMULATION_DESC_STRATEGY,
        &strategy, sizeof(strategy));
 
    // Target ~1e-8 accuracy (≈26 mantissa bits) for faster execution
    int32_t bits = 26;
-   hipblasLtMatmulDescSetAttribute(desc,
-       HIPBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT,
+   hipblasLtEmulationDescSetAttribute(emul_desc,
+       HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT,
        &bits, sizeof(bits));
 
+   // Attach the emulation descriptor to the matmul descriptor
+   hipblasLtMatmulDescSetAttribute(matmul_desc,
+       HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+       &emul_desc, sizeof(emul_desc));
+
    // Query workspace and run (batch_count=1; returns 0 for batch_count != 1)
-   size_t ws_bytes = hipblasLtEmulationWorkspaceSize(handle, desc,
+   size_t ws_bytes = hipblasLtEmulationWorkspaceSize(handle, matmul_desc,
                          HIP_R_64F, m, n, k, 1);
    void* workspace;
    hipMalloc(&workspace, ws_bytes);
 
-   hipblasLtMatmul(handle, desc, &alpha, A, Adesc, B, Bdesc,
+   // emul_desc must remain alive for the duration of any matmul using matmul_desc
+   hipblasLtMatmul(handle, matmul_desc, &alpha, A, Adesc, B, Bdesc,
                    &beta, C, Cdesc, D, Ddesc,
                    nullptr, workspace, ws_bytes, stream);
+
+   // Destroy after all matmul calls are complete
+   hipblasLtEmulationDescDestroy(emul_desc);
+   hipblasLtMatmulDescDestroy(matmul_desc);
 
 
 Workspace
@@ -233,8 +264,8 @@ Setting precedence
 
 For each emulation parameter, the precedence order (highest to lowest) is:
 
-1. **Per-matmul descriptor attribute** (``HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT``) —
-   overrides env vars for that specific matmul call.
+1. **Emulation descriptor attribute** (``hipblasLtEmulationDescSetAttribute`` on an attached
+   ``hipblasLtEmulationDesc_t``) — overrides env vars for that specific matmul call.
 2. **Environment variable** — read once at first use, process-wide default.
 3. **Built-in default** — ADP mode (52 mantissa bits for FP64, 23 for FP32), special-values mask 0x3.
 

@@ -44,9 +44,11 @@
  *     append per-call profiling CSV rows to the given file path.
  *
  * Setting precedence (per-matmul desc attributes > env vars > built-in defaults).
- * Per-matmul emulation settings live on the matmul descriptor via
- * HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT attributes; sentinel values
- * (-1 / 0 for enabled/strategy/mantissa) fall back to the process-wide env var default.
+ * Per-matmul emulation settings are configured via a hipblasLtEmulationDesc_t
+ * sub-descriptor (created with hipblasLtEmulationDescCreate, configured with
+ * hipblasLtEmulationDescSetAttribute, and attached to the matmul descriptor via
+ * HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR).  DEFAULT/sentinel values on the
+ * emulation descriptor attributes fall back to the process-wide env var default.
  * See fixedPointEmulationDecision() for the full resolution logic.
  *
  * See docs/how-to/fp-emulation.rst
@@ -225,8 +227,7 @@ struct FixedPointEmulationSettings
      * For FP64: [1..52]; 52 = full FP64 precision.
      * For FP32: [1..23]; 23 = full FP32 precision.
      * 0 = sentinel: derive from env var (FP64/FP32_MANTISSA_BIT_COUNT
-     *   or FP64/FP32_TOLERANCE) or type default.
-     * Only consulted when dynamic_mode = true.                              */
+     *   or FP64/FP32_TOLERANCE) or type default.                            */
     int adp_mantissa_bits; /* 0 = env var default                    */
 };
 
@@ -269,7 +270,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
  * Returns rocblaslt_status_success on success,
  *         rocblaslt_status_memory_error if no workspace is provided or too small,
  *         rocblaslt_status_invalid_value if Inf/NaN is detected (sv_mask) or
- *             if ADP determines s=20 is insufficient for the input's range.
+ *             if ADP determines s=12 is insufficient for the input's range.
  * In invalid_value cases the caller should fall back to native FP32.       */
 rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                   hipblasOperation_t                 opA,

@@ -88,6 +88,7 @@ typedef enum {
     HIPBLASLT_EMULATION_STRATEGY_DEFAULT    = 0, /**<Use the process-wide default (from HIPBLASLT_EMULATION_STRATEGY env var). */
     HIPBLASLT_EMULATION_STRATEGY_PERFORMANT = 1, /**<Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
     HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
+    HIPBLASLT_EMULATION_STRATEGY_DISABLED   = 3, /**<Never emulate, even if an emulation descriptor is attached. Used internally by the native-GEMM fallback to prevent recursive re-entry. */
 } hipblasLtEmulationStrategy_t;
 
 /*! \ingroup types_module
@@ -95,11 +96,9 @@ typedef enum {
  *  during FP64/FP32 emulation via Ozaki Scheme II.
  *
  *  \details
- *  Used as the data type for the
- *  ``HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT`` matmul
- *  descriptor attribute. The ``DEFAULT`` value instructs the library to inherit
- *  the setting from the ``HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK``
- *  environment variable (built-in default: detect both Inf and NaN).
+ *  Used as the data type for the ``HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT``
+ *  emulation descriptor attribute.  ``DEFAULT`` detects both Inf and NaN (the built-in
+ *  default); the other values restrict or disable detection.
  */
 typedef enum {
     HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT  = 0, /**<Detect both Inf and NaN values (default behavior). */
@@ -107,6 +106,29 @@ typedef enum {
     HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY = 2, /**<Detect Inf values only. */
     HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN      = 3, /**<Detect NaN values only. */
 } hipblasltEmulationSpecialValuesSupport_t;
+
+/*! \ingroup types_module
+ *  \brief Attributes of a ``hipblasLtEmulationDesc_t`` descriptor.
+ *
+ *  \details
+ *  Used with ``hipblasLtEmulationDescSetAttribute`` and
+ *  ``hipblasLtEmulationDescGetAttribute`` to configure per-matmul
+ *  FP64/FP32 emulation settings.  Emulation is enabled simply by attaching
+ *  the descriptor to a matmul descriptor via
+ *  ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``; detach (set to NULL) to
+ *  disable via the public API.  To force-disable from within the native-GEMM
+ *  fallback (preventing recursive re-entry), set
+ *  ``HIPBLASLT_EMULATION_DESC_STRATEGY`` to
+ *  ``HIPBLASLT_EMULATION_STRATEGY_DISABLED``.
+ */
+typedef enum {
+    HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate; ``DISABLED`` (3) = never emulate (used by internal fallback to prevent re-entry). Default: ``DEFAULT``. */
+    HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` (``hipblasltEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL           = 2, /**<Not used at the moment. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT     = 3, /**<ADP precision target in mantissa bits. Data type: ``int32_t``. ``1``..``52`` for FP64 (``1``..``23`` for FP32); ``0`` = inherit from env var (default). Only affects ADP mode. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET        = 4, /**<Not used at the moment. */
+    HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER = 5, /**<Not used at the moment. */
+} hipblasLtEmulationDescAttributes_t;
 
 
 /*! \ingroup types_module
@@ -259,6 +281,27 @@ typedef hipblasStatus_t (*hipblasLtDeviceCommAllgatherFn)(void*       userData,
 #endif
 
 /*! \ingroup types_module
+ *  \brief Opaque descriptor for per-matmul FP64/FP32 emulation settings.
+ *
+ *  \details
+ *  Use the following functions to manipulate this handle:
+ *
+ *  \ref hipblasLtEmulationDescCreate(): To create one instance.
+ *
+ *  \ref hipblasLtEmulationDescSetAttribute(): To configure emulation settings.
+ *
+ *  \ref hipblasLtEmulationDescGetAttribute(): To query emulation settings.
+ *
+ *  \ref hipblasLtEmulationDescDestroy(): To destroy a previously created handle.
+ *
+ *  Attach the descriptor to a matmul descriptor via
+ *  \c HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.  The descriptor is non-owning:
+ *  it must remain valid for the lifetime of any matmul descriptor that
+ *  references it.
+ */
+typedef struct hipblasLtEmulationDescriptor* hipblasLtEmulationDesc_t;
+
+/*! \ingroup types_module
  *  \brief Specify the batch mode of the matrices.
  */
 
@@ -407,10 +450,7 @@ typedef enum {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
 #endif
-  HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT                = 107, /**<Enable/disable FP64/FP32 emulation via Ozaki Scheme II for this matmul. Data type: ``int32_t``. 1=force on, 0=force off, -1=inherit from env var (default). */
-  HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT               = 108, /**<Emulation strategy for this matmul. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). 0=DEFAULT, 1=PERFORMANT, 2=EAGER; -1=inherit from env var (default). */
-  HIPBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT = 109, /**<ADP maximum mantissa bit count (precision target). Data type: ``int32_t``. 1..52 = explicit bit count for FP64 (1..23 for FP32); 0=inherit from env var (default). Only affects ADP mode. */
-  HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT = 110, /**<Inf/NaN detection support level for emulation. Data type: ``int32_t`` (``hipblasltEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
+  HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR                        = 107, /**<Attach an emulation descriptor to this matmul. The value is a ``hipblasLtEmulationDesc_t`` built with ``hipblasLtEmulationDescCreate`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Set to NULL to detach. Data type: ``hipblasLtEmulationDesc_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -1530,6 +1570,77 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
  *           (device not supported, emulation disabled, unsupported
  *           \p computeInputType, or ``batch_count != 1``).
  */
+/*! \ingroup library_module
+ *  \brief Create an emulation descriptor.
+ *
+ *  \details
+ *  Creates an emulation descriptor with all settings initialised to their
+ *  sentinel values ("inherit from env var").  Configure settings with
+ *  ``hipblasLtEmulationDescSetAttribute`` and attach to a matmul descriptor
+ *  via ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``.
+ *
+ *  @param[out] desc  receives the created descriptor.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the descriptor was created.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc is null.
+ *  \retval HIPBLAS_STATUS_ALLOC_FAILED  the descriptor could not be allocated.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtEmulationDescCreate(hipblasLtEmulationDesc_t* desc);
+
+/*! \ingroup library_module
+ *  \brief Destroy an emulation descriptor.
+ *
+ *  \details
+ *  Releases the descriptor.  Any matmul descriptor still referencing it must
+ *  not be used afterwards.  Passing NULL is not an error.
+ *
+ *  @param[in] desc  the descriptor to destroy.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS the descriptor was destroyed.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtEmulationDescDestroy(hipblasLtEmulationDesc_t desc);
+
+/*! \ingroup library_module
+ *  \brief Set an attribute on an emulation descriptor.
+ *
+ *  @param[in] desc         the descriptor to configure.
+ *  @param[in] attr         which attribute to set (see \ref hipblasLtEmulationDescAttributes_t).
+ *  @param[in] buf          pointer to the new value; must not be null.
+ *  @param[in] sizeInBytes  size of \p buf in bytes; must match the attribute's type.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the value was stored.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc or \p buf is null, \p attr is unrecognized,
+ *                                       \p sizeInBytes does not match the attribute, or the
+ *                                       value is outside the attribute's accepted range.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtEmulationDescSetAttribute(hipblasLtEmulationDesc_t          desc,
+                                                   hipblasLtEmulationDescAttributes_t attr,
+                                                   const void*                        buf,
+                                                   size_t                             sizeInBytes);
+
+/*! \ingroup library_module
+ *  \brief Get an attribute from an emulation descriptor.
+ *
+ *  @param[in]  desc         the descriptor to query.
+ *  @param[in]  attr         which attribute to retrieve.
+ *  @param[out] buf          receives the attribute value.
+ *  @param[in]  sizeInBytes  size of \p buf in bytes.
+ *  @param[out] sizeWritten  if non-null, receives the number of bytes written.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS       the value was written to \p buf.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE \p desc is null, \p attr is unrecognized, or
+ *                                       \p sizeInBytes is insufficient.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtEmulationDescGetAttribute(hipblasLtEmulationDesc_t          desc,
+                                                   hipblasLtEmulationDescAttributes_t attr,
+                                                   void*                              buf,
+                                                   size_t                             sizeInBytes,
+                                                   size_t*                            sizeWritten);
+
 HIPBLASLT_EXPORT
 size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
                                        hipblasLtMatmulDesc_t matmulDesc,

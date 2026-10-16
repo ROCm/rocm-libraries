@@ -450,12 +450,14 @@ namespace FixedPointEmulation
         hipblasLtMatrixLayoutCreate(
             &layoutD, hip_type, static_cast<uint64_t>(m), static_cast<uint64_t>(n), ldd);
         hipblasLtMatmulDescCreate(&desc, ctype, hip_type);
-        {
-            /* Force-disable emulation on this desc to prevent recursive re-entry. */
-            const int32_t emul_off = 0;
-            hipblasLtMatmulDescSetAttribute(
-                desc, HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT, &emul_off, sizeof(emul_off));
-        }
+        /* Explicitly disable emulation via DISABLED strategy to prevent infinite recursion:
+         * native_gemm_fallback → hipblasLtMatmul → emulation → native_gemm_fallback.
+         * The stack-local emulation descriptor outlives the (synchronous) hipblasLtMatmul call. */
+        hipblasLtEmulationDescriptor emul_off_desc;
+        emul_off_desc.emulation_strategy = HIPBLASLT_EMULATION_STRATEGY_DISABLED;
+        struct hipblasLtEmulationDescriptor* emul_off = &emul_off_desc;
+        hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+                                        &emul_off, sizeof(emul_off));
         hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
         hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB));
 
@@ -1859,14 +1861,15 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
     if((type_a != HIP_R_64F && type_a != HIP_R_32F) || batch_count != 1)
         return result; /* apply=false, success */
 
-    /* Emulation enabled check.
-     * Priority: desc->emulation_enabled (non-sentinel) > env var.
-     *   desc_enabled == 1  -> force on
-     *   desc_enabled == 0  -> force off (returns false)
-     *   desc_enabled == -1 -> inherit from env var                          */
-    const int  desc_enabled = desc ? desc->emulation_enabled : -1;
-    const bool emulEnabled
-        = (desc_enabled == 1) || (desc_enabled != 0 && fixedPointEmulationIsEnabled(type_a));
+    const hipblasLtEmulationDescriptor* ed = (desc && desc->emulation_desc) ? desc->emulation_desc : nullptr;
+
+    /* DISABLED strategy = force off; used by native_gemm_fallback to prevent recursive re-entry. */
+    if(ed && ed->emulation_strategy == HIPBLASLT_EMULATION_STRATEGY_DISABLED)
+        return result; /* apply=false */
+
+    /* Emulation enabled: attaching the descriptor is the enable signal.
+     * Without a descriptor, fall back to the env var (HIPBLASLT_EMULATE_{DOUBLE,SINGLE}_PRECISION). */
+    const bool emulEnabled = ed ? true : fixedPointEmulationIsEnabled(type_a);
     if(!emulEnabled)
         return result;
 
@@ -1883,30 +1886,34 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
      *   NONE    (1) -> 0x0 (skip detection)
      *   INFINITY(2) -> 0x1 (bit 0 = Inf)
      *   NAN     (3) -> 0x2 (bit 1 = NaN) */
-    if(desc)
+    if(ed)
     {
-        switch(desc->emulation_sv_support)
+        switch(ed->emulation_sv_support)
         {
-        case 1: result.sv_mask = 0x0u; break; /* NONE */
-        case 2: result.sv_mask = 0x1u; break; /* INFINITY */
-        case 3: result.sv_mask = 0x2u; break; /* NAN */
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE:     result.sv_mask = 0x0u; break;
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY: result.sv_mask = 0x1u; break;
+        case HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NAN:      result.sv_mask = 0x2u; break;
         default: result.sv_mask = 0x3u; break; /* DEFAULT: both Inf+NaN */
         }
     }
 
     /* ADP target precision.
-     * Priority: desc->emulation_mantissa_bits (> 0) > type-specific env var. */
+     * Priority: desc->emulation_fixedpoint_max_mantissa_bits (> 0) > type-specific env var. */
     {
-        const int desc_bits = desc ? desc->emulation_mantissa_bits : 0;
+        const int desc_bits = ed ? ed->emulation_fixedpoint_max_mantissa_bits : 0;
         result.adp_mantissa_bits
             = (desc_bits > 0) ? desc_bits : fixedPointEmulationAdpMantissaBits(type_a);
     }
 
     /* Strategy (eager vs performant).
-     * Priority: desc->emulation_strategy (non-sentinel) > env var. */
+     * Priority: desc->emulation_strategy (non-DEFAULT) > env var.
+     * DISABLED is already handled above; only DEFAULT/PERFORMANT/EAGER reach here. */
     {
-        const int  desc_strat = desc ? desc->emulation_strategy : -1;
-        const bool eager = (desc_strat == 2) || (desc_strat != 1 && fixedPointEmulationIsEager());
+        const hipblasLtEmulationStrategy_t desc_strat
+            = ed ? ed->emulation_strategy : HIPBLASLT_EMULATION_STRATEGY_DEFAULT;
+        const bool eager
+            = (desc_strat == HIPBLASLT_EMULATION_STRATEGY_EAGER)
+              || (desc_strat == HIPBLASLT_EMULATION_STRATEGY_DEFAULT && fixedPointEmulationIsEager());
         if(eager
            || fixedPointEmulationPerformanceCheck(
                h, desc, type_a, opA, opB, m, n, k, workspace_bytes))

@@ -32,18 +32,17 @@
 namespace
 {
 
-    /* Set emulation enabled (1=on, 0=off) on a matmul descriptor. */
-    inline void emulSetEnabled(hipblasLtMatmulDesc_t desc, int val)
-    {
-        hipblasLtMatmulDescSetAttribute(
-            desc, HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT, &val, sizeof(val));
-    }
-    /* Set emulation strategy on a matmul descriptor. */
-    inline void emulSetStrategy(hipblasLtMatmulDesc_t desc, hipblasLtEmulationStrategy_t s)
+    /* Set emulation strategy on an emulation descriptor. */
+    inline void emulSetStrategy(hipblasLtEmulationDesc_t ed, hipblasLtEmulationStrategy_t s)
     {
         int32_t v = static_cast<int32_t>(s);
+        hipblasLtEmulationDescSetAttribute(ed, HIPBLASLT_EMULATION_DESC_STRATEGY, &v, sizeof(v));
+    }
+    /* Attach an emulation descriptor to a matmul descriptor. */
+    inline void emulAttach(hipblasLtMatmulDesc_t matmul_desc, hipblasLtEmulationDesc_t ed)
+    {
         hipblasLtMatmulDescSetAttribute(
-            desc, HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT, &v, sizeof(v));
+            matmul_desc, HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR, &ed, sizeof(ed));
     }
     // Returns true only when a HIP device exists AND it is in the emulation
     // hardware support table.  Uses EAGER to bypass the cost model so the probe
@@ -60,15 +59,18 @@ namespace
         if(hipblasLtCreate(&h) != HIPBLAS_STATUS_SUCCESS)
             return false;
         /* Check device support using a temporary matmul desc with eager emulation. */
-        hipblasLtMatmulDesc_t _tmpDesc = nullptr;
+        hipblasLtMatmulDesc_t    _tmpDesc = nullptr;
+        hipblasLtEmulationDesc_t _ed      = nullptr;
         hipblasLtMatmulDescCreate(&_tmpDesc, HIPBLAS_COMPUTE_64F, HIP_R_64F);
-        emulSetEnabled(_tmpDesc, 1);
-        emulSetStrategy(_tmpDesc, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        hipblasLtEmulationDescCreate(&_ed);
+        emulSetStrategy(_ed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+        emulAttach(_tmpDesc, _ed);
         const auto*                   _h = reinterpret_cast<const _rocblaslt_handle*>(h);
         const _rocblaslt_matmul_desc* _dp
             = reinterpret_cast<const _rocblaslt_matmul_desc*>(_tmpDesc);
         const FixedPointEmulationDecision d = fixedPointEmulationDecision(
             _h, _dp, HIP_R_64F, HIPBLAS_OP_N, HIPBLAS_OP_N, 16, 16, 16, 1, ~size_t{0});
+        hipblasLtEmulationDescDestroy(_ed);
         hipblasLtMatmulDescDestroy(_tmpDesc);
         hipblasLtDestroy(h);
         return d.apply;
@@ -160,13 +162,17 @@ namespace
             m_roc = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
             ASSERT_EQ(hipblasLtMatmulDescCreate(&m_emul_desc, HIPBLAS_COMPUTE_64F, HIP_R_64F),
                       HIPBLAS_STATUS_SUCCESS);
-            /* Default: eager emulation enabled */
-            emulSetEnabled(m_emul_desc, 1);
-            emulSetStrategy(m_emul_desc, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            /* Create emulation sub-descriptor, configure defaults, attach to matmul desc. */
+            ASSERT_EQ(hipblasLtEmulationDescCreate(&m_ed), HIPBLAS_STATUS_SUCCESS);
+            emulSetStrategy(m_ed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            emulAttach(m_emul_desc, m_ed);
         }
 
         void TearDown() override
         {
+            /* Destroy emulation desc before the matmul desc it was attached to. */
+            if(m_ed)
+                hipblasLtEmulationDescDestroy(m_ed);
             if(m_emul_desc)
                 hipblasLtMatmulDescDestroy(m_emul_desc);
             if(m_handle)
@@ -175,12 +181,13 @@ namespace
 
         void set_enabled(bool on)
         {
-            emulSetEnabled(m_emul_desc, on ? 1 : 0);
+            /* Attach or detach the emulation descriptor: attached = enabled, null = disabled. */
+            emulAttach(m_emul_desc, on ? m_ed : nullptr);
         }
 
         void set_strategy(hipblasLtEmulationStrategy_t s)
         {
-            emulSetStrategy(m_emul_desc, s);
+            emulSetStrategy(m_ed, s);
         }
 
         bool would_apply(hipDataType t, int64_t m, int64_t n, int64_t k, int32_t batch)
@@ -202,6 +209,7 @@ namespace
 
         hipblasLtHandle_t        m_handle    = nullptr;
         hipblasLtMatmulDesc_t    m_emul_desc = nullptr;
+        hipblasLtEmulationDesc_t m_ed        = nullptr;
         const _rocblaslt_handle* m_roc       = nullptr;
     };
 
@@ -605,7 +613,7 @@ namespace
         /* ── Emulation handle ─────────────────────────────────────────────── */
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled=true now set on matmul desc; see emulSetEnabled() */
+        /* emulation enabled by attaching the emulation descriptor */
         /* emulation strategy=HIPBLASLT_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
 
         /* ── Native DGEMM reference handle + layouts ─────────────────────── */
@@ -655,12 +663,15 @@ namespace
         /* Allocate workspace for this GEMM configuration */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _emu_ws_sz = [&]() -> size_t {
-            hipblasLtMatmulDesc_t _wd = nullptr;
+            hipblasLtMatmulDesc_t    _wd  = nullptr;
+            hipblasLtEmulationDesc_t _wed = nullptr;
             hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
-            emulSetEnabled(_wd, 1);
-            emulSetStrategy(_wd, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            hipblasLtEmulationDescCreate(&_wed);
+            emulSetStrategy(_wed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            emulAttach(_wd, _wed);
             const size_t _sz
                 = hipblasLtEmulationWorkspaceSize(hem, _wd, HIP_R_64F, p.m, p.n, p.k, 1);
+            hipblasLtEmulationDescDestroy(_wed);
             hipblasLtMatmulDescDestroy(_wd);
             return _sz;
         }();
@@ -1177,7 +1188,7 @@ namespace
 
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled=true now set on matmul desc; see emulSetEnabled() */
+        /* emulation enabled by attaching the emulation descriptor */
         /* emulation strategy=HIPBLASLT_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
 
         FixedPointEmulationSettings emu_settings{};
@@ -1187,12 +1198,15 @@ namespace
         /* Allocate workspace for Demmel test */
         /* Query workspace size using a temp desc with emulation enabled. */
         const size_t _dem_ws_sz = [&]() -> size_t {
-            hipblasLtMatmulDesc_t _wd = nullptr;
+            hipblasLtMatmulDesc_t    _wd  = nullptr;
+            hipblasLtEmulationDesc_t _wed = nullptr;
             hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
-            emulSetEnabled(_wd, 1);
-            emulSetStrategy(_wd, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            hipblasLtEmulationDescCreate(&_wed);
+            emulSetStrategy(_wed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            emulAttach(_wd, _wed);
             const size_t _sz
                 = hipblasLtEmulationWorkspaceSize(hem, _wd, HIP_R_64F, N, N, N, 1);
+            hipblasLtEmulationDescDestroy(_wed);
             hipblasLtMatmulDescDestroy(_wd);
             return _sz;
         }();
@@ -1558,7 +1572,7 @@ namespace
 
         hipblasLtHandle_t hem = nullptr;
         ASSERT_EQ(hipblasLtCreate(&hem), HIPBLAS_STATUS_SUCCESS);
-        /* emulation enabled=true now set on matmul desc; see emulSetEnabled() */
+        /* emulation enabled by attaching the emulation descriptor */
         /* emulation strategy=HIPBLASLT_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
         /* ADP: let the algorithm choose the number of moduli from the data */
         /* emulation num_moduli=-1 now set on matmul desc; see emulSetNumModuli() */;
@@ -1604,12 +1618,15 @@ namespace
 
         emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
         const size_t _struct_ws_sz = [&]() -> size_t {
-            hipblasLtMatmulDesc_t _wd = nullptr;
+            hipblasLtMatmulDesc_t    _wd  = nullptr;
+            hipblasLtEmulationDesc_t _wed = nullptr;
             hipblasLtMatmulDescCreate(&_wd, HIPBLAS_COMPUTE_64F, HIP_R_64F);
-            emulSetEnabled(_wd, 1);
-            emulSetStrategy(_wd, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            hipblasLtEmulationDescCreate(&_wed);
+            emulSetStrategy(_wed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            emulAttach(_wd, _wed);
             const size_t _sz
                 = hipblasLtEmulationWorkspaceSize(hem, _wd, HIP_R_64F, N, N, N, 1);
+            hipblasLtEmulationDescDestroy(_wed);
             hipblasLtMatmulDescDestroy(_wd);
             return _sz;
         }();
@@ -2762,8 +2779,9 @@ namespace
     class FixedPointEmulationFp32Test : public ::testing::Test
     {
     protected:
-        hipblasLtHandle_t     m_handle    = nullptr;
-        hipblasLtMatmulDesc_t m_emul_desc = nullptr;
+        hipblasLtHandle_t        m_handle    = nullptr;
+        hipblasLtMatmulDesc_t    m_emul_desc = nullptr;
+        hipblasLtEmulationDesc_t m_ed        = nullptr;
 
         void SetUp() override
         {
@@ -2772,12 +2790,15 @@ namespace
             if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
                 GTEST_SKIP() << "hipblasLtCreate failed";
             hipblasLtMatmulDescCreate(&m_emul_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F);
-            emulSetEnabled(m_emul_desc, 1);
-            emulSetStrategy(m_emul_desc, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            hipblasLtEmulationDescCreate(&m_ed);
+            emulSetStrategy(m_ed, HIPBLASLT_EMULATION_STRATEGY_EAGER);
+            emulAttach(m_emul_desc, m_ed);
         }
 
         void TearDown() override
         {
+            if(m_ed)
+                hipblasLtEmulationDescDestroy(m_ed);
             if(m_emul_desc)
                 hipblasLtMatmulDescDestroy(m_emul_desc);
             if(m_handle)

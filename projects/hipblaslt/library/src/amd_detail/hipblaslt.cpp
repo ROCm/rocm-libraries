@@ -1481,6 +1481,54 @@ catch(...)
  * The old handle-level setters have been removed; use matmul desc attributes.
  * ========================================================================= */
 
+/* Forward declarations: emulation descriptor helpers (rocblaslt_auxiliary.cpp,
+ * same shared library, same extern "C" block). */
+rocblaslt_status rocblaslt_emulation_desc_create(hipblasLtEmulationDesc_t* desc);
+rocblaslt_status rocblaslt_emulation_desc_destroy(hipblasLtEmulationDesc_t desc);
+rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t           desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        const void*                        buf,
+                                                        size_t sizeInBytes);
+rocblaslt_status rocblaslt_emulation_desc_get_attribute(hipblasLtEmulationDesc_t           desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        void*   buf,
+                                                        size_t  sizeInBytes,
+                                                        size_t* sizeWritten);
+
+hipblasStatus_t hipblasLtEmulationDescCreate(hipblasLtEmulationDesc_t* desc)
+{
+    auto st = rocblaslt_emulation_desc_create(desc);
+    return (st == rocblaslt_status_success) ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_ALLOC_FAILED;
+}
+
+hipblasStatus_t hipblasLtEmulationDescDestroy(hipblasLtEmulationDesc_t desc)
+{
+    rocblaslt_emulation_desc_destroy(desc);
+    return HIPBLAS_STATUS_SUCCESS;
+}
+
+hipblasStatus_t hipblasLtEmulationDescSetAttribute(hipblasLtEmulationDesc_t           desc,
+                                                    hipblasLtEmulationDescAttributes_t attr,
+                                                    const void*                        buf,
+                                                    size_t                             sizeInBytes)
+{
+    auto st = rocblaslt_emulation_desc_set_attribute(desc, attr, buf, sizeInBytes);
+    return (st == rocblaslt_status_success) ? HIPBLAS_STATUS_SUCCESS
+                                             : HIPBLAS_STATUS_INVALID_VALUE;
+}
+
+hipblasStatus_t hipblasLtEmulationDescGetAttribute(hipblasLtEmulationDesc_t           desc,
+                                                    hipblasLtEmulationDescAttributes_t attr,
+                                                    void*                              buf,
+                                                    size_t                             sizeInBytes,
+                                                    size_t*                            sizeWritten)
+{
+    auto st = rocblaslt_emulation_desc_get_attribute(desc, attr, buf, sizeInBytes, sizeWritten);
+    return (st == rocblaslt_status_success) ? HIPBLAS_STATUS_SUCCESS
+                                             : HIPBLAS_STATUS_INVALID_VALUE;
+}
+
+
 size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
                                        hipblasLtMatmulDesc_t matmulDesc,
                                        hipDataType           computeInputType,

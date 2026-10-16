@@ -36,6 +36,21 @@
 #include <iostream>
 #include <vector>
 
+/********************************************************************************
+ * \brief Internal definition of the opaque hipblasLtEmulationDescriptor type.
+ * Emulation is enabled by attaching the descriptor; set strategy to DISABLED to
+ * prevent re-entry from the native-GEMM fallback.
+ *******************************************************************************/
+struct hipblasLtEmulationDescriptor
+{
+    hipblasLtEmulationStrategy_t             emulation_strategy   = HIPBLASLT_EMULATION_STRATEGY_DEFAULT;             /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden); DISABLED = never emulate */
+    hipblasltEmulationSpecialValuesSupport_t emulation_sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
+    int emulation_fixedpoint_mantissa_control   = 0;   /**< Not used at the moment */
+    int emulation_fixedpoint_max_mantissa_bits  = 0;   /**< 0=inherit, 1..52=explicit bit count */
+    int emulation_fixedpoint_mantissa_bit_offset = 0;  /**< Not used at the moment */
+    int emulation_fixedpoint_mantissa_bit_count_pointer = 0; /**< Not used at the moment */
+};
+
 struct _rocblaslt_attribute
 {
     _rocblaslt_attribute() {};
@@ -382,16 +397,10 @@ struct _rocblaslt_matmul_desc
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
 #endif
 
-    /* Per-matmul emulation settings (HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT).
-     * Sentinel values mean "inherit from env var / built-in default":
-     *   emulation_enabled      : -1 = inherit, 0 = force off, 1 = force on
-     *   emulation_strategy     : -1 = inherit, 0/1/2 = DEFAULT/PERFORMANT/EAGER
-     *   emulation_sv_support   : 0 = DEFAULT (inherit from env var), 1 = NONE, 2 = INFINITY, 3 = NAN
-     *   emulation_mantissa_bits: 0 = inherit, 1..52 = explicit bit count    */
-    int emulation_enabled       = -1;
-    int emulation_strategy      = -1;
-    int emulation_sv_support    = 0; /**< hipblasltEmulationSpecialValuesSupport_t; 0=DEFAULT=inherit */
-    int emulation_mantissa_bits = 0;
+    /* FP64/FP32 emulation settings attached via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+     * Non-owning: the caller's hipblasLtEmulationDesc_t must outlive every matmul
+     * using this descriptor.  nullptr means "use all env-var / built-in defaults". */
+    const struct hipblasLtEmulationDescriptor* emulation_desc = nullptr;
 
     std::shared_ptr<void> m_data; // Tensile data
 
@@ -429,10 +438,7 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
-        this->emulation_enabled           = src.emulation_enabled;
-        this->emulation_strategy          = src.emulation_strategy;
-        this->emulation_sv_support        = src.emulation_sv_support;
-        this->emulation_mantissa_bits     = src.emulation_mantissa_bits;
+        this->emulation_desc              = src.emulation_desc;
     }
 };
 

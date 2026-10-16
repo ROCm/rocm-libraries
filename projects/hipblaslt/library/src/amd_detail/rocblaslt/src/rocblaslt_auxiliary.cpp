@@ -841,6 +841,113 @@ extern "C" {
 #endif
 
 /********************************************************************************
+ * \brief Create an emulation descriptor (internal rocblaslt implementation).
+ *******************************************************************************/
+rocblaslt_status rocblaslt_emulation_desc_create(hipblasLtEmulationDesc_t* desc)
+{
+    if(desc == nullptr)
+        return rocblaslt_status_invalid_value;
+    try
+    {
+        *desc = new hipblasLtEmulationDescriptor();
+    }
+    catch(...)
+    {
+        return rocblaslt_status_memory_error;
+    }
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_destroy(hipblasLtEmulationDesc_t desc)
+{
+    delete desc; // delete nullptr is safe
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t          desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        const void*                        buf,
+                                                        size_t                             sizeInBytes)
+{
+    if(desc == nullptr || buf == nullptr)
+        return rocblaslt_status_invalid_value;
+    switch(attr)
+    {
+    case HIPBLASLT_EMULATION_DESC_STRATEGY:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            if(v < 0 || v > 3)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_strategy = static_cast<hipblasLtEmulationStrategy_t>(v);
+        }
+        break;
+    case HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            if(v < 0 || v > 3)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_sv_support = static_cast<hipblasltEmulationSpecialValuesSupport_t>(v);
+        }
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:           /* not used at the moment */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:        /* not used at the moment */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER: /* not used at the moment */
+        return rocblaslt_status_invalid_value;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
+        if(sizeInBytes < sizeof(int32_t))
+            return rocblaslt_status_invalid_value;
+        {
+            int32_t v = 0;
+            memcpy(&v, buf, sizeof(int32_t));
+            if(v < 0 || v > 52)
+                return rocblaslt_status_invalid_value;
+            desc->emulation_fixedpoint_max_mantissa_bits = v;
+        }
+        break;
+    default:
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_success;
+}
+
+rocblaslt_status rocblaslt_emulation_desc_get_attribute(hipblasLtEmulationDesc_t          desc,
+                                                        hipblasLtEmulationDescAttributes_t attr,
+                                                        void*                              buf,
+                                                        size_t                             sizeInBytes,
+                                                        size_t*                            sizeWritten)
+{
+    if(desc == nullptr || (sizeInBytes != 0 && buf == nullptr))
+        return rocblaslt_status_invalid_value;
+    if(sizeWritten) *sizeWritten = sizeof(int32_t);
+    if(sizeInBytes < sizeof(int32_t)) return rocblaslt_status_invalid_value;
+    switch(attr)
+    {
+    case HIPBLASLT_EMULATION_DESC_STRATEGY:
+        memcpy(buf, &desc->emulation_strategy, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT:
+        memcpy(buf, &desc->emulation_sv_support, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT:
+        memcpy(buf, &desc->emulation_fixedpoint_max_mantissa_bits, sizeof(int32_t));
+        break;
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL:           /* not used at the moment */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_OFFSET:        /* not used at the moment */
+    case HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_BIT_COUNT_POINTER: /* not used at the moment */
+        return rocblaslt_status_invalid_value;
+    default:
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
  * It must be initialized using rocblaslt_create()
  * and the returned handle must be passed
@@ -1855,76 +1962,19 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 }
                 break;
 #endif
-            case ROCBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT:
-                if(sizeof(int32_t) <= sizeInBytes)
+            case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+                // Stored as a non-owning pointer. The caller's hipblasLtEmulationDesc_t
+                // must outlive every matmul call that uses this descriptor.
+                if(sizeof(hipblasLtEmulationDesc_t) <= sizeInBytes)
                 {
-                    int32_t v = 0;
-                    memcpy(&v, buf, sizeof(int32_t));
-                    if(v < -1 || v > 1)
-                    {
-                        log_error(__func__, "invalid emulation_enabled value", v);
-                        return rocblaslt_status_invalid_value;
-                    }
-                    matmulDesc->emulation_enabled = v;
+                    hipblasLtEmulationDesc_t emul = nullptr;
+                    memcpy(&emul, buf, sizeof(hipblasLtEmulationDesc_t));
+                    matmulDesc->emulation_desc = emul;
                 }
                 else
                 {
-                    log_error(__func__, "invalid emulation_enabled buf size", sizeInBytes);
+                    log_error(__func__, "invalid emulation_desc buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
-                }
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT:
-                if(sizeof(int32_t) <= sizeInBytes)
-                {
-                    int32_t v = 0;
-                    memcpy(&v, buf, sizeof(int32_t));
-                    if(v < -1 || v > 2)
-                    {
-                        log_error(__func__, "invalid emulation_strategy value", v);
-                        return rocblaslt_status_invalid_value;
-                    }
-                    matmulDesc->emulation_strategy = v;
-                }
-                else
-                {
-                    log_error(__func__, "invalid emulation_strategy buf size", sizeInBytes);
-                    return rocblaslt_status_invalid_value;
-                }
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT:
-                if(sizeof(int32_t) <= sizeInBytes)
-                {
-                    int32_t bits = 0;
-                    memcpy(&bits, buf, sizeof(int32_t));
-                    /* 0 = sentinel (inherit from env var); 1..52 = explicit bit count */
-                    if(bits < 0 || bits > 52)
-                    {
-                        log_error(__func__, "invalid emulation_max_mantissa_bit_count value (must be 0..52)", bits);
-                        return rocblaslt_status_invalid_value;
-                    }
-                    matmulDesc->emulation_mantissa_bits = bits;
-                }
-                else
-                {
-                    log_error(__func__, "invalid emulation_max_mantissa_bit_count buf size (need int32_t)", sizeInBytes);
-                    return rocblaslt_status_invalid_value;
-                }
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT:
-                if(sizeof(int32_t) > sizeInBytes)
-                {
-                    log_error(__func__, "invalid emulation_special_values_support buf size", sizeInBytes);
-                    return rocblaslt_status_invalid_value;
-                }
-                {
-                    int32_t v = 0;
-                    memcpy(&v, buf, sizeof(int32_t));
-                    if(v < 0 || v > 3)
-                    {
-                        log_error(__func__, "invalid emulation_special_values_support value", v);
-                        return rocblaslt_status_invalid_value;
-                    }
-                    matmulDesc->emulation_sv_support = v;
                 }
                 break;
             default:
@@ -2286,25 +2336,10 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
                 break;
 #endif
-            case ROCBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT:
-                if(sizeWritten) *sizeWritten = sizeof(int32_t);
-                if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_enabled buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
-                memcpy(buf, &matmulDesc->emulation_enabled, sizeof(int32_t));
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT:
-                if(sizeWritten) *sizeWritten = sizeof(int32_t);
-                if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_strategy buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
-                memcpy(buf, &matmulDesc->emulation_strategy, sizeof(int32_t));
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT:
-                if(sizeWritten) *sizeWritten = sizeof(int32_t);
-                if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_max_mantissa_bit_count buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
-                memcpy(buf, &matmulDesc->emulation_mantissa_bits, sizeof(int32_t));
-                break;
-            case ROCBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_SUPPORT_EXT:
-                if(sizeWritten) *sizeWritten = sizeof(int32_t);
-                if(sizeInBytes < sizeof(int32_t)) { log_error(__func__, "invalid emulation_special_values_support buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
-                memcpy(buf, &matmulDesc->emulation_sv_support, sizeof(int32_t));
+            case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+                if(sizeWritten) *sizeWritten = sizeof(hipblasLtEmulationDesc_t);
+                if(sizeInBytes < sizeof(hipblasLtEmulationDesc_t)) { log_error(__func__, "invalid emulation_desc buf size", sizeInBytes); return rocblaslt_status_invalid_value; }
+                memcpy(buf, &matmulDesc->emulation_desc, sizeof(hipblasLtEmulationDesc_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
