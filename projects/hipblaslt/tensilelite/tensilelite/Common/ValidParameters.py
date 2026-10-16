@@ -358,15 +358,14 @@ validParameters = { # we need to make sure this matches develop
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
     # So when global reads are issued, the data is likely to be in GL2 cache.
     # 0: disable
-    # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
-    # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
+    # N (1..16): prefetch N load tiles (MTxDepthU) ahead of PrefetchGlobalRead
     # Currently we do not support StaggerU (forced off), StridedBatched=False kernels,
     # 6-bit float, or Stream-K other than DP-first (StreamK==3). General batch
     # (pointer-array mode) is supported on StridedBatched SupportUserArgs kernels,
     # where ArgType == 3 selects it at runtime. GSU is supported; with a
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
-    "PrefetchGL2": [0, 1, 2],
+    "PrefetchGL2": list(range(0, 17)),
     # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
     # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
     # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride

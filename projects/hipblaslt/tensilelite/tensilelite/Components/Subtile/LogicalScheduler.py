@@ -235,7 +235,7 @@ class SchedulerConfig:
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
-    pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
+    pgl: int = 0              # Prefetch GL2 (0=off, 1..16 tiles ahead)
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -3370,7 +3370,7 @@ class LogicalScheduler:
             gl2_preloop_ops = []
             if cfg.pgl > 0:
                 gl2_preloop_ops.append(GL2PrefetchOp())
-                if cfg.pgl == 2:
+                for _ in range(1, cfg.pgl):
                     gl2_preloop_ops.append(GL2PrefetchIncOp())
                     gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
