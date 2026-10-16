@@ -42,18 +42,21 @@ inline bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
 
 // Owns logical extents independently of a datatype, strides, or storage. A
 // rank-zero shape describes one scalar; any zero extent describes an empty shape.
+// Construction requires the full element count to fit in size_t.
 // Counts and index conversions perform checked, rank-dependent work. Reuse a
 // computed count or an iteration plan in performance-critical element loops.
 class Shape {
    public:
     Shape() = default;
 
-    explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {}
+    explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {
+        validateElementCount(m_dimensions);
+    }
 
-    Shape(std::initializer_list<size_t> dimensions) : m_dimensions(dimensions) {}
+    Shape(std::initializer_list<size_t> dimensions) : Shape(std::vector<size_t>(dimensions)) {}
 
     explicit Shape(std::span<const size_t> dimensions)
-        : m_dimensions(dimensions.begin(), dimensions.end()) {}
+        : Shape(std::vector<size_t>(dimensions.begin(), dimensions.end())) {}
 
     size_t rank() const {
         return m_dimensions.size();
@@ -74,7 +77,7 @@ class Shape {
     }
 
     size_t elementCount() const {
-        return elementCount(0, rank());
+        return computeElementCount(m_dimensions);
     }
 
     // Products use [firstDimension, onePastLastDimension). A zero extent makes
@@ -83,10 +86,8 @@ class Shape {
         validateDimensionRange(firstDimension, onePastLastDimension);
         const auto extents =
             dimensions().subspan(firstDimension, onePastLastDimension - firstDimension);
-        const bool empty = validateElementCount(extents);
-        if (empty) return 0;
-        return std::accumulate(extents.begin(), extents.end(), size_t{1},
-                               [](size_t count, size_t extent) { return count * extent; });
+        validateElementCount(extents);
+        return computeElementCount(extents);
     }
 
     // Select dimensions in the supplied order.
@@ -163,6 +164,14 @@ class Shape {
                                          std::to_string(axis) + ".");
             seen[axis] = true;
         }
+        for (size_t axis : axes)
+            if (m_dimensions[axis] == 0) return;
+        size_t count = 1;
+        for (size_t axis : axes) {
+            if (count > std::numeric_limits<size_t>::max() / m_dimensions[axis])
+                throw std::runtime_error("Tensor shape element count exceeds size_t.");
+            count *= m_dimensions[axis];
+        }
     }
 
     void validateCoordinates(size_t linearIndex, std::span<const size_t> order,
@@ -188,16 +197,6 @@ class Shape {
                                          " in dimension " + std::to_string(dimension) +
                                          " is outside [0, " +
                                          std::to_string(m_dimensions[dimension]) + ").");
-
-        // Reverse each multiply-add: prefix * extent + coordinate <= limit
-        // exactly when prefix <= (limit - coordinate) / extent.
-        size_t limit = std::numeric_limits<size_t>::max();
-        for (size_t position = rank(); position > 0; --position) {
-            const size_t dimension = order.empty() ? position - 1 : order[position - 1];
-            if (indices[dimension] > limit)
-                throw std::runtime_error("Tensor linear index overflow.");
-            limit = (limit - indices[dimension]) / m_dimensions[dimension];
-        }
     }
 
     void computeCoordinates(size_t linearIndex, std::span<const size_t> order,
@@ -209,10 +208,15 @@ class Shape {
         }
     }
 
-    static bool validateElementCount(std::span<const size_t> extents) {
-        const auto count = detail::tryElementCount(extents);
-        if (!count) throw std::runtime_error("Tensor shape element count exceeds size_t.");
-        return *count == 0;
+    static void validateElementCount(std::span<const size_t> extents) {
+        if (!detail::tryElementCount(extents))
+            throw std::runtime_error("Tensor shape element count exceeds size_t.");
+    }
+
+    static size_t computeElementCount(std::span<const size_t> extents) noexcept {
+        if (std::ranges::find(extents, size_t{0}) != extents.end()) return 0;
+        return std::accumulate(extents.begin(), extents.end(), size_t{1},
+                               [](size_t count, size_t extent) { return count * extent; });
     }
 
     void validateIndexOrder(std::span<const size_t> order) const {
