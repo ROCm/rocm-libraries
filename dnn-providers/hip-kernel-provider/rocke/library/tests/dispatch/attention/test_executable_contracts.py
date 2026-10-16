@@ -386,6 +386,49 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
         self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
 
+    def test_explicit_binding_rejects_additive_bias(self):
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        captured = {}
+
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return "ok"
+
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=fake_run,
+        ):
+            tensors = _paged_tensors()
+            tensors["problem"] = replace(_problem(req), use_additive_bias=True)
+            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
+                candidate.bound_torch(req, spec, tensors)
+
+            for name in (
+                "additive_bias",
+                "additive_bias_batch_stride",
+                "additive_bias_head_stride",
+                "additive_bias_sq_stride",
+            ):
+                with self.subTest(where="tensors", name=name):
+                    tensors = _paged_tensors()
+                    tensors[name] = 0
+                    with self.assertRaisesRegex(ValueError, f"{name} in tensors"):
+                        candidate.bound_torch(req, spec, tensors)
+
+            binding = candidate.bound_torch(req, spec, _paged_tensors())
+            with self.assertRaisesRegex(ValueError, "additive_bias in launch kwargs"):
+                binding.launch(additive_bias=object())
+            self.assertEqual(captured, {})
+
+            binding.launch()
+        self.assertFalse(any(k.startswith("additive_bias") for k in captured))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -201,7 +201,12 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
     subflags = _enable_transposed_subflags(problem, arch)
     scalar_state = combo or subflags
     skip_legacy_qreg = combo or subflags
-    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    _bias_active = (
+        problem.softcap > 0
+        or problem.use_alibi
+        or problem.use_qq_bias
+        or problem.use_additive_bias
+    )
     mask_opts = (combo_no_sw and not _bias_active) or subflags
     return dict(
         head_size=problem.head_size,
@@ -293,9 +298,11 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
     if _enable_k_single_buffer(problem, arch):
         _schedule_fields["use_k_single_buffer"] = True
     # Shared base fields + the gfx950-only schedule tail (disjoint keys).
+    # Additive bias is gfx950-only for now, so it lives in the tail too.
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem, arch),
         **_schedule_fields,
+        use_additive_bias=problem.use_additive_bias,
     )
     if _kau._d256_gfx950_fast(problem, arch):
         # D256 gfx950 bf16 prefill fast route -- pins the 32x32 transposed + FA3
@@ -385,6 +392,10 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem, arch),
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        # Additive bias is gfx950-only for now; gfx942's spec has no such field.
+        **(
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+        ),
     )
 
 
