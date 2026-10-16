@@ -1424,3 +1424,65 @@ def test_small_c_depthwise_wgrad_binary_bakes_its_channel_count(cache):
         i.algorithm == "direct_wgrad_dw_cols" and "bakes C=" in why
         for i, why in rejected
     )
+
+
+def test_run_from_cache_variants_filter():
+    """``--variants`` names cache variants (DIRECT_CAPABILITIES keys)."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_direct_conv import _cache_variants
+
+    assert _cache_variants(SimpleNamespace(variants=None)) == frozenset()
+    picked = _cache_variants(
+        SimpleNamespace(variants="direct_grouped_dgrad_4c, direct_grouped_dgrad_fused")
+    )
+    assert picked == {"direct_grouped_dgrad_4c", "direct_grouped_dgrad_fused"}
+    assert picked <= set(dks.DIRECT_CAPABILITIES)
+    with pytest.raises(ValueError, match="unknown direct variant"):
+        _cache_variants(SimpleNamespace(variants="direct_grouped_dgrad_4c,bogus"))
+
+
+def test_run_from_cache_variants_filter_can_leave_nothing():
+    """A ``--variants`` filter that keeps none of a case's plans or rejections
+    leaves both lists empty, and the case reports the filter rather than an
+    index error or a missing cache build."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_direct_conv import (
+        _filter_variants,
+        _no_plan_reason,
+    )
+
+    def plan(variant):
+        return SimpleNamespace(identity=SimpleNamespace(algorithm=variant))
+
+    plans = [plan("direct_grouped_dgrad"), plan("direct_dgrad_mfma_rtc")]
+    rejected = [(SimpleNamespace(algorithm="direct_grouped_dgrad_mfma"), "why")]
+    keep = frozenset({"direct_grouped_dgrad_4c"})
+    got_plans, got_rejected = _filter_variants(plans, rejected, keep)
+    assert got_plans == [] and got_rejected == []
+    why = _no_plan_reason(got_rejected, "bf16", keep)
+    assert "--variants direct_grouped_dgrad_4c" in why
+    assert "--compile-all" not in why
+    # Unfiltered, the same empty case points at the cache build; a kept
+    # rejection is reported as is.
+    assert "--compile-all --dtype bf16" in _no_plan_reason([], "bf16", frozenset())
+    assert _filter_variants(plans, rejected, frozenset()) == (plans, rejected)
+    kept = _filter_variants(plans, rejected, frozenset({"direct_grouped_dgrad_mfma"}))
+    assert kept == ([], rejected)
+    assert _no_plan_reason(kept[1], "bf16", keep) == "why"
+
+
+def test_compile_all_refuses_variants_before_checking_them(capsys):
+    """``--compile-all --variants`` is refused as a mode error, whether or not
+    the names are valid: --variants only filters --run-from-cache."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_direct_conv import _cache_dispatch
+
+    for names in ("direct_grouped_dgrad_4c", "bogus"):
+        args = SimpleNamespace(compile_all=True, variants=names, directions=None)
+        assert _cache_dispatch(args, _ARCH, []) == 2
+        err = capsys.readouterr().err
+        assert "--variants only filters --run-from-cache" in err
+        assert "unknown direct variant" not in err
