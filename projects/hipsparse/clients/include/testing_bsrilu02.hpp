@@ -524,11 +524,7 @@ void testing_bsrilu02(Arguments argus)
 
         // Get pivot
         status_analysis_1 = hipsparseXbsrilu02_zeroPivot(handle, info, &h_analysis_pivot_1);
-        if(h_analysis_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_analysis_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis_1, h_analysis_pivot_1);
 
         // bsrilu02 analysis - device mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -547,11 +543,9 @@ void testing_bsrilu02(Arguments argus)
 
         // Get pivot
         status_analysis_2 = hipsparseXbsrilu02_zeroPivot(handle, info, d_analysis_pivot_2);
-        if(h_analysis_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_analysis_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIP_ERROR(
+            hipMemcpy(&h_analysis_pivot_2, d_analysis_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis_2, h_analysis_pivot_2);
 
         // bsrilu02 solve - host mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -572,11 +566,7 @@ void testing_bsrilu02(Arguments argus)
 
         // Get pivot
         status_solve_1 = hipsparseXbsrilu02_zeroPivot(handle, info, &h_solve_pivot_1);
-        if(h_solve_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_solve_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_solve_1, h_solve_pivot_1);
 
         // bsrilu02 solve - device mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -597,11 +587,9 @@ void testing_bsrilu02(Arguments argus)
 
         // Get pivot
         status_solve_2 = hipsparseXbsrilu02_zeroPivot(handle, info, d_solve_pivot_2);
-        if(h_solve_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_solve_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIP_ERROR(
+            hipMemcpy(&h_solve_pivot_2, d_solve_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_solve_2, h_solve_pivot_2);
 
         // Copy output from device to CPU
         std::vector<T> result_1(block_dim * block_dim * nnzb);
@@ -615,11 +603,6 @@ void testing_bsrilu02(Arguments argus)
                                   dbsr_val_2,
                                   sizeof(T) * block_dim * block_dim * nnzb,
                                   hipMemcpyDeviceToHost));
-
-        CHECK_HIP_ERROR(
-            hipMemcpy(&h_analysis_pivot_2, d_analysis_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(
-            hipMemcpy(&h_solve_pivot_2, d_solve_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host bsrilu02
         int numerical_pivot;
