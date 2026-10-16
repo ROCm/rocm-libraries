@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 /*
  * helper_rocke.helpers.transforms.c -- C99 port of a SUBSET of
- * rocke.helpers.transforms (the CK Tile coordinate-transform DAG).
+ * rocke.helpers.transforms (the CK Tile coordinate-transform DAG) and of
+ * rocke.helpers.magic_division.
  *
  * Ported symbols (see the header for the exact list): calculate_magic_numbers,
- * do_magic_division, CoordVar, Embed/PassThrough/Unmerge/UnmergeMagicDiv
+ * do_magic_division (both from magic_division), CoordVar, Embed/PassThrough/Unmerge/UnmergeMagicDiv
  * transforms + their constructors (embed/pass_through/unmerge/unmerge_magic),
  * and TensorDescriptor.{naive,transform,offset,unmerge_lower}.
  *
@@ -791,7 +792,7 @@ static bool rocke_i_apply_pad_dynamic(rocke_ir_builder_t* b,
 }
 
 /* do_magic_division_dynamic: same as do_magic_division but mult/shift are SSA.
- * Mirrors transforms.do_magic_division_dynamic. */
+ * Mirrors magic_division.do_magic_division_dynamic. */
 static rocke_value_t* rocke_i_do_magic_division_dynamic(rocke_ir_builder_t* b,
                                                         rocke_value_t* dividend,
                                                         rocke_value_t* mult_v,
