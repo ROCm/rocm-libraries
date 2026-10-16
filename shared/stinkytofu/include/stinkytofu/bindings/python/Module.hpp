@@ -134,7 +134,7 @@
     X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */        \
     X(DsSections, bool, true)             /* ds slots per barrier / tensor_load section */         \
     X(DsEvenSpreadCap, bool, true)        /* cap cycles per load at the even spread */             \
-    X(DsFreeBypassRefill, bool, true)     /* a free ds_load is not held by the WMMA refill */      \
+    X(DsFreeBypassRefill, bool, false)    /* a free ds_load is not held by the WMMA refill */      \
     X(DsReleasedFirst, bool, true)        /* a held ds_load does not stand in for released ones */ \
     X(WmmaRunMax, int, 8)                 /* longest WMMA-only run; 0 = off */                     \
     X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */      \

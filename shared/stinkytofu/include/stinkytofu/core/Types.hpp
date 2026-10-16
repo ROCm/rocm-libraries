@@ -154,7 +154,7 @@ struct PassFeatureConfig {
         /// Cap DsReadCyclesPerLoad at the even spread of the region's loads over its WMMAs.
         bool dsEvenSpreadCap = true;
         /// A ds_load that waits for no credit issues while the WMMA queue refill is active.
-        bool dsFreeBypassRefill = true;
+        bool dsFreeBypassRefill = false;
         /// The ds_load offered to the picker is the best one the pacer releases.
         bool dsReleasedFirst = true;
         /// Longest run of WMMAs with nothing else between; 0 = no limit.
