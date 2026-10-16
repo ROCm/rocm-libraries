@@ -73,6 +73,11 @@ public:
         return _mode;
     }
 
+    std::int64_t spatialDims() const noexcept
+    {
+        return _spatialDims;
+    }
+
     const std::vector<std::int64_t>& prePaddings() const noexcept
     {
         return _prePaddings;
@@ -119,8 +124,13 @@ protected:
                             "CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES[0] must be > 0");
         }
 
-        _computeType = requireLowerable(rawComputeType, CUDNN_ATTR_CONVOLUTION_COMP_TYPE);
-        _mode = requireLowerable(rawMode, CUDNN_ATTR_CONVOLUTION_CONV_MODE);
+        const DataType_t computeType
+            = requireLowerable(rawComputeType, CUDNN_ATTR_CONVOLUTION_COMP_TYPE);
+        const ConvolutionMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_CONVOLUTION_CONV_MODE);
+
+        _computeType = computeType;
+        _mode = mode;
+        _spatialDims = spatialDims;
         _prePaddings = std::move(prePaddings);
         _postPaddings = std::move(postPaddings);
         _dilations = std::move(dilations);
@@ -136,6 +146,7 @@ private:
 
     DataType_t _computeType = DataType_t::NOT_SET;
     ConvolutionMode_t _mode = ConvolutionMode_t::NOT_SET;
+    std::int64_t _spatialDims = 0;
     std::vector<std::int64_t> _prePaddings;
     std::vector<std::int64_t> _postPaddings;
     std::vector<std::int64_t> _dilations;
@@ -307,6 +318,11 @@ public:
         return _computeType;
     }
 
+    bool isDeterministic() const noexcept
+    {
+        return _isDeterministic;
+    }
+
 protected:
     void finalizeImpl() override
     {
@@ -316,13 +332,19 @@ protected:
         const auto rawComputeType
             = requireAttribute(scalarAttribute<cudnnDataType_t>(CUDNN_ATTR_REDUCTION_COMP_TYPE),
                                CUDNN_ATTR_REDUCTION_COMP_TYPE);
-        _mode = requireLowerable(rawMode, CUDNN_ATTR_REDUCTION_OPERATOR);
-        _computeType = requireLowerable(rawComputeType, CUDNN_ATTR_REDUCTION_COMP_TYPE);
+        const ReductionMode_t mode = requireLowerable(rawMode, CUDNN_ATTR_REDUCTION_OPERATOR);
+        const DataType_t computeType
+            = requireLowerable(rawComputeType, CUDNN_ATTR_REDUCTION_COMP_TYPE);
+        _mode = mode;
+        _computeType = computeType;
+        _isDeterministic
+            = scalarAttribute<bool>(CUDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value_or(false);
     }
 
 private:
     ReductionMode_t _mode = ReductionMode_t::NOT_SET;
     DataType_t _computeType = DataType_t::NOT_SET;
+    bool _isDeterministic = false;
 };
 
 class ResampleDescriptor final : public Descriptor
