@@ -382,7 +382,7 @@ private:
         {"all",           "(.+)"},
         {"amd",           "(gfx[0-9a-f]+)"},
         {"nvidia",        "(nvidia)"}, // see TestController::get_arch
-        {"apus",          "(gfx1103|gfx1150|gfx1151|gfx1152)"},
+        {"apus",          "(gfx1103|gfx1150|gfx1151|gfx1152|gfx1170|gfx1171)"},
         {"navi2x-family", "(gfx1030|gfx1031|gfx1032)"},
         {"navi3x-family", "(gfx1100|gfx1101|gfx1102)"},
         {"navi4x-family", "(gfx1200|gfx1201)"},

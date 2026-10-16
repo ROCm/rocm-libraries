@@ -497,7 +497,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, CastOp)
     using IteratorType
         = test_utils::transform_iterator<input_type*, hipcub::CastOp<output_type>, output_type>;
 
-    const std::vector<size_t> sizes = get_sizes();
+    std::vector<size_t> sizes = get_sizes();
     for(auto input_size : CHECK_SIZE_FILTERS(sizes))
     {
         // Generate data.

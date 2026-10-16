@@ -340,7 +340,10 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-TEST(DeviceMemcpyBatched, ZeroBuffersNoOp)
+class DeviceMemcpyBatched : public test_controller::ControlledTest<>
+{};
+
+TEST_F(DeviceMemcpyBatched, ZeroBuffersNoOp)
 {
     using T         = uint8_t;
     T**     d_srcs  = nullptr;
@@ -369,7 +372,7 @@ TEST(DeviceMemcpyBatched, ZeroBuffersNoOp)
     }
 }
 
-TEST(DeviceMemcpyBatched, ZeroSizeEntries)
+TEST_F(DeviceMemcpyBatched, ZeroSizeEntries)
 {
     using T                               = uint8_t;
     const int                 num_buffers = 5;
@@ -380,6 +383,8 @@ TEST(DeviceMemcpyBatched, ZeroSizeEntries)
     {
         total += s;
     }
+
+    CHECK_SIZE_ENABLEMENT(total);
 
     T* d_input  = nullptr;
     T* d_output = nullptr;
@@ -436,7 +441,7 @@ TEST(DeviceMemcpyBatched, ZeroSizeEntries)
     HIP_CHECK(hipFree(d_input));
 }
 
-TEST(DeviceMemcpyBatched, NonDefaultStreamAndTempReuse)
+TEST_F(DeviceMemcpyBatched, NonDefaultStreamAndTempReuse)
 {
     using T                                           = uint32_t;
     const int                             num_buffers = 8;
@@ -449,6 +454,8 @@ TEST(DeviceMemcpyBatched, NonDefaultStreamAndTempReuse)
         sizes[i] = dist(rng) * sizeof(T);
         total += sizes[i];
     }
+
+    CHECK_SIZE_ENABLEMENT(total);
 
     T* d_in  = nullptr;
     T* d_out = nullptr;
@@ -579,7 +586,7 @@ struct PackedPair
     uint16_t a;
     uint16_t b;
 }; // alignment-sensitive
-TEST(DeviceMemcpyBatched, PackedStructAlignment)
+TEST_F(DeviceMemcpyBatched, PackedStructAlignment)
 {
     using T                       = PackedPair;
     const int    num_buffers      = 4;
