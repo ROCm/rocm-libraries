@@ -27,7 +27,8 @@ import torch.nn.functional as F
 # torch's GPU convolutions mis-compute an fp32 operand larger than 2^32 bytes:
 # the batch images past that offset come back wrong (measured with MIOpen on a
 # 4.8 GB fp32 activation). The forward and backward-data references therefore
-# run batch slices whose fp32 operands stay below 2^31 bytes and concatenate
+# run batch slices whose fp32 operands stay below a 2^31-byte cap -- well under
+# the 2^32 break point, so a slice can never straddle it -- and concatenate
 # them; every image is independent in those two directions.
 _MAX_SLICE_BYTES = 2**31 - 1
 
