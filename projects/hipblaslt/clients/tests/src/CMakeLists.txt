@@ -51,9 +51,9 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
     )
 endif()
 
-if(HIPBLASLT_ENABLE_USER_KERNELS)
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     target_sources(hipblaslt-test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/user_kernel_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
     )
 endif()
 

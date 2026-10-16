@@ -12,12 +12,12 @@ namespace TensileLite
      *   [2^30, 3 * 2^29)   reserved for JIT-generated kernels
      *   [3 * 2^29, 2^31)   kernels registered at runtime
      *
-     * A user kernel index is valid only in the process that assigned it.
+     * A local kernel index is valid only in the process that assigned it.
      */
-    constexpr int UserKernelIndexBase = 3 << 29;
+    constexpr int LocalKernelIndexBase = 3 << 29;
 
-    constexpr bool isUserKernelIndex(int index)
+    constexpr bool isLocalKernelIndex(int index)
     {
-        return index >= UserKernelIndexBase;
+        return index >= LocalKernelIndexBase;
     }
 } // namespace TensileLite
