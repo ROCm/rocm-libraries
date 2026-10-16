@@ -143,12 +143,28 @@ namespace
             return toFloat(type, hostData[offset[g] + size_t(j * ld[g] + i)]);
         }
 
-        void release()
+        GroupedMatrix()                                = default;
+        GroupedMatrix(const GroupedMatrix&)            = delete;
+        GroupedMatrix& operator=(const GroupedMatrix&) = delete;
+        ~GroupedMatrix()
         {
             static_cast<void>(hipFree(deviceData));
             static_cast<void>(hipFree(ptrArray));
         }
     };
+
+    // Runs f at scope exit, including the early returns of GTEST_SKIP and failed ASSERTs.
+    template <typename F>
+    struct ScopeExit
+    {
+        F f;
+        ~ScopeExit()
+        {
+            f();
+        }
+    };
+    template <typename F>
+    ScopeExit(F) -> ScopeExit<F>;
 
     class GroupedMatmul : public ::testing::Test
     {
@@ -276,7 +292,19 @@ namespace
             auto layC = layout(C, true, false);
             auto layD = layout(D, true, false);
 
-            hipblasLtMatmulDesc_t desc = nullptr;
+            hipblasLtMatmulDesc_t       desc   = nullptr;
+            hipblasLtMatmulPreference_t pref   = nullptr;
+            hipStream_t                 stream = nullptr;
+            ScopeExit                   cleanup{[&] {
+                if(stream)
+                    static_cast<void>(hipStreamDestroy(stream));
+                if(pref)
+                    hipblasLtMatmulPreferenceDestroy(pref);
+                if(desc)
+                    hipblasLtMatmulDescDestroy(desc);
+                for(auto l : {layA, layB, layC, layD})
+                    hipblasLtMatrixLayoutDestroy(l);
+            }};
             ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
@@ -325,7 +353,6 @@ namespace
                 }
             }
 
-            hipblasLtMatmulPreference_t pref = nullptr;
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
             uint64_t wsLimit = kWorkspace;
             ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
@@ -359,7 +386,6 @@ namespace
             ASSERT_EQ(hipMalloc(&ws, kWorkspace), hipSuccess);
             keep(ws);
 
-            hipStream_t stream;
             ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
             auto matmulAndCheck = [&]() {
                 ASSERT_EQ(hipblasLtMatmul(handle,
@@ -454,14 +480,6 @@ namespace
                 }
                 matmulAndCheck();
             }
-
-            static_cast<void>(hipStreamDestroy(stream));
-            hipblasLtMatmulPreferenceDestroy(pref);
-            hipblasLtMatmulDescDestroy(desc);
-            for(auto l : {layA, layB, layC, layD})
-                hipblasLtMatrixLayoutDestroy(l);
-            for(auto* x : {&A, &B, &C, &D})
-                x->release();
         }
     };
 
