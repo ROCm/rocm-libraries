@@ -7,6 +7,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER 3.39
 
 ### Added
+
+* Equilibration of general matrices
+    * GEEQU, GEEQUB
+    * GEEQU_64, GEEQUB_64
+
 ### Changed
 ### Removed
 ### Optimized

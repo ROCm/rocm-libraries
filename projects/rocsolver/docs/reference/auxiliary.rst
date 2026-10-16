@@ -90,6 +90,55 @@ rocsolver_<type>lauum()
 .. doxygenfunction:: rocsolver_slauum
 
 
+.. _equilibration:
+
+Equilibration
+==================================
+
+.. contents:: List of equilibration functions
+   :local:
+   :backlinks: top
+
+.. _geequ:
+
+rocsolver_<type>geequ()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequ_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequ
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequ
+
+.. _geequb:
+
+rocsolver_<type>geequb()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequb_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_cgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_dgeequb
+   :outline:
+.. doxygenfunction:: rocsolver_sgeequb
+
 .. _normcon:
 
 Norms and condition numbers
