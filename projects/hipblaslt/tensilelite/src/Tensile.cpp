@@ -29,6 +29,8 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
+#include "LibraryLoadError.hpp"
+
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/Loading.hpp>
 #endif
@@ -39,6 +41,63 @@
 
 namespace TensileLite
 {
+    namespace
+    {
+        thread_local std::string g_lastLibraryLoadError;
+
+        bool hasSuffix(std::string const& path, char const* suffix)
+        {
+            size_t const length = std::char_traits<char>::length(suffix);
+            return path.size() >= length
+                   && path.compare(path.size() - length, length, suffix) == 0;
+        }
+
+        // YAML and msgpack builds publish one SONAME. A file written for the
+        // other parser reaches this function when that parser is absent.
+        std::string explainLibraryLoadFailure(std::string const& filename)
+        {
+#if defined(TENSILE_YAML)
+            char const* const parser = "YAML";
+#elif defined(TENSILE_MSGPACK)
+            char const* const parser = "msgpack";
+#else
+            char const* const parser = "no library parser";
+#endif
+#if !defined(TENSILE_YAML)
+            if(hasSuffix(filename, ".yaml") || hasSuffix(filename, ".yml"))
+            {
+                return "file '" + filename + "' is YAML. This libtensilelite-host was built with the "
+                       + parser + " parser only.";
+            }
+#endif
+#if !defined(TENSILE_MSGPACK)
+            if(hasSuffix(filename, ".dat") || hasSuffix(filename, ".msgpack"))
+            {
+                return "file '" + filename
+                       + "' is msgpack. This libtensilelite-host was built with the " + parser
+                       + " parser only.";
+            }
+#endif
+            return "file '" + filename + "' was rejected by the " + parser
+                   + " parser in this libtensilelite-host. The file's format_version may be newer "
+                     "than this build, or its contents may not match that parser.";
+        }
+    }
+
+    void NoteLibraryLoadError(std::string message)
+    {
+        g_lastLibraryLoadError = std::move(message);
+    }
+
+    void ClearLibraryLoadError()
+    {
+        g_lastLibraryLoadError.clear();
+    }
+
+    std::string LastLibraryLoadError()
+    {
+        return g_lastLibraryLoadError;
+    }
 
     TENSILELITEHOST_EXPORT Problem::~Problem()                 = default;
     TENSILELITEHOST_EXPORT Hardware::Hardware()                = default;
@@ -66,20 +125,45 @@ namespace TensileLite
                                const std::vector<LazyLoadingInit>& preloaded)
     {
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> rv;
+        ClearLibraryLoadError();
+
+        // Name the parser mismatch before a parser turns the foreign file into
+        // a generic read error such as "Invalid argument".
+#if !defined(TENSILE_YAML)
+        if(hasSuffix(filename, ".yaml") || hasSuffix(filename, ".yml"))
+        {
+            NoteLibraryLoadError(explainLibraryLoadFailure(filename));
+            return nullptr;
+        }
+#endif
+#if !defined(TENSILE_MSGPACK)
+        if(hasSuffix(filename, ".dat") || hasSuffix(filename, ".msgpack"))
+        {
+            NoteLibraryLoadError(explainLibraryLoadFailure(filename));
+            return nullptr;
+        }
+#endif
 
 #ifdef TENSILE_MSGPACK
         rv = MessagePackLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
         if(rv)
+        {
+            ClearLibraryLoadError();
             return rv;
+        }
 #endif
 
 #ifdef TENSILE_YAML
         rv = LLVMLoadLibraryFile<MyProblem, MySolution>(filename, preloaded);
         if(rv)
+        {
+            ClearLibraryLoadError();
             return rv;
+        }
 #endif
 
-        // Failed to load library, return nullptr.
+        if(LastLibraryLoadError().empty())
+            NoteLibraryLoadError(explainLibraryLoadFailure(filename));
         return nullptr;
     }
 

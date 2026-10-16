@@ -26,6 +26,8 @@
 
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include "../LibraryLoadError.hpp"
+
 #include <Tensile/msgpack/Loading.hpp>
 
 #include <charconv>
@@ -366,6 +368,7 @@ namespace TensileLite
         }
         catch(std::runtime_error const& exc)
         {
+            NoteLibraryLoadError(exc.what());
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
 
