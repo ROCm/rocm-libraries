@@ -583,10 +583,10 @@ TEST(TestIngestorPlanCodec, RefusesAKernelDigestThatDoesNotMatchTheCodeObject)
     ASSERT_NE(payload.sha256, otherDigest);
     payload.sha256 = otherDigest;
 
-    const std::string refusal = expectIngestorPlanRefusal(
-        [&]() { decode(encodeIngestorPlan(payload)); },
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "does not match the code object");
+    const std::string refusal
+        = expectIngestorPlanRefusal([&]() { decode(encodeIngestorPlan(payload)); },
+                                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                    "does not match the code object");
     EXPECT_NE(refusal.find(otherDigest), std::string::npos) << refusal;
     const std::string actual
         = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
