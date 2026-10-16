@@ -48,10 +48,20 @@ namespace TensileLite
             static void mapping(IO& io, Scaler& scaler)
             {
                 std::vector<float> mean, scale;
+                if(iot::outputting(io))
+                {
+                    mean.assign(scaler.mean.begin(), scaler.mean.end());
+                    scale.assign(scaler.scale.begin(), scaler.scale.end());
+                }
+
                 iot::mapRequired(io, "mean", mean);
                 iot::mapRequired(io, "scale", scale);
-                scaler.mean.assign(mean.begin(), mean.end());
-                scaler.scale.assign(scale.begin(), scale.end());
+
+                if(!iot::outputting(io))
+                {
+                    scaler.mean.assign(mean.begin(), mean.end());
+                    scaler.scale.assign(scale.begin(), scale.end());
+                }
             }
 
             const static bool flow = false;
@@ -82,9 +92,17 @@ namespace TensileLite
             static void mapping(IO& io, DenseLayer& l)
             {
                 std::vector<float> W, B;
+                if(iot::outputting(io))
+                {
+                    W = l.weights();
+                    B.assign(l.B.begin(), l.B.end());
+                }
+
                 iot::mapRequired(io, "weight", W);
                 iot::mapRequired(io, "bias", B);
-                l = DenseLayer(W, B);
+
+                if(!iot::outputting(io))
+                    l = DenseLayer(W, B);
             }
 
             const static bool flow = false;

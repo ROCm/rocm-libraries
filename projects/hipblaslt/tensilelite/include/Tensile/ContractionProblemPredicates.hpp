@@ -3037,6 +3037,35 @@ namespace TensileLite
                 }
             };
 
+            // Set while a library document is rewritten. The predicate value is
+            // stored in the file; the current device is read only when a library
+            // is loaded to run a solution.
+            inline bool& deferWorkgroupMappingDeviceQuery()
+            {
+                static thread_local bool defer = false;
+                return defer;
+            }
+
+            struct DeferWorkgroupMappingDeviceQuery
+            {
+                bool prior;
+
+                DeferWorkgroupMappingDeviceQuery()
+                    : prior(deferWorkgroupMappingDeviceQuery())
+                {
+                    deferWorkgroupMappingDeviceQuery() = true;
+                }
+
+                ~DeferWorkgroupMappingDeviceQuery()
+                {
+                    deferWorkgroupMappingDeviceQuery() = prior;
+                }
+
+                DeferWorkgroupMappingDeviceQuery(DeferWorkgroupMappingDeviceQuery const&) = delete;
+                DeferWorkgroupMappingDeviceQuery& operator=(DeferWorkgroupMappingDeviceQuery const&)
+                    = delete;
+            };
+
             struct WorkgroupMappingXCCCheck
                 : public Predicate_CRTP<WorkgroupMappingXCCCheck, ContractionProblemGemm>
             {
@@ -3049,6 +3078,11 @@ namespace TensileLite
                 std::array<int, 2> value;
                 size_t             cuCount;
                 AMDGPU::Processor  processor;
+                // Set when captureCuCount left cuCount at 0 because a library
+                // document was being rewritten. The stored predicate is only
+                // the value array; evaluating this object would treat the
+                // device as having no compute units.
+                bool deviceQueryDeferred = false;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3069,23 +3103,16 @@ namespace TensileLite
                 }
 
                 WorkgroupMappingXCCCheck()
+                    : value{}
+                    , cuCount(0)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
+                    captureCuCount();
                 }
                 WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
+                    , cuCount(0)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
+                    captureCuCount();
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
@@ -3103,8 +3130,33 @@ namespace TensileLite
                     return "WorkgroupMappingXCCCheck";
                 }
 
+            private:
+                void captureCuCount()
+                {
+                    if(deferWorkgroupMappingDeviceQuery())
+                    {
+                        cuCount             = 0;
+                        processor           = AMDGPU::Processor::gfx000;
+                        deviceQueryDeferred = true;
+                        return;
+                    }
+                    deviceQueryDeferred = false;
+
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    Hardware const& hardware = *pHardware;
+                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
+                    cuCount                  = pAMDGPU->computeUnitCount;
+                    processor                = pAMDGPU->processor;
+                }
+
+            public:
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
+                    // A predicate built under DeferWorkgroupMappingDeviceQuery
+                    // must not be evaluated. cuCount is 0, with no device behind it.
+                    assert(!deviceQueryDeferred);
                     // If XCC == -1, we automatically set it to the number XCCs.
                     // In this case, no predicate is needed.
                     if(value[0] == -1)
@@ -3121,6 +3173,7 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    assert(!deviceQueryDeferred);
                     if(value[0] == -1)
                         return true;
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
