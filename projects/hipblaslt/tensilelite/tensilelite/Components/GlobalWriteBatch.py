@@ -2845,12 +2845,11 @@ class GlobalWriteBatchWriter:
                               shiftHex=int(log2(CURSOR_PAIR_BYTES)),
                               comment="cursor pair byte offset = dst_rank * %d" % CURSOR_PAIR_BYTES))
 
-    # --- the counter buffer was zeroed for this launch. ---
-    ring.emitLazyInitCursors(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr)
-
-    # --- seed the private room-check cache from the live hardware rptr. ---
+    # --- the counter buffer was zeroed for this launch; seed the private
+    #     room-check cache from the live hardware rptr. ---
     cachedIdxSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaCachedIdx", preventOverflow=False)
-    ring.emitRefreshCache(module, kw, "FusedPeerGroupPtr", cachedIdxSgpr)
+    ring.emitSeedCursorsAndCache(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr",
+                                 cursorOffSgpr, cachedIdxSgpr)
 
     # --- destination base: peer_recvPtr[dst_rank], the upper pair of the quad the
     #     caller loaded.  Folded in place; the caller reloads the quad per issue. ---

@@ -35,6 +35,7 @@ OFF_wptr     = 8 * FUSED_A2A_PEER_FIELDS.index("wptr")      # hardware write poi
 OFF_doorbell = 8 * FUSED_A2A_PEER_FIELDS.index("doorbell")
 
 assert OFF_doorbell == OFF_wptr + 8, "submitPacket's x4 load needs wptr then doorbell"
+assert OFF_wptr == OFF_rptr + 8, "emitSeedCursorsAndCache's x4 load needs rptr then wptr"
 assert OFF_recvPtr == OFF_flagPtr + 8, "the SDMA loader's x4 needs flagPtr then recvPtr"
 
 # Cursor pair, at the front of this device's counter buffer; the caller passes
@@ -54,7 +55,7 @@ class SdmaRingEmitter:
         and SOFFSET. cursorBase is 2-ALIGNED, and the pair it addresses is
         8-byte aligned in memory for the 64-bit atomics.
       * cachedHwReadIdx (2 SGPRs): the private room-check cache. The caller
-        seeds it ONCE at setup with emitRefreshCache(); this emitter refreshes
+        seeds it ONCE at setup with emitSeedCursorsAndCache(); this emitter refreshes
         it in-register and NEVER stores it back to memory.
     """
 
@@ -99,8 +100,6 @@ class SdmaRingEmitter:
     def emitRefreshCache(self, module, w, peerGroupS, cachedHwReadIdxS):
         """cachedHwReadIdx = *rptr, re-read past the caches with glc.
 
-        Also how the caller seeds the cache at setup.
-
         Emits only s_load and s_waitcnt, neither of which writes SCC, so a room
         check on either side of this keeps its answer.
 
@@ -119,9 +118,11 @@ class SdmaRingEmitter:
 
     # ---- cursor lazy-init --------------------------------------------------
 
-    def emitLazyInitCursors(self, module, w, peerGroupS, cursorBaseS, cursorOffS):
+    def emitSeedCursorsAndCache(self, module, w, peerGroupS, cursorBaseS, cursorOffS,
+                                cachedHwReadIdxS):
         """Raise cachedWptr to at least the hardware write pointer, and
-        committedWptr too, but only when cachedWptr was below it.
+        committedWptr too, but only when cachedWptr was below it; seed
+        cachedHwReadIdx as emitRefreshCache does.
 
         MUST be emitted before the reserve loop: once a producer has reserved
         from a cursor that is too low, the damage is done.
@@ -131,17 +132,20 @@ class SdmaRingEmitter:
         """
         skipLabel = Label(w.labels.getNameInc("sdma_lazy_skip_commit"),
                           "LazyInit: cachedWptr already >= hwWptr, leave committedWptr")
-        wptrPtrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_wptrPtr", preventOverflow=False)
-        hwWptrS  = w.sgprPool.checkOutAligned(2, 2, tag="sdma_lazy_hwWptr", preventOverflow=False)
-        module.add(self._peerLoad(SLoadB64, sgpr(wptrPtrS, 2), peerGroupS, OFF_wptr,
-                                  "load wptr pointer"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait wptr pointer load"))
-        module.add(SLoadB64(dst=sgpr(hwWptrS, 2), base=sgpr(wptrPtrS, 2),
+        ptrsS   = w.sgprPool.checkOutAligned(4, 4, tag="sdma_seed_ptrs", preventOverflow=False)
+        hwWptrS = w.sgprPool.checkOutAligned(2, 2, tag="sdma_seed_hwWptr", preventOverflow=False)
+        module.add(self._peerLoad(SLoadB128, sgpr(ptrsS, 4), peerGroupS, OFF_rptr,
+                                  "load rptr, wptr pointers"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait rptr, wptr pointer load"))
+        module.add(SLoadB64(dst=sgpr(hwWptrS, 2), base=sgpr(ptrsS + (OFF_wptr - OFF_rptr) // 4, 2),
                             soffset=hex(0), smem=SMEMModifiers(glc=True),
                             comment="hwWptr = *wptr (glc: past the caches)"))
-        module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr load"))
-        # wptrPtrS is dead past the load above; it takes the pre-op cachedWptr.
-        oldS = wptrPtrS
+        module.add(SLoadB64(dst=sgpr(cachedHwReadIdxS, 2), base=sgpr(ptrsS, 2),
+                            soffset=hex(0), smem=SMEMModifiers(glc=True),
+                            comment="cachedHwReadIndex = hardware rptr"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait hwWptr, rptr loads"))
+        # ptrsS is dead past the loads above; it takes the pre-op cachedWptr.
+        oldS = ptrsS
         module.add(SMovB64(dst=sgpr(oldS, 2), src=sgpr(hwWptrS, 2), comment="SDATA in = hwWptr"))
         module.add(SAtomicUmaxX2(dst=sgpr(oldS, 2), base=sgpr(cursorBaseS, 2),
                                  soffset=sgpr(cursorOffS),
@@ -161,7 +165,7 @@ class SdmaRingEmitter:
         module.add(SWaitCnt(kmcnt=0, comment="committedWptr raised"))
         module.add(skipLabel)
         w.sgprPool.checkIn(hwWptrS)
-        w.sgprPool.checkIn(wptrPtrS)
+        w.sgprPool.checkIn(ptrsS)
 
     # ---- ReserveQueueSpace (CAS, NOT fetch_add) ----------------------------
 

@@ -8627,8 +8627,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SLShiftLeftB32(dst=sgpr(curOff), shiftHex=int(log2(CURSOR_PAIR_BYTES)),
                               src=sgpr(srank),
                               comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
-    ring.emitLazyInitCursors(module, self, peerGrp, "A2ACounterPtr", curOff)
-    ring.emitRefreshCache(module, self, peerGrp, cached)
+    ring.emitSeedCursorsAndCache(module, self, peerGrp, "A2ACounterPtr", curOff, cached)
     module.add(SSubU32(dst=sgpr(size), src0=sgpr("A2AShardCounter"), src1=1, comment="W - 1"))
     module.add(SMinU32(dst=sgpr(size), src0=sgpr(size), src1=sgpr("A2ABlockCount"),
                        comment="non-empty groups = min(W-1, count)"))

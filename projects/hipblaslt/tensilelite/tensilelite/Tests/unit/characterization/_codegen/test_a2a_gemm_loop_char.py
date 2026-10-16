@@ -419,6 +419,20 @@ class TestA2AGemmEnqueueLoops:
         assert rsv, "no reserve loop inside the packing pass"
         assert "cachedHwReadIndex = hardware rptr" in body[: rsv.start()]
 
+    def test_hardware_wptr_and_rptr_reads_share_one_wait(self):
+        import re
+
+        body = self._packing_pass(self._src())
+        rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
+        assert rsv, "no reserve loop inside the packing pass"
+        assert re.search(
+            r"^s_load_dwordx2 [^\n]*glc[^\n]*\n"
+            r"(?:(?!s_waitcnt)[^\n]*\n)*?"
+            r"s_load_dwordx2 [^\n]*glc",
+            body[: rsv.start()],
+            re.M,
+        ), "a s_waitcnt separates the hardware wptr and rptr reads"
+
     def test_reservation_size_is_computed_per_queue(self):
         import re
 
