@@ -383,6 +383,8 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.distributeGlobalRead = true;
         pfc.dagFeatures.clusterBarrier = clusterBarrier;
+        // The SCC / barrier rule is under test, not the ds_load pace: the setup ds_loads burst.
+        pfc.dagFeatures.dsSpread = false;
         ctx.setPassFeatureConfig(pfc);
         if (testDumpEnabled()) {
             std::cerr << "\n=== INPUT (clusterBarrier=" << (clusterBarrier ? "on" : "off")

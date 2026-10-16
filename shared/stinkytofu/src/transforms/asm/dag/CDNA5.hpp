@@ -3420,9 +3420,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         if (dagFeatures.dsPaceCount > 0) pace.count = dagFeatures.dsPaceCount;
         if (dagFeatures.dsPaceSeparators >= 0) pace.separators = dagFeatures.dsPaceSeparators;
         dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_);
-        dsOverflow_ = static_cast<long long>(loads.size()) *
-                          dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
-                      static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
+        dsOverflow_ =
+            !loads.empty() && static_cast<long long>(loads.size()) *
+                                      dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
+                                  static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
                              << wmmaTotalThisRegion_ << " separators=" << region.separatorTotal
                              << " paceCycles=" << dsSpread_.pace().cycles
