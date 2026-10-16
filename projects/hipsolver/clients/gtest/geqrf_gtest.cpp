@@ -121,6 +121,10 @@ class GEQRF_COMPAT_64 : public GEQRF_BASE<API_COMPAT, int64_t, size_t>
 {
 };
 
+class GEQRF_BATCHED : public GEQRF_BASE<API_NORMAL, int, size_t>
+{
+};
+
 // non-batch tests
 
 TEST_P(GEQRF, __float)
@@ -205,22 +209,22 @@ TEST_P(GEQRF_COMPAT_64, __double_complex)
 
 // batched tests
 
-TEST_P(GEQRF, batched__float)
+TEST_P(GEQRF_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
 }
 
-TEST_P(GEQRF, batched__double)
+TEST_P(GEQRF_BATCHED, batched__double)
 {
     run_tests<true, false, double>();
 }
 
-TEST_P(GEQRF, batched__float_complex)
+TEST_P(GEQRF_BATCHED, batched__float_complex)
 {
     run_tests<true, false, rocblas_float_complex>();
 }
 
-TEST_P(GEQRF, batched__double_complex)
+TEST_P(GEQRF_BATCHED, batched__double_complex)
 {
     run_tests<true, false, rocblas_double_complex>();
 }
@@ -255,4 +259,8 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GEQRF_COMPAT_64,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         GEQRF_BATCHED,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(n_size_range)));
