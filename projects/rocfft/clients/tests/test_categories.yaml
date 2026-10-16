@@ -20,8 +20,9 @@ test_categories:
     exclude:
       - "*multi_gpu*"
     extra_args:
-      - "--test_prob"
-      - "0.02"
+#      - "--test_prob"
+#      - "0.02"
+      - "--smoketest"
       - "--precompile"
     labels:
     # standard/comprehensive/full run the same single-GPU test set

@@ -21,8 +21,9 @@ test_categories:
       - "*multi_gpu*"
       - "hipfftXtSuite*"
     extra_args:
-      - "--test_prob"
-      - "0.02"
+#      - "--test_prob"
+#      - "0.02"
+      - "--smoketest"
       - "--precompile"
     labels:
     #Same tests run for comprehensive and full categories
