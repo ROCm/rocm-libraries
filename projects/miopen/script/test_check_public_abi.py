@@ -1285,12 +1285,87 @@ def test_check_headers_fails_a_wrapper_only_stub_calling_an_impl(tmp_path, capsy
     assert f"{ACCESSOR} calls {ACCESSOR}_impl" in capsys.readouterr().out
 
 
-def test_check_headers_skips_a_checkout_without_the_wrapper_only_header(
+def test_check_headers_skips_a_checkout_without_a_core_source(
     tmp_path, monkeypatch, capsys
 ):
-    """It is one of MIOpen's own sources, so it skips on the same terms they do."""
     monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
-    assert run_check_headers(tmp_path, wrapper_header=None) == 0
+    assert run_check_headers(tmp_path, public_header=None) == 0
     out = capsys.readouterr().out
     assert "SKIP" in out
-    assert "include_wrapper/miopen/hipdnn_forwarding.h: not tracked at HEAD" in out
+    assert "include/miopen/miopen.h: not tracked at HEAD" in out
+
+
+def test_check_headers_treats_an_untracked_wrapper_header_and_list_as_empty(
+    tmp_path, monkeypatch, capsys
+):
+    """Removing the optional files must not turn the gate off."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    result = run_check_headers(tmp_path, wrapper_header=None, wrapper_only=None)
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "include_wrapper/miopen/hipdnn_forwarding.h is not part of this tree" in out
+    assert "test/public_abi/wrapper_only_symbols.txt is not part of this tree" in out
+    assert "wrapper_only_symbols.txt lists exactly the 0 hipdnn_forwarding.h" in out
+    assert "wrapper.cpp covers exactly the 2 miopen.h + hipdnn_forwarding.h" in out
+    assert "header consistency check: PASS" in out
+
+
+def test_check_headers_keeps_checking_without_the_wrapper_header_and_list(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    drifted = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);").replace(
+            "miopenHandle_t* handle", "int* handle"
+        )
+    )
+    result = run_check_headers(
+        tmp_path, wrapper_header=None, wrapper_only=None, wrapper=drifted
+    )
+    assert result == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert "wrapper.cpp prototypes have drifted from miopen.h" in out
+
+
+def test_check_headers_fails_a_wrapper_only_stub_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    """With no header there is nothing declaring the stub, so it is an extra."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    overrides = with_accessor(wrapper_header=None, wrapper_only=None)
+    assert run_check_headers(tmp_path, **overrides) == 1
+    out = capsys.readouterr().out
+    assert "SKIP" not in out
+    assert (
+        f"+ present in wrapper.cpp, not declared in miopen.h + hipdnn_forwarding.h:"
+        f" {ACCESSOR}" in out
+    )
+
+
+def test_check_headers_fails_a_listed_symbol_when_the_header_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper_header=None)) == 1
+    out = capsys.readouterr().out
+    assert f"+ listed, not declared in hipdnn_forwarding.h: {ACCESSOR}" in out
+
+
+def test_check_headers_fails_a_declared_symbol_when_the_list_is_untracked(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=False))
+    assert run_check_headers(tmp_path, **with_accessor(wrapper_only=None)) == 1
+    out = capsys.readouterr().out
+    assert f"- declared in hipdnn_forwarding.h, not listed: {ACCESSOR}" in out
+
+
+def test_check_headers_still_fails_a_tracked_but_unreadable_wrapper_header(
+    tmp_path, monkeypatch, capsys
+):
+    """Only an untracked file counts as empty; a broken checkout stays an error."""
+    monkeypatch.setattr(abi, "run_git", _unreadable_blob_git(tracked=True))
+    assert run_check_headers(tmp_path, wrapper_header=None) == 2
+    assert "hipdnn_forwarding.h" in capsys.readouterr().err

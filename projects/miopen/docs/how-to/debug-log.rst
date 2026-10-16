@@ -114,11 +114,13 @@ forwarding code prints the following lines to ``stderr``:
 
 * ``[MIOpen] hipDNN forwarded: <entry point>``
 
-  Printed when ``MIOPEN_ENABLE_LOGGING`` is enabled, once per forwarded call. Forwarded calls skip
-  the code that prints MIOpen's API call log, so this line is how they show up in it. It does not
-  list the arguments, and ``MIOPEN_ENABLE_LOGGING_CMD`` prints no ``MIOpenDriver`` command for a
-  forwarded call. To get both, rerun with ``MIOPEN_DISABLE_HIPDNN_FOR=<entry point>`` so that the
-  call runs in MIOpen.
+  Printed when ``MIOPEN_ENABLE_LOGGING`` is enabled, once per forwarded call. A forwarded call
+  prints no API-log entry or ``MIOpenDriver`` command of its own, so this line stands in for the
+  entry. It does not list the arguments. The forwarding code reads the tensor and convolution
+  descriptors through MIOpen's getter functions, and those still log themselves. Blocks such as
+  ``miopenGetTensorDescriptor_impl{...}`` can therefore follow this line, for functions you never
+  called. To get the arguments and the command, rerun with
+  ``MIOPEN_DISABLE_HIPDNN_FOR=<entry point>`` so that the call runs in MIOpen.
 
 * ``[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set HIPDNN_LOG_LEVEL=error): <message>``
 

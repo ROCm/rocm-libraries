@@ -89,7 +89,8 @@ miopen.h, and listed in test/public_abi/wrapper_only_symbols.txt for
 ``check-wrapper``; the header and the list must name the same functions. Each
 has a stub in wrapper.cpp that must match that header's signature but does the
 work itself: it calls no _impl and carries no dispatch macro. None of the other
-artifacts lists them.
+artifacts lists them. The header and the list are optional: if the commit tracks
+neither, there are no wrapper-only functions and every other check still runs.
 
 The provider mirror lives in a sibling project that a MIOpen-only checkout does
 not ship, so it is the one artifact that can be skipped. It is skipped only once
@@ -1520,8 +1521,6 @@ def cmd_check_headers(args) -> int:
         f"{miopen_rel}/src/private/miopen_impl.h": impl_source,
         f"{miopen_rel}/src/private/miopen_private_rename.h": rename_source,
         f"{miopen_rel}/src/private/wrapper.cpp": wrapper_source,
-        f"{miopen_rel}/include_wrapper/miopen/hipdnn_forwarding.h": wrapper_header_source,
-        f"{miopen_rel}/test/public_abi/wrapper_only_symbols.txt": wrapper_only_source,
         f"{miopen_rel}/src/convolution_api.cpp": range_defs_source,
         f"{miopen_rel}/test/gtest/conv_workspace_size_range.cpp": range_test_source,
     }
@@ -1541,10 +1540,35 @@ def cmd_check_headers(args) -> int:
     impl = parse_declarations(impl_source, EXTERN_C_ANCHOR_RE, "miopen_impl.h")
     renames = parse_renames(rename_source)
     wrapper, forwards, dispatches = parse_wrapper(wrapper_source)
-    wrapper_only = parse_declarations(
-        wrapper_header_source, EXPORT_ANCHOR_RE, "hipdnn_forwarding.h"
+
+    # Not part of the skip above: either file can be removed on its own (the
+    # function moves into miopen.h, or the list empties), and skipping then would
+    # switch off every other check. An untracked one means no wrapper-only
+    # functions, so a stub in wrapper.cpp that nothing declares still fails below.
+    for rel, source in (
+        (
+            f"{miopen_rel}/include_wrapper/miopen/hipdnn_forwarding.h",
+            wrapper_header_source,
+        ),
+        (f"{miopen_rel}/test/public_abi/wrapper_only_symbols.txt", wrapper_only_source),
+    ):
+        if source is None:
+            print(
+                f"NOTE: {rel} is not part of this tree ({reasons.get(rel, 'unreadable')});"
+                " treating it as empty"
+            )
+    wrapper_only = (
+        parse_declarations(
+            wrapper_header_source, EXPORT_ANCHOR_RE, "hipdnn_forwarding.h"
+        )
+        if wrapper_header_source is not None
+        else {}
     )
-    wrapper_only_listed = parse_symbol_list(wrapper_only_source)
+    wrapper_only_listed = (
+        parse_symbol_list(wrapper_only_source)
+        if wrapper_only_source is not None
+        else set()
+    )
 
     # The private declarations carry the suffix; strip it so every comparison
     # below is against the public header under one common set of names. An

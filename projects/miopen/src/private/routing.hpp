@@ -180,8 +180,8 @@ void ReportRouteDecision(const char* entryPoint,
 void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
 
 // Writes ReportForwardedCall's line to stderr when MIOPEN_ENABLE_LOGGING is on.
-// Forwarded calls skip the _impl functions that print MIOpen's API call log, so
-// without this they would be missing from it.
+// A forwarded call skips its own _impl function, which is what prints its API
+// call log entry, so without this it would be missing from the log.
 void LogForwardedCall(const char* entryPoint) noexcept;
 
 // Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
