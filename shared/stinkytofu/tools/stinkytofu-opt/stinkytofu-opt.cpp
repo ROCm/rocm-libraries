@@ -190,6 +190,7 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
+                arg == "--ds-spread" || arg.starts_with("--ds-spread-tolerance-cycles=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -574,6 +575,11 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));
+        } else if (a == "--ds-spread") {
+            passFeatureConfig.dagFeatures.dsSpread = true;
+        } else if (a.starts_with("--ds-spread-tolerance-cycles=")) {
+            passFeatureConfig.dagFeatures.dsSpreadToleranceCycles =
+                std::stoi(a.substr(std::string("--ds-spread-tolerance-cycles=").size()));
         } else if (a.starts_with("--wmma-refill-mode=")) {
             const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
             passFeatureConfig.dagFeatures.wmmaRefillMode =

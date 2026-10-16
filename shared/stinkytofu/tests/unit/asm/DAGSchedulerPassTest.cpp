@@ -3367,6 +3367,32 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
     EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWWWddddddddWWWWWWW");
 }
 
+// Even ds_load spread: the ds_loads follow the WMMAs instead of bursting at the start.
+TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
+    std::string shapes[2];
+    for (int v = 0; v < 2; ++v) {
+        SetUp();
+        for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+        for (int i = 0; i < 16; i++) createWmmaF32_16x16x16_bf16(8 * (i % 8), 100 + 8 * i);
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsReadThrottleLatency = 1;
+        pfc.dagFeatures.dsReadPerCap = 100;
+        pfc.dagFeatures.wmmaQueueDepth = 8;
+        pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+        pfc.dagFeatures.dsSpread = v == 1;
+        pfc.dagFeatures.dsSpreadToleranceCycles = 0;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+        shapes[v] = wdShape(mnemonicSequence(*bb));
+    }
+    EXPECT_EQ(shapes[0], "WWWddddddWddWWWWWWWWWWWW");
+    EXPECT_EQ(shapes[1], "WWWddWdWWdWWdWWdWWdWWdWW");
+}
+
 // Fixed with batch size 1 is the one-WMMA-at-a-time refill the queue model always had.
 TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
     std::string shapes[2];

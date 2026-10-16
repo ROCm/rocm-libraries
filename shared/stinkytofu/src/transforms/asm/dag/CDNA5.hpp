@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "DsIssueCap.hpp"
+#include "DsSpreadPacer.hpp"
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "RegionDAG.hpp"
@@ -443,6 +444,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return globalReadInflight_.full();
     }
 
+    bool dsSpreadOn() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsSpread;
+    }
     int dsReadQueueDepth() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
         return cfg > 0 ? cfg : hw_.lds.readQueueDepth;
@@ -802,6 +806,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int wmmaIssuedCountThisRegion_ = 0;
     bool wmmaRefilling_ = false;
     int wmmaRefillLeft_ = 0;
+    DsSpreadPacer dsSpread_;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -1261,6 +1266,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         ++dsIssuedThisRegion_;
         dsReadInflight_.pushWithThrottle(dsReadThrottleLatency());
         dsIssueCap_.push(dsIssueCapSpan());
+        dsSpread_.noteIssue(clock_);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1661,7 +1667,9 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int kind = -1;
     int bestWait = 0;
     std::tuple<int, int, int> bestKey{};
-    const bool dsLoadBudgetEnabled = !hideBudget_.barriers.empty();
+    const bool spread = dsSpreadOn();
+    bool dsHeldBySpread = false;
+    const bool dsLoadBudgetEnabled = !spread && !hideBudget_.barriers.empty();
     const bool dsLoadBudgetPending = dsLoadIssuedThisRegion_ < cumulativeWmmaDsLoadBudget_;
 
     // Ordering, lowest key first: (1) genuinely free work; (2) a throttled DS
@@ -1693,7 +1701,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // it makes it issue whatever else is ready, hoisting a worse candidate (see
     // SgprToTensorLoadHazard_AtLeast8CycleGap). As a wait it competes on price,
     // so with nothing better to run the scheduler idles until the window frees.
-    const int dsCapWait = dsIssueCap_.full() ? std::max(1, dsIssueCap_.minResidual()) : 0;
+    const int dsCapWait =
+        !spread && dsIssueCap_.full() ? std::max(1, dsIssueCap_.minResidual()) : 0;
     // A DS budget is an upper gate, not permission to bypass queue pacing:
     // while pending, DS reads still follow the normal throttle/scheduling-space
     // checks below; once satisfied, they leave normal selection until the next
@@ -1715,7 +1724,9 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int dsThrottleWait = 0;
     bool dsProtect = false;
     if (dsBaseOk) {
-        dsThrottleWait = std::max(dsCapWait, dsReadThrottleWait());
+        dsThrottleWait =
+            spread ? (dsReadInflight_.full() ? std::max(1, dsReadInflight_.minResidual()) : 0)
+                   : std::max(dsCapWait, dsReadThrottleWait());
         const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
         int schedulingSpace = activeWmmaLatency_ - schedulingPos;
         for (int pos = schedulingPos; pos < activeWmmaLatency_; ++pos) {
@@ -1742,13 +1753,17 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) {
-            consider(pickedDS, kLocalRead, dsThrottleWait);
-            memWorkFitsWindow_ = true;
+            if (!spread || dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
+                consider(pickedDS, kLocalRead, dsThrottleWait);
+                memWorkFitsWindow_ = true;
+            } else {
+                dsHeldBySpread = true;
+            }
         }
         // dsSlotFirst, saturated ds stream: a ds_load that still fits this window keeps its
         // slot (its throttle wait is charged to the ds scheduling budget, not to fillers).
-        if (getPassContext().getPassFeatureConfig().dagFeatures.dsSlotFirst && dsSaturated() &&
-            fitsSchedulingBudget && !outOfWmmaWindow && activeWmmaLatency_ > 0)
+        if (!spread && getPassContext().getPassFeatureConfig().dagFeatures.dsSlotFirst &&
+            dsSaturated() && fitsSchedulingBudget && !outOfWmmaWindow && activeWmmaLatency_ > 0)
             dsProtect = true;
     }
     // A ds_load owed to this window that still fits goes first; fillers take what is left.
@@ -1812,6 +1827,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         }
     }
 
+    // The spread holds a ds_load back only while a WMMA can still issue in its place; with none
+    // ready, or nothing else to run, the ds_load goes.
+    if (dsHeldBySpread && wmmaQueue.empty() && (best == nullptr || bestWait > 0)) {
+        consider(pickedDS, kLocalRead, dsThrottleWait);
+        memWorkFitsWindow_ = true;
+    }
     if (!best) return false;
     *outNode = best;
     *kindOut = kind;
@@ -2775,7 +2796,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     assert(dsIssueCap_.depth() > 0 && "rule (4) cap must have a positive depth");
     const int dsDepth = dsReadQueueDepth();
     const double dsThrottleInterval =
-        dsDepth > 0 ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
+        dsDepth > 0 && !dsSpreadOn() ? (double)dsReadThrottleLatency() / (double)dsDepth : 0.0;
     dsReadInflight_.setThrottleInterval(dsThrottleInterval, dsReadThrottleTransitionFactor(),
                                         dsReadThrottleTransitionEntries());
 
@@ -3671,6 +3692,44 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         } else if (isDSRead(*inst) && dsTotalThisRegion_ > 0) {
             planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
         }
+    }
+    dsSpread_.reset();
+    if (dagFeatures.dsSpread) {
+        std::vector<int> wmmaIndex(deps.dag.nodes.size(), INT_MAX);
+        int wmmaOrdinal = 0;
+        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+            if (isMatrixInstruction(*deps.dag.nodes[id].inst)) wmmaIndex[id] = wmmaOrdinal++;
+        }
+        constexpr int kConsumerHops = 3;
+        auto consumerWindow = [&](unsigned id) {
+            int best = INT_MAX;
+            std::vector<unsigned> frontier{id};
+            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
+                std::vector<unsigned> next;
+                for (unsigned n : frontier) {
+                    for (unsigned succ : deps.dag.graph[n]) {
+                        if (wmmaIndex[succ] != INT_MAX)
+                            best = std::min(best, wmmaIndex[succ]);
+                        else
+                            next.push_back(succ);
+                    }
+                }
+                frontier = std::move(next);
+            }
+            return best;
+        };
+        std::vector<DsSpreadPacer::Load> loads;
+        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
+            if (isDSRead(*deps.dag.nodes[id].inst)) loads.push_back({id, consumerWindow(id)});
+        }
+        const int tol = dagFeatures.dsSpreadToleranceCycles;
+        const int windowCycles = std::max(1, wmmaIssueConfig.latency);
+        constexpr int kDsLeadWindows = 2;
+        dsSpread_.plan(loads, wmmaTotalThisRegion_,
+                       tol < 0 ? -1 : (tol + windowCycles - 1) / windowCycles, kDsLeadWindows);
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
+                             << " wmmas=" << wmmaTotalThisRegion_
+                             << " slackWindows=" << dsSpread_.slack() << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

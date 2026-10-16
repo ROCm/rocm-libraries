@@ -147,6 +147,13 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
+        /// Spread ds_loads evenly over the region's WMMAs instead of the cap/throttle pacing: a
+        /// ds_load is released at its planned WMMA window (minus the tolerance) and issues only
+        /// while the ds queue has a free credit. Off = the cap/throttle pacing.
+        bool dsSpread = false;
+        /// Tolerance of the spread, in cycles (converted to WMMA windows); < 0 = automatic, the
+        /// smallest one that still lets every ds_load reach its consumer in time.
+        int dsSpreadToleranceCycles = -1;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
