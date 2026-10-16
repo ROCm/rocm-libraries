@@ -17,7 +17,12 @@ that read zero V instead give ``(N - m) / N`` for the affected sequence --
 ``4064/4096 = 0.9921875`` at 8 KV heads (m = 32 keys in the last 64 KiB) and
 ``8128/8192`` at 4 KV heads (m = 64) -- which a 0.05 tolerance does not catch.
 One extra cache block pushes the same data onto the i64 path, which is
-correct; that case is the control.
+correct on the 2D kernel; that case is the control.
+
+The gfx942 3D split-KV kernel uses the same resource size and gate but has no
+i64 path: its spec raises ``NotImplementedError`` when the gate requests one.
+For that kernel an explicit refusal is acceptable (recorded as xfail); silent
+zero reads are not.
 """
 
 from __future__ import annotations
@@ -90,7 +95,7 @@ def test_gate_selects_i64_when_cache_exceeds_rsrc(shape):
 
 
 # ---------------------------------------------------------------------------
-# On-GPU reproduction (gfx942, 2D tiled kernel)
+# On-GPU reproduction (gfx942, 2D tiled and 3D split-KV kernels)
 # ---------------------------------------------------------------------------
 
 
@@ -102,7 +107,7 @@ def gfx942_torch():
     from rocke.runtime.hip_module import get_device_arch
 
     if get_device_arch() != "gfx942":
-        pytest.skip("reproduction targets the gfx942 tiled 2D kernel")
+        pytest.skip("reproduction targets the gfx942 tiled kernels")
     return torch
 
 
@@ -113,12 +118,17 @@ def gfx942_torch():
     ids=["cache_2gib_i32", "cache_2gib_plus_block_i64"],
 )
 @pytest.mark.parametrize("shape", _SHAPES, ids=_shape_id)
-def test_zero_q_unit_v_is_exactly_one(gfx942_torch, shape, extra_blocks):
+@pytest.mark.parametrize("backend", ["tiled", "3d"], ids=["2d", "3d"])
+def test_zero_q_unit_v_is_exactly_one(gfx942_torch, backend, shape, extra_blocks):
     """Zero Q, constant V = 1, identity block table: every output must be 1.
 
     ``extra_blocks=0``: K/V caches of exactly 2^31 bytes (fails while the gate
     is ``> 0x8000_0000``). ``extra_blocks=1``: one unused trailing block moves
-    the cache onto the i64 path; the data read is identical (control).
+    the cache onto the i64 path; the data read is identical (control on 2D).
+
+    ``backend="tiled"`` forces the 2D kernel, ``"3d"`` the split-KV kernel.
+    The 3D kernel may refuse a cache that needs i64 addressing (xfail), but
+    must not return wrong values.
     """
     torch = gfx942_torch
     hq, hkv, sk = shape
@@ -147,19 +157,28 @@ def test_zero_q_unit_v_is_exactly_one(gfx942_torch, shape, extra_blocks):
     seqused_k = torch.full((_BATCH,), sk, dtype=torch.int32, device=dev)
 
     # num_kv_blocks=0: the runtime fills it from k.shape[0], as in production.
-    au.run_unified_attention_torch(
-        problem=_problem(hq, hkv, sk),
-        q=q,
-        k=k,
-        v=v,
-        out=out,
-        cu_seqlens_q=cu_seqlens_q,
-        seqused_k=seqused_k,
-        softmax_scale=1.0 / math.sqrt(_HEAD_SIZE),
-        block_table=block_table,
-        softcap=0.0,
-        backend="tiled",
-    )
+    # No graph replay: each case allocates fresh multi-GiB caches.
+    try:
+        au.run_unified_attention_torch(
+            problem=_problem(hq, hkv, sk),
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            cu_seqlens_q=cu_seqlens_q,
+            seqused_k=seqused_k,
+            softmax_scale=1.0 / math.sqrt(_HEAD_SIZE),
+            block_table=block_table,
+            softcap=0.0,
+            backend=backend,
+            use_graph=False,
+        )
+    except NotImplementedError as exc:
+        if backend == "3d" and "use_i64_kv_addr" in str(exc):
+            if cache_bytes <= _RSRC_BYTES:
+                raise  # a cache that fits the resource must not need i64
+            pytest.xfail(f"gfx942 3D kernel has no i64 KV path: {exc}")
+        raise
     torch.cuda.synchronize()
 
     result = out.float().cpu()
