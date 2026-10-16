@@ -30,7 +30,7 @@ from .Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
 from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
-from .Common.SolutionIdGen import ensure_solution_uid
+from .Common.SolutionIdGen import claim_solution_uid
 from .Common.TimingInstrumentation import timing_context
 from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
@@ -178,7 +178,27 @@ def libraryDeviceNames(architectureName, deviceNames):
 ################################################################################
 # Analyze Problem Type
 ################################################################################
-def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryLogicPath, splitGSU: bool):
+def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryLogicPath, splitGSU: bool, seen: set[str] | None = None):
+  """Select winning solutions and assign a SolutionUID unique within ``seen``.
+
+  Args:
+      problemType: Problem type being analyzed.
+      problemSizeGroups: Benchmark groups for that problem type.
+      inputParameters: LibraryLogic analysis parameters.
+      libraryLogicPath: Directory that will receive the logic file.
+      splitGSU: Whether solution names include GlobalSplitU.
+      seen: Canonical UIDs already used by this Tensile process. A new set is
+          used when omitted, so one call still cannot emit a duplicate.
+
+  Returns:
+      Logic tuple consumed by the library writer.
+
+  Raises:
+      RuntimeError: If a unique SolutionUID cannot be drawn.
+      ValueError: If UID generation overflows the 40-bit timestamp.
+  """
+  if seen is None:
+    seen = set()
   print2(HR)
   print1("# Analyzing: %s" % problemType)
 
@@ -260,7 +280,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
   for i in range(0, len(logicAnalyzer.solutions)):
     s = logicAnalyzer.solutions[i]
     s["SolutionIndex"] = i
-    ensure_solution_uid(s)
+    claim_solution_uid(s, seen)
     s["SolutionNameMin"] = getSolutionNameMin(s, splitGSU)
     s["KernelNameMin"]   = getKernelNameMin(s, splitGSU)
     print1("(%2u) %s : %s" % (i, s["SolutionNameMin"], getSolutionNameFull(s, splitGSU)))
@@ -296,7 +316,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
       selectionSolutionIndex = solutionsStartIndex + i
       selectionSolutionsIds.add(selectionSolutionIndex)
       validSolution["SolutionIndex"] = selectionSolutionIndex
-      ensure_solution_uid(validSolution)
+      claim_solution_uid(validSolution, seen)
       validSolution["SolutionNameMin"] = getSolutionNameMin(validSolution, splitGSU)
       validSolution["KernelNameMin"]   = getKernelNameMin(validSolution, splitGSU)
       validSolution["Ideals"] = validSolutionInfo
@@ -1809,8 +1829,9 @@ def generateLogic(
             dataFileName, solutionsFileName, selectionFileName, solutions) )
 
   with timing_context("python_logic_analyze"):
+    seenUids: set[str] = set()
     for problemType in problemTypes:
-      logicTuple = analyzeProblemType(problemType, problemTypes[problemType], analysisParameters, libraryLogicPath, splitGSU)
+      logicTuple = analyzeProblemType(problemType, problemTypes[problemType], analysisParameters, libraryLogicPath, splitGSU, seenUids)
 
       filename = os.path.join(libraryLogicPath, \
           "{}_{}".format(analysisParameters["ScheduleName"], str(problemType)))

@@ -58,6 +58,7 @@ from geko.concurrency.runner import Runner, Worker
 from geko.library import Library, LibraryCollection
 from geko.constants import GEMM_LOG_FIELDS, INDEX_TYPE_MAP
 from geko.library import _bank
+from geko.library.uid_uniqueness import uniquify_generated_logic
 
 logger = logging.getLogger("GEKO")
 
@@ -165,7 +166,11 @@ def merge_solutions(
     lib_paths = sorted(input_dir.glob(pattern))
     if not lib_paths:
         raise ValueError(f"No valid YAML libraries found in '{input_dir}'")
-    logger.debug(f"Merging solutions, discovered {len(lib_paths)} library files")
+    rewritten = uniquify_generated_logic(lib_paths)
+    logger.debug(
+        f"Merging solutions, discovered {len(lib_paths)} library files; "
+        f"rewrote {rewritten} colliding SolutionUID values"
+    )
 
     # update dependant parameters if StaggerU == 0
     def _sanitize_solution(sol):
