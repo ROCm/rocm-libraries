@@ -5,11 +5,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...contract import Case
-from ...implementations import dense
-from ..common import attention_request, validate_library_root
 
 if TYPE_CHECKING:
     from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
@@ -35,11 +34,28 @@ CASE_BY_ID = {case.id: case for case in CASES}
 
 def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:
     """Select the current kernel through gfx942's production dispatch policy."""
-    validate_library_root(library_root)
-    from dispatch.attention import tuning_spec_with_knobs
+    import kernels
+    from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
+    if (
+        not Path(kernels.__file__)
+        .resolve()
+        .is_relative_to(Path(library_root).resolve())
+    ):
+        raise RuntimeError("worker imported kernels outside the selected library")
     return tuning_spec_with_knobs(
-        attention_request(case, NAME),
+        AttentionRequest(
+            batch=case.batch,
+            nhead_q=case.query_heads,
+            nhead_k=case.kv_heads,
+            seqlen_q=case.sequence_length,
+            seqlen_k=case.sequence_length,
+            hdim_q=case.head_dim,
+            hdim_v=case.head_dim,
+            arch="gfx942",
+            mask_type=1 if case.causal else 0,
+            dtype=case.dtype,
+        ),
         "gfx942_dense",
         {"persistent": case.persistent},
     ).kernel_spec
@@ -47,13 +63,32 @@ def prepare(case: Case, library_root: str) -> Gfx942AttentionDenseSpec:
 
 def launch(spec: Gfx942AttentionDenseSpec, buffers: dict, scale: float) -> None:
     """Use the same public launch entry as the existing gfx942 numeric tests."""
-    from kernels.gfx942 import attention_dense
+    from kernels.gfx942.attention_dense import run_attention_dense_torch
 
-    dense.launch(attention_dense, spec, buffers, scale)
+    run_attention_dense_torch(
+        spec=spec,
+        q=buffers["q"],
+        k=buffers["k"],
+        v=buffers["v"],
+        out=buffers["out"],
+        scale=scale,
+    )
 
 
 def exported_kernel(spec: Gfx942AttentionDenseSpec) -> tuple[bytes, dict]:
     """Describe the launcher that actually executed during qualification."""
-    from kernels.gfx942 import attention_dense
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx942.attention_dense import (
+        _DENSE_LAUNCHER_CACHE,
+        attention_dense_block,
+        attention_dense_grid,
+    )
 
-    return dense.exported_kernel(attention_dense, spec, NAME)
+    launcher = _DENSE_LAUNCHER_CACHE[attention_dense_cache_key(spec, arch=NAME)]
+    return launcher._hsaco, {
+        "name": launcher.kernel_name,
+        "signature": launcher.signature,
+        "grid": attention_dense_grid(spec),
+        "block": attention_dense_block(spec),
+        "runtime_shape": spec.runtime_shape,
+    }
