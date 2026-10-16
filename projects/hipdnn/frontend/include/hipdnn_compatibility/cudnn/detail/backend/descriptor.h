@@ -228,8 +228,11 @@ public:
         }
         const AttributeInfo info = lookup(name, attributeType);
 
-        std::optional<StoredAttribute> defaulted;
-        const StoredAttribute* value = findAttribute(name);
+        // Null array OR zero request is a count query (upstream fetchNotes passes
+        // a non-zero count with a null array).
+        const bool countQuery = arrayOfElements == nullptr || requestedElementCount == 0;
+        std::optional<StoredAttribute> defaulted = lazyAttribute(name, countQuery);
+        const StoredAttribute* value = defaulted ? &*defaulted : findAttribute(name);
         if(value == nullptr)
         {
             defaulted = defaultAttribute(info);
@@ -252,9 +255,7 @@ public:
                                            ? static_cast<std::int64_t>(value->bytes.size() + 1)
                                            : value->count;
 
-        // Null array OR zero request is a count query (upstream fetchNotes passes
-        // a non-zero count with a null array).
-        if(arrayOfElements == nullptr || requestedElementCount == 0)
+        if(countQuery)
         {
             if(elementCount == nullptr)
             {
@@ -335,6 +336,15 @@ protected:
     virtual void fillInto(Handle& target)
     {
         target.object = shared_from_this();
+    }
+
+    // GET-only values computed on first request instead of at finalize (e.g.
+    // work that needs a device). nullopt falls back to the attribute store. On a
+    // count query only the element count of the result is read.
+    virtual std::optional<StoredAttribute> lazyAttribute(cudnnBackendAttributeName_t /*name*/,
+                                                         bool /*countOnly*/) const
+    {
+        return std::nullopt;
     }
 
     const StoredAttribute* findAttribute(cudnnBackendAttributeName_t name) const

@@ -169,8 +169,28 @@ Operation descriptors are validated at `cudnnBackendFinalize`. These differ from
 | Batch-norm inference and backward `EPSILON_DESC` | accepted but not used; hipDNN's inference takes inverse variance and its backward takes saved statistics, so neither needs epsilon |
 | Batch-norm backward without `MEAN_DESC` / `INV_VARIANCE_DESC` | `BAD_PARAM`; the saved statistics are required |
 | Running-statistic descriptors outside batch-norm training; `MEAN_DESC` on RMS norm | `NOT_SUPPORTED` |
+| Layer-norm forward without `BIAS_DESC` | `BAD_PARAM`; hipDNN's layer norm requires a bias |
 | Norm `INSTANCE`, `GROUP`, `ADA_LAYER` modes; peer statistics | `NOT_SUPPORTED` |
 | Max-pool backward resample without `IDXDESC` | `BAD_PARAM`; hipDNN needs the index tensor |
 | Backward resample `XDESC` / `YDESC` | `NOT_SUPPORTED`; hipDNN's backward resample has no such inputs |
 | Matmul M/N/K override descriptors | `NOT_SUPPORTED` |
 | A pointwise tensor slot the mode does not use (for example `TDESC` on a non-select mode, or `YDESC` on a backward activation) | `BAD_PARAM`; upstream builders never set these |
+
+### Operation graphs
+
+`OPERATIONGRAPH` finalize lowers the graph to hipDNN; it needs no device and runs no heuristics.
+These differ from cuDNN:
+
+| Case | Shim behavior |
+|---|---|
+| No `HANDLE` | `BAD_PARAM`; hipDNN needs a handle to build the graph (cuDNN 9.8 and later make it optional) |
+| `IS_DYNAMIC_SHAPE_ENABLED` or `IS_OVERRIDE_SHAPE_ENABLED` set to true | `NOT_SUPPORTED` at finalize; the v8 surface has no variant-pack shape overrides |
+| Norm forward / backward compute type | cuDNN norm operations carry none; the shim sends `FLOAT` to hipDNN |
+| Pointwise `RELU_*_CLIP*`, `ELU_ALPHA`, `SOFTPLUS_BETA`, `SWISH_BETA` | narrowed to `float`; values beyond the float range saturate to ±`FLT_MAX`. Parameters left at their defaults are not sent |
+| `RESAMPLE` without `PADDING_MODE` | `BAD_PARAM` at the resample descriptor's finalize (upstream builders always send it) |
+| Several `TENSOR` descriptors with one UID | accepted when they agree; `BAD_PARAM` naming the UID when data type, dimensions, strides, virtualness, by-value or constant value, or ragged offset differ. Differing byte alignments use the smallest |
+| One UID written by two operations; a cycle | `BAD_PARAM` |
+| `CONSTANT_VALUE` on a tensor whose type is not `FLOAT`, `DOUBLE`, `HALF`, `BFLOAT16`, `UINT8`, `INT32`, `INT64` or `BOOLEAN` | `NOT_SUPPORTED` at graph finalize |
+| hipDNN operation validation | Graph finalize runs hipDNN's own checks. Beyond cuDNN's: epsilon and the exponential-average factor must be single-element `IS_BY_VALUE` tensors; batch-norm scale, bias and statistics must be per-channel `[1,C,1,…]` (no per-activation mode) with N·spatial > 1 when training; a reduction must reduce at least one dimension; a max-pool index must be `INT8` or `INT32`; RMS-norm scale must match the trailing dimensions of X. A rejection is `BAD_PARAM` naming the operation type, except "no engine supports this graph", which is `NOT_SUPPORTED`. Backend failures during lowering, allocation included, also report `BAD_PARAM` with hipDNN's message |
+| `ENGINE_GLOBAL_COUNT` | computed on the first value GET by running hipDNN heuristics, which needs a HIP device; a failure returns its status and the next GET retries. It counts only engines hipDNN reports as applicable whose default configuration finalizes; an engine that fails is logged and left out, so every counted index builds. The result is a per-graph snapshot: later changes to the heuristic configuration or autotune cache do not affect an existing graph |
+| Engine indices | `0 … ENGINE_GLOBAL_COUNT-1` enumerate the applicable hipDNN engines in ascending (signed) hipDNN engine-ID order, not cuDNN's global engine numbering. They change if the set of applicable engines changes (provider added, removed or upgraded, different GPU) |
