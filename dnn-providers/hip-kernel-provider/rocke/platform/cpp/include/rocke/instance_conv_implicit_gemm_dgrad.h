@@ -177,6 +177,18 @@ typedef struct rocke_dgrad_conv_spec
      * rocke_dgrad_conv_spec_default); false tags the kernel name "_noxcd".
      * Mirrors DgradConvSpec.xcd_tile_order. Appended last. */
     bool xcd_tile_order; /* default true */
+
+    /* dY halo reuse, a mode of the tap-outer K loop (Python
+     * DgradConvSpec.dy_halo / dy_halo_setprio / dy_halo_kouter_pad /
+     * halo_max_wo): dy_halo 0 = off, 1 = staged halo, 2 = staged halo with a
+     * double-buffered B tile; setprio 0..3; kouter_pad a multiple of 8 (0
+     * keeps ROCKE_DGRAD_KOUTER_PAD); halo_max_wo the widest Wo served (the
+     * staged halo is sized for it). All default 0. Name tags "_halo<n>",
+     * "_hprio<n>", "_hkp<n>", "_hwo<n>". Appended last. */
+    int dy_halo;
+    int dy_halo_setprio;
+    int dy_halo_kouter_pad;
+    int halo_max_wo;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

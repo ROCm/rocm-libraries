@@ -272,6 +272,35 @@ problems the tilde binary of its configuration already serves. The
 loop reduces in the same order as the flat loop, so `dX` matches it bit for
 bit.
 
+## dY halo reuse (`dy_halo`)
+
+A mode of the tap-outer loop for problems whose output is the input's size
+(`Ho == Hi`, `Wo == Wi`, stride 1, dilation 1). Filter tap `(y, x)` reads `dY`
+pixel `m + (pH - y)*Wo + (pW - x)` for `dX` pixel `m` in the linear `(n, h, w)`
+order, so every tap of a tile of `tile_m` consecutive pixels reads one
+contiguous `dY` range: the tile plus `(Y-1)*Wo + (X-1)` halo pixels. With
+`dy_halo` the K loop runs output-channel chunk outer and filter tap inner
+(unrolled), stages that range in LDS once per chunk and serves every tap from
+it at a row shift of `(Y-1-y)*Wo + (X-1-x)`; a lane whose shifted pixel leaves
+the image reads a trailing all-zero LDS row instead (one select per fragment
+row). `dy_halo=1` loads the `W` tile per (chunk, tap); `dy_halo=2`
+double-buffers it (tap `t+1`'s tile is read into registers before tap `t`'s
+MFMAs). `dy_halo_setprio` raises the wave priority around each tap's MFMAs,
+`dy_halo_kouter_pad` widens the K-outer `B` row pad.
+
+The filter is baked (the taps are unrolled; an AOT binary records it as
+`filter_h/w`), and so is the pad, which `Ho == Hi` at stride 1 fixes to
+`((Y-1)/2, (X-1)/2)`. The staged tile is sized for `halo_max_wo`
+(`tile_m + (Y-1)*halo_max_wo + (X-1)` rows, whole loader passes, plus the zero
+row), not for the problem: `Wo`, the shifts, the row bounds and the rows the
+loader fills are kernargs, and the binary serves every `Wo <= halo_max_wo`. A
+wider `halo_max_wo` costs LDS on a narrower image, which lowers the workgroups
+per CU where it crosses an LDS step. The validator (both engines, reasons
+verbatim) requires `tap_outer_k`, `Ho == Hi`, `Wo == Wi`, more than one tap,
+`0 < Wo <= halo_max_wo` and K-outer for the pad knob. Name tags `_halo<n>`,
+`_hprio<n>`, `_hkp<n>`, `_hwo<n>`. The AOT grid builds a capped sub-grid on
+gfx950 (see `CACHE_DGRAD_HALO_*` in `kernel_sweep.py`).
+
 ## XCD-contiguous tile order (`xcd_tile_order`)
 
 The hardware hands workgroups to the XCDs round-robin in launch order, and

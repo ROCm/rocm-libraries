@@ -342,7 +342,16 @@ class TestTapOuterKIdentity(unittest.TestCase):
         off = _identity(uniform_k_decode=True)
         # The hash an identity had before the field existed.
         fields = dataclasses.asdict(off)
-        for name in ("ws_replicas", "prefetch_addr", "patch", "tap_outer_k"):
+        for name in (
+            "ws_replicas",
+            "prefetch_addr",
+            "patch",
+            "tap_outer_k",
+            "dy_halo",
+            "dy_halo_setprio",
+            "dy_halo_kouter_pad",
+            "halo_max_wo",
+        ):
             del fields[name]
         del fields["streamk"], fields["streamk_reduction"]
         legacy = hashlib.sha1(
@@ -551,7 +560,7 @@ class TestXcdTileOrder(unittest.TestCase):
                 self.assertEqual(remapped, takes)
 
     def test_never_swept(self):
-        from benchmarks.common import kernel_sweep as ks
+        from kernels.conv import aot_jobs as ks
         from rocke.core.arch import ArchTarget
 
         target = ArchTarget.from_gfx(_ARCH)
@@ -560,6 +569,191 @@ class TestXcdTileOrder(unittest.TestCase):
             _ARCH, "bf16", 64, "mma", target, 1024, geometries=geos
         ):
             self.assertNotIn("xcd_tile_order", job.spec_kwargs)
+
+
+def _halo_spec(Y=3, Wi=14, **kw):
+    base = {
+        "problem": _problem(Wi=Wi, Y=Y, X=Y, pH=Y // 2, pW=Y // 2),
+        "tap_outer_k": True,
+        "dy_halo": 2,
+        "halo_max_wo": 16,
+    }
+    base.update(kw)
+    return _spec(**base)
+
+
+class TestDyHalo(unittest.TestCase):
+    """The dY halo mode of the tap-outer loop: knobs, rejections, LDS and the
+    loop it emits."""
+
+    def test_default_off_and_name_tags(self):
+        spec = _spec()
+        self.assertEqual(
+            (spec.dy_halo, spec.dy_halo_setprio, spec.dy_halo_kouter_pad), (0, 0, 0)
+        )
+        self.assertEqual(spec.halo_max_wo, 0)
+        self.assertNotIn("halo", spec.kernel_name())
+        name = _halo_spec(
+            tile_m=128, warp_m=4, warp_n=1, dy_halo_setprio=1, dy_halo_kouter_pad=32
+        ).kernel_name()
+        self.assertTrue(name.endswith("_tapk_halo2_hprio1_hkp32_hwo16"), name)
+        self.assertTrue(
+            _halo_spec(dy_halo=1, xcd_tile_order=False)
+            .kernel_name()
+            .endswith("_tapk_noxcd_halo1_hwo16")
+        )
+
+    def test_rejected_where_it_cannot_compute(self):
+        cases = (
+            ({"tap_outer_k": False}, "tap-outer K loop"),
+            ({"problem": _problem(pH=0, pW=0)}, "Ho == Hi"),
+            ({"problem": _problem(Y=1, X=1, pH=0, pW=0)}, "more than one tap"),
+            ({"halo_max_wo": 0}, "halo_max_wo > 0"),
+            ({"halo_max_wo": 8}, "Wo <= halo_max_wo"),
+            ({"dy_halo_kouter_pad": 32, "lds_k_outer": False}, "lds_k_outer"),
+            ({"dy_halo_kouter_pad": 12}, "multiple of 8"),
+            ({"dy_halo": 3}, "dy_halo must be"),
+            ({"dy_halo_setprio": 4}, "0..3"),
+            ({"dy_halo": 0, "halo_max_wo": 16}, "halo_max_wo needs"),
+            ({"dy_halo": 0, "halo_max_wo": 0, "dy_halo_setprio": 1}, "setprio"),
+            ({"problem": _problem(K=96)}, "kpg % tile_k"),
+            ({"problem": _problem(sH=2, sW=2)}, "stride 1"),
+        )
+        for kw, needle in cases:
+            with self.subTest(**{k: str(v) for k, v in kw.items()}):
+                spec = _halo_spec(**kw)
+                ok, why = is_valid_dgrad_spec(spec, _ARCH)
+                self.assertFalse(ok)
+                self.assertIn(needle, why)
+                with self.assertRaises(ValueError):
+                    spec.validate()
+        for kw in (
+            {},
+            {"dy_halo": 1},
+            {"problem": _problem(Wi=16)},
+            {"problem": _problem(Wi=1, Hi=1)},
+            {"problem": _problem(C=128, K=256, groups=2)},
+            {"problem": _problem(Y=3, X=5, pH=1, pW=2)},
+            {"lds_k_outer": False},
+            {"tile_m": 256, "warp_m": 4, "warp_n": 1, "dy_halo_kouter_pad": 32},
+        ):
+            with self.subTest(ok=str(kw)):
+                ok, why = is_valid_dgrad_spec(_halo_spec(**kw), _ARCH)
+                self.assertTrue(ok, why)
+
+    def test_lds_is_sized_for_halo_max_wo_not_the_problem(self):
+        for kw in (
+            {},
+            {"dy_halo": 1},
+            {"tile_m": 128, "warp_m": 4, "warp_n": 1, "dy_halo_kouter_pad": 32},
+            {"Y": 5, "halo_max_wo": 64},
+            {"lds_k_outer": False},
+        ):
+            with self.subTest(**kw):
+                spec = _halo_spec(**kw)
+                k = build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
+                ab, c = _smem_bytes(k, spec)
+                self.assertEqual(dgrad_lds_bytes(spec), max(ab, c))
+                # The halo tile: tile_m + (Y-1)*halo_max_wo + (X-1) rows,
+                # whole loader passes, plus the zero row.
+                p = spec.problem
+                need = spec.tile_m + (p.Y - 1) * spec.halo_max_wo + (p.X - 1)
+                rows = spec.dy_halo_lds_rows
+                self.assertGreater(rows, need)
+                self.assertEqual(((rows - 1) * spec.tile_k) % (spec.block_size * 8), 0)
+                narrow = _halo_spec(**{**kw, "Wi": 3})
+                self.assertEqual(dgrad_lds_bytes(narrow), dgrad_lds_bytes(spec))
+        wide = _halo_spec(halo_max_wo=128)
+        self.assertGreater(dgrad_lds_bytes(wide), dgrad_lds_bytes(_halo_spec()))
+
+    def test_emits_one_chunk_loop_with_unrolled_taps(self):
+        for Y, mode in ((3, 2), (5, 1)):
+            with self.subTest(Y=Y, dy_halo=mode):
+                spec = _halo_spec(Y=Y, dy_halo=mode)
+                k = build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)
+                # One chunk loop, no tap loop: the taps are unrolled in it.
+                self.assertEqual(_loop_tree(k), [[]])
+                ops = _all_ops(k)
+                per_tap = spec.mfmas_per_warp_m * spec.mfmas_per_warp_n
+                per_tap *= spec.k_atoms_per_tile_k
+                self.assertEqual(ops.count("tile.mma"), Y * Y * per_tap)
+                # dy_halo=2 pins each of taps 1..Y*X-1's B prefetch with two
+                # scheduling barriers; dy_halo=1 has none.
+                self.assertEqual(
+                    ops.count("tile.sched_barrier"), 2 * (Y * Y - 1) * (mode == 2)
+                )
+
+    def test_identity_hash_and_label(self):
+        plain = _identity(tap_outer_k=True)
+        halo = _identity(
+            tap_outer_k=True,
+            filter_h=3,
+            filter_w=3,
+            dy_halo=2,
+            dy_halo_setprio=1,
+            dy_halo_kouter_pad=32,
+            halo_max_wo=64,
+        )
+        self.assertNotEqual(halo.stable_hash(), plain.stable_hash())
+        label = halo.label()
+        for tag in ("halo2", "hprio1", "hkp32", "hwo64", "f3x3", "tapk"):
+            self.assertIn(tag, label.split("-"))
+        self.assertEqual(type(halo).from_label(label), halo)
+        self.assertNotIn("halo", plain.label())
+
+    def test_aot_grid_halo_slice(self):
+        from kernels.conv import aot_jobs as ks
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(_ARCH)
+        geos = [
+            g
+            for g in ks._geometry_list(target, "bf16")
+            if g[:6] in ks.CACHE_DGRAD_HALO_TILES and g[6] in ("mem", "compv4")
+        ]
+        self.assertTrue(geos)
+        jobs = list(
+            ks._dgrad_jobs(_ARCH, "bf16", 64, "mma", target, 1024, geometries=geos)
+        )
+        halo = [j for j in jobs if j.identity.dy_halo]
+        self.assertTrue(halo)
+        for j in halo:
+            i = j.identity
+            self.assertEqual(i.pipeline, "mem")
+            self.assertTrue(i.tap_outer_k and i.lds_k_outer and i.grouped)
+            self.assertEqual((i.stride_h, i.dilation_h), (1, 1))
+            self.assertIn(i.filter_h, ks.CACHE_DGRAD_HALO_FILTERS)
+            self.assertEqual(i.filter_h, i.filter_w)
+            self.assertIn(i.halo_max_wo, ks.CACHE_DGRAD_HALO_MAX_WO)
+            p = ks._probe_problem("dgrad", j.caps)
+            self.assertEqual(
+                (p.Y, p.X, p.Wo, p.Ho, p.Wi),
+                (i.filter_h,) * 2
+                + (
+                    i.halo_max_wo,
+                    p.Hi,
+                    i.halo_max_wo,
+                ),
+            )
+            # The 2x2 tile carries neither setprio nor the wider pad.
+            if i.warp_n == 2:
+                self.assertEqual((i.dy_halo_setprio, i.dy_halo_kouter_pad), (0, 0))
+        # Not built where the transpose read (K-outer) is unavailable.
+        t942 = ArchTarget.from_gfx("gfx942")
+        geos942 = ks._geometry_list(t942, "bf16")[::37]
+        self.assertFalse(
+            any(
+                j.identity.dy_halo
+                for j in ks._dgrad_jobs(
+                    "gfx942", "bf16", 64, "mma", t942, 1024, geometries=geos942
+                )
+            )
+        )
+        # Every valid halo job rebuilds from its identity.
+        valid = [j for j in halo if ks._spec_is_valid(j, _ARCH, "bf16")]
+        self.assertTrue(valid)
+        for j in valid[:: max(1, len(valid) // 12)]:
+            self.assertEqual(ks.job_for_identity(j.identity).identity, j.identity)
 
 
 if __name__ == "__main__":

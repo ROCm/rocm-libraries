@@ -866,6 +866,14 @@
           "sha256": "5fd7c35e9dbebf1d649c4d9101a3ca24d2f1b04445a9b1fbd109efbf5aae6251",
           "status": "ok"
         },
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_halo2": {
+          "arch": "gfx950",
+          "bytes": 74077,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_950_g4_s1_halo2_N1H8W8C64_K64Y3X3G4_t64x64x16_w2x2_a32x32x16_mem_default_tapk_halo2_hwo8",
+          "sha256": "09190a4791d51b6c60a31d686eddd30655cef8ff1f77fad13ee66a98fe0461d1",
+          "status": "ok"
+        },
         "conv_dgrad/gfx950/n1h8c64k64r3_g4_tapk": {
           "arch": "gfx950",
           "bytes": 41649,
@@ -2070,7 +2078,7 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 50,
-          "gfx950": 176
+          "gfx950": 177
         },
         "expected_failures": 4,
         "families": {
@@ -2079,7 +2087,7 @@
           "attention_d256": 2,
           "attention_dense": 44,
           "conv": 16,
-          "conv_dgrad": 12,
+          "conv_dgrad": 13,
           "conv_direct": 23,
           "conv_direct_depthwise_tiled": 3,
           "conv_direct_dgrad": 15,
@@ -2097,7 +2105,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 255
+        "ok_cases": 256
       }
     },
     "llvm22": {
@@ -2964,6 +2972,14 @@
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_g4_s1_N1H8W8C64_K64Y3X3G4_t64x64x64_w2x2_a32x32x16_mem_default",
           "sha256": "5d732e22252dd5a25454236dc05505d40d1a96eaf8314c3c5e3937fa957f757c",
+          "status": "ok"
+        },
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_halo2": {
+          "arch": "gfx950",
+          "bytes": 74216,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_950_g4_s1_halo2_N1H8W8C64_K64Y3X3G4_t64x64x16_w2x2_a32x32x16_mem_default_tapk_halo2_hwo8",
+          "sha256": "e7e797cb17f723739f99264bb0b19eb3542f558909a5a1176fb08fabead730d6",
           "status": "ok"
         },
         "conv_dgrad/gfx950/n1h8c64k64r3_g4_tapk": {
@@ -4170,7 +4186,7 @@
           "gfx1250": 4,
           "gfx90a": 5,
           "gfx942": 50,
-          "gfx950": 176
+          "gfx950": 177
         },
         "expected_failures": 4,
         "families": {
@@ -4179,7 +4195,7 @@
           "attention_d256": 2,
           "attention_dense": 44,
           "conv": 16,
-          "conv_dgrad": 12,
+          "conv_dgrad": 13,
           "conv_direct": 23,
           "conv_direct_depthwise_tiled": 3,
           "conv_direct_dgrad": 15,
@@ -4197,7 +4213,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 255
+        "ok_cases": 256
       }
     },
     "llvm23": {
@@ -5064,6 +5080,14 @@
           "family": "conv_dgrad",
           "kernel_name": "irhash_dgrad_950_g4_s1_N1H8W8C64_K64Y3X3G4_t64x64x64_w2x2_a32x32x16_mem_default",
           "sha256": "a0ca8c9e2e62c4f4fa7344cc3488f19fdf10253adc2127e002224a555aa6cf4a",
+          "status": "ok"
+        },
+        "conv_dgrad/gfx950/n1h8c64k64r3_g4_halo2": {
+          "arch": "gfx950",
+          "bytes": 74280,
+          "family": "conv_dgrad",
+          "kernel_name": "irhash_dgrad_950_g4_s1_halo2_N1H8W8C64_K64Y3X3G4_t64x64x16_w2x2_a32x32x16_mem_default_tapk_halo2_hwo8",
+          "sha256": "a4ec84204b457513cab213ef62507aec94665dc6b09b9afc427ddceba88e95df",
           "status": "ok"
         },
         "conv_dgrad/gfx950/n1h8c64k64r3_g4_tapk": {
@@ -6285,7 +6309,7 @@
           "gfx1250": 8,
           "gfx90a": 5,
           "gfx942": 50,
-          "gfx950": 176
+          "gfx950": 177
         },
         "expected_failures": 0,
         "families": {
@@ -6294,7 +6318,7 @@
           "attention_d256": 2,
           "attention_dense": 44,
           "conv": 16,
-          "conv_dgrad": 12,
+          "conv_dgrad": 13,
           "conv_direct": 23,
           "conv_direct_depthwise_tiled": 3,
           "conv_direct_dgrad": 15,
@@ -6312,7 +6336,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 259
+        "ok_cases": 260
       }
     }
   },

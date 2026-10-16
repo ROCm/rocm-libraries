@@ -1668,5 +1668,161 @@ class TestConvDgradStride1Specializations(unittest.TestCase):
                     self._check(f"{label}/{name}", problem, "fp16", {name: out})
 
 
+# dY halo (DgradConvSpec.dy_halo) cases: Ho == Hi, Wo == Wi, kpg a multiple
+# of tile_k. (label, dtype, N, Hi, Wi, C, K, Y, X, groups); pad (Y-1)/2,
+# (X-1)/2.
+_HALO_CASES = (
+    ("n1_odd_13x17", "fp16", 1, 13, 17, 64, 256, 3, 3, 1),
+    ("straddle_3x70", "fp16", 2, 3, 70, 64, 128, 3, 3, 1),
+    ("w1_column", "fp16", 2, 33, 1, 64, 192, 3, 3, 1),
+    ("1x1_image", "bf16", 1, 1, 1, 64, 64, 3, 3, 1),
+    ("partial_n_c96", "bf16", 3, 9, 31, 96, 128, 3, 3, 1),
+    ("partial_n_c200", "fp16", 5, 6, 32, 200, 320, 3, 3, 1),
+    ("5x5_15x13", "fp16", 2, 15, 13, 128, 64, 5, 5, 1),
+    ("7x7_w2", "bf16", 3, 9, 2, 64, 128, 7, 7, 1),
+    ("7x7_8x32", "fp16", 4, 8, 32, 64, 64, 7, 7, 1),
+    ("grouped_g2", "bf16", 2, 14, 14, 256, 256, 3, 3, 2),
+    ("grouped_g4_5x5", "fp16", 1, 11, 9, 256, 512, 5, 5, 4),
+    ("1x7_12x20", "bf16", 2, 12, 20, 64, 128, 1, 7, 1),
+    ("7x1_21x9", "fp16", 1, 21, 9, 64, 64, 7, 1, 1),
+    ("3x1_odd_11x5", "bf16", 3, 11, 5, 96, 128, 3, 1, 1),
+    ("3x5_10x14", "bf16", 1, 10, 14, 128, 64, 3, 5, 1),
+)
+# (label, spec overrides) per tiling.
+_HALO_TILINGS = (
+    ("halo1_64x64", {"dy_halo": 1}),
+    ("halo2_64x64", {"dy_halo": 2}),
+    (
+        "halo2_128x64_4x1_prio_kpad",
+        {
+            "dy_halo": 2,
+            "tile_m": 128,
+            "warp_m": 4,
+            "warp_n": 1,
+            "dy_halo_setprio": 1,
+            "dy_halo_kouter_pad": 32,
+        },
+    ),
+    ("halo2_256x64_4x1", {"dy_halo": 2, "tile_m": 256, "warp_m": 4, "warp_n": 1}),
+    ("halo2_64x64_mouter", {"dy_halo": 2, "lds_k_outer": False}),
+)
+# The widest Wo the test binaries are sized for (every case fits).
+_HALO_MAX_WO = 72
+
+
+@unittest.skipUnless(
+    ARCH == "gfx950" and _HAS_TORCH,
+    "the dY halo dgrad loop is gfx950 wave64 MFMA + torch",
+)
+class TestConvDgradDyHalo(unittest.TestCase):
+    """The dY halo loop against the reference on adversarial shapes.
+
+    As the AOT cache builds it: one binary per (tiling, filter, halo_max_wo),
+    built once against a grouped probe of that filter and width, launched
+    through ConvArgs launch values on every case of the filter -- narrower
+    images, odd widths, a one-pixel column or image, partial N tiles, groups.
+    """
+
+    def _probe(self, Y, X, max_wo):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(
+            N=1,
+            Hi=max(Y, 8),
+            Wi=max_wo,
+            C=128,
+            K=128,
+            Y=Y,
+            X=X,
+            pH=(Y - 1) // 2,
+            pW=(X - 1) // 2,
+            groups=2,
+        )
+
+    def _spec(self, Y, X, dtype, max_wo=_HALO_MAX_WO, **kw):
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        base = {
+            "problem": self._probe(Y, X, max_wo),
+            "name": "rocke_test_dgrad_halo",
+            "data": ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            "tile_m": 64,
+            "tile_n": 64,
+            "tile_k": 64,
+            "warp_m": 2,
+            "warp_n": 2,
+            "warp_tile_m": 32,
+            "warp_tile_n": 32,
+            "warp_tile_k": 16,
+            "pipeline": "mem",
+            "epilogue": "cshuffle",
+            "lds_k_outer": True,
+            "tap_outer_k": True,
+            "halo_max_wo": max_wo,
+        }
+        base.update(kw)
+        spec = DgradConvSpec(**base)
+        ok, why = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, why)
+        return spec
+
+    def _problem(self, N, Hi, Wi, C, K, Y, X, g):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        return ConvProblem(
+            N=N,
+            Hi=Hi,
+            Wi=Wi,
+            C=C,
+            K=K,
+            Y=Y,
+            X=X,
+            pH=(Y - 1) // 2,
+            pW=(X - 1) // 2,
+            groups=g,
+        )
+
+    def _check(self, label, out, problem, dtype):
+        import torch
+
+        out = out.float()
+        ref = _dgrad_reference(problem, dtype)
+        bad = ((out - ref).abs() > 1e-2 + 1e-2 * ref.abs()) | ~torch.isfinite(out)
+        self.assertEqual(int(bad.sum()), 0, f"{label}: bad elements (NaN/Inf = bad)")
+
+    def test_halo_tilings_match_reference(self):
+        ran = 0
+        for tlabel, kw in _HALO_TILINGS:
+            for label, dtype, N, Hi, Wi, C, K, Y, X, g in _HALO_CASES:
+                with self.subTest(case=label, tiling=tlabel):
+                    spec = self._spec(Y, X, dtype, **kw)
+                    p = self._problem(N, Hi, Wi, C, K, Y, X, g)
+                    self.assertEqual((p.Ho, p.Wo), (p.Hi, p.Wi))
+                    out = _dgrad_run_inprocess(spec, dtype, poison=True, problem=p)
+                    self._check(f"{label}/{tlabel}", out, p, dtype)
+                    ran += 1
+        self.assertEqual(ran, len(_HALO_TILINGS) * len(_HALO_CASES))
+
+    def test_halo_max_wo_does_not_change_the_result(self):
+        # A binary sized for the problem's own width and one sized for a much
+        # wider image compute the same dX bit for bit: the bucket changes
+        # only the LDS the halo tile reserves and the rows the loader skips.
+        import torch
+
+        for label, dtype, N, Hi, Wi, C, K, Y, X, g in _HALO_CASES:
+            with self.subTest(case=label):
+                p = self._problem(N, Hi, Wi, C, K, Y, X, g)
+                tight = self._spec(Y, X, dtype, max_wo=Wi, dy_halo=2)
+                wide = self._spec(Y, X, dtype, dy_halo=2)
+                a = _dgrad_run_inprocess(tight, dtype, poison=True, problem=p)
+                b = _dgrad_run_inprocess(wide, dtype, poison=True, problem=p)
+                self.assertTrue(torch.equal(a, b), label)
+                self._check(label, a, p, dtype)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

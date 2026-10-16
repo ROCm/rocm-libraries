@@ -1121,6 +1121,51 @@ def test_dgrad_stride1_xcd_order_ignores_the_group_count():
     assert len(fingerprints) == 1, "the XCD tile order depends on the shape"
 
 
+@pytest.mark.parametrize("dy_halo", [1, 2])
+def test_dgrad_halo_ir_is_shape_invariant(dy_halo):
+    """A dY halo binary serves every problem of its filter with Wo <= its
+    halo_max_wo: N, H, Wo, the channels and the group count are kernargs
+    (the tap shifts and row bounds are runtime), and the staged halo is
+    sized for halo_max_wo, never for the problem's Wo."""
+    for Y in (3, 5):
+        fingerprints = set()
+        for N, H, W, cpg, kpg, groups in (
+            (1, 9, 24, 64, 64, 1),
+            (2, 17, 1, 96, 128, 1),
+            (3, 6, 13, 32, 64, 2),
+            (1, 24, 24, 128, 64, 4),
+            (4, 5, 7, 64, 192, 1),
+        ):
+            p = ConvProblem(
+                N=N,
+                Hi=H,
+                Wi=W,
+                C=cpg * groups,
+                K=kpg * groups,
+                Y=Y,
+                X=Y,
+                pH=Y // 2,
+                pW=Y // 2,
+                groups=groups,
+            )
+            spec = DgradConvSpec(
+                problem=p,
+                data=_DATA,
+                tap_outer_k=True,
+                dy_halo=dy_halo,
+                halo_max_wo=24,
+                **_TILE,
+            )
+            # Grouped and ungrouped are two capabilities; compare within one.
+            fingerprints.add(
+                (
+                    groups > 1,
+                    _op_signature(build_implicit_gemm_conv_dgrad(spec, arch=_ARCH)),
+                )
+            )
+        assert len(fingerprints) == 2, f"{Y}x{Y} halo IR depends on the shape"
+
+
 def _dgrad_kernarg_record(problem, tile_m, tile_n, tile_k, split_k):
     """The stride-1 sub-GEMM record as the kernel rebuilds it from kernargs.
 
@@ -1271,6 +1316,13 @@ _CAPABILITY_CASES = [
     ("dgrad grouped", "dgrad", dict(groups=2), ("grouped",)),
     ("dgrad stride", "dgrad", dict(sH=2, sW=2), ("stride_h", "stride_w")),
     ("dgrad dilation", "dgrad", dict(dH=2, dW=2), ("dilation_h", "dilation_w")),
+    # The dY halo loop unrolls its taps: the filter is baked.
+    (
+        "dgrad halo filter",
+        "dgrad_halo",
+        {"Y": 5, "X": 5, "pH": 2, "pW": 2},
+        ("filter_h", "filter_w"),
+    ),
 ]
 
 
@@ -1282,6 +1334,18 @@ def _build_direction(direction, problem):
     if direction == "wgrad":
         return build_implicit_gemm_conv_wgrad(
             WgradConvSpec(problem=problem, data=_DATA, split_k=1, **_TILE), arch=_ARCH
+        )
+    if direction == "dgrad_halo":
+        return build_implicit_gemm_conv_dgrad(
+            DgradConvSpec(
+                problem=problem,
+                data=_DATA,
+                tap_outer_k=True,
+                dy_halo=2,
+                halo_max_wo=16,
+                **_TILE,
+            ),
+            arch=_ARCH,
         )
     return build_implicit_gemm_conv_dgrad(
         DgradConvSpec(problem=problem, data=_DATA, **_TILE), arch=_ARCH
@@ -1383,6 +1447,68 @@ def test_cache_rejects_capability_mismatches():
     assert cache.supports_problem(dgrad_s1, plain)[0]
     assert not cache.supports_problem(dgrad_s1, strided)[0]
     assert not cache.supports_problem(dgrad_s1, dilated)[0]
+
+
+def test_cache_serves_halo_binaries_within_their_capabilities():
+    """A dY halo binary bakes its filter and the widest Wo it was sized for,
+    and its loop needs a same-size output (Ho == Hi, Wo == Wi) at stride 1,
+    dilation 1, with kpg a multiple of tile_k."""
+    from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
+
+    cache = KernelCache("/nonexistent-cache-dir-for-a-pure-predicate-test", _ARCH)
+    halo = KernelIdentity(
+        arch=_ARCH,
+        direction="dgrad",
+        algorithm="implicit_gemm",
+        dtype_a="fp16",
+        dtype_b="fp16",
+        dtype_d="fp16",
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=64,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        lds_k_outer=True,
+        grouped=True,
+        stride_h=1,
+        stride_w=1,
+        dilation_h=1,
+        dilation_w=1,
+        filter_h=3,
+        filter_w=3,
+        max_sub_gemms=1024,
+        tap_outer_k=True,
+        dy_halo=2,
+        halo_max_wo=32,
+    )
+    ok_p = ConvProblem(N=2, Hi=20, Wi=32, C=128, K=128, Y=3, X=3, pH=1, pW=1)
+    cases = (
+        (ok_p, True),
+        (dc_replace(ok_p, Wi=7), True),  # narrower rows: same binary
+        (dc_replace(ok_p, Wi=1, Hi=1), True),
+        (dc_replace(ok_p, groups=2, C=256, K=256), True),
+        (dc_replace(ok_p, Wi=33), False),  # wider than halo_max_wo
+        (dc_replace(ok_p, pH=0, pW=0), False),  # Ho != Hi
+        (dc_replace(ok_p, pH=2), False),  # Ho != Hi
+        (dc_replace(ok_p, Y=5, X=5, pH=2, pW=2), False),  # another filter
+        (dc_replace(ok_p, Y=3, X=5, pW=2), False),
+        (dc_replace(ok_p, K=96), False),  # kpg % tile_k
+        (dc_replace(ok_p, sH=2, sW=2), False),
+    )
+    for problem, want in cases:
+        ok, why = cache.supports_problem(halo, problem)
+        assert ok == want, (problem, why)
+    _, why = cache.supports_problem(halo, dc_replace(ok_p, Wi=33))
+    assert "halo_max_wo" in why or "Wo <=" in why, why
 
 
 # ---------------------------------------------------------------------
