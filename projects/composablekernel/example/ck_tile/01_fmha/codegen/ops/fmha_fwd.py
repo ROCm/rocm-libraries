@@ -1692,10 +1692,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ["f", "t"],
                     ["f", "t"],
                 ):
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "f", "f", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_use_double_kv_lds_buffer="t"))  # fmt: skip
 
             for logits, qscale, mask, bias in itertools.product(
                 ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
