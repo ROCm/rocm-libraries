@@ -2032,9 +2032,8 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
     return forced;
 }
 
-// WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS
-// cap. After the count reaches the DS read queue depth, configured transition
-// entries use the scaled throttle interval and later entries use the full one.
+// WMMA windows needed to issue dsLoadCount ds_reads at the even-spread density of the region
+// (wmmaTotal / dsTotal windows per ds_load, as DsSpreadPacer plans them).
 DsLoadBudgetConfig CDNA5ReadyQueue::dsLoadBudgetConfig() const {
     DsLoadBudgetConfig config;
     // The budget windows are one WMMA window, but the cap is "cap per span": scale it.
@@ -2050,7 +2049,7 @@ DsLoadBudgetConfig CDNA5ReadyQueue::dsLoadBudgetConfig() const {
 }
 
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
-    return computeDsLoadWmmaWindowsNeeded(dsLoadCount, dsLoadBudgetConfig());
+    return DsSpreadPacer::windowsFor(dsLoadCount, wmmaTotalThisRegion_, dsTotalThisRegion_);
 }
 
 // Compute forceBarrierAfterNthWmma_ for this region from register dependencies.
@@ -2064,8 +2063,9 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) +
 //  latencyWmmaBudget;
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
-//            wmmaWindowsNeeded is derived from matching ds_read count and DS
-//            per-WMMA cap. latency = dsReadDrainLatency when it is configured
+//            wmmaWindowsNeeded is the matching ds_read count at the even-spread
+//            density (wmmaTotal / dsTotal windows per ds_load). latency = dsReadDrainLatency when
+//            it is configured
 //            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
 //            numWaves) over every matching ds_read (last-load latency,
 //            count-weighted average throughput, max maxDrain over the burst).
@@ -2254,7 +2254,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 //  Step 4  — build candidate "before" caps from:
 //            - beforeN: residualCycles / wmmaIssueConfig.latency
 //            - maxFinalWmmaIdx: targetDSLoadLatency / wmmaIssueConfig.latency
-//            - wmmaWindowsNeeded: WMMA windows needed to issue all matching
+//            - wmmaWindowsNeeded: WMMA windows the even spread gives all matching
 //            ds_reads. Final threshold = max(0, min(beforeN, issuedCount
 //                                             - max(maxFinalWmmaIdx,
 //                                             wmmaWindowsNeeded))).
@@ -2373,10 +2373,8 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
         // WMMAs in the region:
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency /
-        //   WMMA latency) wmmaWindowsNeeded — DS issue bandwidth (enough WMMA
-        //   windows for all ds_loads); when
-        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from
-        //       dsReadThrottleLatency.
+        //   WMMA latency) wmmaWindowsNeeded — the windows the even spread gives
+        //       all of these ds_loads.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));

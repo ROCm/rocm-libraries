@@ -373,6 +373,13 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return inst;
     }
 
+    // ds_loads on tokens no barrier carries. They raise the region's ds_load count so the
+    // even-spread density (wmmaTotal / dsTotal windows per ds_load) drops to about one window.
+    void createUnrelatedDsLoads(int count) {
+        for (int i = 0; i < count; ++i)
+            createMovableDsLoad(/*destReg=*/2000 + i * 4, /*addrReg=*/900 + i, /*ldsToken=*/50 + i);
+    }
+
     // A tensor_load_to_lds with an LDS pseudo dest-reg so the DAG scheduler
     // treats it as movable (without LDS pseudo-regs hasSideEffect() makes it a
     // region boundary and it never enters globalReadQueue). Mirrors
@@ -969,6 +976,7 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
     auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
+    createUnrelatedDsLoads(6);  // 8 ds_loads over 8 WMMAs: one window per ds_load
 
     runPassWithUnrollGemm();
 
@@ -1024,6 +1032,7 @@ TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairSpreadsSignalAndWait) {
     createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
     StinkyInstruction* beforeConsumer =
         createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
+    createUnrelatedDsLoads(22);  // 24 ds_loads over 24 WMMAs: one window per ds_load
 
     runPassWithUnrollGemm(/*barrierHalfSlack=*/2);
 

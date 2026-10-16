@@ -49,6 +49,14 @@ class DsSpreadPacer {
         slack_ = manualSlack >= 0 ? manualSlack : need;
     }
 
+    // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
+    // load, rounded up.
+    static int windowsFor(int count, int wmmaTotal, int dsTotal) {
+        if (count <= 0 || wmmaTotal <= 0 || dsTotal <= 0) return 0;
+        return static_cast<int>((static_cast<long long>(count) * wmmaTotal + dsTotal - 1) /
+                                dsTotal);
+    }
+
     bool active() const {
         return active_;
     }
