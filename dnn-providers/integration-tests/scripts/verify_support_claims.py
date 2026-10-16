@@ -14,7 +14,8 @@ Checks
    cases[].metadata.enforcement_level in sweep.json).  Absent is legal and
    means "full" -- see check_enforcement_level_single for why.
 3. Sweep case ids: every claimed id must exist in the sibling sweep.json;
-   no duplicate case id per engine.
+   no duplicate case id per engine.  The sweep.json itself must pass the
+   harness's readSweepCaseIds() rules, or the harness registers none of it.
 4. Orphaned sidecars: X.support.json without a sibling X.json; support.json
    in a directory that is not a sweep root.
 
@@ -30,6 +31,18 @@ import json
 import sys
 from pathlib import Path
 from typing import List
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from bundle_discovery import (  # noqa: E402
+    SWEEP_MANIFEST_NAME,
+    SWEEP_SUPPORT_NAME,
+    SWEEP_TEMPLATE_NAME,
+    is_sweep_root,
+    load_json,
+    read_sweep_cases,
+    walk_bundle_tree,
+)
 
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "integration-test-bundles"
 VALID_PLATFORMS = {"linux", "windows"}
@@ -158,7 +171,10 @@ def validate_sweep_schema(data: dict, path: Path, errors: List[str]) -> None:
                 _validate_arch_platform_map(support, path, f"{ctx}.support", errors)
 
 
-def _has_non_empty_claims(data: dict) -> bool:
+def _has_non_empty_claims(data: object) -> bool:
+    # A non-object sidecar has already been reported by the schema check.
+    if not isinstance(data, dict):
+        return False
     claims = data.get("claims", {})
     return isinstance(claims, dict) and len(claims) > 0
 
@@ -180,11 +196,13 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
     meta_path = support_path.parent / f"{bundle_stem}.meta.json"
     if not meta_path.exists():
         return
-    try:
-        with open(meta_path, encoding="utf-8") as f:
-            meta = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        _error(meta_path, f"cannot read metadata: {exc}", errors)
+    meta, error = load_json(meta_path)
+    if error is not None:
+        _error(meta_path, error, errors)
+        return
+    if not isinstance(meta, dict):
+        # parseBundleMetadataJson() throws on this, losing every field.
+        _error(meta_path, "is not a metadata JSON object", errors)
         return
     level = meta.get("enforcement_level")
     if level is not None and level not in VALID_ENFORCEMENT_LEVELS:
@@ -196,52 +214,27 @@ def check_enforcement_level_single(support_path: Path, errors: List[str]) -> Non
         )
 
 
-def check_enforcement_level_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
-    if not sweep_path.exists():
-        return
-    try:
-        with open(sweep_path, encoding="utf-8") as f:
-            sweep = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        _error(sweep_path, f"cannot read sweep: {exc}", errors)
-        return
-    cases = sweep.get("cases", [])
-    if not isinstance(cases, list):
-        return
+def check_enforcement_level_sweep(
+    sweep_path: Path, cases: List[dict], errors: List[str]
+) -> None:
+    """``cases`` comes from read_sweep_cases(), so every id is a string."""
     for case_entry in cases:
-        if not isinstance(case_entry, dict):
-            continue
         metadata = case_entry.get("metadata", {})
         if not isinstance(metadata, dict):
             continue
         level = metadata.get("enforcement_level")
         if level is not None and level not in VALID_ENFORCEMENT_LEVELS:
-            case_id = case_entry.get("id", "<unknown>")
             _error(
                 sweep_path,
-                f"case '{case_id}': invalid enforcement_level '{level}'",
+                f"case '{case_entry['id']}': invalid enforcement_level '{level}'",
                 errors,
             )
 
 
 def check_sweep_case_ids(
-    support_path: Path, support_data: dict, errors: List[str]
+    support_path: Path, support_data: dict, cases: List[dict], errors: List[str]
 ) -> None:
-    sweep_path = support_path.parent / "sweep.json"
-    if not sweep_path.exists():
-        # check_orphaned_sweep already reports this; no duplicate error.
-        return
-    try:
-        with open(sweep_path, encoding="utf-8") as f:
-            sweep = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
-        _error(sweep_path, f"cannot read sweep: {exc}", errors)
-        return
-    valid_ids = set()
-    for case_entry in sweep.get("cases", []):
-        if isinstance(case_entry, dict) and isinstance(case_entry.get("id"), str):
-            valid_ids.add(case_entry["id"])
+    valid_ids = {case_entry["id"] for case_entry in cases}
     claims = support_data.get("claims", {})
     if not isinstance(claims, dict):
         return
@@ -273,18 +266,19 @@ def check_orphaned_single_graph(support_path: Path, errors: List[str]) -> None:
 
 
 def check_orphaned_sweep(support_path: Path, errors: List[str]) -> None:
-    sweep_path = support_path.parent / "sweep.json"
-    if not sweep_path.exists():
+    # Share the harness's sweep-root rule: a directory missing either control
+    # file is never discovered, so its claims would be silently ignored.
+    if not is_sweep_root(support_path.parent):
         _error(
             support_path,
             "orphaned support.json: directory is not a sweep root"
-            " (no sweep.json found)",
+            f" (needs both {SWEEP_TEMPLATE_NAME} and {SWEEP_MANIFEST_NAME})",
             errors,
         )
 
 
 def is_sweep_sidecar(path: Path) -> bool:
-    return path.name == "support.json"
+    return path.name == SWEEP_SUPPORT_NAME
 
 
 def check_canonical_form(support_path: Path, data: object, errors: List[str]) -> None:
@@ -294,23 +288,42 @@ def check_canonical_form(support_path: Path, data: object, errors: List[str]) ->
         _error(support_path, "not in canonical form (re-run the writer)", errors)
 
 
+def _load_sidecar(support_path: Path, errors: List[str]) -> tuple[object, bool]:
+    data, error = load_json(support_path)
+    if error is not None:
+        _error(support_path, error, errors)
+        return None, False
+    return data, True
+
+
+def check_sweep_manifest(
+    support_path: Path, support_data: dict, errors: List[str]
+) -> None:
+    """Read the sibling sweep.json once and run both checks that need it."""
+    sweep_path = support_path.parent / SWEEP_MANIFEST_NAME
+    if not sweep_path.exists():
+        # check_orphaned_sweep already reports this; no duplicate error.
+        return
+    cases, error = read_sweep_cases(sweep_path)
+    if error is not None:
+        _error(sweep_path, error, errors)
+        return
+    check_enforcement_level_sweep(sweep_path, cases, errors)
+    check_sweep_case_ids(support_path, support_data, cases, errors)
+
+
 def verify_all(bundle_root: Path) -> List[str]:
     errors: List[str] = []
     if not bundle_root.is_dir():
         return errors
 
-    for support_path in sorted(bundle_root.rglob("*.support.json")):
-        try:
-            with open(support_path, encoding="utf-8") as f:
-                data = json.load(f)
-        except json.JSONDecodeError as exc:
-            _error(support_path, f"invalid JSON: {exc}", errors)
-            continue
-        except UnicodeDecodeError as exc:
-            _error(support_path, f"not valid UTF-8: {exc}", errors)
-            continue
-        except OSError as exc:
-            _error(support_path, f"cannot read: {exc}", errors)
+    # Walk the tree the way the harness does, so a sidecar reached through a
+    # directory symlink is checked rather than silently skipped.
+    _, files = walk_bundle_tree(bundle_root)
+
+    for support_path in (f for f in files if f.name.endswith(".support.json")):
+        data, loaded = _load_sidecar(support_path, errors)
+        if not loaded:
             continue
         check_canonical_form(support_path, data, errors)
         validate_single_graph_schema(data, support_path, errors)
@@ -318,25 +331,15 @@ def verify_all(bundle_root: Path) -> List[str]:
         if _has_non_empty_claims(data):
             check_enforcement_level_single(support_path, errors)
 
-    for support_path in sorted(bundle_root.rglob("support.json")):
-        try:
-            with open(support_path, encoding="utf-8") as f:
-                data = json.load(f)
-        except json.JSONDecodeError as exc:
-            _error(support_path, f"invalid JSON: {exc}", errors)
-            continue
-        except UnicodeDecodeError as exc:
-            _error(support_path, f"not valid UTF-8: {exc}", errors)
-            continue
-        except OSError as exc:
-            _error(support_path, f"cannot read: {exc}", errors)
+    for support_path in (f for f in files if is_sweep_sidecar(f)):
+        data, loaded = _load_sidecar(support_path, errors)
+        if not loaded:
             continue
         check_canonical_form(support_path, data, errors)
         validate_sweep_schema(data, support_path, errors)
         check_orphaned_sweep(support_path, errors)
         if _has_non_empty_claims(data):
-            check_enforcement_level_sweep(support_path, errors)
-            check_sweep_case_ids(support_path, data, errors)
+            check_sweep_manifest(support_path, data, errors)
 
     return errors
 
