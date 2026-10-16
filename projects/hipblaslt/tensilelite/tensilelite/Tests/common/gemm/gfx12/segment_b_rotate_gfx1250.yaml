@@ -12,6 +12,8 @@ TestParameters:
 # Group 2: MT256x256x256 + HalfPLR on the tight layout (64K < S < 128K, StoreSwapAddr).
 # Groups 3/4/5: MXF8 (tight) / MXF4 block-32 and block-16 (aligned) MT256 with VWB = WaveTileB/2;
 # pair 1 also flips its MXSB half-wave select so the scales follow the rotated B columns.
+# Group 6: BF16 MT128x192 VWB1 on the tight layout; B extent is exactly 128 KiB, which must still use two B
+# local-read addresses (regression for the numVgprMultiplierB off-by-one).
 
 GlobalParameters:
   PrintSolutionRejectionReason: True
@@ -369,5 +371,64 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 512]     # two unroll iterations
           - Exact: [264, 256, 1, 544]     # M edge + tail loop
           - Exact: [256, 256, 1, 320]     # tail loop
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, BF16 in / BF16 out
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  4, 6,  2, 2]  # MT128x192, wave tile 4x6
+        - DepthU: [256]
+        - TDMInst: [3]
+        - LDSSegmentInterleave: [1]
+        - LDSSegmentBRotate: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [1]                     # WaveTileB/VWB = 6 (even)
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 384, 1, 512]
+          - Exact: [256, 384, 1, 320]     # tail loop
         - ActivationArgs:
           - [Enum: none]

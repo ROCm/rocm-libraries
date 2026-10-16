@@ -8619,7 +8619,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             maxOffsetB = max(maxOffsetB, reachB)
 
         numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
-        numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
+        # maxOffsetB is an extent (last byte is maxOffsetB-1), so an exact multiple of the reach needs no extra register.
+        # B-rotate asserts exactly two B local-read addresses, which this exposes at 128 KiB extents.
+        if kernel.get("LDSSegmentBRotate"):
+          numVgprMultiplierB = (maxOffsetB + maxLDSConstOffset - 1) // maxLDSConstOffset
+        else:
+          numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
         numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
         numVgprMultiplierMXSB = maxOffsetMXSB // maxLDSConstOffset + 1
         numVgprMultiplierMetadata = maxOffsetMetadata // maxLDSConstOffset + 1
