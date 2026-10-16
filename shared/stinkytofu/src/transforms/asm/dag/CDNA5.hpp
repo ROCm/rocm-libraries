@@ -2419,21 +2419,23 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                     blockWmmaForCoexecSpacing = true;
             }
         }
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
-                             << " bestLatency=" << bestLatency
-                             << " blockLoopHead=" << blockWmmaForLoopHeadBalance
-                             << " blockActiveWindow=" << blockWmmaForActiveWindow
-                             << " blockAtLeastOneNonWmmaInterleaving="
-                             << blockWmmaForAtLeastOneNonWmmaInterleaving << " blockCoexecSpacing="
-                             << blockWmmaForCoexecSpacing << " hasPickable=" << hasPickableNonWmma
-                             << " pickKind=" << pickKind << " dsFree=" << dsIssuesFree
-                             << " dsHeld=" << dsHeldBySpreadLast_ << " preempt=" << preemptForQueue
-                             << " outstanding=" << outstandingWmmas() << " cover="
-                             << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
-                             << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
-                             << (smallestPickable ? std::to_string(smallestPickable->id)
-                                                  : std::string("none"))
-                             << "\n");
+        PASS_DEBUG(
+            std::cerr
+            << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
+            << " bestLatency=" << bestLatency << " blockLoopHead=" << blockWmmaForLoopHeadBalance
+            << " blockActiveWindow=" << blockWmmaForActiveWindow
+            << " blockAtLeastOneNonWmmaInterleaving=" << blockWmmaForAtLeastOneNonWmmaInterleaving
+            << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
+            << " hasPickable=" << hasPickableNonWmma << " pickKind=" << pickKind
+            << " dsFree=" << dsIssuesFree << " dsHeld=" << dsHeldBySpreadLast_
+            << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
+            << " slot=" << (pickedDS ? dsSpread_.slotOf(pickedDS->id) : -2) << " clock=" << clock_
+            << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
+            << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
+            << " cover=" << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
+            << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
+            << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
+            << "\n");
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
