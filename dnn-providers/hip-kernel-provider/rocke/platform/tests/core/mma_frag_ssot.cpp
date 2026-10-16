@@ -5,8 +5,9 @@
  * frag-length / accumulator-dtype tables consulted by rocke_b_mma.
  *
  * rocke_b_mma sizes its tile.mma result vector as <c_frag_len x acc_elem>,
- * where c_frag_len comes from the op_id frag-length table and acc_elem is i32
- * for integer WMMA atoms, f64 for f64 MFMA atoms, and f32 otherwise. This test pins that mapping for a
+ * where c_frag_len comes from the op_id frag-length table and acc_elem is the
+ * IR type of the instruction's accumulator dtype in the arch catalog (fp32 for
+ * an op_id the catalog does not list). This test pins that mapping for a
  * representative set of atoms and checks the unknown-op_id error path, so a
  * table edit that changes a result width/dtype is caught here.
  *

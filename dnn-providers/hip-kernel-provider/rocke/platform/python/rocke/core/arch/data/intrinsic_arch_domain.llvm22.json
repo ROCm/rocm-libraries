@@ -7701,7 +7701,7 @@
       "gfx942",
       "gfx950"
     ],
-    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.3 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)",
+    "clang": "AMD clang version 22.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.2.4 26084 f58b06dce1f9c15707c5f808fd002e18c2accf7e)",
     "flavor": "llvm22",
     "generator": 4,
     "probe_cflags": [

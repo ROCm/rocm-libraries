@@ -431,14 +431,14 @@ def _mma_c_frag_len(op_id: str) -> int:
     return frag_len
 
 
-def _mma_c_is_int(op_id: str) -> bool:
-    """True when ``op_id`` accumulates in i32 (integer WMMA).
+def _mma_c_dtype(op_id: str) -> str:
+    """The accumulator dtype of ``op_id``, from the arch catalog.
 
-    Sourced from the arch catalog's accumulator dtype
-    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``).
-    Op_ids absent from the catalog default to the f32 accumulator.
+    Sourced from ``core/arch/data/arch_specs.json`` via
+    ``target._op_id_c_dtype``. Op_ids absent from the catalog accumulate in
+    fp32.
     """
-    return _arch._op_id_c_dtype().get(op_id) == "i32"
+    return _arch._op_id_c_dtype().get(op_id, "fp32")
 
 
 @dataclass(frozen=True)
@@ -1795,7 +1795,7 @@ class IRBuilder:
     def zero_vec(self, elem: Type, n: int) -> Value:
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32, F64):
+        if elem in (F16, BF16, FP8E4M3, BF8E5M2, I8, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -2376,8 +2376,8 @@ class IRBuilder:
         two ISAs.**
 
         The result vector type is ``<c_frag_len x acc>`` (the per-lane
-        accumulator length the atom produces; ``acc`` is f32, i32 for integer
-        WMMA atoms, or f64 for f64 MFMA atoms). When ``op`` is an ``op_id``
+        accumulator length the atom produces; ``acc`` is the IR type of the
+        atom's catalog accumulator dtype). When ``op`` is an ``op_id``
         string the frag length is resolved from the static MMA fragment table;
         an emulated atom's op_id resolves through the physical atom it expands
         into.
@@ -2405,19 +2405,10 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
-        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
-        # i32, f64 MFMA atoms in f64; everything else in f32. Prefer the atom's
-        # own c_dtype when ``op`` is an MmaOp, else resolve from the arch SSOT
-        # via op_id.
-        c_dtype = getattr(op, "c_dtype", None)
-        if c_dtype is None:
-            c_dtype = _arch._op_id_c_dtype().get(op_id)
-        if c_dtype == "i32":
-            c_elem = I32
-        elif c_dtype == "fp64":
-            c_elem = F64
-        else:
-            c_elem = F32
+        # Accumulator element type: the atom's own c_dtype when ``op`` is an
+        # MmaOp, else the catalog's accumulator dtype for the op_id.
+        c_dtype = getattr(op, "c_dtype", None) or _mma_c_dtype(op_id)
+        c_elem = dtype_to_ir_type(c_dtype)
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")

@@ -125,8 +125,7 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
         return rocke_b_zero_vec_f32(b, n);
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())
        || rocke_type_eq(elem, rocke_fp8e4m3()) || rocke_type_eq(elem, rocke_bf8e5m2())
-       || rocke_type_eq(elem, rocke_i8()) || rocke_type_eq(elem, rocke_i32())
-       || rocke_type_eq(elem, rocke_f64()))
+       || rocke_type_eq(elem, rocke_i8()) || rocke_type_eq(elem, rocke_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
