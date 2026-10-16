@@ -315,28 +315,160 @@ TEST(TestKernelIngestorStateManager, OffersAnUnstampedKernelEverywhereItsPackRea
     }
 }
 
-/// An arch-independent pack claims every device, so it overlaps a per-arch one and the
-/// two cannot share a tuple: on a gfx942 device both would apply and the catalog key
-/// would name two kernels. This is the empty-list arm of archOverlaps, which the disjoint
-/// case above never reaches.
-TEST(TestKernelIngestorStateManager, RejectsATupleSharedByAnArchIndependentAndAPerArchPack)
+/// One tuple offered at all three tiers keeps only the best per device. Every pack order
+/// and an interleaved second query per device (served from the catalog cache) are exercised.
+TEST(TestKernelIngestorStateManager, KeepsOnlyTheBestArchTierOfASharedTuplePerDevice)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     auto anywhere = makePack({GRAPH_MATCHER_ID});
     anywhere.kernels = {makeKernel(testId(0x93), "kernel_anywhere", 64, "FLOAT")};
-    auto pinned = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
-    pinned.id = testId(0x94);
-    pinned.kernels = {makeKernel(testId(0x95), "kernel_gfx942", 64, "FLOAT")};
+    auto generic = makePack({GRAPH_MATCHER_ID}, {"gfx11-generic"});
+    generic.id = testId(0x94);
+    generic.kernels = {makeKernel(testId(0x95), "kernel_generic", 64, "FLOAT")};
+    auto member = makePack({GRAPH_MATCHER_ID}, {"gfx1151"});
+    member.id = testId(0x96);
+    member.kernels = {makeKernel(testId(0x97), "kernel_gfx1151", 64, "FLOAT")};
+
+    const std::vector<std::vector<KernelDescriptorPack>> orders{
+        {anywhere, generic, member}, {member, generic, anywhere}, {generic, member, anywhere}};
+    uint8_t graphIndex = 0x25;
+    for(const auto& packs : orders)
+    {
+        const StateManager manager(makeSchema(),
+                                   makeTestMatchers(),
+                                   makeTestDispatches(),
+                                   packs,
+                                   std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                   "test.graph");
+
+        const TestGraph graph(makeGraphId(graphIndex++));
+        const auto winnerOn = [&](int deviceId, const char* deviceArch) {
+            auto properties = testDeviceProperties();
+            properties.gcnArchName = deviceArch;
+            const auto definitions
+                = manager.unsortedDefinitions(MatchContext{graph, deviceId, properties});
+            EXPECT_EQ(definitions.size(), 1U) << deviceArch;
+            return definitions.empty() ? DescriptorId{} : definitions.front().kernelId;
+        };
+
+        for(int round = 0; round < 2; ++round)
+        {
+            EXPECT_EQ(winnerOn(0, "gfx1151:sramecc+"), testId(0x97)) << "round " << round;
+            EXPECT_EQ(winnerOn(1, "gfx1100"), testId(0x95)) << "round " << round;
+            EXPECT_EQ(winnerOn(2, "gfx942:sramecc+"), testId(0x93)) << "round " << round;
+        }
+    }
+}
+
+/// Same generic, same tuple: both rank GENERIC on every member, so the tie is rejected.
+TEST(TestKernelIngestorStateManager, RejectsATupleSharedByTwoPacksAtTheSameGenericTier)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto first = makePack({GRAPH_MATCHER_ID}, {"gfx11-generic"});
+    first.kernels = {makeKernel(testId(0x93), "kernel_generic_a", 64, "FLOAT")};
+    auto second = makePack({GRAPH_MATCHER_ID}, {"gfx11-generic"});
+    second.id = testId(0x94);
+    second.kernels = {makeKernel(testId(0x95), "kernel_generic_b", 64, "FLOAT")};
 
     EXPECT_THROW(StateManager(makeSchema(),
                               makeTestMatchers(),
                               makeTestDispatches(),
-                              {anywhere, pinned},
+                              {first, second},
                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                               "test.graph"),
                  std::invalid_argument);
+}
+
+inline bool declineTheExplicitKernel(const MatchContext& context,
+                                     const BoundTokens& bound,
+                                     const KernelDefinition& kernel)
+{
+    return kernel.name != "kernel_gfx942" && acceptFloatKernels(context, bound, kernel);
+}
+
+/// A better-tier kernel a matcher declined must not hide the lower-tier one.
+TEST(TestKernelIngestorStateManager, ADeclinedBetterTierKernelDoesNotHideALowerTierOne)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", declineTheExplicitKernel);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    for(const bool explicitFirst : {true, false})
+    {
+        auto anywhere = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
+        anywhere.kernels = {makeKernel(testId(0x93), "kernel_anywhere", 64, "FLOAT")};
+        auto pinned = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID}, {"gfx942"});
+        pinned.id = testId(0x94);
+        pinned.kernels = {makeKernel(testId(0x95), "kernel_gfx942", 64, "FLOAT")};
+
+        const StateManager manager(makeSchema(),
+                                   makeTestMatchers(),
+                                   makeTestDispatches(),
+                                   explicitFirst ? std::vector{pinned, anywhere}
+                                                 : std::vector{anywhere, pinned},
+                                   std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                   "test.graph");
+
+        const TestGraph graph(makeGraphId(0x28));
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = "gfx942:sramecc+";
+        const auto definitions = manager.unsortedDefinitions(MatchContext{graph, 0, properties});
+
+        ASSERT_EQ(definitions.size(), 1U) << "explicitFirst=" << explicitFirst;
+        EXPECT_EQ(definitions.front().kernelId, testId(0x93)) << "explicitFirst=" << explicitFirst;
+    }
+}
+
+/// A winner-cache record naming a shadowed kernel cannot resurrect it; it is declined.
+TEST(TestKernelIngestorStateManager, AWinnerRecordNamingAShadowedKernelFallsBackToHeuristicOrdering)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto anywhere = makePack({GRAPH_MATCHER_ID});
+    anywhere.kernels = {makeKernel(testId(0x93), "kernel_anywhere_64", 64, "FLOAT"),
+                        makeKernel(testId(0x96), "kernel_anywhere_256", 256, "FLOAT")};
+    auto pinned = makePack({GRAPH_MATCHER_ID}, {"gfx942"});
+    pinned.id = testId(0x94);
+    pinned.kernels = {makeKernel(testId(0x95), "kernel_gfx942", 64, "FLOAT")};
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {anywhere, pinned},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
+    const TestGraph graph(makeGraphId(0x29));
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx942:sramecc+";
+    const MatchContext context{graph, 0, properties};
+
+    const auto baseline = manager.sortedCatalog(context);
+    ASSERT_EQ(baseline.entries.size(), 2U);
+    ASSERT_FALSE(baseline.orderedFromRecord);
+
+    const WinnerRecord record{
+        RankedEntry{testId(0x93), anywhere.id, DISPATCH_ID, 0.1},
+        RankedEntry{testId(0x96), anywhere.id, DISPATCH_ID, 0.2},
+    };
+    manager.recordWinner(
+        WinnerKey{hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{graph},
+                  DeviceKey{properties}},
+        record,
+        WinnerWriteCause::FRESH_MISS);
+
+    const auto after = manager.sortedCatalog(context);
+    EXPECT_FALSE(after.orderedFromRecord);
+    ASSERT_EQ(after.entries.size(), baseline.entries.size());
+    for(size_t i = 0; i < after.entries.size(); ++i)
+    {
+        EXPECT_EQ(after.entries[i].kernelId, baseline.entries[i].kernelId);
+        EXPECT_NE(after.entries[i].kernelId, testId(0x93)) << "a shadowed kernel was resurrected";
+    }
 }
 
 TEST(TestKernelIngestorStateManager, APackIsPrunedWhenAnyOfItsCriteriaFails)

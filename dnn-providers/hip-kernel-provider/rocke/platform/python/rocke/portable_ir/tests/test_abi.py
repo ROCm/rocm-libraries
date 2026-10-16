@@ -50,6 +50,69 @@ def from_the_future(artifact, bump=1):
     return out
 
 
+class _StubFunction:
+    """A loaded C entry point: ctypes lets the caller set these two attributes."""
+
+    argtypes = None
+    restype = None
+
+    def __init__(self, result):
+        self._result = result
+
+    def __call__(self):
+        return self._result
+
+
+class _StubLibrary:
+    """A shared library that reports a given binary ABI, or none at all."""
+
+    def __init__(self, reports=None):
+        if reports is not None:
+            self.rocke_abi_version = _StubFunction(reports)
+
+
+class TestBinaryAbiRefusal(unittest.TestCase):
+    """A library from another build is refused before any struct is touched.
+
+    The binary ABI cannot be defended by reading the artifact: a ctypes caller
+    or a compiled client passes arguments and indexes arrays by the header it
+    was built against, so the one thing that stops a mismatch is comparing the
+    two versions up front. These pin that comparison in both directions,
+    because "the library is older" and "the library is newer" are two different
+    deployments with the same failure.
+    """
+
+    def _adopt(self, reports):
+        from rocke.portable_ir.src import online
+
+        online._check_abi(_StubLibrary(reports), "/stub/librocke.so")
+
+    def test_a_library_built_for_this_abi_is_accepted(self):
+        self._adopt(abi.BINARY_ABI)
+
+    def test_a_newer_library_is_refused(self):
+        """Old bindings meeting a new library: the case a struct growing makes real.
+
+        rocke_mma_op_t gained fields at the end, so a client that indexes the
+        array it hands out by the old element size reads from the middle of the
+        next element -- which still passes every check the client makes unless
+        this one refuses first."""
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(abi.BINARY_ABI + 1)
+        self.assertIn(f"binary ABI v{abi.BINARY_ABI + 1}", str(cm.exception))
+
+    def test_an_older_library_is_refused(self):
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(abi.BINARY_ABI - 1)
+        self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
+
+    def test_a_library_with_no_version_export_is_refused(self):
+        """Predating the contract is itself the mismatch, not a reason to skip it."""
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(None)
+        self.assertIn("predates", str(cm.exception))
+
+
 class TestMinReaderDerivation(unittest.TestCase):
     def test_ordinary_recipe_is_level_one(self):
         """The property that keeps a generator upgrade from being a flag day:

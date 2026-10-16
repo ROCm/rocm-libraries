@@ -31,16 +31,14 @@ from config_helpers import findAvailableArchs, findConfigs
 _COMMON_DIR = Path(__file__).parent
 
 
-def pytest_ignore_collect(collection_path=None, path=None, config=None):
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config):
     """Filter direct children of common/ based on --build-only / --use-cache mode."""
-    # collection_path: pytest >= 7; path: pre-7 fallback (py.path.local).
-    p = Path(collection_path) if collection_path is not None else Path(str(path))
-    if p.parent != _COMMON_DIR:
+    if collection_path.parent != _COMMON_DIR:
         return None
 
     build_only = config.getoption("--build-only", default=False)
     use_cache = config.getoption("--use-cache", default=False)
-    name = p.name
+    name = collection_path.name
 
     if build_only:
         return name in ("test_config.py", "test_config_run.py")
