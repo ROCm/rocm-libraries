@@ -22,7 +22,11 @@ and K), so they can instead be compiled once and reused for any matching shape:
   python benchmark_direct_conv.py --run-from-cache ./kernel_cache --N 8 --Hi 56 --Wi 56 \
       --C 1024 --K 1024 --groups 64 --verify
 The capability list (filters, strides, paddings, channels per group) lives in
-benchmarks/common/direct_kernel_sweep.py.
+benchmarks/common/direct_kernel_sweep.py. ``--variants`` restricts a
+``--run-from-cache`` run to some of its variants, e.g. only the single-kernel
+grouped dgrad forms:
+  python benchmark_direct_conv.py --run-from-cache ./kernel_cache --direction dgrad \
+      --variants direct_grouped_dgrad_4c,direct_grouped_dgrad_fused ...
 """
 
 from __future__ import annotations
@@ -2104,6 +2108,22 @@ def _cache_directions(args) -> "tuple[str, ...] | None":
     return directions
 
 
+def _cache_variants(args) -> "frozenset[str]":
+    """The cache variants ``--variants`` keeps (empty: every variant)."""
+    if not getattr(args, "variants", None):
+        return frozenset()
+    from benchmarks.common.direct_kernel_sweep import DIRECT_CAPABILITIES
+
+    variants = frozenset(v.strip() for v in args.variants.split(",") if v.strip())
+    unknown = sorted(variants - set(DIRECT_CAPABILITIES))
+    if unknown:
+        raise ValueError(
+            f"unknown direct variant(s) {', '.join(unknown)}; use "
+            f"{', '.join(DIRECT_CAPABILITIES)}"
+        )
+    return variants
+
+
 def _cache_dispatch(args, arch: str, cases: list) -> int:
     """Handle the two cache modes.
 
@@ -2124,6 +2144,14 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
         directions = _cache_directions(args)
     except ValueError as e:
         print(f"error: --directions: {e}", file=sys.stderr)
+        return 2
+    try:
+        _cache_variants(args)
+    except ValueError as e:
+        print(f"error: --variants: {e}", file=sys.stderr)
+        return 2
+    if args.compile_all and args.variants:
+        print("error: --variants only filters --run-from-cache", file=sys.stderr)
         return 2
 
     if args.compile_all:
@@ -2182,6 +2210,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
 
     from benchmarks.common.direct_kernel_sweep import DIRECT_DTYPES
 
+    variants = _cache_variants(args)
     overall_rc = 0
     for case_idx, (p, dtype, case_direction) in enumerate(cases, 1):
         if dtype not in DIRECT_DTYPES:
@@ -2193,6 +2222,9 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
         torch_dt = torch.bfloat16 if dtype == "bf16" else torch.float16
         for direction in directions or (case_direction,):
             plans, rejected = direct_plans(cache, p, direction, arch)
+            if variants:
+                plans = [pl for pl in plans if pl.identity.algorithm in variants]
+                rejected = [r for r in rejected if r[0].algorithm in variants]
             if not plans:
                 why = (
                     rejected[0][1]
@@ -2541,6 +2573,17 @@ def main() -> int:
         help="comma-separated directions (fwd, dgrad, wgrad) to build or run. "
         "--compile-all defaults to --direction if given, else all three; "
         "--run-from-cache defaults to each case's own direction.",
+    )
+    cache_grp.add_argument(
+        "--variants",
+        default=None,
+        dest="variants",
+        help="--run-from-cache only: comma-separated cache variants to run "
+        "(the keys of DIRECT_CAPABILITIES in "
+        "benchmarks/common/direct_kernel_sweep.py), e.g. "
+        "direct_grouped_dgrad_4c,direct_grouped_dgrad_fused to time only the "
+        "single-kernel grouped dgrad forms. Default: every cached kernel that "
+        "fits the case.",
     )
     cache_grp.add_argument(
         "--limit",

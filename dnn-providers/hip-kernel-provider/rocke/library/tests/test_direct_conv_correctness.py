@@ -2154,17 +2154,30 @@ class TestDirectConvNongroupedValidation(unittest.TestCase):
 class TestDirectConvValidation(unittest.TestCase):
     """Validation-only tests that do not require a GPU."""
 
-    def test_cpg4_bf16_rejected(self):
-        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+    def test_cpg4_bf16_accepted(self):
+        """cpg=4 + bf16 validates: the 4c kernel takes mfma_f32_4x4x4_bf16 (the
+        CDNA2+ ``_1k`` atom), and the kernel name carries the dtype. Any other
+        dtype is still refused."""
         from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
+            is_valid_spec_4c,
         )
 
         p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
         spec = DirectConv4cSpec(problem=p)
+        spec.validate()
+        for arch in ("gfx942", "gfx950"):
+            self.assertTrue(is_valid_spec_4c(spec, arch=arch)[0])
+        self.assertTrue(spec.kernel_name().endswith("_bf16"))
+        bad = DirectConv4cSpec(
+            problem=DirectConvProblem(
+                N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="fp32"
+            )
+        )
         with self.assertRaises(ValueError):
-            spec.validate()
+            bad.validate()
+        self.assertFalse(is_valid_spec_4c(bad)[0])
 
     def test_depthwise_filter_limit(self):
         """Both depthwise forward variants accept filters up to 32x32 and reject
@@ -2659,8 +2672,10 @@ def _run_mfma_dgrad_pipeline(arch, problem, fprop_spec, kernels, dtype):
     }
     rt.memcpy_h2d(bufs["dy"], _u8(dY), dY.nbytes)
     rt.memcpy_h2d(bufs["w"], _u8(W), W.nbytes)
-    rt.memset(bufs["dx"], 0, dX.nbytes)
-    # Garbage in the workspaces: a correct pipeline overwrites what it reads.
+    # NaN in dX (0xFFFF is a NaN in fp16 and bf16): every output must be
+    # written. Garbage in the workspaces: a correct pipeline overwrites what
+    # it reads.
+    rt.memset(bufs["dx"], 0xFF, dX.nbytes)
     rt.memset(bufs["ws_t"], 0x7F, ws_t_bytes)
     rt.memset(bufs["ws_coa"], 0x7F, ws_coa_bytes)
 
@@ -2792,13 +2807,13 @@ class TestDirectConvMfmaDgradCorrectness(unittest.TestCase):
                 self.assertLess(rel_err, tol, f"{label} {problem.short()} {dtype}")
 
     def test_mfma_dgrad_baked(self):
-        for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
-            # One baked binary per shape: the first of each case. Each case
-            # opens with a shape the baked reorganize pass serves: one group
-            # (it offsets the W_T column by the group) and, where the weights
-            # are reorganized, whole K-atoms (it leaves the workspace tail of
-            # a partial one unwritten).
-            self._check(label, knobs, fold_k32, shapes[:1], "fp16", False)
+        # One baked binary per shape, on every shape of every case: grouped
+        # problems and partial K-atoms included. The coalesced cases
+        # (waves_k > 1, runtime_k_loop) run the baked reorganize pass, which
+        # must read W_T's per-group column and zero-fill out-of-range lanes.
+        for dtype in ("fp16", "bf16"):
+            for label, knobs, fold_k32, shapes in _MFMA_DGRAD_RTC_CASES:
+                self._check(label, knobs, fold_k32, shapes, dtype, False)
 
     def test_mfma_dgrad_runtime_channels(self):
         for dtype in ("fp16", "bf16"):

@@ -437,7 +437,10 @@ if(ROCKE_INSTALL_TESTS)
     # prefix on each, matching the other installed tests.
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py"
+        "tests/library/tests/dispatch/test_grouped_conv_dgrad_depthwise_dispatch.py"
+        "tests/library/tests/dispatch/test_grouped_conv_dgrad_dispatch_aot.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
         "tests/library/tests/test_builder_signature_contract.py"
@@ -520,6 +523,10 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_wgrad_streamk_gpu.py"
         "tests/library/tests/test_conv_dgrad_correctness.py"
         "tests/library/tests/test_direct_conv_correctness.py"
+        "tests/library/tests/test_conv_dgrad_depthwise_windowed.py"
+        "tests/library/tests/test_conv_dgrad_4c.py"
+        "tests/library/tests/test_conv_dgrad_fused_weights.py"
+        "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
         "tests/library/tests/test_attention_dense_gfx942_numeric.py"
         "tests/library/tests/test_attention_dense_gfx950_numeric.py"
         "tests/library/tests/test_attn_bf16_d128_ring.py"

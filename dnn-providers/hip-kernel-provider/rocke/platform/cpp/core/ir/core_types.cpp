@@ -704,7 +704,8 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_flag_wait_eq",
 
     "vector.undef",
-    "tile.buffer_load_f16_d16"};
+    "tile.buffer_load_f16_d16",
+    "arith.fdot2"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -973,7 +974,8 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* memref.global_flag_wait_eq */ false,
 
     /* vector.undef               */ false,
-    /* tile.buffer_load_f16_d16   */ false};
+    /* tile.buffer_load_f16_d16   */ false,
+    /* arith.fdot2                */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

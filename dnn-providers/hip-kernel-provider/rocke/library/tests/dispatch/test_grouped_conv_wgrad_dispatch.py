@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from dataclasses import replace
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
@@ -306,8 +307,16 @@ class TestGroupedDgradDispatch(unittest.TestCase):
     """
 
     def _select(self, req):
-        cands = [c for c in conv_grouped_candidates("dgrad") if c.admits(req)[0]]
-        self.assertEqual(len(cands), 1, f"expected exactly one candidate: {cands}")
+        # These tests pin the implicit-GEMM candidate's own contract. Grouped
+        # and small-channel stride-1 requests are also admitted by the
+        # higher-priority direct candidate (TestGroupedDirectDgradDispatch),
+        # so look the implicit-GEMM one up by name.
+        cands = [
+            c
+            for c in conv_grouped_candidates("dgrad")
+            if c.name == "implicit_gemm_conv_dgrad" and c.admits(req)[0]
+        ]
+        self.assertEqual(len(cands), 1, f"igemm dgrad must admit {req}: {cands}")
         return cands[0], cands[0].select_spec(req)
 
     def test_admitted_and_grid_matches_sub_gemm_tiling(self):
@@ -400,6 +409,421 @@ class TestGroupedDgradDispatch(unittest.TestCase):
         self.assertEqual(inst.tile_m, spec.tile_m)
         self.assertEqual(inst.warp_tile_n, spec.warp_tile_mn)
         inst.validate()
+
+
+def _dgrad_valid(inst):
+    from kernels.common.conv_implicit_gemm_dgrad import is_valid_dgrad_spec
+
+    return is_valid_dgrad_spec(inst, "gfx950")
+
+
+class TestGfx950DgradTileTable(unittest.TestCase):
+    """Shape-keyed tile selection of the gfx950 implicit-GEMM dgrad candidate.
+
+    The table (``_gfx950_dgrad_tile``) serves every problem the dY halo pick
+    does not take. Each pick carries explicit vector widths and the K loop
+    of the cached binary it names: the stride-1 tap-outer binary where
+    kpg % tile_k == 0, the tilde binary (per-tile reduction decode)
+    otherwise.
+    """
+
+    def _tile(self, **kw):
+        req = _dgrad(dtype="bf16", **kw)
+        r = dispatch_conv_grouped(req)
+        self.assertEqual(r.candidate.name, "implicit_gemm_conv_dgrad")
+        s = r.spec
+        inst = s.to_dgrad_spec(_problem(req))
+        ok, why = _dgrad_valid(inst)
+        self.assertTrue(ok, why)
+        self.assertEqual(s.dy_halo, 0)
+        return (s.tile_m, s.tile_n, s.tile_k, s.warp_m, s.warp_n, s.warp_tile_mn), s
+
+    def _table(self, **kw):
+        from dispatch.grouped_convolution import _gfx950_dgrad_tile
+
+        return _gfx950_dgrad_tile(_dgrad(dtype="bf16", **kw))[:6]
+
+    def test_large_grid_takes_the_128x128_tile(self):
+        # 62 M tiles x 6 N tiles = 372 workgroups.
+        self.assertEqual(
+            self._table(N=10, C=768, K=768, Hi=28, Wi=28), (128, 128, 64, 2, 2, 16)
+        )
+        # Outside the halo pick dispatch takes the table: kpg % 64 != 0 (the
+        # tilde binary), and a size-changing pad (the stride-1 tap-outer one).
+        tile, s = self._tile(N=10, C=768, K=800, Hi=28, Wi=28)
+        self.assertEqual(tile, (128, 128, 64, 2, 2, 16))
+        self.assertEqual((s.tap_outer_k, s.uniform_k_decode), (False, True))
+        tile, s = self._tile(N=10, C=768, K=768, Hi=28, Wi=28, pad_h=0, pad_w=0)
+        self.assertEqual(tile, (128, 128, 64, 2, 2, 16))
+        self.assertEqual((s.tap_outer_k, s.uniform_k_decode), (True, False))
+
+    def test_one_workgroup_per_cu_keeps_the_64x64_tile(self):
+        # 62 M tiles x 3 N tiles = 186 workgroups: below the 128x128 floor.
+        self.assertEqual(
+            self._table(N=10, C=384, K=768, Hi=28, Wi=28), (64, 64, 64, 2, 2, 32)
+        )
+
+    def test_few_channels_keep_the_64x64_tile(self):
+        # cpg = 64 < 128: a 128-wide N tile would be half empty.
+        self.assertEqual(
+            self._table(N=16, C=64, K=192, Hi=40, Wi=40), (64, 64, 64, 2, 2, 32)
+        )
+
+    def test_small_channel_tiles(self):
+        # cpg <= 32 on grids that fill the device: narrow N tiles, 256-row
+        # tiles with 32-wide K tiles for short reductions (kpg <= 32).
+        cases = (
+            ({"N": 32, "C": 12, "K": 64, "Hi": 112, "Wi": 112}, (128, 16, 64, 4, 1, 16)),
+            ({"N": 16, "C": 3, "K": 24, "Hi": 240, "Wi": 240}, (256, 16, 32, 2, 1, 16)),
+            ({"N": 16, "C": 24, "K": 24, "Hi": 120, "Wi": 120}, (256, 32, 32, 4, 1, 16)),
+            ({"N": 16, "C": 24, "K": 96, "Hi": 120, "Wi": 120}, (128, 32, 64, 4, 2, 16)),
+        )  # fmt: skip
+        for kw, want in cases:
+            with self.subTest(**kw):
+                tile, _ = self._tile(pad_h=0, pad_w=0, **kw)
+                self.assertEqual(tile, want)
+        # A grid the taller M tile would leave short of workgroups keeps the
+        # default.
+        tile, _ = self._tile(N=1, C=12, K=64, Hi=16, Wi=16, pad_h=0, pad_w=0)
+        self.assertEqual(tile, (64, 64, 64, 2, 2, 32))
+
+    def test_kpg_odd_multiple_of_32_takes_the_tilde_binary(self):
+        # kpg % 64 == 32: tile_k 64 straddles taps, so the stride-1 binary
+        # (tap-outer, no fallback loop) cannot serve it.
+        for kw in (
+            {"N": 1, "C": 64, "K": 96, "Hi": 13, "Wi": 17, "G": 1, "Y": 3},
+            {"N": 4, "C": 8192, "K": 4096, "Hi": 7, "Wi": 7, "G": 128, "Y": 3},
+            {"N": 8, "C": 512, "K": 768, "Hi": 7, "Wi": 7, "G": 8, "Y": 7},
+        ):
+            with self.subTest(**kw):
+                y = kw.pop("Y")
+                tile, s = self._tile(Y=y, X=y, pad_h=y // 2, pad_w=y // 2, **kw)
+                self.assertEqual(tile, (64, 64, 64, 2, 2, 32))
+                self.assertFalse(s.tap_outer_k)
+                self.assertTrue(s.uniform_k_decode)
+
+    def test_pointwise_runs_the_general_kernels(self):
+        # The AOT grid builds no pointwise kernel: a 1x1 problem takes the
+        # table like any other (stride-1 tap-outer binary where it applies).
+        tile, s = self._tile(
+            N=64, C=256, K=512, Hi=28, Wi=28, Y=1, X=1, pad_h=0, pad_w=0
+        )
+        self.assertEqual(tile, (128, 128, 64, 2, 2, 16))
+        self.assertTrue(s.tap_outer_k)
+
+    def test_strided_keeps_the_default_tile(self):
+        tile, s = self._tile(N=16, C=256, K=256, Hi=56, Wi=56, stride_h=2, stride_w=2)
+        self.assertEqual(tile, (64, 64, 64, 2, 2, 32))
+        self.assertFalse(s.tap_outer_k)
+        self.assertFalse(s.to_dgrad_spec(_problem(_dgrad(
+            N=16, C=256, K=256, Hi=56, Wi=56, stride_h=2, stride_w=2
+        ))).folds_sub_gemm_record)  # fmt: skip
+
+    def test_every_pick_carries_explicit_vector_widths(self):
+        for kw, want in (
+            ({"C": 64, "K": 64}, (8, 8, 8)),
+            ({"C": 48, "K": 64, "G": 16}, (4, 1, 1)),
+            ({"C": 96, "K": 40, "G": 2}, (4, 8, 8)),
+            ({"C": 64, "K": 64, "vec_size_c": 4}, (8, 4, 4)),
+        ):
+            with self.subTest(**kw):
+                s = dispatch_conv_grouped(_dgrad(**kw)).spec
+                if s.direction != "dgrad" or not hasattr(s, "vector_size_a"):
+                    self.fail(f"not an implicit-GEMM pick: {s}")
+                vecs = (s.vector_size_a, s.vector_size_b, s.vector_size_c)
+                self.assertEqual(vecs, want)
+                self.assertEqual(s.epilogue, "cshuffle" if want[2] > 1 else "default")
+
+
+class TestGfx950DgradHaloPick(unittest.TestCase):
+    """dY halo picks of the gfx950 dgrad candidate (_gfx950_dgrad_halo_pick).
+
+    Stride-1 problems with a same-size output, a square 3x3..7x7 filter (the
+    cached halo filters), Wo within the widest cached halo row and kpg % 64
+    == 0 take the staged-halo loop (dy_halo=2) on a 64x64 (small grids),
+    128x64 or 256x64 (large grids) tile, sized for the smallest cached
+    halo_max_wo covering Wo; everything else keeps the tile table.
+    """
+
+    def _pick(self, dtype="bf16", **kw):
+        req = _dgrad(dtype=dtype, **kw)
+        r = dispatch_conv_grouped(req)
+        self.assertEqual(r.candidate.name, "implicit_gemm_conv_dgrad")
+        s = r.spec
+        inst = s.to_dgrad_spec(_problem(req))
+        ok, why = _dgrad_valid(inst)
+        self.assertTrue(ok, why)
+        return s, inst
+
+    def _assert_halo(self, s, inst, tile, setprio, kpad, max_wo):
+        self.assertEqual((s.tile_m, s.tile_n, s.warp_m, s.warp_n), tile)
+        self.assertEqual(
+            (s.dy_halo, s.dy_halo_setprio, s.dy_halo_kouter_pad, s.halo_max_wo),
+            (2, setprio, kpad, max_wo),
+        )
+        self.assertTrue(s.tap_outer_k and s.lds_k_outer)
+        self.assertEqual(s.vector_size_a, 8)
+        # The dispatch spec forwards every knob and names every one it sets.
+        self.assertEqual(
+            (inst.dy_halo, inst.dy_halo_setprio, inst.dy_halo_kouter_pad),
+            (s.dy_halo, s.dy_halo_setprio, s.dy_halo_kouter_pad),
+        )
+        self.assertEqual(inst.halo_max_wo, max_wo)
+        name = s.kernel_name()
+        self.assertIn("halo2", name)
+        self.assertIn(f"hwo{max_wo}", name)
+        self.assertEqual("hprio" in name, setprio > 0)
+        self.assertEqual("hkp" in name, kpad > 0)
+
+    def _assert_table(self, kw):
+        from dispatch.grouped_convolution import _gfx950_dgrad_tile
+
+        s, _ = self._pick(**kw)
+        self.assertEqual((s.dy_halo, s.halo_max_wo), (0, 0))
+        self.assertNotIn("halo", s.kernel_name())
+        table = _gfx950_dgrad_tile(_dgrad(**{"dtype": "bf16", **kw}))
+        self.assertEqual((s.tile_m, s.tile_n), table[:2])
+
+    def test_small_grid_takes_the_64x64_tile(self):
+        s, inst = self._pick(N=8, C=256, K=256, Hi=14, Wi=14)
+        self._assert_halo(s, inst, (64, 64, 2, 2), 0, 0, 16)
+
+    def test_mid_grid_takes_the_128x64_tile(self):
+        # 128x64 workgroups in the mid band; the 32-element B pad keeps the
+        # LDS occupancy, so it is set.
+        s, inst = self._pick(N=8, C=896, K=384, Hi=15, Wi=15)
+        self._assert_halo(s, inst, (128, 64, 4, 1), 1, 32, 16)
+
+    def test_b_pad_only_where_it_keeps_the_occupancy(self):
+        # The pad would cost the 128x64 tile a workgroup per CU.
+        s, inst = self._pick(N=4, C=768, K=768, Hi=32, Wi=32)
+        self._assert_halo(s, inst, (128, 64, 4, 1), 1, 0, 32)
+
+    def test_large_grid_takes_the_256x64_tile(self):
+        s, inst = self._pick(N=8, C=896, K=256, Hi=30, Wi=30)
+        self._assert_halo(s, inst, (256, 64, 4, 1), 1, 32, 32)
+
+    def test_256x64_pad_on_large_dy_tensors(self):
+        # Where the pad costs the 256x64 tile its second workgroup per CU it
+        # is taken only for large dY tensors.
+        s, inst = self._pick(N=12, C=192, K=192, Hi=52, Wi=52)
+        self._assert_halo(s, inst, (256, 64, 4, 1), 1, 0, 64)
+        s, inst = self._pick(dtype="fp16", N=20, C=192, K=896, Hi=62, Wi=62)
+        self._assert_halo(s, inst, (256, 64, 4, 1), 1, 32, 64)
+
+    def test_halo_width_is_the_smallest_cached_bucket(self):
+        for wi, bucket in ((7, 8), (8, 8), (9, 16), (33, 48), (60, 64), (100, 128)):
+            with self.subTest(Wi=wi):
+                s, _ = self._pick(N=2, C=64, K=64, Hi=8, Wi=wi)
+                self.assertEqual((s.dy_halo, s.halo_max_wo), (2, bucket))
+        # Wider than the widest cached halo row: the tile table.
+        self._assert_table({"N": 1, "C": 64, "K": 64, "Hi": 8, "Wi": 130})
+
+    def test_grouped_takes_the_halo(self):
+        s, inst = self._pick(N=8, C=896, K=768, Hi=15, Wi=15, G=2)
+        self._assert_halo(s, inst, (128, 64, 4, 1), 1, 32, 16)
+
+    def test_not_applied(self):
+        # 1x1, stride 2, a size-changing pad, kpg % 64 != 0, an uncached
+        # filter (non-square, one-dimensional, 9x9), odd cpg (no K-outer B).
+        for kw in (
+            {"N": 32, "C": 256, "K": 1024, "Y": 1, "X": 1, "pad_h": 0, "pad_w": 0},
+            {"N": 16, "C": 256, "K": 256, "Hi": 50, "Wi": 50, "stride_h": 2,
+             "stride_w": 2},
+            {"N": 8, "C": 256, "K": 256, "Hi": 28, "Wi": 28, "pad_h": 0, "pad_w": 0},
+            {"N": 1, "C": 64, "K": 96, "Hi": 13, "Wi": 17},
+            {"N": 8, "C": 256, "K": 256, "Y": 3, "X": 5, "pad_h": 1, "pad_w": 2},
+            {"N": 8, "C": 256, "K": 256, "Y": 3, "X": 1, "pad_h": 1, "pad_w": 0},
+            {"N": 8, "C": 256, "K": 256, "Y": 9, "X": 9, "pad_h": 4, "pad_w": 4},
+            {"N": 8, "C": 192, "K": 256, "G": 64},
+        ):  # fmt: skip
+            with self.subTest(**kw):
+                self._assert_table(kw)
+
+    def test_wide_images_fall_back(self):
+        # A halo that leaves one workgroup per CU on a grid that needs more
+        # than one per CU falls back (128x64 if that keeps two per CU, else
+        # the tile table).
+        s, inst = self._pick(N=1, C=192, K=192, Hi=90, Wi=90)
+        self._assert_halo(s, inst, (128, 64, 4, 1), 1, 32, 96)
+        self._assert_table({"N": 4, "C": 128, "K": 128, "Hi": 128, "Wi": 128})
+
+    def test_7x7_small_grid_takes_the_64x64_tile(self):
+        s, inst = self._pick(N=2, C=64, K=64, Hi=24, Wi=24, Y=7, X=7, pad_h=3, pad_w=3)
+        self._assert_halo(s, inst, (64, 64, 2, 2), 0, 0, 32)
+
+    def test_pick_is_memoized_per_request(self):
+        from dispatch.grouped_convolution import _gfx950_dgrad_pick
+
+        req = _dgrad(dtype="bf16", N=8, C=256, K=256, Hi=14, Wi=14)
+        tile, knobs = _gfx950_dgrad_pick(req)
+        knobs["dy_halo"] = 0  # the caller's copy; the cached pick is unchanged
+        self.assertEqual(
+            _gfx950_dgrad_pick(req), (tile, {"dy_halo": 2, "halo_max_wo": 16})
+        )
+
+
+class TestGroupedDirectDgradDispatch(unittest.TestCase):
+    """Selection of the gfx950 direct-MFMA dgrad candidate.
+
+    Stride-1 dgrad with cpg/kpg multiples of 4 up to 32, 'same'-padded square
+    filters up to 7x7 (groups == 1 too), outside the measured implicit-GEMM
+    corners, routes to one cached direct kernel: the batched 4x4x4 kernel for
+    cpg = kpg = 4 (16-group multiples), the fused generic kernel otherwise.
+    Everything else keeps the implicit-GEMM candidate.
+    """
+
+    _DIRECT = "direct_mfma_conv_dgrad"
+    _IGEMM = "implicit_gemm_conv_dgrad"
+
+    @staticmethod
+    def _grouped(**kw):
+        base = {
+            "N": 8,
+            "C": 128,
+            "K": 128,
+            "Hi": 12,
+            "Wi": 12,
+            "G": 32,
+            "dtype": "bf16",
+        }
+        base.update(kw)
+        return _dgrad(**base)
+
+    def _pick(self, req):
+        r = dispatch_conv_grouped(req)
+        return r.candidate.name, r
+
+    def test_routes_with_cached_knobs(self):
+        # (N, C, K, H, W, Y, G) -> (variant, knob subset)
+        cases = {
+            (64, 128, 128, 28, 28, 3, 32): (
+                "direct_grouped_dgrad_4c",
+                {"block_q": 8, "block_groups": 16, "stage_rows": True},
+            ),
+            (64, 256, 256, 12, 12, 1, 64): (
+                "direct_grouped_dgrad_4c",
+                {"block_q": 4, "block_groups": 16, "stage_rows": True},
+            ),
+            (64, 384, 384, 13, 13, 3, 24): (
+                "direct_grouped_dgrad_fused",
+                {"block_q": 16, "block_groups": 2, "block_h": 16, "row_exit": True,
+                 "fold_k32": False, "waves_per_eu": 4, "xcd_tiles": True},
+            ),
+            (64, 384, 384, 13, 13, 3, 12): (
+                "direct_grouped_dgrad_fused",
+                {"block_q": 16, "block_groups": 1, "block_h": 16, "fold_k32": True,
+                 "waves_per_eu": 0},
+            ),
+            (32, 256, 256, 50, 50, 5, 16): (
+                "direct_grouped_dgrad_fused",
+                {"block_groups": 1, "block_h": 4},
+            ),
+        }  # fmt: skip
+        for (n, c, k, h, w, y, g), (variant, knobs) in cases.items():
+            with self.subTest(shape=(n, c, k, h, w, y, g)):
+                req = self._grouped(
+                    N=n, C=c, K=k, Hi=h, Wi=w, Y=y, X=y, pad_h=y // 2, pad_w=y // 2,
+                    G=g,
+                )  # fmt: skip
+                name, r = self._pick(req)
+                self.assertEqual(name, self._DIRECT)
+                self.assertEqual(r.spec.variant, variant)
+                got = r.spec.knob_dict()
+                self.assertEqual({k: got.get(k) for k in knobs}, knobs)
+                # Fused weights staged through LDS (gfx950 transpose reads).
+                self.assertTrue(got["dgrad_weights_lds"])
+
+    def test_dense_small_channels_take_direct(self):
+        name, r = self._pick(self._grouped(N=32, C=16, K=32, Hi=50, Wi=50, G=1))
+        self.assertEqual(name, self._DIRECT)
+        self.assertEqual(r.spec.variant, "direct_grouped_dgrad_fused")
+
+    def test_both_candidates_admit_and_direct_outranks(self):
+        req = self._grouped()
+        names = [c.name for c in conv_grouped_candidates("dgrad") if c.admits(req)[0]]
+        self.assertEqual(names, [self._DIRECT, self._IGEMM])
+
+    def test_out_of_region_requests_keep_igemm(self):
+        cases = {
+            "dense_wide": {"C": 64, "K": 64, "G": 1},
+            "stride2": {"stride_h": 2, "stride_w": 2},
+            "dilation2": {"dilation_h": 2, "dilation_w": 2, "pad_h": 2, "pad_w": 2},
+            "cpg64": {"C": 2048, "K": 2048, "G": 32},
+            "cpg6_not_vec4": {"C": 192, "K": 128, "G": 32},
+            "kpg6_not_vec4": {"C": 128, "K": 192, "G": 32},
+            "nonsquare_filter": {"Y": 3, "X": 1, "pad_w": 0},
+            "asym_pad": {"pad_h": 1, "pad_w": 0},
+            "pad0_not_same": {"pad_h": 0, "pad_w": 0},
+            "filter9x9": {"N": 96, "Y": 9, "X": 9, "pad_h": 4, "pad_w": 4},
+            "7x7_over_the_register_budget": {"C": 768, "K": 768, "Y": 7, "X": 7,
+                                             "pad_h": 3, "pad_w": 3},
+        }  # fmt: skip
+        direct = next(
+            c for c in conv_grouped_candidates("dgrad") if c.name == self._DIRECT
+        )
+        for label, kw in cases.items():
+            with self.subTest(case=label):
+                req = self._grouped(**kw)
+                ok, why = direct.admits(req)
+                self.assertFalse(ok, f"{label}: direct must decline ({why})")
+                name, _ = self._pick(req)
+                self.assertEqual(name, self._IGEMM, label)
+
+    def test_policy_declines_where_igemm_measured_faster(self):
+        from dispatch.grouped_conv_dgrad_direct import POLICY_PREFIX
+
+        cases = {
+            "tiny_3x3_image": (8192, 64, 64, 3, 3, 3, 2),
+            "W5_wide_output": (2048, 128, 128, 5, 5, 3, 4),
+            "1x1_wide_reduction": (64, 256, 256, 28, 28, 1, 8),
+            "small_grid_4ch": (2, 64, 64, 12, 12, 3, 16),
+        }
+        direct = next(
+            c for c in conv_grouped_candidates("dgrad") if c.name == self._DIRECT
+        )
+        for label, (n, c, k, h, w, y, g) in cases.items():
+            with self.subTest(case=label):
+                req = self._grouped(
+                    N=n, C=c, K=k, Hi=h, Wi=w, Y=y, X=y, pad_h=y // 2, pad_w=y // 2,
+                    G=g,
+                )  # fmt: skip
+                ok, why = direct.admits(req)
+                self.assertFalse(ok)
+                self.assertIn(POLICY_PREFIX, why)
+
+    def test_4c_needs_groups_multiple_of_16(self):
+        name, r = self._pick(self._grouped(N=64, C=96, K=96, Hi=28, Wi=28, G=24))
+        self.assertEqual(name, self._DIRECT)
+        self.assertEqual(r.spec.variant, "direct_grouped_dgrad_fused")
+
+    def test_explanation_names_the_variant_and_ignores_vec_size_c(self):
+        r = dispatch_conv_grouped(self._grouped(vec_size_c=2))
+        text = "\n".join(r.explanation)
+        self.assertIn("variant=direct_grouped_dgrad_fused", text)
+        self.assertIn("vec_size_c=2 ignored", text)
+
+    def test_other_arches_never_see_direct(self):
+        for arch in ("gfx942", "gfx1250"):
+            req = replace(self._grouped(), arch=arch)
+            for c in conv_grouped_candidates("dgrad"):
+                if c.name.startswith("direct"):
+                    self.assertFalse(c.admits(req)[0], (arch, c.name))
+
+    def test_grid_and_block_are_the_kernels(self):
+        from dispatch.grouped_convolution import _direct_problem
+        from kernels.common.conv_direct_grouped import direct_launch_geometry
+
+        req = self._grouped(N=8, C=256, K=256, Hi=20, Wi=20, G=16)
+        r = dispatch_conv_grouped(req)
+        grid, block = direct_launch_geometry(r.spec.instance(_direct_problem(req)))
+        self.assertEqual((r.grid, r.block), (grid, block))
+
+    def test_kernel_name_separates_knobs(self):
+        a = dispatch_conv_grouped(self._grouped(G=32)).spec
+        b = dispatch_conv_grouped(self._grouped(C=256, K=256, G=16)).spec
+        self.assertNotEqual(a.knobs, b.knobs)
+        self.assertNotEqual(a.kernel_name(), b.kernel_name())
 
 
 class TestGfx1250WgradKOuterReachable(unittest.TestCase):

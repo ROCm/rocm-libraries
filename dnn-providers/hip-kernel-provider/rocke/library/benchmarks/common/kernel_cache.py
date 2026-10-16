@@ -141,6 +141,22 @@ def comgr_input_key(comgr_input) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Identity fields added after the first cache format, with the default at
+# which KernelIdentity.stable_hash leaves each out (so every identity that
+# predates a field keeps its hash). A new configuration field belongs here.
+_POST_V1_HASH_DEFAULTS: dict[str, object] = {
+    # Two-stage scratch slabs ("no scratch").
+    "ws_replicas": 0,
+    "prefetch_addr": False,
+    "uniform_k_decode": False,
+    "tap_outer_k": False,
+    "dy_halo": 0,
+    "dy_halo_setprio": 0,
+    "dy_halo_kouter_pad": 0,
+    "halo_max_wo": 0,
+}
+
+
 @dataclass(frozen=True)
 class KernelIdentity:
     """Compile-time tuple that uniquely identifies an AOT kernel.
@@ -214,6 +230,17 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
+    # dgrad only (DgradConvSpec.tap_outer_k): the stride-1 tap-outer K loop.
+    # Serves only problems whose kpg is a multiple of tile_k (see
+    # supports_problem). Left out of the hash while False.
+    tap_outer_k: bool = False
+    # dgrad only (DgradConvSpec.dy_halo / dy_halo_setprio /
+    # dy_halo_kouter_pad): the dY halo mode of the tap-outer K loop and its
+    # knobs. A halo binary also bakes its filter (filter_h/w) and the widest
+    # Wo it serves (halo_max_wo, below). Left out of the hash at 0.
+    dy_halo: int = 0
+    dy_halo_setprio: int = 0
+    dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # ---- capability: bounds which problems this binary can serve ----
@@ -244,6 +271,10 @@ class KernelIdentity:
     # Dgrad only: the largest tilde sub-GEMM count the record table (and the
     # binary search's runtime trip count) was built to support.
     max_sub_gemms: int = 0
+    # Dgrad dY halo only (DgradConvSpec.halo_max_wo): the staged halo is
+    # sized for this output width, so the binary serves Wo <= halo_max_wo.
+    # 0 = not a halo binary. Left out of the hash at 0.
+    halo_max_wo: int = 0
     # async_dma only: elements per DRAM->LDS chunk of the A and B loaders. The
     # width is picked from the build-time cpg so a chunk never straddles a
     # filter position, and is baked into the ISA -- a binary is only correct
@@ -280,14 +311,12 @@ class KernelIdentity:
         across Python versions (sorted JSON keys, no randomization).
         """
         fields = asdict(self)
-        # Left out at its "no scratch" value so identities that predate the
-        # field keep their hash (and their cache entries).
-        if not fields["ws_replicas"]:
-            del fields["ws_replicas"]
-        if not fields["prefetch_addr"]:
-            del fields["prefetch_addr"]
-        if not fields["uniform_k_decode"]:
-            del fields["uniform_k_decode"]
+        # Fields added after the first cache format are left out at their
+        # defaults, so identities that predate them keep their hash (and
+        # their cache entries).
+        for name, default in _POST_V1_HASH_DEFAULTS.items():
+            if fields[name] == default:
+                del fields[name]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -816,6 +845,38 @@ class KernelCache:
                     "depthwise dgrad (cpg == 1) is not supported by the "
                     "implicit-GEMM grouped path"
                 )
+            # The tap-outer K loop has no fallback: every K tile must lie
+            # inside one filter tap, and the tap must be the plain (y, x).
+            # The stride/dilation fields above already pin a stride-1 binary;
+            # this states the rule for the loop itself.
+            if identity.tap_outer_k:
+                strided = any(
+                    int(getattr(problem, a, 1)) != 1 for a in ("sH", "sW", "dH", "dW")
+                )
+                if strided:
+                    return False, "tap_outer_k serves stride 1 / dilation 1 only"
+                if kpg % max(1, identity.tile_k):
+                    return False, (
+                        f"tap_outer_k needs kpg % tile_k == 0; kpg={kpg}, "
+                        f"tile_k={identity.tile_k}"
+                    )
+            # The dY halo loop shifts the linear pixel index by whole output
+            # rows, so the output must be the input's size, and its LDS tile
+            # is sized for halo_max_wo. The filter (filter_h/w, baked) is
+            # matched above; with stride 1 and Ho == Hi it fixes the pad.
+            if identity.dy_halo:
+                ho = int(getattr(problem, "Ho", -1))
+                wo = int(getattr(problem, "Wo", -1))
+                if (ho, wo) != (
+                    int(getattr(problem, "Hi", -2)),
+                    int(getattr(problem, "Wi", -2)),
+                ):
+                    return False, "dy_halo needs Ho == Hi and Wo == Wi"
+                if wo > identity.halo_max_wo:
+                    return False, (
+                        f"dy_halo binary serves Wo <= {identity.halo_max_wo}, "
+                        f"problem has Wo={wo}"
+                    )
 
         if not identity.is_direct:
             ok, why = self._grid_fits(identity, problem)
