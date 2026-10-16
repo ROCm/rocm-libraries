@@ -104,9 +104,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.library-audit == 'true'
     uses: ./.github/workflows/component-ci-library-audit.yml
-    with:
-      docker_image: ${{ needs.changes.outputs.docker-image }}
-      linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   component-ci-summary:
     name: "Component CI Summary"
