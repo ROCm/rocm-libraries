@@ -930,7 +930,10 @@ def cfgs_gfx1201_wmma_fmha_fwd():
     # by dtype. Without the bf16 rows a dropped or misparsed ``dtype`` in the
     # binding would still report VALIDATED on this arch, because fp16 is what an
     # unset dtype falls back to.
-    return cfgs_gfx1151_wmma_fmha_fwd()[:12]
+    #
+    # The gfx1151 list holds (config, arch) pairs. This family sets its arch in
+    # FAMILIES, so it takes plain configs: keep each config, drop its arch.
+    return [config for config, _arch in cfgs_gfx1151_wmma_fmha_fwd()[:12]]
 
 
 def cfgs_attention_unified():
