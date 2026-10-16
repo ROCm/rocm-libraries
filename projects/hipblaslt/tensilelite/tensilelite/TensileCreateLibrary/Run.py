@@ -36,6 +36,7 @@ import subprocess
 import sys
 import pickle
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
@@ -769,14 +770,14 @@ def writeSolutionsAndKernelsTCL(
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = disableAsmComments
 
-    memcompress = len(uniqueAsmKernels) > 10000
+    # No in-memory compression of the source: it is written to disk in the
+    # worker that generated it and never returned to the parent.
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
-        compress = memcompress,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -785,41 +786,50 @@ def writeSolutionsAndKernelsTCL(
             processed_kernel = unaryProcessKernelSource(kernel)
             written_kernel = unaryWriteAssembly(processed_kernel)
             assembled_kernel = assemble(written_kernel)
-            return processed_kernel
+            # The source is on disk (and assembled) by now; don't ship it back
+            # to the parent, which only needs the post-codegen kernel info.
+            return processed_kernel._replace(src=None, header=None)
         return composed_function
-
-    results = ParallelMap2(
-        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-        uniqueAsmKernels,
-        "Generating assembly kernels",
-        multiArg=False,
-        return_as="list"
-    )
-
-    buildAssemblyCodeObjectFiles(
-        asmToolchain.linker,
-        asmToolchain.bundler,
-        asmKernels,
-        destRoot,
-        assemblyTmpPath,
-        compress,
-        archNames=archNames,
-    )
 
     # The basename has to stay "Kernels": the emitted code object is named from
     # it, and the runtime opens Kernels.so-000-<arch>.hsaco by that name.
     writeHelpers(buildTmpPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = buildTmpPath / "Kernels.cpp"
 
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destRoot,
-        objectTmpPath,
-        buildTmpPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+    # The helper kernels in Kernels.cpp do not depend on the assembly kernels,
+    # so compile them (one long single-threaded clang job) while the assembly
+    # kernels are being generated instead of afterwards.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        srcCodeObjects = executor.submit(
+            buildSourceCodeObjectFiles,
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destRoot,
+            objectTmpPath,
+            buildTmpPath,
+            srcKernelFile,
+            cmdlineArchs,
+        )
+
+        results = ParallelMap2(
+            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+            uniqueAsmKernels,
+            "Generating assembly kernels",
+            multiArg=False,
+            return_as="list"
+        )
+
+        buildAssemblyCodeObjectFiles(
+            asmToolchain.linker,
+            asmToolchain.bundler,
+            asmKernels,
+            destRoot,
+            assemblyTmpPath,
+            compress,
+            archNames=archNames,
+        )
+
+        srcCodeObjects.result()
 
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
