@@ -175,6 +175,8 @@ namespace rocisa
         {
             size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
             size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
+            // f8f6f4 has no f16-accumulate form; f16 accumulation keeps the fp8/bf8 opcodes.
+            bool f8f6f4 = (variant[2] >= f8f6f4_k) && (accType != InstType::INST_F16);
 
             switch(iType)
             {
@@ -195,13 +197,13 @@ namespace rocisa
             case InstType::INST_XF32:
                 return "xf32";
             case InstType::INST_F8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_fp8";
+                return f8f6f4 ? "f8f6f4" : "fp8_fp8";
             case InstType::INST_BF8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_bf8";
+                return f8f6f4 ? "f8f6f4" : "bf8_bf8";
             case InstType::INST_F8_BF8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_bf8";
+                return f8f6f4 ? "f8f6f4" : "fp8_bf8";
             case InstType::INST_BF8_F8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_fp8";
+                return f8f6f4 ? "f8f6f4" : "bf8_fp8";
             case InstType::INST_F6:
             case InstType::INST_BF6:
             case InstType::INST_F6_B6:
@@ -506,6 +508,10 @@ namespace rocisa
                     break;
                 default:
                     break;
+                }
+                if(typeConvert(instType) != "f8f6f4")
+                {
+                    inputPermuteStr = "";
                 }
                 if(forceScaledWMMA())
                 {

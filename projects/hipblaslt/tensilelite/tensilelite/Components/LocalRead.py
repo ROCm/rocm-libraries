@@ -25,15 +25,37 @@
 from rocisa.code import Module
 from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifiers, ContinuousRegister, VCC
 from rocisa.enum import HighBitSel, SelectBit, InstType
-from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
+from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, VAndB32, VAndOrB32, VLShiftLeftB32, \
                             VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
                             VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, VSubF32, VSwapB32, MFMAInstruction, \
-                            VCmpClassF32, VCndMaskB32, \
+                            VCmpClassF32, VCndMaskB32, VCvtScalePk8FP4toF16, VCvtScalePk8F16toFP8, \
                             ECvtPkFP8toF32, ECvtF32toF16
 
 from ..Component import LocalRead
+from ..SolutionStructs.Problem import isF16Accumulation
 
 from math import ceil
+
+def fp4ToFp8Decode(src, dst0, dst1, tmp0, tmp1, sel, table):
+    """Eight e2m1 values in src to eight e4m3 bytes in dst0 (elements 0-3) and dst1 (4-7), for targets
+    without an fp4 convert. v_perm_b32 looks each magnitude up in an eight-byte table, whose high half is
+    a literal and low half is in table; even and odd nibbles are looked up separately, their sign bits
+    moved to bit 7, and the two results interleaved. src is read before dst0 or dst1 is written."""
+    return [
+        VMovB32(dst=table, src=hex(0x3c383000), comment="e4m3 of e2m1 magnitudes 0-3"),
+        VAndB32(dst=tmp0, src0=hex(0x07070707), src1=src, comment="even e2m1 magnitudes"),
+        VPermB32(dst=tmp0, src0=hex(0x4c484440), src1=table, src2=tmp0, comment="even e4m3 magnitudes"),
+        VLShiftLeftB32(dst=tmp1, shiftHex=4, src=src, comment="even signs to bit 7"),
+        VAndOrB32(dst=tmp0, src0=tmp1, src1=hex(0x80808080), src2=tmp0, comment="even e4m3"),
+        VLShiftRightB32(dst=tmp1, shiftHex=4, src=src, comment="odd nibbles"),
+        VAndB32(dst=tmp1, src0=hex(0x07070707), src1=tmp1, comment="odd e2m1 magnitudes"),
+        VPermB32(dst=tmp1, src0=hex(0x4c484440), src1=table, src2=tmp1, comment="odd e4m3 magnitudes"),
+        VAndOrB32(dst=tmp1, src0=src, src1=hex(0x80808080), src2=tmp1, comment="odd e4m3"),
+        VMovB32(dst=sel, src=hex(0x05010400), comment="interleave bytes 0-1"),
+        VPermB32(dst=dst0, src0=tmp1, src1=tmp0, src2=sel, comment="e4m3 0-3"),
+        VOrB32(dst=sel, src0=hex(0x02020202), src1=sel, comment="interleave bytes 2-3"),
+        VPermB32(dst=dst1, src0=tmp1, src1=tmp0, src2=sel, comment="e4m3 4-7"),
+    ]
 
 class LocalReadVALU(LocalRead):
     kernel = {"EnableMatrixInstruction": False}
@@ -844,7 +866,12 @@ class LocalReadMFMA(LocalRead):
         else:
             raise Exception(f"unsupport tc %s{tc}")
 
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        cvtFP4 = kernel["ConvertAfterDS"] and tc in ("A", "B") and kernel["ProblemType"]["DataType%s"%tc].isFloat4()
+        if kernel["ConvertAfterDS"] and isF16Accumulation(kernel["ProblemType"]):
+            # f16 accumulation converts whole fp4 vectors, so LDS is read like an unconverted operand.
+            numElementPerRead = int(blockWidth * bpr / tP["bpeDS"]) // lrvwTile
+        else:
+            numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
@@ -1287,7 +1314,23 @@ class LocalReadMFMA(LocalRead):
                                                 packCodeT.add(VSwapB32(dst=swapVgpr1, src=swapVgpr2, comment=commentStr))
 
                                 if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
-                                    if tP["bpe"] == 2 and tP["bpeDS"] == 4:
+                                    if cvtFP4:
+                                        # fp4 register i expands into fp8 registers 2i and 2i+1; go from the last
+                                        # register so that no fp4 source is overwritten before it is converted.
+                                        for offset in reversed(range(numVgpr)):
+                                            src = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx+offset))
+                                            dst = "Valu%s_X%u_I%u+%%u"%(tc, bufferIdx, iui)
+                                            if writer.states.archCaps.get("HasCvtScalePk8FP4", True):
+                                                # Each half-wave reads its scale from its own byte, so every byte holds 1.0.
+                                                packCodeT.add(VCvtScalePk8FP4toF16(dst=vgpr("CvtTemp", 4), src=src, \
+                                                              scale=0x7f7f7f7f, comment="convert fp4 to f16"))
+                                                packCodeT.add(VCvtScalePk8F16toFP8(dst=vgpr(dst%(valuiIdx+2*offset), 2), \
+                                                              src=vgpr("CvtTemp", 4), scale=1.0, comment="convert f16 to fp8"))
+                                            else:
+                                                for inst in fp4ToFp8Decode(src, vgpr(dst%(valuiIdx+2*offset)), vgpr(dst%(valuiIdx+2*offset+1)), \
+                                                                           vgpr("CvtTemp"), vgpr("CvtTemp+1"), vgpr("CvtTemp+2"), vgpr("CvtTemp+3")):
+                                                    packCodeT.add(inst)
+                                    elif tP["bpe"] == 2 and tP["bpeDS"] == 4:
                                         assert 0 # Doesn't support ConvertAfterDS
                                     else:
                                         highBitsForHalf = False

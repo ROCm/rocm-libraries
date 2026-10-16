@@ -7294,7 +7294,7 @@ class KernelWriterAssembly(KernelWriter):
       numVgprPackTemp = 1
     numVgprCvtTemp = 0
     if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
-      numVgprCvtTemp = 2
+      numVgprCvtTemp = self.numVgprCvtTemp(kernel)
     if numVgprPackTemp + numVgprCvtTemp > 0:
       vgprBaseMisc = self.vgprPool.checkOut(numVgprPackTemp + numVgprCvtTemp, tag="tailLoopAllocValuVgpr_vgprBaseMisc")
       if numVgprPackTemp > 0:
@@ -9498,8 +9498,8 @@ class KernelWriterAssembly(KernelWriter):
     numRegistersInMXSB = kernel["ProblemType"]["DataTypeMXSB"].numRegisters() if kernel["ProblemType"]["MXBlockB"] else 0
     numRegistersOut  = kernel["MIRegPerOut"]
     loopCounterName  = self.loopCounterName(kernel, self.states.unrollIdx)
-    accs_per_wave    = kernel["MatrixInstM"] * kernel["MatrixInstN"] * kernel["MatrixInstB"] \
-                       // self.states.kernel["WavefrontSize"] * numRegistersOut
+    accs_per_wave    = int(kernel["MatrixInstM"] * kernel["MatrixInstN"] * kernel["MatrixInstB"] \
+                       // self.states.kernel["WavefrontSize"] * numRegistersOut)
     dividerFortidInK = kernel["MatrixInstN"] * kernel["MatrixInstB"]
 
     matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
@@ -16016,12 +16016,15 @@ class KernelWriterAssembly(KernelWriter):
     vgprPermAddr: int = -1        # per-lane ds_bpermute byte address (partner_lane*4); constant for the whole batch
     vgprLaneGroupDelta: int = -1  # per-lane lane_group*8: M-row byte offset added to addrDVgpr for the dwordx4 store
     vgprAddrScratch: int = -1     # per-store scratch: holds (addrDVgpr scaled + lane_group*8) without modifying addrDVgpr
+    vgprF32Pair: int = -1         # two vgprs: a packed f16 pair widened to f32 (f16 accumulation)
+    vgprAlphaBeta: int = -1       # two vgprs: alpha and beta widened to f32 (f16 accumulation)
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
     vgprFp8Temp: int   = -1
     vgprFp8Min: int    = -1
     vgprFp8Max: int    = -1
+    vgprFp8F32Pair: int = -1     # two vgprs: a packed f16 pair widened to f32 (f16 accumulation)
 
   class BF8CVTVgprStruct(NamedTuple):
     vgprBF8NanInf: int = -1
@@ -16693,6 +16696,15 @@ class KernelWriterAssembly(KernelWriter):
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr2")
         cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
                                               vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3))
+      elif kernel["ProblemType"]["DestDataType"].isFloat8() and hasPackedAccumulators(kernel):
+        cvtVgpr = self.vgprPool.checkOut(6, tag="globalWriteElements_cvtVgpr2")
+        cvtVgprStruct = self.FP8CVTVgprStruct(vgprFp8Temp=cvtVgpr, vgprFp8NanInf=(cvtVgpr+1), \
+                                              vgprFp8Min=(cvtVgpr+2), vgprFp8Max=(cvtVgpr+3), vgprFp8F32Pair=(cvtVgpr+4))
+      elif kernel["ProblemType"]["DestDataType"].isBFloat16() and hasPackedAccumulators(kernel):
+        cvtVgpr = self.vgprPool.checkOut(8, tag="globalWriteElements_cvtVgpr")
+        cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
+                                               vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
+                                               vgprF32Pair=(cvtVgpr+4), vgprAlphaBeta=(cvtVgpr+6))
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         cvtVgpr = self.vgprPool.checkOut(4, tag="globalWriteElements_cvtVgpr3")
         cvtVgprStruct = self.BF8CVTVgprStruct(vgprBF8Temp=cvtVgpr, vgprBF8NanInf=(cvtVgpr+1), \
@@ -17012,7 +17024,8 @@ class KernelWriterAssembly(KernelWriter):
       elif miwt0 > 1 and numElementsPerBatch >= miwt0:
         numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
 
-    assert(self.states.c.numVgprValu % gwvw == 0) # sanity check
+    numValuCElements = self.states.c.numVgprValu * 2 if hasPackedAccumulators(kernel) else self.states.c.numVgprValu
+    assert(numValuCElements % gwvw == 0) # sanity check
 
     numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
 
@@ -17277,6 +17290,8 @@ class KernelWriterAssembly(KernelWriter):
         codeAccVgprRead = deepcopy(self.codes.accVgprRead) if self.states.serializedStore else None
         mulAlpha = self.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else self.codes.mulAlphaOther
         codeMulAlpha = deepcopy(mulAlpha) if self.states.serializedStore else None
+        if hasPackedAccumulators(kernel) and gwvw == 1 and self.states.serializedStore:
+          codeAccVgprRead, codeMulAlpha = packedAccSingles(kernel, mulAlpha=False), packedAccSingles(kernel, mulAlpha=True)
 
         self.alphaBeforeLoadC = False
         if kernel["MIArchVgpr"] and applyAlpha and not kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
@@ -17294,6 +17309,9 @@ class KernelWriterAssembly(KernelWriter):
             codeMulAlpha = None
         else:
           codeMulAlpha = None
+        if codeMulAlpha is not None and hasPackedAccumulators(kernel) and kernel["ProblemType"]["DestDataType"].isBFloat16():
+          # bf16 output multiplies by alpha in f32 (PackData_F16toBF16); the MI outputs only move here
+          codeMulAlpha = packedAccSingles(kernel, mulAlpha=False) if gwvw == 1 else deepcopy(self.codes.accVgprRead)
 
         biasLocalBarrierInit = False
         # If LSU, the VGPRs are from LSU reduction.
@@ -17993,6 +18011,10 @@ class KernelWriterAssembly(KernelWriter):
       elif dataType.isInt8() or dataType.isAnyFloat8() or dataType.isAnyBFloat8() or dataType.isAnyFloat8BFloat8() or dataType.isAnyBFloat8Float8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
+              addr0, addr1, globalOffset, soffset=wsOffset, \
+              glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
+        elif hasPackedAccumulators(kernel):
+          module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx//2, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
               glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
     return module

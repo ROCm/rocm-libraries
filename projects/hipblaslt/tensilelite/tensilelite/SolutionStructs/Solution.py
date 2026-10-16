@@ -73,7 +73,7 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_ABSOLUTE, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
-from .Problem import ProblemType
+from .Problem import ProblemType, isF16Accumulation
 from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
@@ -869,6 +869,9 @@ class Solution(collections.abc.Mapping):
         outputVectorWidth, RegsPerOut = 1, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
         outputVectorWidth, RegsPerOut = 8, 1
+        # The f16 accumulators of a 16x16 WMMA pack two elements per VGPR.
+        if isaInfoMap[isa].asmCaps['HasWMMA_V3'] and isF16Accumulation(state["ProblemType"]):
+          RegsPerOut = 0.5
     else:
       print("WARNING: unexpect code flow")
 
@@ -3220,7 +3223,49 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "Archs with HasEccHalf require AF0EM%2==0 except for HPA kernels")
           return
 
-    if state["ConvertAfterDS"]:
+    if isF16Accumulation(state["ProblemType"]):
+      ptype = state["ProblemType"]
+      asmCaps = isaInfoMap[state["ISA"]].asmCaps
+      if not (state["EnableMatrixInstruction"] and asmCaps["HasWMMA_V3"]):
+        reject(state, printRejectionReason, "f16 accumulation requires the gfx1250 f16-accumulate fp8 WMMA")
+        return
+      if state["MatrixInstM"] != 16 or state["MatrixInstN"] != 16 or state["MatrixInstK"] not in (64, 128):
+        reject(state, printRejectionReason, "f16 accumulation supports only the 16x16x64 and 16x16x128 WMMA")
+        return
+      if state["WavefrontSize"] != 32:
+        reject(state, printRejectionReason, "f16 accumulation supports only wave32")
+        return
+      if state["GlobalSplitU"] != 1 or state["LocalSplitU"] > 1 \
+          or state["AdaptiveGemmGSUA"] or state["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+        reject(state, printRejectionReason, "f16 accumulation does not support GlobalSplitU, AdaptiveGemmGSUA, MultipleBufferSingleKernel, LocalSplitU or StreamK")
+        return
+      if state["StoreRemapVectorWidth"] or state["CompactLoopStore"] or state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "f16 accumulation does not support StoreRemapVectorWidth, CompactLoopStore or UseSubtileImpl")
+        return
+      if ptype["UseBias"] or ptype["ActivationType"] != 'none' or ptype["UseE"] or ptype["Gradient"] \
+          or ptype["UseScaleAB"] or ptype["UseScaleCD"] or ptype["UseScaleAlphaVec"] or ptype["OutputAmaxD"] \
+          or ptype["UseGateResidual"] or ptype["FusedGemmA2A"] or ptype["Sparse"] \
+          or ptype["MXBlockA"] or ptype["MXBlockB"] or ptype["StochasticRounding"]:
+        reject(state, printRejectionReason, "f16 accumulation supports only alpha/beta in the epilogue")
+        return
+      for tc in ("A", "B"):
+        if ptype["DataType%s"%tc].isFloat4():
+          if not state["ConvertAfterDS"]:
+            reject(state, printRejectionReason, "f16 accumulation converts F4 to F8 after the LDS read and needs ConvertAfterDS")
+            return
+          if ptype["TLU%s"%tc] or not state["UnrollMajorLDS%s"%tc] \
+              or state["DirectToVgpr%s"%tc] or state["DirectToLds%s"%tc]:
+            reject(state, printRejectionReason, "f16 accumulation reads F4 %s K-contiguous from unroll-major LDS only"%tc)
+            return
+      state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
+      # f16 accumulation is order dependent and the reference accumulates K from 0 upward.
+      _disableRuntimeStaggerU(state)
+
+    if state["ConvertAfterDS"] and isF16Accumulation(state["ProblemType"]):
+      if not (state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()):
+        reject(state, printRejectionReason, "f16 accumulation uses ConvertAfterDS only for F4 inputs")
+        return
+    elif state["ConvertAfterDS"]:
       if (state["ProblemType"]["DataType"].isHalf() == False) and (state["ProblemType"]["DataType"].isBFloat16() == False):
           reject(state, printRejectionReason, "ConvertAfterDS only support DataType half")
           return
@@ -5200,6 +5245,13 @@ class Solution(collections.abc.Mapping):
       # incompatible VectorWidthA into a rejection.
       state["StoreVectorWidth"] = max(state["StoreVectorWidth"], 2)
 
+    # Edge stores halve StoreVectorWidth. Only a power of two keeps every width either one element
+    # or whole VGPRs; 3, 5 or 7 f16 values have no store instruction.
+    svw = state["StoreVectorWidth"]
+    if state["EnableMatrixInstruction"] and state["MIRegPerOut"] == 0.5 and svw & (svw - 1):
+      reject(state, printRejectionReason, "f16 accumulators hold two elements per VGPR and need a power-of-two StoreVectorWidth")
+      return
+
     if state["EnableMatrixInstruction"] and not state["UseSubtileImpl"]:
       if state["SourceSwap"]:
         if ((state["VectorWidthA"] % state["StoreVectorWidth"]) != 0):
@@ -7117,6 +7169,10 @@ class Solution(collections.abc.Mapping):
     state["EdgeType"] = "ShiftPtr" # Use ShiftPtr by default
     if state["enableTDMA"] and state["enableTDMB"]:
       state["EdgeType"] = "None"
+    if state["EnableMatrixInstruction"] and state["MIRegPerOut"] == 0.5 and state["EdgeType"] == "ShiftPtr" \
+        and not (state["GuaranteeNoPartialA"] and state["GuaranteeNoPartialB"]):
+      reject(state, printRejectionReason, "f16 accumulators cannot be shifted for a partial global-read vector")
+      return
 
     # Precise bounds check uses the "num_records" field in the buffer to
     # precisely detect when we are inbounds or not.  Only a one-dimensional
