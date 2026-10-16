@@ -51,7 +51,6 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.element_count_in_range(3, 3), 1)
         self.assertEqual(shape.project([0, 2]).element_count, 8)
         self.assertEqual(hn.Shape([7]).project([]).element_count, 1)
-        # Compare every selected range/exclusion against Python's exact integers.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
             shape = hn.Shape(dimensions)
             for first in range(4):
@@ -153,8 +152,6 @@ class ShapeTests(unittest.TestCase):
                 if count == 0:
                     indices = [max(extent - 1, 0) for extent in dimensions]
                     with self.subTest(dimensions=dimensions, order=order):
-                        # Both diagnostics are possible when bounds validation
-                        # and flattening arithmetic encounter different axes.
                         with self.assertRaises(RuntimeError):
                             shape.linear_index(indices, order)
                     continue
