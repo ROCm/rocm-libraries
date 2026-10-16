@@ -401,8 +401,9 @@ jobs:
           # deselecting them makes the selection explicit. Not skip-gfx1250: base-only skips
           # can still run on strict.
           # Wall-clock timing is dropped before tee, so neither the console nor the file shows it.
+          # Per-test timeout: decouple_pgr_tdm_fuse_gfx1250.yaml's sweep (#12825) runs past 600 s.
           tox -v -e py3 -- tensilelite/Tests -m "common and not skip-gfx1250-strict" "${K_ARG[@]}" \
-            --timeout=600 -n 4 -rfxX 2>&1 \
+            --timeout=1200 -n 4 -rfxX 2>&1 \
             | sed -E -e 's/ in [0-9]+(\.[0-9]+)?s\b//g' -e 's/ \([0-9]+:[0-9]{2}:[0-9]{2}\)//g' \
                 -e 's/ \([0-9][^()]* seconds\)//g' -e 's/ \([0-9]+(\.[0-9]+)? secs elapsed\)//g' \
                 -e 's/(End -|_Final) [0-9]+(\.[0-9]+)?s\b/\1/g' -e 's/ done \([0-9]+(\.[0-9]+)?s\)/ done/g' \
