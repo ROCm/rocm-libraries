@@ -38,6 +38,7 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
+from .arch import MmaEmulationRecipe
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
     _FENCE_ORDERINGS,
@@ -49,6 +50,7 @@ from .ir import (
     I1,
     I16,
     I32,
+    TF32,
     KernelDef,
     Op,
     Param,
@@ -1672,6 +1674,12 @@ class _DebugInfo:
 
 
 # ----------------------------- lowerer -----------------------------------
+
+# bf16 as the i16 lanes the TF32 split saturates on (``_split_f32_to_bf16``): the
+# largest finite bf16 has magnitude pattern 0x7f7f, and the sign bit is LLVM's
+# signed i16 literal for 0x8000.
+_BF16_MAX_FINITE = 0x7F7F
+_BF16_SIGN_BIT = -0x8000
 
 
 class _Lowerer:
@@ -3635,7 +3643,174 @@ class _Lowerer:
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
         # byte-identical to the legacy ISA-named path.
+        #
+        # An emulated atom is expanded here, *before* ISA dispatch, so one
+        # expansion serves both MFMA and WMMA. Native atoms -- every atom that
+        # predates XF32 -- fall straight through, so their emission is unchanged.
+        if self._expand_emulated_mma(op):
+            return
         self._backend.emit_mma(self, op)
+
+    def _emulated_mma_atom(self, op_id: str):
+        """The catalog atom for ``op_id`` when it needs expansion, else ``None``.
+
+        Scans the target's own catalog rather than a bare-op_id table: emulation
+        is a per-arch property (the same logical atom may be native on one target
+        and emulated on another), so the arch being lowered has to be the one
+        asked.
+        """
+        for atom in self._backend.arch.mma.ops:
+            if atom.op_id == op_id:
+                return None if atom.is_native else atom
+        return None
+
+    def _tf32_payload_as_f32(self, v: Value, hint: str) -> str:
+        """The fp32 view of a TF32 fragment: its I32 carrier bits, reinterpreted.
+
+        A ``bitcast`` and nothing else -- never a rounding -- so the split sees
+        every payload bit the caller put there. That is the difference from a
+        native XF32 instruction, which ignores the low 13 bits of each operand.
+        """
+        n = v.type.count
+        cast = self._fresh(f"{hint}_f32")
+        self._current().emit(
+            f"  {cast} = bitcast <{n} x i32> {self._operand(v)} to <{n} x float>"
+        )
+        return cast
+
+    def _split_f32_to_bf16(self, src: str, n: int, hint: str) -> Tuple[Value, Value]:
+        """Dekker-style split of an fp32 fragment into two bf16 fragments.
+
+        ``src`` names the fp32 vector of ``n`` elements. ``big`` is it rounded to
+        bf16 (and saturated, below); ``small`` is the part that rounding threw
+        away, itself rounded to bf16. Together they carry ~16 mantissa bits of the
+        original 24.
+
+        The narrowings are ``fptrunc ... to bfloat``, which is
+        round-to-nearest-even -- LLVM has no other fp32->bf16 rounding -- and the
+        AMDGPU backend selects the packed ``v_cvt_pk_bf16_f32`` for the vector
+        form on gfx950. That is CK's shipping packed path; CK's *scalar* fallback
+        truncates instead, and is deliberately not the parity target here.
+
+        **Saturation.** Rounding to bf16 overflows to infinity for every payload
+        of magnitude 0x7f7f8000 or more: the top 2^-9 of the finite fp32 range,
+        which holds TF32's largest finite values. Left alone, ``big`` becomes
+        +-inf and ``small`` the opposite infinity, and the ``inf * 0`` that
+        results in the cross terms turns a finite product into NaN. ``big`` is
+        therefore capped at the largest finite bf16, 0x7f7f, keeping the sign.
+        ``small`` is still taken from the original payload, so it holds what the
+        cap threw away -- finite, and within bf16's own precision of it -- and
+        the three terms sum to the same product as anywhere else. Payloads below
+        the threshold are untouched, bit for bit.
+
+        A non-finite payload goes through the same cap, which makes ``big``
+        finite for it too. ``small`` is computed from the payload itself, so it
+        stays +-inf (or NaN), and ``small * big`` -- the first term issued -- is
+        then non-finite whatever the other operand holds. That is the contract:
+        an infinity or NaN in an operand makes every output element it feeds
+        non-finite. ``Inf * 0`` is NaN as IEEE says, and ``Inf`` against an
+        ordinary finite partner stays ``Inf``; a partner whose own residual is
+        large enough to overflow against the cap can turn it into NaN.
+        """
+        f32v, bf16v, i16v = f"<{n} x float>", f"<{n} x bfloat>", f"<{n} x i16>"
+
+        def lanes(value: int) -> str:
+            # An explicit list rather than `splat (...)`, which older LLVM
+            # flavors do not parse.
+            return "<" + ", ".join(f"i16 {value}" for _ in range(n)) + ">"
+
+        big_rne = self._fresh(f"{hint}_big_rne")
+        bits = self._fresh(f"{hint}_big_bits")
+        sign = self._fresh(f"{hint}_big_sign")
+        cap = self._fresh(f"{hint}_big_cap")
+        over = self._fresh(f"{hint}_big_over")
+        sat = self._fresh(f"{hint}_big_sat")
+        big = Value(self._fresh(f"{hint}_big"), VectorType(BF16, n))
+        big_f32 = self._fresh(f"{hint}_big_f32")
+        diff = self._fresh(f"{hint}_diff")
+        small = Value(self._fresh(f"{hint}_small"), VectorType(BF16, n))
+        blk = self._current()
+        blk.emit(f"  {big_rne} = fptrunc {f32v} {src} to {bf16v}")
+        # The bf16 bit patterns are ordered like their magnitudes, so "past the
+        # largest finite value" is an unsigned compare against that pattern with
+        # the value's own sign bit attached: it catches +-inf and every NaN
+        # (all 0x7f80 and up in magnitude) and nothing finite.
+        blk.emit(f"  {bits} = bitcast {bf16v} {big_rne} to {i16v}")
+        blk.emit(f"  {sign} = and {i16v} {bits}, {lanes(_BF16_SIGN_BIT)}")
+        blk.emit(f"  {cap} = or {i16v} {sign}, {lanes(_BF16_MAX_FINITE)}")
+        blk.emit(f"  {over} = icmp ugt {i16v} {bits}, {cap}")
+        blk.emit(f"  {sat} = select <{n} x i1> {over}, {i16v} {cap}, {i16v} {bits}")
+        blk.emit(f"  {big.name} = bitcast {i16v} {sat} to {bf16v}")
+        blk.emit(f"  {big_f32} = fpext {bf16v} {big.name} to {f32v}")
+        blk.emit(f"  {diff} = fsub {f32v} {src}, {big_f32}")
+        blk.emit(f"  {small.name} = fptrunc {f32v} {diff} to {bf16v}")
+        return big, small
+
+    def _expand_emulated_mma(self, op: Op) -> bool:
+        """Expand an emulated ``tile.mma`` in place; return whether it was one.
+
+        BF16x3: reinterpret both TF32 operands as fp32, split them, then issue
+        three BF16 MMAs threading a single fp32 accumulator. The ``small*small``
+        term is dropped: it is below 2^-16 of the product, the same order as the
+        split's own representation error, so a fourth MMA would buy back only
+        part of the error.
+
+        The term **order** is load-bearing. fp32 accumulation is not associative,
+        so issuing these three in any other order produces different result bits
+        and breaks parity with CK.
+        """
+        atom = self._emulated_mma_atom(op.attrs["op_id"])
+        if atom is None:
+            return False
+        recipe = atom.emulation.recipe
+        if recipe != MmaEmulationRecipe.BF16X3:
+            raise NotImplementedError(
+                f"tile.mma {atom.op_id}: no lowering for emulation recipe "
+                f"{recipe!r}; known: {MmaEmulationRecipe.BF16X3!r}"
+            )
+        a, b, c = op.operands
+        for name, v, frag_len in (
+            ("a", a, atom.a_frag_len),
+            ("b", b, atom.b_frag_len),
+        ):
+            if not isinstance(v.type, VectorType) or v.type.elem is not TF32:
+                raise ValueError(
+                    f"tile.mma {atom.op_id}: BF16x3 emulation needs a TF32 "
+                    f"vector for operand {name}, got {v.type.name}; wrap fp32 "
+                    f"payload bits with bitcast(v, TF32), or round them first "
+                    f"with cvt_f32_to_tf32(v)"
+                )
+            if v.type.count != frag_len:
+                raise ValueError(
+                    f"tile.mma {atom.op_id}: operand {name} must be a "
+                    f"vec<tf32x{frag_len}>, got {v.type.name}"
+                )
+        n = a.type.count
+        a_f32 = self._tf32_payload_as_f32(a, "xf32_a")
+        a_big, a_small = self._split_f32_to_bf16(a_f32, n, "xf32_a")
+        b_f32 = self._tf32_payload_as_f32(b, "xf32_b")
+        b_big, b_small = self._split_f32_to_bf16(b_f32, n, "xf32_b")
+
+        physical = atom.emulation.physical_op_id
+        terms = ((a_small, b_big), (a_big, b_small), (a_big, b_big))
+        acc = c
+        for i, (x, y) in enumerate(terms):
+            # The last term must land in the caller's SSA value; the earlier two
+            # thread through temporaries.
+            last = i == len(terms) - 1
+            out = op.result if last else Value(self._fresh("xf32_acc"), c.type)
+            self._backend.emit_mma(
+                self,
+                Op(
+                    name="tile.mma",
+                    operands=[x, y, acc],
+                    results=[out],
+                    attrs={"op_id": physical},
+                    loc=op.loc,
+                ),
+            )
+            acc = out
+        return True
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
         a, b, c = op.operands

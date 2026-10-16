@@ -9,8 +9,20 @@ import math
 import numpy as np
 import pytest
 
+from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime.hip_module import get_device_arch
 from rocke.runtime.packing import pack_args
+
+# Every gfx11 (gfx12) device runs one gfx11-generic (gfx12-generic) code object set.
+_ARCH = generic_arch_from_target_id(get_device_arch() or "")
+_NEEDS_RDNA = pytest.mark.skipif(
+    _ARCH not in ("gfx11-generic", "gfx12-generic"),
+    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
+)
+# The transposed-QK body uses the gfx11 WMMA operand layout.
+_NEEDS_GFX11 = pytest.mark.skipif(
+    _ARCH != "gfx11-generic", reason="needs an RDNA3/3.5 (gfx11) GPU"
+)
 
 
 def _dense_values(
@@ -82,7 +94,7 @@ def _reference_attention(q, k, v, *, causal):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("head_size,heads_q,heads_kv", [(64, 4, 4), (128, 8, 2)])
 def test_dense_attention_matches_reference(head_size, heads_q, heads_kv, causal):
@@ -114,8 +126,8 @@ def test_dense_attention_matches_reference(head_size, heads_q, heads_kv, causal)
     module = None
     try:
         artifact = compile_kernel(
-            build_wmma_fmha_fwd(spec, arch="gfx1151"),
-            arch="gfx1151",
+            build_wmma_fmha_fwd(spec, arch=_ARCH),
+            arch=_ARCH,
             backend="python",
         )
         module = rt.load_module(artifact.hsaco)
@@ -155,7 +167,7 @@ def test_dense_attention_matches_reference(head_size, heads_q, heads_kv, causal)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 @pytest.mark.parametrize(
     "mask,bottom_right,sq,sk,v_staging",
     [
@@ -198,8 +210,8 @@ def test_large_negative_bf16_logits(mask, bottom_right, sq, sk, v_staging):
     module = None
     try:
         artifact = compile_kernel(
-            build_wmma_fmha_fwd(spec, arch="gfx1151"),
-            arch="gfx1151",
+            build_wmma_fmha_fwd(spec, arch=_ARCH),
+            arch=_ARCH,
             backend="python",
         )
         module = rt.load_module(artifact.hsaco)
@@ -240,7 +252,7 @@ def test_large_negative_bf16_logits(mask, bottom_right, sq, sk, v_staging):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("v_staging", [False, True])
 def test_sequence_tails_preserve_guards_and_ignore_poison(dtype, v_staging):
@@ -303,8 +315,8 @@ def test_sequence_tails_preserve_guards_and_ignore_poison(dtype, v_staging):
             v_lds_stage=v_staging,
         )
         artifact = compile_kernel(
-            build_wmma_fmha_fwd(spec, arch="gfx1151"),
-            arch="gfx1151",
+            build_wmma_fmha_fwd(spec, arch=_ARCH),
+            arch=_ARCH,
             backend="python",
         )
         module = rt.load_module(artifact.hsaco)
@@ -361,7 +373,7 @@ def _run_score_case(case, inputs):
 
     rt = Runtime()
     buffers = DeviceBuffers(rt, inputs)
-    kernels = RockeKernels(rt)
+    kernels = RockeKernels(rt, _ARCH)
     try:
         launch, _ = kernels.prepare(case, buffers)
         launch(0)
@@ -373,7 +385,7 @@ def _run_score_case(case, inputs):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 def test_softcap_saturates_large_bf16_logits():
     bf16 = pytest.importorskip("ml_dtypes").bfloat16
     from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
@@ -392,7 +404,7 @@ def test_softcap_saturates_large_bf16_logits():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_sink_adds_denominator_without_value(dtype):
     from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
@@ -413,7 +425,7 @@ def test_sink_adds_denominator_without_value(dtype):
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 def test_alibi_context_offset_preserves_sink_mass():
     from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
 
@@ -447,7 +459,7 @@ def test_alibi_context_offset_preserves_sink_mass():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 def test_qq_bias_bounds_compose_with_window():
     from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
 
@@ -483,7 +495,7 @@ def test_qq_bias_bounds_compose_with_window():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 @pytest.mark.parametrize("layout", ["ragged", "paged"])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("v_staging", [False, True])
@@ -563,8 +575,8 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(
             mask_mode="causal",
             kv_dtype=kv_dtype,
         )
-        kernel = build_wmma_fmha_fwd(spec)
-        artifact = compile_kernel(kernel, arch="gfx1151", backend="python")
+        kernel = build_wmma_fmha_fwd(spec, arch=_ARCH)
+        artifact = compile_kernel(kernel, arch=_ARCH, backend="python")
         module = rt.load_module(artifact.hsaco)
         values = {
             "Q": buffers.ptrs["q"],
@@ -639,7 +651,7 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_RDNA
 def test_compiled_wmma_preserves_declared_workgroup_limit():
     """The driver must see the requested limit, not a discarded LLVM hint."""
     import ctypes
@@ -649,7 +661,7 @@ def test_compiled_wmma_preserves_declared_workgroup_limit():
 
     spec = WmmaFmhaFwdSpec(head_size=128)
     artifact = compile_kernel(
-        build_wmma_fmha_fwd(spec), arch="gfx1151", backend="python"
+        build_wmma_fmha_fwd(spec, arch=_ARCH), arch=_ARCH, backend="python"
     )
     rt = hip_module.Runtime()
     module = rt.load_module(artifact.hsaco)
@@ -669,7 +681,7 @@ def test_compiled_wmma_preserves_declared_workgroup_limit():
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@_NEEDS_GFX11
 @pytest.mark.parametrize(
     "dimension,block_n,waves,mask,sq,sk,hq,hkv",
     [
@@ -739,7 +751,7 @@ def test_transposed_qk_preserves_output_coordinates_and_guards(
             num_waves=waves,
         )
         artifact = compile_kernel(
-            build_wmma_fmha_fwd(spec), arch="gfx1151", backend="python"
+            build_wmma_fmha_fwd(spec, arch=_ARCH), arch=_ARCH, backend="python"
         )
         module = rt.load_module(artifact.hsaco)
         values = _dense_values(

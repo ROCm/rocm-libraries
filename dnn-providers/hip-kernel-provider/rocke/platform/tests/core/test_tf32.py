@@ -67,7 +67,13 @@ def test_catalog_isolation(m, k, acc):
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=m, n=m, k=k
     )
     for gfx in ("gfx950", "gfx1151", "gfx1250"):
-        assert not any(op.a_dtype == "tf32" for op in ArchTarget.from_gfx(gfx).mma.ops)
+        tf32_ops = [
+            op for op in ArchTarget.from_gfx(gfx).mma.ops if op.a_dtype == "tf32"
+        ]
+        # Native XF32 is gfx942-only. gfx950 offers the same logical atom only as
+        # the BF16x3 emulation, and the others offer none at all.
+        assert not any(op.is_native for op in tf32_ops)
+        assert gfx == "gfx950" or not tf32_ops
 
     class Integers:
         const_i32 = staticmethod(int)
