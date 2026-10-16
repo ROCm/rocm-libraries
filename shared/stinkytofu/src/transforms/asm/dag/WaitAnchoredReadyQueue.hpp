@@ -278,7 +278,11 @@ class WaitAnchoredPickPolicy {
         if (anchorInfo == nullptr) {
             // Nothing to shorten without a wait, so this window keeps its own
             // occupancy and only lets the carry pass through to the next anchor.
-            window_.otherPickBudget = window_.originalOtherCount;
+            // A window the DAG left empty takes one carried instruction, so the
+            // carry drains instead of piling up at the end of the segment.
+            window_.otherPickBudget = window_.originalOtherCount == 0 && pendingCarry_ > 0
+                                          ? 1
+                                          : window_.originalOtherCount;
         } else {
             window_.otherPickBudget = window_.originalOtherCount > slotsToMovePastAnchor_
                                           ? window_.originalOtherCount - slotsToMovePastAnchor_
