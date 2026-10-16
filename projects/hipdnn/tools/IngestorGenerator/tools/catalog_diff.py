@@ -31,6 +31,12 @@ Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage.
 ``--subset`` requires only shipped ⊆ regenerated: kernels only the regenerated
 catalog holds are listed as registry extras, not differences.
 
+Without ``--strict-spec`` (including ``--subset``) the spec comparison is keyed on
+the fields the SHIPPED catalog carries, so a regenerated kernel whose extra field
+holds a non-default value still passes. The ``spec fields`` header line lists those
+regenerated-only fields; whoever reads a pass owns the claim that they sit at their
+defaults (``test_registry_regeneration`` asserts it for the shipped engine).
+
 What a pass does NOT establish: that the regenerated bundle is CORRECT, only
 that it is the same catalog. A profile that is wrong in the same way twice
 passes. And a KDP carries no UUID stability of its own -- the ``--ignore-ids``
@@ -56,9 +62,9 @@ import sys
 from pathlib import Path
 
 #: Keys whose values are minted per run. Masked, never compared.
-#: ``engine_id`` / ``kmd_id`` appear inside the KDP's specialization_contract;
-#: they reference the same freshly-minted UED and KMD and differ for the same
-#: reason as the top-level ``id`` field.
+#: ``engine_id`` / ``kmd_id`` appear in each consumer of the KDP's
+#: specialization_contract; they reference the same freshly-minted UED and KMD
+#: and differ for the same reason as the top-level ``id`` field.
 _ID_KEYS = ("id", "engine_id", "kmd_id")
 #: KDP keys that reference another descriptor by id.
 _REFERENCE_KEYS = ("engine", "dispatch", "matchers")
@@ -77,7 +83,7 @@ def _load(path: str, label: str) -> dict:
         kdp = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CatalogDiffError(f"the {label} KDP is not valid JSON: {exc}") from exc
-    if "kernelDescriptors" not in kdp:
+    if not isinstance(kdp, dict) or "kernelDescriptors" not in kdp:
         raise CatalogDiffError(
             f"the {label} file has no 'kernelDescriptors'; is it a KDP?"
         )
@@ -86,12 +92,45 @@ def _load(path: str, label: str) -> dict:
             f"the {label} KDP 'kernelDescriptors' must be an array, "
             f"got {type(kdp['kernelDescriptors']).__name__}"
         )
+    for index, entry in enumerate(kdp["kernelDescriptors"]):
+        where = f"the {label} KDP kernelDescriptors[{index}]"
+        if not isinstance(entry, dict):
+            raise CatalogDiffError(f"{where} must be an object")
+        source = entry.get("kernel_source", {})
+        if not isinstance(source, dict):
+            raise CatalogDiffError(f"{where} 'kernel_source' must be an object")
+        if not isinstance(source.get("spec", {}), dict):
+            raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
     return kdp
 
 
 def _canonical(value) -> str:
     """Stable text for a nested value, so dicts can key a Counter."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _spec_fields(kdp: dict) -> frozenset:
+    """Every ``kernel_source.spec`` field name any entry of ``kdp`` carries."""
+    return frozenset().union(
+        *(
+            (e.get("kernel_source", {}).get("spec") or {}).keys()
+            for e in kdp["kernelDescriptors"]
+        )
+    )
+
+
+def _entry_counters(
+    shipped: dict, regenerated: dict, spec_keys: frozenset | None
+) -> tuple[collections.Counter, collections.Counter]:
+    """The shipped and regenerated entries as multisets over ``entry_key``."""
+    return (
+        collections.Counter(
+            entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
+        ),
+        collections.Counter(
+            entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
+        ),
+    )
 
 
 def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
@@ -134,21 +173,8 @@ def compare_catalog(
     the spec dataclass). ``strict_spec=True`` compares the FULL spec both ways
     instead, so any regenerated-only field is a difference.
     """
-    spec_keys: frozenset | None = None
-    if not strict_spec:
-        spec_keys = frozenset().union(
-            *(
-                (e.get("kernel_source", {}).get("spec") or {}).keys()
-                for e in shipped["kernelDescriptors"]
-            )
-        )
-
-    left = collections.Counter(
-        entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
-    )
-    right = collections.Counter(
-        entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
-    )
+    spec_keys = None if strict_spec else _spec_fields(shipped)
+    left, right = _entry_counters(shipped, regenerated, spec_keys)
     problems: list[str] = []
 
     total_left, total_right = sum(left.values()), sum(right.values())
@@ -173,18 +199,7 @@ def compare_catalog(
 
 def compare_subset(shipped: dict, regenerated: dict) -> tuple[list[str], list[str]]:
     """(shipped entries the regenerated catalog lacks, regenerated-only names)."""
-    spec_keys = frozenset().union(
-        *(
-            (e.get("kernel_source", {}).get("spec") or {}).keys()
-            for e in shipped["kernelDescriptors"]
-        )
-    )
-    left = collections.Counter(
-        entry_key(e, spec_keys) for e in shipped["kernelDescriptors"]
-    )
-    right = collections.Counter(
-        entry_key(e, spec_keys) for e in regenerated["kernelDescriptors"]
-    )
+    left, right = _entry_counters(shipped, regenerated, _spec_fields(shipped))
     missing = left - right
     problems = [
         f"  only in shipped    (x{count}): {key[0]}"
@@ -291,8 +306,12 @@ def _load_kmd(path: str, label: str) -> dict:
         kmd = json.loads(text)
     except json.JSONDecodeError as exc:
         raise CatalogDiffError(f"the {label} KMD is not valid JSON: {exc}") from exc
-    if "fields" not in kmd:
+    if not isinstance(kmd, dict) or "fields" not in kmd:
         raise CatalogDiffError(f"the {label} file has no 'fields'; is it a KMD?")
+    if not isinstance(kmd["fields"], list) or not all(
+        isinstance(field, dict) for field in kmd["fields"]
+    ):
+        raise CatalogDiffError(f"the {label} KMD 'fields' must be an array of objects")
     return kmd
 
 
@@ -306,9 +325,6 @@ def compare_kmd_fields(shipped_kmd: dict, regenerated_kmd: dict) -> list[str]:
     512 vs 256 dispatches to a different binary even though the catalog looks identical.
     """
     problems: list[str] = []
-
-    def _field_key(f: dict) -> str:
-        return f.get("name", "")
 
     shipped_by_name = {
         f["name"]: f for f in shipped_kmd.get("fields", []) if "name" in f
@@ -357,13 +373,22 @@ def _id_index(kdp: dict) -> tuple[dict, list[str]]:
     return index, ambiguous
 
 
+def _contract_ids(kdp: dict) -> list[tuple]:
+    """``(engine_id, kmd_id)`` of each ``specialization_contract.consumers[]``."""
+    contract = (kdp.get("provenance") or {}).get("specialization_contract") or {}
+    return [
+        (consumer.get("engine_id"), consumer.get("kmd_id"))
+        for consumer in contract.get("consumers") or []
+    ]
+
+
 def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
     """``--expect-ids``: the regenerated tree must REUSE the shipped ids.
 
     Only meaningful after a splice, never straight off ``generate.py``. This is
     what makes ``extend.md``'s 'preserve old names, UUIDs, symbols' checkable
     instead of a review convention. Covers the KDP's own id and references, the
-    ``engine_id`` / ``kmd_id`` in its specialization contract, and the id of
+    ``engine_id`` / ``kmd_id`` of each contract consumer, and the id of
     EVERY shipped kernel descriptor -- a loader that resolves kernels by UUID
     breaks on one renumbered entry just as it does on a renumbered engine.
     Kernels missing from the regenerated side are the catalog comparison's
@@ -377,18 +402,12 @@ def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
                 f"(regenerated {regenerated.get(key)!r})"
             )
 
-    left_contract = (shipped.get("provenance") or {}).get(
-        "specialization_contract"
-    ) or {}
-    right_contract = (regenerated.get("provenance") or {}).get(
-        "specialization_contract"
-    ) or {}
-    for key in ("engine_id", "kmd_id"):
-        if left_contract.get(key) != right_contract.get(key):
-            problems.append(
-                f"specialization_contract.{key}: shipped {left_contract.get(key)!r} "
-                f"was not preserved (regenerated {right_contract.get(key)!r})"
-            )
+    left_consumers, right_consumers = _contract_ids(shipped), _contract_ids(regenerated)
+    if left_consumers != right_consumers:
+        problems.append(
+            "specialization_contract.consumers[] engine_id/kmd_id: shipped "
+            f"{left_consumers!r} was not preserved (regenerated {right_consumers!r})"
+        )
 
     left_ids, left_amb = _id_index(shipped)
     right_ids, right_amb = _id_index(regenerated)
@@ -410,6 +429,24 @@ def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
     if len(changed) > 20:
         problems.append(f"... and {len(changed) - 20} more kernel ids not preserved")
     return problems
+
+
+def _spec_mode(shipped: dict, regenerated: dict, strict_spec: bool) -> str:
+    """The header line saying which spec fields the catalog comparison covered.
+
+    Outside ``--strict-spec`` a field only the regenerated catalog carries is
+    never compared, so it names them: a clean pass must not read as covering them.
+    """
+    if strict_spec:
+        return "strict (full spec)"
+    uncompared = sorted(_spec_fields(regenerated) - _spec_fields(shipped))
+    if not uncompared:
+        return "shipped fields (the regenerated catalog adds no spec field)"
+    shown = ", ".join(uncompared[:10]) + (" ..." if len(uncompared) > 10 else "")
+    return (
+        f"shipped fields ({len(uncompared)} regenerated-only spec fields NOT "
+        f"compared: {shown})"
+    )
 
 
 def main(argv=None) -> int:
@@ -436,9 +473,10 @@ def main(argv=None) -> int:
         "--strict-spec",
         action="store_true",
         help="compare the FULL kernel_source.spec both ways, so a field only "
-        "the regenerated catalog carries is a difference. By default only the "
-        "fields the shipped catalog carries are compared (a dropped or changed "
-        "shipped field is always reported).",
+        "the regenerated catalog carries is a difference. By default (and with "
+        "--subset) only the fields the shipped catalog carries are compared, a "
+        "dropped or changed shipped field is always reported, and the header "
+        "names the regenerated-only fields that were NOT compared.",
     )
     parser.add_argument(
         "--shipped-kmd",
@@ -517,9 +555,7 @@ def main(argv=None) -> int:
     print(f"  shipped      {len(shipped['kernelDescriptors'])} kernels")
     print(f"  regenerated  {len(regenerated['kernelDescriptors'])} kernels")
     print(f"  ids          {'masked' if args.ignore_ids else 'compared'}")
-    print(
-        f"  spec fields  {'strict (full spec)' if args.strict_spec else 'shipped fields (regenerated-only fields not compared)'}"
-    )
+    print(f"  spec fields  {_spec_mode(shipped, regenerated, args.strict_spec)}")
     print(
         f"  catalog      {'subset (shipped kernels must all be regenerated)' if args.subset else 'equal'}"
     )

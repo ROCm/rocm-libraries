@@ -171,9 +171,11 @@ enumerate:
   # The catalog is aligned-only, so `ragged` is not free: a ragged spec differs
   # from the default and is excluded.
   free_fields: [block_m, block_n]
-  # Fields of the registry spec the shipped KDP carries. The registry spec is
-  # wider; the rest sit at their dataclass defaults, which
-  # tests/test_registry_regeneration.py asserts.
+  # Fields of the registry spec every generated kernel carries. The registry spec
+  # is wider (the rest sit at their dataclass defaults), and the shipped KDP omits
+  # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
+  # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
+  # diffs the enumeration against the shipped catalog on the shipped fields (g3).
   spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
   max_kernels: 840

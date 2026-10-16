@@ -168,8 +168,8 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
     # intersection of spec keys present in the shipped catalog.  Without it,
     # a newly added spec field that hkp_pack would hydrate (and that changes
     # the compiled binary) passes silently if it is absent from the shipped
-    # catalog.  The engine manifest's enumerate.spec_fields is explicit, so
-    # regeneration always produces the same set and --strict-spec should hold.
+    # catalog.  The selection carries exactly the shipped spec fields, so
+    # --strict-spec holds here; the registry enumeration (g3) carries one more.
     rc = catalog_diff.main(
         [
             "--shipped",
@@ -178,6 +178,41 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
             str(kdp),
             "--ignore-ids",
             "--strict-spec",
+            "--shipped-kmd",
+            str(_SHIPPED_KMD),
+            "--regenerated-kmd",
+            str(kmd),
+        ]
+    )
+    report = capsys.readouterr()
+    assert rc == 0, report.out + report.err
+
+
+def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
+    registry_config, tmp_path_factory, capsys
+):
+    """The manifest's own enumeration, rendered and diffed against the shipped
+    catalog: the gate that the registry, not the authored selection, still yields
+    the shipped kernels. Keyed on the shipped spec fields, because the enumeration
+    also carries `lds_k_row_pad`, which the shipped specs omit and g1 asserts sits at
+    its default."""
+    if not _SHIPPED_KDP.is_file():
+        pytest.skip(f"shipped KDP not in this checkout: {_SHIPPED_KDP}")
+    out = tmp_path_factory.mktemp("g3")
+    path = out / "registry.yaml"
+    path.write_text(yaml.safe_dump(registry_config, sort_keys=False))
+    config = load_config(path)
+    IngestorGenerator(_ROOT / "templates").render(config, out / "generated")
+    descriptors = out / "generated" / config.descriptor_dir
+    (kdp,) = descriptors.glob("*.kdp.json")
+    (kmd,) = descriptors.glob("*.kmd.json")
+    rc = catalog_diff.main(
+        [
+            "--shipped",
+            str(_SHIPPED_KDP),
+            "--regenerated",
+            str(kdp),
+            "--ignore-ids",
             "--shipped-kmd",
             str(_SHIPPED_KMD),
             "--regenerated-kmd",

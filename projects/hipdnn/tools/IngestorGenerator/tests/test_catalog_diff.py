@@ -48,7 +48,18 @@ def _kdp(entries: list[dict], **overrides) -> dict:
         "matchers": ["umd-id"],
         "engine": "ued-id",
         "dispatch": "udd-id",
-        "provenance": {"specialization_contract": {"schema_version": 1}},
+        "provenance": {
+            "specialization_contract": {
+                "schema_version": 1,
+                "consumers": [
+                    {
+                        "engine_id": "ued-id",
+                        "kmd_id": "kmd-id",
+                        "metadata_fields": ["dtype", "block_m", "block_n"],
+                    }
+                ],
+            }
+        },
         "kernelDescriptors": entries,
     }
     kdp.update(overrides)
@@ -79,6 +90,17 @@ class TestTheMaskHidesIdsAndNothingElse:
         regenerated["engine"] = "fresh-ued-id"
         assert run(shipped, regenerated, "--ignore-ids") == 0
 
+    @pytest.mark.parametrize("key", ["engine_id", "kmd_id"])
+    def test_the_contract_consumer_ids_are_masked(self, run, key):
+        """The contract references the freshly minted UED and KMD, so a straight
+        generate.py output differs from the shipped KDP in these two keys."""
+        shipped = _kdp([_entry("k0")])
+        regenerated = json.loads(json.dumps(shipped))
+        consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
+        consumer[key] = "fresh-minted-id"
+        assert run(shipped, regenerated, "--ignore-ids") == 0
+        assert run(shipped, regenerated) == 1
+
     def test_a_dropped_kernel_is_caught(self, run, capsys):
         """The failure the gate is FOR: a profile change that silently ships
         less than it did. Counting alone would catch this one."""
@@ -105,6 +127,25 @@ class TestTheMaskHidesIdsAndNothingElse:
         out = capsys.readouterr().out
         assert "only in shipped" in out and "only in regenerated" in out, out
 
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            lambda e: e["kernel_source"].update(builder="build_attention_other"),
+            lambda e: e["kernel_source"].update(source="kernels/gfx950/other.py"),
+            lambda e: e.update(version="2.0"),
+            lambda e: e["metadata"].update(dtype="FP16"),
+        ],
+        ids=["builder", "source", "version", "metadata"],
+    )
+    def test_each_key_component_alone_is_caught(self, run, edit):
+        """One flip at a time, so removing any one component from `entry_key`
+        leaves its own case green-to-red. Metadata moves without the spec: the
+        spec and metadata agreeing is the contract's job, not the key's."""
+        shipped = _kdp([_entry("k0")])
+        regenerated = json.loads(json.dumps(shipped))
+        edit(regenerated["kernelDescriptors"][0])
+        assert run(shipped, regenerated, "--ignore-ids") == 1
+
     def test_a_changed_priority_is_caught(self, run):
         """Priority orders selection, so two catalogs that differ only there
         dispatch differently for the same graph."""
@@ -121,9 +162,8 @@ class TestTheMaskHidesIdsAndNothingElse:
         """The contract is what forces kernel_source.spec and metadata to agree.
         Masked ids must not mask the fields around them."""
         regenerated = _kdp([_entry("k0")])
-        regenerated["provenance"]["specialization_contract"]["metadata_fields"] = [
-            "dtype"
-        ]
+        consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
+        consumer["metadata_fields"] = ["dtype"]
         assert run(_kdp([_entry("k0")]), regenerated, "--ignore-ids") == 1
         assert "specialization_contract" in capsys.readouterr().out
 
@@ -192,13 +232,14 @@ class TestExpectIdsPerKernel:
         regenerated["kernelDescriptors"].reverse()
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 0
 
-    def test_contract_engine_and_kmd_ids_must_be_preserved(self, run, capsys):
-        contract = {"schema_version": 1, "engine_id": "ued-1", "kmd_id": "kmd-1"}
-        shipped = _kdp([_entry("k0")], provenance={"specialization_contract": contract})
+    @pytest.mark.parametrize("key", ["engine_id", "kmd_id"])
+    def test_contract_engine_and_kmd_ids_must_be_preserved(self, run, capsys, key):
+        shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
-        regenerated["provenance"]["specialization_contract"]["kmd_id"] = "kmd-2"
+        consumer = regenerated["provenance"]["specialization_contract"]["consumers"][0]
+        consumer[key] = "fresh-minted-id"
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
-        assert "specialization_contract.kmd_id" in capsys.readouterr().out
+        assert "engine_id/kmd_id" in capsys.readouterr().out
 
     def test_repeated_names_are_keyed_by_spec(self, run):
         a, b = _entry("dup", block_n=32), _entry("dup", block_n=64)
@@ -367,7 +408,19 @@ class TestShippedFieldKeying:
         default the gate is keyed on the shipped fields."""
         shipped, regenerated = self._pair()
         assert run(shipped, regenerated, "--ignore-ids") == 0
-        assert "shipped fields" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "1 regenerated-only spec fields NOT compared: lds_k_row_pad" in out, out
+
+    def test_subset_names_the_fields_it_did_not_compare(self, run, capsys):
+        shipped, regenerated = self._pair()
+        assert run(shipped, regenerated, "--ignore-ids", "--subset") == 0
+        out = capsys.readouterr().out
+        assert "NOT compared: lds_k_row_pad" in out, out
+
+    def test_no_regenerated_only_field_is_said_so(self, run, capsys):
+        kdp = _kdp([_entry("k0")])
+        assert run(kdp, kdp, "--ignore-ids") == 0
+        assert "adds no spec field" in capsys.readouterr().out
 
     def test_strict_spec_makes_a_regenerated_only_field_a_difference(self, run, capsys):
         shipped, regenerated = self._pair()
@@ -432,6 +485,52 @@ class TestUsageErrorsAreNotDifferences:
         b.write_text(json.dumps({"version": "1.0"}))
         assert catalog_diff.main(["--shipped", str(a), "--regenerated", str(b)]) == 2
         assert "no 'kernelDescriptors'" in capsys.readouterr().err
+
+
+def _write(path: Path, document) -> str:
+    path.write_text(json.dumps(document))
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "k0",
+        {"name": "k0", "kernel_source": None},
+        {"name": "k0", "kernel_source": {"spec": ["block_n", 64]}},
+    ],
+    ids=["string-entry", "null-kernel-source", "list-spec"],
+)
+def test_a_malformed_catalog_entry_exits_2(tmp_path, capsys, entry):
+    """Exit 1 means 'the catalogs differ'; an entry the comparison cannot read
+    compared nothing."""
+    good = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
+    bad = _write(tmp_path / "b.kdp.json", _kdp([entry]))
+    assert catalog_diff.main(["--shipped", good, "--regenerated", bad]) == 2
+    assert "kernelDescriptors[0]" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [None, ["dtype"], {"name": "dtype"}],
+    ids=["null", "string-item", "object"],
+)
+def test_a_malformed_kmd_exits_2(tmp_path, capsys, fields):
+    kdp = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
+    good = _write(tmp_path / "a.kmd.json", _kmd([_field("dtype")]))
+    bad = _write(tmp_path / "b.kmd.json", {"id": "kmd-id", "fields": fields})
+    argv = ["--shipped", kdp, "--regenerated", kdp]
+    assert (
+        catalog_diff.main(argv + ["--shipped-kmd", good, "--regenerated-kmd", bad]) == 2
+    )
+    assert "KMD 'fields' must be an array of objects" in capsys.readouterr().err
+
+
+def test_a_json_array_is_not_a_kdp(tmp_path, capsys):
+    good = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
+    bad = _write(tmp_path / "b.json", [])
+    assert catalog_diff.main(["--shipped", good, "--regenerated", bad]) == 2
+    assert "no 'kernelDescriptors'" in capsys.readouterr().err
 
 
 def _subset_case(change: str) -> tuple[dict, dict]:
