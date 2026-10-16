@@ -80,12 +80,6 @@ struct PassFeatureConfig {
         AscendingCache,  ///< Zigzag for cache reuse: A0 B0 B1 A1
     };
 
-    /// How the rule (4) ds_load cap (dsReadPerCap per dsIssueCapSpanCycles) expires.
-    enum class DsIssueCapMode {
-        Sliding,   ///< Each ds_load frees its slot span cycles after its own issue
-        Periodic,  ///< A period opens at its first ds_load; all slots free span cycles later
-    };
-
     enum class WmmaRefillMode : int {
         Fixed = 0,    ///< A refill issues wmmaBatchSize WMMAs
         Dynamic = 1,  ///< A refill issues WMMAs until the queued cover reaches wmmaRefillToCycles
@@ -102,32 +96,6 @@ struct PassFeatureConfig {
         int globalReadDrainLatency = 0;
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
-        int dsReadThrottleLatency = 0;
-        /// Fraction of the full throttle interval used for the first
-        /// dsReadThrottleTransitionEntries issued beyond the queue depth.
-        /// Clamped to [0, 1]; 1.0 applies full throttling.
-        double dsReadThrottleTransitionFactor = 1.0;
-        /// Number of entries beyond queue depth that use the transition factor
-        /// before full throttling begins. 0 disables the transition; negative
-        /// means one queue depth.
-        int dsReadThrottleTransitionEntries = 0;
-        /// Rule (4) ds_load ceiling: at most this many ds_loads per
-        /// dsIssueCapSpanCycles. INT_MAX = per-arch default; non-positive is
-        /// rejected. Was dsReadPerWmma, when the window was delimited by WMMA
-        /// issues; the old module-option key still works (SchedulingKnobHeuristics).
-        int dsReadPerCap = INT_MAX;
-        /// Cycle span the dsReadPerCap ceiling applies over: at most
-        /// dsReadPerCap ds_loads may issue in any dsIssueCapSpanCycles of the
-        /// real timeline. Tuned alongside dsReadPerCap -- the pair is the cap,
-        /// and neither means anything without the other.
-        ///
-        /// 0 = use the per-kernel default: the region's actual WMMA latency
-        /// (wmmaIssueConfig.latency), or the arch constant
-        /// (CDNA5Config::dsIssueCapSpanCycles) where no matrix op sets one.
-        int dsIssueCapSpanCycles = 0;
-        /// Sliding mimics the LDS queue and keeps it from running busy; Periodic is a
-        /// hard "at most dsReadPerCap per dsIssueCapSpanCycles period" kernel limit.
-        DsIssueCapMode dsIssueCapMode = DsIssueCapMode::Sliding;
         int tensorLoadWmmaSpace = 0;
         /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
         /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
@@ -147,9 +115,9 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
-        /// Spread ds_loads evenly over the region's WMMAs instead of the cap/throttle pacing: a
-        /// ds_load is released at its planned WMMA window (minus the tolerance) and issues only
-        /// while the ds queue has a free credit. Off = the cap/throttle pacing.
+        /// Spread ds_loads evenly over the region's WMMAs: a ds_load is released at its planned
+        /// WMMA window (minus the tolerance) and issues only while the ds queue has a free
+        /// credit. Off = ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = false;
         /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
         /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
@@ -176,11 +144,6 @@ struct PassFeatureConfig {
         /// Internal tuning knob only — deliberately not surfaced as a module
         /// option, so TensileLite cannot set it.
         int mergeBarrierThreshold = 0;
-        /// Run the per-window WMMA hide-budget policy at the top of each
-        /// scheduling region. The budget gates WMMA selection until enough
-        /// non-WMMA work has issued. The gfx1250 production backend enables it;
-        /// standalone/custom pass pipelines opt in explicitly.
-        bool enableWmmaHideBudgetPrescan = false;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
         /// barriers. Enables the scheduler's cluster-barrier SCC rule and the
@@ -201,10 +164,6 @@ struct PassFeatureConfig {
         /// selection and coexec hazard padding are unaffected. See
         /// CDNA5ReadyQueue::fillQuotaPerWindow_ for the full mechanism.
         bool evenSpreadFillers = false;
-        /// In a ds stream of 2+ ds_loads per WMMA window, a ds_load that still fits the
-        /// window goes before fillers and prefetches, so no slot is lost and the
-        /// tensor_load does not slip (mirrors ModuleOptions::DsSlotFirst).
-        bool dsSlotFirst = false;
         /// Mirrors ModuleOptions::WaitAluHoldStrictCount. A VALU/other filler that
         /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
         /// query) is held until just before the next s_barrier_wait; < 0 = off.

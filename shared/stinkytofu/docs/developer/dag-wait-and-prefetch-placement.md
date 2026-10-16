@@ -36,10 +36,11 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
    older LDS reads whatever its count) is held until the two windows before the next
    `s_barrier_wait`. Not held when it is the last pending predecessor of real work, or when
    it feeds a prefetch's address.
-3. **ds_load pacing** (`DsSlotFirst`). In a ds stream of 2+ ds_loads per WMMA window, a
-   ds_load that still fits the window goes before fillers and prefetches, and a hazard-hoisted
-   VALU that cannot co-issue now is not forced. Otherwise each stolen slot shifts the stream,
-   and the tensor_load, one window late.
+3. **ds_load pacing** (`DsSpread`, `DsReadQueueDepth`). The ds credit queue bounds the
+   ds_loads in flight, and with `DsSpread` the k-th ds_load of a region is released at WMMA
+   window `k * WMMAs / ds_loads` (less the tolerance), so the stream stays even and the
+   tensor_load is not pushed a window late. A held ds_load is released early only when no WMMA
+   is ready in its place. See the [spread plan](wmma-batch-ds-spread-plan.md).
 4. **Critical chains.** A filler whose consumer (prefetch, tensor_load, ds_load) is planned
    within 20 windows skips the filler quota and takes the earliest window with a free
    co-issue slot, or issues as soon as it is ready once every remaining window is full.
@@ -60,7 +61,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 |---|---|---|---|
 | `PrefetchLeadWmmas` | 25 (KernelWriter: stage < 64 WMMAs 0; no HalfPLR 4; else 25 sub-byte A, 40 otherwise) | `--prefetch-lead-wmmas=N` | prefetch lead; < 8 = single-stage grouping; 0 = off |
 | `WaitAluHoldStrictCount` | 2 | `--wait-alu-hold-strict-count=N` | strict-wait threshold; < 0 = no hold |
-| `DsSlotFirst` | true | `--ds-slot-first` | ds_load before fillers in a saturated ds stream |
+| `DsSpread` | false | `--ds-spread` | spread the region's ds_loads evenly over its WMMAs |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
 | `WmmaQueueDepth` | 1 | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time. > 1 also merges the waits of back-to-back WMMAs onto the first one |

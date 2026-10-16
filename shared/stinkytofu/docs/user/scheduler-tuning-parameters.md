@@ -9,7 +9,7 @@ For the placement mechanisms behind the prefetch and filler knobs, see
 
 | Entry point | How |
 |---|---|
-| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueCoverCycles: 32, DsReadPerCap: 8}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
+| TensileLite | `GlobalParameters: StinkyTofuModuleOptions: {WmmaQueueDepth: 8, WmmaQueueCoverCycles: 32, WmmaBatchSize: 2}` in the yaml (any module option, applied last), or add the key to `stinky_module_options` in `Tensile/KernelWriter.py` |
 | `stinkytofu-opt` | the `--flag=N` listed per parameter |
 | C++ pass pipeline | `PassFeatureConfig::dagFeatures.<field>` |
 
@@ -18,17 +18,15 @@ A few values have no module option and are reachable only from
 
 Defaults below are the production (TensileLite → `Gfx1250Backend`) defaults.
 `stinkytofu-opt` and a hand-built pipeline start from the `dagFeatures`
-defaults instead, where `EvenSpreadFillers`, `DsSlotFirst`, the prefetch lead,
-the wait-alu hold, the hide-budget prescan (`--enable-wmma-hide-budget-prescan`)
-and the knob heuristic are all off.
+defaults instead, where `EvenSpreadFillers`, `DsSpread`, the prefetch lead,
+the wait-alu hold and the knob heuristic are all off.
 
 ### How an unset value is resolved
 
 Each parameter resolves independently, first match wins:
 
 1. An explicit value you set.
-2. For `DsReadPerCap`, `DsReadThrottleLatency` and
-   `ClusterBarrierRule3SignalLeadCycles`: the knob heuristic, computed from the
+2. For `ClusterBarrierRule3SignalLeadCycles`: the knob heuristic, computed from the
    main loop (`loopWithPrefetch`) when it has both WMMAs and ds_loads.
 3. The per-arch scheduling default (`CDNA5Config`).
 4. The hardware fact (`HWModel`).
@@ -69,8 +67,7 @@ A larger N keeps the pipe busier but delays ds_loads; a smaller one issues ds_lo
 but lets the queue drain. N should cover the longest stall you want hidden: a ds_load stall is
 a few cycles, a stage barrier or `tensor_load` stall is 65 to 75 cycles. When the queue model
 is on, the wait pass also merges the waits of back-to-back WMMAs onto the first one, so the
-run stays back-to-back. The knob heuristic does **not** scale with the queue: when you raise
-the depth, set `DsReadPerCap` explicitly.
+run stays back-to-back.
 
 ### WMMA refill (batches)
 
@@ -88,49 +85,36 @@ the queue is kept busy and covers the small stalls of the ds_loads and barriers 
 A refill also ends when the queue is full. A dependent WMMA that needs coexec padding is held as
 before.
 
-## ds_load even spread
+## ds_load pacing
+
+The ds_loads of a region are paced by the ds credit queue and, with `DsSpread`, spread evenly over
+the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-budget pacing.
 
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
-| `DsSpread` | false | `--ds-spread` | Spread the region's ds_loads evenly over its WMMAs. The k-th ds_load is released at WMMA window `k * WMMAs / ds_loads`, less the tolerance, and issues only while the ds queue (`DsReadQueueDepth` credits) has a free one. The cap, throttle, slot-first and ds hide-budget pacing below are bypassed. |
+| `DsSpread` | false | `--ds-spread` | Spread the region's ds_loads evenly over its WMMAs. The k-th ds_load is released at WMMA window `k * WMMAs / ds_loads`, less the tolerance, and issues only while the ds queue (`DsReadQueueDepth` credits) has a free one. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
 | `DsSpreadToleranceCycles` | -1 → automatic | `--ds-spread-tolerance-cycles=N` | How early, in cycles, a ds_load may issue before its slot. 0 = as even as possible. Automatic = the smallest tolerance that still lets every ds_load reach its first consumer WMMA two windows ahead, i.e. as even as the dependencies allow. |
+| `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |
+| `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. |
+| `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
+| `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
 
 A held ds_load is released early only when no WMMA is ready to issue in its place. With the debug
 type `StinkyDAGSchedulerPass` enabled, each region logs the resolved tolerance and `gapCv`, the
 coefficient of variation of the gaps between its ds_loads (0 = perfectly even).
 
-`DsReadOrder` and `LockDsReadOrder` apply unchanged.
+**Barrier sizing:** the ds_loads in front of a barrier are given `WMMAs / ds_loads` windows each,
+the same density the spread plans with, so the barrier thresholds and the pacer agree.
 
-## ds_load issue (cap and throttle pacing)
-
-Used when `DsSpread` is off.
-
-| Module option | Default | CLI | Meaning |
-|---|---|---|---|
-| `DsReadPerCap` | -1 → heuristic | `--ds-read-per-cap=N` | Ceiling A: at most N ds_loads per `DsIssueCapSpanCycles` cycles (how the span expires is set by `DsIssueCapMode`). It is a wait, not a veto. Must be > 0 when set. Alias: `DsReadPerWmma` (deprecated). |
-| `DsIssueCapSpanCycles` | 0 → one WMMA window | `--ds-issue-cap-span-cycles=N` | The span X `DsReadPerCap` applies over. The pair is the cap: neither means anything alone. TensileLite: global parameter `StinkyTofuDsIssueCapSpanCycles`. |
-| `DsIssueCapMode` | 0 (`Sliding`) | `--ds-issue-cap-mode=sliding\|periodic` | How the cap expires. `0` / `sliding`: each ds_load frees its slot X cycles after its own issue (keeps the LDS return queue from running busy). `1` / `periodic`: a period opens at its first ds_load and all slots free X cycles later, so the cap is exactly A per X-cycle period. Tight back-to-back bursts behave the same in both modes. TensileLite: global parameter `StinkyTofuDsIssueCapMode`. |
-| `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. |
-| `DsReadThrottleLatency` | -1 → heuristic | `--ds-read-throttle-latency=N` | Lifetime of one credit. A saturated queue issues one ds_load per `DsReadThrottleLatency / DsReadQueueDepth` cycles. |
-| `DsReadThrottleTransitionFactor` | 1.0 | `--ds-read-throttle-transition-factor=F` | Fraction of the full throttle interval used for the first `TransitionEntries` loads past the queue depth. Clamped to [0, 1]; 1.0 = full throttle. |
-| `DsReadThrottleTransitionEntries` | 0 | `--ds-read-throttle-transition-entries=N` | Loads past the queue depth that use the transition factor. 0 = no transition; negative = one queue depth. |
-| `DsReadDrainLatency` | 0 → dynamic | `--ds-read-drain-latency=N` | Barrier timing only: cycles a barrier waits for its ds_loads to return. 0 derives it from the matching loads. Does not affect pacing. |
-| `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
-| `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
-| `DsSlotFirst` | true | `--ds-slot-first` | With 2+ ds_loads per WMMA window, a ds_load that still fits the window goes before fillers and prefetches. |
-
-**Heuristic values** (when unset and the main loop has WMMAs and ds_loads):
-
-```
-perWmma           = min(3, ceil(dsLoads / wmmas))
-DsReadPerCap      = 3 if wmmas <= 128 else perWmma
-DsReadThrottleLatency = max(72, (L / perWmma) * 16)        // L = first main-loop WMMA latency
-```
-Without a usable main loop: `DsReadPerCap = 3`, `DsReadThrottleLatency = 72`.
+**Removed options:** `DsReadPerCap`, `DsReadPerWmma`, `DsIssueCapSpanCycles`, `DsIssueCapMode`,
+`DsReadThrottleLatency`, `DsReadThrottleTransitionFactor`, `DsReadThrottleTransitionEntries` and
+`DsSlotFirst` (and the matching `stinkytofu-opt` flags and `--enable-wmma-hide-budget-prescan`)
+are still accepted but ignored, with a warning. TensileLite's `StinkyTofuDsIssueCapMode` and
+`StinkyTofuDsIssueCapSpanCycles` global parameters are gone.
 
 **Shared ds issue pipe:** when `HWModel::lds.wavesPerDsIssuePipe > 1`,
-the issue cost of each ds_load is multiplied by `min(NumWaves, wavesPerDsIssuePipe)`
-(the cap itself is unchanged). On gfx1250 it is currently 1, so this is inert.
+the issue cost of each ds_load is multiplied by `min(NumWaves, wavesPerDsIssuePipe)`.
+On gfx1250 it is currently 1, so this is inert.
 
 ## Global reads and tensor loads
 
@@ -164,8 +148,8 @@ Per WMMA window, at most `globalReadPerWmma` (arch default 1) tensor_loads issue
 
 | Source | Value (gfx1250) |
 |---|---|
-| `CDNA5Config` | `dsReadPerCap = 3`, `globalReadPerWmma = 1`, `tensorLoadWmmaSpace = 0`, `dsIssueCapSpanCycles = 8` (fallback WMMA latency where a region has none), `warGateWmmas = 0` (derive) |
-| `HWModel::lds` | `readQueueDepth = 16`, `readThrottleLatency = 72`, `readDrainLatency = 0` (dynamic), `wavesPerDsIssuePipe = 1` |
+| `CDNA5Config` | `globalReadPerWmma = 1`, `tensorLoadWmmaSpace = 0`, `wmmaLatencyFallbackCycles = 8` (WMMA latency where a region has none), `warGateWmmas = 0` (derive) |
+| `HWModel::lds` | `readQueueDepth = 16`, `readCreditLifetime = 72`, `readDrainLatency = 0` (dynamic), `wavesPerDsIssuePipe = 1` |
 
 gfx1250v0 uses the same scheduling defaults.
 
@@ -177,9 +161,8 @@ dependences allow.
 
 | Pattern | Options |
 |---|---|
-| Default interleave `W ds ds ds W …` | none |
-| WMMA queue kept covered, ds_loads capped at 8 per 32-cycle period | `WmmaQueueDepth=8, WmmaQueueCoverCycles=32, DsIssueCapMode=1, DsIssueCapSpanCycles=32, DsReadPerCap=8` |
-| ds at a fixed rate with the LDS queue model off (measured 0.7 to 3.7% slower: bursts stall the WMMA stream) | add `DsReadThrottleLatency=1` |
+| Default: ds_loads as soon as they are ready and a credit is free | none |
+| WMMA queue kept covered, refilled in batches of 4 | `WmmaQueueDepth=8, WmmaQueueCoverCycles=32, WmmaBatchSize=4` |
+| ds_loads spread evenly over the WMMAs | `DsSpread=true` |
 | Fillers packed early instead of spread | `EvenSpreadFillers=false` |
 | Free ds order | `LockDsReadOrder=false` |
-| A ds_loads per fixed X-cycle period (e.g. 12 per 32) | `DsReadPerCap=12, DsIssueCapSpanCycles=32, DsIssueCapMode=1, DsReadQueueDepth=16, DsReadThrottleLatency=1` |

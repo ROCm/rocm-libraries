@@ -7197,8 +7197,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                                # How many unrolled loop bodies were emitted
                                # (states.unrollLoopCopies). HalfPLR sets this to 3.
-                               # SchedulingKnobHeuristics logs an optimistic ds-read
-                               # throttle from it; DsReadThrottleLatency is unchanged.
                                "UnrollLoopCopies": int(self.states.unrollLoopCopies),
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
@@ -7239,9 +7237,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       stinky_module_options["PrefetchLeadWmmas"] = \
         4 if not kernel["HalfPLR"] else \
         25 if kernel["ProblemType"]["DataTypeA"].numBytes() < 1 else 40
-      # ds_load issue cap shape (see GlobalParameters); 0/0 keeps the scheduler defaults.
-      stinky_module_options["DsIssueCapMode"] = int(globalParameters.get("StinkyTofuDsIssueCapMode") or 0)
-      stinky_module_options["DsIssueCapSpanCycles"] = int(globalParameters.get("StinkyTofuDsIssueCapSpanCycles") or 0)
       if self.states.localReadSideOrder[0] == "B":
         stinky_module_options["DsReadOrder"] = 0  # Preserve selected B-then-A emission.
       # Tuning overrides from GlobalParameters win over the values above.
