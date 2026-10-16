@@ -497,11 +497,23 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int cover = wmmaBarrierCover(wmmaLatency);
         return cover > 0 ? (cover + std::max(1, wmmaLatency) - 1) / std::max(1, wmmaLatency) : 0;
     }
+    // An unissued barrier whose WMMA threshold is within a queue depth of the WMMAs issued so far.
+    bool barrierNearThreshold() const {
+        for (const auto& [barrier, threshold] : barrierWmmaThresholds_) {
+            if (barrierIssued_.count(barrier)) continue;
+            if (threshold - wmmaIssuedCountThisRegion_ <= wmmaQueueDepth()) return true;
+        }
+        return false;
+    }
     bool wmmaRefillActive(int wmmaLatency) {
         if (wmmaQueueCover() <= 0) return false;
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         const bool room = outstandingWmmas() < wmmaQueueDepth();
         if (barrierWaitsForCover_) return true;
+        if (f.wmmaRefillNearBarrier && !barrierNearThreshold()) {
+            wmmaRefilling_ = false;
+            return false;
+        }
         if (wmmaRefilling_) {
             const int target = f.wmmaRefillToCycles > 0
                                    ? f.wmmaRefillToCycles
@@ -768,6 +780,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // WMMAs issued since the last non-WMMA instruction. A longer run fills the matrix queue and
     // blocks the wave at the WMMA issue, where no ds_load can go out.
     int wmmaRun_ = 0;
+    std::unordered_set<const StinkyInstruction*> barrierIssued_;
     bool wmmaRunAtLimit_ = false;
 
     // Set by decidePromote() each pick: which phase is forced (None = normal
@@ -2348,6 +2361,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     auto rememberPick = [this](DAGNode* node) {
         lastPickedNode_ = node;
         wmmaRun_ = isMatrixInstruction(*node->inst) ? wmmaRun_ + 1 : 0;
+        if (isBarrier(*node->inst)) barrierIssued_.insert(node->inst);
         noteSccChainIssue(node);
         return node;
     };
@@ -2803,6 +2817,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     barrierWaitsForCover_ = false;
     lastPickedNode_ = nullptr;
     wmmaRun_ = 0;
+    barrierIssued_.clear();
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
     // crosses anyway.
