@@ -4,12 +4,23 @@
 /**
  * @file TestCsvOutput.cpp
  * @brief Covers quoting for the bench CSV's free-text columns: the problem id, query values,
- *        knob names and values, the engine name, and skip_reason (RFC 0019.13 §7.4).
+ *        knob names and values, the engine name, and skip_reason (RFC 0019.13 §7.4); and the
+ *        columns uhd_gen's dataset reads.
  */
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_bench/CsvOutput.hpp>
+#include <hipdnn_bench/DeviceIdentity.hpp>
+
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#if !defined(HIPDNN_BENCH_CSV_SAMPLE)
+#error "HIPDNN_BENCH_CSV_SAMPLE must name uhd_gen's sample of the CSV; see tests/CMakeLists.txt"
+#endif
 
 namespace hipdnn_bench
 {
@@ -79,6 +90,33 @@ TEST(TestCsvOutput, AQuotedFieldRoundTripsBackToItsInput)
     {
         EXPECT_EQ(parse(csvField(original)), original) << "did not round-trip: " << original;
     }
+}
+
+/// The header is the one uhd_gen's dataset tests convert (fixtures/hipdnn_bench.csv), so a
+/// column bench drops or renames fails here before the dataset refuses real output.
+TEST(TestCsvOutput, TheHeaderIsTheOneTheDatasetFixtureConverts)
+{
+    hipDeviceProp_t properties{};
+    std::strncpy(properties.gcnArchName, "gfx942:sramecc+:xnack-", sizeof(properties.gcnArchName));
+    const auto columns = deviceColumns(properties);
+    std::vector<std::string> deviceNames;
+    deviceNames.reserve(columns.size());
+    for(const auto& column : columns)
+    {
+        deviceNames.push_back(column.first);
+    }
+
+    std::ifstream sample(HIPDNN_BENCH_CSV_SAMPLE);
+    std::string expected;
+    ASSERT_TRUE(std::getline(sample, expected)) << HIPDNN_BENCH_CSV_SAMPLE;
+    EXPECT_EQ(csvHeader(deviceNames, {"M"}, {"tile_m"}), expected);
+}
+
+TEST(TestCsvOutput, AnUntimedCandidateHasEmptyTimings)
+{
+    EXPECT_EQ(csvTiming(true, 0.5F), "0.5");
+    EXPECT_EQ(csvTiming(false, 0.0F), "");
+    EXPECT_EQ(csvTiming(false, 0.5F), "");
 }
 
 } // namespace hipdnn_bench

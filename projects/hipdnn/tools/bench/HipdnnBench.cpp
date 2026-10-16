@@ -16,6 +16,7 @@
 #include <hipdnn_bench/CandidatePageJson.hpp>
 #include <hipdnn_bench/CliNumbers.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
+#include <hipdnn_bench/DeviceIdentity.hpp>
 #include <hipdnn_bench/InputDomain.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
@@ -581,19 +582,23 @@ hipdnn_frontend::Error engineIdentity(hipdnnHandle_t handle,
     output["device_arch"] = deviceArch;
     output["device_name"] = properties.name;
     output["device_ordinal"] = device;
+    // The kind of device, as the catalog page names it: a row is of a device kind, so a
+    // shape measured on two GPUs of one SKU is one problem.
+    output["device_id"] = hipdnn_bench::deviceKindId(properties);
 
+    // Which physical GPU ran it, for diagnosing one bad board; never a training identity.
     hipUUID uuid{};
     HIPDNN_CHECK_ERROR(hipError(hipDeviceGetUuid(&uuid, device), "Could not read device UUID"));
     static constexpr std::string_view HEX = "0123456789abcdef";
-    std::string deviceId;
-    deviceId.reserve(sizeof(uuid.bytes) * 2);
+    std::string deviceUuid;
+    deviceUuid.reserve(sizeof(uuid.bytes) * 2);
     for(const auto byte : uuid.bytes)
     {
         const auto value = static_cast<unsigned char>(byte);
-        deviceId.push_back(HEX[value >> 4]);
-        deviceId.push_back(HEX[value & 0x0f]);
+        deviceUuid.push_back(HEX[value >> 4]);
+        deviceUuid.push_back(HEX[value & 0x0f]);
     }
-    output["device_id"] = std::move(deviceId);
+    output["device_uuid"] = std::move(deviceUuid);
     return {};
 }
 
@@ -1318,6 +1323,10 @@ int runBench(const std::vector<std::string>& args)
             }
             // is_valid means measured, not numerically correct.
             const bool timed = result.succeeded && result.iterationsRun > 0;
+            // An untimed candidate has no timings: a zero would read as a measurement.
+            const auto timing = [timed](float milliseconds) {
+                return timed ? nlohmann::json(milliseconds) : nlohmann::json(nullptr);
+            };
             std::string reason;
             if(!result.succeeded)
             {
@@ -1339,10 +1348,10 @@ int runBench(const std::vector<std::string>& args)
                                          {"numerically_valid", numericallyValid(verdict.verdict)},
                                          {"validation", verdict.reason},
                                          {"skip_reason", reason},
-                                         {"min_time_ms", result.minTimeMs},
-                                         {"avg_time_ms", result.avgTimeMs},
-                                         {"robust_time_ms", result.robustTimeMs},
-                                         {"stddev_ms", result.stddevMs},
+                                         {"min_time_ms", timing(result.minTimeMs)},
+                                         {"avg_time_ms", timing(result.avgTimeMs)},
+                                         {"robust_time_ms", timing(result.robustTimeMs)},
+                                         {"stddev_ms", timing(result.stddevMs)},
                                          {"iterations", result.iterationsRun},
                                          {"converged", result.converged},
                                          {"workspace_bytes", result.workspaceSize}});
@@ -1354,22 +1363,33 @@ int runBench(const std::vector<std::string>& args)
     // One column per knob: uhd_gen reads kernel.* columns as features and hashes the header.
     const auto kernelNames = kernelColumns(results);
 
+    // A row is of a graph (its content key) on a kind of device, so the dataset keys it as
+    // the catalog page and engine mode do (RFC 0019.13 §4.1, §8.3).
+    int device = 0;
+    hipDeviceProp_t deviceProperties{};
+    if(hipGetDevice(&device) != hipSuccess
+       || hipGetDeviceProperties(&deviceProperties, device) != hipSuccess)
+    {
+        std::cerr << "Could not read the device's properties\n";
+        return 1;
+    }
+    const auto deviceColumns = hipdnn_bench::deviceColumns(deviceProperties);
+
     if(options.header)
     {
-        std::cout << "problem";
+        std::vector<std::string> deviceNames;
+        deviceNames.reserve(deviceColumns.size());
+        for(const auto& column : deviceColumns)
+        {
+            deviceNames.push_back(column.first);
+        }
+        std::vector<std::string> queryNames;
+        queryNames.reserve(options.query.size());
         for(const auto& entry : options.query)
         {
-            std::cout << "," << hipdnn_bench::csvField("q." + entry.first);
+            queryNames.push_back(entry.first);
         }
-        for(const auto& knob : kernelNames)
-        {
-            std::cout << "," << hipdnn_bench::csvField("kernel." + knob);
-        }
-        // Timing column names follow RFC 0019.13 §8.3 (and `robustMeanMs` matches uhd_gen), so
-        // they are camelCase. `numerically_valid` is three-valued text, kept separate from
-        // `is_valid` (RFC 0019 §13.2).
-        std::cout << ",engine,rank,succeeded,is_valid,numerically_valid,validation,skip_reason,"
-                     "minTimeMs,avgTimeMs,robustMeanMs,stddevMs,iters,converged,workspace_bytes\n";
+        std::cout << hipdnn_bench::csvHeader(deviceNames, queryNames, kernelNames) << "\n";
     }
 
     // Emit every variant, including losers and failures: ranking needs the comparison.
@@ -1379,7 +1399,11 @@ int runBench(const std::vector<std::string>& args)
         const auto& result = results[index];
         // Every text field goes through csvField: the problem id defaults to the graph's path,
         // and knob values and engine names are free text.
-        std::cout << hipdnn_bench::csvField(problemId);
+        std::cout << hipdnn_bench::csvField(problemId) << "," << hipdnn_bench::csvField(graphKey);
+        for(const auto& column : deviceColumns)
+        {
+            std::cout << "," << hipdnn_bench::csvField(column.second);
+        }
         for(const auto& entry : options.query)
         {
             std::cout << "," << hipdnn_bench::csvField(entry.second);
@@ -1410,10 +1434,12 @@ int runBench(const std::vector<std::string>& args)
                   << (timed ? "True" : "False") << ","
                   << hipdnn_bench::verdictText(verdicts[index].verdict) << ","
                   << hipdnn_bench::csvField(verdicts[index].reason) << ","
-                  << hipdnn_bench::csvField(skipReason) << "," << result.minTimeMs << ","
-                  << result.avgTimeMs << "," << result.robustTimeMs << "," << result.stddevMs << ","
-                  << result.iterationsRun << "," << (result.converged ? 1 : 0) << ","
-                  << result.workspaceSize << "\n";
+                  << hipdnn_bench::csvField(skipReason) << ","
+                  << hipdnn_bench::csvTiming(timed, result.minTimeMs) << ","
+                  << hipdnn_bench::csvTiming(timed, result.avgTimeMs) << ","
+                  << hipdnn_bench::csvTiming(timed, result.robustTimeMs) << ","
+                  << hipdnn_bench::csvTiming(timed, result.stddevMs) << "," << result.iterationsRun
+                  << "," << (result.converged ? 1 : 0) << "," << result.workspaceSize << "\n";
     }
 
     return results.empty() ? 2 : 0;

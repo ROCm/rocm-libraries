@@ -17,7 +17,7 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     # detail/EngineQueries.hpp decodes FlatBuffers pages; the frontend does not link the SDK.
     target_link_libraries(hipdnn_bench_tool
         PRIVATE hipdnn_bench_lib hipdnn_backend hipdnn_frontend hipdnn_flatbuffers_sdk
-                hipdnn_data_sdk hip::host)
+                hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
     clang_tidy_check(hipdnn_bench_tool)
     install(TARGETS hipdnn_bench_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

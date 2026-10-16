@@ -14,6 +14,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -766,62 +767,89 @@ public:
 
 private:
     /// Fills the verdicts of the finite candidates; true when a strict majority agreed.
+    ///
+    /// A cohort that left the zero-filled output untouched computed nothing, so it never
+    /// votes and is never the reference, however many candidates it holds: the majority is
+    /// decided among the candidates that wrote their output.
     bool decide(std::vector<ValidationOutcome>& outcomes) const
     {
         if(_cohorts.empty())
         {
             return false;
         }
-        size_t largest = 0;
-        for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
-        {
-            if(_cohorts[cohort].members.size() > _cohorts[largest].members.size())
-            {
-                largest = cohort;
-            }
-        }
 
         if(_crossChecked < 2)
         {
             // One candidate agreeing with itself is not evidence.
-            outcomes[_cohorts[largest].members.front()]
+            outcomes[_cohorts.front().members.front()]
                 = {NumericalVerdict::UNKNOWN,
                    "no_reference: one candidate ran for this problem, so there was nothing to "
                    "cross-check it against"};
             return false;
         }
 
-        if(_cohorts.size() == 1 && detail::leftOutputUntouched(_cohorts[0].founder, _tensors))
-        {
-            for(const size_t index : _cohorts[0].members)
-            {
-                outcomes[index] = {NumericalVerdict::UNKNOWN,
-                                   "degenerate_reference: every cross-checked candidate left the "
-                                   "zero-filled output untouched, so their agreement is not "
-                                   "evidence that any of them computed anything"};
-            }
-            return false;
-        }
-
-        // Strict majority, written to avoid overflow; necessarily unique.
-        const bool decided = _cohorts[largest].members.size() > _crossChecked / 2;
-        const CandidateOutput& reference = _cohorts[decided ? largest : 0].founder;
+        std::vector<bool> untouched(_cohorts.size());
+        size_t computing = 0;
+        std::optional<size_t> largest;
         for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
         {
-            if(decided && cohort == largest)
+            untouched[cohort] = detail::leftOutputUntouched(_cohorts[cohort].founder, _tensors);
+            if(untouched[cohort])
+            {
+                continue;
+            }
+            computing += _cohorts[cohort].members.size();
+            if(!largest || _cohorts[cohort].members.size() > _cohorts[*largest].members.size())
+            {
+                largest = cohort;
+            }
+        }
+
+        // Strict majority of the candidates that computed, written to avoid overflow;
+        // necessarily unique. One computing candidate has no corroboration.
+        const bool decided
+            = largest && computing >= 2 && _cohorts[*largest].members.size() > computing / 2;
+        for(size_t cohort = 0; cohort < _cohorts.size(); ++cohort)
+        {
+            if(untouched[cohort] && !decided)
+            {
+                for(const size_t index : _cohorts[cohort].members)
+                {
+                    outcomes[index] = {NumericalVerdict::UNKNOWN,
+                                       "degenerate_reference: the candidate left the zero-filled "
+                                       "output untouched and no majority of the candidates that "
+                                       "wrote their output corroborates an answer"};
+                }
+                continue;
+            }
+            if(!untouched[cohort] && computing < 2)
+            {
+                for(const size_t index : _cohorts[cohort].members)
+                {
+                    outcomes[index]
+                        = {NumericalVerdict::UNKNOWN,
+                           "no_reference: no other cross-checked candidate wrote its output, "
+                           "so there was nothing to cross-check it against"};
+                }
+                continue;
+            }
+            if(decided && cohort == *largest)
             {
                 for(const size_t index : _cohorts[cohort].members)
                 {
                     outcomes[index]
                         = {NumericalVerdict::AGREED,
                            "agrees_with_catalog: " + std::to_string(_cohorts[cohort].members.size())
-                               + " of " + std::to_string(_crossChecked)
-                               + " cross-checked candidates produced this output"};
+                               + " of " + std::to_string(computing)
+                               + " cross-checked candidates that wrote their output produced it"};
                 }
                 continue;
             }
             // Members agree with the founder within tolerance, so its detail stands for all.
-            const std::string detailText = mismatchDetail(_cohorts[cohort].founder, reference);
+            const std::string detailText
+                = untouched[cohort]
+                      ? "the candidate left the zero-filled output untouched"
+                      : mismatchDetail(_cohorts[cohort].founder, _cohorts[*largest].founder);
             for(const size_t index : _cohorts[cohort].members)
             {
                 outcomes[index]

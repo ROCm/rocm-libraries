@@ -162,6 +162,37 @@ TEST(TestNumericalValidation, NonZeroInputsDoNotMakeAnUntouchedOutputEvidence)
     }
 }
 
+TEST(TestNumericalValidation, AMajorityThatLeftTheOutputUntouchedIsNotTheReference)
+{
+    // Three candidates wrote nothing; the two that computed agree. The no-ops never vote.
+    const auto verdicts = crossCheck({ran({0.0F, 0.0F}),
+                                      ran({1.0F, 2.0F}),
+                                      ran({0.0F, 0.0F}),
+                                      ran({1.0F, 2.0F}),
+                                      ran({0.0F, 0.0F})},
+                                     tensors());
+    for(const size_t computed : {1U, 3U})
+    {
+        EXPECT_EQ(verdicts[computed].verdict, NumericalVerdict::AGREED)
+            << verdicts[computed].reason;
+    }
+    for(const size_t noOp : {0U, 2U, 4U})
+    {
+        EXPECT_EQ(verdicts[noOp].verdict, NumericalVerdict::DISAGREED) << verdicts[noOp].reason;
+        EXPECT_NE(verdicts[noOp].reason.find("untouched"), std::string::npos);
+    }
+}
+
+TEST(TestNumericalValidation, OneComputingCandidateAmongNoOpsIsUncorroborated)
+{
+    const auto verdicts
+        = crossCheck({ran({0.0F, 0.0F}), ran({1.0F, 2.0F}), ran({0.0F, 0.0F})}, tensors());
+    for(const auto& verdict : verdicts)
+    {
+        EXPECT_EQ(verdict.verdict, NumericalVerdict::UNKNOWN) << verdict.reason;
+    }
+}
+
 TEST(TestNumericalValidation, APluralityIsNotAgreement)
 {
     // {1, 1, 2, 3}: the largest cohort holds only two of four.
