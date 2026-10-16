@@ -2385,7 +2385,12 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             activeWmmaNode_ != nullptr && fillQuotaMet() && !nonFillerPickable;
         // Too little queued WMMA work to hide a non-WMMA stall: the next WMMA goes first, while
         // the queue has room (a full queue already covers it, and the wait fits other work).
-        const bool preemptForQueue = wmmaRefillActive(bestWMMA->inst->latencyCycles);
+        // A released ds_load that does not wait for a credit hides nothing and stalls nothing: it
+        // issues in the WMMA's window, so the refill does not hold it back.
+        const bool dsIssuesFree = hasPickableNonWmma && pickKind == kLocalRead &&
+                                  smallestPickable == pickedDS && !dsReadInflight_.full();
+        const bool preemptForQueue =
+            wmmaRefillActive(bestWMMA->inst->latencyCycles) && !dsIssuesFree;
         const bool blockWmmaForActiveWindow = !preemptForQueue && !quotaClosedWindow &&
                                               (coIssueCyclePos_ < activeWmmaLatency_) &&
                                               (smallestPickable != nullptr);
