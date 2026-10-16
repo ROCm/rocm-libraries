@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CRC GEMM -- the free-dim-contiguous (column-major-in, column-major-out) interleaved kernel.
+"""CRC GEMM -- the free-dim-contiguous (M- and N-contiguous in, M-contiguous out) interleaved kernel.
 
 ISOLATED PROTOTYPE (do NOT fold into the other kernels). C = A.B, f16 input -> f32 accumulate ->
 f32 OUTPUT, authored ENTIRELY through the ``rocke.helpers.tiling`` surface.
@@ -9,13 +9,13 @@ f32 OUTPUT, authored ENTIRELY through the ``rocke.helpers.tiling`` surface.
 THE FIXED CRC LAYOUT (this is the whole point of the file):
   * A is (M, K) with strides (1, M)  -> M is stride-1  -> A is FREE-DIM (M) CONTIGUOUS.
   * B is (N, K) with strides (1, N)  -> N is stride-1  -> B is FREE-DIM (N) CONTIGUOUS.
-  * C is (M, N) with strides (1, M)  -> M is stride-1  -> C is M-CONTIGUOUS (col-major output).
+  * C is (M, N) with strides (1, M)  -> M is stride-1  -> C is M-CONTIGUOUS.
 
 THE CRC GIFT: because the global load is already free-dim-innermost (M for A, N for B), the same
 byte order the coalesced global load wants IS the free-dim-innermost LDS store order -- so the
 cooperative store into LDS is an IDENTITY round-trip (no global->LDS register reorder). The K-loop
 wave read then reaches its K-contiguous MMA operand via a pure ``_transpose_desc`` relabel of the
-M-innermost LDS buffer (no shuffle, no cross-lane). This is the mirror image of the row-major
+M-innermost LDS buffer (no shuffle, no cross-lane). This is the mirror image of the K-contiguous
 interleaved kernel (``tiling_gemm_interleaved_demo``), which pays a register ``reorder`` on the store
 because its global load is K-contiguous.
 
@@ -25,11 +25,11 @@ PIPELINE (double-buffered prefetch, wave64, gfx90a, atom 16x16x16):
 
 TWO PATHS selectable by ``ab_swap`` (both compute identical C, both bit-exact):
   * ``ab_swap=False`` (base): MMA built as (warp_m, warp_n, tile_k); C accumulator is the native
-    (M, N); stored through the M-contiguous (col-major) C descriptor. The native-C register run is
+    (M, N); stored through the M-contiguous C descriptor. The native-C register run is
     M-inner, so the M-contiguous store needs NO fragment reorder (correctness is address-driven).
   * ``ab_swap=True`` (crossed): MMA built as (warp_n, warp_m, tile_k) with B fed into the A-slot and
     A into the B-slot (an M<->N free relabel). The machine emits C' = C^T = (N, M); stored through
-    the (N, M)-permuted C descriptor so C'[n, m] lands at addr = m + n*ldc -- the SAME col-major C
+    the (N, M)-permuted C descriptor so C'[n, m] lands at addr = m + n*ldc -- the SAME M-contiguous C
     address. In the crossed layout M is lane-major, so the M-contiguous store wave-coalesces.
 
 Only PURE layout helpers are reused from the interleaved demo (``_wave_descs_interleaved``,
@@ -121,7 +121,7 @@ def _macro_coop_descs_crc(tile_free: int, tile_k: int, n_waves: int):
 
 def _c_store_desc(m_sub: int, n_sub: int):
     """M-contiguous C store distribution (make_tile_desc): each lane owns a contiguous 4*m_sub x n_sub
-    (M x N) block with M inner (stride-1) -> the col-major C store is coalesced/wide in M. The native
+    (M x N) block with M inner (stride-1) -> the M-contiguous C store is coalesced/wide in M. The native
     interleaved accumulator -> this store desc is a pure register ``reorder`` (same lane ownership).
     """
     return make_tile_desc(
@@ -160,7 +160,7 @@ def build_crc_gemm(
     """Build the CRC f16->f32 GEMM KernelDef. Returns ``(kernel, mma)``.
 
     ``ab_swap`` selects the base ((warp_m,warp_n,K), native C) or crossed ((warp_n,warp_m,K),
-    C'=C^T stored through the permuted desc) path. Both are bit-exact and write the same col-major C.
+    C'=C^T stored through the permuted desc) path. Both are bit-exact and write the same M-contiguous C.
     """
     from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
 
@@ -408,11 +408,11 @@ def build_crc_gemm(
 
     # C epilogue. The accumulator is the native interleaved C (shape (warp_m,warp_n) base, or
     # (warp_n,warp_m) crossed). Reorder to an M-inner store distribution (a pure register reorder,
-    # same lane ownership) so the col-major store is wide, then write through the C descriptor.
+    # same lane ownership) so the M-contiguous store is wide, then write through the C descriptor.
     if ab_swap:
         # C' = C^T = (warp_n, warp_m). Store the NATIVE crossed accumulator directly through the (N, M)-
         # permuted C view: each register's crossed coord (nc, mc) lands at addr = mc*1 + nc*ldc -- the
-        # SAME col-major C address as the base path. In the crossed layout M is lane-major, so this
+        # SAME M-contiguous C address as the base path. In the crossed layout M is lane-major, so this
         # M-contiguous store wave-coalesces WITHOUT any epilogue reorder (the ab_swap payoff).
         c_view = c_td.permute([1, 0])  # (N, M): addr(n, m) = m*1 + n*ldc
         c_win = make_window(
@@ -456,8 +456,9 @@ def _compile_launcher(kernel, arch: str):
 
 
 def _crc_host_arrays(M_LEN, N_LEN, K_LEN, *, zeros=False):
-    """Host arrays in CRC byte order. A col-major (M,K) has the SAME bytes as a C-contiguous (K,M);
-    likewise B->(K,N), C->(N,M). We upload those C-contiguous transposes (as_u8_buffer needs
+    """Host arrays in CRC byte order. An M-contiguous A (M, K) has the SAME bytes as a numpy
+    C-contiguous (K, M) array; likewise an N-contiguous B (N, K) and an M-contiguous C (M, N) match
+    numpy (K, N) and (N, M) arrays. We upload those C-contiguous transposes (as_u8_buffer needs
     C-contiguity) and reinterpret on readback. Returns (A_logical, B_logical, A_dev, B_dev, C_dev).
     """
     if zeros:
@@ -467,11 +468,15 @@ def _crc_host_arrays(M_LEN, N_LEN, K_LEN, *, zeros=False):
         rng = np.random.default_rng(0)
         a = rng.integers(-3, 4, size=(M_LEN, K_LEN)).astype(np.float16)
         bm = rng.integers(-3, 4, size=(N_LEN, K_LEN)).astype(np.float16)
-    a_dev = np.ascontiguousarray(a.T)  # (K,M) c-contig == A (M,K) col-major bytes
-    b_dev = np.ascontiguousarray(bm.T)  # (K,N) c-contig == B (N,K) col-major bytes
+    a_dev = np.ascontiguousarray(
+        a.T
+    )  # numpy (K,M) c-contig == A (M,K) M-contiguous bytes
+    b_dev = np.ascontiguousarray(
+        bm.T
+    )  # numpy (K,N) c-contig == B (N,K) N-contiguous bytes
     c_dev = np.zeros(
         (N_LEN, M_LEN), dtype=np.float32
-    )  # (N,M) c-contig == C (M,N) col-major bytes
+    )  # numpy (N,M) c-contig == C (M,N) M-contiguous bytes
     return a, bm, a_dev, b_dev, c_dev
 
 
@@ -537,7 +542,7 @@ def run_and_verify_crc(
     rt.memcpy_d2h(as_u8_buffer(c_dev_h), c_dev.ptr(), c_dev_h.nbytes)
 
     reference = a.astype(np.float32) @ bm.astype(np.float32).T  # logical (M, N)
-    result = c_dev_h.T.astype(np.float32)  # (N,M) c-contig -> (M,N) col-major
+    result = c_dev_h.T.astype(np.float32)  # numpy (N,M) c-contig -> C (M,N)
     max_abs_diff = float(np.abs(result - reference).max())
     return {
         "shape": (M_LEN, N_LEN, K_LEN),

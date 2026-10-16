@@ -6,7 +6,7 @@ rocWMMA `perf_hgemm`. Phases are built up in-place (P1 register-blocked -> P2 LD
 this file currently holds P1.
 
 P1 -- register-blocked, no LDS. A per-CTA wave tile of ``TILE_M x TILE_N`` (default 32x32 = a 2x2
-grid of 16x16x16 MFMA atoms), single wave (wave64), RCC layout (A row-major, B/C col-major),
+grid of 16x16x16 MFMA atoms), single wave (wave64), A and B K-contiguous, C M-contiguous,
 canonical `make_tile_desc` layouts (load layout == MFMA layout, so no cross-lane relayout is needed
 and no LDS is used). The 2x2 grid gives register reuse: each loaded A / B atom feeds two MMAs.
 
@@ -187,11 +187,11 @@ def _wave_descs(m_sub: int = 1, n_sub: int = 1, k_sub: int = 1):
 def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
     """Block-wide COOPERATIVE load, returned as a (LOAD, STORE) pair per operand.
 
-    LOAD: K-contiguous (KPT contiguous per lane -> coalesced global load, K-stride-1 row-major A/B),
+    LOAD: K-contiguous (KPT contiguous per lane -> coalesced global load, K-contiguous A/B),
     with the free-dim also owning DPT>=2 elements per lane. STORE: the SAME lane ownership re-ordered
     FREE-DIM-contiguous (M/N inner) -- a pure register `reorder` (transpose = axis-significance swap,
-    the free "col-major == transpose of row-major"). The kernel loads with LOAD (fast), re-orders to
-    STORE, and writes free-dim-contiguous LDS so the interleaved wave read is stride-1 (conflict-free).
+    the free transpose: the same elements, the other axis contiguous). The kernel loads with LOAD
+    (fast), re-orders to STORE, and writes free-dim-contiguous LDS so the interleaved wave read is stride-1 (conflict-free).
     One interleaved layout end to end; `wave_dist` splits the free dim across the block's waves.
     """
     coop_m, coop_n = tile_m // n_waves, tile_n // n_waves
@@ -225,7 +225,7 @@ def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
             wave_size=64,
         )
         # STORE = LOAD with the two register axes swapped in significance -> free-dim-contiguous, same
-        # elements/lanes (a `reorder`). This is the free transpose (col-major == row-major^T).
+        # elements/lanes (a `reorder`). This is the free transpose (same elements, the other axis contiguous).
         el = load.layout
         store = TileDesc(
             shape=load.shape,
@@ -246,8 +246,8 @@ def _macro_coop_descs(tile_m: int, tile_n: int, tile_k: int, n_waves: int):
 
 
 def _transpose_desc(td):
-    """Swap the two X-dims (M<->K) of a desc -- a free relabel (col-major == row-major^T), register-
-    identity (same values, coords swapped). Used to address the M-innermost LDS buffer, described in
+    """Swap the two X-dims (M<->K) of a desc -- a free relabel (same elements, the other axis
+    contiguous), register-identity (same values, coords swapped). Used to address the M-innermost LDS buffer, described in
     (K, M) order, so the free-dim (M) store/read runs along its stride-1 axis -> WIDE ds_write/ds_read
     (never scalar).
     """
@@ -368,7 +368,7 @@ def build_interleaved_gemm(
     m_macro = b.mul(b.block_id_y(), b.const_i32(tile_m))
     n_macro = b.mul(b.block_id_x(), b.const_i32(tile_n))
 
-    lda = lda if lda is not None else K_LEN  # A (M,K) row-major
+    lda = lda if lda is not None else K_LEN  # A (M,K): K contiguous
     ldb = ldb if ldb is not None else K_LEN  # B (N,K): K contiguous
 
     a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)

@@ -127,7 +127,7 @@ _CONFIGS: dict[str, Callable[[], object]] = {
 }
 
 _GOLDEN: dict[str, str] = {
-    "manual": "acbe9945a75a30e440fc98a0841d5682e575d5a097eeec5bc674c84244394eea",
+    "manual": "edcd6e0afda22fc8adab78bcc78c2bf89a850b7c0fe3dd684a23429a3e0056ce",
     "lds_staged": "56c94d2b977a32881d06486ecba5306f15d543c6701b701380f966aa13285890",
     "interleaved_1wave": "d1bbded563e193de6cb250b5aeebd1c76dc0dac610437ab676a088af23d20485",
     "interleaved_1wave_k32": "804b4bd4cac5f360d37f935d39ff8370013f75d5cdaa14ab43180b052b48fcbf",

@@ -30,7 +30,8 @@ def test_tensor_desc_rank_mismatch_rejected() -> None:
 
 
 def test_permute_swaps_lengths_and_strides() -> None:
-    # A col-major operand stored (N, K) presented as logical (K, N): a pure view, same dtype.
+    # An N-contiguous tensor described (N, K) = (32, 16), strides (1, 32); permute([1, 0]) gives its
+    # (K, N) view -- a view of the same bytes and dtype, not the operand order.
     td = make_tensor_desc((32, 16), (1, 32), _DT("f16"))
     viewed = td.permute([1, 0])
     assert viewed.lengths == (16, 32)

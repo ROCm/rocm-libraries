@@ -26,8 +26,12 @@ one index and `TensorDesc.squeeze(axis)` drops a length-1 BATCH axis -- both TYP
 declared roles: they refuse to reduce the free or contraction axis (that would silently drop matmul
 terms), and refuse to operate at all without declared roles (never a bare `rank==2` check).
 `TensorDesc.assert_mma_operand()` is the boundary gate: rank-2 with exactly one free + one
-contraction axis, in EITHER order (A is (M, K) = (free, contraction); B is (K, N) = (contraction,
-free), its atom orientation) -- the roles are labels, the order matches the operand's tile descriptor.
+contraction axis; it checks the axis set, not the order.
+
+GEMM tensors are written in one axis order -- A (M, K), B (N, K), C (M, N), batch axes first --
+the order their tile descriptors use, with the memory layout only in the strides: a B stored
+N-contiguous (stride 1 on N) is ``make_tensor_desc((N, K), (1, ldb), dtype)``, a K-contiguous B is
+``make_tensor_desc((N, K), (ldb, 1), dtype)``.
 """
 
 from __future__ import annotations
@@ -122,10 +126,11 @@ class TensorDesc:
         return self._role_axis("contraction")
 
     def permute(self, order: tuple[int, ...]) -> "TensorDesc":
-        """A permuted VIEW (new axis ``i`` = old axis ``order[i]``). The physical memory is
-        unchanged -- only the LOGICAL axis order -- so an operand authored PHYSICALLY (traditional
-        fastest-stride-rightmost memory layout) can be presented in LOGICAL matrix order to line up
-        with its tile descriptor (e.g. a col-major B stored ``(N, K)`` viewed as logical ``(K, N)``).
+        """A permuted VIEW (new axis ``i`` = old axis ``order[i]``): the same memory, presented in
+        another axis order. A tensor needs no permute to match its memory layout -- the layout lives
+        in the strides, so a GEMM's B stored N-contiguous is described ``(N, K)`` with strides
+        ``(1, ldb)`` directly. Permute when a consumer wants the same bytes in another axis order: on
+        that B, ``permute([1, 0])`` gives its ``(K, N)`` view, strides ``(ldb, 1)``.
         `axis_roles`, if declared, follow the permutation."""
         if sorted(order) != list(range(self.rank)):
             raise ValueError(

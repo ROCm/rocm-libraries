@@ -505,7 +505,7 @@ def _round_up(n: int, m: int) -> int:
 )
 def test_lds_round_trip_places_elements_by_strides(dtype: str, case: str) -> None:
     ir = _IR[dtype]
-    # The tensor is (16, 32) row-major in global memory; LDS describes the same logical tensor.
+    # The tensor is (16, 32), last axis contiguous, in global memory; LDS describes the same logical tensor.
     rows, cols = 16, 32
     lds_strides = {"k_contiguous": (32, 1), "padded": (40, 1), "n_contiguous": (1, 16)}[
         case
