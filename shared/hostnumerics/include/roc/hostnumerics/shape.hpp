@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -13,6 +15,30 @@
 #include <vector>
 
 namespace roc::hostnumerics {
+namespace detail {
+inline std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
+    if (std::ranges::find(dimensions, size_t{0}) != dimensions.end()) return 0;
+    size_t count = 1;
+    for (size_t extent : dimensions) {
+        if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
+        count *= extent;
+    }
+    return count;
+}
+
+inline bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
+    if (order.empty()) return true;
+    if (order.size() != rank) return false;
+    std::vector<bool> seen(rank, false);
+    for (size_t axis : order) {
+        if (axis >= rank || seen[axis]) return false;
+        seen[axis] = true;
+    }
+    return true;
+}
+
+}  // namespace detail
+
 // Owns logical extents independently of a datatype, strides, or storage. A
 // rank-zero shape describes one scalar; any zero extent describes an empty shape.
 // Counts and index conversions perform checked, rank-dependent work. Reuse a
@@ -40,8 +66,8 @@ class Shape {
 
     size_t extent(size_t dimension) const {
         if (dimension >= rank())
-            throw std::out_of_range("Tensor shape dimension " + std::to_string(dimension) +
-                                    " is outside [0, " + std::to_string(rank()) + ").");
+            throw std::runtime_error("Tensor shape dimension " + std::to_string(dimension) +
+                                     " is outside [0, " + std::to_string(rank()) + ").");
         return m_dimensions[dimension];
     }
 
@@ -62,7 +88,7 @@ class Shape {
             const std::string reason = firstDimension > onePastLastDimension
                                            ? "the start exceeds the end"
                                            : "the end exceeds the shape rank";
-            throw std::out_of_range(
+            throw std::runtime_error(
                 "Tensor shape dimension range [" + std::to_string(firstDimension) + ", " +
                 std::to_string(onePastLastDimension) + ") is invalid for rank " +
                 std::to_string(rank()) + ": " + reason + ".");
@@ -80,8 +106,8 @@ class Shape {
         for (size_t axis : axes) {
             const size_t value = extent(axis);
             if (seen[axis])
-                throw std::invalid_argument("Tensor shape projection repeats dimension " +
-                                            std::to_string(axis) + ".");
+                throw std::runtime_error("Tensor shape projection repeats dimension " +
+                                         std::to_string(axis) + ".");
             seen[axis] = true;
             dimensions.push_back(value);
         }
@@ -98,21 +124,20 @@ class Shape {
     size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order = {}) const {
         validateIndexOrder(order);
         if (indices.size() != rank())
-            throw std::invalid_argument("Tensor coordinate rank " + std::to_string(indices.size()) +
-                                        " does not match shape rank " + std::to_string(rank()) +
-                                        ".");
+            throw std::runtime_error("Tensor coordinate rank " + std::to_string(indices.size()) +
+                                     " does not match shape rank " + std::to_string(rank()) + ".");
 
         size_t result = 0;
         const auto appendDimension = [&](size_t dimension) {
             if (indices[dimension] >= extent(dimension))
-                throw std::out_of_range("Tensor coordinate " + std::to_string(indices[dimension]) +
-                                        " in dimension " + std::to_string(dimension) +
-                                        " is outside [0, " + std::to_string(extent(dimension)) +
-                                        ").");
+                throw std::runtime_error("Tensor coordinate " + std::to_string(indices[dimension]) +
+                                         " in dimension " + std::to_string(dimension) +
+                                         " is outside [0, " + std::to_string(extent(dimension)) +
+                                         ").");
             result =
                 checkedMultiply(result, extent(dimension), "Tensor shape element count overflow.");
             if (indices[dimension] > std::numeric_limits<size_t>::max() - result)
-                throw std::overflow_error("Tensor linear index overflow.");
+                throw std::runtime_error("Tensor linear index overflow.");
             result += indices[dimension];
         };
 
@@ -131,13 +156,13 @@ class Shape {
                      std::span<size_t> result) const {
         validateIndexOrder(order);
         if (result.size() != rank())
-            throw std::invalid_argument(
-                "Tensor coordinate output rank " + std::to_string(result.size()) +
-                " does not match shape rank " + std::to_string(rank()) + ".");
+            throw std::runtime_error("Tensor coordinate output rank " +
+                                     std::to_string(result.size()) + " does not match shape rank " +
+                                     std::to_string(rank()) + ".");
         const size_t count = elementCount();
         if (linearIndex >= count)
-            throw std::out_of_range("Tensor logical index " + std::to_string(linearIndex) +
-                                    " is outside [0, " + std::to_string(count) + ").");
+            throw std::runtime_error("Tensor logical index " + std::to_string(linearIndex) +
+                                     " is outside [0, " + std::to_string(count) + ").");
 
         for (size_t position = rank(); position > 0; --position) {
             const size_t dimension = order.empty() ? position - 1 : order[position - 1];
@@ -156,39 +181,32 @@ class Shape {
 
    private:
     size_t checkedElementCount(size_t firstDimension, size_t onePastLastDimension) const {
-        // A zero anywhere in the selected range makes its exact product zero.
-        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension) {
-            if (m_dimensions[dimension] == 0) return 0;
-        }
-        size_t count = 1;
-        for (size_t dimension = firstDimension; dimension < onePastLastDimension; ++dimension)
-            count = checkedMultiply(count, m_dimensions[dimension],
-                                    "Tensor shape element count exceeds size_t.");
-        return count;
+        const auto count = detail::tryElementCount(
+            dimensions().subspan(firstDimension, onePastLastDimension - firstDimension));
+        if (!count) throw std::runtime_error("Tensor shape element count exceeds size_t.");
+        return *count;
     }
 
     void validateIndexOrder(std::span<const size_t> order) const {
         if (order.empty()) return;
         if (order.size() != rank())
-            throw std::invalid_argument("Tensor index order rank " + std::to_string(order.size()) +
-                                        " does not match shape rank " + std::to_string(rank()) +
-                                        ".");
-        std::vector<bool> seen(rank(), false);
-        for (size_t axis : order) {
-            if (axis >= rank() || seen[axis])
-                throw std::invalid_argument("Tensor index order must be a permutation of [0, " +
-                                            std::to_string(rank()) + ").");
-            seen[axis] = true;
-        }
+            throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
+                                     " does not match shape rank " + std::to_string(rank()) + ".");
+        if (!detail::isValidIndexOrder(rank(), order))
+            throw std::runtime_error("Tensor index order must be a permutation of [0, " +
+                                     std::to_string(rank()) + ").");
     }
 
     static size_t checkedMultiply(size_t left, size_t right, const char* message) {
         if (right == 0) return 0;
-        if (left > std::numeric_limits<size_t>::max() / right) throw std::overflow_error(message);
+        if (left > std::numeric_limits<size_t>::max() / right) throw std::runtime_error(message);
         return left * right;
     }
 
     std::vector<size_t> m_dimensions;
 };
 
+// Returns the NumPy-style broadcast shape of two inputs. Dimensions are
+// aligned from the end and must be equal or have extent one. A zero extent
+// broadcasts with one to zero, but not with any other extent.
 }  // namespace roc::hostnumerics
