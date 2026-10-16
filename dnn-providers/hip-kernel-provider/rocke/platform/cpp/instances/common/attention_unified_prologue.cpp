@@ -122,18 +122,6 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
         return false;
     }
 
-    /* max_blocks = ceil(max_seqlen_k / block_size). Python folds this inline as
-     * (p.max_seqlen_k + p.block_size - 1) // p.block_size when computing the
-     * block_tables row stride. */
-    if(p->block_size > 0)
-    {
-        ctx->max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    }
-    else
-    {
-        ctx->max_blocks = 0;
-    }
-
     return true;
 }
 
