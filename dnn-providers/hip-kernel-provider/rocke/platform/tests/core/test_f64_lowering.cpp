@@ -30,12 +30,12 @@ enum f64_op
     OP_SQRT,
     OP_RSQRT,
     OP_RCP_FAST,
-    OP_FABS,
     OP_FMA,
     OP_FMAX3,
     OP_FMIN3,
     OP_VECTOR_FMA,
     OP_RCP,
+    OP_FABS,
     OP_VECTOR_ADD,
     OP_VECTOR_SUB,
     OP_VECTOR_MUL,
@@ -47,7 +47,7 @@ static rocke_value_t* build_f64_kernel(rocke_ir_builder_t* b, f64_op op)
     rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_f64(), "global"), NULL);
     rocke_value_t* idx = rocke_b_const_i32(b, 0);
     rocke_value_t* r = NULL;
-    if(op >= OP_VECTOR_FMA && op != OP_RCP)
+    if(op == OP_VECTOR_FMA || op >= OP_VECTOR_ADD)
     {
         rocke_value_t* v = rocke_b_global_load_vN(b, out, idx, rocke_f64(), 2, 16);
         r = op == OP_VECTOR_FMA   ? rocke_b_vector_fma(b, v, v, v)
@@ -76,9 +76,6 @@ static rocke_value_t* build_f64_kernel(rocke_ir_builder_t* b, f64_op op)
         case OP_RCP_FAST:
             r = rocke_b_rcp_fast(b, x);
             break;
-        case OP_FABS:
-            r = rocke_b_fabs(b, x);
-            break;
         case OP_FMA:
             r = rocke_b_fma(b, x, x, x);
             break;
@@ -87,6 +84,9 @@ static rocke_value_t* build_f64_kernel(rocke_ir_builder_t* b, f64_op op)
             break;
         case OP_FMIN3:
             r = rocke_b_fmin3(b, x, x, x);
+            break;
+        case OP_FABS:
+            r = rocke_b_fabs(b, x);
             break;
         default:
             r = rocke_b_rcp(b, x);
@@ -141,6 +141,32 @@ static int test_rcp_divides_in_double()
     return 0;
 }
 
+/* fabs stays in double in both lowerings (the f32 helper would round). */
+static int test_fabs_stays_in_double()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "f64_fabs") == ROCKE_OK);
+    build_f64_kernel(&b, OP_FABS);
+
+    char* llvm_text = NULL;
+    CHECK(rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text)
+          == ROCKE_OK);
+    CHECK(std::strstr(llvm_text, "declare double @llvm.fabs.f64(double)") != NULL);
+    CHECK(std::strstr(llvm_text, "= call double @llvm.fabs.f64(double %") != NULL);
+    std::free(llvm_text);
+
+    rocke_strbuf_t hip;
+    CHECK(rocke_strbuf_init(&hip, 0) == 0);
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = "gfx942";
+    CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &hip) == ROCKE_OK);
+    CHECK(std::strstr(hip.data, " = fabs(") != NULL);
+    CHECK(std::strstr(hip.data, "fabsf") == NULL);
+    rocke_strbuf_free(&hip);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 static int test_vector_binops_use_float_ops()
 {
     const struct
@@ -169,7 +195,7 @@ static int test_vector_binops_use_float_ops()
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
-       || test_vector_binops_use_float_ops())
+       || test_fabs_stays_in_double() || test_vector_binops_use_float_ops())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;

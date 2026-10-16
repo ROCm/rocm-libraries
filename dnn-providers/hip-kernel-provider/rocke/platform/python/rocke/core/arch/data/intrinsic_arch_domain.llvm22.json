@@ -46,6 +46,7 @@
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
+    "fabs.f64": "llvm.fabs.f64",
     "flat.prefetch": "llvm.amdgcn.flat.prefetch",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
@@ -2050,6 +2051,40 @@
       }
     },
     "fabs.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      }
+    },
+    "fabs.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm22"

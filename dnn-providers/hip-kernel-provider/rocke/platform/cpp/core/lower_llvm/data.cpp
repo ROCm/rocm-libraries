@@ -158,6 +158,7 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"minnum.f32", "declare float @llvm.minnum.f32(float, float)"},
     {"minnum.f16", "declare half @llvm.minnum.f16(half, half)"},
     {"minnum.bf16", "declare bfloat @llvm.minnum.bf16(bfloat, bfloat)"},
+    {"fabs.f64", "declare double @llvm.fabs.f64(double)"},
     {"fabs.f32", "declare float @llvm.fabs.f32(float)"},
     {"fabs.f16", "declare half @llvm.fabs.f16(half)"},
     {"fabs.bf16", "declare bfloat @llvm.fabs.bf16(bfloat)"},
