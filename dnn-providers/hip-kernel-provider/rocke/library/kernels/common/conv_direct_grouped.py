@@ -10476,3 +10476,80 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         )
         return (n_blocks, 1, 1), (64, 1, 1)
     raise TypeError(f"no launch geometry for {type(spec).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# Single-step direct dgrad variants of the AOT cache
+# ---------------------------------------------------------------------------
+
+#: The direct dgrad cache variants that run as one kernel launch, and the
+#: kernarg ABI each launches with. The 4c and fused generic kernels are
+#: forward kernels over the transposed problem (forward ABI over
+#: ``spec.problem``); the depthwise kernels are native dgrad kernels (dgrad
+#: ABI over the dgrad problem).
+DIRECT_DGRAD_SINGLE_STEP_ABI = {
+    "direct_grouped_dgrad_4c": "fwd",
+    "direct_grouped_dgrad_fused": "fwd",
+    "direct_depthwise_dgrad_win": "dgrad",
+    "direct_depthwise_dgrad": "dgrad",
+}
+
+
+def make_direct_dgrad_spec(variant: str, problem: DirectConvProblem, knobs: dict):
+    """The kernel spec the single-step direct dgrad cache ``variant`` builds
+    for ``problem`` with ``knobs`` (no problem check: callers validate).
+
+    One constructor for the AOT cache build and for dispatch, so the spec a
+    dispatched (variant, knobs) pair names is the spec the cache compiled.
+    ``knobs`` are the identity's knob dict (``KernelIdentity.knobs``).
+    """
+    from dataclasses import replace as _replace
+
+    if variant == "direct_grouped_dgrad_4c":
+        stage_rows = knobs["stage_rows"]
+        return DirectConv4cSpec(
+            problem=dgrad_4c_transposed_problem(problem),
+            name="rocke_direct_dgrad_4c",
+            block_q=knobs["block_q"],
+            block_groups=knobs["block_groups"],
+            dgrad_fused_weights=True,
+            dgrad_weights_lds=knobs["dgrad_weights_lds"],
+            stage_rows=stage_rows,
+            waves_q=knobs["block_q"] // 4 if stage_rows else 1,
+        )
+    if variant == "direct_grouped_dgrad_fused":
+        # Every tile carries the row guard: a tile may reach past the image
+        # on any problem whose height it does not divide.
+        spec = make_dgrad_fprop_spec(
+            problem, dgrad_fused_weights=True, row_guard=True, **knobs
+        )
+        return _replace(spec, name="rocke_direct_dgrad_fused")
+    if variant == "direct_depthwise_dgrad_win":
+        return DirectDepthwiseDgradWindowedSpec(
+            problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
+        )
+    if variant == "direct_depthwise_dgrad":
+        return DirectDepthwiseDgradStreamSpec(
+            problem=problem, name="rocke_direct_dw_dgrad", **knobs
+        )
+    raise ValueError(f"not a single-step direct dgrad variant: {variant!r}")
+
+
+def is_valid_direct_dgrad_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
+    """``(ok, reason)`` of a :func:`make_direct_dgrad_spec` spec on ``arch``,
+    from the kernel's own validator (the check the cache build and the
+    launch-plan re-validation apply)."""
+    try:
+        if variant == "direct_grouped_dgrad_4c":
+            spec.validate()
+            return is_valid_spec_4c(spec, arch=arch)
+        if variant == "direct_grouped_dgrad_fused":
+            spec.validate()
+            return is_valid_spec(spec, arch=arch)
+        if variant == "direct_depthwise_dgrad_win":
+            return is_valid_depthwise_dgrad_win_spec(spec, arch=arch)
+        if variant == "direct_depthwise_dgrad":
+            return is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+    except ValueError as e:
+        return False, str(e)
+    raise ValueError(f"not a single-step direct dgrad variant: {variant!r}")

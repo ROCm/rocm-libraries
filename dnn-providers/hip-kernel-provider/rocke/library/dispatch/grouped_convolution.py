@@ -11,6 +11,13 @@ same shape description.
 
 Coverage is not uniform across the three. Forward and wgrad each have gfx942,
 gfx950 and gfx1250 candidates; dgrad has gfx950 only, and pins split_k=1.
+gfx950 dgrad picks among the binaries of the AOT caches (every selection
+names one cached kernel): the direct-MFMA candidate (4c and fused generic
+kernels, ``ConvDirectDgradSpec``) takes stride-1 problems with small channel
+groups, the depthwise candidates (windowed kernel at stride 1, row-streaming
+kernel otherwise) take cpg = kpg = 1, and the implicit-GEMM candidate (tile
+table and dY halo pick, ``ConvGroupedSpec``) the rest. The direct policy is
+:mod:`dispatch.grouped_conv_dgrad_direct`.
 
 SCOPE -- what this dispatcher decides
 -------------------------------------
@@ -141,10 +148,19 @@ hard-coded defaults if the model is absent or predicts an invalid config.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
+from dispatch import grouped_conv_dgrad_direct as _ddp
+from kernels.common.conv_direct_grouped import (
+    DIRECT_DGRAD_SINGLE_STEP_ABI,
+    DirectConvProblem,
+    direct_launch_geometry,
+    make_direct_dgrad_spec,
+)
 from kernels.common.conv_implicit_gemm import (
     ConvDataSpec,
     ConvProblem,
@@ -160,6 +176,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
 )
 from kernels.common.conv_implicit_gemm_dgrad import (
     DgradConvSpec,
+    dgrad_lds_bytes as _dgrad_lds_bytes,
     is_valid_dgrad_spec as _dgrad_is_valid_spec,
 )
 from rocke.dispatch.core import (
@@ -479,6 +496,20 @@ def _is_gfx1250(req: ConvGroupedRequest) -> bool:
 # Spec type returned by select_spec
 # ---------------------------------------------------------------------------
 
+# ConvGroupedSpec fields that only dgrad sets; each is left out of the spec
+# hash at its default (see _kernel_id).
+_DGRAD_SPEC_FIELDS = (
+    "vector_size_a",
+    "vector_size_b",
+    "vector_size_c",
+    "uniform_k_decode",
+    "tap_outer_k",
+    "dy_halo",
+    "dy_halo_setprio",
+    "dy_halo_kouter_pad",
+    "halo_max_wo",
+)
+
 
 @dataclass(frozen=True)
 class ConvGroupedSpec:
@@ -500,6 +531,31 @@ class ConvGroupedSpec:
     lds_k_outer: bool = False  # wgrad only
     group_merge: int = 1  # wgrad only, depthwise only
     name: str = "rocke_conv_grouped"
+    # dgrad only: the fields that name one AOT dgrad binary beyond the tile
+    # (KernelIdentity's), forwarded verbatim by to_dgrad_spec. Explicit load
+    # / store widths (0 = the builder's default), the K loop
+    # (uniform_k_decode on the tilde binary, tap_outer_k on the stride-1
+    # one) and the dY halo knobs with the widest Wo the binary serves. All
+    # default off and are left out of the spec hash at their defaults
+    # (_DGRAD_SPEC_FIELDS), so every spec without them keeps its hash.
+    vector_size_a: int = 0
+    vector_size_b: int = 0
+    vector_size_c: int = 0
+    uniform_k_decode: bool = False
+    tap_outer_k: bool = False
+    dy_halo: int = 0
+    dy_halo_setprio: int = 0
+    dy_halo_kouter_pad: int = 0
+    halo_max_wo: int = 0
+
+    def __post_init__(self) -> None:
+        if self.direction != "dgrad":
+            set_fields = [f for f in _DGRAD_SPEC_FIELDS if getattr(self, f)]
+            if set_fields:
+                raise ValueError(
+                    f"{', '.join(set_fields)} only apply to direction='dgrad' "
+                    f"(got direction={self.direction!r})"
+                )
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -526,6 +582,22 @@ class ConvGroupedSpec:
             parts.append("kouter")
         if self.direction == "wgrad" and self.group_merge > 1:
             parts.append(f"gm{self.group_merge}")
+        # The dgrad binary fields each change the body (or, for halo_max_wo,
+        # the LDS shape), with the tags of DgradConvSpec.kernel_name().
+        if self.direction == "dgrad":
+            vecs = (self.vector_size_a, self.vector_size_b, self.vector_size_c)
+            if any(vecs):
+                parts.append("v" + "x".join(str(v) for v in vecs))
+            for flag, tag in (
+                (self.uniform_k_decode, "ukd"),
+                (self.tap_outer_k, "tapk"),
+                (self.dy_halo, f"halo{self.dy_halo}"),
+                (self.dy_halo_setprio, f"hprio{self.dy_halo_setprio}"),
+                (self.dy_halo_kouter_pad, f"hkp{self.dy_halo_kouter_pad}"),
+                (self.halo_max_wo, f"hwo{self.halo_max_wo}"),
+            ):
+                if flag:
+                    parts.append(tag)
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -627,6 +699,15 @@ class ConvGroupedSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             split_k=self.split_k,
+            vector_size_a=self.vector_size_a or None,
+            vector_size_b=self.vector_size_b or None,
+            vector_size_c=self.vector_size_c or None,
+            uniform_k_decode=self.uniform_k_decode,
+            tap_outer_k=self.tap_outer_k,
+            dy_halo=self.dy_halo,
+            dy_halo_setprio=self.dy_halo_setprio,
+            dy_halo_kouter_pad=self.dy_halo_kouter_pad,
+            halo_max_wo=self.halo_max_wo,
         )
 
 
@@ -1544,55 +1625,383 @@ def _dgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
     )
 
 
-def _make_gfx950_dgrad_candidate() -> KernelCandidate:
-    """Backward-data conv for gfx950: 64x64x64, 2x2, 32x32x16 MFMA.
+# ---------------------------------------------------------------------------
+# gfx950 implicit-GEMM dgrad: tile table and dY halo pick
+# ---------------------------------------------------------------------------
+#
+# Every pick names one binary of the AOT dgrad grid
+# (benchmarks.common.kernel_sweep): a cached tile with explicit vector widths
+# (A along kpg, B and D along cpg; D scalar under the default epilogue), the
+# K-outer B layout the grid builds for that B width, and one of the grid's
+# capabilities:
+#
+# * stride 1 / dilation 1 with kpg % tile_k == 0: the stride-1 binary (its
+#   sub-GEMM record rebuilt from the kernargs) with the tap-outer K loop;
+# * stride 1, square 3x3 / 5x5 / 7x7 filters, Ho == Hi, Wo == Wi up to the
+#   widest cached halo row, kpg % 64 == 0: the dY halo mode of that loop on
+#   one of the three halo tiles, sized for the smallest cached halo_max_wo
+#   covering Wo (:func:`_gfx950_dgrad_halo_pick`);
+# * everything else: the tilde binary (stride and dilation in the record
+#   buffer) with the per-tile reduction decode.
+#
+# tests/dispatch/test_grouped_conv_dgrad_dispatch_aot.py checks that every
+# pick is a cached identity the cache offers for the problem.
 
-    Pins ``epilogue="default"`` and ``split_k=1``. dgrad already dispatches its
-    epilogue internally on ``needs_atomic`` (stride > 1 gives more than one
-    sub-GEMM, which forces the atomic store regardless of split-K), so the
-    epilogue knob does not carry the same meaning it does for wgrad. Split-K is
-    left at 1 rather than auto-resolved: the CK formula wgrad uses keys on its
+# Shape-keyed tiles: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn,
+# warp_tile_k). The default 64x64 tile keeps the grid large, which is what
+# small-M and few-channel problems need; the 128x128 tile halves the operand
+# traffic per MFMA but only pays once the grid still fills the device, from
+# _GFX950_DGRAD_LARGE_MIN_CTAS workgroups (1.25 per CU on gfx950). Strided
+# problems keep the default (the tilde path the table was not tuned on).
+_GFX950_DGRAD_TILE_DEFAULT = (64, 64, 64, 2, 2, 32, 16)
+_GFX950_DGRAD_TILE_LARGE = (128, 128, 64, 2, 2, 16, 32)
+_GFX950_DGRAD_LARGE_MIN_CTAS = 320
+# Small channel groups: a 64-wide N tile over cpg <= 32 output channels is
+# mostly empty, so narrow N tiles (16 or 32 wide) with a taller M tile keep
+# the MFMAs full, on 256-row tiles with 32-wide K tiles where the reduction
+# is short (kpg <= 32). Only on grids that still fill the device with the taller M tile
+# (else the default, whose 64-row M tiles give more workgroups). Stride-1
+# problems; the direct candidate takes the small-channel problems in its
+# region first.
+_GFX950_DGRAD_TILE_CPG16 = (128, 16, 64, 4, 1, 16, 32)
+_GFX950_DGRAD_TILE_CPG16_SHORT_K = (256, 16, 32, 2, 1, 16, 32)
+_GFX950_DGRAD_TILE_CPG32 = (128, 32, 64, 4, 2, 16, 32)
+_GFX950_DGRAD_TILE_CPG32_SHORT_K = (256, 32, 32, 4, 1, 16, 32)
+# No tile_k 32 entry beside the default: with kpg % 64 == 32 the default
+# tile takes the tilde binary (its tile_k straddles taps), and tile_k 32
+# only won with cache-resident operands.
+
+
+def _gfx950_dgrad_tile(req: ConvGroupedRequest) -> tuple[int, ...]:
+    """Tile table of the gfx950 dgrad candidate (see the constants above)."""
+    p = _problem(req)
+    groups = max(int(p.groups), 1)
+    if p.sH != 1 or p.sW != 1 or p.dH != 1 or p.dW != 1:
+        return _GFX950_DGRAD_TILE_DEFAULT
+    m = p.N * p.Hi * p.Wi
+    if p.cpg <= 32:
+        short_k = p.kpg <= 32
+        if p.cpg <= 16:
+            tile = (
+                _GFX950_DGRAD_TILE_CPG16_SHORT_K
+                if short_k
+                else _GFX950_DGRAD_TILE_CPG16
+            )
+        else:
+            tile = (
+                _GFX950_DGRAD_TILE_CPG32_SHORT_K
+                if short_k
+                else _GFX950_DGRAD_TILE_CPG32
+            )
+        if -(-m // tile[0]) * groups >= _GFX950_DGRAD_LARGE_MIN_CTAS:
+            return tile
+        return _GFX950_DGRAD_TILE_DEFAULT
+    tm, tn = _GFX950_DGRAD_TILE_LARGE[:2]
+    ctas = -(-m // tm) * -(-p.cpg // tn) * groups
+    if p.cpg >= tn and ctas >= _GFX950_DGRAD_LARGE_MIN_CTAS:
+        return _GFX950_DGRAD_TILE_LARGE
+    return _GFX950_DGRAD_TILE_DEFAULT
+
+
+# dY halo reuse picks (DgradConvSpec.dy_halo) for gfx950 stride-1 dgrad whose
+# output has the input's size, a square 3x3..7x7 filter and kpg % 64 == 0.
+# The staged halo with the double-buffered B tile (dy_halo=2) was faster
+# than the tile table once the tile matched the grid, the LDS occupancy and
+# the filter's dY reuse, except where the rules below keep the table. Three
+# tiles, all 32x32x16 MFMA with a K-outer B tile:
+#   - 64x64, 2x2 waves, for small grids;
+#   - 128x64, 4x1 waves (each wave reads every B column), for mid-size grids;
+#   - 256x64, 4x1 waves (half the B traffic per output pixel), for large
+#     grids, and on mid-size grids when it keeps the 128x64 tile's LDS
+#     occupancy, still has _GFX950_DGRAD_HALO_LARGE_MIN_WGS workgroups and
+#     either fills more than one workgroup per CU or has a per-tap halo of at
+#     least _GFX950_DGRAD_HALO_LARGE_MIN_HALO_TILES 128x64 tiles.
+# The 256x64 tile is limited to 3x3 filters: with more taps its per-tap row
+# masks lift the register count to one wave per SIMD.
+#
+# A cached halo binary is sized for halo_max_wo (the smallest
+# _GFX950_DGRAD_HALO_MAX_WO bucket covering Wo), not for the problem's Wo,
+# so every occupancy below is the LDS charge of that binary.
+_GFX950_DGRAD_HALO_TILE_SMALL = (64, 64, 64, 2, 2, 32, 16)
+_GFX950_DGRAD_HALO_TILE_MID = (128, 64, 64, 4, 1, 32, 16)
+_GFX950_DGRAD_HALO_TILE_LARGE = (256, 64, 64, 4, 1, 32, 16)
+# The cached halo filters and halo_max_wo buckets (CACHE_DGRAD_HALO_* of the
+# AOT grid).
+_GFX950_DGRAD_HALO_FILTERS = (3, 5, 7)
+_GFX950_DGRAD_HALO_MAX_WO = (8, 16, 32, 48, 64, 96, 128)
+# 128x64 workgroup counts that bound the mid band: below the first the 64x64
+# tile won, from the second on the 256x64 tile won.
+_GFX950_DGRAD_HALO_MID_MIN_WGS = 192
+_GFX950_DGRAD_HALO_LARGE_GRID_WGS = 768
+_GFX950_DGRAD_HALO_LARGE_MIN_WGS = 128
+_GFX950_DGRAD_HALO_LARGE_MAX_TAPS = 9
+_GFX950_DGRAD_HALO_LARGE_MIN_HALO_TILES = 2
+# s_setprio around each tap's MFMA block on the 4x1-wave tiles (not on the
+# 64x64 tile).
+_GFX950_DGRAD_HALO_SETPRIO = 1
+# K-outer B row pad for the 4x1-wave tiles, only where it keeps the
+# LDS-limited workgroups per CU (a padded tile that drops one was slower) --
+# except on the 256x64 tile with a dY tensor of at least
+# _GFX950_DGRAD_HALO_PAD_BIG_DY_BYTES: there the tile ran faster at one
+# workgroup per CU than at two, so the pad is taken even where it costs the
+# second one. (The bucketed halo_max_wo puts many images on that occupancy
+# step; smaller dY tensors kept the second workgroup's win.)
+_GFX950_DGRAD_HALO_KOUTER_PAD = 32
+_GFX950_DGRAD_HALO_PAD_BIG_DY_BYTES = 128 << 20
+# A halo tile that fits one workgroup per CU in LDS exposes the halo load of
+# every channel chunk; once the grid needs more than one workgroup per CU the
+# 256x64 tile falls back to 128x64 if that keeps two per CU, and every other
+# pick to the tile table.
+_GFX950_NUM_CUS = 256
+# The tile table's 128x128 tile is kept over the 128x64 halo tile at fewer
+# than three LDS-limited workgroups per CU where the 128-wide N tiles cover a
+# group's input channels exactly in one or two tiles.
+_GFX950_DGRAD_HALO_MID_OVER_LARGE_MIN_OCC = 3
+_GFX950_DGRAD_HALO_KEEP_LARGE_MAX_N_TILES = 2
+# 4x1-wave tiles take filters of at most 7x7 taps.
+_GFX950_DGRAD_HALO_4X1_MAX_TAPS = 49
+# dY reuse floor of a halo tile: filter taps x tile rows over the staged rows
+# (the tile plus its (Y-1)*Wo + (X-1) halo pixels). Below it the tile table
+# is kept: the 4x1-wave tiles below _GFX950_DGRAD_HALO_MIN_REUSE_4X1, the
+# 64x64 tile below _GFX950_DGRAD_HALO_MIN_REUSE_2X2 once the grid needs more
+# than one workgroup per CU, below ..._SMALL_GRID otherwise.
+_GFX950_DGRAD_HALO_MIN_REUSE_4X1 = 1.3
+_GFX950_DGRAD_HALO_MIN_REUSE_2X2 = 1.0
+_GFX950_DGRAD_HALO_MIN_REUSE_2X2_SMALL_GRID = 0.7
+
+
+def _dgrad_vector_sizes(req: ConvGroupedRequest) -> tuple[int, int, int]:
+    """``(a, b, c)`` load / store widths of a dgrad pick: the widest of
+    (8, 4, 2, 1) dividing kpg (A, dY) and cpg (B, W; D, dX), D scalar under
+    the default epilogue. A ``vec_size_c`` override caps the cpg widths."""
+    p = _problem(req)
+
+    def widest(n: int, cap: int = 8) -> int:
+        return next(v for v in (8, 4, 2, 1) if v <= cap and n % v == 0)
+
+    vec_c = _vec_size_c(req)
+    vec_b = widest(p.cpg, vec_c if req.vec_size_c is not None and vec_c > 1 else 8)
+    return widest(p.kpg), vec_b, (vec_b if vec_c > 1 else 1)
+
+
+def _dgrad_halo_max_wo(wo: int) -> int:
+    """The smallest cached halo_max_wo bucket covering ``wo`` (0: none)."""
+    return next((b for b in _GFX950_DGRAD_HALO_MAX_WO if b >= wo), 0)
+
+
+def _dgrad_instance_spec(
+    req: ConvGroupedRequest, tile: tuple[int, ...], **halo
+) -> DgradConvSpec:
+    """The gfx950 dgrad instance spec of ``tile`` (and halo knobs ``halo``)
+    for ``req``: the binary the pick names, built on the real problem."""
+    return _dgrad_dispatch_spec(req, tile, halo).to_dgrad_spec(_problem(req))
+
+
+def _dgrad_dispatch_spec(
+    req: ConvGroupedRequest, tile: tuple[int, ...], halo: dict
+) -> ConvGroupedSpec:
+    """The dispatcher spec of a gfx950 dgrad pick (see the notes above)."""
+    p = _problem(req)
+    tm, tn, tk, wm, wn, wtmn, wtk = tile
+    vec_a, vec_b, vec_c = _dgrad_vector_sizes(req)
+    target = ArchTarget.from_gfx(req.arch)
+    stride1 = (p.sH, p.sW, p.dH, p.dW) == (1, 1, 1, 1) and not p.is_3d
+    tap_outer = stride1 and target.wave_size == 64 and p.kpg % tk == 0
+    epilogue = "cshuffle" if vec_c > 1 else "default"
+    return ConvGroupedSpec(
+        direction="dgrad",
+        tile_m=tm,
+        tile_n=tn,
+        tile_k=tk,
+        warp_m=wm,
+        warp_n=wn,
+        warp_tile_mn=wtmn,
+        warp_tile_k=wtk,
+        pipeline=_PIPELINE,
+        epilogue=epilogue,
+        lds_k_outer=DgradConvSpec.default_lds_k_outer(
+            arch=req.arch,
+            dtype_b=req.dtype.lower(),
+            warp_tile_n=wtmn,
+            cpg=vec_b,
+            wave_size=target.wave_size,
+            pipeline=_PIPELINE,
+        ),
+        dtype=req.dtype.lower(),
+        arch=req.arch,
+        split_k=1,
+        name="implicit_gemm_conv_dgrad",
+        vector_size_a=vec_a,
+        vector_size_b=vec_b,
+        vector_size_c=vec_c,
+        uniform_k_decode=(
+            not tap_outer
+            and DgradConvSpec.default_uniform_k_decode(
+                arch=req.arch, wave_size=target.wave_size, pipeline=_PIPELINE
+            )
+        ),
+        tap_outer_k=tap_outer,
+        **halo,
+    )
+
+
+def _gfx950_dgrad_halo_pick(
+    req: ConvGroupedRequest,
+) -> tuple[tuple[int, ...], dict[str, int]] | None:
+    """``(tile, halo knobs)`` of the dY halo pick, or None (see above).
+
+    None where no cached halo binary serves the request (filter, Wo bucket,
+    kpg, layout), where no halo tile is valid for it (the instance validator
+    decides eligibility and the LDS fit of the bucketed binary), where a
+    4x1-wave tile would get a filter of more than
+    ``_GFX950_DGRAD_HALO_4X1_MAX_TAPS`` taps, where the tile table's 128x128
+    tile is kept (``_GFX950_DGRAD_HALO_MID_OVER_LARGE_MIN_OCC``) or where
+    the picked tile's dY reuse is below its floor. Occupancy is the
+    LDS-limited workgroup count per CU of the bucketed binary.
+    """
+    p = _problem(req)
+    if p.is_3d or (p.sH, p.sW, p.dH, p.dW) != (1, 1, 1, 1):
+        return None
+    if p.Y != p.X or p.Y not in _GFX950_DGRAD_HALO_FILTERS:
+        return None
+    if (p.Ho, p.Wo) != (p.Hi, p.Wi) or p.kpg % 64:
+        return None
+    max_wo = _dgrad_halo_max_wo(p.Wo)
+    if not max_wo:
+        return None
+    vec_a, vec_b, _vec_c = _dgrad_vector_sizes(req)
+    if vec_a != 8 or vec_b < 2:
+        return None  # the halo binaries are K-outer with 8-wide dY loads
+    lds_cap = ArchTarget.from_gfx(req.arch).lds_capacity_bytes
+
+    def _valid(spec: DgradConvSpec) -> bool:
+        return _dgrad_is_valid_spec(spec, arch=req.arch)[0]
+
+    def _wgs(tile: tuple[int, ...]) -> int:
+        tm, tn = tile[0], tile[1]
+        return -(-(p.N * p.Hi * p.Wi) // tm) * -(-p.cpg // tn) * max(int(p.groups), 1)
+
+    small, mid, large = (
+        _GFX950_DGRAD_HALO_TILE_SMALL,
+        _GFX950_DGRAD_HALO_TILE_MID,
+        _GFX950_DGRAD_HALO_TILE_LARGE,
+    )
+    base = {"dy_halo": 2, "halo_max_wo": max_wo}
+    specs = {t: _dgrad_instance_spec(req, t, **base) for t in (small, mid, large)}
+    ok = {t: _valid(s) for t, s in specs.items()}
+    if not ok[small] and not ok[mid]:
+        return None
+    occ = {t: lds_cap // _dgrad_lds_bytes(s) for t, s in specs.items()}
+    # dY pixels each tap's halo adds to the staged tile.
+    halo_rows = (p.Y - 1) * p.Wo + (p.X - 1)
+    if (_wgs(mid) < _GFX950_DGRAD_HALO_MID_MIN_WGS or not ok[mid]) and ok[small]:
+        tile = small
+    elif (
+        ok[large]
+        and p.Y * p.X <= _GFX950_DGRAD_HALO_LARGE_MAX_TAPS
+        and (
+            _wgs(mid) >= _GFX950_DGRAD_HALO_LARGE_GRID_WGS
+            or (
+                occ[large] >= occ[mid]
+                and _wgs(large) >= _GFX950_DGRAD_HALO_LARGE_MIN_WGS
+                and (
+                    _wgs(large) > _GFX950_NUM_CUS
+                    or halo_rows >= _GFX950_DGRAD_HALO_LARGE_MIN_HALO_TILES * mid[0]
+                )
+            )
+        )
+    ):
+        tile = large
+    else:
+        tile = mid
+    if occ[tile] < 2 and _wgs(tile) > _GFX950_NUM_CUS:
+        if tile == large and ok[mid] and occ[mid] >= 2:
+            tile = mid
+        else:
+            return None
+    if tile[4] == 1 and p.Y * p.X > _GFX950_DGRAD_HALO_4X1_MAX_TAPS:
+        return None
+    large_tn = _GFX950_DGRAD_TILE_LARGE[1]
+    if (
+        tile == mid
+        and occ[mid] < _GFX950_DGRAD_HALO_MID_OVER_LARGE_MIN_OCC
+        and p.cpg % large_tn == 0
+        and p.cpg // large_tn <= _GFX950_DGRAD_HALO_KEEP_LARGE_MAX_N_TILES
+        and _gfx950_dgrad_tile(req) == _GFX950_DGRAD_TILE_LARGE
+    ):
+        return None
+    if tile[4] == 1:
+        min_reuse = _GFX950_DGRAD_HALO_MIN_REUSE_4X1
+    elif _wgs(tile) > _GFX950_NUM_CUS:
+        min_reuse = _GFX950_DGRAD_HALO_MIN_REUSE_2X2
+    else:
+        min_reuse = _GFX950_DGRAD_HALO_MIN_REUSE_2X2_SMALL_GRID
+    if p.Y * p.X * tile[0] < min_reuse * (tile[0] + halo_rows):
+        return None
+    knobs = dict(base)
+    if tile[4] == 1:
+        knobs["dy_halo_setprio"] = _GFX950_DGRAD_HALO_SETPRIO
+        padded = _dgrad_instance_spec(
+            req, tile, dy_halo_kouter_pad=_GFX950_DGRAD_HALO_KOUTER_PAD, **knobs
+        )
+        dy_bytes = p.N * p.Ho * p.Wo * p.K * 2
+        big_dy = tile == large and dy_bytes >= _GFX950_DGRAD_HALO_PAD_BIG_DY_BYTES
+        if _valid(padded) and (
+            big_dy or lds_cap // _dgrad_lds_bytes(padded) == occ[tile]
+        ):
+            knobs["dy_halo_kouter_pad"] = _GFX950_DGRAD_HALO_KOUTER_PAD
+    return tile, knobs
+
+
+@functools.lru_cache(maxsize=256)
+def _gfx950_dgrad_pick_cached(
+    req: ConvGroupedRequest,
+) -> tuple[tuple[int, ...], tuple[tuple[str, int], ...]]:
+    halo = _gfx950_dgrad_halo_pick(req)
+    if halo is not None:
+        tile, knobs = halo
+        return tile, tuple(knobs.items())
+    return _gfx950_dgrad_tile(req), ()
+
+
+def _gfx950_dgrad_pick(
+    req: ConvGroupedRequest,
+) -> tuple[tuple[int, ...], dict[str, int]]:
+    """``(tile, halo knobs)`` of the gfx950 dgrad candidate.
+
+    The dY halo pick where it applies (:func:`_gfx950_dgrad_halo_pick`),
+    otherwise the tile table (:func:`_gfx950_dgrad_tile`) with no halo knobs.
+    Memoized per request: support() and select() both need it, and the halo
+    pick builds and validates several instance specs.
+    """
+    tile, knobs = _gfx950_dgrad_pick_cached(req)
+    return tile, dict(knobs)
+
+
+def _make_gfx950_dgrad_candidate() -> KernelCandidate:
+    """Backward-data conv for gfx950, configured by :func:`_gfx950_dgrad_pick`.
+
+    Pins ``split_k=1``; the epilogue follows the D store width (cshuffle when
+    dX stores more than one element). dgrad already dispatches its store
+    internally on ``needs_atomic`` (stride > 1 gives more than one sub-GEMM,
+    which forces the atomic store regardless of split-K). Split-K is left at
+    1 rather than auto-resolved: the CK formula wgrad uses keys on its
     lopsided ``N*Ho*Wo`` reduction, and dgrad's ``Y*X*K`` is not that shape.
+
+    Every selected spec names one AOT dgrad binary (see the notes above
+    :func:`_gfx950_dgrad_tile`).
 
     No gfx942 or gfx1250 counterpart yet. gfx942 lacks the 32x32x16 atom, and
     the gfx1250 wave32 path is exercised through the sweep driver but has no
     dispatch-level dual-engine test of its own.
     """
     name = "implicit_gemm_conv_dgrad"
-    spec_id = "igemm_conv_dgrad_64x64"
+    spec_id = "igemm_conv_dgrad_tile_table"
     algorithm = "implicit_gemm_dgrad"
 
-    def _tile(req: ConvGroupedRequest):
-        return (
-            _GFX950_TILE_M,
-            _GFX950_TILE_N,
-            _GFX950_TILE_K,
-            _GFX950_WARP_M,
-            _GFX950_WARP_N,
-            _GFX950_WARP_TILE_MN,
-            _GFX950_WARP_TILE_K,
-        )
-
-    def _build_instance_spec(req: ConvGroupedRequest) -> DgradConvSpec:
-        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        return DgradConvSpec(
-            problem=_problem(req),
-            name=name,
-            lds_k_outer=_dgrad_lds_k_outer(req, wtmn),
-            data=_data_spec(req),
-            tile_m=tm,
-            tile_n=tn,
-            tile_k=tk,
-            warp_m=wm,
-            warp_n=wn,
-            warp_tile_m=wtmn,
-            warp_tile_n=wtmn,
-            warp_tile_k=wtk,
-            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-            pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            split_k=1,
-        )
+    def _select(req: ConvGroupedRequest) -> ConvGroupedSpec:
+        tile, halo = _gfx950_dgrad_pick(req)
+        return _dgrad_dispatch_spec(req, tile, halo)
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -1606,7 +2015,8 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
-        ok, why = _dgrad_is_valid_spec(_build_instance_spec(req), arch=req.arch)
+        spec = _select(req)
+        ok, why = _dgrad_is_valid_spec(spec.to_dgrad_spec(_problem(req)), arch=req.arch)
         if not ok:
             return False, why
         return True, "ok"
@@ -1616,24 +2026,7 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, ConvGroupedRequest)
-        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
-        return ConvGroupedSpec(
-            direction="dgrad",
-            tile_m=tm,
-            tile_n=tn,
-            tile_k=tk,
-            warp_m=wm,
-            warp_n=wn,
-            warp_tile_mn=wtmn,
-            warp_tile_k=wtk,
-            pipeline=_PIPELINE,
-            epilogue=_epilogue_for(req),
-            lds_k_outer=_dgrad_lds_k_outer(req, wtmn),
-            dtype=req.dtype.lower(),
-            arch=req.arch,
-            split_k=1,
-            name=name,
-        )
+        return _select(req)
 
     candidate = KernelCandidate(
         name=name,
@@ -1655,6 +2048,280 @@ def _make_gfx950_dgrad_candidate() -> KernelCandidate:
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
     )
     return candidate
+
+
+# ---------------------------------------------------------------------------
+# gfx950 direct dgrad candidates (single-kernel AOT variants)
+# ---------------------------------------------------------------------------
+#
+# The policy is dispatch.grouped_conv_dgrad_direct; these candidates wrap it.
+# A selection is a ConvDirectDgradSpec naming one cached direct binary: the
+# cache variant, the capabilities (filter, padding, stride, per-group channel
+# counts) and the identity's knob dict.
+
+
+@dataclass(frozen=True)
+class ConvDirectDgradSpec:
+    """Selected spec of a gfx950 direct dgrad candidate.
+
+    ``variant`` is the direct cache variant (``KernelIdentity.algorithm``);
+    ``KH``/``PAD``/``stride``/``cpg``/``kpg`` its baked capabilities and
+    ``knobs`` the identity's knob dict as sorted ``(name, value)`` pairs.
+    The kernel is one launch (no workspace): ``A = dY``, ``B = W``,
+    ``D = dX``, with the ABI :attr:`abi_direction` names over
+    :meth:`launch_problem`.
+    """
+
+    variant: str
+    KH: int
+    PAD: int
+    stride: int
+    cpg: int
+    kpg: int
+    knobs: tuple
+    dtype: str
+    arch: str
+    threads_per_block: int
+    direction: str = "dgrad"
+    # dX is written by direct stores; read by dispatch explanations.
+    epilogue: str = "direct"
+
+    def knob_dict(self) -> dict:
+        return dict(self.knobs)
+
+    @property
+    def abi_direction(self) -> str:
+        """``"fwd"`` (the 4c / fused kernels run the forward kernel over the
+        transposed problem) or ``"dgrad"`` (the depthwise kernels)."""
+        return DIRECT_DGRAD_SINGLE_STEP_ABI[self.variant]
+
+    def kernel_name(self) -> str:
+        from rocke.helpers.spec import kernel_name_join
+
+        return kernel_name_join(
+            "rocke_conv_direct_dgrad",
+            self.variant,
+            self.dtype,
+            f"r{self.KH}p{self.PAD}s{self.stride}c{self.cpg}k{self.kpg}",
+            *(f"{k}{int(v) if isinstance(v, bool) else v}" for k, v in self.knobs),
+        )
+
+    def instance(self, problem: DirectConvProblem):
+        """The kernel spec on ``problem`` (the spec the cache compiled)."""
+        return make_direct_dgrad_spec(self.variant, problem, self.knob_dict())
+
+    def launch_problem(self, problem: DirectConvProblem) -> DirectConvProblem:
+        """The problem the kernargs describe: the transposed one for the
+        forward-ABI kernels, ``problem`` itself for the dgrad-ABI ones."""
+        if self.abi_direction == "fwd":
+            return self.instance(problem).problem
+        return problem
+
+
+def _direct_problem(req: ConvGroupedRequest) -> DirectConvProblem:
+    """The direct-conv problem of a 2D dgrad request (square pad and stride
+    are read from the H axis; callers check the W axis matches)."""
+    p = _problem(req)
+    return DirectConvProblem(
+        N=int(p.N),
+        H=int(p.Hi),
+        W=int(p.Wi),
+        groups=int(p.groups),
+        cpg=int(p.cpg),
+        kpg=int(p.kpg),
+        KH=int(p.Y),
+        KW=int(p.X),
+        PAD=int(p.pH),
+        stride=int(p.sH),
+        dtype=req.dtype.lower(),
+        dil_h=int(p.dH),
+        dil_w=int(p.dW),
+    )
+
+
+def _direct_request_errors(req: ConvGroupedRequest) -> list[str]:
+    """Request shapes no direct dgrad kernel takes: 3D, and a pad or stride
+    that differs between the axes (the direct problem has one of each)."""
+    errors = []
+    if req.Di is not None:
+        errors.append("direct dgrad is 2D only")
+    if int(req.pad_h) != int(req.pad_w):
+        errors.append(f"requires pad_h == pad_w (got {req.pad_h}, {req.pad_w})")
+    if int(req.stride_h) != int(req.stride_w):
+        errors.append(
+            f"requires stride_h == stride_w (got {req.stride_h}, {req.stride_w})"
+        )
+    return errors
+
+
+def _direct_dgrad_spec(
+    req: ConvGroupedRequest, variant: str, knobs: dict
+) -> ConvDirectDgradSpec:
+    p = _direct_problem(req)
+    spec = make_direct_dgrad_spec(variant, p, knobs)
+    return ConvDirectDgradSpec(
+        variant=variant,
+        KH=p.KH,
+        PAD=p.PAD,
+        stride=p.stride,
+        cpg=p.cpg,
+        kpg=p.kpg,
+        knobs=tuple(sorted(knobs.items())),
+        dtype=req.dtype.lower(),
+        arch=req.arch,
+        threads_per_block=int(spec.threads_per_block),
+    )
+
+
+def _direct_grid(spec: ConvDirectDgradSpec, req: OperatorRequest) -> tuple:
+    assert isinstance(req, ConvGroupedRequest)
+    grid, _block = direct_launch_geometry(spec.instance(_direct_problem(req)))
+    return grid
+
+
+def _direct_signature(spec: ConvDirectDgradSpec) -> tuple:
+    """The kernarg signature of the one launch (the step signature
+    ``direct_kernel_sweep.plan_for`` gives the cached binary)."""
+    from kernels.common.conv_abi import conv_direct_args_signature
+
+    return tuple(conv_direct_args_signature(spec.dtype, direction=spec.abi_direction))
+
+
+@functools.lru_cache(maxsize=256)
+def _direct_generic_pick(req: ConvGroupedRequest) -> tuple:
+    """``(variant, knobs items, reasons)`` of the grouped direct dgrad policy."""
+    errors = _direct_request_errors(req)
+    if errors:
+        return None, (), tuple(errors)
+    variant, knobs, errors = _ddp.select_generic(_direct_problem(req), req.arch)
+    return variant, tuple(sorted(knobs.items())), tuple(errors)
+
+
+@functools.lru_cache(maxsize=256)
+def _direct_depthwise_pick(req: ConvGroupedRequest, streaming: bool) -> tuple:
+    """``(knobs items, reasons)`` of a depthwise dgrad kernel for ``req``."""
+    errors = _direct_request_errors(req)
+    if int(req.G) != int(req.C) or int(req.G) != int(req.K):
+        errors.append(
+            f"requires depthwise G == C == K (got G={req.G}, C={req.C}, K={req.K})"
+        )
+    if errors:
+        return (), tuple(errors)
+    select = _ddp.select_depthwise_stream if streaming else _ddp.select_depthwise_win
+    knobs, errors = select(_direct_problem(req), req.arch)
+    return tuple(sorted((knobs or {}).items())), tuple(errors)
+
+
+def _make_gfx950_direct_candidate(
+    name: str,
+    spec_id: str,
+    algorithm: str,
+    priority: int,
+    pick: Callable[[ConvGroupedRequest], tuple[str | None, dict, list]],
+) -> KernelCandidate:
+    """A gfx950 direct dgrad candidate around ``pick``, which returns
+    ``(variant, knobs, reasons)`` for a request (``variant`` None: declined
+    with ``reasons``)."""
+
+    def support(req: OperatorRequest) -> tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, ConvGroupedRequest)
+        if not _is_gfx950(req):
+            return False, f"gfx950 candidate requires arch=gfx950 (got {req.arch!r})"
+        if req.direction != "dgrad":
+            return False, f"candidate handles 'dgrad', got direction={req.direction!r}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        variant, _knobs, reasons = pick(req)
+        if variant is None:
+            return False, "; ".join(reasons)
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> ConvDirectDgradSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, ConvGroupedRequest)
+        variant, knobs, _ = pick(req)
+        return _direct_dgrad_spec(req, variant, knobs)
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY_DGRAD,
+        algorithm=algorithm,
+        spec_id=spec_id,
+        abi_version=CONV_GROUPED_ABI_VERSION,
+        priority=priority,
+        capability=Capability(
+            arches=("gfx950",),
+            dtypes=("fp16", "bf16"),
+            layouts=("NHWC",),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=_direct_signature,
+        grid=_direct_grid,
+        block=lambda spec: (spec.threads_per_block, 1, 1),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+    )
+    return candidate
+
+
+def _generic_pick(req: ConvGroupedRequest) -> tuple:
+    variant, knobs, reasons = _direct_generic_pick(req)
+    return variant, dict(knobs), list(reasons)
+
+
+def _depthwise_win_pick(req: ConvGroupedRequest) -> tuple:
+    knobs, reasons = _direct_depthwise_pick(req, False)
+    return (_ddp.VARIANT_DW_WIN if knobs else None), dict(knobs), list(reasons)
+
+
+def _depthwise_stream_pick(req: ConvGroupedRequest) -> tuple:
+    knobs, reasons = _direct_depthwise_pick(req, True)
+    return (_ddp.VARIANT_DW_STREAM if knobs else None), dict(knobs), list(reasons)
+
+
+def _make_gfx950_direct_dgrad_candidate() -> KernelCandidate:
+    """Grouped and small-channel stride-1 dgrad: the 4c and fused generic
+    direct-MFMA kernels. Outranks the implicit-GEMM candidate on the problems
+    it admits (:func:`dispatch.grouped_conv_dgrad_direct.select_generic`),
+    groups == 1 included."""
+    return _make_gfx950_direct_candidate(
+        name="direct_mfma_conv_dgrad",
+        spec_id="direct_mfma_dgrad_grouped",
+        algorithm="direct_mfma_dgrad",
+        priority=5,
+        pick=_generic_pick,
+    )
+
+
+def _make_gfx950_depthwise_dgrad_win_candidate() -> KernelCandidate:
+    """Depthwise (cpg = kpg = 1) stride-1 dgrad: the windowed kernel (VALU or
+    Toeplitz MFMA form). The implicit-GEMM candidate rejects every cpg = 1
+    request; what this one declines goes to the streaming kernel."""
+    return _make_gfx950_direct_candidate(
+        name="direct_depthwise_dgrad_win",
+        spec_id="direct_dw_dgrad_windowed",
+        algorithm="direct_depthwise_dgrad_win",
+        priority=5,
+        pick=_depthwise_win_pick,
+    )
+
+
+def _make_gfx950_depthwise_dgrad_stream_candidate() -> KernelCandidate:
+    """Depthwise dgrad at stride 1 or 2: the row-streaming kernel. Serves the
+    strided problems, and the stride-1 ones the windowed kernel declines."""
+    return _make_gfx950_direct_candidate(
+        name="direct_depthwise_dgrad_stream",
+        spec_id="direct_dw_dgrad_stream",
+        algorithm="direct_depthwise_dgrad",
+        priority=6,
+        pick=_depthwise_stream_pick,
+    )
 
 
 def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
@@ -1801,7 +2468,10 @@ _CONV_DIM_VOCABULARY = (
 CONV_DGRAD_REGISTRY = CandidateRegistry(
     _FAMILY_DGRAD, dim_vocabulary=_CONV_DIM_VOCABULARY
 )
+CONV_DGRAD_REGISTRY.register(_make_gfx950_direct_dgrad_candidate())
 CONV_DGRAD_REGISTRY.register(_make_gfx950_dgrad_candidate())
+CONV_DGRAD_REGISTRY.register(_make_gfx950_depthwise_dgrad_win_candidate())
+CONV_DGRAD_REGISTRY.register(_make_gfx950_depthwise_dgrad_stream_candidate())
 
 CONV_FWD_REGISTRY = CandidateRegistry(_FAMILY_FWD, dim_vocabulary=_CONV_DIM_VOCABULARY)
 CONV_FWD_REGISTRY.register(_make_gfx942_fwd_candidate())
@@ -1833,7 +2503,14 @@ def _kernel_id(
     req: ConvGroupedRequest, candidate: KernelCandidate, spec: ConvGroupedSpec
 ) -> KernelId:
     request_hash = stable_json_hash(req.normalized(), n=16)
-    spec_hash = stable_json_hash(asdict(spec), n=16)
+    spec_dict = asdict(spec)
+    # The dgrad binary fields are hashed only when set, so every spec without
+    # them keeps the hash it had before the fields existed.
+    if isinstance(spec, ConvGroupedSpec):
+        for f in _DGRAD_SPEC_FIELDS:
+            if not spec_dict[f]:
+                del spec_dict[f]
+    spec_hash = stable_json_hash(spec_dict, n=16)
     return KernelId(
         op=f"conv_{req.direction}",
         family=candidate.family,
@@ -1890,16 +2567,22 @@ def dispatch_conv_grouped_all(
     return _registry_for(req).dispatch_all(req, kernel_id=_kernel_id)
 
 
-def _signature_for(req: ConvGroupedRequest, spec: ConvGroupedSpec) -> tuple:
+def _signature_for(
+    req: ConvGroupedRequest, spec: ConvGroupedSpec | ConvDirectDgradSpec
+) -> tuple:
     """Launch signature for a dispatched kernel, including its variant extras.
 
-    The trailing args are not cosmetic: dgrad always carries the tilde record
-    buffer, wgrad always carries ``ks``/``ks_count``, and a two-stage wgrad
-    also carries the workspace pair. Kernargs pack positionally, so omitting
-    one shifts every argument after it.
+    The trailing args are not cosmetic: implicit-GEMM dgrad always carries the
+    tilde record buffer, wgrad always carries ``ks``/``ks_count``, and a
+    two-stage wgrad also carries the workspace pair. Kernargs pack
+    positionally, so omitting one shifts every argument after it. A direct
+    dgrad pick takes the direct ABI of its kernel (forward over the
+    transposed problem, or dgrad), with none of those extras.
     """
     from kernels.common.conv_abi import conv_args_signature
 
+    if isinstance(spec, ConvDirectDgradSpec):
+        return _direct_signature(spec)
     p = _problem(req)
     dtype = req.dtype
     if req.direction == "wgrad":
@@ -1922,7 +2605,7 @@ def _signature_for(req: ConvGroupedRequest, spec: ConvGroupedSpec) -> tuple:
 
 def launch_values_for(
     req: ConvGroupedRequest,
-    spec: ConvGroupedSpec,
+    spec: ConvGroupedSpec | ConvDirectDgradSpec,
     *,
     A_ptr: int,
     B_ptr: int,
@@ -1944,9 +2627,25 @@ def launch_values_for(
 
     The tile size comes from ``spec`` because the chiplet-swizzle path decodes
     the workgroup id against ``p_num_pid_m/n``, which are tile-count values.
+
+    A direct dgrad pick (:class:`ConvDirectDgradSpec`) takes the direct ABI
+    over its launch problem and no extras: ``ws_*`` and ``sub_gemm_*`` must
+    be left unset (only the implicit-GEMM dgrad kernel carries the record
+    buffer).
     """
     from kernels.common.conv_args import ConvArgs
 
+    if isinstance(spec, ConvDirectDgradSpec):
+        extras = (ws_ptr, ws_bytes, sub_gemm_buf, num_sub_gemms)
+        if any(v is not None for v in extras):
+            raise ValueError(
+                "a direct dgrad kernel takes no workspace and no sub-GEMM "
+                "record buffer"
+            )
+        problem = spec.launch_problem(_direct_problem(req))
+        return ConvArgs.from_problem(
+            problem, direction=spec.abi_direction
+        ).to_launch_values(A_ptr, B_ptr, D_ptr, A_bytes, B_bytes, D_bytes)
     p = _problem(req)
     tile_m, tile_n = spec.tile_m, spec.tile_n
     if req.direction == "wgrad":
@@ -2029,7 +2728,19 @@ def dispatch_conv_grouped(
         f"selected {candidate.name} ({req.direction}) on {req.arch}",
         f"algorithm={candidate.algorithm}",
         f"spec_id={candidate.spec_id}",
-        f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})",
+    ]
+    if isinstance(spec, ConvDirectDgradSpec):
+        explanation.append(
+            f"variant={spec.variant} knobs={spec.knob_dict()} "
+            f"abi={spec.abi_direction}"
+        )
+        if req.vec_size_c is not None:
+            explanation.append(
+                f"vec_size_c={req.vec_size_c} ignored (implicit-GEMM epilogue hint)"
+            )
+    else:
+        explanation.append(f"epilogue={spec.epilogue} (vec_size_c={_vec_size_c(req)})")
+    explanation += [
         f"spec_hash={kid.spec_hash}",
         f"request_hash={kid.request_hash}",
     ]

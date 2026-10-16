@@ -771,45 +771,16 @@ def make_spec(variant: str, problem, knobs: dict):
             dtype=problem.dtype,
             **knobs,
         )
-    if variant == "direct_depthwise_dgrad":
-        return dc.DirectDepthwiseDgradStreamSpec(
-            problem=problem, name="rocke_direct_dw_dgrad", **knobs
-        )
-    if variant == "direct_depthwise_dgrad_win":
-        return dc.DirectDepthwiseDgradWindowedSpec(
-            problem=problem, name="rocke_direct_dw_dgrad_win", **knobs
-        )
+    if variant in dc.DIRECT_DGRAD_SINGLE_STEP_ABI:
+        # The 4c / fused generic dgrad (forward kernels on the transposed
+        # problem) and the depthwise dgrad kernels: one constructor shared
+        # with dispatch. No problem check here: plan_for re-validates the
+        # spec on the real shape.
+        return dc.make_direct_dgrad_spec(variant, problem, knobs)
     if variant == "direct_grouped_dgrad":
         return dc.DirectConvDgradSpec(
             problem=problem, name="rocke_direct_dgrad", **knobs
         )
-    if variant == "direct_grouped_dgrad_4c":
-        # The forward 4c kernel on the transposed problem (no problem check
-        # here: plan_for re-validates the spec on the real shape).
-        stage_rows = knobs["stage_rows"]
-        return dc.DirectConv4cSpec(
-            problem=dc.dgrad_4c_transposed_problem(problem),
-            name="rocke_direct_dgrad_4c",
-            block_q=knobs["block_q"],
-            block_groups=knobs["block_groups"],
-            dgrad_fused_weights=True,
-            dgrad_weights_lds=knobs["dgrad_weights_lds"],
-            stage_rows=stage_rows,
-            waves_q=knobs["block_q"] // 4 if stage_rows else 1,
-        )
-    if variant == "direct_grouped_dgrad_fused":
-        # The generic forward kernel on the transposed problem, reading the
-        # original weights (no problem check here: plan_for re-validates the
-        # spec on the real shape). Every tile carries the row guard: a tile
-        # may reach past the image on any problem whose height it does not
-        # divide.
-        spec = dc.make_dgrad_fprop_spec(
-            problem,
-            dgrad_fused_weights=True,
-            row_guard=True,
-            **knobs,
-        )
-        return replace(spec, name="rocke_direct_dgrad_fused")
     if variant == "direct_grouped_dgrad_mfma":
         fold_k32 = knobs["fold_k32"]
         spec = dc.make_dgrad_fprop_spec(
