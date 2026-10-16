@@ -27,9 +27,9 @@ estimates, shipping order, and acceptance checklists are maintained separately.
 logical dtype and native gfx942 atoms added after the original basis snapshot.
 Other scores and source line numbers retain their stated historical basis.
 
-**FP64 coverage update.** The f64 entries in §1, §2.5, and §4C reflect the IR
-type, arithmetic, memory, and elementwise/reduce2d support added after the
-original basis snapshot. The §2.4 f64 row retains its stated historical basis.
+**FP64 coverage update.** The f64 entries in §1, §2.5, §4B, and §4C reflect the
+IR type, arithmetic, memory, elementwise/reduce2d, and gfx942 MFMA atom support
+added after the original basis snapshot. The §2.4 f64 row retains its stated historical basis.
 
 ---
 
@@ -385,7 +385,7 @@ mode. The missing selector and precision contract are described in §2.5.
   the mode is exposed; see [§1](#1-the-canonical-dtype-set).
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
-- **`f64` — IR, memory, and elementwise/reduce2d only.** The IR type,
+- **`f64` — IR, memory, elementwise/reduce2d, and the gfx942 MFMA atoms.** The IR type,
   `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
   `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
   memory up to 2-element vectors, and HIP lowering are present. Elementwise
@@ -397,9 +397,10 @@ mode. The missing selector and precision contract are described in §2.5.
   f32: the builder rejects any other operand type. `cvt_f32_to_f64` (exact)
   and `cvt_f64_to_f32` (round to nearest even) are the only conversions;
   `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
-  conversions, MMA atoms, or atomics. f64 is in the
+  conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950 but undeclared (§4C.6).
+  gfx942 declares `mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; no GEMM
+  family selects them yet, and gfx90a/gfx950 declare no f64 atom (§4C.6).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -499,12 +500,12 @@ to gfx1251, so this is not a missing gfx1250 atom.
 
 `core/arch/data/arch_specs.json` is rocKE's architecture SSOT. An atom that is not
 declared there is unusable by any kernel regardless of what the silicon provides.
-The original basis snapshot, with the gfx942 XF32 addition noted below:
+The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
-| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
+| `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, **f64** |
 | `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
@@ -557,9 +558,10 @@ Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The
 catalog declares no sparse atom on any arch, and no family requests one. No dtype
 in §2.4 is blocked on it.
 
-#### 4C.6 f64 matrix is in silicon but undeclared
-`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is an IR type
-(§1), but no f64 MMA atom is declared on those targets.
+#### 4C.6 f64 matrix is in silicon but mostly undeclared
+`V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. gfx942 declares
+`mfma_f64_16x16x4_f64` and `mfma_f64_4x4x4_f64`; gfx90a and gfx950 declare no
+f64 MMA atom.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set
