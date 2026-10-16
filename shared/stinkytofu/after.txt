@@ -1,26 +1,103 @@
 
 *** After Pass: StinkyBuildImplicitDependencyPass ***
-st.func @tensor_load_chain_reaches_wmma() {
+st.func @barrier_cover() {
   ^entry:
-    v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
-    LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    LDS0 = "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    LDS0 = "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    v[32:35] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
-    v[36:39] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
-    v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
-    "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+    v[50:53] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[54:57] = "st.buffer_load_b128"(v8, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[58:61] = "st.buffer_load_b128"(v9, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[62:65] = "st.buffer_load_b128"(v9, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    LDS0 = "st.ds_store_b128"(v10, v[50:53]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    LDS0 = "st.ds_store_b128"(v10, v[54:57]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+    LDS1 = "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+    LDS1 = "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+    LDS0, LDS1 = "st.s_barrier_signal"(-1, LDS0, LDS1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+    LDS0, LDS1 = "st.s_barrier_wait"(-1, LDS0, LDS1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+    v[20:23] = "st.ds_load_b128"(v12, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[24:27] = "st.ds_load_b128"(v12, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[30:33] = "st.ds_load_b128"(v13, LDS1) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+    v[34:37] = "st.ds_load_b128"(v13, LDS1) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+    v[100:107] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[100:107]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[108:115] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[108:115]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[116:123] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[116:123]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[124:131] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[124:131]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[132:139] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[132:139]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[140:147] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[140:147]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[148:155] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[148:155]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[156:163] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[156:163]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[164:171] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[164:171]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[172:179] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[172:179]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[180:187] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[180:187]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[188:195] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[188:195]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[196:203] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[196:203]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[204:211] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[204:211]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[212:219] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[212:219]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[220:227] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[220:227]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[228:235] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[228:235]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[236:243] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[236:243]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[244:251] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[244:251]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[252:259] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[252:259]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[260:267] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[260:267]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[268:275] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[268:275]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[276:283] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[276:283]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[284:291] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[284:291]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
 }
 
 *** After Pass: StinkyDAGSchedulerPass ***
-st.func @tensor_load_chain_reaches_wmma() {
+st.func @barrier_cover() {
   ^entry:
-    v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
-    LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    LDS0 = "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    LDS0 = "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-    v[32:35] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
-    v[36:39] = "st.ds_load_b128"(v200, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
-    v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { issueCycles = 1, latencyCycles = 4, mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP4", fmtB = "MATRIX_FMT_FP4" } }
-    "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+    v[100:107] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[100:107]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[108:115] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[108:115]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[116:123] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[116:123]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[124:131] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[124:131]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[50:53] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[54:57] = "st.buffer_load_b128"(v8, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[132:139] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[132:139]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[140:147] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[140:147]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[148:155] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[148:155]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[156:163] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[156:163]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[58:61] = "st.buffer_load_b128"(v9, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[62:65] = "st.buffer_load_b128"(v9, s[0:3], s0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+    v[164:171] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[164:171]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[172:179] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[172:179]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[180:187] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[180:187]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[188:195] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[188:195]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[196:203] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[196:203]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    v[204:211] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[204:211]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    v[212:219] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[212:219]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    LDS0 = "st.ds_store_b128"(v10, v[50:53]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    "st.v_nop"() { issueCycles = 1, latencyCycles = 5 }
+    v[220:227] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[220:227]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[228:235] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[228:235]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[236:243] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[236:243]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    LDS0 = "st.ds_store_b128"(v10, v[54:57]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[244:251] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[244:251]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[252:259] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[252:259]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[260:267] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[260:267]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[268:275] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[268:275]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    LDS1 = "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+    LDS1 = "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+    v[276:283] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[276:283]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    v[284:291] = "st.v_wmma_f32_16x16x16_bf16"(v[200:207], v[208:215], v[284:291]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
+    LDS0, LDS1 = "st.s_barrier_signal"(-1, LDS0, LDS1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+    LDS0, LDS1 = "st.s_barrier_wait"(-1, LDS0, LDS1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0,1] } }
+    v[20:23] = "st.ds_load_b128"(v12, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[24:27] = "st.ds_load_b128"(v12, LDS0) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+    v[30:33] = "st.ds_load_b128"(v13, LDS1) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+    v[34:37] = "st.ds_load_b128"(v13, LDS1) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+    v[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[30:37], v[0:7]) { issueCycles = 1, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
 }

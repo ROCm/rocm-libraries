@@ -525,10 +525,27 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
     // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
     // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
+    // Queued cover to hold for a barrier (0 = off); see DagFeatures::wmmaBarrierCoverCycles.
+    int wmmaBarrierCover(int wmmaLatency) const {
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        if (wmmaQueueCover() <= 0 || f.wmmaBarrierCoverCycles == 0) return 0;
+        if (f.wmmaBarrierCoverCycles < 0 && !f.dsSpread) return 0;
+        const int fullQueue = wmmaQueueDepth() * std::max(1, wmmaLatency);
+        constexpr int kAutoBarrierCover = 72;
+        const int want =
+            f.wmmaBarrierCoverCycles < 0 ? kAutoBarrierCover : f.wmmaBarrierCoverCycles;
+        return std::min(want, fullQueue);
+    }
+    // WMMAs held back in front of a barrier's threshold to hide its stall.
+    int wmmaBarrierReserve(int wmmaLatency) const {
+        const int cover = wmmaBarrierCover(wmmaLatency);
+        return cover > 0 ? (cover + std::max(1, wmmaLatency) - 1) / std::max(1, wmmaLatency) : 0;
+    }
     bool wmmaRefillActive(int wmmaLatency) {
         if (wmmaQueueCover() <= 0) return false;
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         const bool room = outstandingWmmas() < wmmaQueueDepth();
+        if (barrierWaitsForCover_) return true;
         if (wmmaRefilling_) {
             const int target = f.wmmaRefillToCycles > 0
                                    ? f.wmmaRefillToCycles
@@ -807,6 +824,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool wmmaRefilling_ = false;
     int wmmaRefillLeft_ = 0;
     DsSpreadPacer dsSpread_;
+    // decidePromote() held a ready barrier back: the queued WMMA cover is below the barrier cover.
+    bool barrierWaitsForCover_ = false;
 
     BasicBlock* currentBB_ = nullptr;
     std::vector<Layer2BarrierOverlapCandidate> layer2BarrierOverlapCandidates_;
@@ -1059,6 +1078,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         });
     }
     void onScheduled(const StinkyInstruction& inst) override {
+        PASS_DEBUG({
+            if (isBarrier(inst))
+                std::cerr << "[CDNA5 barrierCover] wmmaIssued=" << wmmaIssuedCountThisRegion_
+                          << " queuedCover=" << queuedCoverCycles() << "\n";
+        });
         if (waitAlu_) waitAlu_->commit(inst);
     }
 };
@@ -1923,6 +1947,7 @@ void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
     promotedKind_ = -1;
+    barrierWaitsForCover_ = false;
 
     if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
         for (DAGNode* node : barrierQueue) {
@@ -1930,6 +1955,14 @@ void CDNA5ReadyQueue::decidePromote() {
             auto thIt = barrierWmmaThresholds_.find(node->inst);
             if (thIt != barrierWmmaThresholds_.end() &&
                 wmmaIssuedCountThisRegion_ >= thIt->second) {
+                // The WMMAs queued behind the barrier hide its stall: refill first.
+                if (!wmmaQueue.empty() && outstandingWmmas() < wmmaQueueDepth()) {
+                    const int latency = wmmaQueue.top()->inst->latencyCycles;
+                    if (queuedCoverCycles() < wmmaBarrierCover(latency)) {
+                        barrierWaitsForCover_ = true;
+                        continue;
+                    }
+                }
                 promotedPhase_ = PromotePhase::Barrier;
                 promotedNode_ = node;
                 PASS_DEBUG(std::cerr << "[CDNA5 decidePromote] promote barrier=" << node->inst
@@ -2951,6 +2984,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     wmmaRefilling_ = false;
     wmmaRefillLeft_ = 0;
+    barrierWaitsForCover_ = false;
     lastPickedNode_ = nullptr;
     // SCC chain locks are per-region: chain ids index the prior region's
     // DAGNodeList, and region boundaries are side-effect cuts no reordering
@@ -3608,7 +3642,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     // Run after every barrier placement and normalization step so the analysis
     // sees the same final thresholds that the scheduler will enforce.
-    if (hideBudgetPrescanEnabled()) {
+    if (hideBudgetPrescanEnabled() && !dagFeatures.dsSpread) {
         hideBudget_ = analyzeWmmaHideBudget(deps.dag, hideBudgetBarriers, wmmaHideBudgetBase,
                                             dsLoadBudgetConfig());
         PASS_DEBUG(std::cerr << "[CDNA5 hideBudget] windows=" << hideBudget_.numWindows()
@@ -3712,6 +3746,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (isMatrixInstruction(*deps.dag.nodes[id].inst)) wmmaIndex[id] = wmmaOrdinal++;
         }
         constexpr int kConsumerHops = 3;
+        const int barrierReserve = wmmaBarrierReserve(wmmaIssueConfig.latency);
         auto consumerWindow = [&](unsigned id) {
             int best = INT_MAX;
             std::vector<unsigned> frontier{id};
@@ -3719,6 +3754,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 std::vector<unsigned> next;
                 for (unsigned n : frontier) {
                     for (unsigned succ : deps.dag.graph[n]) {
+                        auto th = barrierWmmaThresholds_.find(
+                            const_cast<StinkyInstruction*>(deps.dag.nodes[succ].inst));
+                        if (th != barrierWmmaThresholds_.end())
+                            best = std::min(best, th->second - barrierReserve);
                         if (wmmaIndex[succ] != INT_MAX)
                             best = std::min(best, wmmaIndex[succ]);
                         else

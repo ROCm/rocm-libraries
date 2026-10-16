@@ -151,6 +151,12 @@ struct PassFeatureConfig {
         /// ds_load is released at its planned WMMA window (minus the tolerance) and issues only
         /// while the ds queue has a free credit. Off = the cap/throttle pacing.
         bool dsSpread = false;
+        /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
+        /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
+        /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are
+        /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
+        /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
+        int wmmaBarrierCoverCycles = -1;
         /// Tolerance of the spread, in cycles (converted to WMMA windows); < 0 = automatic, the
         /// smallest one that still lets every ds_load reach its consumer in time.
         int dsSpreadToleranceCycles = -1;

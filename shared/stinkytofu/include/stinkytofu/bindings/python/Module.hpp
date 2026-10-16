@@ -141,6 +141,7 @@
     X(DsIssueCapSpanCycles, int, 0) /* 0 = one batch window */                                  \
     X(DsIssueCapMode, int, 0)       /* 0 Sliding, 1 Periodic */                                 \
     X(DsReadPerCap, int, -1)                                                                    \
+    X(WmmaBarrierCoverCycles, int, -1)  /* cover kept for a barrier; < 0 = automatic */         \
     X(DsSpread, bool, false)            /* even ds_load spread over the WMMAs */                \
     X(DsSpreadToleranceCycles, int, -1) /* < 0 = automatic */                                   \
     X(DsReadPerWmma, int, -1)           /* deprecated alias for DsReadPerCap */                 \

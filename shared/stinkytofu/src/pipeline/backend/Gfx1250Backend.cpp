@@ -208,6 +208,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
                 passFeatureConfig.dagFeatures.dsSlotFirst = moduleOptions.DsSlotFirst;
                 passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
+                passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
+                    moduleOptions.WmmaBarrierCoverCycles;
                 passFeatureConfig.dagFeatures.dsSpreadToleranceCycles =
                     moduleOptions.DsSpreadToleranceCycles;
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
