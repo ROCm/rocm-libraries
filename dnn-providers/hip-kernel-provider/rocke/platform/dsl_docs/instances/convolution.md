@@ -603,6 +603,17 @@ policy image (`block_q` 4/8/16, `block_groups` 16/32/64, gathered, LDS-staged
 and row-staged weights) for both dtypes; `plan_for` emits one forward-ABI
 launch with the buffers `(dy, w, dx)`.
 
+Not dispatched yet (the grouped-convolution dispatcher is being reworked
+separately); `benchmark_direct_conv --run-from-cache <cache> --direction dgrad
+--variants direct_grouped_dgrad_4c --verify` runs the cached binaries on a
+shape. Scope: `cpg = kpg = 4`, a "same" 1x1/3x3 filter and
+`groups % 16 == 0`. The row-staged kernel (`dgrad_weights_lds` +
+`stage_rows`) pays on larger grids and taller images; on small grids the
+fused generic kernel (next section), which tiles H, or implicit GEMM is the
+better choice. Case studies:
+[`dgrad_4c_bf16_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_4c_bf16_case_study.md),
+[`dgrad_fused_weights_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md).
+
 ### Generic Kernel dgrad: fused weights (`DirectConvSpec`, AOT variant `direct_grouped_dgrad_fused`)
 
 The generic `DirectConvSpec` row stream (any `cpg` that is a multiple of 4,
@@ -691,6 +702,17 @@ the policy's row-stream stack: `prefetch_rows=2`, `lds_only_sync`,
 (padded and staged, padded, neither). The 16- and 32-row tiles, which the
 policy reaches only through whole-image picks, also carry `row_exit`.
 `plan_for` emits one forward-ABI launch with the buffers `(dy, w, dx)`.
+
+Not dispatched yet (the grouped-convolution dispatcher is being reworked
+separately); `benchmark_direct_conv --run-from-cache <cache> --direction dgrad
+--variants direct_grouped_dgrad_fused --verify` runs the cached binaries on a
+shape. The cache-scope rules of the knob image are `_dgrad_fused_policy_reason`
+in `library/kernels/conv/direct_aot_jobs.py`; the validator still accepts what
+they skip, so a JIT sweep can try it. Strided problems, filters past 7x7,
+channels past 32 and 5x5/7x7 pairs over `PRELOAD_WEIGHT_VGPR_BUDGET` have no
+fused binary. Case studies:
+[`dgrad_fused_weights_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/dgrad_fused_weights_case_study.md),
+[`grouped_generic_row_stream_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/grouped_generic_row_stream_case_study.md).
 
 ### Depthwise Kernel (`DirectDepthwiseSpec`)
 
@@ -819,6 +841,122 @@ The sweeps skip a row-streaming config that would spill
 (`depthwise_stream_register_reason`) and leave its shape to this kernel.
 
 Parity gate: configs 57-62 in `library/tests/parity/conv_direct_grouped_emit.{c,py}`.
+
+### Windowed Depthwise Dgrad Kernel (`DirectDepthwiseDgradWindowedSpec`)
+
+`DirectDepthwiseDgradWindowedSpec` / `build_direct_depthwise_dgrad_windowed`
+(C++ `rocke_build_direct_depthwise_dgrad_win`). Backward-data for depthwise
+convolution (`cpg == kpg == 1`) at stride 1, any padding (rows are bounded by
+`p_Ho`, columns by `p_Wo`). AOT cache variant `direct_depthwise_dgrad_win`;
+not dispatched yet (the grouped-convolution dispatcher is being reworked
+separately), so it is reached through the cache (`--run-from-cache`).
+
+```python
+@dataclass(frozen=True)
+class DirectDepthwiseDgradWindowedSpec:
+    problem: DirectConvProblem
+    name: str = "direct_depthwise_dgrad_win"
+    block_w: int = 8        # dX columns per block (VALU form)
+    block_waves: int = 1
+    ch_per_lane: int = 1    # 1/2/4/8 adjacent channels per lane (vector I/O)
+    block_h: int = 8        # dX rows per block: a tile height, must be > 0
+    dot2: bool = False      # tap pairs on arith.fdot2 (gfx950 only)
+    mfma: bool = False      # Toeplitz MFMA form (gfx950, groups % 8 == 0)
+    w_fold: int = 1         # mfma: images per 16x16 tile (1, 2, 4)
+    prefetch_rows: int = 1  # mfma: dY rows in flight
+    wave_size: int = 64
+```
+
+The filter, the padding and the dtype are baked (the kernel name carries
+`r<KH>s<KW>p<PAD>` and `bf16`); N, H, W and the channel count are kernargs.
+`block_h` is a build-time tile height: the rows of a tile are unrolled, the
+image height is the `p_Hi` kernarg and rows past it are guarded at run time,
+so there is no whole-image (`block_h = 0`) form.
+
+Algorithm of the VALU form (the rows of a tile and the taps are unrolled):
+
+```text
+for each local dY row y of the tile (ho = h0 + y + PAD - (KH-1)):
+    load window[t] = dY[n, ho, wi0 + PAD - (KW-1) + t, ch..]   t < block_w + KW - 1
+    (the next live row's window is issued before this row's FMAs; sched_barrier)
+    for r < KH, s < KW, j < block_w:
+        acc[(y + r - (KH-1)) % KH][j] += W[ch, r, s] * window[j + KW - 1 - s]
+    flush dX local row y - (KH-1) from its slot
+```
+
+Addressing: each offset is a row-invariant lane part (channel + column, or
+`DW_DGRAD_WIN_OOB_LANE` when the channel or column is out of range) plus a
+block-uniform row part (or `DW_DGRAD_WIN_OOB_UNIFORM` for a row outside the
+image). The two sentinels sum to `2**31 - 1`, so an invalid access lands past
+the buffer (loads read zero, stores drop) with no per-tap select and the
+signed i32 add never overflows. The tensors must therefore stay within
+`DW_DGRAD_WIN_MAX_TENSOR_BYTES`, a plan-time rule (the IR does not depend on
+it) that the validator checks on the real problem.
+
+`dot2` pairs taps `(s, s+1)` into one `arith.fdot2`
+(`v_dot2c_f32_{f16,bf16}`), with the window packed once per row; an odd KW
+issues its tail pair `(w[KW-1], 0)` against `(x, 0)` first, so the zero
+weight only ever meets a zero (an Inf one column outside the receptive field
+cannot turn into a NaN).
+
+Constraints (`is_valid_depthwise_dgrad_win_spec` /
+`rocke_direct_depthwise_dgrad_win_is_valid_spec`, same reason text):
+fp16/bf16, `cpg == kpg == 1`, `stride == 1`, no dilation, `block_h >= 1`,
+`ch_per_lane in {1, 2, 4, 8}` dividing `groups`, `dot2` only with
+`ch_per_lane == 1` and only on `DW_DGRAD_WIN_DOT2_ARCHES` (gfx950), at most
+`DW_DGRAD_WIN_MAX_UNROLL` unrolled FMAs
+(`block_h * KH * KW * block_w * ch_per_lane`), and `w_fold` /
+`prefetch_rows` left at 1 without `mfma`.
+
+Grid: `(ceil(W / block_w), ceil(groups / block_ch), N * ceil(H / block_h))`
+with `block_ch = block_waves * 64 * ch_per_lane`.
+
+**Toeplitz MFMA form (`mfma=True`, gfx950).** Each wave owns 8 channels and a
+16x16 fp32 tile per dX row in flight: tile rows are (channel, column parity),
+tile columns are column pairs of `w_fold` images (`tile_w = 32 / w_fold`
+columns each). A one-hot diagonal weight fragment (A) meets 8 channels x 4
+window columns (B) in one `mfma_f32_16x16x32_{f16,bf16}`, so a filter row takes
+`ceil((KW + 1) / 4)` passes. dY window rows (16-byte coalesced loads,
+`prefetch_rows` rows in flight) and finished dX rows go through two LDS double
+buffers that share one barrier per row; the block writes whole 16-byte channel
+runs per pixel. `block_w` and `ch_per_lane` do not apply (`ch_per_lane` must
+be 1; `block_w` stays out of the kernel name). `block_ch = 8 * block_waves`,
+grid `(ceil(W / tile_w), ceil(groups / block_ch), ceil(N / w_fold) *
+ceil(H / block_h))`. Extra constraints: `groups % 8 == 0` (a plan-time rule),
+`block_waves <= DW_DGRAD_MFMA_MAX_WAVES`, `w_fold in DW_DGRAD_MFMA_W_FOLDS`,
+`prefetch_rows <= DW_DGRAD_MFMA_MAX_PREFETCH_ROWS`, at most
+`DW_DGRAD_MFMA_MAX_UNROLL` unrolled MFMAs (`block_h * KH * passes`), the
+resident-fragment estimate `mfma_frag_vgprs()` within
+`DW_DGRAD_MFMA_MAX_FRAG_VGPRS`, and `mfma_lds_bytes()` within
+`DW_DGRAD_MFMA_LDS_BUDGET`.
+
+Non-finite semantics differ between the forms. The VALU forms (including
+`dot2`) keep an Inf / NaN in dY inside its channel and receptive field. The
+MFMA form multiplies zero off-diagonal weights against the other 7 channels of
+the group, so a non-finite dY value reaches every channel of its 8-channel
+group, in its receptive-field rows and over `4 * ceil((KW + 1) / 4)` columns
+(the zero-weight taps of the passes; `0 * Inf = NaN`). Finite inputs agree
+with the VALU form up to fp32 summation order.
+
+AOT cache image (`library/kernels/conv/direct_aot_jobs.py`): the square
+filters `_DEPTHWISE_FILTERS` with every padding; for the VALU form the `(block_w, block_h)` tiles of
+`DW_WIN_TILES` with and without `dot2` at `DW_WIN_WAVES` waves and with
+channel pairs at `DW_WIN_PAIR_WAVES`; for the MFMA form every
+`DW_WIN_MFMA_FOLDS` x `DW_WIN_MFMA_WAVES` x `DW_WIN_MFMA_BLOCK_H` at
+`prefetch_rows = DW_WIN_MFMA_PREFETCH`, filtered by `_dw_win_policy_reason`.
+
+Choosing between the forms is left to the dispatcher rework. The MFMA form
+was measured ahead of the `dot2` VALU kernel, with warm and with cold caches,
+only inside a bounded region of "same"-padded large filters and moderate
+image sizes; outside it, and on the memory-bound 3x3, the VALU form (with
+`dot2` from 5-wide filters on gfx950, channel pairs on 3x3) is the starting
+point. Stride 2 runs the row-streaming kernel (`direct_depthwise_dgrad`).
+
+Parity gate: configs 0-19 of
+`library/tests/parity/conv_direct_dgrad_ext_emit.{c,py}` (0-10 the VALU and
+`dot2` forms, 11-19 the MFMA form, including the gfx942, `groups % 8 != 0` and
+`block_h = 0` configs both engines reject). Case study:
+[`depthwise_windowed_dgrad_case_study.md`](../../python/rocke/examples/gfx950/conv_dgrad/depthwise_windowed_dgrad_case_study.md).
 
 ## Direct Non-grouped Convolution
 
@@ -1023,3 +1161,7 @@ Grid: `ceil_div(total_output_elements, block_size)`.
 - C++ port folds two emitting builder calls into one argument list: C++ argument evaluation order is unspecified, so `arith.constant`s reorder and byte-identity breaks.
 - Output descriptor uses NHWC instead of NHWK stride order.
 - Benchmark compares implicit-GEMM graph mode to direct per-launch mode without labeling launch overhead.
+- Output (or a multi-kernel pipeline's workspace) verified after a zero fill: an unwritten lane reads as 0 and hides the bug. Pre-fill dX and scratch with 0xFF bytes (NaN in fp16 and bf16), except where the kernel accumulates atomically into a zeroed output.
+- Group offset applied twice: indexing a per-group tensor (last dim `kpg`) with an absolute channel index (`g*kpg + k`) passes every `groups == 1` test. Test grouped and ungrouped shapes.
+- Eligibility or tiling policy fitted on a cohort that varied only some axes (size but not the channel ratio, one group count): the rule fails in the region the cohort never sampled. Sweep the channel-ratio, filter, group-count and image-size axes, and keep a disjoint hold-out set.
+- A whole-image tile in an AOT kernel: the image height is a kernarg, so a build-time "whole image" is a fixed tile height that can be taller or shorter than the real image. Bound the rows at run time (`row_guard`, `row_exit`, the windowed kernel's row masks) and test images shorter and taller than the tile.
