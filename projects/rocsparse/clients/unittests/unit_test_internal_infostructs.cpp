@@ -36,7 +36,7 @@
 //   * _rocsparse_csrmv_info::clear + adaptive/lrb/nnzsplit clear
 //         (header-inline clear; level2/rocsparse_csrmv_{adaptive,lrb,nnzsplit}_info.cpp)
 //   * nnzsplit csrmv_info device-buffer release through the public rocsparse_spmv
-//         path (ROCM-33113 regression for rocm-libraries#6595; see
+//         path (regression for rocm-libraries#6595; see
 //         level2/rocsparse_csrmv_nnzsplit_info.cpp)
 //   * rocsparse csrgemm_info create/copy/destroy (extra/rocsparse_csrgemm_info.cpp)
 //   * _rocsparse_mat_info lifecycle via the public C API (rocsparse_create/destroy_mat_info)
@@ -225,7 +225,7 @@ TEST(internal_infostructs, csrmv_subinfo_clear_null_safe)
 }
 
 // ===========================================================================
-// nnzsplit csrmv_info device-buffer lifecycle (ROCM-33113)
+// nnzsplit csrmv_info device-buffer lifecycle
 // ===========================================================================
 // Regression test for the device leak fixed by rocm-libraries PR #6595:
 // _rocsparse_csrmv_info::clear() must free nnzsplit.starting_ids, and
