@@ -667,9 +667,16 @@ class TestAgainstTheGfx950Manifest:
         assert "CHECK PASSED" in result.stdout
 
 
-class TestAgainstTheShippedDenseManifest:
-    def test_every_declared_surface_is_real_guarded_and_tested(self):
-        manifest = _TOOLS.parent / "configs" / "gfx950_attention_dense.engine.yaml"
+class TestAgainstTheShippedEngineDescriptions:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "gfx950_attention_dense.engine.yaml",
+            "gfx950_attention_unified_2d.profile.yaml",
+        ],
+    )
+    def test_every_declared_surface_is_real_guarded_and_tested(self, name):
+        manifest = _TOOLS.parent / "configs" / name
         result = _run("--check", str(manifest), cwd=_REPO_ROOT)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "unguarded/untested  0" in result.stdout

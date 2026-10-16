@@ -1296,8 +1296,9 @@ class TestShippedExampleConfigsLoad:
             path
             for path in configs_dir.glob("*.yaml")
             if not path.name.endswith(".engine.yaml")
-            # .profile.yaml is the pre-migration profile format (no packs/engine
-            # top-level keys); registry_enumerator.py expands it separately.
+            # A .profile.yaml describes an engine that has no manifest: no `packs`, no
+            # `enumerate:`. Neither loader takes it; tests/test_launch_surface.py
+            # checks its `launch_surface:` block.
             and not path.name.endswith(".profile.yaml")
         )
 

@@ -1,8 +1,15 @@
-# Profile: gfx950 unified 2D paged/varlen attention.
+# Description of hipkernel:Gfx950AttentionUnified2D, the gfx950 unified 2D
+# paged/varlen attention engine.
 #
-# Read by the profile-driven scripts under tools/. Sibling of
-# gfx950_attention_dense.profile.yaml; read that one first, since this file only
-# states where the unified family differs.
+# This is not an engine manifest and not a generator config. It has no `enumerate:`
+# block, so tools/registry_enumerator.py refuses it, and no authored selection exists
+# for this engine: the shipped catalog is the committed KDP under
+# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/
+# rocKE/gfx950_attention_unified_2d/, and no tool regenerates it. Its readers are
+# tools/launch_surface.py --check (the `launch_surface:` block, run over this file by
+# tests/test_launch_surface.py) and the comments in the provider's
+# Gfx950AttentionUnified2D* pack sources that cite it. The rest records what the
+# shipped descriptors were authored from.
 #
 # THE KERNEL IS NOT THE DENSE KERNEL ON A WIDER ABI. Three differences decide
 # almost everything below, and each was measured against the registry rather
@@ -23,74 +30,31 @@
 #      (`binary_search_iters = ceil(log2(num_seqs + 1))`). See the kmd_fields
 #      note on num_seqs for the capacity bound this creates.
 
+# HOW THE CATALOG IS SELECTED FROM THE REGISTRY. Selection is by PIN, and the pin
+# must name a spec_id -- not just the algorithm. Measured: `algorithm: unified_2d`
+# and the unpinned call both return an AttentionSpec with no `kernel_spec` at all (a
+# routing plan, F3), and `algorithm: unified_tuning` alone raises "no candidate
+# supports request" because every unified candidate is opt_in. Only a spec_id pin
+# resolves to a UnifiedAttention2DTiledSpec a builder can compile. The pin is
+# `algorithm: unified_tuning`, `spec_id: gfx950_u2d_narrow_nw1_mw16_t1xb_llvm`.
+#
+# WHY THIS SPEC_ID. The 104 gfx950 u2d candidates carry 52 distinct geometries, each
+# in an `_llvm` and a `_hipcc` arm that bake an IDENTICAL kernel_spec --
+# `compile_backend` lives on the tuning spec, not the kernel spec, so the pair
+# deduplicates to one binary. `_llvm` is the arm this packaged dialect actually uses:
+# hkp_pack lowers the named builder through comgr, which is the LLVM path.
+#
+# Among the geometries, `narrow_nw1_mw16_t1xb` is the baseline: one warp,
+# block_m_per_warp 16, tile_size = 1 x block_size. It served 150/150 shapes in this
+# corpus, every head size included, where e.g. `wide32_nw4_mw32_t4xb` served 100/150.
+# A wider geometry is a stage-6 tuning result, not a baseline -- RUNBOOK stage 2: "a
+# legal cross-product is not a measured shipping set".
+
 arch: gfx950
-slug: gfx950_attention_unified_2d
-
 provider_root: dnn-providers/hip-kernel-provider
-
-# Read by reconcile_applicability.py. The unified candidates are opt_in, so an
-# unpinned reference request returns the route-only `unified_2d` plan and zero
-# buildable candidates; the algorithm pin is what makes the family reachable.
-reference_candidates:
-  module: dispatch.attention
-  function: attention_candidates
-  match: algorithm
-  family: unified_tuning
-
-reference_request:
-  module: dispatch.attention.common
-  class: AttentionRequest
-  defaults:
-    arch: gfx950
-    algorithm: unified_tuning
-    spec_id: gfx950_u2d_narrow_nw1_mw16_t1xb_llvm
 
 source: kernels/gfx950/attention_tiled_2d.py
 builder: build_unified_attention_2d_tiled
-
-dispatch:
-  module: dispatch.attention
-  function: dispatch_attention
-  # Selection is by PIN, and the pin must name a spec_id -- not just the
-  # algorithm. Measured: `algorithm: unified_2d` and the unpinned call both
-  # return an AttentionSpec with no `kernel_spec` at all (a routing plan, F3),
-  # and `algorithm: unified_tuning` alone raises "no candidate supports
-  # request" because every unified candidate is opt_in. Only a spec_id pin
-  # resolves to a UnifiedAttention2DTiledSpec a builder can compile.
-  #
-  # WHY THIS SPEC_ID. The 104 gfx950 u2d candidates carry 52 distinct
-  # geometries, each in an `_llvm` and a `_hipcc` arm that bake an IDENTICAL
-  # kernel_spec -- `compile_backend` lives on the tuning spec, not the kernel
-  # spec, so the pair deduplicates to one binary. `_llvm` is the arm this
-  # packaged dialect actually uses: hkp_pack lowers the named builder through
-  # comgr, which is the LLVM path.
-  #
-  # Among the geometries, `narrow_nw1_mw16_t1xb` is the baseline: one warp,
-  # block_m_per_warp 16, tile_size = 1 x block_size. It served 150/150 shapes
-  # in this corpus, every head size included, where e.g.
-  # `wide32_nw4_mw32_t4xb` served 100/150. A wider geometry is a stage-6
-  # tuning result, not a baseline -- RUNBOOK stage 2: "a legal cross-product is
-  # not a measured shipping set".
-  pin:
-    algorithm: unified_tuning
-    spec_id: gfx950_u2d_narrow_nw1_mw16_t1xb_llvm
-  result_attr: spec
-  spec_attr: kernel_spec
-  refusal_exception: rocke.dispatch.core.PinRefused
-
-request:
-  module: dispatch.attention.common
-  class: AttentionRequest
-  defaults:
-    arch: gfx950
-
-predicate:
-  module: kernels.gfx950.attention_tiled_2d
-  function: supports_tiled_2d_spec
-
-arch_spec:
-  module: kernels.gfx950.attention_tiled_2d
-  class: UnifiedAttention2DTiledSpec
 
 # WHAT THE BINARY SPECIALIZES ON, measured by holding the pin fixed and moving
 # one request field at a time:
@@ -110,31 +74,8 @@ arch_spec:
 # spec_id is pinned, but they are still metadata: the collision rule keys a
 # candidate on its COMPLETED metadata, and native-pack.md requires metadata for
 # every field consumed by scoring, geometry or workspace even when no graph
-# comparison reads it. Dropping the two that the first draft of this engine
-# omitted -- use_register_pv and use_k_single_buffer -- would also make a
-# future second geometry collide with this one instead of shipping beside it.
-metadata_fields:
-  - dtype
-  - head_size
-  - num_query_heads
-  - num_kv_heads
-  - block_size
-  - sliding_window
-  - use_sinks
-  - num_seqs
-  - tile_size
-  - num_warps
-  - block_m_per_warp
-  - use_mfma_32x32
-  - use_transposed_qk_32x32
-  - use_register_pv
-  - use_k_single_buffer
-
-vocabulary:
-  dtype:
-    bf16: BF16
-    fp16: FP16
-
+# comparison reads it. Dropping use_register_pv and use_k_single_buffer would make
+# a future second geometry collide with this one instead of shipping beside it.
 specialization:
   metadata_fields:
     - dtype
@@ -327,15 +268,18 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_2d.py:build_unified_attention_2d_tiled
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, sliding_window, use_sinks, num_seqs]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, sliding_window, use_sinks, num_seqs, block_m_per_warp, num_warps, tile_size]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size,
       num_query_heads, num_kv_heads or block_size disagrees with the graph, if
-      the candidate bakes a sliding window or sinks, if seqlen_kv is not a
-      multiple of block_size, or if the graph's batch exceeds the candidate's
-      proven binary-search capacity
+      the candidate bakes a sliding window or sinks, if its geometry
+      (block_m_per_warp, num_warps, block_size) is missing or non-positive, if
+      seqlen_kv is not a multiple of block_size, or if the graph's batch
+      exceeds the candidate's proven binary-search capacity
       (batch > 2^ceil(log2(num_seqs + 1)) - 1). graph_match has already
-      required a causal mask: the kernel masks unconditionally.
+      required a causal mask: the kernel masks unconditionally. score() ranks
+      by block_m_per_warp * num_warps, then tile_size, and a candidate with a
+      missing or non-positive tile_size is ranked unsupported.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DMatchers.cpp
 
   - name: kernargs
