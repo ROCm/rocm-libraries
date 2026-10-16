@@ -38,17 +38,20 @@
 
 /********************************************************************************
  * \brief Internal definition of the opaque hipblasLtEmulationDescriptor type.
- * Emulation is enabled by attaching the descriptor; set strategy to DISABLED to
- * prevent re-entry from the native-GEMM fallback.
+ * Emulation is enabled by attaching the descriptor to a matmul descriptor.
+ * Use force_off (internal only) to prevent re-entry from the native-GEMM fallback.
  *******************************************************************************/
 struct hipblasLtEmulationDescriptor
 {
-    hipblasLtEmulationStrategy_t             emulation_strategy   = HIPBLASLT_EMULATION_STRATEGY_DEFAULT;             /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden); DISABLED = never emulate */
+    hipblasLtEmulationStrategy_t             emulation_strategy   = HIPBLASLT_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
     hipblasltEmulationSpecialValuesSupport_t emulation_sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
-    int emulation_fixedpoint_mantissa_control   = 0;   /**< Not used at the moment */
-    int emulation_fixedpoint_max_mantissa_bits  = 0;   /**< 0=inherit, 1..52=explicit bit count */
-    int emulation_fixedpoint_mantissa_bit_offset = 0;  /**< Not used at the moment */
-    int emulation_fixedpoint_mantissa_bit_count_pointer = 0; /**< Not used at the moment */
+    int emulation_fixedpoint_mantissa_control            = 0;   /**< Not used at the moment */
+    int emulation_fixedpoint_max_mantissa_bits           = 0;   /**< 0=inherit, 1..52=explicit bit count */
+    int emulation_fixedpoint_mantissa_bit_offset         = 0;   /**< Not used at the moment */
+    int emulation_fixedpoint_mantissa_bit_count_pointer  = 0;   /**< Not used at the moment */
+    /** Internal use only: set by native_gemm_fallback to prevent recursive re-entry.
+     *  Not accessible via any public API. Must not be set from user code. */
+    bool force_off = false;
 };
 
 struct _rocblaslt_attribute

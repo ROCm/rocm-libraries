@@ -879,7 +879,7 @@ rocblaslt_status rocblaslt_emulation_desc_set_attribute(hipblasLtEmulationDesc_t
         {
             int32_t v = 0;
             memcpy(&v, buf, sizeof(int32_t));
-            if(v < 0 || v > 3)
+            if(v < 0 || v > 2)
                 return rocblaslt_status_invalid_value;
             desc->emulation_strategy = static_cast<hipblasLtEmulationStrategy_t>(v);
         }

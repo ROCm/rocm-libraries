@@ -450,11 +450,11 @@ namespace FixedPointEmulation
         hipblasLtMatrixLayoutCreate(
             &layoutD, hip_type, static_cast<uint64_t>(m), static_cast<uint64_t>(n), ldd);
         hipblasLtMatmulDescCreate(&desc, ctype, hip_type);
-        /* Explicitly disable emulation via DISABLED strategy to prevent infinite recursion:
+        /* Explicitly disable emulation via force_off flag to prevent infinite recursion:
          * native_gemm_fallback → hipblasLtMatmul → emulation → native_gemm_fallback.
          * The stack-local emulation descriptor outlives the (synchronous) hipblasLtMatmul call. */
         hipblasLtEmulationDescriptor emul_off_desc;
-        emul_off_desc.emulation_strategy = HIPBLASLT_EMULATION_STRATEGY_DISABLED;
+        emul_off_desc.force_off = true;
         struct hipblasLtEmulationDescriptor* emul_off = &emul_off_desc;
         hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
                                         &emul_off, sizeof(emul_off));
@@ -1863,8 +1863,8 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
 
     const hipblasLtEmulationDescriptor* ed = (desc && desc->emulation_desc) ? desc->emulation_desc : nullptr;
 
-    /* DISABLED strategy = force off; used by native_gemm_fallback to prevent recursive re-entry. */
-    if(ed && ed->emulation_strategy == HIPBLASLT_EMULATION_STRATEGY_DISABLED)
+    /* force_off = internal flag set by native_gemm_fallback to prevent recursive re-entry. */
+    if(ed && ed->force_off)
         return result; /* apply=false */
 
     /* Emulation enabled: attaching the descriptor is the enable signal.
@@ -1907,7 +1907,7 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
 
     /* Strategy (eager vs performant).
      * Priority: desc->emulation_strategy (non-DEFAULT) > env var.
-     * DISABLED is already handled above; only DEFAULT/PERFORMANT/EAGER reach here. */
+     * force_off is already handled above; only DEFAULT/PERFORMANT/EAGER reach here. */
     {
         const hipblasLtEmulationStrategy_t desc_strat
             = ed ? ed->emulation_strategy : HIPBLASLT_EMULATION_STRATEGY_DEFAULT;

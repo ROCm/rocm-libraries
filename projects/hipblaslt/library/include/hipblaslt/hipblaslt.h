@@ -88,7 +88,6 @@ typedef enum {
     HIPBLASLT_EMULATION_STRATEGY_DEFAULT    = 0, /**<Use the process-wide default (from HIPBLASLT_EMULATION_STRATEGY env var). */
     HIPBLASLT_EMULATION_STRATEGY_PERFORMANT = 1, /**<Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
     HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
-    HIPBLASLT_EMULATION_STRATEGY_DISABLED   = 3, /**<Never emulate, even if an emulation descriptor is attached. Used internally by the native-GEMM fallback to prevent recursive re-entry. */
 } hipblasLtEmulationStrategy_t;
 
 /*! \ingroup types_module
@@ -116,13 +115,10 @@ typedef enum {
  *  FP64/FP32 emulation settings.  Emulation is enabled simply by attaching
  *  the descriptor to a matmul descriptor via
  *  ``HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR``; detach (set to NULL) to
- *  disable via the public API.  To force-disable from within the native-GEMM
- *  fallback (preventing recursive re-entry), set
- *  ``HIPBLASLT_EMULATION_DESC_STRATEGY`` to
- *  ``HIPBLASLT_EMULATION_STRATEGY_DISABLED``.
+ *  disable via the public API.
  */
 typedef enum {
-    HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate; ``DISABLED`` (3) = never emulate (used by internal fallback to prevent re-entry). Default: ``DEFAULT``. */
+    HIPBLASLT_EMULATION_DESC_STRATEGY                              = 0, /**<Emulation strategy. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). ``DEFAULT`` (0) = use process-wide env-var default (PERFORMANT unless overridden); ``PERFORMANT`` (1) = only when predicted faster; ``EAGER`` (2) = always emulate. Default: ``DEFAULT``. */
     HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT                = 1, /**<Inf/NaN detection support level. Data type: ``int32_t`` (``hipblasltEmulationSpecialValuesSupport_t``). ``DEFAULT`` (0) = detect both Inf+NaN; ``NONE`` (1) = skip detection; ``INFINITY`` (2) = Inf only; ``NAN`` (3) = NaN only. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MANTISSA_CONTROL           = 2, /**<Not used at the moment. */
     HIPBLASLT_EMULATION_DESC_FIXEDPOINT_MAX_MANTISSA_BIT_COUNT     = 3, /**<ADP precision target in mantissa bits. Data type: ``int32_t``. ``1``..``52`` for FP64 (``1``..``23`` for FP32); ``0`` = inherit from env var (default). Only affects ADP mode. */
