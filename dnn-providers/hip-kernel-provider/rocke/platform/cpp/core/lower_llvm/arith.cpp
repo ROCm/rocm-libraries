@@ -231,7 +231,9 @@ static void _op_arith_fneg(rocke_lower_t* L, const rocke_op_t* op)
         L, "  %s = fneg %s %s", res->name, rocke_ll_llvm_type(L, v->type), rocke_ll_operand(L, v));
 }
 
-/* Python _op_arith_fabs -> llvm.fabs.<ty>. */
+/* Python _op_arith_fabs -> llvm.fabs.<ty>. Unlike fma / fmax3, fabs also
+ * accepts f64 (a sign-bit clear), so f64 is admitted here rather than in
+ * the shared ll_fp_llvm_ty table. */
 static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -241,7 +243,8 @@ static void _op_arith_fabs(rocke_lower_t* L, const rocke_op_t* op)
     }
     const rocke_value_t* v = op->operands[0];
     const char* ty_name = v->type ? v->type->name : NULL;
-    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
+    const char* llvm_ty
+        = (ty_name && strcmp(ty_name, "f64") == 0) ? "double" : ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         rocke_ll_fail(

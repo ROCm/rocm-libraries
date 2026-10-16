@@ -386,13 +386,13 @@ mode. The missing selector and precision contract are described in §2.5.
 - **`u16-64` — 0 at every layer.** Absent from the hipDNN enum, rejected by the
   MIOpen provider, and not requested by any family.
 - **`f64` — IR, memory, and elementwise/reduce2d only.** The IR type,
-  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fmax`/`fmin`/`fcmp`/
-  `select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS memory up to
-  2-element vectors, and HIP lowering are present. Elementwise
+  `const_f64`, f64 `fadd`/`fsub`/`fmul`/`fdiv`/`fneg`/`fabs`/`fmax`/`fmin`/
+  `fcmp`/`select` and `vector_add`/`vector_sub`/`vector_mul`, global/LDS
+  memory up to 2-element vectors, and HIP lowering are present. Elementwise
   (non-transcendental ops) and reduce2d accept f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
-  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`,
-  `fma`, `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings.
+  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fma`,
+  `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings.
   `cvt_f32_to_f64` (exact) and `cvt_f64_to_f32` (round to nearest even) are the
   only conversions; `cast_to_f32` / `cast_f32_to` refuse f64, and there are no
   direct f16/bf16 conversions, MMA atoms, or atomics. f64 is in the
@@ -405,7 +405,7 @@ mode. The missing selector and precision contract are described in §2.5.
 
 Every score above is traceable to: compiler `ir.py:43-52`,
 `lower_llvm.py:1093-1129`,
-FP-op guards `lower_llvm.py:2068-2150` (FMA/FABS/FMAX3 accept only f32/f16/bf16;
+FP-op guards `lower_llvm.py:2068-2150` (FMA/FMAX3 accept only f32/f16/bf16, FABS also f64;
 the dtype rejection is at `:2122`);
 helpers `ir.py:838-1170` (casts), `helpers/io.py:48-211,260-315`,
 `helpers/quant.py:58-357`, `helpers/i4_dequant.py`, `helpers/mx_scale.py`;

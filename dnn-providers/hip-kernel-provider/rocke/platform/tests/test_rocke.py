@@ -1039,6 +1039,26 @@ class TestElementwiseInstance(unittest.TestCase):
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn("fadd double", ll)
 
+    def test_f64_abs_clears_the_sign_bit(self):
+        # f64 abs is one sign-bit clear (llvm.fabs.f64), not max(x, -x), whose
+        # maxnum costs several instructions under IEEE mode. f32 keeps max(x, -x).
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.instances import ElementwiseSpec, build_elementwise
+
+        kernel = build_elementwise(ElementwiseSpec(op="abs", dtype="f64", vec=2))
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        self.assertIn("call double @llvm.fabs.f64(double", ll)
+        self.assertNotIn("llvm.maxnum.f64", ll)
+        hip = lower_kernel_to_hip(kernel)
+        self.assertIn(" = fabs(", hip)
+        self.assertNotIn("fabsf", hip)
+
+        ll_f32 = lower_kernel_to_llvm(
+            build_elementwise(ElementwiseSpec(op="abs")), arch="gfx950"
+        )
+        self.assertIn("llvm.maxnum.f32", ll_f32)
+        self.assertNotIn("llvm.fabs", ll_f32)
+
     def test_f64_rejects_transcendental_ops_and_wide_vec(self):
         from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
