@@ -75,7 +75,7 @@ bool rocke_calculate_magic_numbers(rocke_ir_builder_t* b,
  * Emits `dividend // divisor` via the mul-hi magic sequence:
  *   mult_i32 = (multiplier >= 2**31) ? multiplier - 2**32 : multiplier
  *   tmp      = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
- *   summed   = b.add(tmp, dividend)
+ *   summed   = b.add_nuw(tmp, dividend)
  *   return shift == 0 ? summed : b.lshr(summed, b.const_i32(shift))
  *
  * `dividend` is an i32 SSA value (treated unsigned); the result is the i32

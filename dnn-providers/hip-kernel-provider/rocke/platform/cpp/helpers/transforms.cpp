@@ -126,7 +126,7 @@ rocke_value_t* rocke_do_magic_division(rocke_ir_builder_t* b,
     }
 
     tmp = rocke_b_umul_hi_i32(b, dividend, rocke_b_const_i32(b, mult_i32));
-    summed = rocke_b_add(b, tmp, dividend);
+    summed = rocke_b_add_nuw(b, tmp, dividend);
     if(shift == 0)
     {
         return summed;
@@ -804,7 +804,7 @@ static rocke_value_t* rocke_i_do_magic_division_dynamic(rocke_ir_builder_t* b,
         return NULL;
     }
     tmp = rocke_b_umul_hi_i32(b, dividend, mult_v);
-    summed = rocke_b_add(b, tmp, dividend);
+    summed = rocke_b_add_nuw(b, tmp, dividend);
     /* lshr unconditionally (shift==0 is a no-op) */
     return rocke_b_lshr(b, summed, shift_v);
 }
