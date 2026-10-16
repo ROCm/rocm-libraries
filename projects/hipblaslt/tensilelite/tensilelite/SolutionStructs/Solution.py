@@ -3500,6 +3500,95 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
+    # Some restrictions for float4 and 6bitFloat:
+    # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
+    isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
+    isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
+    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
+      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
+      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
+      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
+      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
+      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
+      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
+          and len(state.get("MIBlock", [])) >= 2 \
+          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
+        reject(state, printRejectionReason,
+               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "use a 16x16 MatrixInstruction or build for gfx1250")
+        return
+      if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
+        if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
+          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
+          return
+
+        if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
+          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
+          return
+
+        # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
+        # TODO: Enalbe edge with arbitrary number
+        state["AssertFree0ElementMultiple"] = 2
+        state["AssertFree1ElementMultiple"] = 2
+
+        # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
+        # TODO: Enalbe tail-loop with arbitrary number
+        state["AssertSummationElementMultiple"] = 8
+
+      if state["ProblemType"]["MacDataTypeA"].is6bitFloat() or state["ProblemType"]["MacDataTypeB"].is6bitFloat():
+        state["AssertFree0ElementMultiple"] = 1
+        state["AssertFree1ElementMultiple"] = 1
+        state["AssertSummationElementMultiple"] = 16
+        if not state["ProblemType"]["TransposeA"]:
+          state["AssertFree0ElementMultiple"] = 16
+        if state["ProblemType"]["TransposeB"]:
+          state["AssertFree1ElementMultiple"] = 16
+
+    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
+    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
+
+    # NoTailLoop parameter initialization.
+    # If ASEM is multiple of DepthU TailLoop will not be used.
+    # ASEM is final only from here on: depthUIteration raises it for DirectToVgpr
+    # and sets it for sparse, and the fp4/fp6/MX overrides above set it again. The
+    # runtime predicate admits any K that is a multiple of the final ASEM, so a
+    # NoTailLoop derived from an earlier value drops the K remainder.
+    # ReuseAcrossPersistent keeps NoTailLoop: its own predicate requires
+    # K % DepthU == 0 (Contractions.py).
+    state["NoTailLoop"] = False
+    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 or state.get("ReuseAcrossPersistent", 0):
+      state["NoTailLoop"] = True
+
+    # TailloopInNll optimization check
+    if state["TailloopInNll"]:
+      # Disable TailloopInNll
+      # - (not MFMA) or WMMA
+      # - PrefetchGlobalRead is 0
+      # - NoTailLoop
+      # - DepthU is not power of 2
+      # - LocalSplitU > 1
+      # - MX case
+      if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
+         (state["PrefetchGlobalRead"] == 0) or \
+         state["NoTailLoop"] or \
+         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
+         state["LocalSplitU"] > 1 or \
+         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or \
+         not bufferLoad:
+        state["TailloopInNll"] = False
+
+      # need restrictions for TailloopInNll
+      if state["TailloopInNll"]:
+        # need to disable SuppressNoLoadLoop
+        state["SuppressNoLoadLoop"] = False
+
+      # disable StaggerUcode
+      # - TailloopInNll
+      # - MX + StreamK (not enough sgpr)
+      if state["TailloopInNll"] or \
+         (isPersistent(state) and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])):
+        _disableRuntimeStaggerU(state)
+
     if state["UseDirect32XEmulation"] == True:
       #   Turn off Direct32X for the following kernels:
       #   Cijk_Ailk_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
@@ -3665,52 +3754,6 @@ class Solution(collections.abc.Mapping):
     state["DisableXdlArbStall"] = evaluateDisableXdlArbStall()
 
     state["ESMRuntimeGate"] = tuple(state["ISA"])[:2] == (12, 0)
-    # Some restrictions for float4 and 6bitFloat:
-    # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
-    isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
-    isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
-    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
-      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
-      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
-      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
-      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
-      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
-      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
-          and len(state.get("MIBlock", [])) >= 2 \
-          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
-        reject(state, printRejectionReason,
-               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
-               "use a 16x16 MatrixInstruction or build for gfx1250")
-        return
-      if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
-        if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
-          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
-          return
-
-        if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
-          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
-          return
-
-        # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
-        # TODO: Enalbe edge with arbitrary number
-        state["AssertFree0ElementMultiple"] = 2
-        state["AssertFree1ElementMultiple"] = 2
-
-        # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
-        # TODO: Enalbe tail-loop with arbitrary number
-        state["AssertSummationElementMultiple"] = 8
-
-      if state["ProblemType"]["MacDataTypeA"].is6bitFloat() or state["ProblemType"]["MacDataTypeB"].is6bitFloat():
-        state["AssertFree0ElementMultiple"] = 1
-        state["AssertFree1ElementMultiple"] = 1
-        state["AssertSummationElementMultiple"] = 16
-        if not state["ProblemType"]["TransposeA"]:
-          state["AssertFree0ElementMultiple"] = 16
-        if state["ProblemType"]["TransposeB"]:
-          state["AssertFree1ElementMultiple"] = 16
-
-    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
-    state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
@@ -5428,42 +5471,6 @@ class Solution(collections.abc.Mapping):
        state["LdsPadA"] != state["LdsPadB"]:
       reject(state, printRejectionReason, "Source KernelLanguage only supports LdsPadA == LdsPadB")
       return
-
-    # NoTailLoop parameter initialization.
-    # If ASEM is multiple of DepthU TailLoop will not be used.
-    state["NoTailLoop"] = False
-    if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
-      state["NoTailLoop"] = True
-
-    # TailloopInNll optimization check
-    if state["TailloopInNll"]:
-      # Disable TailloopInNll
-      # - (not MFMA) or WMMA
-      # - PrefetchGlobalRead is 0
-      # - NoTailLoop
-      # - DepthU is not power of 2
-      # - LocalSplitU > 1
-      # - MX case
-      if ((not state["EnableMatrixInstruction"]) or isaInfoMap[isa].asmCaps["HasWMMA"]) or \
-         (state["PrefetchGlobalRead"] == 0) or \
-         state["NoTailLoop"] or \
-         (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
-         state["LocalSplitU"] > 1 or \
-         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or \
-         not bufferLoad:
-        state["TailloopInNll"] = False
-
-      # need restrictions for TailloopInNll
-      if state["TailloopInNll"]:
-        # need to disable SuppressNoLoadLoop
-        state["SuppressNoLoadLoop"] = False
-
-      # disable StaggerUcode
-      # - TailloopInNll
-      # - MX + StreamK (not enough sgpr)
-      if state["TailloopInNll"] or \
-         (isPersistent(state) and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])):
-        _disableRuntimeStaggerU(state)
 
     _disableUnsupportedRuntimeStaggerU(state)
 
@@ -7334,7 +7341,8 @@ class Solution(collections.abc.Mapping):
       if state["InnerUnroll"] != 1:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires InnerUnroll = 1")
         return
-      if not state["NoTailLoop"]:
+      # NoTailLoop is derived later, once ASEM is final (assignDerivedParameters).
+      if state["AssertSummationElementMultiple"] % state["DepthU"] != 0:
         reject(state, printRejectionReason, "ReuseAcrossPersistent requires NoTailLoop (AssertSummationElementMultiple % DepthU == 0)")
         return
       if state["DirectToVgprA"] or state.get("DirectToVgprMXSA", False):
