@@ -1097,9 +1097,13 @@ try
         arg.bias_type = string_to_hip_datatype(bias_type);
 
     if(auto parsed = string2hipblaslt_initialization(initialization))
+    {
         arg.initialization = *parsed;
+    }
     else
+    {
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
+    }
 
     if(vm["initialization"].defaulted()
        && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
