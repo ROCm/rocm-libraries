@@ -55,8 +55,6 @@ class Shape {
    public:
     Shape() = default;
 
-    // Lvalue vectors are copied; rvalue vectors transfer their storage. Lists
-    // and spans are copied too, so no constructor borrows the supplied extents.
     explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {}
 
     Shape(std::initializer_list<size_t> dimensions) : m_dimensions(dimensions) {}
@@ -88,9 +86,8 @@ class Shape {
         return elementCount(0, rank());
     }
 
-    // Products use [firstDimension, onePastLastDimension). An empty range has
-    // product one; a zero extent makes the product zero even if other extents
-    // would overflow size_t.
+    // Products use [firstDimension, onePastLastDimension). A zero extent makes
+    // the product zero even if other extents would overflow size_t.
     size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
         if (firstDimension > onePastLastDimension || onePastLastDimension > rank()) {
             const std::string reason = firstDimension > onePastLastDimension
@@ -104,9 +101,7 @@ class Shape {
         return checkedElementCount(firstDimension, onePastLastDimension);
     }
 
-    // Select retained dimensions in the supplied order. Empty selection yields
-    // a scalar; repeated dimensions are rejected. Projection also expresses a
-    // permutation or removal of dimensions without special product APIs.
+    // Select dimensions in the supplied order.
     Shape project(std::span<const size_t> axes) const {
         std::vector<size_t> dimensions;
         std::vector<bool> seen(rank(), false);
@@ -123,8 +118,8 @@ class Shape {
     }
 
     // Convert an n-dimensional coordinate to a logical linear index, independently
-    // of physical strides. For shape (2, 3, 5), indices (1, 2, 3), and order
-    // (1, 2, 0), the logical strides are (1, 10, 2), so the index is
+    // of physical strides. For shape (2, 3, 5), row-major strides are (15, 5, 1).
+    // With order (1, 2, 0), strides are (1, 10, 2), so indices (1, 2, 3) give
     // 1 * 1 + 2 * 10 + 3 * 2 = 27.
     // \param indices One coordinate per dimension.
     // \param order A permutation of dimensions, slowest to fastest. Ascending
@@ -154,8 +149,7 @@ class Shape {
         return result;
     }
 
-    // Invert linearIndex: with shape (2, 3, 5) and order (1, 2, 0), index 27
-    // produces coordinates (1, 2, 3).
+    // Invert linearIndex.
     // \param linearIndex Logical index in [0, elementCount()).
     // \param order A permutation of dimensions, slowest to fastest. Empty
     // selects row-major order (last fastest).

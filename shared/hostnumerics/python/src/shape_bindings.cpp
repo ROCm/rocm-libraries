@@ -40,7 +40,6 @@ void registerShapeBindings(nb::module_& module) {
         .def(
             "__getitem__",
             [](const Shape& shape, nb::handle key) -> nb::object {
-                // Let Python apply its integer-index protocol and slice rules to the extents.
                 nb::object result = shapeTuple(shape).attr("__getitem__")(key);
                 if (nb::isinstance<nb::slice>(key))
                     return nb::cast(Shape(nb::cast<std::vector<size_t>>(result)));
