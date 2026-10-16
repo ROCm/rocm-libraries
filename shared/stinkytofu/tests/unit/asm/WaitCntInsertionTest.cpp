@@ -1631,9 +1631,11 @@ st.func @drained_entry_rotating_loop() {
 ^loop:
 )";
         for (int i = 0; i < count; ++i)
-            irString += R"(  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+            irString +=
+                R"(  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
 )";
-        irString += R"(  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = )";
+        irString +=
+            R"(  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = )";
         irString += std::to_string(count);
         irString += R"( } }
   LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
