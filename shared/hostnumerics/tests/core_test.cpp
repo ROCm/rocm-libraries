@@ -159,6 +159,6 @@ TEST(ShapeCpp, CallerProvidedCoordinates) {
     EXPECT_EQ(output, (std::array<size_t, 3>{1, 2, 2}));
     EXPECT_EQ(shape.linearIndex(output, order), 17);
     EXPECT_EQ(shape.coordinates(17, order), (std::vector<size_t>{1, 2, 2}));
-    EXPECT_THROW(shape.coordinates(0, order, {}), std::invalid_argument);
+    EXPECT_THROW(shape.coordinates(0, order, {}), std::runtime_error);
 }
 }  // namespace

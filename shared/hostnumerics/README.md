@@ -74,6 +74,16 @@ Test numerical behavior primarily through the Python API, using independent
 expected results. Keep native core tests in `tests/core_test.cpp` for contracts
 that Python cannot exercise, such as C++ construction and ownership rules.
 
+## Error handling
+
+HostNumerics-owned terminal errors throw `std::runtime_error` with a useful
+message. Expected compatibility and support failures should use explicit checks
+or results; callers must not select recovery from exception types or messages.
+Allocation, system, dependency and user-callback errors retain their original
+types. Python tuple operations retain their native errors, while named
+HostNumerics operations report `RuntimeError`. This policy does not promise an
+exceptions-disabled build or restrict Shape construction by total element count.
+
 ## Python Shape
 
 `Shape` behaves like an immutable Python tuple of nonnegative extents. Integer
