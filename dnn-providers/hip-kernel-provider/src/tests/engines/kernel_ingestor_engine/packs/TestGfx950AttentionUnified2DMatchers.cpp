@@ -40,6 +40,10 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL
     = "hipkernel.gfx950_attention_unified2_d.kernel_match";
 
 constexpr int64_t Q_UID = 1, K_UID = 2, V_UID = 3, O_UID = 4;
+constexpr int64_t RAGGED_OFFSET_UID = 5;
+// A uid no tensor in the graph carries, for the optional attributes the matcher declines
+// on presence alone.
+constexpr int64_t ABSENT_UID = 99;
 constexpr int64_t BATCH = 2, HEADS_Q = 32, HEADS_KV = 8, SEQ = 256, HEAD_SIZE = 128;
 constexpr float SCALE = 0.08838834764831843F;
 constexpr int64_t BLOCK_SIZE = 16;
@@ -82,6 +86,8 @@ struct GraphSpec
     bool useAlibi = false;
     bool usePaddingMask = false;
     bool useFp8 = false;
+    // Operand uid that carries a ragged (THD) offset table, if any.
+    std::optional<int64_t> raggedOperand;
     bool twoNodes = false;
     bool pointwiseOnly = false;
     float scale = SCALE;
@@ -103,16 +109,39 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     const auto& vStrides = spec.vStrideOverride.empty() ? defaultKStrides : spec.vStrideOverride;
     const auto& oStrides = spec.oStrideOverride.empty() ? defaultQStrides : spec.oStrideOverride;
 
-    auto qT = data_objects::CreateTensorAttributesDirect(
-        b, Q_UID, nullptr, spec.dtype, &qStrides, &qDims, false);
-    auto kT = data_objects::CreateTensorAttributesDirect(
-        b, K_UID, nullptr, spec.dtype, &kStrides, &kvDims, false);
-    auto vT = data_objects::CreateTensorAttributesDirect(
-        b, V_UID, nullptr, spec.dtype, &vStrides, &kvDims, false);
-    auto oT = data_objects::CreateTensorAttributesDirect(
-        b, O_UID, nullptr, spec.dtype, &oStrides, &qDims, false);
+    const auto tensorFor = [&](int64_t uid,
+                               data_objects::DataType dtype,
+                               const std::vector<int64_t>& strides,
+                               const std::vector<int64_t>& dims) {
+        const ::flatbuffers::Optional<int64_t> ragged
+            = spec.raggedOperand == uid ? ::flatbuffers::Optional<int64_t>(RAGGED_OFFSET_UID)
+                                        : ::flatbuffers::nullopt;
+        return data_objects::CreateTensorAttributesDirect(b,
+                                                          uid,
+                                                          nullptr,
+                                                          dtype,
+                                                          &strides,
+                                                          &dims,
+                                                          false,
+                                                          data_objects::TensorValue::NONE,
+                                                          0,
+                                                          false,
+                                                          ragged);
+    };
 
-    const std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{qT, kT, vT, oT};
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+        tensorFor(Q_UID, spec.dtype, qStrides, qDims),
+        tensorFor(K_UID, spec.dtype, kStrides, kvDims),
+        tensorFor(V_UID, spec.dtype, vStrides, kvDims),
+        tensorFor(O_UID, spec.dtype, oStrides, qDims),
+    };
+    if(spec.raggedOperand.has_value())
+    {
+        const std::vector<int64_t> offsetDims{spec.batch + 1, 1, 1, 1};
+        const std::vector<int64_t> offsetStrides{1, 1, 1, 1};
+        tensors.push_back(
+            tensorFor(RAGGED_OFFSET_UID, data_objects::DataType::INT32, offsetStrides, offsetDims));
+    }
 
     data_objects::SdpaAttributesBuilder sdpa(b);
     sdpa.add_q_tensor_uid(Q_UID);
@@ -137,19 +166,23 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     sdpa.add_attn_scale_value(spec.scale);
     if(spec.useAttnMask)
     {
-        sdpa.add_attn_mask_tensor_uid(99);
+        sdpa.add_attn_mask_tensor_uid(ABSENT_UID);
     }
     if(spec.useScaleTensor)
     {
-        sdpa.add_scale_tensor_uid(99);
+        sdpa.add_scale_tensor_uid(ABSENT_UID);
     }
     if(spec.useVarlen)
     {
-        sdpa.add_seq_len_q_tensor_uid(99);
+        sdpa.add_seq_len_q_tensor_uid(ABSENT_UID);
     }
     if(spec.useSinkTensor)
     {
-        sdpa.add_sink_token_tensor_uid(99);
+        sdpa.add_sink_token_tensor_uid(ABSENT_UID);
+    }
+    if(spec.useFp8)
+    {
+        sdpa.add_descale_q_tensor_uid(ABSENT_UID);
     }
     sdpa.add_alibi_mask(spec.useAlibi);
     sdpa.add_padding_mask(spec.usePaddingMask);
@@ -331,37 +364,38 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesNoMask)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
-    s.rightBound = -1; // no bound at all => NO_MASK
-    s.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-    s.seqQ = 512;
-    s.seqKv = 1024; // seqQ != seqKv so top-left != bottom-right
-    // Actually easier: use NO_MASK by leaving right_bound unset
-    GraphSpec s2 = canonical();
-    // Force NO_MASK path: no right_bound, no deprecated bool, aligned TOP_LEFT
-    s2.rightBound = -1;
-    s2.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-    s2.seqQ = 512;
-    s2.seqKv = 512;
-    // When seqQ==seqKv top-left==bottom-right, so use different seqLens to force NO_MASK
-    // Actually the cleanest: don't set right_bound (UNBOUNDED) and alignment TOP_LEFT
-    // => maskTypeFor returns NO_MASK
-    GraphSpec nm;
-    nm.rightBound = -1; // no right bound => UNBOUNDED => NO_MASK
-    nm.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
-    EXPECT_FALSE(matchGraph(nm).has_value());
+    // No right_bound at all: an unmasked graph, whatever the alignment says.
+    s.rightBound = -1;
+    EXPECT_FALSE(matchGraph(s).has_value());
 }
 
 TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesTopLeftCausalWhenSeqLensDiffer)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
-    s.rightBound = -1;
+    // right_bound 0 (the default) with TOP_LEFT alignment is hipDNN's top-left causal mask,
+    // which the bottom-right kernel reproduces only when seqlen_q == seqlen_kv.
     s.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
     s.seqQ = 128;
     s.seqKv = 256;
-    // Resize O to match Q
-    s.qStrideOverride = bshdStrides(s.headsQ, s.seqQ, s.headSize);
-    s.oStrideOverride = bshdStrides(s.headsQ, s.seqQ, s.headSize);
+    EXPECT_FALSE(matchGraph(s).has_value());
+}
+
+TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsBottomRightCausalWhenQueryIsShorterThanKv)
+{
+    registerNativeIngestorSymbols();
+    GraphSpec s = canonical();
+    s.seqQ = 128;
+    s.seqKv = 256;
+    EXPECT_TRUE(matchGraph(s).has_value());
+}
+
+TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesBottomRightCausalWhenQueryIsLongerThanKv)
+{
+    registerNativeIngestorSymbols();
+    GraphSpec s = canonical();
+    s.seqQ = 256;
+    s.seqKv = 128;
     EXPECT_FALSE(matchGraph(s).has_value());
 }
 
@@ -463,6 +497,71 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesPointwiseOnly)
     EXPECT_FALSE(matchGraph(s).has_value());
 }
 
+TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesEachUnsupportedGraphFeature)
+{
+    registerNativeIngestorSymbols();
+
+    struct Case
+    {
+        const char* feature;
+        void (*apply)(GraphSpec&);
+    };
+    const std::vector<Case> cases = {
+        {"left_bound (sliding window)", [](GraphSpec& s) { s.leftBound = 128; }},
+        {"bidirectional right_bound", [](GraphSpec& s) { s.rightBound = 4; }},
+        {"both deprecated causal booleans",
+         [](GraphSpec& s) {
+             s.causalMaskDeprecated = true;
+             s.bottomRightDeprecated = true;
+         }},
+        {"deprecated top-left causal with seqlen_q != seqlen_kv",
+         [](GraphSpec& s) {
+             s.causalMaskDeprecated = true;
+             s.seqQ = 128;
+         }},
+        {"padding_mask", [](GraphSpec& s) { s.usePaddingMask = true; }},
+        {"fp8 scaling tensor", [](GraphSpec& s) { s.useFp8 = true; }},
+        {"mma_core_mode FLOAT",
+         [](GraphSpec& s) { s.mmaCoreMode = data_objects::DataType::FLOAT; }},
+        {"implementation COMPOSITE",
+         [](GraphSpec& s) { s.impl = data_objects::AttentionImplementation::COMPOSITE; }},
+        {"implementation UNIFIED",
+         [](GraphSpec& s) { s.impl = data_objects::AttentionImplementation::UNIFIED; }},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.feature);
+        GraphSpec s = canonical();
+        c.apply(s);
+        EXPECT_FALSE(matchGraph(s).has_value());
+    }
+}
+
+TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsAnMmaCoreModeTheKernelRuns)
+{
+    registerNativeIngestorSymbols();
+    for(const auto mode : {data_objects::DataType::HALF, data_objects::DataType::BFLOAT16})
+    {
+        GraphSpec s = canonical();
+        s.mmaCoreMode = mode;
+        EXPECT_TRUE(matchGraph(s).has_value()) << "mma_core_mode " << static_cast<int>(mode);
+    }
+}
+
+// A ragged operand addresses each batch from a device offset table; the engine builds a
+// uniform dense layout and never reads it.
+TEST(TestGfx950AttentionUnified2DGraphMatch, DeclinesRaggedOperands)
+{
+    registerNativeIngestorSymbols();
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        GraphSpec s = canonical();
+        s.raggedOperand = uid;
+        EXPECT_FALSE(matchGraph(s).has_value()) << "ragged operand uid " << uid;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TestGfx950AttentionUnified2DKernelMatch
 // ---------------------------------------------------------------------------
@@ -501,20 +600,35 @@ TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsSeqLenKvNotDivisibleByBlock
     EXPECT_FALSE(matchesKernel(canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, 17)));
 }
 
-TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsBatchExceedsCapacity)
-{
-    registerNativeIngestorSymbols();
-    // numSeqs=1 -> capacity = 2^ceil(log2(2)) - 1 = 1, batch=2 > 1
-    EXPECT_FALSE(matchesKernel(
-        canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 1)));
-}
-
+// A kernel baked at num_seqs=3 runs 2 search iterations, so its capacity is 2^2 - 1 = 3.
 TEST(TestGfx950AttentionUnified2DKernelMatch, AcceptsWhenBatchEqualsCapacity)
 {
     registerNativeIngestorSymbols();
-    // numSeqs=3 -> iterations=ceil(log2(4))=2 -> capacity=3; batch=2 <= 3
+    GraphSpec s = canonical();
+    s.batch = 3;
     EXPECT_TRUE(matchesKernel(
-        canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, 3)));
+        s, makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, /* numSeqs= */ 3)));
+}
+
+TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsBatchOneAboveCapacity)
+{
+    registerNativeIngestorSymbols();
+    GraphSpec s = canonical();
+    s.batch = 4;
+    EXPECT_FALSE(matchesKernel(
+        s, makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV, BLOCK_SIZE, 0, 0, /* numSeqs= */ 3)));
+}
+
+TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsNumQueryHeadsMismatch)
+{
+    registerNativeIngestorSymbols();
+    EXPECT_FALSE(matchesKernel(canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q / 2, HEADS_KV)));
+}
+
+TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsNumKvHeadsMismatch)
+{
+    registerNativeIngestorSymbols();
+    EXPECT_FALSE(matchesKernel(canonical(), makeKernel("BF16", HEAD_SIZE, HEADS_Q, HEADS_KV / 2)));
 }
 
 TEST(TestGfx950AttentionUnified2DKernelMatch, RejectsBakedSlidingWindow)

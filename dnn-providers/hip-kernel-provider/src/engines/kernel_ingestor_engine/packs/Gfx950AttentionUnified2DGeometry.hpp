@@ -5,8 +5,8 @@
 
 /**
  * @file Gfx950AttentionUnified2DGeometry.hpp
- * @brief The launch geometry, derived workspace layout and binary-search capacity bound
- *        for hipkernel:Gfx950AttentionUnified2D.
+ * @brief The launch geometry, derived workspace layout and contents, and binary-search
+ *        capacity bound for hipkernel:Gfx950AttentionUnified2D.
  *
  * Every quantity here restates one the rocKE builder computes in Python. The Python side
  * is authoritative; this header is the mirror a C++ dispatch has to carry because the
@@ -22,8 +22,10 @@
  *                     UnifiedAttention2DTiledSpec.binary_search_iters
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -320,6 +322,51 @@ inline Gfx950AttentionUnified2DWorkspace
     // four values.
     (void)seqLenQ;
     return workspace;
+}
+
+/**
+ * @brief The workspace contents for one dispatch, as int32 words over the whole workspace.
+ *
+ * block_tables[b][j] = b * blocksPerSequence + j   -- the identity table. This is what a
+ *                                                     contiguous dense K/V already is,
+ *                                                     which is why graph_match insists on
+ *                                                     BSHD K and V.
+ * seq_lens[b]        = seqLenKv                    -- every sequence is the same length;
+ *                                                     varlen graphs were declined.
+ * query_start_len[b] = b * seqLenQ                 -- the cumulative query count, and
+ *                                                     [batch] = batch * seqLenQ closes it.
+ *
+ * Each section starts at the byte offset @p workspace gives it. Padding words between
+ * sections are zero; the kernel never reads them.
+ *
+ * @param workspace The layout gfx950AttentionUnified2DWorkspace returned for the same
+ *                  @p batch, @p seqLenQ and @p seqLenKv.
+ */
+inline std::vector<int32_t>
+    gfx950AttentionUnified2DStageWorkspace(int64_t batch,
+                                           int64_t seqLenQ,
+                                           int64_t seqLenKv,
+                                           const Gfx950AttentionUnified2DWorkspace& workspace)
+{
+    constexpr int64_t INT32_BYTES = 4;
+    std::vector<int32_t> staged(static_cast<size_t>(workspace.totalBytes / INT32_BYTES), 0);
+
+    const auto wordAt = [&staged](int64_t byteOffset, int64_t index) -> int32_t& {
+        return staged[static_cast<size_t>(byteOffset / INT32_BYTES + index)];
+    };
+
+    for(int64_t b = 0; b < batch; ++b)
+    {
+        for(int64_t j = 0; j < workspace.blocksPerSequence; ++j)
+        {
+            wordAt(workspace.blockTablesOffset, b * workspace.blocksPerSequence + j)
+                = static_cast<int32_t>(b * workspace.blocksPerSequence + j);
+        }
+        wordAt(workspace.seqLensOffset, b) = static_cast<int32_t>(seqLenKv);
+        wordAt(workspace.queryStartLenOffset, b) = static_cast<int32_t>(b * seqLenQ);
+    }
+    wordAt(workspace.queryStartLenOffset, batch) = static_cast<int32_t>(batch * seqLenQ);
+    return staged;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

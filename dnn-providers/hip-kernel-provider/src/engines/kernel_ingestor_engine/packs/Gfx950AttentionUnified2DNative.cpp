@@ -374,6 +374,18 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
                : MaskType::TOP_LEFT_CAUSAL;
 }
 
+/**
+ * @brief Is this a well-formed operand this engine can address as dense?
+ *
+ * A ragged (THD) operand addresses each batch from a device offset table. This engine
+ * synthesizes a uniform dense layout and never reads that table, so it must decline such
+ * an operand rather than read the buffer as dense.
+ */
+bool isDenseOperand(const data_objects::TensorAttributes& tensor)
+{
+    return isWellFormedOperand(tensor) && !tensor.ragged_offset_tensor_uid().has_value();
+}
+
 /// The kernel's dtype spelling for a graph dtype, or nullopt for one it cannot be built for.
 std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType)
 {
@@ -471,12 +483,12 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     for(const auto& [role, tensor] :
         {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}, std::pair{"O", o}})
     {
-        if(!isWellFormedOperand(*tensor))
+        if(!isDenseOperand(*tensor))
         {
             HIPDNN_PLUGIN_LOG_INFO(Declined{"operand"}
                                    << describeOperand(role, *tensor)
-                                   << " is not a rank-4 non-virtual tensor with positive "
-                                      "extents");
+                                   << " is not a rank-4 tensor with positive extents, or is "
+                                      "virtual, pass-by-value or ragged");
             return std::nullopt;
         }
     }
@@ -581,7 +593,12 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     // (attention_tiled_2d.py:1262 and :3452, on every emitted path). There is no
     // unmasked arm and no mask kernarg, so:
     //
-    //   BOTTOM_RIGHT_CAUSAL  is exactly this. Always accepted.
+    //   BOTTOM_RIGHT_CAUSAL  is exactly this while seqlen_q <= seqlen_kv. Past that
+    //                        context_len is negative and the first
+    //                        seqlen_q - seqlen_kv query rows have no key at or before
+    //                        them: fully masked rows, whose output (zero or NaN) no
+    //                        test here or in rocKE pins against the hipDNN reference.
+    //                        Declined rather than served on trust.
     //   TOP_LEFT_CAUSAL      wants key_pos <= q_pos, which coincides only when
     //                        context_len is zero, i.e. seqlen_q == seqlen_kv.
     //   NO_MASK              has no spelling here at all. Accepting it would return
@@ -599,6 +616,15 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     switch(*mask)
     {
     case MaskType::BOTTOM_RIGHT_CAUSAL:
+        if(problem.seqLenQ > problem.seqLenKv)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(Declined{"mask"}
+                                   << "bottom-right causal needs seqlen_q <= seqlen_kv, got "
+                                   << problem.seqLenQ << " and " << problem.seqLenKv
+                                   << "; the leading query rows would be fully masked and "
+                                      "their output is not established against the reference");
+            return std::nullopt;
+        }
         break;
     case MaskType::TOP_LEFT_CAUSAL:
         if(problem.seqLenQ != problem.seqLenKv)
@@ -815,7 +841,7 @@ bool kernelMatches(const MatchContext& context,
     }
     const auto* q = findTensor(context, node->q_tensor_uid());
     const auto* k = findTensor(context, node->k_tensor_uid());
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    if(q == nullptr || k == nullptr || !isDenseOperand(*q) || !isDenseOperand(*k))
     {
         return false;
     }
@@ -1052,45 +1078,6 @@ AttentionUnified2DBinding attentionUnified2DBinding(const BoundTokens& bound)
     return binding;
 }
 
-/**
- * @brief Fill the three derived arrays, as int32 words over the whole workspace.
- *
- * block_tables[b][j] = b * blocksPerSequence + j   -- the identity table. This is what a
- *                                                     contiguous dense K/V already is,
- *                                                     which is why graph_match insists on
- *                                                     BSHD K and V.
- * seq_lens[b]        = seqLenKv                    -- every sequence is the same length;
- *                                                     varlen graphs were declined.
- * query_start_len[b] = b * seqLenQ                 -- the cumulative query count, and
- *                                                     [batch] = batch * seqLenQ closes it.
- *
- * Padding words between sections are left zero; the kernel never reads them.
- */
-std::vector<int32_t> stageUnified2DWorkspace(const AttentionUnified2DProblem& problem,
-                                             const Gfx950AttentionUnified2DWorkspace& workspace)
-{
-    constexpr int64_t INT32_BYTES = 4;
-    std::vector<int32_t> staged(static_cast<size_t>(workspace.totalBytes / INT32_BYTES), 0);
-
-    const auto wordAt = [&staged](int64_t byteOffset, int64_t index) -> int32_t& {
-        return staged[static_cast<size_t>(byteOffset / INT32_BYTES + index)];
-    };
-
-    for(int64_t b = 0; b < problem.batch; ++b)
-    {
-        for(int64_t j = 0; j < workspace.blocksPerSequence; ++j)
-        {
-            wordAt(workspace.blockTablesOffset, b * workspace.blocksPerSequence + j)
-                = static_cast<int32_t>(b * workspace.blocksPerSequence + j);
-        }
-        wordAt(workspace.seqLensOffset, b) = static_cast<int32_t>(problem.seqLenKv);
-        wordAt(workspace.queryStartLenOffset, b) = static_cast<int32_t>(b * problem.seqLenQ);
-    }
-    wordAt(workspace.queryStartLenOffset, problem.batch)
-        = static_cast<int32_t>(problem.batch * problem.seqLenQ);
-    return staged;
-}
-
 /// The graph's problem, re-derived in prepare()/workspaceBytes() from the context.
 std::optional<AttentionUnified2DProblem> problemOf(const MatchContext& context)
 {
@@ -1101,7 +1088,7 @@ std::optional<AttentionUnified2DProblem> problemOf(const MatchContext& context)
     }
     const auto* q = findTensor(context, node->q_tensor_uid());
     const auto* k = findTensor(context, node->k_tensor_uid());
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    if(q == nullptr || k == nullptr || !isDenseOperand(*q) || !isDenseOperand(*k))
     {
         return std::nullopt;
     }
@@ -1159,7 +1146,7 @@ public:
         // its layout is what launch() writes through, and a shape inference pass may only
         // have settled it after matching.
         const auto* o = findTensor(context, binding.o);
-        if(o == nullptr || !isWellFormedOperand(*o) || !hasBshdStrides(*o))
+        if(o == nullptr || !isDenseOperand(*o) || !hasBshdStrides(*o))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1206,7 +1193,8 @@ public:
                                                                  problem->seqLenKv,
                                                                  geometry->blockSize,
                                                                  toString(kernel.kernelId));
-        auto staged = stageUnified2DWorkspace(*problem, workspace);
+        auto staged = gfx950AttentionUnified2DStageWorkspace(
+            problem->batch, problem->seqLenQ, problem->seqLenKv, workspace);
 
         return std::make_unique<PreparedGfx950AttentionUnified2D>(
             std::move(code), binding, *problem, workspace, std::move(staged));

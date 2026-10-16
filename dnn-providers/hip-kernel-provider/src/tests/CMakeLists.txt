@@ -334,7 +334,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 RanksThroughItsRegisteredScoreSymbol
                 CarriesNoGraphScopedMatcher
                 CarriesExactlyOneSharedKernelScopedMatcher
-                DeclaresTheExpectedWorkspacePolicy
         )
     else()
         message(STATUS

@@ -3,9 +3,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -262,33 +264,50 @@ TEST(TestGfx950AttentionUnified2DDispatch, WorkspaceSizeMatchesGeometryComputati
     EXPECT_EQ(ws, static_cast<size_t>(layout.totalBytes));
 }
 
-TEST(TestGfx950AttentionUnified2DDispatch, SynthesisedBlockTablesAreIdentityLayout)
+TEST(TestGfx950AttentionUnified2DDispatch, WorkspaceIsEmptyWhenThePageSizeDoesNotTileSeqLenKv)
 {
-    // The highest-value check in this suite (Risk R1).
-    // The identity block table maps sequence b, page j to physical page
-    // b * blocksPerSequence + j.  This is what a dense contiguous K/V already is.
-    // A wrong table silently addresses wrong memory with no fault.
     registerNativeIngestorSymbols();
     const AttentionGraph ag;
     auto bound = bindingsFor(ag);
     ASSERT_TRUE(bound.has_value());
-    auto kernel = makeKernel();
+    // SEQ is 256, which a 48-token page does not divide.
+    const auto kernel = makeKernel(16, 1, 48);
+    EXPECT_EQ(dispatchHandler()->workspaceBytes(ag.context(), *bound, kernel), 0U);
+}
 
-    const auto layout = gfx950AttentionUnified2DWorkspace(BATCH, SEQ, SEQ, BLOCK_SIZE, "test");
-    // Use a real heap buffer so the staged data can be inspected.
-    const std::vector<std::byte> wsBuffer(static_cast<size_t>(layout.totalBytes), std::byte{0xAB});
+// The identity block table maps sequence b, page j to physical page
+// b * blocksPerSequence + j, which is what a dense contiguous K/V already is. A wrong
+// table addresses the wrong memory with no fault. The case has batch > 1 and
+// seqlen_q != seqlen_kv so that a table, length or query offset built from the wrong
+// extent or the wrong sequence cannot coincide with the right one.
+TEST(TestGfx950AttentionUnified2DDispatch, StagedWorkspaceHoldsTheIdentityTableAndOffsets)
+{
+    constexpr int64_t STAGED_BATCH = 3;
+    constexpr int64_t STAGED_SEQ_Q = 64;
+    constexpr int64_t STAGED_SEQ_KV = 128;
+    constexpr int64_t BLOCKS_PER_SEQUENCE = STAGED_SEQ_KV / BLOCK_SIZE; // 8
+    constexpr int64_t INT32_BYTES = 4;
 
-    // Can't launch without a GPU, but we can inspect workspaceBytes consistency.
-    // The handler prepares staged data during prepare(); verify indirectly via the
-    // layout contract that the handler itself calls gfx950AttentionUnified2DWorkspace.
-    const size_t ws = dispatchHandler()->workspaceBytes(ag.context(), *bound, kernel);
-    const int64_t blocksPerSeq = SEQ / BLOCK_SIZE; // 16
-    const int64_t expectedBlockTablesBytes = BATCH * blocksPerSeq * 4;
-    EXPECT_EQ(layout.blocksPerSequence, blocksPerSeq);
-    EXPECT_EQ(layout.blockTablesBytes, expectedBlockTablesBytes);
-    EXPECT_EQ(layout.seqLensBytes, BATCH * 4);
-    EXPECT_EQ(layout.queryStartLenBytes, (BATCH + 1) * 4);
-    EXPECT_EQ(ws, static_cast<size_t>(layout.totalBytes));
+    const auto layout = gfx950AttentionUnified2DWorkspace(
+        STAGED_BATCH, STAGED_SEQ_Q, STAGED_SEQ_KV, BLOCK_SIZE, "test");
+    const auto staged
+        = gfx950AttentionUnified2DStageWorkspace(STAGED_BATCH, STAGED_SEQ_Q, STAGED_SEQ_KV, layout);
+
+    // Everything outside the three sections, padding included, stays zero.
+    std::vector<int32_t> expected(static_cast<size_t>(layout.totalBytes / INT32_BYTES), 0);
+    const auto sectionAt
+        = [&expected](int64_t byteOffset) { return expected.begin() + byteOffset / INT32_BYTES; };
+    // block_tables: [0..7 | 8..15 | 16..23]
+    std::iota(sectionAt(layout.blockTablesOffset),
+              sectionAt(layout.blockTablesOffset) + STAGED_BATCH * BLOCKS_PER_SEQUENCE,
+              0);
+    // seq_lens: every sequence is seqlen_kv long.
+    std::fill_n(sectionAt(layout.seqLensOffset), STAGED_BATCH, static_cast<int32_t>(STAGED_SEQ_KV));
+    // query_start_len: b * seqlen_q, closed by batch * seqlen_q.
+    const std::vector<int32_t> queryStartLen{0, 64, 128, 192};
+    std::copy(queryStartLen.begin(), queryStartLen.end(), sectionAt(layout.queryStartLenOffset));
+
+    EXPECT_EQ(staged, expected);
 }
 
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesNonBshdOutput)
