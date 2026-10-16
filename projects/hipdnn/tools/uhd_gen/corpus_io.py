@@ -59,5 +59,7 @@ def read_corpus_frame(path: Path) -> pd.DataFrame:
         content = json.loads(path.read_text(encoding="utf-8"))
         frame = pd.DataFrame([content] if isinstance(content, dict) else content)
     else:
-        frame = pd.read_csv(path, dtype=IDENTITY_DTYPES)
+        # round_trip: pandas' default parser is off by an ulp for about one value in ten,
+        # so a written corpus would not read back as the same features.
+        frame = pd.read_csv(path, dtype=IDENTITY_DTYPES, float_precision="round_trip")
     return pin_identity_dtypes(frame)

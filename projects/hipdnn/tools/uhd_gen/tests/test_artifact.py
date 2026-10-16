@@ -243,3 +243,96 @@ def test_evaluation_opens_only_an_artifact_the_loader_would(
     else:
         with pytest.raises(ValueError, match="relative path inside"):
             load_model(model)
+
+
+def _write(path: Path, model: GbdtModelT) -> Path:
+    builder = flatbuffers.Builder(1024)
+    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
+    path.write_bytes(bytes(builder.Output()))
+    return path
+
+
+def _model(**changes) -> GbdtModelT:
+    model = GbdtModelT()
+    model.trees = [_stump()]
+    model.baseScore = 0.0
+    model.numFeatures = 2
+    model.featuresHash = "sha256:0123456789abcdef"
+    model.groupByFeatureIndex = -1
+    for name, value in changes.items():
+        setattr(model, name, value)
+    return model
+
+
+def _tree(**changes) -> GbdtTreeT:
+    tree = _stump()
+    for name, value in changes.items():
+        setattr(tree, name, value)
+    return tree
+
+
+def _grouped(index: int) -> GbdtModelT:
+    group = GbdtGroupT()
+    group.value = 0.0
+    group.trees = [_stump()]
+    return _model(groups=[group], groupByFeatureIndex=index)
+
+
+@pytest.mark.parametrize(
+    ("model", "reason"),
+    [
+        (_model(numFeatures=-1), "negative feature count"),
+        (_model(baseScore=float("inf")), "base score is not finite"),
+        (_model(baseScore=float("nan")), "base score is not finite"),
+        (_model(trees=[_tree(thresholds=None)]), "missing nodes"),
+        (_model(trees=[_tree(leftChildren=[])]), "missing nodes"),
+        (_model(trees=[_tree(thresholds=[10.0, 0.0])]), "different lengths"),
+        (_model(trees=[_tree(leafValues=[0.0, 1.0])]), "leaf has no prediction"),
+        (
+            _model(trees=[_tree(leafValues=[0.0, float("nan"), 9.0])]),
+            "leaf prediction is not finite",
+        ),
+        (
+            _model(trees=[_tree(thresholds=[float("inf"), 0.0, 0.0])]),
+            "split threshold is not finite",
+        ),
+        (_model(trees=[_tree(rightChildren=[3, -1, -1])]), "child index outside"),
+        (_model(trees=[_tree(leftChildren=[-2, -1, -1])]), "child index outside"),
+        (_model(trees=[_tree(featureIndices=[2, 0, 0])]), "split feature outside"),
+        (_model(trees=[_tree(featureIndices=[-1, 0, 0])]), "split feature outside"),
+        (_grouped(2), "group_by_feature_index 2"),
+        (_grouped(-1), "group_by_feature_index -1"),
+    ],
+    ids=lambda case: case if isinstance(case, str) else "",
+)
+def test_an_artifact_the_runtime_would_not_load_is_refused_with_its_reason(
+    tmp_path, model, reason
+):
+    """Each `TreeDataAdapter::loadFromBuffer` refusal, one field off a loadable model."""
+    assert verify_tree_artifact(_write(tmp_path / "base.bin", _model()), None)
+    with pytest.raises(ValueError, match=reason):
+        verify_tree_artifact(_write(tmp_path / "model.bin", model), None)
+
+
+def test_an_artifact_is_admitted_up_to_the_runtimes_size_limit_and_no_further(
+    tmp_path, monkeypatch
+):
+    """The runtime refuses an empty buffer, one under eight bytes, and one over 256 MiB."""
+    from uhd_gen import artifact
+
+    assert artifact.MAX_ARTIFACT_BYTES == 256 * 1024 * 1024
+    path = _write(tmp_path / "model.bin", _model())
+    size = path.stat().st_size
+    monkeypatch.setattr(artifact, "MAX_ARTIFACT_BYTES", size)
+    assert verify_tree_artifact(path, None) == path.read_bytes()
+    monkeypatch.setattr(artifact, "MAX_ARTIFACT_BYTES", size - 1)
+    with pytest.raises(ValueError, match="outside"):
+        verify_tree_artifact(path, None)
+    empty = tmp_path / "empty.bin"
+    empty.write_bytes(b"")
+    with pytest.raises(ValueError, match="outside"):
+        verify_tree_artifact(empty, None)
+    short = tmp_path / "short.bin"
+    short.write_bytes(path.read_bytes()[:7])
+    with pytest.raises(ValueError, match="too short"):
+        verify_tree_artifact(short, None)

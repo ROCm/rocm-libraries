@@ -429,11 +429,17 @@ def run_size(args: argparse.Namespace) -> int:
             )
         pinned = set(test_set["shapes"])
         test_keys = [key for key in usable if key[0] in pinned]
-        pool = sorted(key for key in usable if key[0] not in pinned)
-        if len(test_keys) < 10 or len(pool) < 20:
+        # The pool is of shapes: one shape measured on several kinds of device is one shape
+        # to size, and a subset holds every device's measurement of the shapes it draws.
+        rows_of: dict = {}
+        for key in usable:
+            if key[0] not in pinned:
+                rows_of.setdefault(key[0], []).append(key)
+        pool = sorted(rows_of)
+        tested = len({key[0] for key in test_keys})
+        if tested < 10 or len(pool) < 20:
             raise ValueError(
-                f"too little to size from: {len(test_keys)} test and {len(pool)} "
-                f"training shapes"
+                f"too little to size from: {tested} test and {len(pool)} training shapes"
             )
 
         output.mkdir(parents=True)
@@ -454,7 +460,11 @@ def run_size(args: argparse.Namespace) -> int:
                     subset = _write_subset(
                         args.dataset,
                         args.metric,
-                        [usable[key] for key in order[:size]],
+                        [
+                            usable[key]
+                            for shape in order[:size]
+                            for key in sorted(rows_of[shape])
+                        ],
                         work / "datasets" / tag,
                         args.contribution,
                     )
@@ -654,8 +664,8 @@ def run_size(args: argparse.Namespace) -> int:
         regimes: dict = {}
         for regime in set(regime_of.values()) | set(shapes_by_regime):
             regimes[regime] = {"train": 0, "test": 0, "misses": 0, "errors": []}
-        for key in pool:
-            regimes[regime_of.get(key[0], "unlabelled")]["train"] += 1
+        for shape in pool:
+            regimes[regime_of.get(shape, "unlabelled")]["train"] += 1
         for benchmark, error in (full_errors or {}).items():
             info = regimes[regime_of.get(benchmark, "unlabelled")]
             info["test"] += 1

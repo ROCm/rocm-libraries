@@ -58,7 +58,11 @@ class ValidationError(Exception):
 
 def load_csvs(paths: Iterable[pathlib.Path]) -> pd.DataFrame:
     """Reads and concatenates collected CSVs; empty fields arrive as NaN ("no measurement")."""
-    frames = [pd.read_csv(path, dtype=IDENTITY_DTYPES) for path in paths]
+    # round_trip: exact, where pandas' default parser is off by an ulp for some values.
+    frames = [
+        pd.read_csv(path, dtype=IDENTITY_DTYPES, float_precision="round_trip")
+        for path in paths
+    ]
     if not frames:
         raise ValidationError("no input CSVs")
     return pd.concat(frames, ignore_index=True)
@@ -98,11 +102,12 @@ def _kernel_columns(frame: pd.DataFrame) -> list[str]:
 
 
 def _problem_key_columns(frame: pd.DataFrame) -> list[str]:
-    """The columns that identify a problem: the shape AND the machine that measured it.
+    """The columns that identify a problem: the shape AND the kind of device that measured it.
 
-    The same shape on two GPUs is two problems; keyed on shape alone, a multi-board corpus
-    fails validation and has healthy problems downgraded. Device is `device`/`device_id`, else
-    the `device.*` properties; `benchmark` joins the key wherever present.
+    The same shape on two kinds of device is two problems (on two GPUs of one kind, one);
+    keyed on shape alone, a corpus spanning device kinds fails validation and has healthy
+    problems downgraded. Device is `device`/`device_id`, else the `device.*` properties;
+    `benchmark` joins the key wherever present.
     """
     identity = [c for c in ("benchmark", "device", "device_id") if c in frame.columns]
     if "device" not in identity and "device_id" not in identity:
@@ -311,7 +316,8 @@ def resolve_duplicates(
     problems the newest occasion did not cover are kept. A row with no `latest_column` value
     cannot be ordered against the others, so it is refused as a corpus without the column is.
     """
-    # Full problem identity (shape, graph, device): one shape on two boards is two problems.
+    # Full problem identity (shape, graph, device): one shape on two kinds of device is two
+    # problems.
     query = _problem_key_columns(frame)
     if not query:
         return frame

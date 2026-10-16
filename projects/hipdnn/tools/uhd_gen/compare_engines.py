@@ -44,7 +44,7 @@ def measure(specs: list[str], names: dict[str, str], metrics: list[str]):
             raise SystemExit(f"--engine {spec!r}: expected LABEL=path/to/corpus.csv")
         if label not in labels:
             labels.append(label)
-        frame = pd.read_csv(path)
+        frame = pd.read_csv(path, float_precision="round_trip")
         if "binding" not in frame:
             raise SystemExit(
                 f"{path}: no binding column, so the metric each row was collected under "

@@ -361,7 +361,7 @@ def test_resolution_settles_what_validation_would_otherwise_reject():
 
 
 def test_resolution_keeps_each_boards_problem_apart():
-    """One shape on two boards is two problems, each with its own newest occasion."""
+    """One shape on two kinds of device is two problems, each with its own newest occasion."""
     frame = pd.DataFrame(
         {
             "benchmark": ["g0"] * 4,
@@ -443,7 +443,7 @@ def test_unscoped_expansion_still_shares_one_set_of_positions():
 
 
 def test_two_boards_measuring_one_shape_import_as_two_problems():
-    """A problem is (graph, device): one shape on two boards is two candidate sets."""
+    """A problem is (graph, device): one shape on two kinds of device is two candidate sets."""
     frame = pd.concat(
         [rows(device=["a", "a"]), rows(device=["b", "b"])], ignore_index=True
     )

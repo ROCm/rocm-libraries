@@ -171,6 +171,58 @@ def test_collected_rows_carry_the_noise_columns_and_the_calibrated_rate(
     assert row["tflops"] == pytest.approx(4e12 / (2.6 * 1e9))
 
 
+@pytest.mark.parametrize("bench_timings", [0.0, None])
+def test_a_candidate_that_did_not_run_has_no_timings(
+    monkeypatch, tmp_path, bench_timings
+):
+    """A failed candidate is a failure, not also a measurement: a bench that wrote its
+    timings as 0 (or null) yields a row with none, which the dataset reads as not run.
+    """
+    from uhd_gen.dataset.training_table import measurement_error
+
+    page = _page()
+    failed = _timing(page)["results"][0] | {
+        "succeeded": False,
+        "is_valid": False,
+        "numerically_valid": None,
+        "validation": "not_measured: the candidate did not run",
+        "skip_reason": "config_not_applicable: engine declined or failed to run this "
+        "configuration",
+        "robust_time_ms": bench_timings,
+        "min_time_ms": bench_timings,
+        "avg_time_ms": bench_timings,
+        "stddev_ms": bench_timings,
+        "iterations": 0,
+    }
+    row = _collect(monkeypatch, tmp_path, [_sweep(page, failed)])[0][0]
+    assert [row[c] for c in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs")] == [
+        None
+    ] * 4
+    assert "tflops" not in row or row["tflops"] is None
+    assert measurement_error(row) == "invalid"
+
+
+def test_moving_the_stage_rewrites_its_own_records_and_leaves_bench_output_alone(
+    tmp_path,
+):
+    """A crashed graph can leave its bench stdout empty; moving the stage still succeeds."""
+    from uhd_gen.generate import _relocate_stage
+
+    stage = tmp_path / ".uhd-generate-1"
+    (stage / "commands").mkdir(parents=True)
+    (stage / "commands" / "000003.stdout.json").write_text("", encoding="utf-8")
+    (stage / "generation_manifest.json").write_text(
+        json.dumps({"model_dir": str(stage / "model")}), encoding="utf-8"
+    )
+    final = tmp_path / "out"
+    _relocate_stage(stage, final)
+    manifest = json.loads(
+        (stage / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest == {"model_dir": str(final / "model")}
+    assert (stage / "commands" / "000003.stdout.json").read_text(encoding="utf-8") == ""
+
+
 def test_an_engine_that_publishes_no_work_count_gets_no_fabricated_throughput(
     monkeypatch, tmp_path
 ):
@@ -487,6 +539,26 @@ def _l1_args(graphs, tree, output, evaluator, *extra, features="graph.flops"):
         str(output),
         *extra,
     ]
+
+
+def test_a_run_that_trained_several_metrics_converts_into_a_dataset(
+    monkeypatch, tmp_path, evaluator
+):
+    """`dataset add --generation` reads a multi-metric folder, which holds a corpus file per
+    metric and no corpus.json."""
+    from uhd_gen.dataset import store
+
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*common, "--metric", "tflops", "--metric", "time"]) == 0
+    assert not (output / "corpus.json").exists()
+
+    entry, rows = store.from_generation(output)
+    assert entry["sources"] == ["tflops", "time"] and entry["collected_at"]
+    assert store.add(tmp_path / "ds", entry, rows)["rows"] == 32
 
 
 def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(

@@ -45,7 +45,7 @@ def test_two_boards_join_into_one_corpus(tmp_path):
 
     assert len(merged) == 16
     assert report["devices"] == ["aaaa", "bbbb"]
-    # A problem is (benchmark, device), so one graph on two boards is two problems.
+    # A problem is (benchmark, device), so one graph on two kinds of device is two problems.
     assert report["problems"] == 8
     assert not report["repeated_devices"]
 

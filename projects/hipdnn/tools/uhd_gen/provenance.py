@@ -148,9 +148,10 @@ def compare_provenance(
 ) -> None:
     """Existing dependencies must retain identity/major and not regress minor.
 
-    Extra pack matchers are fine. Recorded matchers in `foreign_matchers` (owned only by
-    other arches' packs) are ignored, as in `DescriptorLoader.hpp`. Selector revisions are
-    opaque and must match exactly.
+    As `DescriptorLoader.hpp`'s provenanceError decides it: a recorded matcher in
+    `foreign_matchers` (owned only by other arches' packs) is ignored, and every matcher in
+    `actual` -- the arch's own -- must be recorded, since the runtime disables a model that
+    never saw one of them. Selector revisions are opaque and must match exactly.
     """
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
@@ -191,6 +192,14 @@ def compare_provenance(
                 raise ProvenanceError(
                     f"trained_against.{kind}: {identity} revision {current['revision']} is incompatible with trained revision {dependency['revision']}"
                 )
+    recorded_matchers = {item["id"] for item in trained["umd"]}
+    for matcher in actual["umd"]:
+        if matcher["id"] not in recorded_matchers:
+            raise ProvenanceError(
+                f"trained_against.umd: matcher {matcher['id']} serves this architecture but "
+                "the model was not trained with it, so the runtime would disable the model; "
+                "retrain against the current descriptor set"
+            )
 
 
 def load_descriptor_tree(

@@ -62,9 +62,11 @@ def world(tmp_path, monkeypatch):
             Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8")
         )
         average = (1.0 + graph["size"] / 10) * engine["scale"]
-        # `--device N` picks a GPU (HIP_VISIBLE_DEVICES); the device id is the hash of the
-        # device's properties, the same for every GPU of one kind, as the real bench reports.
-        device = engine["device"]
+        # `--device N` picks a GPU (HIP_VISIBLE_DEVICES). As the real bench does, it reports
+        # the GPU's own UUID as `device_uuid` and its kind (the hash of its properties) as
+        # `device_id`; `gpus` gives an ordinal its own kind.
+        ordinal = environment.get("HIP_VISIBLE_DEVICES", "0")
+        device = engine.get("gpus", {}).get(ordinal, engine["device"])
         engine["scale"] *= engine.get("drift", 1.0)
         return {
             "engine_id": engine.get("engine_id", 7),
@@ -72,6 +74,7 @@ def world(tmp_path, monkeypatch):
             "graph_id": graph["id"],
             "graph_key": graph["id"],
             "device_id": device,
+            "device_uuid": f"uuid-of-gpu-{ordinal}",
             "arch": "gfx942",
             "metric": metric,
             "binding": {
@@ -263,6 +266,24 @@ def test_an_engine_id_that_is_not_one_is_refused(world, capsys, spelling, reason
     assert world["engine"]["calls"] == 0
 
 
+def test_a_model_trained_from_collections_takes_its_name_and_version(world, evaluator):
+    """--descriptor-name and --model-version reach the model, as they do from a dataset."""
+    collection = _collect(world, "col")
+    code, output = _train(
+        world,
+        "named",
+        evaluator,
+        collections=[collection],
+        extra=["--descriptor-name", "custom", "--model-version", "3.1"],
+    )
+    assert code == 0
+    assert (output / "model" / "custom.uhd.json").is_file()
+    manifest = json.loads(
+        (output / "model" / "train_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["model_version"] == "3.1"
+
+
 def test_a_recorded_collection_trains_what_the_one_shot_run_would(world, evaluator):
     """Same measurements and seed give the same split and training set."""
     one_shot = _train(world, "one_shot", evaluator, graphs=world["graphs"])
@@ -433,10 +454,29 @@ def test_one_run_on_several_gpus_trains_on_each_shape_once(world, evaluator):
             fastest.get(row["benchmark"], row["avgTimeMs"]), row["avgTimeMs"]
         )
     assert {r["benchmark"]: r["avgTimeMs"] for r in rows} == fastest
+    assert {r["device"] for r in rows} == {
+        "board"
+    }, "two GPUs of one kind are one device"
     manifest = json.loads(
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["superseded_rows"] == GRAPHS
+
+
+def test_one_run_on_two_kinds_of_gpu_measures_each_kind_separately(world, evaluator):
+    """The second GPU is another kind of card: its measurements are other problems."""
+    world["engine"]["gpus"] = {"1": "other-kind"}
+    code, output = _train(
+        world,
+        "two_kinds",
+        evaluator,
+        graphs=world["graphs"],
+        extra=["--device", "0", "--device", "1"],
+    )
+    assert code == 0
+    rows = json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    assert len(rows) == 2 * GRAPHS
+    assert {r["device"] for r in rows} == {"board", "other-kind"}
 
 
 def test_distinct_configurations_on_one_shape_are_distinct_rows():

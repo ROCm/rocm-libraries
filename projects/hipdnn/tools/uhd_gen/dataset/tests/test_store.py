@@ -242,6 +242,28 @@ def test_published_csv_converts_with_the_binding_the_caller_states(tmp_path):
     assert store.add(tmp_path / "ds", entry, rows)["rows"] == 4
 
 
+def test_a_hipdnn_bench_csv_converts_with_its_untimed_candidates_as_failures(tmp_path):
+    """fixtures/hipdnn_bench.csv is hipdnn_bench's CSV (TestCsvOutput pins its header): a row
+    keyed by graph and device kind, and a candidate that did not run, with empty timings.
+    """
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "hipdnn_bench.csv"
+    entry, rows = store.from_csv(
+        [fixture],
+        engine="hipkernel:Example",
+        engine_id=7,
+        role="sort_kernel_catalog",
+        arch="gfx942",
+        selector_revision="example/1",
+        collected_at="2026-10-15T00:00:00+00:00",
+    )
+    assert entry["devices"] == ["8215566447713624081"] and entry["graph_count"] == 1
+    timed, untimed = sorted(rows[None], key=lambda r: r["kernel.tile_m"])
+    assert timed["minTimeMs"] == 0.5 and not timed["error"]
+    assert untimed["minTimeMs"] is None
+    assert untimed["error"].startswith("config_not_applicable")
+    assert store.add(tmp_path / "ds", entry, rows)["rows"] == 2
+
+
 def test_the_command_line_refuses_csv_without_a_binding(tmp_path, capsys):
     with pytest.raises(SystemExit):
         store.main(["--into", str(tmp_path / "ds"), "--csv", str(tmp_path / "x.csv")])

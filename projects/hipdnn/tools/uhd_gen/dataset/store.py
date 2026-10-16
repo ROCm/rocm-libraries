@@ -643,6 +643,7 @@ def from_generation(
         "tflops"
     ]
     rows_by_source = {}
+    read = []
     for metric in metrics:
         # Everything the run measured; a run that predates measurements.json kept it in
         # its corpus files.
@@ -655,9 +656,8 @@ def from_generation(
             ),
             f"corpus{stem}.json",
         )
-        rows_by_source[metric] = json.loads(
-            (generation / name).read_text(encoding="utf-8")
-        )
+        read.append(generation / name)
+        rows_by_source[metric] = json.loads(read[-1].read_text(encoding="utf-8"))
     every = [row for rows in rows_by_source.values() for row in rows]
     revisions = {json.loads(row["binding"])["selector_revision"] for row in every}
     if len(revisions) != 1:
@@ -666,11 +666,9 @@ def from_generation(
     published: set[str] = set()
     for row in every:
         published.update(json.loads(row["features"]))
+    # When the first bench call ran, else when the rows it read were written.
     logs = sorted((generation / "commands").glob("*.stdout.json"))
-    first = min(
-        (p.stat().st_mtime for p in logs),
-        default=(generation / "corpus.json").stat().st_mtime,
-    )
+    first = min(p.stat().st_mtime for p in (logs or read))
     entry = {
         "collected_at": datetime.fromtimestamp(first, timezone.utc).isoformat(
             timespec="seconds"

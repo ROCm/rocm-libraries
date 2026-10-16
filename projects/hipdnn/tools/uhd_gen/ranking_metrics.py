@@ -18,17 +18,13 @@ class RankingMetric:
     units: str
     objective: str
     label: str
-    #: Zero is the worst throughput but an impossible time, so validity is per metric.
-    strictly_positive: bool
 
 
 DEFAULT_RANKING_METRIC = "tflops"
 
 RANKING_METRICS: dict[str, RankingMetric] = {
-    "tflops": RankingMetric(
-        "tflops", "TFLOPS", "max", "tflops", strictly_positive=False
-    ),
-    "time": RankingMetric("time", "ms", "min", "avgTimeMs", strictly_positive=True),
+    "tflops": RankingMetric("tflops", "TFLOPS", "max", "tflops"),
+    "time": RankingMetric("time", "ms", "min", "avgTimeMs"),
 }
 
 
@@ -43,11 +39,13 @@ def ranking_metric(name: str) -> RankingMetric:
 
 
 def is_valid_metric_value(name: str, value) -> bool:
-    """`isValidMetricValue`: finite, and nonnegative throughput or positive time."""
+    """`isValidMetricValue`: finite and positive, for every metric. A zero is no measurement,
+    of a time or a rate."""
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
         or not math.isfinite(value)
     ):
         return False
-    return value > 0 if ranking_metric(name).strictly_positive else value >= 0
+    ranking_metric(name)
+    return value > 0

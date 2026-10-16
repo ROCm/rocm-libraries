@@ -103,13 +103,23 @@ def test_metadata_cannot_resolve_to_a_matcher_of_the_same_identity(tmp_path):
         snapshot_provenance(tree)
 
 
-def test_compatible_minor_revisions_and_new_matchers_preserve_model_contract(tmp_path):
+def test_a_compatible_minor_revision_preserves_the_model_contract(tmp_path):
+    tree = _tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx942")
+    _write(tree / "a.umd.json", {"id": MATCH_A, "revision": "2.11"})
+    compare_provenance(trained, snapshot_provenance(tree, arch="gfx942"))
+    assert {"id": MATCH_A, "revision": "2.10"} in trained["umd"]
+
+
+def test_a_matcher_the_model_never_saw_breaks_the_contract(tmp_path):
+    """The runtime disables a model missing one of its arch's matchers
+    (DescriptorLoader.hpp: "arch-relevant UMD is missing from training provenance")."""
     tree = _tree(tmp_path)
     trained = snapshot_provenance(tree, arch="gfx950")
-    _write(tree / "a.umd.json", {"id": MATCH_A, "revision": "2.11"})
-    actual = snapshot_provenance(tree, arch="gfx942")
-    compare_provenance(trained, actual)
-    assert trained["umd"] == [{"id": MATCH_A, "revision": "2.10"}]
+    with pytest.raises(
+        ProvenanceError, match=f"matcher {MATCH_B} serves this architecture"
+    ):
+        compare_provenance(trained, snapshot_provenance(tree, arch="gfx942"))
 
 
 @pytest.mark.parametrize("kind", ["ued", "kmd", "umd"])

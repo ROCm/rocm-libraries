@@ -186,7 +186,7 @@ def store(tmp_path, monkeypatch):
             )
     # Two boards of one kind: their timings differ, their device identity (the hash of the
     # device's properties) does not.
-    engine = {"board": "board-a"}
+    engine = {"board": "board-a", "kind": "kind-1"}
 
     def bench(command, environment, log_dir, ordinal, commands):
         commands.append({"argv": command})
@@ -202,7 +202,7 @@ def store(tmp_path, monkeypatch):
             "engine_name": "provider:engine7",
             "graph_id": graph["id"],
             "graph_key": graph["id"],
-            "device_id": "kind-1",
+            "device_id": engine["kind"],
             "arch": "gfx942",
             "metric": metric,
             "binding": {
@@ -229,10 +229,11 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr("uhd_gen.generate._run_json", bench)
     find_any_bench(monkeypatch)
 
-    def collect(name, board, collected_at):
+    def collect(name, board, collected_at, kind="kind-1"):
         from uhd_gen.__main__ import main
 
         engine["board"] = board
+        engine["kind"] = kind
         output = tmp_path / name
         assert (
             main(
@@ -264,7 +265,12 @@ def store(tmp_path, monkeypatch):
 
     first = collect("col_a", "board-a", "2026-09-28T10:00:00+00:00")
     second = collect("col_b", "board-b", "2026-09-29T10:00:00+00:00")
-    return {"tree": tree, "collections": [first, second], "root": tmp_path}
+    return {
+        "tree": tree,
+        "collections": [first, second],
+        "root": tmp_path,
+        "collect": collect,
+    }
 
 
 def _dataset(store):
@@ -381,6 +387,34 @@ def test_a_sizing_run_pins_its_test_set_and_never_trains_on_it(
     ]
     assert checked["comparable"] is True
     assert checked["observed_within"] is not None
+
+
+def test_a_shape_measured_on_two_kinds_of_device_is_one_shape_to_size(
+    store, evaluator, monkeypatch
+):
+    """The pool and every curve point count shapes; a subset takes each drawn shape's
+    measurement on every kind of device."""
+    import uhd_gen.sizing as sizing
+
+    store["collections"].append(
+        store["collect"]("col_c", "board-c", "2026-09-30T10:00:00+00:00", kind="kind-2")
+    )
+    subsets = []
+    real = sizing._write_subset
+
+    def spy(dataset, metric, rows, destination, only=None):
+        subsets.append(rows)
+        return real(dataset, metric, rows, destination, only)
+
+    monkeypatch.setattr(sizing, "_write_subset", spy)
+    code, output = _size(store, evaluator, "kinds", "--create-test-set")
+    assert code == 0
+    report = json.loads((output / "sizing_report.json").read_text(encoding="utf-8"))
+    assert report["training_pool"] == 120, "shapes, not (shape, device) pairs"
+    for rows in subsets:
+        shapes = {row["benchmark"] for row in rows}
+        assert len(rows) == 2 * len(shapes)
+        assert {row["device"] for row in rows} == {"kind-1", "kind-2"}
 
 
 def test_a_target_past_the_measured_ceiling_asks_for_measurement_not_shapes(

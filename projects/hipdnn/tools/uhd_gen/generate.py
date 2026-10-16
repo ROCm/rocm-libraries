@@ -789,6 +789,11 @@ def collect_graph(
             "iters": result.get("iterations"),
             "knob_settings": json.dumps(candidate["knob_settings"], sort_keys=True),
         }
+        if not result["is_valid"]:
+            # Not timed, so no timings: a bench that wrote zeros for them would otherwise
+            # store a failure that is also a measurement (§8.3).
+            for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs"):
+                row[column] = None
         if verdict is False:
             # §13.2: suppressed here, where the row is built, so every consumer sees it
             # suppressed; otherwise a wrong-but-fast kernel becomes the label.
@@ -1302,10 +1307,11 @@ def _relocate_stage(stage: Path, output: Path) -> None:
             return {key: relocate(item) for key, item in value.items()}
         return value
 
+    # Only the JSON generate wrote: `commands/` holds the bench's raw stdout, which a
+    # crashed graph can leave empty or truncated.
     for path in stage.rglob("*.json"):
-        if (
-            "collection_descriptors" in path.relative_to(stage).parts
-            or "graphs" in path.relative_to(stage).parts
+        if {"collection_descriptors", "graphs", "commands"} & set(
+            path.relative_to(stage).parts
         ):
             continue
         _write_json(path, relocate(json.loads(path.read_text(encoding="utf-8"))))
@@ -2010,6 +2016,12 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.extend(["--uhd-id", uhd_ids[requested]])
             if args.feature_evaluator:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
+            for flag, value in (
+                ("--descriptor-name", args.descriptor_name),
+                ("--model-version", args.model_version),
+            ):
+                if value:
+                    train_args.extend([flag, value])
             # Recall scores every (trained) shape: fit to the served space, not
             # extrapolation.
             eval_args = [

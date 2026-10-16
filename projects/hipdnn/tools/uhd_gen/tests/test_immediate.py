@@ -783,3 +783,93 @@ def test_a_mixed_forward_backward_corpus_trains_and_evaluates_end_to_end(
         "prediction_coverage"
     ]
     assert scored["scored_rows"] == scored["rows"] == 24
+
+
+def test_a_normalized_corpus_written_as_csv_normalizes_again(tmp_path):
+    """Read back exactly: 404843781.80777544 is one of the values pandas' default CSV parser
+    reads an ulp away, which then contradicts the row's own feature map."""
+    from uhd_gen.corpus_io import read_corpus_frame
+
+    row = measurement()
+    row["features"]["device.peak_memory_bandwidth"] = 404843781.80777544
+    normalized = normalize_corpus(pd.DataFrame([row]))
+    path = tmp_path / "corpus.csv"
+    normalized.to_csv(path, index=False)
+
+    again = normalize_corpus(read_corpus_frame(path))
+    assert again["device.peak_memory_bandwidth"].tolist() == [404843781.80777544]
+
+
+def test_the_emitted_training_slice_is_every_problem_the_report_held_out_and_no_other(
+    tmp_path, evaluator
+):
+    """`--emit-train-slice` writes the rows of the problems the report did not score, so
+    training on it can never see an evaluated problem."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    rows = []
+    for index in range(24):
+        row = measurement(graph=f"graph-{index}", metric="time")
+        row["features"]["graph.flops"] = 1e9 * (index + 1)
+        row["avgTimeMs"] = 1.0 + index / 10
+        rows.append(row)
+    corpus, recipe = tmp_path / "corpus.json", tmp_path / "features.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    recipe.write_text(json.dumps(["$graph.flops"]), encoding="utf-8")
+    model_dir, report = tmp_path / "model", tmp_path / "report.json"
+    common = ["--feature-evaluator", evaluator]
+    assert (
+        main(
+            [
+                "train",
+                "--role",
+                ROLE,
+                "--input",
+                str(corpus),
+                "--feature-signature",
+                str(recipe),
+                "--metric",
+                "time",
+                "--num-boost-round",
+                "4",
+                "--early-stopping",
+                "2",
+                "--output-dir",
+                str(model_dir),
+                *common,
+            ]
+        )
+        == 0
+    )
+    train_slice = tmp_path / "slice" / "train.csv"
+    assert (
+        main(
+            [
+                "evaluate",
+                "--input",
+                str(corpus),
+                "--model-dir",
+                str(model_dir),
+                "--eval-fraction",
+                "0.25",
+                "--emit-train-slice",
+                str(train_slice),
+                "--output",
+                str(report),
+                *common,
+            ]
+        )
+        == 0
+    )
+    split = json.loads(report.read_text(encoding="utf-8"))["split"]
+    assert split["train_slice"] == str(train_slice)
+    held_out = {key[0] for key in split["eval_problem_keys"]}
+    # The slice is the normalized corpus: a problem's graph is its `benchmark`.
+    sliced = pd.read_csv(train_slice, dtype={"benchmark": str})
+    kept = set(sliced["benchmark"])
+    assert held_out and kept
+    assert kept.isdisjoint(held_out)
+    assert kept | held_out == {f"graph-{index}" for index in range(24)}
+    assert len(sliced) == len(kept)
