@@ -27,6 +27,9 @@ store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)
   mode and its manual override, a composability matrix, and runnable examples. **Start here.** Its
   section 3 is the one home of the axis convention and of LDS buffers described by their descriptor.
 - `docs/tiling_api_contract.md` -- the why: the promotion gate, the audience tiers, the rules.
+- `docs/tensor_transforms_api.md` -- the coordinate-graph package: units, kinds, rules and every error.
+- `docs/tensor_transforms_guide.md` -- coordinate graphs by example: halos, K splits, swizzles, addresses,
+  checks, and CK `pad` in rocke.
 
 ## Package layout
 ```
@@ -39,6 +42,7 @@ fragments.py        TileDesc + Fragment (register model) + make_fragment / fragm
 emit.py             b-first IR verbs: load_fragment / store_fragment / fill_fragment + coordinates
 layouts/            make_tile_desc -- quantity-major human-approachable distribution authoring
 mma/                TileMma + Tiling; the A/B/C warp-encoding calculators
+tensor_transforms/  coordinate graphs -> split element addresses + derived bound checks
 traits/             typed MMA traits loader/catalog + committed mma_traits.json
 reflection/         describe() + text forward/inverse layout maps
 kernels/            end-to-end demo kernels (spec -> build -> run), bit-exact on gfx90a
