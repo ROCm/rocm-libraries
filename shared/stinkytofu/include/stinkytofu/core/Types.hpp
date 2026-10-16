@@ -149,11 +149,16 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
-        /// Minimum WMMA windows between the barrier that frees a buffer for a tensor_load and the
-        /// barrier whose s_wait_tensorcnt waits for it, so the TDM data lands before the wait.
-        /// The barrier windows are derived from the ds_load density, and the density is raised
-        /// (more ds_loads per group, a shorter ds span) until this gap fits. 0 = off.
-        int tensorLoadMinWmmaGap = 0;
+        /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
+        /// queue depth). The windows the ds_loads in front of a barrier need are at least
+        /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
+        int dsReadCyclesPerLoad = 0;
+        /// Cycles the TDM needs to land a tensor_load's data in LDS (tensor_load -> the
+        /// s_wait_tensorcnt that waits for it). The barrier that frees a buffer for the load and
+        /// the barrier carrying the wait are kept at least ceil(cycles / WMMA window) windows
+        /// apart. The barrier windows follow the ds_load density, and the density is raised, in
+        /// steps of Y ds_loads per X windows, until the gap fits. 0 = off.
+        int tensorLoadLandCycles = 0;
         /// The ds_load pace, "Y ds_loads every X cycles": dsPaceCount (Y) and dsPaceCycles (X).
         /// < 0 (count: <= 0) = taken from dsPaceModel if set, else the default: no cycle rate,
         /// only separators between groups.
