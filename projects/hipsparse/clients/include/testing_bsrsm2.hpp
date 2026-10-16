@@ -686,8 +686,10 @@ void testing_bsrsm2(Arguments argus)
                                                     policy,
                                                     dbuffer));
 
-    int pos_analysis;
-    hipsparseXbsrsm2_zeroPivot(handle, info, &pos_analysis);
+    int               pos_analysis;
+    hipsparseStatus_t status_analysis
+        = hipsparseXbsrsm2_zeroPivot(handle, info, &pos_analysis);
+    CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis, pos_analysis);
 
     if(argus.unit_check)
     {
@@ -716,6 +718,7 @@ void testing_bsrsm2(Arguments argus)
 
         int               hposition_1;
         hipsparseStatus_t pivot_status_1 = hipsparseXbsrsm2_zeroPivot(handle, info, &hposition_1);
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -741,14 +744,15 @@ void testing_bsrsm2(Arguments argus)
                                                                  dbuffer));
 
         hipsparseStatus_t pivot_status_2 = hipsparseXbsrsm2_zeroPivot(handle, info, dposition);
+        int               hposition_2;
+        CHECK_HIP_ERROR(hipMemcpy(&hposition_2, dposition, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
         // Copy output from device to CPU
-        int hposition_2;
         CHECK_HIP_ERROR(
             hipMemcpy(hX_1.data(), dX_1, sizeof(T) * nrowX * ncolX, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(
             hipMemcpy(hX_2.data(), dX_2, sizeof(T) * nrowX * ncolX, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(&hposition_2, dposition, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host bsrsm2
         std::vector<int> hbsr_row_ptr(mb + 1);
@@ -796,15 +800,11 @@ void testing_bsrsm2(Arguments argus)
 
         if(hposition_1 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
         if(hposition_2 != -1)
         {
-            verify_hipsparse_status_zero_pivot(pivot_status_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
 
