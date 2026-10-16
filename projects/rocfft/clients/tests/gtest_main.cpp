@@ -234,7 +234,7 @@ std::vector<std::string> tokens_to_run()
 
 void precompile_test_kernels(const std::string& precompile_file)
 {
-    std::cout << "precompiling test kernels...\n";
+    std::cout << "precompiling test kernels..." << std::endl;
     WorkQueue<std::string> tokenQueue;
 
     auto tokens = tokens_to_run();
@@ -306,6 +306,26 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::cout << "done precompiling FFT plans in " << static_cast<size_t>(precompile_ms.count())
               << " ms\n";
 }
+
+// Static destructor to make a best-effort attempt to clean up any
+// file that was created.  This will run after any FFT library is
+// unloaded so the file should not be in use anymore at that point.
+struct precompile_file_cleanup
+{
+    ~precompile_file_cleanup()
+    {
+        try
+        {
+            if(!path.empty())
+                fs::remove(path);
+        }
+        catch(...)
+        {
+        }
+    }
+    fs::path path;
+};
+static precompile_file_cleanup precompile_cleanup;
 
 int main(int argc, char* argv[])
 {
@@ -705,24 +725,13 @@ int main(int argc, char* argv[])
     std::cout << "Random seed: " << random_seed << std::endl;
 
     // Use temporary file for precompiling if no file was specified
-    struct precompile_file_cleanup
-    {
-        // Make best-effort attempt to clean up any file that was created
-        ~precompile_file_cleanup()
-        {
-            if(!path.empty())
-                fs::remove(path);
-        }
-        fs::path path;
-    };
-    precompile_file_cleanup cleanup;
     if(precompile_option->count() && precompile_file.empty())
     {
         // Pick a name in the temp directory - rocFFT will gracefully
         // share this file between two test programs, or fall back to
         // in-memory cache if this file can't be opened
-        cleanup.path    = fs::temp_directory_path() / "rocfft-test.db";
-        precompile_file = cleanup.path.string();
+        precompile_cleanup.path = fs::temp_directory_path() / "rocfft-test.db";
+        precompile_file         = precompile_cleanup.path.string();
     }
 
     // If precompiling, tell rocFFT to use the specified cache file
