@@ -65,7 +65,6 @@ hipdnnPluginStatus_t
     return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
         hipdnn_plugin_sdk::throwIfNull(handle);
         hipdnn_plugin_sdk::throwIfNull(serializedContext);
-        hipdnn_plugin_sdk::throwIfNull(serializedContext->ptr);
 
         delete[] static_cast<const uint8_t*>(serializedContext->ptr);
         serializedContext->ptr = nullptr;

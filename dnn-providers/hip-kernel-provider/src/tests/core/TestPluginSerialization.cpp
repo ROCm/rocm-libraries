@@ -117,8 +117,6 @@ TEST(TestPluginSerialization, HooksRejectNullArguments)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
     EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(&handle, nullptr),
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
-    EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(&handle, &withoutBytes),
-              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(
         hipdnnEnginePluginCreateExecutionContextFromSerialized(nullptr, &serialized, &created),
@@ -134,6 +132,27 @@ TEST(TestPluginSerialization, HooksRejectNullArguments)
     EXPECT_EQ(serialized.ptr, static_cast<const void*>(&byte));
     EXPECT_EQ(serialized.size, 1U);
     EXPECT_EQ(created, nullptr);
+}
+
+// The backend passes the structure as the save hook filled it in, so a null buffer can reach
+// the destroy hook.
+TEST(TestPluginSerialization, DestroyAcceptsTheEmptyStructureTheBackendCanPass)
+{
+    Handle handle;
+
+    hipdnnPluginConstData_t empty{nullptr, 0};
+    EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(&handle, &empty),
+              HIPDNN_PLUGIN_STATUS_SUCCESS)
+        << lastPluginError();
+    EXPECT_EQ(empty.ptr, nullptr);
+    EXPECT_EQ(empty.size, 0U);
+
+    hipdnnPluginConstData_t sizeWithoutBytes{nullptr, 4};
+    EXPECT_EQ(hipdnnEnginePluginDestroySerializedExecutionContext(&handle, &sizeWithoutBytes),
+              HIPDNN_PLUGIN_STATUS_SUCCESS)
+        << lastPluginError();
+    EXPECT_EQ(sizeWithoutBytes.ptr, nullptr);
+    EXPECT_EQ(sizeWithoutBytes.size, 0U);
 }
 
 TEST(TestPluginSerialization, SaveRefusesAPlanNoIngestorEngineBuilt)
