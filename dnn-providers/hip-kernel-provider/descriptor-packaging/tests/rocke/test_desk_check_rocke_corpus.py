@@ -31,15 +31,16 @@ from hkp_pack.desk_check import (
     symbol_distinctness,
     toc_key_uniqueness,
 )
-from hkp_pack.pipeline import run_pipeline
 from hkp_pack.rocke_compile import build_spec
 from pack_helpers import (
     _EXAMPLES,
     _ROOT_IDS,
+    GENERIC_TARGETS,
     _read,
     _require_bundles,
     _run_cli,
     read_shipped,
+    run_pipeline,
     write_shipped,
 )
 
@@ -153,7 +154,10 @@ class TestInvariant1MetadataSpecDrift:
 class TestInvariant2DuplicateMatcherTuples:
     def test_distinct_variants_report_no_duplicates(self, packed_desk_check):
         assert (
-            duplicate_matcher_tuples(_kernels(packed_desk_check), _MATCHER_FIELDS) == {}
+            duplicate_matcher_tuples(
+                _kernels(packed_desk_check), _MATCHER_FIELDS, GENERIC_TARGETS
+            )
+            == {}
         )
 
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
@@ -175,7 +179,9 @@ class TestInvariant2DuplicateMatcherTuples:
         shipped = _pack_mutated(
             tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate
         )
-        dupes = duplicate_matcher_tuples(_kernels(shipped), _MATCHER_FIELDS)
+        dupes = duplicate_matcher_tuples(
+            _kernels(shipped), _MATCHER_FIELDS, GENERIC_TARGETS
+        )
         assert dupes == {(1, 64): 2}, dupes
 
 
@@ -304,9 +310,11 @@ def test_real_rocke_example_dtype_vocabularies_are_not_drift(rocke_root):
         kernels = _kernels(_read(kdp))
         spec = kernels[0]["kernel_source"]["spec"]
         meta = kernels[0]["metadata"]
-        # The premise: two different spellings of one type. A failure here
-        # means the bundle changed and the regression needs re-grounding.
-        assert (spec["dtype"], meta["dtype"]) == ("bf16", "BF16"), kdp
+        # The premise: two different spellings of one type (bf16/BF16,
+        # fp16/FP16, ...). A failure here means the bundle changed and the
+        # regression needs re-grounding.
+        assert spec["dtype"] != meta["dtype"], kdp
+        assert spec["dtype"].upper() == meta["dtype"], kdp
         assert metadata_spec_drift(kernels, ("dtype",)) == [], kdp
 
 

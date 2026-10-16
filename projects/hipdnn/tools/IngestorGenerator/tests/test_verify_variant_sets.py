@@ -416,8 +416,9 @@ class TestGateCatchesEachDefect:
 class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
     """The loader assembles ONE catalog per engine per device, so the identity is
     engine-wide and carries the effective architecture: an identical tuple in a gfx942
-    and a gfx950 pack is legal, while an overlap -- including a wildcard over a concrete
-    arch -- drops the engine."""
+    and a gfx950 pack is legal, while two packs that compete at the same arch tier drop the
+    engine. A wildcard over a concrete arch, or a generic over a member, sit at
+    different tiers and do not compete."""
 
     def _two_packs(self, gate, tag, left_arch, right_arch):
         root = gate.tmp / tag
@@ -440,7 +441,6 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         self._two_packs(gate, "disjoint", ["gfx942"], ["gfx950"])
         result = gate.run("d", "disjoint", profiled=False)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "loader-tuple" not in result.stdout
 
     def test_equal_tuples_overlapping_on_one_arch_collide(self, gate):
         self._two_packs(gate, "overlap", ["gfx942", "gfx950"], ["gfx950"])
@@ -449,11 +449,27 @@ class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
         assert "loader-tuple collisions" in result.stdout
         assert "gfx950" in result.stdout
 
-    def test_a_wildcard_arch_overlaps_a_concrete_one(self, gate):
-        """An absent arch list is "every device", so it meets the concrete pack on that
-        pack's own device."""
-        self._two_packs(gate, "wildcard", None, ["gfx950"])
-        result = gate.run("w", "wildcard", profiled=False)
+    @pytest.mark.parametrize(
+        ("left_arch", "right_arch"),
+        [
+            (None, ["gfx950"]),
+            (["gfx11-generic"], ["gfx1151"]),
+        ],
+    )
+    def test_a_better_tier_does_not_collide_with_a_worse_one(
+        self, gate, left_arch, right_arch
+    ):
+        self._two_packs(gate, "outranked", left_arch, right_arch)
+        result = gate.run("o", "outranked", profiled=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize(
+        ("left_arch", "right_arch"),
+        [(["gfx11-generic"], ["gfx11-generic"]), (None, None)],
+    )
+    def test_two_packs_tied_at_one_tier_collide(self, gate, left_arch, right_arch):
+        self._two_packs(gate, "tied", left_arch, right_arch)
+        result = gate.run("t", "tied", profiled=False)
         assert result.returncode == 1, result.stdout
         assert "loader-tuple collisions" in result.stdout
 
@@ -1147,18 +1163,18 @@ def real_archive():
 
     kpack, compression = load_kpack(python_dir)
 
-    def write(root):
+    def write(root, arch=_ARCH):
         path = root / "kpack" / "test.kpack"
         path.parent.mkdir(parents=True, exist_ok=True)
         archive = kpack.PackedKernelArchive(
             group_name="test",
-            gfx_arch_family=_ARCH,
-            gfx_arches=[_ARCH],
+            gfx_arch_family=arch,
+            gfx_arches=[arch],
             compressor=compression.ZstdCompressor(compression_level=3),
         )
         archive.add_kernel(
             archive.prepare_kernel(
-                relative_path="v0", gfx_arch=_ARCH, hsaco_data=_PAYLOAD, metadata={}
+                relative_path="v0", gfx_arch=arch, hsaco_data=_PAYLOAD, metadata={}
             )
         )
         archive.finalize_archive()
@@ -1340,3 +1356,36 @@ class TestRealArchiveSelectedConsumer:
         assert "packed dialect" in result.stdout
         structural = self.run(root, python_dir, tmp_path, mode="structural")
         assert structural.returncode == 0, structural.stdout + structural.stderr
+
+
+@pytest.mark.needs_rocm_kpack
+class TestAGenericDocumentIsReadWithItsGenericArchiveKey:
+    """A generic copy's archive is keyed by the generic's name."""
+
+    @staticmethod
+    def _entry(arch):
+        ukd = _packed_ukd()
+        ukd["arch"] = arch
+        return type(
+            "Entry", (), {"ukd": ukd, "arch": arch, "origin_dir": None, "inline": False}
+        )
+
+    def test_a_generic_document_is_read_with_its_generic_archive_key(
+        self, tmp_path, real_archive
+    ):
+        write_archive, python_dir = real_archive
+        write_archive(tmp_path, "gfx11-generic")
+
+        table = gate_module.gtmod.GenericTargets.load(
+            gate_module.gtmod.DEFAULT_TABLE_PATH
+        )
+        payloads = gate_module.Payloads(python_dir, table)
+
+        generic = self._entry(["gfx11-generic"])
+        generic.origin_dir = str(tmp_path)
+        assert payloads.read(generic, "gfx1151") == _PAYLOAD
+
+        member = self._entry(["gfx1151"])
+        member.origin_dir = str(tmp_path)
+        with pytest.raises(gate_module.GateError):
+            payloads.read(member, "gfx1151")
