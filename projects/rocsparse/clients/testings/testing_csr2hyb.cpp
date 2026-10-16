@@ -240,6 +240,36 @@ void testing_csr2hyb(const Arguments& arg)
         hhyb_coo_row_ind_gold.unit_check(hhyb_coo_row_ind);
         hhyb_coo_col_ind_gold.unit_check(hhyb_coo_col_ind);
         hhyb_coo_val_gold.unit_check(hhyb_coo_val);
+
+        // Reconverting into the same HYB matrix releases its arrays, which must not stay referenced.
+        // The max partition fails with invalid_value if a row is too long, after the arrays are released.
+        const rocsparse_status status_max = rocsparse_csr2hyb<T>(handle,
+                                                                 M,
+                                                                 N,
+                                                                 descr,
+                                                                 dcsr_val,
+                                                                 dcsr_row_ptr,
+                                                                 dcsr_col_ind,
+                                                                 hyb,
+                                                                 user_ell_width,
+                                                                 rocsparse_hyb_partition_max);
+        unit_check_scalar<rocsparse_int>(1,
+                                         status_max == rocsparse_status_success
+                                             || status_max == rocsparse_status_invalid_value);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_nnz);
+        unit_check_scalar<rocsparse_int>(dhyb->ell_nnz > 0, dhyb->ell_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(dhyb->ell_nnz > 0, dhyb->ell_val != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_row_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_val != nullptr);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_csr2hyb<T>(
+            handle, 0, N, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, hyb, user_ell_width, part));
+        unit_check_scalar<rocsparse_int>(0, dhyb->ell_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->ell_val != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_row_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_col_ind != nullptr);
+        unit_check_scalar<rocsparse_int>(0, dhyb->coo_val != nullptr);
     }
 
     if(arg.timing)
