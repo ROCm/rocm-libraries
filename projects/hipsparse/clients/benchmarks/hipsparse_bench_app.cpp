@@ -327,7 +327,14 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     // !!! To fix, not necessarily the gpu used from hipsparse_bench.
     //
     hipDeviceProp_t prop{};
-    std::ignore = hipGetDeviceProperties(&prop, 0);
+    hipError_t      status = hipGetDeviceProperties(&prop, 0);
+    if(status != hipSuccess)
+    {
+        std::cerr << "hipGetDeviceProperties failed: " << hipGetErrorString(status) << " ("
+                  << status << ")" << std::endl;
+        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+    }
+
     gpu_config g(prop);
     g.print_json(out);
 
@@ -433,9 +440,7 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     }
     out << "]," << std::endl << std::endl;
     ;
-    out << "\""
-        << "results"
-        << "\": [";
+    out << "\"" << "results" << "\": [";
 
     return HIPSPARSE_STATUS_SUCCESS;
 }
