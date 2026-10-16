@@ -14,7 +14,7 @@
 #
 #   The two known-failing gfx950 cases tracked by AIHPBLAS-3506 are quarantined
 #   via native GTEST_SKIP() calls in the test source itself (see
-#   RangeLibrary_test.cpp, MXDataGen_test.cpp), not via an `exclude:` pattern
+#   RangeLibrary_test.cpp), not via an `exclude:` pattern
 #   here -- they report as skipped, not failed, in every tier automatically.
 #   (AIHPBLAS-4417's AlmostEqual_test.cpp tolerance regression was fixed
 #   upstream in rocm-libraries#11066, so no skip is needed for it anymore.)

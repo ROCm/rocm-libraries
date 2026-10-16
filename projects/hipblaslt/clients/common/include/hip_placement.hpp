@@ -8,14 +8,14 @@
 //
 // PlacedRegion reserves address space with HIP virtual memory management and maps three windows
 // of the same size: the buffer, starting a chosen number of bytes before a 4 GiB boundary, and
-// two poison windows exactly 4 GiB below and above it, filled with kFastCheckPoisonValue. A read
+// two poison windows exactly 4 GiB below and above it, filled with kPaddingPoisonValue. A read
 // whose carry is dropped lands in the low window and returns the poison value instead of
 // faulting, so the GEMM result is wrong rather than the GPU stopping. A write whose carry is
 // dropped changes the poison, which verify_poison() reports.
 
 #pragma once
 
-#include "fast_check.hpp"
+#include "device_validation.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -58,7 +58,7 @@ public:
            || !vmm)
             return fail("this GPU does not support HIP virtual memory management", true);
 
-        const size_t es = fast_check_element_size(type);
+        const size_t es = device_element_size(type);
         if(!es)
             return fail("buffer placement does not support data type " + std::to_string(int(type)),
                         false);
@@ -188,13 +188,13 @@ public:
     }
 
     // Refills both poison windows, and the buffer window past the buffer's end, with
-    // kFastCheckPoisonValue.
+    // kPaddingPoisonValue.
     hipError_t fill_poison(hipStream_t stream) const
     {
         hipError_t err = hipSuccess;
         for(const auto& [at, elements] : poisoned_ranges())
         {
-            hipError_t e = fast_check_poison_padding_device(
+            hipError_t e = poison_padding_device(
                 {reinterpret_cast<void*>(at), m_type, 0, 0, 1, 0}, 1, elements, stream);
             if(e != hipSuccess)
                 err = e;
@@ -204,17 +204,17 @@ public:
 
     // Fails when any element of either poison window no longer holds the poison value: a write
     // reached an address exactly 4 GiB away from where it belonged.
-    FastCheckResult verify_poison(const std::string& operand, hipStream_t stream) const
+    ValidationResult verify_poison(const std::string& operand, hipStream_t stream) const
     {
-        FastCheckResult    result;
+        ValidationResult   result;
         std::ostringstream msg;
-        const size_t       es     = fast_check_element_size(m_type);
+        const size_t       es     = device_element_size(m_type);
         const auto         ranges = poisoned_ranges();
         for(size_t w = 0; w < ranges.size(); w++)
         {
             const auto [at, elements] = ranges[w];
-            FastCheckChanged c        = fast_check_count_changed_device(
-                reinterpret_cast<const void*>(at), m_type, elements, stream);
+            ChangedElements c
+                = count_changed_device(reinterpret_cast<const void*>(at), m_type, elements, stream);
             if(!c.ok)
                 return {false, "could not scan the placement poison windows"};
             if(!c.count)
@@ -246,7 +246,7 @@ private:
     // then the mapped tail of the buffer window after the buffer's last element.
     std::vector<std::pair<uint64_t, size_t>> poisoned_ranges() const
     {
-        const size_t                             es = fast_check_element_size(m_type);
+        const size_t                             es = device_element_size(m_type);
         std::vector<std::pair<uint64_t, size_t>> ranges
             = {{m_windows[1], m_span / es}, {m_windows[2], m_span / es}};
         const size_t used = (m_bytes + es - 1) / es;
