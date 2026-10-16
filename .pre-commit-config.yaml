@@ -177,6 +177,15 @@ repos:
         files: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/.*\.py$
         exclude: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/Tests/
 
+      # pytest 9 rejects these py.path hook arguments outright, so a conftest
+      # carrying one aborts collection before any test runs.
+      - id: tensilelite-no-legacy-pytest-hook-args
+        name: TensileLite - no py.path pytest hook args (removed in pytest 9)
+        language: pygrep
+        entry: 'def pytest_\w+\([^)]*\b(path|startdir)\s*[:=,)]'
+        args: [--multiline]
+        files: ^projects/hipblaslt/.*conftest\.py$
+
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
         entry: python projects/miopen/script/check_public_abi.py check-headers

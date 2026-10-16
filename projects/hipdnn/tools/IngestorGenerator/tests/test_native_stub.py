@@ -4,8 +4,9 @@
 """A real compiler's verdict on the emitted C++. ``packs/<Name>Native.cpp`` is what an
 agent or a human fills in to make an engine serve real graphs (see RUNBOOK.md)."""
 
-import subprocess
+import json
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -77,6 +78,29 @@ def compile_env():
         out_path = gen_dir / rel
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text)
+
+    # GpuGenericTargetsTable.hpp is rendered from the JSON table, as plugin_sdk/CMakeLists.txt does.
+    table_in = (plugin_sdk / ".." / "cmake" / "GpuGenericTargetsTable.hpp.in").resolve()
+    table_json = (plugin_sdk / ".." / "data" / "gpu_generic_targets.json").resolve()
+    if not (table_in.is_file() and table_json.is_file()):
+        pytest.skip(f"missing generic target table inputs {table_in} / {table_json}")
+    generics = json.loads(table_json.read_text())["generics"]
+    arrays, rows = "", ""
+    for generic in sorted(generics):
+        array = generic.upper().replace("-", "_") + "_MEMBERS"
+        literals = "".join(f'    "{m}",\n' for m in generics[generic])
+        arrays += f"inline constexpr std::string_view {array}[] = {{\n{literals}}};\n\n"
+        rows += f'    {{"{generic}", {array}, {len(generics[generic])}}},\n'
+    table_text = table_in.read_text()
+    for key, value in (
+        ("HIPDNN_GENERIC_TARGET_MEMBER_ARRAYS", arrays),
+        ("HIPDNN_GENERIC_TARGET_ROWS", rows),
+        ("HIPDNN_GENERIC_TARGET_ROW_COUNT", str(len(generics))),
+    ):
+        table_text = table_text.replace(f"@{key}@", value)
+    table_out = gen_dir / "hipdnn_plugin_sdk" / "GpuGenericTargetsTable.hpp"
+    table_out.parent.mkdir(parents=True, exist_ok=True)
+    table_out.write_text(table_text)
 
     for name, root, version_vals in (
         (
