@@ -44,13 +44,7 @@ MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t
             throw std::runtime_error("Invalid MX scale storage layout.");
     }
 
-    return {
-        .layout = layout,
-        .naturalShape = naturalShape,
-        .blockSize = blockSize,
-        .naturalByteCount = naturalByteCount,
-        .physicalByteCount = physicalByteCount,
-    };
+    return {layout, naturalShape, blockSize, naturalByteCount, physicalByteCount};
 }
 
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
