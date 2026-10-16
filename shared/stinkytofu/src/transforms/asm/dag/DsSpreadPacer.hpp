@@ -72,6 +72,11 @@ class DsSpreadPacer {
         return it == planned_.end() || wmmaIssued + slack_ >= it->second;
     }
 
+    // Hook for a future minimum-gap or per-period ds throttle; always open for now.
+    bool extraGate(int /*clock*/) const {
+        return true;
+    }
+
     void noteIssue(int clock) {
         issueClocks_.push_back(clock);
     }

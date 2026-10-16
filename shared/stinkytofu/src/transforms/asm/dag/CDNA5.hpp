@@ -1617,7 +1617,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget) {
-            if (!spread || dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
+            if (!spread || (dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_) &&
+                            dsSpread_.extraGate(clock_))) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {

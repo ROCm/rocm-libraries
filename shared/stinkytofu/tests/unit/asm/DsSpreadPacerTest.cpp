@@ -78,3 +78,10 @@ TEST(DsSpreadPacer, GapCvIsZeroForEvenIssueAndGrowsWithBursts) {
     for (int c : {0, 1, 2, 3, 32}) burst.noteIssue(c);
     EXPECT_GT(burst.gapCv(), 1.0);
 }
+
+TEST(DsSpreadPacer, ExtraGateIsOpenByDefault) {
+    DsSpreadPacer pacer;
+    EXPECT_TRUE(pacer.extraGate(0));
+    pacer.plan(loadsWithoutConsumers(4), /*wmmaTotal=*/8, /*manualSlack=*/0, /*leadWindows=*/2);
+    EXPECT_TRUE(pacer.extraGate(100));
+}
