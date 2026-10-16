@@ -805,32 +805,58 @@ namespace TensileLite
                 PrintBufferValueClass betaPrint(
                     (void*)args[i].beta, sizeof(args[i].beta), problems[i].betaType());
                 std::cout << "Gemm " << i << ":" << std::endl;
-                std::cout << "   " << "m: " << args[i].m << std::endl;
-                std::cout << "   " << "n: " << args[i].n << std::endl;
-                std::cout << "   " << "batch: " << args[i].batch << std::endl;
-                std::cout << "   " << "k: " << args[i].k << std::endl;
-                std::cout << "   " << "D: " << args[i].d << std::endl;
-                std::cout << "   " << "C: " << args[i].c << std::endl;
-                std::cout << "   " << "A: " << args[i].a << std::endl;
-                std::cout << "   " << "B: " << args[i].b << std::endl;
-                std::cout << "   " << "strideD1: " << args[i].strideD1 << std::endl;
-                std::cout << "   " << "strideD2: " << args[i].strideD2 << std::endl;
-                std::cout << "   " << "strideC1: " << args[i].strideC1 << std::endl;
-                std::cout << "   " << "strideC2: " << args[i].strideC2 << std::endl;
-                std::cout << "   " << "strideA1: " << args[i].strideA1 << std::endl;
-                std::cout << "   " << "strideA2: " << args[i].strideA2 << std::endl;
-                std::cout << "   " << "strideB1: " << args[i].strideB1 << std::endl;
-                std::cout << "   " << "strideB2: " << args[i].strideB2 << std::endl;
-                std::cout << "   " << "Alpha: " << alphaPrint << std::endl;
-                std::cout << "   " << "Beta: " << betaPrint << std::endl;
-                std::cout << "   " << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
-                std::cout << "   " << "bias: " << args[i].bias << std::endl;
-                std::cout << "   " << "e: " << args[i].e << std::endl;
-                std::cout << "   " << "strideE1: " << args[i].strideE1 << std::endl;
-                std::cout << "   " << "strideE2: " << args[i].strideE2 << std::endl;
-                std::cout << "   " << "act0: " << args[i].act0 << std::endl;
-                std::cout << "   " << "act1: " << args[i].act1 << std::endl;
-                std::cout << "   " << "activationType: " << args[i].activationType << std::endl;
+                std::cout << "   "
+                          << "m: " << args[i].m << std::endl;
+                std::cout << "   "
+                          << "n: " << args[i].n << std::endl;
+                std::cout << "   "
+                          << "batch: " << args[i].batch << std::endl;
+                std::cout << "   "
+                          << "k: " << args[i].k << std::endl;
+                std::cout << "   "
+                          << "D: " << args[i].d << std::endl;
+                std::cout << "   "
+                          << "C: " << args[i].c << std::endl;
+                std::cout << "   "
+                          << "A: " << args[i].a << std::endl;
+                std::cout << "   "
+                          << "B: " << args[i].b << std::endl;
+                std::cout << "   "
+                          << "strideD1: " << args[i].strideD1 << std::endl;
+                std::cout << "   "
+                          << "strideD2: " << args[i].strideD2 << std::endl;
+                std::cout << "   "
+                          << "strideC1: " << args[i].strideC1 << std::endl;
+                std::cout << "   "
+                          << "strideC2: " << args[i].strideC2 << std::endl;
+                std::cout << "   "
+                          << "strideA1: " << args[i].strideA1 << std::endl;
+                std::cout << "   "
+                          << "strideA2: " << args[i].strideA2 << std::endl;
+                std::cout << "   "
+                          << "strideB1: " << args[i].strideB1 << std::endl;
+                std::cout << "   "
+                          << "strideB2: " << args[i].strideB2 << std::endl;
+                std::cout << "   "
+                          << "Alpha: " << alphaPrint << std::endl;
+                std::cout << "   "
+                          << "Beta: " << betaPrint << std::endl;
+                std::cout << "   "
+                          << "scaleAlphaVec: " << args[i].scaleAlphaVec << std::endl;
+                std::cout << "   "
+                          << "bias: " << args[i].bias << std::endl;
+                std::cout << "   "
+                          << "e: " << args[i].e << std::endl;
+                std::cout << "   "
+                          << "strideE1: " << args[i].strideE1 << std::endl;
+                std::cout << "   "
+                          << "strideE2: " << args[i].strideE2 << std::endl;
+                std::cout << "   "
+                          << "act0: " << args[i].act0 << std::endl;
+                std::cout << "   "
+                          << "act1: " << args[i].act1 << std::endl;
+                std::cout << "   "
+                          << "activationType: " << args[i].activationType << std::endl;
             }
         }
     }
@@ -1964,8 +1990,8 @@ namespace TensileLite
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                          static_cast<size_t>(sizeMapping.macroTile.y),
-                                          static_cast<size_t>(sizeMapping.depthU)},
+                               static_cast<size_t>(sizeMapping.macroTile.y),
+                               static_cast<size_t>(sizeMapping.depthU)},
                         .cache_hints_a = sizeMapping.cacheHintA(),
                         .cache_hints_b = sizeMapping.cacheHintB(),
                     };
@@ -2094,8 +2120,8 @@ namespace TensileLite
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                          static_cast<size_t>(sizeMapping.macroTile.y),
-                                          static_cast<size_t>(sizeMapping.depthU)},
+                               static_cast<size_t>(sizeMapping.macroTile.y),
+                               static_cast<size_t>(sizeMapping.depthU)},
                         .cache_hints_a = sizeMapping.cacheHintA(),
                         .cache_hints_b = sizeMapping.cacheHintB(),
                     };
@@ -2345,7 +2371,8 @@ namespace TensileLite
                       << " contigA=" << contigA << " contigB=" << contigB << " minLenA=" << minLenA
                       << " minLenB=" << minLenB << " ldA=" << ldA << " ldB=" << ldB
                       << " loopIters=" << loopIters << " longA=" << longA << " longB=" << longB
-                      << ")" << "\n";
+                      << ")"
+                      << "\n";
         }
 
         return result;
@@ -3701,7 +3728,7 @@ namespace TensileLite
                 TensorDescriptor const& bias = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
                 uint32_t                strideBias = static_cast<uint32_t>(
                     problem.useBias() && bias.dimensions() ? bias.strides()[bias.dimensions() - 1]
-                                                           : 0);
+                                                                          : 0);
                 rv.args.template append<uint32_t>("StrideBias", strideBias);
                 break;
             }
@@ -4268,11 +4295,10 @@ namespace TensileLite
         }
 
         if(problemType.stridedBatched)
-            args.template append<void*>(
-                "D",
-                pointerArrayBatch && inputs.batchD
-                    ? const_cast<void*>(static_cast<void const*>(inputs.batchD))
-                    : inputs.d);
+            args.template append<void*>("D",
+                                        pointerArrayBatch && inputs.batchD ? const_cast<void*>(
+                                            static_cast<void const*>(inputs.batchD))
+                                                                           : inputs.d);
         else
             args.template append<void const* const*>("batchD", inputs.batchD);
 
@@ -6339,8 +6365,8 @@ namespace TensileLite
                 };
                 origami::config_t origami_config = {
                     .mt        = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                  static_cast<size_t>(sizeMapping.macroTile.y),
-                                  static_cast<size_t>(sizeMapping.depthU)},
+                           static_cast<size_t>(sizeMapping.macroTile.y),
+                           static_cast<size_t>(sizeMapping.depthU)},
                     .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
                 };
 
@@ -7181,18 +7207,18 @@ namespace TensileLite
                     }
                     origami::config_t origami_config = {
                         .mt        = {static_cast<size_t>(self.sizeMapping.macroTile.x),
-                                      static_cast<size_t>(self.sizeMapping.macroTile.y),
-                                      static_cast<size_t>(self.sizeMapping.depthU)},
+                               static_cast<size_t>(self.sizeMapping.macroTile.y),
+                               static_cast<size_t>(self.sizeMapping.depthU)},
                         .mi        = {static_cast<size_t>(self.sizeMapping.matrixInstruction[0]),
-                                      static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
-                                      static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
+                               static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
+                               static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
                         .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
                         .workgroup_mapping = self.sizeMapping.workGroupMapping,
                         .workspace_size    = problem.workspaceSize(),
                         .workspace_size_per_elem_c
                         = self.sizeMapping.isPersistentDataParallel()
                               ? static_cast<size_t>(
-                                    DataTypeInfo::Get(self.problemType.computeType).elementSize)
+                                  DataTypeInfo::Get(self.problemType.computeType).elementSize)
                               : self.sizeMapping.workspaceSizePerElemC,
                         // The existing grid predictor was calibrated with this model
                         // for whole-tile launches. This adapter preserves its grid policy;

@@ -158,17 +158,17 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
             return;                                                                    \
         }                                                                              \
     } while(0)
-#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                   \
-    do                                                                                      \
-    {                                                                                       \
-        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                             \
-        {                                                                                   \
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                \
+    do                                                                                   \
+    {                                                                                    \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                          \
+        {                                                                                \
             hipblaslt_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is   \
-                           larger than user allocated("    \
-                           << MAX_WORKSPACE_SIZE << ")!" << " at " __FILE__ ":" << __LINE__ \
-                           << std::endl;                                                    \
-            return;                                                                         \
-        }                                                                                   \
+                           larger than user allocated(" \
+                           << MAX_WORKSPACE_SIZE << ")!"                                 \
+                           << " at " __FILE__ ":" << __LINE__ << std::endl;              \
+            return;                                                                      \
+        }                                                                                \
     } while(0)
 #endif // GOOGLE_TEST
 
@@ -393,8 +393,8 @@ public:
         return std::move(name);
     }
 
-    RocBlasLt_TestName()                                     = default;
-    RocBlasLt_TestName(const RocBlasLt_TestName&)            = delete;
+    RocBlasLt_TestName()                          = default;
+    RocBlasLt_TestName(const RocBlasLt_TestName&) = delete;
     RocBlasLt_TestName& operator=(const RocBlasLt_TestName&) = delete;
 };
 
@@ -481,8 +481,8 @@ struct hipblaslt_test_invalid
         FAIL() << msg;
 #else
         hipblaslt_cerr << msg << std::endl;
-        hipblaslt_cerr << "function: " << arg.function
-                       << " types: " << " a: " << hip_datatype_to_string(arg.a_type)
+        hipblaslt_cerr << "function: " << arg.function << " types: "
+                       << " a: " << hip_datatype_to_string(arg.a_type)
                        << " b: " << hip_datatype_to_string(arg.b_type)
                        << " c: " << hip_datatype_to_string(arg.c_type)
                        << " d: " << hip_datatype_to_string(arg.d_type)

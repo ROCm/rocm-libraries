@@ -134,7 +134,8 @@ public:
                 {
                     name_line << ",atol";
                     if(atol == 1) // atol == init value
-                        val_line << "," << "failed";
+                        val_line << ","
+                                 << "failed";
                     else
                         val_line << "," << atol;
                 }
@@ -142,7 +143,8 @@ public:
                 {
                     name_line << ",rtol";
                     if(rtol == 1) // rtol == init value
-                        val_line << "," << "failed";
+                        val_line << ","
+                                 << "failed";
                     else
                         val_line << "," << rtol;
                 }
