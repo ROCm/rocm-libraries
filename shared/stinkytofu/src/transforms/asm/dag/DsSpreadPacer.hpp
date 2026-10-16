@@ -63,7 +63,6 @@ class DsSpreadPacer {
     void reset() {
         deadline_.clear();
         slot_.clear();
-        sortedSlots_.clear();
         pace_ = {};
         nextGroupAt_ = kNever;
         runLength_ = 0;
@@ -108,16 +107,6 @@ class DsSpreadPacer {
     int slotOf(unsigned nodeId) const {
         auto it = slot_.find(nodeId);
         return it == slot_.end() ? -1 : it->second;
-    }
-
-    // ds_loads whose slot is due by `clock` and that have not issued yet. The scheduler holds the
-    // next WMMA back while a load is owed, so the loads feeding a barrier are done by the barrier's
-    // threshold whatever else slows them (the barrier position is decided first).
-    int owed(int clock) const {
-        if (!active_) return 0;
-        const auto due = std::upper_bound(sortedSlots_.begin(), sortedSlots_.end(), clock) -
-                         sortedSlots_.begin();
-        return std::max(0, static_cast<int>(due) - static_cast<int>(issueClocks_.size()));
     }
 
     // Whether the ds_load may issue at region clock `clock`.
@@ -200,12 +189,9 @@ class DsSpreadPacer {
             for (int k = 0; k < n; ++k)
                 slot_[ids[k]] = static_cast<int>(first + (k / pace_.count) * period);
         }
-        for (const auto& kv : slot_) sortedSlots_.push_back(kv.second);
-        std::sort(sortedSlots_.begin(), sortedSlots_.end());
     }
 
     std::unordered_map<unsigned, int> slot_;
-    std::vector<int> sortedSlots_;
     std::unordered_map<unsigned, int> deadline_;
     std::vector<int> issueClocks_;
     PassFeatureConfig::DsPace pace_;

@@ -149,9 +149,6 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
-        /// Hold the next WMMA while a ds_load is owed by its section slot (the owed gate); an owed
-        /// load pays its credit wait as time instead of being blocked.
-        bool dsOwedGate = false;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).

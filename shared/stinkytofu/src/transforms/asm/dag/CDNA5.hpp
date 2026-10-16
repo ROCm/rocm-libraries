@@ -534,9 +534,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // dsReadCyclesPerLoad() capped at the even spread of the region's `dsTotal` loads over its
     // WMMAs: a ds-dense region overflows at an even pace instead of being held back until
     // deadlines force a burst. The pace and the barrier windows must use the same rate.
-    bool dsOwedGateOn() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.dsOwedGate;
-    }
     int effectiveDsCyclesPerLoad(int dsTotal) const {
         int cpl = dsReadCyclesPerLoad();
         if (cpl > 0 && dsTotal > 0 && wmmaTotalThisRegion_ > 0) {
@@ -1672,10 +1669,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             dsCreditWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
-        // An owed load (its slot is due) issues whatever the credit says; the wait is charged
-        // as pacing time. The barrier position was decided first, so the loads must meet it.
-        const bool dsOwed = spread && dsOwedGateOn() && dsSpread_.owed(clock_) > 0;
-        if (fitsSchedulingBudget || (spread && dsOverflow_) || dsOwed) {
+        if (fitsSchedulingBudget || (spread && dsOverflow_)) {
             if (!spread || wmmaRunAtLimit_ || dsSpread_.released(pickedDS->id, clock_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
@@ -2447,23 +2441,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
             << " slot=" << (pickedDS ? dsSpread_.slotOf(pickedDS->id) : -2) << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
-            << " run=" << wmmaRun_ << " owed=" << (dsSpreadOn() ? dsSpread_.owed(clock_) : 0)
-            << " credFull=" << dsReadInflight_.full() << " preempt=" << preemptForQueue
-            << " outstanding=" << outstandingWmmas() << " cover=" << queuedCoverCycles()
-            << " fills=" << nonWmmaFillsSinceActiveWmma_ << " localReadQ=" << localReadQueue.size()
-            << " nonWmmaMinId="
+            << " run=" << wmmaRun_ << " credFull=" << dsReadInflight_.full()
+            << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
+            << " cover=" << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
+            << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
             << (smallestPickable ? std::to_string(smallestPickable->id) : std::string("none"))
             << "\n");
         // A run of kWmmaRunMax WMMAs ends here when something else can issue.
         const bool blockWmmaForRunLimit = wmmaRunAtLimit_ && hasPickableNonWmma;
-        // A ds_load is owed: it goes before the next WMMA (old's hide-budget gate, driven by the
-        // section slots).
-        const bool blockWmmaForOwedDs = hasPickableNonWmma && pickKind == kLocalRead &&
-                                        dsSpreadOn() && dsOwedGateOn() &&
-                                        dsSpread_.owed(clock_) > 0;
         if (bestLatency <= 0 && !blockWmmaForLoopHeadBalance && !blockWmmaForActiveWindow &&
             !blockWmmaForAtLeastOneNonWmmaInterleaving && !blockWmmaForCoexecSpacing &&
-            !blockWmmaForRunLimit && !blockWmmaForOwedDs) {
+            !blockWmmaForRunLimit) {
             DAGNode* node = pickOneFromWMMA(bestWMMA);
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B picked WMMA dagId=" << node->id
                                  << "\n");
