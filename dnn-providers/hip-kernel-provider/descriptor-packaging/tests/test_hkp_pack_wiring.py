@@ -392,12 +392,27 @@ endif()
 
 
 @pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
+@pytest.mark.parametrize(
+    "predicate, engine, sibling",
+    [
+        (
+            "hkp_gfx950_attention_dense_available",
+            "hipkernel:Gfx950AttentionDense",
+            "hipkernel:Gfx950AttentionUnified2D",
+        ),
+        (
+            "hkp_gfx950_attention_unified_2d_available",
+            "hipkernel:Gfx950AttentionUnified2D",
+            "hipkernel:Gfx950AttentionDense",
+        ),
+    ],
+)
 def test_the_arch_aware_predicate_reads_the_probe_and_falls_back_to_the_rocke_option(
-    consumer, enable_rocke
+    consumer, enable_rocke, predicate, engine, sibling
 ):
-    """gfx950 dense attention is available when the product pack ships it for
-    gfx950. A probe that could not answer reads as HIPKERNELPROVIDER_ENABLE_ROCKE,
-    since the bundle is rocKE content."""
+    """A gfx950 attention engine is available when the product pack ships that
+    engine for gfx950, not when only its sibling ships. A probe that could not answer
+    reads as HIPKERNELPROVIDER_ENABLE_ROCKE, since the bundle is rocKE content."""
 
     def answer(shipped, probe_ok):
         return f"""set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
@@ -406,7 +421,7 @@ set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product gfx950)
 set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
 set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product
     "{_cmake_string(json.dumps(shipped))}")
-hkp_gfx950_attention_dense_available(_available)
+{predicate}(_available)
 if(_available)
     set(_available TRUE)
 else()
@@ -420,7 +435,8 @@ endif()
         return _reported(consumer.configure(), "available")
 
     assert evaluate({"gfx950": ["x:Other"]}, "TRUE") == "FALSE"
-    assert evaluate({"gfx950": ["hipkernel:Gfx950AttentionDense"]}, "TRUE") == "TRUE"
+    assert evaluate({"gfx950": [sibling]}, "TRUE") == "FALSE"
+    assert evaluate({"gfx950": [engine]}, "TRUE") == "TRUE"
     assert evaluate({}, "FALSE") == ("TRUE" if enable_rocke == "ON" else "FALSE")
 
 
