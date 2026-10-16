@@ -3480,17 +3480,11 @@ inline void host_csrmv(hipsparseOperation_t trans,
                        const X*             x,
                        T                    beta,
                        Y*                   y,
-                       hipsparseIndexBase_t base)
+                       hipsparseIndexBase_t base,
+                       int                  warp_size)
 {
     if(trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
     {
-        // Get device properties
-        int             dev;
-        hipDeviceProp_t prop{};
-
-        std::ignore = hipGetDevice(&dev);
-        std::ignore = hipGetDeviceProperties(&prop, dev);
-
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
 
@@ -3502,7 +3496,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
             WF_SIZE = 8;
         else if(nnz_per_row < 32)
             WF_SIZE = 16;
-        else if(nnz_per_row < 64 || prop.warpSize == 32)
+        else if(nnz_per_row < 64 || warp_size == 32)
             WF_SIZE = 32;
         else
             WF_SIZE = 64;
@@ -5124,26 +5118,20 @@ static inline void host_lssolve(J                     M,
                                 hipsparseDiagType_t   diag_type,
                                 hipsparseIndexBase_t  base,
                                 J*                    struct_pivot,
-                                J*                    numeric_pivot)
+                                J*                    numeric_pivot,
+                                int                   warp_size)
 {
-    // Get device properties
-    int             dev;
-    hipDeviceProp_t prop{};
-
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
-
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(J i = 0; i < nrhs; ++i)
     {
-        std::vector<T> temp(prop.warpSize);
+        std::vector<T> temp(warp_size);
 
         // Process lower triangular part
         for(J row = 0; row < M; ++row)
         {
-            temp.assign(prop.warpSize, make_DataType<T>(0.0));
+            temp.assign(warp_size, make_DataType<T>(0.0));
 
             J idx_B
                 = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
@@ -5165,9 +5153,9 @@ static inline void host_lssolve(J                     M,
 
             T diag_val = make_DataType<T>(0.0);
 
-            for(I l = row_begin; l < row_end; l += prop.warpSize)
+            for(I l = row_begin; l < row_end; l += warp_size)
             {
-                for(int k = 0; k < prop.warpSize; ++k)
+                for(int k = 0; k < warp_size; ++k)
                 {
                     I j = l + k;
 
@@ -5227,9 +5215,9 @@ static inline void host_lssolve(J                     M,
                 }
             }
 
-            for(int j = 1; j < prop.warpSize; j <<= 1)
+            for(int j = 1; j < warp_size; j <<= 1)
             {
-                for(int k = 0; k < prop.warpSize - j; ++k)
+                for(int k = 0; k < warp_size - j; ++k)
                 {
                     temp[k] = temp[k] + temp[k + j];
                 }
@@ -5266,26 +5254,20 @@ static inline void host_ussolve(J                     M,
                                 hipsparseDiagType_t   diag_type,
                                 hipsparseIndexBase_t  base,
                                 J*                    struct_pivot,
-                                J*                    numeric_pivot)
+                                J*                    numeric_pivot,
+                                int                   warp_size)
 {
-    // Get device properties
-    int             dev;
-    hipDeviceProp_t prop{};
-
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
-
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(J i = 0; i < nrhs; ++i)
     {
-        std::vector<T> temp(prop.warpSize);
+        std::vector<T> temp(warp_size);
 
         // Process upper triangular part
         for(J row = M - 1; row >= 0; --row)
         {
-            temp.assign(prop.warpSize, make_DataType<T>(0.0));
+            temp.assign(warp_size, make_DataType<T>(0.0));
 
             J idx_B
                 = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
@@ -5307,9 +5289,9 @@ static inline void host_ussolve(J                     M,
 
             T diag_val = make_DataType<T>(0.0);
 
-            for(I l = row_end - 1; l >= row_begin; l -= prop.warpSize)
+            for(I l = row_end - 1; l >= row_begin; l -= warp_size)
             {
-                for(int k = 0; k < prop.warpSize; ++k)
+                for(int k = 0; k < warp_size; ++k)
                 {
                     I j = l - k;
 
@@ -5366,9 +5348,9 @@ static inline void host_ussolve(J                     M,
                 }
             }
 
-            for(int j = 1; j < prop.warpSize; j <<= 1)
+            for(int j = 1; j < warp_size; j <<= 1)
             {
-                for(int k = 0; k < prop.warpSize - j; ++k)
+                for(int k = 0; k < warp_size - j; ++k)
                 {
                     temp[k] = temp[k] + temp[k + j];
                 }
@@ -5539,21 +5521,15 @@ void host_csr_lsolve(J                    M,
                      hipsparseDiagType_t  diag_type,
                      hipsparseIndexBase_t base,
                      J*                   struct_pivot,
-                     J*                   numeric_pivot)
+                     J*                   numeric_pivot,
+                     int                  warp_size)
 {
-    // Get device properties
-    int             dev;
-    hipDeviceProp_t prop{};
-
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
-
-    std::vector<T> temp(prop.warpSize);
+    std::vector<T> temp(warp_size);
 
     // Process lower triangular part
     for(J row = 0; row < M; ++row)
     {
-        temp.assign(prop.warpSize, make_DataType<T>(0.0));
+        temp.assign(warp_size, make_DataType<T>(0.0));
         temp[0] = testing_mult(alpha, x[row]);
 
         I diag      = -1;
@@ -5562,9 +5538,9 @@ void host_csr_lsolve(J                    M,
 
         T diag_val = make_DataType<T>(0.0);
 
-        for(I l = row_begin; l < row_end; l += prop.warpSize)
+        for(I l = row_begin; l < row_end; l += warp_size)
         {
-            for(int k = 0; k < prop.warpSize; ++k)
+            for(int k = 0; k < warp_size; ++k)
             {
                 I j = l + k;
 
@@ -5611,9 +5587,9 @@ void host_csr_lsolve(J                    M,
             }
         }
 
-        for(int j = 1; j < prop.warpSize; j <<= 1)
+        for(int j = 1; j < warp_size; j <<= 1)
         {
-            for(int k = 0; k < prop.warpSize - j; ++k)
+            for(int k = 0; k < warp_size - j; ++k)
             {
                 temp[k] = temp[k] + temp[k + j];
             }
@@ -5646,21 +5622,15 @@ void host_csr_usolve(J                    M,
                      hipsparseDiagType_t  diag_type,
                      hipsparseIndexBase_t base,
                      J*                   struct_pivot,
-                     J*                   numeric_pivot)
+                     J*                   numeric_pivot,
+                     int                  warp_size)
 {
-    // Get device properties
-    int             dev;
-    hipDeviceProp_t prop{};
-
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
-
-    std::vector<T> temp(prop.warpSize);
+    std::vector<T> temp(warp_size);
 
     // Process upper triangular part
     for(J row = M - 1; row >= 0; --row)
     {
-        temp.assign(prop.warpSize, make_DataType<T>(0));
+        temp.assign(warp_size, make_DataType<T>(0));
         temp[0] = testing_mult(alpha, x[row]);
 
         I diag      = -1;
@@ -5669,9 +5639,9 @@ void host_csr_usolve(J                    M,
 
         T diag_val = make_DataType<T>(0);
 
-        for(I l = row_end - 1; l >= row_begin; l -= prop.warpSize)
+        for(I l = row_end - 1; l >= row_begin; l -= warp_size)
         {
-            for(int k = 0; k < prop.warpSize; ++k)
+            for(int k = 0; k < warp_size; ++k)
             {
                 I j = l - k;
 
@@ -5714,9 +5684,9 @@ void host_csr_usolve(J                    M,
             }
         }
 
-        for(int j = 1; j < prop.warpSize; j <<= 1)
+        for(int j = 1; j < warp_size; j <<= 1)
         {
-            for(int k = 0; k < prop.warpSize - j; ++k)
+            for(int k = 0; k < warp_size - j; ++k)
             {
                 temp[k] = temp[k] + temp[k + j];
             }
@@ -5752,7 +5722,8 @@ void host_csrsv(hipsparseOperation_t trans,
                 hipsparseFillMode_t  fill_mode,
                 hipsparseIndexBase_t base,
                 J*                   struct_pivot,
-                J*                   numeric_pivot)
+                J*                   numeric_pivot,
+                int                  warp_size)
 {
     // Initialize pivot
     *struct_pivot  = M + 1;
@@ -5772,7 +5743,8 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot);
+                            numeric_pivot,
+                            warp_size);
         }
         else
         {
@@ -5786,7 +5758,8 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot);
+                            numeric_pivot,
+                            warp_size);
         }
     }
     else if(trans == HIPSPARSE_OPERATION_TRANSPOSE
@@ -5829,7 +5802,8 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot);
+                            numeric_pivot,
+                            warp_size);
         }
         else
         {
@@ -5843,7 +5817,8 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot);
+                            numeric_pivot,
+                            warp_size);
         }
     }
 
@@ -5867,7 +5842,8 @@ void host_coosv(hipsparseOperation_t  trans,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 I*                    struct_pivot,
-                I*                    numeric_pivot)
+                I*                    numeric_pivot,
+                int                   warp_size)
 {
     std::vector<I> csr_row_ptr(M + 1);
 
@@ -5897,7 +5873,8 @@ void host_coosv(hipsparseOperation_t  trans,
                fill_mode,
                base,
                struct_pivot,
-               numeric_pivot);
+               numeric_pivot,
+               warp_size);
 }
 
 template <typename I, typename J, typename T>
@@ -5917,7 +5894,8 @@ void host_csrsm2(J                     M,
                  hipsparseFillMode_t   fill_mode,
                  hipsparseIndexBase_t  base,
                  J*                    struct_pivot,
-                 J*                    numeric_pivot)
+                 J*                    numeric_pivot,
+                 int                   warp_size)
 {
     // Initialize pivot
     *struct_pivot  = M + 1;
@@ -5940,7 +5918,8 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot);
+                         numeric_pivot,
+                         warp_size);
         }
         else
         {
@@ -5957,7 +5936,8 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot);
+                         numeric_pivot,
+                         warp_size);
         }
     }
     else if(transA == HIPSPARSE_OPERATION_TRANSPOSE
@@ -6003,7 +5983,8 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot);
+                         numeric_pivot,
+                         warp_size);
         }
         else
         {
@@ -6020,7 +6001,8 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot);
+                         numeric_pivot,
+                         warp_size);
         }
     }
 
@@ -6050,7 +6032,8 @@ void host_csrsm(J                     M,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 J*                    struct_pivot,
-                J*                    numeric_pivot)
+                J*                    numeric_pivot,
+                int                   warp_size)
 {
     J B_m = (trans_B == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? M : nrhs;
     J B_n = (trans_B == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? nrhs : M;
@@ -6199,7 +6182,8 @@ void host_csrsm(J                     M,
                 fill_mode,
                 base,
                 struct_pivot,
-                numeric_pivot);
+                numeric_pivot,
+                warp_size);
 }
 
 template <typename I, typename T>
@@ -6222,7 +6206,8 @@ void host_coosm(I                     M,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 I*                    struct_pivot,
-                I*                    numeric_pivot)
+                I*                    numeric_pivot,
+                int                   warp_size)
 {
     I B_m = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? M : nrhs;
     I B_n = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? nrhs : M;
@@ -6386,7 +6371,8 @@ void host_coosm(I                     M,
                 fill_mode,
                 base,
                 struct_pivot,
-                numeric_pivot);
+                numeric_pivot,
+                warp_size);
 }
 
 /* ============================================================================================ */

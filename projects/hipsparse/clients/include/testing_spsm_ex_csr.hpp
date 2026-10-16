@@ -351,6 +351,11 @@ void testing_spsm_ex_csr(Arguments argus)
 
         J struct_pivot  = -1;
         J numeric_pivot = -1;
+        int             device_id;
+        hipDeviceProp_t device_prop{};
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
         host_csrsm(m,
                    k,
                    nnz,
@@ -370,7 +375,8 @@ void testing_spsm_ex_csr(Arguments argus)
                    uplo,
                    idx_base,
                    &struct_pivot,
-                   &numeric_pivot);
+                   &numeric_pivot,
+                   device_prop.warpSize);
 
         if(struct_pivot == -1 && numeric_pivot == -1)
         {

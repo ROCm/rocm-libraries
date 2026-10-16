@@ -223,6 +223,11 @@ void testing_csrmv(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
+        int             device_id;
+        hipDeviceProp_t device_prop{};
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
         host_csrmv(transA,
                    nrow,
                    ncol,
@@ -234,7 +239,8 @@ void testing_csrmv(Arguments argus)
                    hx.data(),
                    h_beta,
                    hy_gold.data(),
-                   idx_base);
+                   idx_base,
+                   device_prop.warpSize);
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());

@@ -314,6 +314,11 @@ void testing_spmv_csr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(Y) * y_size, hipMemcpyDeviceToHost));
 
         // Host SpMV
+        int             device_id;
+        hipDeviceProp_t device_prop{};
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
         host_csrmv<I, J, A, X, Y, T>(transA,
                                      m,
                                      n,
@@ -325,7 +330,8 @@ void testing_spmv_csr(Arguments argus)
                                      hx.data(),
                                      h_beta,
                                      hy_gold.data(),
-                                     idx_base);
+                                     idx_base,
+                                     device_prop.warpSize);
 
         unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());

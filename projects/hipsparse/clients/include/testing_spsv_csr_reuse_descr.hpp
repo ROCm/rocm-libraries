@@ -155,6 +155,11 @@ static void call_spsv(hipsparseHandle_t&     handle,
     // Host SpSV
     J struct_pivot  = -1;
     J numeric_pivot = -1;
+    int             device_id;
+    hipDeviceProp_t device_prop{};
+    CHECK_HIP_ERROR(hipGetDevice(&device_id));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
     host_csrsv(transA,
                m,
                nnz,
@@ -168,7 +173,8 @@ static void call_spsv(hipsparseHandle_t&     handle,
                uplo,
                idx_base,
                &struct_pivot,
-               &numeric_pivot);
+               &numeric_pivot,
+               device_prop.warpSize);
 
     // Only validate when the triangular system is non-singular (no structural
     // or numerical pivot was encountered by the host reference).
@@ -307,6 +313,11 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         std::vector<T> hy_gold(hy);
                         J              struct_pivot  = -1;
                         J              numeric_pivot = -1;
+                        int             device_id;
+                        hipDeviceProp_t device_prop{};
+                        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+                        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
                         host_csrsv(op,
                                    m,
                                    nnz,
@@ -320,7 +331,8 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                                    uplo,
                                    idx_base,
                                    &struct_pivot,
-                                   &numeric_pivot);
+                                   &numeric_pivot,
+                                   device_prop.warpSize);
 
                         if(struct_pivot == -1 && numeric_pivot == -1)
                         {
