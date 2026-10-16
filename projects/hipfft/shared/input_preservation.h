@@ -79,12 +79,16 @@ static inline uint64_t raw_byte_digest(const void* data, const size_t size_bytes
 // The check also skips itself, rather than failing, when it cannot run: on
 // bricked or multi-device layouts (where the input pointers refer to per-brick
 // staging buffers that the input layout no longer describes), on a params
-// object whose isize has not been computed yet (e.g. the round-trip inverse),
-// and when there is not enough host memory to stage a copy.
+// object whose isize has not been computed yet, and when there is not enough
+// host memory to stage a copy.
 template <class Tparams>
 class input_preservation_check
 {
 public:
+    // An unarmed check, for callers that have to declare one before they are in
+    // a position to populate it.  Reports nothing.
+    input_preservation_check() = default;
+
     input_preservation_check(const Tparams& params, const std::vector<void*>& pibuffer)
     {
         if(!input_must_be_preserved(params))
