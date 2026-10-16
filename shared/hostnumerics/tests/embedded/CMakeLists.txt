@@ -26,3 +26,13 @@ target_link_libraries(hostnumerics-embedded-test PRIVATE roc::hostnumerics GTest
 
 enable_testing()
 add_test(NAME hostnumerics-embedded-test COMMAND hostnumerics-embedded-test)
+
+# Internal C++ result contracts cannot be exercised through the Python bindings.
+add_executable(hostnumerics-result-tests "${HOSTNUMERICS_SOURCE_DIR}/tests/result_test.cpp")
+target_link_libraries(hostnumerics-result-tests PRIVATE roc::hostnumerics-core GTest::gtest_main)
+include(GoogleTest)
+gtest_discover_tests(
+    hostnumerics-result-tests
+    DISCOVERY_MODE PRE_TEST
+    TEST_PREFIX "hostnumerics-result."
+)

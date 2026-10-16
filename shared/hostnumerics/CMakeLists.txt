@@ -35,6 +35,7 @@ target_sources(hostnumerics-core
         FILES
             "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
             include/roc/hostnumerics/scalar_type.hpp
+            include/roc/hostnumerics/result.hpp
 )
 
 # hostnumerics will add input generation, reference operations, and comparison.

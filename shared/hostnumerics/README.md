@@ -70,6 +70,22 @@ removing an old accelerated path.
 
 C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics.
 
+## Internal C++ results
+
+`detail::Expected<T, E>` in `result.hpp` represents either a value or an error.
+Use `detail::Unexpected(error)` to construct a failure, check `has_value()` or
+its boolean conversion, and use `*`/`->` or `error()` only in the matching state.
+The wrapper stores its payload inline and adds no allocation or exception
+translation. An owning payload can still allocate or throw.
+
+This follows the core `std::expected<T, E>` model while retaining C++20 support;
+HostNumerics cannot yet assume C++23 and compatible standard libraries across
+its consumers. It deliberately omits assignment, void values, converting result
+constructors, throwing `value()` access, fallback access, comparisons, and
+monadic operations. Assignment is disabled to keep the stored variant from
+becoming valueless after a throwing payload assignment. The utility remains an
+implementation helper in `detail`, rather than a new supported public API.
+
 ## Build and test
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
