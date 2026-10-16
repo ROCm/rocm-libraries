@@ -642,6 +642,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // Set by findSmallestPickableNonWmma: a ds_load / tensor_load fits this window even if
     // a free filler outranks it, so the quota must not close the window yet.
     mutable bool memWorkFitsWindow_ = false;
+    mutable bool dsHeldBySpreadLast_ = false;  // debug only
     bool fillQuotaMet() const {
         return fillQuotaPerWindow_ > 0 && fillsThisWindow_ >= fillQuotaPerWindow_;
     }
@@ -1613,6 +1614,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     std::tuple<int, int, int> bestKey{};
     const bool spread = dsSpreadOn();
     bool dsHeldBySpread = false;
+    dsHeldBySpreadLast_ = false;
 
     // Ordering, lowest key first: (1) genuinely free work; (2) a ds_load waiting
     // for a credit that fits the active WMMA's scheduling budget; (3) work that
@@ -1667,6 +1669,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
                 memWorkFitsWindow_ = true;
             } else {
                 dsHeldBySpread = true;
+                dsHeldBySpreadLast_ = true;
             }
         }
     }
@@ -2416,7 +2419,9 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                              << " blockActiveWindow=" << blockWmmaForActiveWindow
                              << " blockAtLeastOneNonWmmaInterleaving="
                              << blockWmmaForAtLeastOneNonWmmaInterleaving << " blockCoexecSpacing="
-                             << blockWmmaForCoexecSpacing << " preempt=" << preemptForQueue
+                             << blockWmmaForCoexecSpacing << " hasPickable=" << hasPickableNonWmma
+                             << " pickKind=" << pickKind << " dsFree=" << dsIssuesFree
+                             << " dsHeld=" << dsHeldBySpreadLast_ << " preempt=" << preemptForQueue
                              << " outstanding=" << outstandingWmmas() << " cover="
                              << queuedCoverCycles() << " fills=" << nonWmmaFillsSinceActiveWmma_
                              << " localReadQ=" << localReadQueue.size() << " nonWmmaMinId="
