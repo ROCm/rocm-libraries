@@ -281,21 +281,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
-    # Census for the gfx1151 WMMA-attention production pack, gated like gfx950 above.
-    hkp_product_ships_engine_for_arch(
-        _hkp_gfx1151_wmma_attention "hipkernel:Gfx1151WmmaAttention" gfx1151)
-    if(_hkp_gfx1151_wmma_attention)
+    # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
+    # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
+    # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.
+    set(_hkp_rdna_wmma_attention_arches "")
+    foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
+                           gfx1200 gfx1201)
+        hkp_product_ships_engine_for_arch(
+            _hkp_ships "hipkernel:Gfx1151WmmaAttention" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_rdna_wmma_attention_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_rdna_wmma_attention_arches)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES gfx1151
+            ARCHES ${_hkp_rdna_wmma_attention_arches}
             SUITES TestGfx1151WmmaAttentionPacks
             EXPECTED_CASES
                 LoadsExactlyTheEmittedPacks
                 LoadsExactlyTheEmittedKernels
                 EveryLoadedDescriptorCoversTheRequestedArch
                 EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                DeclaresTheConfiguredSdkVersion
+                UnderstandsRuntimePassByValueScaleGraphs
                 ExposesTheConfiguredKnobs
                 RanksThroughItsRegisteredScoreSymbol
                 CarriesNoGraphScopedMatcher
@@ -304,7 +313,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     else()
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx1151WmmaAttention for "
-            "gfx1151, so its census is not registered.")
+            "any RDNA arch, so its census is not registered.")
     endif()
 endif()
 

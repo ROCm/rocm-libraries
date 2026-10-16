@@ -169,6 +169,9 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/table_model.fbs
         schemas/moe_grouped_matmul_attributes.fbs
         schemas/moe_grouped_matmul_bwd_attributes.fbs
+        schemas/linear_attention_common.fbs
+        schemas/gdn_attributes.fbs
+        schemas/kda_attributes.fbs
     )
     hipdnn_generate_flatbuffer_headers(
         TARGET hipdnn_flatbuffers_sdk

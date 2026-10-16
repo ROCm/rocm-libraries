@@ -146,31 +146,28 @@ def _gfx1250_scaled_rows(declaration: dict) -> list[dict]:
 
 
 @lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
+def _load_doc() -> dict:
     # Pin UTF-8 for embedded interpreters whose default codec is ASCII.
     with open(_DATA_FILE, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    for gfx, spec in doc["arches"].items():
+        return json.load(fh)
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> Dict[str, dict]:
+    arches = _load_doc()["arches"]
+    for gfx, spec in arches.items():
         spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
-    return doc["arches"]
+    return arches
 
 
-# LLVM defines generic-processor membership explicitly; it is not a naming
-# wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
-# https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
-_GFX11_GENERIC_PROCESSORS = frozenset(
-    {
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
+@lru_cache(maxsize=1)
+def _load_generic_targets() -> Dict[str, Tuple[str, ...]]:
+    return {
+        generic: tuple(members)
+        for generic, members in _load_doc()["generic_targets"].items()
+        if not generic.startswith("_")
     }
-)
+
 
 # A callable that, given an :class:`~rocke.core.ir.IRBuilder`, a runtime lane
 # ``Value`` (0..wave_size-1) and a compile-time fragment slot index, emits the
@@ -713,8 +710,8 @@ def _wmma_b_16x16_iu4(builder, lane, slot):
 # ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
 # the two lane-halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The
 # accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
-# registers index rows. These maps are the *hypothesis* verified empirically by
-# examples/gfx1201/wmma_probe.py before matmul_nbits is trusted on gfx1201.
+# registers index rows. The WMMA attention numeric suite exercises these maps on
+# gfx1200/gfx1201 hardware; examples/gfx1201/wmma_probe.py probes single atoms.
 def _wmma_gfx12_acc_16x16(builder, lane, slot):
     """RDNA4 WMMA 16x16x16 accumulator (wave32): ``<8 x float>`` per lane;
     slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns
@@ -1534,11 +1531,13 @@ def _processor_from_target_id(target_id: str) -> str:
     for arch in sorted(arches, key=len, reverse=True):
         if target_without_features.startswith(f"{arch}-"):
             return arch
-    for processor in _GFX11_GENERIC_PROCESSORS:
-        if target_without_features == processor or target_without_features.startswith(
-            f"{processor}-"
-        ):
-            return processor
+    for members in _load_generic_targets().values():
+        for processor in members:
+            if (
+                target_without_features == processor
+                or target_without_features.startswith(f"{processor}-")
+            ):
+                return processor
     match = re.match(r"^(gfx[0-9a-z]+)", target_without_features)
     return match.group(1) if match else target_without_features
 
@@ -1549,9 +1548,11 @@ def base_arch_from_target_id(target_id: str) -> str:
     Removes features after ``:`` and profile suffixes such as ``-strict``:
     ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
     ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved. A concrete processor in LLVM's documented
-    ``gfx11-generic`` compatibility domain uses that generic rocKE catalog row
-    unless rocKE has a more-specific row; exact rows therefore take precedence.
+    ``gfx11-generic``, are preserved. A concrete processor in one of LLVM's
+    documented generic compatibility domains (``generic_targets``: gfx1100 ->
+    ``gfx11-generic``, gfx1200 -> ``gfx12-generic``) uses that generic rocKE
+    catalog row unless rocKE has a more-specific row; exact rows such as
+    ``gfx1151`` and ``gfx1201`` therefore take precedence.
 
     Any other unknown name is reduced to its leading ``gfx`` token when
     possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
@@ -1562,11 +1563,12 @@ def base_arch_from_target_id(target_id: str) -> str:
     processor = _processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
-    if processor in _GFX11_GENERIC_PROCESSORS and (
-        target_without_features == processor
-        or target_without_features.startswith(f"{processor}-")
-    ):
-        return "gfx11-generic"
+    for generic, members in _load_generic_targets().items():
+        if processor in members and (
+            target_without_features == processor
+            or target_without_features.startswith(f"{processor}-")
+        ):
+            return generic
     return processor
 
 
@@ -1590,6 +1592,26 @@ def compiler_target_from_target_id(target_id: str) -> str:
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features
+
+
+def generic_arch_from_target_id(target_id: str) -> Optional[str]:
+    """Return the catalogued LLVM generic target that runs on ``target_id``.
+
+    A code object built for the returned generic processor loads on the device
+    named by ``target_id``. ``gfx1100`` and ``gfx1151:xnack-`` both become
+    ``gfx11-generic``, and a generic name maps to itself. Returns ``None`` when
+    no catalogued generic target covers the processor.
+
+    This only converts the string; it never queries a GPU. Unlike
+    :func:`base_arch_from_target_id`, it deliberately replaces a concrete name,
+    so call it only where one generic code object should serve the family.
+    """
+
+    base_arch = base_arch_from_target_id(target_id)
+    for generic, members in _load_generic_targets().items():
+        if base_arch == generic or base_arch in members:
+            return generic
+    return None
 
 
 def arch_from_isa(isa: str) -> str:
