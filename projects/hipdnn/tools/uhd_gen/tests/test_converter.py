@@ -381,7 +381,7 @@ class TestEdgeCases:
 
 
 class TestReproducibility:
-    """Artifacts must rebuild byte for byte: RFC 0019 §10.5 records a hash over them."""
+    """Artifacts must rebuild byte for byte: RFC 0019.13 §10.5 records a hash over them."""
 
     @staticmethod
     def _saved(tmp_path: Path) -> Path:

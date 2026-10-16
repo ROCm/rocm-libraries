@@ -5,8 +5,8 @@
  * @file TestWorkloadSampling.cpp
  * @brief Covers drawing from archetypes and moving within neighbourhoods.
  *
- * Draws must stay plausible: an archetype's joint values survive, and perturbation moves each
- * parameter the way it moves in real networks.
+ * Draws must stay plausible: every value comes from the archetype's lists, `$q.<other>` copies
+ * hold, and perturbation moves each parameter the way it moves in real networks.
  */
 
 #include <gtest/gtest.h>

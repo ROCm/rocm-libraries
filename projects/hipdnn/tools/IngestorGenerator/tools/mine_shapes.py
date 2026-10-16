@@ -14,7 +14,7 @@ warning.
 
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
     mine_shapes.py --catalog ../hipdnn_torch/MODEL_CATALOG.md \
-        --shape-dir ~/model-shapes --out-query-csv model-shapes.csv
+        --shape-dir <shape-dir> --out-query-csv model-shapes.csv
 
 Emits the request-field mappings `dispatch_parity.py --shapes` consumes and, with
 `--out-query-csv`, the `q.<parameter>` columns `hipdnn_corpus_gen --model-shapes`
@@ -618,7 +618,7 @@ def _shape_row(row: dict, path: Path) -> dict | None:
 
 
 def from_shape_dir(root: Path, arch: str | None = None) -> list[dict]:
-    """Shapes from a published directory -- the cluster's `~/model-shapes`.
+    """Shapes from a published shape directory.
 
     Reads hipDNN graph JSON (via `from_graph_corpus`) and tabular files (`.json`
     records, `.csv`, `key=value` lines); a directory may mix both.
@@ -960,7 +960,7 @@ def main(argv=None) -> int:
         default=[],
         dest="shape_dirs",
         metavar="DIR",
-        help="A published shape directory -- the cluster's `~/model-shapes`. Reads "
+        help="A published shape directory. Reads "
         "graph JSON and tabular files alike (.json records, .csv, `key=value` lines) "
         "through SHAPE_COLUMNS, so a new publisher's spelling costs one table entry "
         "rather than a reader. Repeatable.",

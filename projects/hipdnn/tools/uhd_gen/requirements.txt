@@ -7,4 +7,5 @@ numpy>=2.5.2
 pandas>=3.0.5
 # The Parquet engine pandas lacks; --input reads the published .parquet dataset.
 pyarrow>=25.0.1
+# GroupKFold: training cross-validates by problem, so no shape is on both sides of a fold.
 scikit-learn>=1.9.0

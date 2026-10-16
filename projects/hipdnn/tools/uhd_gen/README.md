@@ -803,7 +803,7 @@ accounting is not replaced with a guessed label. Only a `tflops` collection need
 complete, and its rows carry no `tflops`.
 
 The `tflops` label is `graph.flops / (avgTimeMs * 1e9)`; the `time` label is `avgTimeMs`.
-RFC 0019.13 §11.2 (:2003) requires a UHD declaring `calibrated: true` to train on
+RFC 0019.13 §11.2 requires a UHD declaring `calibrated: true` to train on
 `avgTimeMs`, and §10.6.2 repeats it for this role specifically; L1 always declares it, so
 the mean is the label and never the minimum or the robust mean. `robustMeanMs` stays on
 every corpus row as §8.5's informational statistic, alongside `stddevMs` and `iters`.
@@ -884,9 +884,7 @@ lives in compiled code: a `predict_engine` UED role for a descriptor-backed
 engine, or, for an engine that ships no UED, the UHD UUID its provider declares in its
 own engine definition (RFC 0019 Open Question 7, RESOLVED). Authoring an L1 model for an
 opaque engine therefore means publishing a UHD carrying one of the ids that engine
-already declares — `AsmSdpaEngine::L1_MODEL_IDS` for ASM SDPA,
-`MIOPEN_ENGINE_L1_MODELS` / `MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS` in `MiopenContainer.cpp`
-for MIOpen — into a descriptor root that provider reads. The document itself declares no
+already declares in its provider code, into a descriptor root that provider reads. The document itself declares no
 engine, role or arch; an id no engine declares is unreachable, and an engine whose
 declared id resolves to nothing contributes no score and falls back to static ordering.
 An opaque engine's UHD must not name a descriptor set in `trained_against` -- it has no UED,

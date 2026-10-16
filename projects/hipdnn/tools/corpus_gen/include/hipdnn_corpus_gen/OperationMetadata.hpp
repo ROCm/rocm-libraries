@@ -203,9 +203,10 @@ struct Neighbourhood
     std::vector<double> ratios; ///< MIRROR: permitted ratios to it
 };
 
-/// A correlated tuple of values drawn from a real workload (§12.2, §12.3).
-/// A value `$q.<other>` copies that parameter's draw; the referent must be set by the archetype
-/// and references must be acyclic (both checked at load).
+/// Values recorded from a real workload (§12.2, §12.3), one list per parameter. A draw picks
+/// from each list independently; a value `$q.<other>` copies that parameter's draw instead,
+/// which is the only way an archetype ties two parameters together. The referent must be set
+/// by the archetype and references must be acyclic (both checked at load).
 struct Archetype
 {
     std::string name;

@@ -16,8 +16,10 @@
 /// @file WorkloadSampling.hpp
 /// @brief Drawing problems that look like workloads, from declared anchors (§5.2, §12.2).
 ///
-/// Archetypes are correlated tuples from real networks; a draw takes one whole archetype so
-/// joint facts survive. Neighbourhoods say how each parameter may move away from an anchor.
+/// Archetypes are values recorded from real networks: a draw takes each parameter from its own
+/// list, and a `$q.<other>` value copies another parameter's draw, which is how an archetype
+/// keeps two parameters equal. Neighbourhoods say how each parameter may move away from an
+/// anchor.
 namespace hipdnn_corpus_gen
 {
 namespace detail

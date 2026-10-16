@@ -30,6 +30,8 @@ dependencies = [
     # happens to have, because its absence surfaces as an ImportError deep inside
     # read_parquet rather than as a missing dependency.
     "pyarrow>=25.0.1",
+    # GroupKFold: training cross-validates by problem, so no shape is on both sides of a
+    # fold.
     "scikit-learn>=1.9.0",
 ]
 

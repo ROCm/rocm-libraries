@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 GBDT_MODEL_FILE_IDENTIFIER = b"HGBM"
 
 #: Reproducible-builds stamp source: converting the same model twice must give the same
-#: bytes, since RFC 0019 §10.5 records a content hash over them.
+#: bytes, since RFC 0019.13 §10.5 records a content hash over them.
 SOURCE_DATE_EPOCH = "SOURCE_DATE_EPOCH"
 
 
