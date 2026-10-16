@@ -250,7 +250,7 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
 }
 
 template <class F>
-void dispatchSdpaType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType, F&& f)
+void dispatchSdpaBackwardType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType, F&& f)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -266,7 +266,7 @@ void dispatchSdpaType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType, F
         f(hipdnn_data_sdk::types::bfloat16{});
         return;
     default:
-        throw std::runtime_error("deriveSdpaBackwardOAndStats: unsupported data type");
+        throw std::invalid_argument("deriveSdpaBackwardOAndStats: unsupported data type");
     }
 }
 
@@ -289,8 +289,8 @@ std::optional<float> resolveSdpaBwdAttnScale(
     const auto uid = attrs.scale_tensor_uid().value();
     const auto& tensor = *inputs.at(uid);
     std::optional<float> value;
-    dispatchSdpaType(tensorDataTypes.at(uid), [&](auto sample) {
-        using T = decltype(sample);
+    dispatchSdpaBackwardType(tensorDataTypes.at(uid), [&](auto type) {
+        using T = decltype(type);
         const auto& typed = static_cast<const TensorBase<T>&>(tensor);
         value = static_cast<float>(typed.memory().hostData()[0]);
     });
@@ -321,9 +321,21 @@ void deriveSdpaBackwardOAndStatsImpl(
         = extractDiagonalBandParams(attrs, "deriveSdpaBackwardOAndStats");
     const std::optional<float> attnScale = resolveSdpaBwdAttnScale(attrs, inputs, tensorDataTypes);
 
+    // Check tensor dims so their accessors don't read garbage or segfault
+    const auto checkTensorDims = [](const auto& tensor) {
+        if(tensor.dims().size() != 4)
+        {
+            throw std::invalid_argument("deriveSdpaBackwardOAndStats: tensor must be rank-4");
+        }
+    };
+
     auto& qT = static_cast<TensorBase<Q>&>(*inputs.at(qUid));
     auto& kT = static_cast<TensorBase<K>&>(*inputs.at(kUid));
     auto& vT = static_cast<TensorBase<V>&>(*inputs.at(vUid));
+    checkTensorDims(qT);
+    checkTensorDims(kT);
+    checkTensorDims(vT);
+
     Tensor<O> oScratch({qT.dims()[0], qT.dims()[1], qT.dims()[2], vT.dims()[3]}); // [B,H,Sq,Dv]
     auto& oT = fillO ? static_cast<TensorBase<O>&>(*inputs.at(oUid)) : oScratch;
     TensorBase<C>* attnMaskT
@@ -400,14 +412,14 @@ void deriveSdpaBackwardOAndStats(const hipdnn_flatbuffers_sdk::data_objects::Nod
     // half and bfloat16. So we are restricting the compute type to float for this derivation.
     if(node.compute_data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
-        throw std::runtime_error("deriveSdpaBackwardOAndStats: compute type must be float");
+        throw std::invalid_argument("deriveSdpaBackwardOAndStats: compute type must be float");
     }
 
     // Dispatch the SDPA backward derivation based on the data types of Q/K/V/O/C
-    dispatchSdpaType(tensorDataTypes.at(attrs->q_tensor_uid()), [&](auto q) {
-        dispatchSdpaType(tensorDataTypes.at(attrs->k_tensor_uid()), [&](auto k) {
-            dispatchSdpaType(tensorDataTypes.at(attrs->v_tensor_uid()), [&](auto v) {
-                dispatchSdpaType(tensorDataTypes.at(attrs->o_tensor_uid()), [&](auto o) {
+    dispatchSdpaBackwardType(tensorDataTypes.at(attrs->q_tensor_uid()), [&](auto q) {
+        dispatchSdpaBackwardType(tensorDataTypes.at(attrs->k_tensor_uid()), [&](auto k) {
+            dispatchSdpaBackwardType(tensorDataTypes.at(attrs->v_tensor_uid()), [&](auto v) {
+                dispatchSdpaBackwardType(tensorDataTypes.at(attrs->o_tensor_uid()), [&](auto o) {
                     deriveSdpaBackwardOAndStatsImpl<decltype(q),
                                                     decltype(k),
                                                     decltype(v),
