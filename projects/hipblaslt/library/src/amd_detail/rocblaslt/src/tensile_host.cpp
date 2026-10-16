@@ -6543,6 +6543,10 @@ try
     if(!handle)
         return rocblaslt_status_invalid_handle;
 
+    HandleDeviceScope device(handle->device);
+    if(!device.current())
+        return rocblaslt_status_internal_error;
+
     std::shared_ptr<LocalKernelLibrary> localLibrary;
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, nullptr);
        st != rocblaslt_status_success)
