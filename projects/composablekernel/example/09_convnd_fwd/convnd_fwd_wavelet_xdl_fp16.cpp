@@ -66,7 +66,11 @@ using DeviceGroupedConvNDFwdInstance =
         1,
         1,
         S<1, 32, 1, 8>,
-        4>;
+        4,
+        InDataType,
+        InDataType,
+        1,
+        true>;
 
 #include "run_convnd_fwd_example.inc"
 

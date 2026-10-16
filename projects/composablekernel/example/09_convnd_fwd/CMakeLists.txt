@@ -14,7 +14,7 @@ add_example_executable(example_convnd_fwd_dl_fp16 convnd_fwd_dl_fp16.cpp)
 add_example_executable(example_convnd_fwd_dl_fp32 convnd_fwd_dl_fp32.cpp)
 add_example_executable(example_convnd_fwd_dl_int8 convnd_fwd_dl_int8.cpp)
 # Wavelet XDL instances use MPerXdl=32/NPerXdl=32 (MFMA), not supported on gfx11/gfx12
-list(APPEND gpu_list_wavelet gfx908 gfx90a gfx942 gfx950)
+list(APPEND gpu_list_wavelet gfx908 gfx90a gfx942 gfx950 gfx1250)
 set(target_wavelet 0)
 foreach(gpu IN LISTS GPU_TARGETS)
     if(gpu IN_LIST gpu_list_wavelet AND target_wavelet EQUAL 0)
