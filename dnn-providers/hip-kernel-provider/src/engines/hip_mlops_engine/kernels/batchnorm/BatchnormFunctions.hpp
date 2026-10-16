@@ -7,10 +7,7 @@
 #include "HipKernelMath.hpp"
 #include "VectorTypes.hpp"
 
-namespace hip_kernel_provider
-{
-
-namespace batchnorm
+namespace hip_kernel_provider::batchnorm
 {
 
 namespace detail
@@ -141,7 +138,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int xstride,
                                                       unsigned int batchStride)
 {
-    if constexpr(HIP_PLUGIN_USE_FPMIX)
+    if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::fpmix)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -172,7 +169,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                          / 2 * 2;
         }
     }
-    else if constexpr(HIP_PLUGIN_USE_BFPMIX)
+    else if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::bfpmix)
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -277,7 +274,7 @@ __forceinline__ __device__ void storeToStash(FpPrecType_C value,
 
     if constexpr(config::stash_method == 0 || config::stash_method == 1)
     {
-        *(reinterpret_cast<config::fp_prec_c_type*>(stash + index)) = value;
+        *(reinterpret_cast<FpPrecType_C*>(stash + index)) = value;
     }
     else
     {
@@ -476,6 +473,4 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
     return (macro_tmp > alpha && macro_tmp <= beta) ? dy : 0;
 }
 
-} // namespace batchnorm
-
-} // namespace hip_kernel_provider
+} // namespace hip_kernel_provider::batchnorm
