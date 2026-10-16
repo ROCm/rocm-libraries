@@ -13,9 +13,12 @@
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/DeviceIdentity.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if !defined(HIPDNN_BENCH_CSV_SAMPLE)
@@ -110,6 +113,22 @@ TEST(TestCsvOutput, TheHeaderIsTheOneTheDatasetFixtureConverts)
     std::string expected;
     ASSERT_TRUE(std::getline(sample, expected)) << HIPDNN_BENCH_CSV_SAMPLE;
     EXPECT_EQ(csvHeader(deviceNames, {"M"}, {"tile_m"}), expected);
+}
+
+TEST(TestCsvOutput, ASweepNamesItsProblemByTheFeaturesTheRuntimeExtracted)
+{
+    const auto columns = problemColumns(nlohmann::json{{"graph.flops", 2.5e12},
+                                                       {"sdpa.head_dim", 128},
+                                                       {"graph.nodes[0].causal", true},
+                                                       {"sdpa.layout", "bshd"}});
+    // In the page's (sorted) order, each under its published name.
+    const std::vector<std::pair<std::string, std::string>> expected{
+        {"graph.flops", "2500000000000.0"},
+        {"graph.nodes[0].causal", "True"},
+        {"sdpa.head_dim", "128"},
+        {"sdpa.layout", "bshd"}};
+    EXPECT_EQ(columns, expected);
+    EXPECT_TRUE(problemColumns(nlohmann::json::object()).empty());
 }
 
 TEST(TestCsvOutput, AnUntimedCandidateHasEmptyTimings)

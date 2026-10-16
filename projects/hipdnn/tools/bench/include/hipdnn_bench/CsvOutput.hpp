@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 /// @file CsvOutput.hpp
@@ -34,16 +37,45 @@ inline std::string csvField(const std::string& text)
     return quoted + "\"";
 }
 
-/// The CSV header: the problem and its graph's content key, the device columns, the
-/// `--query` parameters (`q.*`), the knobs (`kernel.*`), then the row's outcome. Timing
+/// The problem columns of a catalog sweep: every feature the runtime extracted for the graph,
+/// under the name the catalog page publishes it, so the dataset can tell one problem from
+/// another without a `--query`. Booleans are written as `True`/`False`, as `is_valid` is.
+inline std::vector<std::pair<std::string, std::string>>
+    problemColumns(const nlohmann::json& problemFeatures)
+{
+    std::vector<std::pair<std::string, std::string>> columns;
+    columns.reserve(problemFeatures.size());
+    for(const auto& [name, value] : problemFeatures.items())
+    {
+        std::string text;
+        if(value.is_boolean())
+        {
+            text = value.get<bool>() ? "True" : "False";
+        }
+        else if(value.is_string())
+        {
+            text = value.get<std::string>();
+        }
+        else
+        {
+            text = value.dump();
+        }
+        columns.emplace_back(name, std::move(text));
+    }
+    return columns;
+}
+
+/// The CSV header: the problem and its graph's content key, the device and problem columns
+/// (named in full), the `--query` parameters (`q.*`), the knobs (`kernel.*`), then the row's
+/// outcome. Timing
 /// names follow RFC 0019.13 §8.3 (camelCase); `numerically_valid` is three-valued text,
 /// kept apart from `is_valid` (RFC 0019 §13.2).
-inline std::string csvHeader(const std::vector<std::string>& deviceColumns,
+inline std::string csvHeader(const std::vector<std::string>& featureColumns,
                              const std::vector<std::string>& queryNames,
                              const std::vector<std::string>& knobNames)
 {
     std::string header = "problem,benchmark";
-    for(const auto& column : deviceColumns)
+    for(const auto& column : featureColumns)
     {
         header += "," + csvField(column);
     }

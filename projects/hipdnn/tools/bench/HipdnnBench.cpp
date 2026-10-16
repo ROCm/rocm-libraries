@@ -1373,15 +1373,21 @@ int runBench(const std::vector<std::string>& args)
         std::cerr << "Could not read the device's properties\n";
         return 1;
     }
-    const auto deviceColumns = hipdnn_bench::deviceColumns(deviceProperties);
+    // The device, then the problem as the runtime sees it: a sweep has the catalog page's
+    // extracted features, and a run without one is identified by its --query alone.
+    auto featureColumns = hipdnn_bench::deviceColumns(deviceProperties);
+    for(auto& column : hipdnn_bench::problemColumns(catalog.problemFeatures))
+    {
+        featureColumns.push_back(std::move(column));
+    }
 
     if(options.header)
     {
-        std::vector<std::string> deviceNames;
-        deviceNames.reserve(deviceColumns.size());
-        for(const auto& column : deviceColumns)
+        std::vector<std::string> featureNames;
+        featureNames.reserve(featureColumns.size());
+        for(const auto& column : featureColumns)
         {
-            deviceNames.push_back(column.first);
+            featureNames.push_back(column.first);
         }
         std::vector<std::string> queryNames;
         queryNames.reserve(options.query.size());
@@ -1389,7 +1395,7 @@ int runBench(const std::vector<std::string>& args)
         {
             queryNames.push_back(entry.first);
         }
-        std::cout << hipdnn_bench::csvHeader(deviceNames, queryNames, kernelNames) << "\n";
+        std::cout << hipdnn_bench::csvHeader(featureNames, queryNames, kernelNames) << "\n";
     }
 
     // Emit every variant, including losers and failures: ranking needs the comparison.
@@ -1400,7 +1406,7 @@ int runBench(const std::vector<std::string>& args)
         // Every text field goes through csvField: the problem id defaults to the graph's path,
         // and knob values and engine names are free text.
         std::cout << hipdnn_bench::csvField(problemId) << "," << hipdnn_bench::csvField(graphKey);
-        for(const auto& column : deviceColumns)
+        for(const auto& column : featureColumns)
         {
             std::cout << "," << hipdnn_bench::csvField(column.second);
         }

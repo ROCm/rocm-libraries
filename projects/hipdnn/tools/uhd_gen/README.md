@@ -523,7 +523,10 @@ and a Parquet file cannot be appended to, so §8.8's "shard outputs merge by app
 would become a full rewrite. CSV has both properties. So `hipdnn_bench` and
 `export-benchmarks` keep writing CSV, and `uhd_gen.dataset` reads the merged shards
 once, derives `tflops` and `gbs` from the engine's published counts, and writes the
-typed dataset:
+typed dataset. A `hipdnn_bench --sweep` row names its problem by the features the runtime
+extracted for the graph (the catalog page's `problem_features`) and its device by the kind
+of GPU (`device` and `device.*`); a run that is not a sweep names its problem only by its
+`--query` (`q.*`) columns.
 
 ```bash
 python -m uhd_gen.dataset \
