@@ -774,7 +774,7 @@ _TARGET_STUB = """
     class StubSpec:
         n: int
 
-    def is_valid_spec(spec, arch):
+    def is_valid_spec(spec: StubSpec, arch):
         SEEN.append(("predicate", arch))
         return True
 

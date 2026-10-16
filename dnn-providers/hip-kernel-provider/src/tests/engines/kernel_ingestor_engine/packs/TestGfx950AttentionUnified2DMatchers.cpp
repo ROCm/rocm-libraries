@@ -294,7 +294,7 @@ TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsTopLeftCausalWhenSeqLensEqua
     EXPECT_TRUE(matchGraph(s).has_value());
 }
 
-TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsFp16)
+TEST(TestGfx950AttentionUnified2DGraphMatch, AcceptsHalfPrecision)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
@@ -473,7 +473,7 @@ TEST(TestGfx950AttentionUnified2DKernelMatch, AcceptsMatchingKernel)
     EXPECT_TRUE(matchesKernel(canonical(), makeKernel()));
 }
 
-TEST(TestGfx950AttentionUnified2DKernelMatch, AcceptsFp16Kernel)
+TEST(TestGfx950AttentionUnified2DKernelMatch, AcceptsHalfPrecisionKernel)
 {
     registerNativeIngestorSymbols();
     GraphSpec s = canonical();
