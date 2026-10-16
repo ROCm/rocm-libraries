@@ -153,8 +153,8 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
     // Host SpSV
-    J struct_pivot  = -1;
-    J numeric_pivot = -1;
+    J               struct_pivot  = -1;
+    J               numeric_pivot = -1;
     int             device_id;
     hipDeviceProp_t device_prop{};
     CHECK_HIP_ERROR(hipGetDevice(&device_id));
@@ -310,9 +310,9 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(hy_out.data(), dy, sizeof(T) * m, hipMemcpyDeviceToHost));
 
-                        std::vector<T> hy_gold(hy);
-                        J              struct_pivot  = -1;
-                        J              numeric_pivot = -1;
+                        std::vector<T>  hy_gold(hy);
+                        J               struct_pivot  = -1;
+                        J               numeric_pivot = -1;
                         int             device_id;
                         hipDeviceProp_t device_prop{};
                         CHECK_HIP_ERROR(hipGetDevice(&device_id));

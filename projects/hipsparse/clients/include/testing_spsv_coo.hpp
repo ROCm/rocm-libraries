@@ -296,8 +296,8 @@ void testing_spsv_coo(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
-        I struct_pivot  = -1;
-        I numeric_pivot = -1;
+        I               struct_pivot  = -1;
+        I               numeric_pivot = -1;
         int             device_id;
         hipDeviceProp_t device_prop{};
         CHECK_HIP_ERROR(hipGetDevice(&device_id));

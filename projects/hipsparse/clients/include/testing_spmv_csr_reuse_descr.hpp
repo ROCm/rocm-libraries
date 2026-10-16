@@ -285,8 +285,8 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
                 CHECK_HIP_ERROR(
                     hipMemcpy(hy_out.data(), dy, sizeof(Y) * y_size, hipMemcpyDeviceToHost));
 
-                std::vector<Y> hy_ref(hy);
-                int            device_id;
+                std::vector<Y>  hy_ref(hy);
+                int             device_id;
                 hipDeviceProp_t device_prop{};
                 CHECK_HIP_ERROR(hipGetDevice(&device_id));
                 CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));

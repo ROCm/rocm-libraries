@@ -288,8 +288,8 @@ void testing_spsv_csr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
-        J struct_pivot  = -1;
-        J numeric_pivot = -1;
+        J               struct_pivot  = -1;
+        J               numeric_pivot = -1;
         int             device_id;
         hipDeviceProp_t device_prop{};
         CHECK_HIP_ERROR(hipGetDevice(&device_id));
