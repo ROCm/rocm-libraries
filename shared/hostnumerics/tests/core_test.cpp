@@ -5,6 +5,7 @@
 
 #include <array>
 #include <complex>
+#include <limits>
 #include <memory>
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
@@ -162,6 +163,21 @@ TEST(ShapeCpp, CallerProvidedCoordinates) {
     EXPECT_EQ(shape.linearIndex(output, order), 17);
     EXPECT_EQ(shape.coordinates(17, order), (std::vector<size_t>{1, 2, 2}));
     EXPECT_THROW(shape.coordinates(0, order, {}), std::runtime_error);
+
+    for (const auto& invalidOrder : {std::vector<size_t>{0}, std::vector<size_t>{0, 0, 2}}) {
+        output.fill(99);
+        EXPECT_THROW(shape.coordinates(0, invalidOrder, output), std::runtime_error);
+        EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
+    }
+    for (const Shape& invalidShape :
+         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 2, 1}}) {
+        output.fill(99);
+        EXPECT_THROW(invalidShape.coordinates(0, order, output), std::runtime_error);
+        EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
+    }
+    output.fill(99);
+    EXPECT_THROW(shape.coordinates(24, order, output), std::runtime_error);
+    EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
 }
 TEST(LayoutCpp, OwnedStridesAndArrayCoordinates) {
     std::vector<ptrdiff_t> strides{5, -1};
