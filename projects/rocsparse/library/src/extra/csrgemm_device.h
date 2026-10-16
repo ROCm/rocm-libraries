@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "csrgemm_shared_device.h"
 #include "rocsparse_common.hpp"
 
 namespace rocsparse
@@ -156,16 +157,6 @@ namespace rocsparse
         // clang-format on
     }
 
-    template <uint32_t HASHSIZE, typename J>
-    constexpr bool exceeding_smem_nnz(uint32_t shared_mem_optin)
-    {
-        // Use >= rather than > : a hash that exactly fills the advertised LDS
-        // limit still needs to pass through hipFuncSetAttribute, which some
-        // runtimes (e.g. under ASAN instrumentation) reject when the request
-        // equals rather than stays strictly below the device's optin limit.
-        return (sizeof(J) * HASHSIZE) >= shared_mem_optin;
-    }
-
     template <uint32_t HASHSIZE, typename J, typename T>
     constexpr bool exceeding_smem(uint32_t shared_mem_optin)
     {
@@ -208,10 +199,10 @@ namespace rocsparse
         else if(nprod <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 3]; int_prod[row] = 3; }
         else if(nprod <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 4]; int_prod[row] = 4; }
         else if(nprod <=  4096) { ++sdata[hipThreadIdx_x * GROUPS + 5]; int_prod[row] = 5; }
-        else if(nprod <=  8192 && !exceeding_smem_nnz<8192, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 6]; int_prod[row] = 6; }
-        else if(nprod <=  16384 && !exceeding_smem_nnz<16384, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; int_prod[row] = 7; }
-        else if(nprod <=  32768 && !exceeding_smem_nnz<32768, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; int_prod[row] = 8; }
-        else if(nprod <=  65536 && !exceeding_smem_nnz<65536, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; int_prod[row] = 9; }
+        else if(nprod <=  8192 && !exceeding_smem_keys<8192, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 6]; int_prod[row] = 6; }
+        else if(nprod <=  16384 && !exceeding_smem_keys<16384, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 7]; int_prod[row] = 7; }
+        else if(nprod <=  32768 && !exceeding_smem_keys<32768, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 8]; int_prod[row] = 8; }
+        else if(nprod <=  65536 && !exceeding_smem_keys<65536, J>(shared_mem_optin)) { ++sdata[hipThreadIdx_x * GROUPS + 9]; int_prod[row] = 9; }
         else                    { ++sdata[hipThreadIdx_x * GROUPS + 10]; int_prod[row] = 10; }
             // clang-format on
         }
