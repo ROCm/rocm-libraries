@@ -514,8 +514,8 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
-    /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
-     * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
+    /* f16 / bf16 / f32 / f64 dense atoms resolve from the table; the scaled /
+     * fp4 / fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
     if(_try_emit_mfma_table(L, op, op_id))
     {
         return;
@@ -1047,7 +1047,7 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
 }
 
 /* ====================================================================== */
-/* f16 / bf16 / f32 dense MFMA atoms (table-driven)                       */
+/* f16 / bf16 / f32 / f64 dense MFMA atoms (table-driven)                 */
 /* ====================================================================== */
 
 /* The plain / scalar / bf16-bitcast MFMA atoms are structural twins: each one
