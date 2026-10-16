@@ -1199,24 +1199,44 @@ def build_unified_attention_3d_tiled(
             b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
             b.sync()
 
-        # O^T = V^T P^T, one 16-token block per MFMA: A = V^T (head-dim rows
-        # n*16 + 0..15 via the transpose read), B = P^T straight from this
-        # lane's registers (its query row, tokens 4 * lane_rg + 0..3).
+        # O^T = V^T P^T: A = V^T (head-dim rows n*16 + 0..15 via the transpose
+        # read), B = P^T straight from this lane's registers (its query row,
+        # tokens 4 * lane_rg + 0..3 of each 16-token block). Two blocks share one
+        # 16x16x32 MFMA, which costs the same as one 16x16x16 on gfx950: A and B
+        # list the two blocks' tokens in the same order, which is all the k-sum
+        # needs. An odd last block uses 16x16x16.
         new_acc = []
         for n in range(PV_N_TILES):
             acc_v = b.vec_pack(
                 [b.fmul(b.vec_extract(acc_vals[n], r), alpha) for r in range(4)], F32
             )
             n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
-            for kb in range(QK_N_TILES):
-                row_lane = pv_tr_reader.row(b, k_offset=kb * 16, read=0)
-                A_v = b.ds_read_tr16_b64(
-                    V_lds, v_buf, row_lane, _kv_col(row_lane, n_col_base), dtype=dtype
-                )
+            for kb in range(0, QK_N_TILES, 2):
+                blocks = range(kb, min(kb + 2, QK_N_TILES))
+                A_parts = []
+                for blk in blocks:
+                    row_lane = pv_tr_reader.row(b, k_offset=blk * 16, read=0)
+                    A_parts.append(
+                        b.ds_read_tr16_b64(
+                            V_lds,
+                            v_buf,
+                            row_lane,
+                            _kv_col(row_lane, n_col_base),
+                            dtype=dtype,
+                        )
+                    )
                 B_p = b.vec_pack(
-                    [b.cast_f32_to(p_regs[(kb, r)], dtype) for r in range(4)], dtype
+                    [
+                        b.cast_f32_to(p_regs[(blk, r)], dtype)
+                        for blk in blocks
+                        for r in range(4)
+                    ],
+                    dtype,
                 )
-                acc_v = _mfma_16x16x16(b, dtype, A_v, B_p, acc_v)
+                if len(A_parts) == 2:
+                    acc_v = _mfma_16x16x32(b, dtype, b.vec_concat(*A_parts), B_p, acc_v)
+                else:
+                    acc_v = _mfma_16x16x16(b, dtype, A_parts[0], B_p, acc_v)
             new_acc.append(acc_v)
 
         yields = [m_new, new_l_val]

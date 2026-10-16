@@ -62,7 +62,7 @@ static rocke_value_t* rocke__mfma_16x16x32(rocke_ir_builder_t* b,
     return NULL;
 }
 
-/* mfma_16x16x16_for_dtype (the PV atom: one 16-token block per MFMA). The
+/* mfma_16x16x16_for_dtype (the PV atom for a single 16-token block). The
  * ported C helper lives in helper_helper_rocke.helpers.attention.h. */
 static rocke_value_t* rocke__mfma_16x16x16(rocke_ir_builder_t* b,
                                            const rocke_type_t* dtype,
@@ -510,8 +510,11 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         }
 
         /* ---------------- PV: O^T = V^T P^T ----------------
-         * One 16-token block per MFMA: A = V^T (head-dim rows n*16 + 0..15 via
-         * the transpose read), B = P^T straight from this lane's registers. */
+         * A = V^T (head-dim rows n*16 + 0..15 via the transpose read), B = P^T
+         * straight from this lane's registers. Two 16-token blocks share one
+         * 16x16x32 MFMA (same cost as one 16x16x16 on gfx950): A and B list the
+         * two blocks' tokens in the same order, which is all the k-sum needs. An
+         * odd last block uses 16x16x16. */
         for(n = 0; n < cfg->PV_N_TILES; n++)
         {
             rocke_value_t* scaled_comps[4];
@@ -529,24 +532,41 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
                 rocke_value_t* ncb_16 = rocke_b_const_i32(b, 16);
                 n_col_base = rocke_b_add(b, rocke_b_mul(b, ncb_n, ncb_16), ctx->tr_col_lane);
             }
-            for(kb = 0; kb < cfg->QK_N_TILES; kb++)
+            for(kb = 0; kb < cfg->QK_N_TILES; kb += 2)
             {
-                rocke_value_t* row_lane
-                    = rocke_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, kb * 16, 0);
-                rocke_value_t* av_idx[3];
-                rocke_value_t* A_v;
-                rocke_value_t* p_comps[4];
+                const int nblk = cfg->QK_N_TILES - kb < 2 ? 1 : 2;
+                rocke_value_t* A_parts[2];
+                rocke_value_t* p_comps[8];
                 rocke_value_t* B_p;
-                av_idx[0] = v_buf;
-                av_idx[1] = row_lane;
-                av_idx[2] = rocke_gfx950_attention_tiled_3d_kv_col(ctx, row_lane, n_col_base);
-                A_v = rocke_b_ds_read_tr16_b64(b, ctx->V_lds, av_idx, 3, dtype);
-                for(reg = 0; reg < 4; reg++)
+                int blk;
+                for(blk = 0; blk < nblk; blk++)
                 {
-                    p_comps[reg] = rocke_b_cast_f32_to(b, p_regs[kb * 4 + reg], dtype);
+                    rocke_value_t* row_lane = rocke_bound_transpose_lds_reader_row(
+                        b, ctx->pv_tr_reader, (kb + blk) * 16, 0);
+                    rocke_value_t* av_idx[3];
+                    av_idx[0] = v_buf;
+                    av_idx[1] = row_lane;
+                    av_idx[2] = rocke_gfx950_attention_tiled_3d_kv_col(ctx, row_lane, n_col_base);
+                    A_parts[blk] = rocke_b_ds_read_tr16_b64(b, ctx->V_lds, av_idx, 3, dtype);
                 }
-                B_p = rocke_b_vec_pack(b, p_comps, 4, dtype);
-                acc_v = rocke__mfma_16x16x16(b, dtype, A_v, B_p, acc_v);
+                for(blk = 0; blk < nblk; blk++)
+                {
+                    for(reg = 0; reg < 4; reg++)
+                    {
+                        p_comps[blk * 4 + reg]
+                            = rocke_b_cast_f32_to(b, p_regs[(kb + blk) * 4 + reg], dtype);
+                    }
+                }
+                B_p = rocke_b_vec_pack(b, p_comps, nblk * 4, dtype);
+                if(nblk == 2)
+                {
+                    rocke_value_t* A_v = rocke_b_vec_concat(b, A_parts[0], A_parts[1]);
+                    acc_v = rocke__mfma_16x16x32(b, dtype, A_v, B_p, acc_v);
+                }
+                else
+                {
+                    acc_v = rocke__mfma_16x16x16(b, dtype, A_parts[0], B_p, acc_v);
+                }
             }
             new_acc[n] = acc_v;
         }

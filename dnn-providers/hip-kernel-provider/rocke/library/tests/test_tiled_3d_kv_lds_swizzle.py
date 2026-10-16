@@ -50,6 +50,7 @@ def test_kernel_name_token():
     [
         (64, 32, "paged"),
         (128, 64, "paged"),
+        (128, 48, "paged"),
         (256, None, "paged"),
         (64, None, "strided"),
         (128, None, "strided"),
