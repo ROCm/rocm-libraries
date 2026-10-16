@@ -33,7 +33,9 @@ value's range and residue, and their methods are the one home of every range-com
 (``plus``, ``scaled``, ``floor_div``, ``minimum``, ``intersect``, ``snapped``, ...). Everything that
 needs a range -- these checks, the address split, the IR range walk -- composes them rather than
 restating a rule. ``_value_ranges`` and ``_required_checks`` are the same rules on ``Interval`` s
-with explicit ``AxisBound`` s.
+with explicit ``AxisBound`` s. ``AffineCoord`` (with ``UniformPart``) is one coordinate split into a
+constant, wave-uniform parts and a per-lane part, each with its range and residue: the IR range
+walk produces it, the emitters consume it.
 
 ``RuntimeValue`` ends prove relations to a runtime length by IDENTITY: an upper side bounded by a
 runtime length is proven only by a computed end over the same IR value object (``length`` itself,
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "UNBOUNDED",
+    "AffineCoord",
     "AxisBound",
     "BoundCheck",
     "CheckReason",
@@ -66,6 +69,7 @@ __all__ = [
     "Interval",
     "RuntimeValue",
     "Side",
+    "UniformPart",
     "VectorRun",
     "graph_injective",
     "required_checks",
@@ -354,6 +358,13 @@ class Interval:
             )
         return Interval(new_lo, new_hi)
 
+    def within(self, lo: int | None, hi: int | None) -> bool:
+        """Every value of the range lies in ``[lo, hi)`` (``None``: no bound on that side).
+
+        Decided on the numeric ends: a runtime end counts with its envelope's extreme value.
+        """
+        return _lo_proven(self.lo, lo) and _hi_proven(self.hi, hi)
+
 
 UNBOUNDED = Interval(None, None)
 
@@ -391,6 +402,68 @@ class AxisBound:
     def of(cls, lo: int | RuntimeValue, hi: int | RuntimeValue) -> AxisBound:
         """The bound ``[lo, hi)`` of one tensor axis."""
         return cls(lo, hi)
+
+
+@dataclass(frozen=True, eq=False)
+class UniformPart:
+    """One wave-uniform summand of a coordinate, with its range and residue."""
+
+    value: Value
+    range: Interval
+    congruence: Congruence
+
+
+@dataclass(frozen=True, eq=False)
+class AffineCoord:
+    """One coordinate split into a constant, wave-uniform parts and one per-lane part.
+
+    The coordinate's value is ``const + sum(part.value for part in uniform) + lane``; nothing is
+    emitted until a consumer emits it. Every part carries an explicit range (``UNBOUNDED`` when
+    unknown) and residue. The IR range walk builds one from a plain value; tiling-layer code that
+    already holds the parts builds one with the constructor, ``of_int`` and ``+``.
+    """
+
+    const: int
+    uniform: tuple[UniformPart, ...] = ()
+    lane: Value | None = None
+    lane_range: Interval | None = None
+    lane_congruence: Congruence = Congruence(1, 0)
+
+    def __post_init__(self) -> None:
+        if any(part.range is None for part in self.uniform):
+            raise ValueError(_missing_range_text("uniform"))
+        if self.lane is not None and self.lane_range is None:
+            raise ValueError(_missing_range_text("lane"))
+
+    @classmethod
+    def of_int(cls, c: int) -> AffineCoord:
+        """The coordinate that is the constant ``c``."""
+        return cls(c)
+
+    def __add__(self, other: AffineCoord) -> AffineCoord:
+        """The sum, emitting nothing: consts added, uniform parts concatenated (this one's
+        first), the one lane part kept."""
+        if self.lane is not None and other.lane is not None:
+            raise ValueError(
+                f"AffineCoord + AffineCoord: both operands have a lane part ({self.lane}, "
+                f"{other.lane}) -- a coordinate has one lane part; add the per-lane values first "
+                "and split the sum with the walk"
+            )
+        lane_side = self if self.lane is not None else other
+        return AffineCoord(
+            self.const + other.const,
+            self.uniform + other.uniform,
+            lane_side.lane,
+            lane_side.lane_range,
+            lane_side.lane_congruence,
+        )
+
+
+def _missing_range_text(part: str) -> str:
+    return (
+        f"AffineCoord {part} part has no range -- every part needs an explicit Interval "
+        "(UNBOUNDED if unknown)"
+    )
 
 
 class Side(Enum):
