@@ -389,19 +389,16 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     Only spec-first predicates can be called generically (see
     `_PREDICATE_ALIASES`); a builder with no resolvable predicate is unvalidated.
 
-    Exception policy:
-      - If the spec does not have an attribute the predicate needs
-        (AttributeError) or the predicate's own body raises TypeError while
-        reading the spec, the pack fails: the predicate cannot judge the spec.
-      - If the CALL itself fails because the argument list does not match the
-        predicate's signature (TypeError at bind time, before the body runs),
-        the pack also fails: this is a packer bug that must be surfaced.
-      - Any other exception from the predicate body is ignored: the predicate
-        is a pre-flight check, and the builder itself remains the real gate.
+    Exception policy: a predicate that raises has no verdict on the spec, and the
+    builder does not re-check every rule a predicate enforces (some only fail much
+    later, or never), so the pack fails rather than ship the spec unvalidated.
+      - A TypeError at bind time, before the body runs, means the packer called the
+        predicate wrongly.
+      - Any exception from the body is reported with the predicate's name and the
+        file:line it was raised at.
 
     To distinguish "bad call" from "bad body", we bind the arguments first with
-    inspect.Signature.bind; only if binding succeeds do we invoke the predicate
-    and catch body-level AttributeError/TypeError.
+    inspect.Signature.bind, and only then invoke the predicate.
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
@@ -420,21 +417,16 @@ def _check_support_predicate(module, builder, spec_obj, arch):
             f"could not be called with the given spec: {exc}"
         ) from exc
 
-    # Phase 2: invocation.  AttributeError/TypeError from the body means the
-    # predicate cannot read a field off the spec and therefore has no verdict.
+    # Phase 2: invocation.  Whatever the body raises, the predicate has no verdict.
     try:
         verdict = predicate(spec_obj, **kwargs)
-    except (AttributeError, TypeError) as exc:
+    except Exception as exc:
         where = traceback.extract_tb(exc.__traceback__)[-1]
         raise HkpPackError(
             f"support predicate {name} for builder '{builder}' @ {arch} raised "
-            f"{type(exc).__name__} at {Path(where.filename).name}:{where.lineno} "
-            f"(it could not read the spec, or has a bug): {exc}"
+            f"{type(exc).__name__} at {Path(where.filename).name}:{where.lineno}: "
+            f"{exc}"
         ) from exc
-    except Exception:
-        # Any other exception does not block packing: the predicate is a
-        # pre-flight check, and the builder itself remains the real gate.
-        return
     ok, reason = verdict if isinstance(verdict, tuple) else (verdict, "")
     if not ok:
         raise HkpPackError(

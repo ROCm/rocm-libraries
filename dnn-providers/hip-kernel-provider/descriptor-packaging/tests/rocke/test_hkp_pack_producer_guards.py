@@ -209,25 +209,18 @@ def test_missing_predicate_is_not_an_error():
 
 
 @pytest.mark.quick
-def test_raising_predicate_does_not_block_packing():
-    # A pre-flight check that itself breaks must not fail the pack; the builder
-    # remains the real gate.
-    def is_valid_spec(spec: _Spec, *, arch="gfx942"):
-        raise RuntimeError("predicate exploded")
-
-    _check_support_predicate(
-        _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "g"
-    )
-
-
-@pytest.mark.quick
-def test_predicate_that_cannot_read_the_spec_fails_the_pack():
-    """A predicate that cannot read the spec has no verdict, so the pack fails."""
+@pytest.mark.parametrize(
+    "exc_type",
+    [AttributeError, TypeError, KeyError, ValueError, IndexError, RuntimeError],
+)
+def test_predicate_that_raises_fails_the_pack(exc_type):
+    """A predicate that raises has no verdict, whatever it raises: packing on would
+    ship the spec without the check, so the pack fails and names where it broke."""
 
     def is_valid_spec(spec: _Spec, *, arch="gfx942"):
-        return spec.kv_storage_dtype is None, ""
+        raise exc_type("no verdict")
 
-    with pytest.raises(HkpPackError, match="raised AttributeError at") as exc:
+    with pytest.raises(HkpPackError, match=f"raised {exc_type.__name__} at") as exc:
         _check_support_predicate(
             _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "gfx942"
         )
@@ -239,7 +232,7 @@ def test_predicate_that_cannot_read_the_spec_fails_the_pack():
 def test_predicate_with_positional_only_arch_fails_with_call_error():
     """A predicate whose arch parameter is positional-only triggers a TypeError
     at bind time, not inside the body.  The error must surface as a pack failure
-    with a 'could not be called' message (not 'could not read the spec')."""
+    with a 'could not be called' message (not a 'raised ...' body failure)."""
 
     # positional-only arch: the packer always passes arch as a keyword
     def is_valid_spec(spec: _Spec, arch: str = "gfx942", /):
@@ -312,9 +305,10 @@ def test_every_rocke_builder_resolves_a_predicate_for_its_own_spec():
 
 
 #: Builders `_check_support_predicate` cannot validate today, because they have no
-#: spec-first predicate. Every builder already in the library is either resolvable or
-#: listed here, so the test below flags only a builder added without a predicate. A
-#: builder that gains one needs no edit here.
+#: spec-first predicate. Every builder in the library is either resolvable or listed
+#: here, and the test below holds the list equal to the unresolved set: a builder
+#: added without a predicate must be listed, and one that gains a predicate must be
+#: removed.
 _UNVALIDATED_BUILDERS = frozenset(
     {
         "kernels.common.attention_unified.build_unified_attention_2d",
@@ -337,10 +331,10 @@ _UNVALIDATED_BUILDERS = frozenset(
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
-def test_no_new_builder_ships_without_a_support_predicate():
+def test_unvalidated_builder_list_matches_the_library():
     """The pack validates a spec only through a predicate it can resolve, so a builder
     added without one ships unvalidated. Give it a predicate, or list it above on
-    purpose."""
+    purpose; and delist a builder once it resolves one."""
     unvalidated = {
         f"{module.__name__}.{builder}"
         for module, builder, _ in _library_builders()
@@ -351,6 +345,11 @@ def test_no_new_builder_ships_without_a_support_predicate():
         f"builder(s) with no support predicate: {new}. Add a spec-first "
         "`supports_*_spec`/`is_valid_*` predicate (see _PREDICATE_ALIASES) or list "
         "them in _UNVALIDATED_BUILDERS."
+    )
+    stale = sorted(_UNVALIDATED_BUILDERS - unvalidated)
+    assert not stale, (
+        f"builder(s) listed in _UNVALIDATED_BUILDERS that now resolve a support "
+        f"predicate (or no longer exist): {stale}. Remove them from the list."
     )
 
 
