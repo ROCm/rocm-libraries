@@ -825,10 +825,30 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return openSccChain_ != 0 && node->handshakeBarrier;
     }
 
+    // An all-wave s_barrier_signal has issued and its s_barrier_wait has not. Barrier
+    // groups syncing different LDS buffers share no token, so the DAG lets them swap
+    // as whole groups but also lets them interleave (sig1 .. sig0 wait0 .. wait1).
+    // Interleaved, every wave signals twice before its first wait: that wait completes
+    // once all waves reach the hoisted sig1, before they finish the reads sig0 guards,
+    // so the next tensor_load overwrites LDS still being read. Signal and wait must
+    // strictly alternate.
+    bool splitSignalOpen_ = false;
+
+    // True for a workgroup barrier other than an all-wave wait while a signal is open.
+    bool splitSignalBlocks(const DAGNode* node) const {
+        if (!splitSignalOpen_) return false;
+        const StinkyInstruction& inst = *node->inst;
+        if (isBarrierSignal(inst) || isBarrierWait(inst))
+            return isSplitBarrierAllWave(inst) && !isBarrierWait(inst);
+        return true;  // legacy s_barrier
+    }
+
     // True when decidePromote() / pickOne() may consider issuing this barrier
-    // now. No-op when clusterBarrier is off (see sccChainBlocks()).
+    // now. Only the open-signal rule applies when clusterBarrier is off (see
+    // sccChainBlocks()).
     bool isBarrierEligibleNow(const DAGNode* node) const {
-        return !sccChainBlocks(node) && !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
+        return !splitSignalBlocks(node) && !sccChainBlocks(node) &&
+               !(singleStageLoop() && stageBarrierAwaitsPrefetch(node));
     }
     // Single-stage loop: the stage barrier waits for its released prefetch group, so the group
     // issues right before it (in the tensor_load's window).
@@ -1061,6 +1081,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onFinishBB() override;
     void onScheduled(const StinkyInstruction& inst) override {
         if (waitAlu_) waitAlu_->commit(inst);
+        if ((isBarrierSignal(inst) || isBarrierWait(inst)) && isSplitBarrierAllWave(inst))
+            splitSignalOpen_ = isBarrierSignal(inst);
     }
 };
 
@@ -2858,8 +2880,14 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             }
             if (barrier) barrierQueue.erase(barrier);
         } else {
-            barrier = barrierQueue.top();
-            barrierQueue.pop();
+            // Lowest-id barrier, skipping signals held back by an open signal; its
+            // wait (or the work it waits on) issues first.
+            for (DAGNode* cand : barrierQueue) {
+                if (splitSignalBlocks(cand)) continue;
+                barrier = cand;
+                break;
+            }
+            if (barrier) barrierQueue.erase(barrier);
         }
         if (barrier) {
             updateWMMAStatus(barrier);
@@ -2894,6 +2922,18 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                              << " kind=" << fallbackKind << " wait=" << realWait
                              << " throttleWait=" << throttleWait << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
+    }
+
+    // Only barriers are left and an open signal holds them all back, so its wait cannot
+    // become ready: the input already interleaves barrier groups. Keep program order.
+    if (splitSignalOpen_ && !barrierQueue.empty() &&
+        !(clusterBarrierEnabled() && openSccChain_ != 0)) {
+        DAGNode* barrier = barrierQueue.top();
+        barrierQueue.pop();
+        updateWMMAStatus(barrier);
+        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
+                             << " issued past an open signal (no ready wait)\n");
+        return rememberPick(barrier);
     }
 
     // Only barriers are left and an SCC chain is still holding them back.
@@ -2963,7 +3003,8 @@ bool CDNA5ReadyQueue::empty() const {
 // Per-BB init. Rule (5): cross-BB loop tail WMMA detection.
 // Resets co-issue timeline. Sets WMMA issue config from first WMMA in block.
 void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {
-    regionDag_ = nullptr;  // set per region in onInitRegion; the previous region's DAG is gone
+    regionDag_ = nullptr;      // set per region in onInitRegion; the previous region's DAG is gone
+    splitSignalOpen_ = false;  // per-BB: blocks are scheduled in layout, not control-flow, order
     deferFirstHeadWmmaActive_ = false;
     deferHeadBalanceThisRegion_ = false;
 
