@@ -11,8 +11,8 @@ pass does not, the pass inserts an `s_wait_alu`.
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it
-belongs with. Develop avoided that by accident: WaitAwareScheduleRepairPass carried the
-prefetch forward to the segment end, the barrier right before the tensor_load.
+belongs with. The former WaitAwareScheduleRepairPass (now removed) hid that by accident: it
+carried the prefetch forward to the segment end, the barrier right before the tensor_load.
 
 ## Rules, in order of measured impact
 
@@ -25,9 +25,7 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
      the stage barrier waits until the ready group has issued, so the group lands just
      before `s_barrier_wait -3`. A group that is not fully ready never holds the barrier.
    - With a lead set, prefetches have their own ready queue; they are not fillers and never
-     count against the filler quota. WaitAwareScheduleRepairPass pins each prefetch, and the
-     VALU chain computing its address, ahead of the next WMMA so the repair does not carry
-     them off.
+     count against the filler quota.
 2. **Wait-prone fillers** (`WaitAluHoldStrictCount`, only with ESM2, the only mode in which
    InsertWaitAlu runs). `WaitAluTracker` is InsertWaitAlu's
    own scoreboard (shared `stepInstruction()`, so the answers cannot diverge); `query(inst)`
@@ -93,7 +91,7 @@ Findings behind the rules:
   loop a staggered lead. A lead of 80 on henry is −14%.
 - A stage under 64 WMMAs (MAB, medium mxf8) has no room for a multi-stage lead: the address
   chain is ready only a few windows before the tensor_load, and a prefetch issued there is
-  worse than one grouped at the tensor_load. That grouping used to come from
+  worse than one grouped at the tensor_load. That grouping used to come from the former
   WaitAwareScheduleRepairPass, which moved the prefetches next to the stage barrier. Without
   the pass, lead 0 issues them mid-stage among the ds_loads, and the next WMMAs wait longer
   for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4 0.63%. The single-stage grouping
