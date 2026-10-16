@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""A/B harness for the tiled attention cache keys.
+"""A/B harness for the attention launcher cache keys.
 
 Compares two rocke trees ("arms"), typically a develop worktree and a branch
-that changes ``_tiled_cache_key`` / ``_tiled_3d_cache_key``. Each arm runs in
+that changes ``_tiled_cache_key`` / ``_tiled_3d_cache_key`` or, with
+``--family scalar``, the scalar fallback's ``_cache_key``. Each arm runs in
 its own process and imports ``kernels`` and ``rocke`` from its own root, so the
 arms never share a module or a launcher cache. The problem sweeps live in this
 file, so both arms walk the same problems in the same order.
@@ -30,6 +31,13 @@ file, so both arms walk the same problems in the same order.
     fp32 reference, and host cost of the cache-key call. Per arm: compiled
     binary count. Python's garbage collector is off inside each worker and
     runs between problems, so a collection pass never lands in a timed region.
+
+``--family scalar`` runs both modes on the scalar fallback instead: problems
+the scalar gate admits, the 2D scalar kernel (the one the launcher compiles),
+and ``backend="scalar"``. Its sweeps are smaller because every problem is
+lowered and the kernel is slow. A key change that also changes the kernel ABI
+makes the arms' own IR differ by design, so in this family that count is
+reported but does not fail the run.
 
 Outputs go to ``--out``: per-arm raw data plus ``summary.md`` and a CSV.
 Measured numbers belong on the ticket or the access-controlled record, never
@@ -81,6 +89,13 @@ _IR_FEATURES = (
 )
 
 
+# Scalar sweep: the dynamic shape the old key carried raw, with block counts
+# on both sides of every block size.
+_SCALAR_IR_NUM_SEQS = (1, 2, 7, 64)
+_SCALAR_IR_SEQLEN_Q = (1, 16, 129)
+_SCALAR_IR_SEQLEN_K = ("q", 100, 1000, 4096)
+
+
 def _shape_grid(num_seqs, seqlens_q, seqlens_k) -> Iterator[tuple[int, int, int]]:
     """(num_seqs, max_seqlen_q, max_seqlen_k) with k >= q and no duplicates;
     "q" in ``seqlens_k`` means k == q."""
@@ -115,9 +130,14 @@ def _bootstrap(root: str, arch: str | None):
     return au
 
 
-def _route(au, problem, arch: str) -> str | None:
-    """Path ``run_unified_attention_torch(backend="auto")`` takes, or None for
-    the scalar fallback (out of scope here)."""
+def _route(au, problem, arch: str, family: str) -> str | None:
+    """Path ``run_unified_attention_torch`` takes for ``family``, or None.
+
+    Tiled: the ``backend="auto"`` route, None for the scalar fallback. Scalar:
+    ``"scalar"`` when the scalar gate admits the problem."""
+    if family == "scalar":
+        ok = au.supports_native_unified_attention(problem, arch)[0]
+        return "scalar" if ok else None
     if problem.select_path() != "2d":
         if au.supports_native_unified_attention_3d_tiled(problem, arch)[0]:
             return "3d"
@@ -127,6 +147,8 @@ def _route(au, problem, arch: str) -> str | None:
 
 
 def _key(au, problem, path: str, arch: str):
+    if path == "scalar":
+        return au._cache_key(problem, arch)
     if path == "2d":
         return au._tiled_cache_key(problem, arch)
     return au._tiled_3d_cache_key(problem, arch)
@@ -141,7 +163,12 @@ def _short_hash(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _ir_sweep(problem_cls, arch: str, num_cus: int) -> Iterator:
+def _ir_sweep(problem_cls, arch: str, num_cus: int, family: str) -> Iterator:
+    grid = (
+        (_SCALAR_IR_NUM_SEQS, _SCALAR_IR_SEQLEN_Q, _SCALAR_IR_SEQLEN_K)
+        if family == "scalar"
+        else (_IR_NUM_SEQS, _IR_SEQLEN_Q, _IR_SEQLEN_K)
+    )
     for dtype, fp8, hd, bs, heads, (sw, sinks, bias) in itertools.product(
         ("bf16", "fp16"),
         (False, True),
@@ -150,7 +177,7 @@ def _ir_sweep(problem_cls, arch: str, num_cus: int) -> Iterator:
         ((8, 8), (32, 8), (64, 8)),
         _IR_FEATURES,
     ):
-        for ns, q, k in _shape_grid(_IR_NUM_SEQS, _IR_SEQLEN_Q, _IR_SEQLEN_K):
+        for ns, q, k in _shape_grid(*grid):
             yield problem_cls(
                 total_q=ns * q,
                 num_seqs=ns,
@@ -172,7 +199,10 @@ def _ir_sweep(problem_cls, arch: str, num_cus: int) -> Iterator:
 
 
 def _build_identity(au, problem, path: str, arch: str) -> str:
-    """Full input of the binary: spec (raw num_seqs kept), builder, backend."""
+    """Full input of the binary: spec (raw num_seqs kept), builder, backend.
+    The scalar spec is the problem itself."""
+    if path == "scalar":
+        return repr(problem)
     if path == "2d":
         route = au._gfx942_4warp_route(problem, arch)
         return repr(
@@ -208,7 +238,11 @@ def _pool_lower(item) -> str:
     au, arch = _POOL_AU, _POOL_ARCH
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-    if path == "2d":
+    if path == "scalar":
+        spec = au.UnifiedAttention2DSpec(problem=problem)
+        kernels = [au.build_unified_attention_2d(spec, arch=arch)]
+        tag = "scalar"
+    elif path == "2d":
         _, build, _ = au._tiled_2d_impl(arch)
         spec = au._tiled_spec_from_problem(problem, arch)
         route = au._gfx942_4warp_route(problem, arch)
@@ -246,9 +280,9 @@ def _worker_ir(args) -> None:
     P = au.UnifiedAttentionProblem
     paths, keys, builds = [], [], []
     rep_of_build: dict[str, tuple] = {}
-    for problem in _ir_sweep(P, args.arch, args.num_cus):
+    for problem in _ir_sweep(P, args.arch, args.num_cus, args.family):
         try:
-            path = _route(au, problem, args.arch)
+            path = _route(au, problem, args.arch, args.family)
             if path is not None:
                 key = _key(au, problem, path, args.arch)
                 build = _build_identity(au, problem, path, args.arch)
@@ -301,10 +335,16 @@ def _worker_ir(args) -> None:
     )
 
 
-def _summarize_ir(arms: list[tuple[str, str]], out: Path, arches, num_cus: int) -> int:
+def _summarize_ir(
+    arms: list[tuple[str, str]], out: Path, arches, num_cus: int, family: str
+) -> int:
     base_name, cand_name = arms[0][0], arms[1][0]
+    paths = ("scalar",) if family == "scalar" else ("2d", "3d")
+    # Scalar: the arms' own IR differs by design when the key change also changes
+    # the kernel ABI, so only same-arm identity gates the run.
+    own_expected = "any (ABI change)" if family == "scalar" else "0"
     lines = [
-        "# Tiled cache-key A/B: per-problem IR identity",
+        f"# {family.capitalize()} cache-key A/B: per-problem IR identity",
         "",
         f"Baseline arm `{base_name}`, candidate arm `{cand_name}`.",
         "",
@@ -320,7 +360,7 @@ def _summarize_ir(arms: list[tuple[str, str]], out: Path, arches, num_cus: int) 
         if au is None:
             au = _bootstrap(arms[1][1], None)
         P = au.UnifiedAttentionProblem
-        problems = list(_ir_sweep(P, arch, num_cus))
+        problems = list(_ir_sweep(P, arch, num_cus, family))
         n = len(problems)
         route_diff = [i for i in range(n) if b["path"][i] != c["path"][i]]
         routed = [i for i in range(n) if c["path"][i] is not None]
@@ -328,37 +368,40 @@ def _summarize_ir(arms: list[tuple[str, str]], out: Path, arches, num_cus: int) 
         cand_bad = [i for i in routed if c["served"][i] != c["own"][i]]
         base_bad = [i for i in routed if b["served"][i] != b["own"][i]]
         vs_base_own = [i for i in routed if c["served"][i] != b["own"][i]]
-        failed |= bool(route_diff or own_diff or cand_bad or vs_base_own)
+        failed |= bool(route_diff or cand_bad)
+        if family != "scalar":
+            failed |= bool(own_diff or vs_base_own)
         lines += [
             f"## {arch}",
             "",
             f"- git: {base_name} `{b['git']}`, {cand_name} `{c['git']}`;"
             f" flavor {c['flavor']}; Python lowerer",
-            f"- problems routed to a tiled path: {len(routed)} of {n}"
-            f" (2D {sum(c['path'][i] == '2d' for i in routed)},"
-            f" 3D {sum(c['path'][i] == '3d' for i in routed)})",
+            f"- problems routed to the {family} path: {len(routed)} of {n} ("
+            + ", ".join(f"{p} {sum(c['path'][i] == p for i in routed)}" for p in paths)
+            + ")",
             f"- distinct specs lowered: {base_name} {b['lowered']},"
             f" {cand_name} {c['lowered']}",
             "",
             "| check | count | expected |",
             "|---|---|---|",
             f"| route differs between arms | {len(route_diff)} | 0 |",
-            f"| own IR differs between arms | {len(own_diff)} | 0 |",
+            f"| own IR differs between arms | {len(own_diff)} | {own_expected} |",
             f"| {cand_name} serves IR != own | {len(cand_bad)} | 0 |",
-            f"| {cand_name} serves IR != {base_name} own | {len(vs_base_own)} | 0 |",
+            f"| {cand_name} serves IR != {base_name} own | {len(vs_base_own)}"
+            f" | {own_expected} |",
             f"| {base_name} serves IR != own | {len(base_bad)} | existing gaps |",
             "",
             "| path | binaries " + base_name + " | binaries " + cand_name + " |",
             "|---|---|---|",
         ]
-        for path in ("2d", "3d"):
+        for path in paths:
             nb = len({b["key"][i] for i in routed if b["path"][i] == path})
             nc = len({c["key"][i] for i in routed if c["path"][i] == path})
             lines.append(f"| {path} | {nb} | {nc} |")
         lines.append("")
         for label, idx in (
             ("route differs", route_diff),
-            ("own IR differs", own_diff),
+            ("own IR differs", own_diff if family != "scalar" else []),
             (f"{cand_name} serves != own", cand_bad),
             (f"{base_name} serves != own", base_bad),
         ):
@@ -444,8 +487,51 @@ _AB_COHORTS = (
 )
 
 
-def _ab_sweep(problem_cls, arch: str, num_cus: int) -> Iterator[tuple[str, object]]:
-    for label, static, nss, qs, ks in _AB_COHORTS:
+# The scalar kernel runs one workgroup per output element with one active
+# lane, so its cohorts stay small.
+_SCALAR_AB_COHORTS = (
+    (
+        "d64-gqa4-bs16-bf16",
+        dict(num_query_heads=8, num_kv_heads=2, head_size=64, block_size=16),
+        (1, 2, 4, 7),
+        (1, 16, 64),
+        ("q", 256, 1000),
+    ),
+    (
+        "d128-mha-bs32-fp16",
+        dict(
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=32,
+            dtype="fp16",
+        ),
+        (1, 3),
+        (1, 32),
+        (128, 512),
+    ),
+    (
+        "d64-gqa4-bs16-bf16-sw64-sinks",
+        dict(
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=64,
+            block_size=16,
+            sliding_window=64,
+            use_sinks=True,
+        ),
+        (2, 5),
+        (16,),
+        (300,),
+    ),
+)
+
+
+def _ab_sweep(
+    problem_cls, arch: str, num_cus: int, family: str
+) -> Iterator[tuple[str, object]]:
+    cohorts = _SCALAR_AB_COHORTS if family == "scalar" else _AB_COHORTS
+    for label, static, nss, qs, ks in cohorts:
         static = {"dtype": "bf16", **static}
         if static.get("use_fp8"):
             static["fp8_fnuz"] = arch == "gfx942"
@@ -531,7 +617,9 @@ def _reference_fp32(problem, data):
     )
 
 
-def _binaries(au) -> int:
+def _binaries(au, family: str) -> int:
+    if family == "scalar":
+        return len(au._ATTN_CACHE)
     return len(au._ATTN_TILED_CACHE) + len(au._ATTN_3D_TILED_CACHE)
 
 
@@ -556,9 +644,9 @@ def _worker_ab(args) -> None:
     # problems instead, as timeit does.
     gc.disable()
     for idx, (label, problem) in enumerate(
-        _ab_sweep(au.UnifiedAttentionProblem, arch, num_cus)
+        _ab_sweep(au.UnifiedAttentionProblem, arch, num_cus, args.family)
     ):
-        path = _route(au, problem, arch)
+        path = _route(au, problem, arch, args.family)
         if path is None:
             continue
         gc.collect()
@@ -577,17 +665,17 @@ def _worker_ab(args) -> None:
                 block_table=data["block_tables"],
                 softcap=0.0,
                 sinks=data["sinks"],
-                backend="auto",
+                backend="scalar" if args.family == "scalar" else "auto",
                 stream=stream,
             )
 
-        before = _binaries(au)
+        before = _binaries(au, args.family)
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         call()
         torch.cuda.synchronize()
         first_ms = (time.perf_counter() - t0) * 1e3
-        compiled = _binaries(au) - before
+        compiled = _binaries(au, args.family) - before
 
         ref = _reference_fp32(problem, data)
         max_abs = float((data["out"].float() - ref).abs().max().item())
@@ -634,14 +722,16 @@ def _worker_ab(args) -> None:
                 git=_git_head(args.root),
                 backend=backend,
                 num_cus=num_cus,
-                binaries=_binaries(au),
+                binaries=_binaries(au, args.family),
                 rows=rows,
             )
         )
     )
 
 
-def _summarize_ab(arms: list[tuple[str, str]], out: Path, rounds: int) -> int:
+def _summarize_ab(
+    arms: list[tuple[str, str]], out: Path, rounds: int, family: str
+) -> int:
     base_name, cand_name = arms[0][0], arms[1][0]
     runs = {
         name: [
@@ -652,7 +742,7 @@ def _summarize_ab(arms: list[tuple[str, str]], out: Path, rounds: int) -> int:
     }
     meta = runs[cand_name][0]
     if not meta["rows"]:
-        print(f"no problem routed to a tiled path on {meta['arch']}")
+        print(f"no problem routed to the {family} path on {meta['arch']}")
         return 1
     table = []
     for row in meta["rows"]:
@@ -687,7 +777,7 @@ def _summarize_ab(arms: list[tuple[str, str]], out: Path, rounds: int) -> int:
 
     geomean = math.exp(statistics.fmean(math.log(r["ratio"]) for r in table))
     lines = [
-        "# Tiled cache-key A/B: latency, compiles, correctness",
+        f"# {family.capitalize()} cache-key A/B: latency, compiles, correctness",
         "",
         f"- arch {meta['arch']}, num_cus {meta['num_cus']}, {rounds} rounds, arm order"
         " alternated per round, one fresh process per arm per round",
@@ -788,6 +878,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--mode", choices=("ir", "ab"))
     ap.add_argument(
+        "--family",
+        default="tiled",
+        choices=("tiled", "scalar"),
+        help="launcher family whose key is under test",
+    )
+    ap.add_argument(
         "--arm",
         action="append",
         default=[],
@@ -826,7 +922,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode == "ir":
         arches = args.arch or list(ARCHES)
-        common = ["--flavor", args.flavor, "--jobs", str(args.jobs)]
+        common = ["--family", args.family, "--flavor", args.flavor]
+        common += ["--jobs", str(args.jobs)]
         common += ["--num-cus", str(args.num_cus or 120)]
         for arch in arches:
             for name, root in arms:
@@ -837,16 +934,17 @@ def main(argv: list[str] | None = None) -> int:
                     out / f"ir_{name}_{arch}.json",
                     ["--arch", arch, *common],
                 )
-        return _summarize_ir(arms, out, arches, args.num_cus or 120)
+        return _summarize_ir(arms, out, arches, args.num_cus or 120, args.family)
 
-    common = ["--iters", str(args.iters), "--warmup", str(args.warmup)]
+    common = ["--family", args.family]
+    common += ["--iters", str(args.iters), "--warmup", str(args.warmup)]
     common += ["--num-cus", str(args.num_cus)]
     for r in range(args.rounds):
         order = arms if r % 2 == 0 else arms[::-1]
         for name, root in order:
             print(f"[ab] round {r} arm {name}", flush=True)
             _spawn("ab", root, out / f"ab_{name}_r{r}.json", common)
-    return _summarize_ab(arms, out, args.rounds)
+    return _summarize_ab(arms, out, args.rounds, args.family)
 
 
 if __name__ == "__main__":
