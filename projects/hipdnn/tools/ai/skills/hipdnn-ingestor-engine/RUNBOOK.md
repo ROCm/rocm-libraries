@@ -256,9 +256,9 @@ filesystem.
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
 tuple identity includes schema types/defaults and the arch tier at which kernels compete.
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with unrun
-checks. `--manifest "$MANIFEST"` optionally names the bundle to gate (the slug of the
-manifest's `engine.name`) and supplies the matcher vocabulary
-(`specialization.vocabulary`), never compiler evidence. Full artifact checking belongs
+checks. `--manifest "$MANIFEST"` optionally names the bundles to gate (the KDPs whose
+UED name equals the manifest's `engine.name`; every pack of that engine is gated) and
+supplies the matcher vocabulary (`specialization.vocabulary`), never compiler evidence. Full artifact checking belongs
 after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
@@ -753,9 +753,13 @@ among variants sharing its other knobs, which divide every shape a larger tile d
 4. **Reduce and present the proposal.** The report holds the ε-versus-instances curve,
    each variant's keep/drop reason and numerics tag, the cells with no corpus evidence,
    and proposed rules (`drop knob X`, `drop X=v`, `keep X=v only for <cells>`) with their
-   saving and cost. Exit 2 is unusable or stale input. Exit 1: floor plus coverage alone
-   exceed the budget; with the user's approval raise it (`reduction.aot_budget_per_arch`
-   or `--budget`) or narrow cells, corpus or knobs and rerun from stage 2:
+   saving and cost. Exit 2 is unusable or stale input. Exit 3: a correctness attempt
+   failed, or a timing phase is missing for some (round, corpus), so the sweep cannot
+   support a reduction; the report is written and no selection is, so investigate or
+   rerun the sweep. A single round warns that the noise floor is assumed, not measured.
+   Exit 1: floor plus coverage alone exceed the budget; with the user's approval raise
+   it (`reduction.aot_budget_per_arch` or `--budget`) or narrow cells, corpus or knobs
+   and rerun from stage 2:
 
    ```bash
    "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
@@ -764,14 +768,16 @@ among variants sharing its other knobs, which divide every shape a larger tile d
    ```
 
 5. **Apply what the user picks.** Set `RULES` to the comma-separated rule ids the user
-   chose (`R1,R3`), then write and adopt that selection (or copy `$SCRATCH/reduced.yaml`
-   if the user accepts the ε keep-set):
+   chose from the report's rule table (`R` and six hex digits, derived from the rule
+   text, so an id names the same rule under any `--budget`; a rule the sweep no longer
+   proposes exits 2), then write and adopt that selection (or copy
+   `$SCRATCH/reduced.yaml` if the user accepts the ε keep-set):
 
    ```bash
    "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
      --sweep-output "$SWEEP_OUTPUT" --out "$SCRATCH/selection.rules.yaml" \
-     --report "$EVIDENCE/variant_reduce.rules.md" --apply-rules "$RULES"
-   cp "$SCRATCH/selection.rules.yaml" "$CONFIG"
+     --report "$EVIDENCE/variant_reduce.rules.md" --apply-rules "$RULES" &&
+     cp "$SCRATCH/selection.rules.yaml" "$CONFIG"
    ```
 
 6. **Repeat stages 3–6** with a new empty generation destination and a fresh sweep
@@ -825,6 +831,11 @@ evidence, and without the complete join the accounting is **incomplete**. Invest
 every unexplained decline and obtain explicit scope decisions for exclusions. Direct-load
 pointwise instead uses its explicit one-element corpus, installed engine results and
 independent arithmetic/reference correctness, with `exclude_tensors: none`.
+
+No tool checks offline that every shipped variant is reachable from some corpus shape
+(the retired `variant_reachability` check): `variant_reduce` reports a variant as "never
+ranked" only after a GPU sweep, and `registry_enumerator.py --shapes` classifies shapes,
+not shipped variants.
 
 Report exactly the populations and statistics [workloads.md](workloads.md)'s *Required
 reporting statistics* requires; timing is reported separately from the outcome
