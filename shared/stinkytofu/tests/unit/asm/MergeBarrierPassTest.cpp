@@ -403,7 +403,6 @@ TEST(MergeBarrierConstants, KnownDefault) {
     EXPECT_EQ(kCdna5MergeBarrierThreshold, 11);
 }
 
-
 TEST_F(MergeBarrierPassTest, EarlierTensorContractPreventsMerge) {
     auto* signal0 = createSignal(0);
     createWait(0);

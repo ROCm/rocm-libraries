@@ -448,7 +448,7 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
 /// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
 /// end the straight-line proof even though labels are pseudo instructions.
 IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
-                                      const IRBase* limit) {
+                                        const IRBase* limit) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
@@ -473,7 +473,7 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
 /// Find a complete earlier WG pair after the previous cluster wait. Missing or
 /// out-of-bounds pairs leave the signal co-located with its own wait.
 IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
-                                           const IRBase* limit) {
+                                             const IRBase* limit) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {

@@ -2863,8 +2863,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule3HardStopCannotFindItsOwnTriggerAsEarli
     for (int hops : {0, 1}) {
         for (auto* reference : {leadingDrain, trigger}) {
             const auto found = cluster_barrier::test::findRule3SignalAnchorByCycleLeadForUnitTest(
-                reference, segBeginAfter(loopHead), reference, cycleMap,
-                500, 900, {}, hops, loopHead);
+                reference, segBeginAfter(loopHead), reference, cycleMap, 500, 900, {}, hops,
+                loopHead);
             EXPECT_EQ(found.anchor, reference);
             EXPECT_EQ(found.hops, 0);
             EXPECT_FALSE(found.crossedLoopHead);

@@ -287,7 +287,6 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
         << "g2: s_barrier_wait must precede tensor_load1";
 }
 
-
 TEST_F(BarrierTest, TensorContractSurvivesLegacyBarrierLegalization) {
     auto* barrier = createSBarrier();
     ASSERT_NE(barrier, nullptr);
