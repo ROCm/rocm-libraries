@@ -38,7 +38,7 @@ _KEY = "EnableESM2TrackValuVsrc"
 ARCH_CONFIGS = {
     "gfx1250": (
         os.path.join(_DESIGNED, "gfx1250", "streamk.yaml"),
-        os.path.join(_COMMON, "sparse", "gfx1250", "spmm_f16_sia4.yaml"),
+        os.path.join(_COMMON, "sparse", "gfx1250", "spmm_f16.yaml"),
     ),
 }
 

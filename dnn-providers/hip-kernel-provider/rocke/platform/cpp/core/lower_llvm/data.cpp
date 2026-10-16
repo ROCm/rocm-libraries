@@ -318,6 +318,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"raw.ptr.buffer.load.i16",
      "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16(ptr addrspace(8) nocapture readonly, i32, "
      "i32, i32 immarg)"},
+    {"raw.ptr.buffer.load.f16",
+     "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16(ptr addrspace(8) nocapture readonly, i32, "
+     "i32, i32 immarg)"},
     {"raw.ptr.buffer.store.i32",
      "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32(i32, ptr addrspace(8) nocapture "
      "writeonly, i32, i32, i32 immarg)"},
@@ -417,6 +420,9 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"s.prefetch.inst.p0", "declare void @llvm.amdgcn.s.prefetch.inst.p0(ptr, i32)"},
     {"s.prefetch.inst.p1", "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)"},
     {"s.prefetch.inst.p4", "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)"},
+    {"mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32",
+     "declare <16 x float> @llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
+     "i32>, <16 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
     /* gfx1250 data prefetch (llvm23). s.prefetch.data is llvm_anyptr_ty like
      * s.prefetch.inst above; see ROCKE_LL_S_PREFETCH_DATA_PTR_TYPES. */
     {"s.setreg", "declare void @llvm.amdgcn.s.setreg(i32 immarg, i32)"},

@@ -491,12 +491,13 @@ function(hkp_wire_pack_target)
                 --inter-root "${_inter_root}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 --source-label "${ARG_NAME}"
+                --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
-                "${_input_manifest}"
+                "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
@@ -1238,11 +1239,13 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
     set(_probe_py "import json, sys
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
+from hkp_pack.generic_targets import GenericTargets
 from hkp_pack.pipeline import offered_engines, shipped_engines
 lists = {k: tuple(v for v in rest.split(',') if v)
-         for k, _, rest in (a.partition('=') for a in sys.argv[2:])}
+         for k, _, rest in (a.partition('=') for a in sys.argv[3:])}
 try:
-    flat = load_flat_input(sys.argv[1], log=lambda *_args: None,
+    flat = load_flat_input(sys.argv[1], GenericTargets.load(sys.argv[2]),
+                           log=lambda *_args: None,
                            exclude_folders=lists['folders'],
                            disabled_kinds=lists['kinds'])
     print(json.dumps({'shipped': shipped_engines(flat, lists['arches']),
@@ -1253,6 +1256,7 @@ except HkpPackError as exc:
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
                 "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}"
+                "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 "arches=${_arch_csv}" "folders=${_folder_csv}" "kinds=${_kind_csv}"
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
@@ -1315,12 +1319,12 @@ function(_hkp_shipped_engines_for_arch out_var shipped arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_attention_dense_available(<out>)
-#   TRUE when this configuration actually ships the gfx950 dense-attention bundle: the
-#   `product` pack target is wired, gfx950 is among the architectures it was wired for,
-#   and what that pack ships for gfx950 includes hipkernel:Gfx950AttentionDense.
+# hkp_product_ships_engine_for_arch(<out> <engine> <arch>)
+#   TRUE when this configuration actually ships <engine> for <arch>: the `product` pack
+#   target is wired, <arch> is among the architectures it was wired for, and what that
+#   pack ships for <arch> includes <engine>.
 #
-#   Arch-aware, for registrations that install into the gfx950 shard and are pruned with
+#   Arch-aware, for registrations that install into the <arch> shard and are pruned with
 #   it (the census, the external and the gpu_ref checks). Host and test sources outside
 #   the arch content must not read it: they use hkp_product_offers_engine().
 #
@@ -1334,7 +1338,7 @@ endfunction()
 #   HIPKERNELPROVIDER_ENABLE_ROCKE: the bundle is rocKE content, and the pack then
 #   reports what is wrong with the root.
 # ---------------------------------------------------------------------------
-function(hkp_gfx950_attention_dense_available out_var)
+function(hkp_product_ships_engine_for_arch out_var engine arch)
     set(${out_var} FALSE PARENT_SCOPE)
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
@@ -1343,7 +1347,7 @@ function(hkp_gfx950_attention_dense_available out_var)
     endif()
 
     get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
-    if(NOT "gfx950" IN_LIST _arches)
+    if(NOT "${arch}" IN_LIST _arches)
         return()
     endif()
 
@@ -1354,10 +1358,19 @@ function(hkp_gfx950_attention_dense_available out_var)
     endif()
 
     get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
-    _hkp_shipped_engines_for_arch(_engines "${_shipped}" gfx950)
-    if("hipkernel:Gfx950AttentionDense" IN_LIST _engines)
+    _hkp_shipped_engines_for_arch(_engines "${_shipped}" "${arch}")
+    if("${engine}" IN_LIST _engines)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_attention_dense_available(<out>)
+#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_attention_dense_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1640,6 +1653,15 @@ endfunction()
 #   fatal.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
+    if(NOT HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON
+       OR NOT EXISTS "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+        message(FATAL_ERROR
+            "hkp: HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON names no file "
+            "('${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}'); build against a "
+            "hipdnn_plugin_sdk that ships gpu_generic_targets.json.")
+    endif()
+    set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND PROPERTY
+        CMAKE_CONFIGURE_DEPENDS "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
