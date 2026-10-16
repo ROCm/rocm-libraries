@@ -161,8 +161,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -298,21 +298,19 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 
 // A pivot position of -1 requires success. Any other position requires zero pivot.
 // This is a macro so a GoogleTest failure returns from the calling test.
-#define CHECK_HIPSPARSE_ZERO_PIVOT(STATUS, PIVOT)                                \
-    do                                                                           \
-    {                                                                            \
-        const hipsparseStatus_t hipsparse_zero_pivot_status_   = (STATUS);      \
-        const int               hipsparse_zero_pivot_position_ = (PIVOT);       \
-        if(hipsparse_zero_pivot_position_ == -1)                                 \
-        {                                                                        \
-            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_,                \
-                                    HIPSPARSE_STATUS_SUCCESS);                   \
-        }                                                                        \
-        else                                                                     \
-        {                                                                        \
-            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_,                \
-                                    HIPSPARSE_STATUS_ZERO_PIVOT);                \
-        }                                                                        \
+#define CHECK_HIPSPARSE_ZERO_PIVOT(STATUS, PIVOT)                                               \
+    do                                                                                          \
+    {                                                                                           \
+        const hipsparseStatus_t hipsparse_zero_pivot_status_   = (STATUS);                      \
+        const int               hipsparse_zero_pivot_position_ = (PIVOT);                       \
+        if(hipsparse_zero_pivot_position_ == -1)                                                \
+        {                                                                                       \
+            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_, HIPSPARSE_STATUS_SUCCESS);    \
+        }                                                                                       \
+        else                                                                                    \
+        {                                                                                       \
+            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_, HIPSPARSE_STATUS_ZERO_PIVOT); \
+        }                                                                                       \
     } while(0)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
