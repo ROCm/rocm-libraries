@@ -85,13 +85,75 @@ void init_inst(nb::module_ m)
         m_inst, "InstructionInputVector", "A vector of InstructionInputs.");
 
     // Base class
+    nb::enum_<rocisa::GirActionKind>(m_inst, "GirActionKind")
+        .value("Other", rocisa::GirActionKind::Other)
+        .value("Read", rocisa::GirActionKind::Read)
+        .value("Copy", rocisa::GirActionKind::Copy)
+        .value("Fence", rocisa::GirActionKind::Fence)
+        .value("Wmma", rocisa::GirActionKind::Wmma)
+        .value("WaitCnt", rocisa::GirActionKind::WaitCnt);
+
     nb::class_<rocisa::Instruction, rocisa::Item, rocisa::PyInstruction>(m_inst, "Instruction")
         .def(nb::init<rocisa::InstType, const std::string&>())
         .def_rw("instType", &rocisa::Instruction::instType)
         .def_rw("comment", &rocisa::Instruction::comment)
         .def_rw("memToken", &rocisa::Instruction::m_memToken)
-        .def("setMemToken", &rocisa::Instruction::setMemToken)
+        // None clears it: the member is a shared_ptr whose absence is meaningful, so a caller that
+        // wants no token must be able to say so.
+        .def("setMemToken", &rocisa::Instruction::setMemToken, nb::arg("token").none())
         .def("getMemToken", &rocisa::Instruction::getMemToken)
+        .def(
+            "setGirActionData",
+            [](rocisa::Instruction&  self,
+               uint64_t              actionId,
+               uint64_t              anchorAction,
+               rocisa::GirActionKind kind,
+               const nb::sequence&   accesses) {
+                std::vector<rocisa::GirAccess> out;
+                for(auto item : accesses)
+                {
+                    auto              d = nb::cast<nb::dict>(item);
+                    rocisa::GirAccess a;
+                    a.isWrite    = nb::cast<bool>(d["is_write"]);
+                    a.operand    = nb::cast<int>(d["operand"]);
+                    a.ring       = nb::cast<int>(d["ring"]);
+                    a.genId      = nb::cast<int>(d["gen"]);
+                    a.gdelta     = nb::cast<int>(d["gdelta"]);
+                    a.absolute   = nb::cast<int>(d["absolute"]);
+                    a.crossAgent = nb::cast<bool>(d["cross_agent"]);
+                    out.push_back(std::move(a));
+                }
+                self.setGirActionData(actionId, anchorAction, kind, out);
+            },
+            nb::arg("action_id"),
+            nb::arg("anchor_action"),
+            nb::arg("kind"),
+            nb::arg("accesses"))
+        .def("getGirActionData",
+             [](const rocisa::Instruction& self) -> nb::object {
+                 auto data = self.getGirActionData();
+                 if(!data)
+                     return nb::none();
+                 nb::dict result;
+                 result["action_id"]     = nb::int_(data->actionId);
+                 result["anchor_action"] = nb::int_(data->anchorAction);
+                 result["kind"]          = nb::int_(static_cast<uint8_t>(data->kind));
+                 nb::list accesses;
+                 for(const rocisa::GirAccess& src : data->accesses)
+                 {
+                     nb::dict access;
+                     access["is_write"]    = nb::bool_(src.isWrite);
+                     access["operand"]     = nb::int_(src.operand);
+                     access["ring"]        = nb::int_(src.ring);
+                     access["gen"]         = nb::int_(src.genId);
+                     access["gdelta"]      = nb::int_(src.gdelta);
+                     access["absolute"]    = nb::int_(src.absolute);
+                     access["cross_agent"] = nb::bool_(src.crossAgent);
+                     accesses.append(std::move(access));
+                 }
+                 result["accesses"] = std::move(accesses);
+                 return std::move(result);
+             })
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
         .def("getParams", &rocisa::Instruction::getParams)
         .def("preStr", &rocisa::Instruction::preStr)

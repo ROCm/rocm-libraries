@@ -141,6 +141,9 @@ class BarrierTest : public ::testing::Test {
 TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
     StinkyInstruction* barrier = createSBarrier();
     ASSERT_NE(barrier, nullptr);
+    const GirActionData action{
+        17, 9, GirActionKind::Fence, {GirAccessData{false, 3, 2, 1, -1, -1, true}}};
+    barrier->addModifier<GirActionData>(action);
 
     // Before legalization: exactly one s_barrier in the block.
     EXPECT_EQ(countByMnemonic("s_barrier"), 1);
@@ -172,6 +175,17 @@ TEST_F(BarrierTest, LegalizeBarrier_Gfx1250_ExpandsToSignalAndWait) {
         << "Second legalized instruction should be s_barrier_wait";
     EXPECT_TRUE(isSplitBarrierAllWave(*result.last))
         << "s_barrier_wait should carry -1 (all-wave) operand";
+
+    // One logical GIR action may legalize into multiple physical instructions. Every
+    // realization carries the complete record; GirFrameAnalysis de-duplicates accesses by id.
+    for (StinkyInstruction* half : {result.first, result.last}) {
+        const GirActionData* actual = half->getModifier<GirActionData>();
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(actual->actionId, action.actionId);
+        EXPECT_EQ(actual->anchorAction, action.anchorAction);
+        EXPECT_EQ(actual->kind, action.kind);
+        EXPECT_EQ(actual->accesses, action.accesses);
+    }
 }
 
 // Three independent memory-token groups are emitted into one block.

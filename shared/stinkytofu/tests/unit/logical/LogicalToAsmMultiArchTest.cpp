@@ -15,6 +15,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
+#include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
 
@@ -1374,6 +1375,36 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions) {
         if (numSrcs == 4) {
             std::cout << "  ? TensorLoadToLds with 4 sources (optional) works correctly\n";
         }
+    }
+}
+
+TEST(LogicalToAsmMetadata, CompleteGirActionSurvivesBarrierSplit) {
+    Function function("gir_barrier");
+    BasicBlock* block = function.createBasicBlock("entry");
+    LogicalInstruction* barrier = SBarrier();
+    const GirActionData action{
+        17, 9, GirActionKind::Fence, {GirAccessData{false, 3, 2, 1, -1, -1, true}}};
+    barrier->giraction = action;
+    block->appendIR(barrier);
+
+    PassManager passes;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};
+    passes.setGemmTileConfig(config);
+    passes.addPass(createToStinkyAsmPass());
+    passes.run(function);
+
+    std::vector<StinkyInstruction*> halves;
+    for (IRBase& ir : *block)
+        if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) halves.push_back(inst);
+    ASSERT_EQ(halves.size(), 2u);
+    for (StinkyInstruction* half : halves) {
+        const GirActionData* actual = half->getModifier<GirActionData>();
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(actual->actionId, action.actionId);
+        EXPECT_EQ(actual->anchorAction, action.anchorAction);
+        EXPECT_EQ(actual->kind, action.kind);
+        EXPECT_EQ(actual->accesses, action.accesses);
     }
 }
 

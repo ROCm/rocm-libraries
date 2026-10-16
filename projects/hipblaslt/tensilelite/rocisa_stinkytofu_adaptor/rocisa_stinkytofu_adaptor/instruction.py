@@ -81,7 +81,7 @@ class Instruction:
     __slots__ = (
         "name", "parent",
         "instType", "comment", "instStr", "outputInlineAsm",
-        "m_memToken",
+        "m_memToken", "m_girAction",
     )
 
     def __init__(self, instType: Any, comment: str = ""):
@@ -96,6 +96,7 @@ class Instruction:
         self.instStr: str = ""
         self.outputInlineAsm: bool = False
         self.m_memToken: Any = None
+        self.m_girAction: Any = None
 
     # ---------------------------------------------------- memToken / inline
     def setMemToken(self, token: Any) -> None:
@@ -103,6 +104,33 @@ class Instruction:
 
     def getMemToken(self) -> Any:
         return self.m_memToken
+
+    def setGirActionData(self, action_id: int, anchor_action: int,
+                         kind: Any, accesses: Any) -> None:
+        try:
+            kind_value = int(kind)
+        except (TypeError, ValueError):
+            kind_value = int(kind.value)
+        self.m_girAction = {
+            "action_id": int(action_id),
+            "anchor_action": int(anchor_action),
+            "kind": kind_value,
+            "accesses": [
+                {
+                    "is_write": bool(access["is_write"]),
+                    "operand": int(access["operand"]),
+                    "ring": int(access["ring"]),
+                    "gen": int(access["gen"]),
+                    "gdelta": int(access["gdelta"]),
+                    "absolute": int(access["absolute"]),
+                    "cross_agent": bool(access["cross_agent"]),
+                }
+                for access in accesses
+            ],
+        }
+
+    def getGirActionData(self) -> Any:
+        return self.m_girAction
 
     def setInlineAsm(self, is_true: bool) -> None:
         self.outputInlineAsm = bool(is_true)
