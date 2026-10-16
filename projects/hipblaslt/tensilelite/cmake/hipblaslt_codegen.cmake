@@ -314,6 +314,14 @@ function(create_device_library)
         --use-bundled-known-bugs
         --check-all
     )
+    # TensileLogic defaults to 48 workers, but it gates TensileCreateLibrary, so
+    # give it the same parallelism (TCL uses every CPU unless JOBS is set).
+    if(_cdl_JOBS)
+        list(APPEND _tensile_logic_args --jobs "${_cdl_JOBS}")
+    else()
+        cmake_host_system_information(RESULT _logic_jobs QUERY NUMBER_OF_LOGICAL_CORES)
+        list(APPEND _tensile_logic_args --jobs "${_logic_jobs}")
+    endif()
     set(_codegen_dependencies "${_known_bugs_resource}")
     if(TARGET _rocisa)
         list(APPEND _codegen_dependencies _rocisa)

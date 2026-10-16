@@ -92,7 +92,20 @@ class StrictTypeLoader(yamlLoader):
     the actual type written in the YAML to catch type mismatches during validation.
     Accepts both YAML-standard (true/false) and Python-style (True/False) booleans.
     """
-    pass
+
+    # Logic files hold millions of scalars but only thousands of distinct ones,
+    # and regex-matching each against the implicit resolvers dominates parsing.
+    # With no path resolvers registered a scalar's tag depends only on its text.
+    _scalarTags: dict = {}
+
+    def resolve(self, kind, value, implicit):
+        if kind is yaml.ScalarNode and not self.yaml_path_resolvers:
+            key = (value, implicit)
+            tag = self._scalarTags.get(key)
+            if tag is None:
+                tag = self._scalarTags[key] = super().resolve(kind, value, implicit)
+            return tag
+        return super().resolve(kind, value, implicit)
 
 # Remove the implicit bool resolver for integers
 # By default, YAML treats various forms as bool (yes/no, true/false, on/off, 0/1)

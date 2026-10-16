@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -109,6 +110,55 @@ namespace rocisa
             isainfo.reg_caps      = initRegisterCaps(isaVersion, isainfo.arch_caps);
             isainfo.asm_bugs      = initAsmBugs(isainfo.asm_caps);
             m_isainfo[isaVersion] = isainfo;
+        }
+
+        // Same as calling init() for each arch, but probes the assembler
+        // capabilities of all not-yet-initialized ISAs concurrently.  Each
+        // probe is an independent assembler run, so results are unchanged.
+        void initMany(const nb::list& archs, const std::string& assemblerPath, bool debug = false)
+        {
+            std::vector<IsaVersion> isaVersions;
+            for(auto arch : archs)
+            {
+                auto       t = nb::cast<nb::tuple>(arch);
+                IsaVersion isaVersion
+                    = {nb::cast<int>(t[0]), nb::cast<int>(t[1]), nb::cast<int>(t[2])};
+                if(m_isainfo.find(isaVersion) == m_isainfo.end()
+                   && std::find(isaVersions.begin(), isaVersions.end(), isaVersion)
+                          == isaVersions.end())
+                    isaVersions.push_back(isaVersion);
+            }
+            std::vector<std::map<std::string, int>> asmCaps(isaVersions.size());
+            std::vector<std::exception_ptr>         errors(isaVersions.size());
+            {
+                nb::gil_scoped_release   release;
+                std::vector<std::thread> threads;
+                for(size_t i = 0; i < isaVersions.size(); ++i)
+                    threads.emplace_back([&, i]() {
+                        try
+                        {
+                            asmCaps[i] = initAsmCaps(isaVersions[i], assemblerPath, debug);
+                        }
+                        catch(...)
+                        {
+                            errors[i] = std::current_exception();
+                        }
+                    });
+                for(auto& t : threads)
+                    t.join();
+            }
+            for(auto& e : errors)
+                if(e)
+                    std::rethrow_exception(e);
+            for(size_t i = 0; i < isaVersions.size(); ++i)
+            {
+                IsaInfo isainfo;
+                isainfo.asm_caps            = std::move(asmCaps[i]);
+                isainfo.arch_caps           = initArchCaps(isaVersions[i]);
+                isainfo.reg_caps            = initRegisterCaps(isaVersions[i], isainfo.arch_caps);
+                isainfo.asm_bugs            = initAsmBugs(isainfo.asm_caps);
+                m_isainfo[isaVersions[i]] = isainfo;
+            }
         }
 
         bool isInit()
