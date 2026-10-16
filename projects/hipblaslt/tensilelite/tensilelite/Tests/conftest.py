@@ -42,6 +42,7 @@ def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
     parser.addoption("--prebuilt-client")
+    parser.addoption("--hipblaslt-bench", help="hipblaslt-bench for direct client integration tests")
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
@@ -330,4 +331,3 @@ def useGlobalParameters(tensile_args):
             Common.restoreDefaultGlobalParameters()
 
     return gpUpdater
-

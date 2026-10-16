@@ -274,6 +274,13 @@ namespace hipblaslt_bench
         // cfg.iters is used here and ONLY here; the adaptive path below is self-sizing.
         if(!cfg.adaptive)
         {
+            // Zero timed iterations permits a validation-only bench run. Do not
+            // touch events or the stream: there is no measurement to collect.
+            if(cfg.iters == 0)
+            {
+                out = TimingResult{};
+                return;
+            }
             const int32_t iters    = cfg.iters > 0 ? cfg.iters : 1;
             double        batch_us = 0.0;
             detail::time_batch(launch, iters, global_index, cfg.use_gpu_timer, events, batch_us);
