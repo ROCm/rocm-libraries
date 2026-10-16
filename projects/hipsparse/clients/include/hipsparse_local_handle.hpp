@@ -31,6 +31,9 @@
 #include "hipsparse_arguments.hpp"
 #include "utility.hpp"
 
+#include <sstream>
+#include <stdexcept>
+
 /*! \brief  local handle which is automatically created and destroyed  */
 class hipsparseLocalHandle_t
 {
@@ -59,7 +62,12 @@ public:
     }
     ~hipsparseLocalHandle_t()
     {
-        hipsparseDestroy(this->handle);
+        const hipsparseStatus_t status = hipsparseDestroy(this->handle);
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            std::cerr << "hipsparseDestroy failed: " << hipsparseStatusToString(status)
+                      << std::endl;
+        }
     }
 
     // Allow hipsparseLocalHandle_t to be used anywhere hipsparseHandle_t is expected
@@ -83,23 +91,31 @@ public:
             return;
         }
 
-#ifdef GOOGLE_TEST
-        ASSERT_EQ(capture_started, false);
-#endif
+        if(this->capture_started)
+        {
+            throw std::runtime_error(
+                "hipsparseStreamBeginCapture called while a capture is already active");
+        }
 
-        CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
-        CHECK_HIPSPARSE_ERROR(hipsparseGetStream(*this, &this->old_stream));
-        CHECK_HIPSPARSE_ERROR(hipsparseSetStream(*this, this->graph_stream));
+        throw_on_hip_error("hipStreamCreate", hipStreamCreate(&this->graph_stream));
+        throw_on_hipsparse_error("hipsparseGetStream",
+                                 hipsparseGetStream(*this, &this->old_stream));
+        throw_on_hipsparse_error("hipsparseSetStream",
+                                 hipsparseSetStream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE
-        CHECK_HIP_ERROR(hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
+        throw_on_hip_error(
+            "hipStreamBeginCapture",
+            hipStreamBeginCapture(this->graph_stream, hipStreamCaptureModeGlobal));
 
-        capture_started = true;
+        this->capture_started = true;
 #endif
     }
 
     void hipsparseStreamEndCapture(int runs = 1)
     {
+        (void)runs;
+
 // As of ROCm 7.1, the HIP graph APIs require nvcc unnecessarily as they are gated by
 // __CUDACC__ in the nvidia_hip_runtime_api.h header. Since we can compile hipSPARSE
 // with g++/clang, these graph APIs cannot be called from hipSPARSE.
@@ -109,38 +125,75 @@ public:
             return;
         }
 
-#ifdef GOOGLE_TEST
-        ASSERT_EQ(capture_started, true);
-#endif
+        if(!this->capture_started)
+        {
+            throw std::runtime_error(
+                "hipsparseStreamEndCapture called without an active capture");
+        }
 
         hipGraph_t     graph;
         hipGraphExec_t instance;
 
         // END GRAPH CAPTURE
-        CHECK_HIP_ERROR(hipStreamEndCapture(this->graph_stream, &graph));
-        CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
+        throw_on_hip_error("hipStreamEndCapture",
+                           hipStreamEndCapture(this->graph_stream, &graph));
+        throw_on_hip_error("hipGraphInstantiate",
+                           hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
 
-        CHECK_HIP_ERROR(hipGraphDestroy(graph));
-        CHECK_HIP_ERROR(hipGraphLaunch(instance, this->graph_stream));
-        CHECK_HIP_ERROR(hipStreamSynchronize(this->graph_stream));
-        CHECK_HIP_ERROR(hipGraphExecDestroy(instance));
+        throw_on_hip_error("hipGraphDestroy", hipGraphDestroy(graph));
+        throw_on_hip_error("hipGraphLaunch", hipGraphLaunch(instance, this->graph_stream));
+        throw_on_hip_error("hipStreamSynchronize", hipStreamSynchronize(this->graph_stream));
+        throw_on_hip_error("hipGraphExecDestroy", hipGraphExecDestroy(instance));
 
-        CHECK_HIPSPARSE_ERROR(hipsparseSetStream(*this, this->old_stream));
-        CHECK_HIP_ERROR(hipStreamDestroy(this->graph_stream));
+        throw_on_hipsparse_error("hipsparseSetStream",
+                                 hipsparseSetStream(*this, this->old_stream));
+        throw_on_hip_error("hipStreamDestroy", hipStreamDestroy(this->graph_stream));
         this->graph_stream = nullptr;
 
-        capture_started = false;
+        this->capture_started = false;
 #endif
     }
 
     hipStream_t get_stream()
     {
-        hipStream_t stream;
-        hipsparseGetStream(*this, &stream);
+        hipStream_t             stream{};
+        const hipsparseStatus_t status = hipsparseGetStream(*this, &stream);
+        if(status != HIPSPARSE_STATUS_SUCCESS)
+        {
+            std::cerr << "hipsparseGetStream failed: " << hipsparseStatusToString(status)
+                      << std::endl;
+            throw status;
+        }
+
         return stream;
     }
 
 private:
+    static void throw_on_hip_error(const char* call, hipError_t status)
+    {
+        if(status == hipSuccess)
+        {
+            return;
+        }
+
+        std::ostringstream message;
+        message << call << " failed: " << hipGetErrorString(status) << " ("
+                << static_cast<int>(status) << ")";
+        throw std::runtime_error(message.str());
+    }
+
+    static void throw_on_hipsparse_error(const char* call, hipsparseStatus_t status)
+    {
+        if(status == HIPSPARSE_STATUS_SUCCESS)
+        {
+            return;
+        }
+
+        std::ostringstream message;
+        message << call << " failed: " << hipsparseStatusToString(status);
+        throw std::runtime_error(message.str());
+    }
+
     hipStream_t graph_stream;
     hipStream_t old_stream;
     bool        capture_started;
