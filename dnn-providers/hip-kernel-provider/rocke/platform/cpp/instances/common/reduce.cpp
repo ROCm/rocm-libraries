@@ -550,11 +550,16 @@ rocke_kernel_def_t*
             total = rocke_block_lds_reduce(b, acc, lds, tid, BS, combine);
         }
 
-        /* if spec.op == "mean": total = total * rcp(const_c(float(N))) */
+        /* if spec.op == "mean":
+         *     f64: total = fdiv(total, const_c(float(N)))  (one rounding)
+         *     else: total = total * rcp(const_c(float(N))) */
         if(strcmp(spec->op, "mean") == 0)
         {
-            total = rocke_b_fmul(
-                b, total, rocke_b_rcp(b, rocke_reduce2d_const_c(b, is_f64, (double)N)));
+            rocke_value_t* n_value = rocke_reduce2d_const_c(b, is_f64, (double)N);
+            if(is_f64)
+                total = rocke_b_fdiv(b, total, n_value);
+            else
+                total = rocke_b_fmul(b, total, rocke_b_rcp(b, n_value));
         }
 
         /* with b.scf_if(b.cmp_eq(tid, const_i32(0))):

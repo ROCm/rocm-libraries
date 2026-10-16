@@ -255,11 +255,40 @@ static int test_scalar_global_accesses_are_8_byte_aligned()
     return 0;
 }
 
+/* The f64 mean is the sum divided by N (one rounding), not the sum times
+ * 1/N, which rounds twice. N=3072 has no exact reciprocal; its double bit
+ * pattern is 0x40A8000000000000. */
+static int test_mean_divides_by_n()
+{
+    char err[256];
+    char* llvm_text = NULL;
+
+    rocke_reduce2d_spec_t rd = rocke_reduce2d_spec_default();
+    rd.n_per_block = 3072;
+    rd.op = "mean";
+    rd.dtype = "f64";
+    rd.vec = 2;
+    CHECK(rocke_reduce2d_lower_to_llvm(
+              &rd, "gfx942", ROCKE_LLVM_FLAVOR_LLVM20, &llvm_text, err, sizeof(err))
+          == ROCKE_OK);
+    const char* div = std::strstr(llvm_text, " = fdiv ");
+    CHECK(div != NULL);
+    CHECK(std::strstr(div + 1, " = fdiv ") == NULL);
+    const char* div_end = std::strchr(div, '\n');
+    CHECK(div_end != NULL);
+    const std::string div_line(div, div_end);
+    CHECK(div_line.find(" = fdiv double %") == 0);
+    CHECK(div_line.find(", 0x40A8000000000000") == div_line.size() - 20);
+    CHECK(std::strstr(llvm_text, "fmul double") == NULL);
+    std::free(llvm_text);
+    return 0;
+}
+
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
        || test_fabs_stays_in_double() || test_vector_binops_use_float_ops()
-       || test_scalar_global_accesses_are_8_byte_aligned())
+       || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;

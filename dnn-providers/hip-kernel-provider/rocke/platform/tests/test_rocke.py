@@ -1147,6 +1147,19 @@ class TestReduceInstance(unittest.TestCase):
         self.assertEqual(len(accesses), 1)
         self.assertTrue(accesses[0].endswith(", align 8"), accesses[0])
 
+    def test_f64_mean_divides_by_n(self):
+        # The f64 mean is the sum divided by N (one rounding), not the sum
+        # times 1/N, which rounds twice. N=3072 has no exact reciprocal; its
+        # double bit pattern is 0x40A8000000000000.
+        from rocke.instances import Reduce2DSpec, build_reduce2d
+
+        spec = Reduce2DSpec(n_per_block=3072, op="mean", dtype="f64", vec=2)
+        ll = lower_kernel_to_llvm(build_reduce2d(spec))
+        divides = [line.strip() for line in ll.splitlines() if " = fdiv " in line]
+        self.assertEqual(len(divides), 1, divides)
+        self.assertRegex(divides[0], r"= fdiv double %\w+, 0x40A8000000000000$")
+        self.assertNotIn("fmul double", ll)
+
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
 
