@@ -7792,9 +7792,8 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         from rocke.runtime import runtime_coexistence as rc
 
         # TheRock torch's comgr lives in _rocm_sdk_core/lib, outside the torch
-        # package. Its version came from the /opt/rocm fallback instead of the
-        # wheel, so a ROCm 10.1 wheel on a 10.2 host picked the LLVM flavor and
-        # capability guards for a comgr that was not the one loaded.
+        # package. Release metadata must come from that wheel rather than a
+        # different system installation; it does not select the LLVM flavor.
         with tempfile.TemporaryDirectory() as tmp:
             site, core_lib, torch_stub = self._fake_torch_site(tmp)
             torch_stub.version = types.SimpleNamespace(hip="7.16.26332-0000000")
