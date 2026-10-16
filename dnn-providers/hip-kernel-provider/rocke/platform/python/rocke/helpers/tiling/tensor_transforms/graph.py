@@ -55,6 +55,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from math import prod
 from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .ranges import RuntimeValue
 
 __all__ = [
     "BroadcastParams",
@@ -74,6 +78,7 @@ __all__ = [
     "broadcast",
     "embed",
     "freeze",
+    "identity_graph",
     "inputs",
     "make_transform_graph",
     "merge",
@@ -642,3 +647,19 @@ def _describe_arg(arg: object) -> str:
     if arg is None:
         return "nothing"
     return type(arg).__name__
+
+
+def identity_graph(lengths: tuple[int | RuntimeValue | None, ...]) -> TransformGraph:
+    """The graph of a plain window over a tensor with these lengths: outputs = inputs.
+
+    Inputs and outputs are named ``axis0``, ``axis1``, ... in tensor-axis order. An int length
+    gives its input the domain ``[0, length)``; a runtime length (or ``None``) gives an input with
+    no domain, bounded only by the tensor. A plain window and a graph window then have their
+    checks decided by the same rule.
+    """
+    names = tuple(f"axis{i}" for i in range(len(lengths)))
+    domains = {
+        name: length if isinstance(length, int) else None
+        for name, length in zip(names, lengths)
+    }
+    return TransformGraph(domains, names, ())
