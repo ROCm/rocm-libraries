@@ -784,7 +784,6 @@ int main(int argc, char* argv[])
         // in-memory cache if this file can't be opened
         precompile_cleanup.path = fs::temp_directory_path() / "rocfft-test.db";
         precompile_file         = precompile_cleanup.path.string();
-        std::cerr << "precompile file is " << precompile_file << std::endl;
     }
 
     // if precompiling, tell rocFFT to use the specified cache file
