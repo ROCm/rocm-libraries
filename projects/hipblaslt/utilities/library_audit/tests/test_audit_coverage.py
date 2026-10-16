@@ -10,6 +10,7 @@ import os
 import runpy
 import subprocess
 import sys
+import types
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -660,6 +661,62 @@ def test_rocisa_stub_installs_when_missing_and_is_reused() -> None:
     normalize, defaults = audit_checks._tensile_fill_tools()
     assert callable(normalize)
     assert defaults
+
+
+def test_joblib_stub_installs_when_missing_or_incomplete() -> None:
+    """Install the joblib stub when the import fails or the module is incomplete.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the stub does not stand in for ``delayed``.
+    """
+    saved = sys.modules.get("joblib")
+    real_import = __import__
+
+    def _block_joblib(name: str, *args: Any, **kwargs: Any) -> Any:
+        """Fail imports of joblib so the stub installer takes its except path.
+
+        Args:
+            name: Module name.
+            args: Positional import arguments.
+            kwargs: Keyword import arguments.
+
+        Returns:
+            The imported module.
+
+        Raises:
+            ModuleNotFoundError: If ``name`` is joblib.
+        """
+        if name == "joblib" or name.startswith("joblib."):
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    try:
+        sys.modules.pop("joblib", None)
+        with patch("builtins.__import__", side_effect=_block_joblib):
+            audit_checks._install_joblib_stub_if_needed()
+        assert sys.modules["joblib"].delayed(int) is int
+
+        missing_parallel = types.ModuleType("joblib")
+        sys.modules["joblib"] = missing_parallel
+        audit_checks._install_joblib_stub_if_needed()
+        assert sys.modules["joblib"].delayed(str) is str
+
+        missing_delayed = types.ModuleType("joblib")
+        missing_delayed.Parallel = object
+        sys.modules["joblib"] = missing_delayed
+        audit_checks._install_joblib_stub_if_needed()
+        assert sys.modules["joblib"].__version__ == "0"
+    finally:
+        if saved is not None:
+            sys.modules["joblib"] = saved
+        else:
+            sys.modules.pop("joblib", None)
 
 
 def test_absent_filled_fields_are_skipped() -> None:

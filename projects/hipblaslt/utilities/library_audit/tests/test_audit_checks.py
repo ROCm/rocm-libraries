@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
+from unittest.mock import patch
 
 from audit_hipblaslt_libraries import (
     DEFAULT_CHECK_IDS,
     AuditResult,
     FileAuditContext,
+    _yaml_safe_load,
     format_audit_report,
     format_check_list,
     main,
@@ -319,6 +322,98 @@ def test_filename_policy_does_not_synthesize_a_problem_name() -> None:
     assert "suffix" not in messages
 
 
+def test_solution_uid_must_be_present_on_every_solution() -> None:
+    """Changed libraries fail when any solution omits SolutionUID.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a missing, blank, or non-mapping solution is accepted,
+            or if ``DefaultSolution`` is allowed to carry ``SolutionUID``.
+    """
+    present = _dict_library(
+        [
+            {"SolutionIndex": 1, "SolutionUID": "0u1c"},
+            {"SolutionIndex": 2, "SolutionUID": "0u3E"},
+        ],
+        default_solution={"UseCustomMainLoopSchedule": 1},
+    )
+    assert _errors(present, ("solution_uid_present",)) == []
+    assert _errors(_dict_library([]), ("solution_uid_present",)) == []
+
+    on_defaults = _dict_library(
+        [{"SolutionIndex": 1, "SolutionUID": "0u1c"}],
+        default_solution={"SolutionUID": "0u3E"},
+    )
+    default_errors = _errors(on_defaults, ("solution_uid_present",))
+    assert [code for code, _ in default_errors] == ["solution_uid_present"]
+    assert "DefaultSolution" in default_errors[0][1]
+
+    missing = _dict_library(
+        [{"SolutionIndex": 1, "SolutionUID": "0u1c"}, {"SolutionIndex": 4}]
+    )
+    blank = _dict_library([{"SolutionIndex": 5, "SolutionUID": "  "}])
+    numeric = _dict_library([{"SolutionIndex": 6, "SolutionUID": 7}])
+    for record in (missing, blank, numeric):
+        errors = _errors(record, ("solution_uid_present",))
+        assert [code for code, _ in errors] == ["solution_uid_present"]
+
+    not_a_mapping = normalize_library(
+        {
+            "ArchitectureName": "gfx950",
+            "ProblemType": {},
+            "Solutions": ["not-a-solution"],
+            "LibraryType": "Equality",
+        },
+        Path("gfx950/gfx950/Equality/sample.yaml"),
+    )
+    errors = _errors(not_a_mapping, ("solution_uid_present",))
+    assert [code for code, _ in errors] == ["solution_uid_present"]
+    assert "position 0" in errors[0][1]
+
+    listed = normalize_library(
+        [
+            None,
+            "gfx950",
+            "gfx950",
+            ["Device 75a0"],
+            {},
+            [{"SolutionIndex": 0}],
+            [],
+            [],
+            [],
+            None,
+            "DeviceEfficiency",
+            "Equality",
+        ],
+        Path("legacy.yaml"),
+    )
+    errors = _errors(listed, ("solution_uid_present",))
+    assert [code for code, _ in errors] == ["solution_uid_present"]
+    assert "SolutionIndex 0" in errors[0][1]
+
+
+def test_yaml_loader_uses_pure_python_without_c_loader() -> None:
+    """Fall back to ``yaml.safe_load`` when the libyaml loader is absent.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the fallback does not return the parsed document.
+    """
+    fake = SimpleNamespace(safe_load=lambda source: {"loaded": source})
+    with patch("audit_hipblaslt_libraries.yaml", fake):
+        assert _yaml_safe_load("a: 1") == {"loaded": "a: 1"}
+
+
 def test_activation_func_call_uses_tensile_default() -> None:
     """An omitted ActivationFuncCall becomes TensileLite's global default, True.
 
@@ -360,6 +455,7 @@ def test_check_registry_lists_defaults_and_skip() -> None:
         "activation_func_call",
         "filename_policy",
         "kernel_name_matches_filename",
+        "solution_uid_present",
     ):
         assert check_id in text
     assert "use_custom_main_loop_schedule" not in resolve_enabled_checks(

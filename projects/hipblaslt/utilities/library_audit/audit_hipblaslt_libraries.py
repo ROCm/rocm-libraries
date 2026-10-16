@@ -910,6 +910,59 @@ def validate_list_format_added(
         )
 
 
+def validate_solution_uid_present(
+    record: LibraryRecord,
+    sink: ErrorSink,
+    device_folders: Optional[dict[str, set[str]]] = None,
+    context: Optional[FileAuditContext] = None,
+) -> None:
+    """Require every solution to include ``SolutionUID``.
+
+    The audit only reads logic files changed in the pull request. Each
+    solution must carry its own non-empty ``SolutionUID``. ``DefaultSolution``
+    must not contain ``SolutionUID``.
+
+    Args:
+        record: Parsed library record.
+        sink: Error callback.
+        device_folders: Unused. Present so every check shares one signature.
+        context: Unused per-file audit context.
+
+    Returns:
+        None.
+
+    Raises:
+        No exceptions are raised.
+    """
+    del device_folders, context
+    if "SolutionUID" in record.default_solution:
+        _emit(
+            sink,
+            record.path,
+            "solution_uid_present",
+            "DefaultSolution must not contain SolutionUID.",
+        )
+    for position, sol in enumerate(record.solutions):
+        if not isinstance(sol, dict):
+            _emit(
+                sink,
+                record.path,
+                "solution_uid_present",
+                f"Solution at position {position} is not a mapping, so it has no SolutionUID.",
+            )
+            continue
+        uid = sol.get("SolutionUID")
+        if isinstance(uid, str) and uid.strip():
+            continue
+        sol_idx = sol.get("SolutionIndex", position)
+        _emit(
+            sink,
+            record.path,
+            "solution_uid_present",
+            f"SolutionIndex {sol_idx}: SolutionUID is required on every solution.",
+        )
+
+
 def validate_activation_func_call(
     record: LibraryRecord,
     sink: ErrorSink,
@@ -1240,6 +1293,11 @@ CHECK_CATALOG: tuple[tuple[str, str, CheckFn], ...] = (
         "list_format_added",
         "Fail when a new file is list-format, or a dict library changes to list-format.",
         validate_list_format_added,
+    ),
+    (
+        "solution_uid_present",
+        "Every solution must include SolutionUID. DefaultSolution must not.",
+        validate_solution_uid_present,
     ),
     (
         "activation_func_call",
