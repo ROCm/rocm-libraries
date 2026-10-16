@@ -60,7 +60,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
-  VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
+  VBfeU32, VSwapB32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
@@ -6507,6 +6507,23 @@ class KernelWriterAssembly(KernelWriter):
     return module, offset_val
 
   ##############################################################################
+  # Local Read Addresses: fill LocalReadAddr+1.. from +0 (each +64K)
+  ##############################################################################
+  def _lraFanOut(self, kernel, tc, numLra):
+    module = Module("lraFanOut")
+    maxOff = self.states.regCaps["maxLDSConstOffset"]
+    if tc == "B" and kernel.get("LDSSegmentBRotate"):
+      # +0 already carries the pair offset; +1 = +0 + per-wave delta (see lraDeclareAddresses).
+      assert numLra == 2 and maxOff == 65536, "LDSSegmentBRotate needs exactly 2 B local-read addresses"
+      module.add(VAddU32(dst=vgpr("LocalReadAddrB+1"), src0=sgpr("BRotateLRDelta"), src1=vgpr("LocalReadAddrB+0"), \
+                         comment="B-rotate: other component"))
+      return module
+    for i in range(1, numLra):
+      module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), src0=(i * maxOff), \
+        src1=vgpr("LocalReadAddr%s"%tc), comment="Final Offset Plus %uK"%((i * maxOff) / 1024)))
+    return module
+
+  ##############################################################################
   # Local Read Addresses: Declare Addresses A/B
   ##############################################################################
   def lraDeclareAddresses(self, kernel, tP):
@@ -6527,6 +6544,24 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
+      if tc == "B" and kernel.get("LDSSegmentBRotate"):
+        # B-rotate: SIMD pair 1 (odd wave) reads B half h from component 1-h. LocalRead reaches
+        # half h through LocalReadAddrB+h with immediate (h*S + within) - h*64K, S = component
+        # stride. So pair p needs +0 = root + p*S and +1 = +0 + 64K - p*2S (the per-wave delta).
+        compStride = _segOff["writeStrideBytes"]
+        with self.allocTmpSgpr(1, tag="bRotatePair") as tmpSgprInfo:
+          pairSgpr = sgpr(tmpSgprInfo.idx)
+          module.add(VReadfirstlaneB32(dst=pairSgpr, src=vgpr("Serial"), comment="B-rotate: tId"))
+          module.add(SLShiftRightB32(dst=pairSgpr, shiftHex=log2(kernel["WavefrontSize"]), src=pairSgpr, \
+                                     comment="B-rotate: wave id"))
+          module.add(SAndB32(dst=pairSgpr, src0=pairSgpr, src1=1, comment="B-rotate: pair = wave id & 1"))
+          module.add(SMulI32(dst=sgpr("BRotateLRDelta"), src0=pairSgpr, src1=2 * compStride, \
+                             comment="B-rotate: pair * 2S"))
+          module.add(SSubU32(dst=sgpr("BRotateLRDelta"), src0=self.states.regCaps["maxLDSConstOffset"], \
+                             src1=sgpr("BRotateLRDelta"), comment="B-rotate: delta = 64K - pair*2S"))
+          module.add(SMulI32(dst=pairSgpr, src0=pairSgpr, src1=compStride, comment="B-rotate: pair * S"))
+          module.add(VAddU32(dst=vgpr("LocalReadAddrB+0"), src0=pairSgpr, src1=vgpr("LocalReadAddrB+0"), \
+                             comment="B-rotate: pair 1 reads the other component first"))
 
     if tP["isA"]:
       numVgpr = self.states.a.numVgprLocalReadAddr
@@ -6541,9 +6576,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       raise Exception(f"unsupport tc %s{tc}")
 
-    for i in range(1, numVgpr):
-      module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"],i)), src0=i * self.states.regCaps["maxLDSConstOffset"], \
-        src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024) ))
+    module.add(self._lraFanOut(kernel, tP["tensorChar"], numVgpr))
 
     return module
 
@@ -8850,6 +8883,29 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # End Summation
   ##############################################################################
+  def _bRotateUnswapAcc(self, kernel):
+    """LDSSegmentBRotate: SIMD pair 1 read B tile j from tile (j + WT1/2) mod WT1, so its
+    accumulator tile (i, j) holds C(i, rot(j)). Swap the two B halves back before the epilogue."""
+    module = Module("bRotateUnswapAcc")
+    wt0, wt1 = kernel["MIWaveTile"][0], kernel["MIWaveTile"][1]
+    accsPerTile = kernel["MatrixInstM"] * kernel["MatrixInstN"] * kernel["MatrixInstB"] \
+                  // kernel["WavefrontSize"] * kernel["MIRegPerOut"]
+    assert wt1 % 2 == 0 and accsPerTile * wt0 * wt1 == self.states.c.numVgprValu, \
+      "LDSSegmentBRotate: unexpected accumulator layout"
+    skip = Label(self.labels.getUniqueNamePrefix("BRotate_Unswap_End"), "")
+    self._emitTdmWaveParitySCCAuto(module, kernel, "B-rotate: SIMD pair 1 (odd wave)?")
+    module.add(SCBranchSCC0(labelName=skip.getLabelName(), comment="pair 0: accumulators already in order"))
+    half = wt1 // 2
+    for j in range(half):
+      for i in range(wt0):
+        a = (j * wt0 + i) * accsPerTile
+        b = ((j + half) * wt0 + i) * accsPerTile
+        for r in range(accsPerTile):
+          module.add(VSwapB32(dst=vgpr("ValuC+%u" % (a + r)), src=vgpr("ValuC+%u" % (b + r)), \
+                              comment="B-rotate: acc(%u,%u) <-> acc(%u,%u)" % (i, j, i, j + half) if r == 0 else ""))
+    module.add(skip)
+    return module
+
   def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
     module = Module("endSummation")
 
@@ -8857,6 +8913,9 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["StorePriorityOpt"]:
       module.add(SSetPrior(prior=0, comment="optimization store"))
+
+    if kernel.get("LDSSegmentBRotate"):
+      module.add(self._bRotateUnswapAcc(kernel))
 
     if isOptNLL:
       vbegin = self.states.startVgprMisc
@@ -13768,12 +13827,7 @@ class KernelWriterAssembly(KernelWriter):
         src1=vgpr("LocalReadAddr%s"%tc), \
         comment="swap Red Blk"))
 
-    for i in range(1,numLra):
-      module.add(VAddU32(
-        dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
-        src0=(i * self.states.regCaps["maxLDSConstOffset"]), \
-        src1=vgpr("LocalReadAddr%s"%tc), \
-        comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
+    module.add(self._lraFanOut(kernel, tc, numLra))
     return module
 
   ##############################################################################
@@ -13847,12 +13901,7 @@ class KernelWriterAssembly(KernelWriter):
     elif tP["isM"]:
       numLra = self.states.m.numVgprLocalReadAddr
 
-    for i in range(1,numLra):
-      module.add(VAddU32(
-        dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
-        src0=(i * self.states.regCaps["maxLDSConstOffset"]), \
-        src1=vgpr("LocalReadAddr%s"%tc), \
-        comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
+    module.add(self._lraFanOut(kernel, tc, numLra))
 
     return module
 
@@ -13884,12 +13933,7 @@ class KernelWriterAssembly(KernelWriter):
         src0=hex(kernel["LdsOffset%s_Blk"%tP["tensorChar"]]-1), \
         src1=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"], 0)), \
         comment="init Red,Blk -> Red"))
-      for i in range(1, numLra):
-        module.add(VAddU32(
-          dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
-          src0=(i * self.states.regCaps["maxLDSConstOffset"]), \
-          src1=vgpr("LocalReadAddr%s"%tc), \
-          comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
+      module.add(self._lraFanOut(kernel, tc, numLra))
     return module
 
   ##############################################################################
