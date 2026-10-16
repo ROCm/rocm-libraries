@@ -671,24 +671,30 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                 vector_type<ElementDataTypeA, KPack> a_thread_vec;
                 vector_type<ElementDataTypeB, KPack> b_thread_vec;
 
-                auto loadA =
-                    thread_buf_to_vec_loader<decltype(a_thread_vec),
-                                             decltype(a_thread_buf),
-                                             decltype(a_thread_desc_),
-                                             ElementDataTypeA,
-                                             Number<m0>,
-                                             Number<0>,
-                                             decltype(k),
-                                             index_expression::Ik>{a_thread_vec, a_thread_buf};
-                auto loadB =
-                    thread_buf_to_vec_loader<decltype(b_thread_vec),
-                                             decltype(b_thread_buf),
-                                             decltype(b_thread_desc_),
-                                             ElementDataTypeB,
-                                             Number<n0>,
-                                             Number<0>,
-                                             decltype(k),
-                                             index_expression::Ik>{b_thread_vec, b_thread_buf};
+                auto loadA = thread_buf_to_vec_loader<
+                    decltype(a_thread_vec),
+                    decltype(a_thread_buf),
+                    decltype(a_thread_desc_),
+                    ElementDataTypeA,
+                    Number<m0>,
+                    Number<0>,
+                    Number<0>,
+                    Number<k>,
+                    index_expression::Div<index_expression::Ik, Number<A_K1>>,
+                    index_expression::Mod<index_expression::Ik, Number<A_K1>>>{a_thread_vec,
+                                                                               a_thread_buf};
+                auto loadB = thread_buf_to_vec_loader<
+                    decltype(b_thread_vec),
+                    decltype(b_thread_buf),
+                    decltype(b_thread_desc_),
+                    ElementDataTypeB,
+                    Number<n0>,
+                    Number<0>,
+                    Number<0>,
+                    Number<k>,
+                    index_expression::Div<index_expression::Ik, Number<B_K1>>,
+                    index_expression::Mod<index_expression::Ik, Number<B_K1>>>{b_thread_vec,
+                                                                               b_thread_buf};
 
                 static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
@@ -823,24 +829,30 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                 vector_type<ElementDataTypeA, KPack> a_thread_vec;
                 vector_type<ElementDataTypeB, KPack> b_thread_vec;
 
-                auto loadA =
-                    thread_buf_to_vec_loader<decltype(a_thread_vec),
-                                             decltype(a_thread_buf),
-                                             decltype(a_thread_desc_),
-                                             ElementDataTypeA,
-                                             Number<m0 + m1>,
-                                             Number<0>,
-                                             decltype(k),
-                                             index_expression::Ik>{a_thread_vec, a_thread_buf};
-                auto loadB =
-                    thread_buf_to_vec_loader<decltype(b_thread_vec),
-                                             decltype(b_thread_buf),
-                                             decltype(b_thread_desc_),
-                                             ElementDataTypeB,
-                                             Number<n0 + n1>,
-                                             Number<0>,
-                                             decltype(k),
-                                             index_expression::Ik>{b_thread_vec, b_thread_buf};
+                auto loadA = thread_buf_to_vec_loader<
+                    decltype(a_thread_vec),
+                    decltype(a_thread_buf),
+                    decltype(a_thread_desc_),
+                    ElementDataTypeA,
+                    Number<m0 + m1>,
+                    Number<0>,
+                    Number<0>,
+                    Number<k>,
+                    index_expression::Div<index_expression::Ik, Number<A_K1>>,
+                    index_expression::Mod<index_expression::Ik, Number<A_K1>>>{a_thread_vec,
+                                                                               a_thread_buf};
+                auto loadB = thread_buf_to_vec_loader<
+                    decltype(b_thread_vec),
+                    decltype(b_thread_buf),
+                    decltype(b_thread_desc_),
+                    ElementDataTypeB,
+                    Number<n0 + n1>,
+                    Number<0>,
+                    Number<0>,
+                    Number<k>,
+                    index_expression::Div<index_expression::Ik, Number<B_K1>>,
+                    index_expression::Mod<index_expression::Ik, Number<B_K1>>>{b_thread_vec,
+                                                                               b_thread_buf};
 
                 static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
@@ -906,8 +918,8 @@ struct BlockwiseGemmXdlops_k0mk1_k0nk1_m0n0m1n1m2m3m4n2_loop_knm_v1
                                                          B_K1,
                                                          B_K1>;
 
-    AThreadCopy a_thread_copy_{Base::CalculateAThreadOriginDataIndex()};
-    BThreadCopy b_thread_copy_{Base::CalculateBThreadOriginDataIndex()};
+    AThreadCopy a_thread_copy_{CalculateAThreadOriginDataIndex()};
+    BThreadCopy b_thread_copy_{CalculateBThreadOriginDataIndex()};
 };
 
 // Note: To facilitate the inter-wave loop scheduler, we need to explicitly set the macro
