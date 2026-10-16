@@ -687,8 +687,7 @@ void testing_bsrsm2(Arguments argus)
                                                     dbuffer));
 
     int               pos_analysis;
-    hipsparseStatus_t status_analysis
-        = hipsparseXbsrsm2_zeroPivot(handle, info, &pos_analysis);
+    hipsparseStatus_t status_analysis = hipsparseXbsrsm2_zeroPivot(handle, info, &pos_analysis);
     CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis, pos_analysis);
 
     if(argus.unit_check)
