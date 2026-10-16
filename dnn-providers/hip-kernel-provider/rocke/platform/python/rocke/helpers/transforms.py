@@ -158,13 +158,18 @@ def do_magic_division(
     ``dividend`` is an i32 SSA value interpreted as unsigned; the result is
     the i32 quotient. ``multiplier`` / ``shift`` come from
     :func:`calculate_magic_numbers`.
+
+    The sum ``tmp + dividend`` is emitted as a no-unsigned-wrap add: for a
+    dividend near 2**31 it passes the signed maximum (from 1,610,612,736 for
+    divisor 3) while staying below 2**32, so a no-signed-wrap add would make
+    the quotient poison inside the documented range.
     """
     # ``multiplier`` is a uint32 that may exceed the i32 signed range; bake
     # it into the i32 constant as its two's-complement bit pattern so the
     # unsigned ``umul_hi`` sees the right bits (matches the C++ uint32 path).
     mult_i32 = multiplier - (1 << 32) if multiplier >= (1 << 31) else multiplier
     tmp = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
-    summed = b.add(tmp, dividend)
+    summed = b.add_nuw(tmp, dividend)
     if shift == 0:
         return summed
     return b.lshr(summed, b.const_i32(shift))
@@ -176,10 +181,11 @@ def do_magic_division_dynamic(
     """Like :func:`do_magic_division` but ``multiplier`` and ``shift`` are
     runtime SSA ``Value`` objects (e.g. kernel arguments) instead of Python
     ``int``. Emits the same ``umul_hi + add + lshr`` sequence; ``lshr`` is
-    always emitted (shift == 0 produces a no-op right-shift).
+    always emitted (shift == 0 produces a no-op right-shift). The sum is a
+    no-unsigned-wrap add, as in :func:`do_magic_division`.
     """
     tmp = b.umul_hi_i32(dividend, multiplier)
-    summed = b.add(tmp, dividend)
+    summed = b.add_nuw(tmp, dividend)
     return b.lshr(summed, shift)
 
 
