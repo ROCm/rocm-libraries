@@ -54,8 +54,8 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
-from ..Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
-                                       tdmGroupingName, tdmPapRejectReason
+from ..Components.TDMFuse import TDM_SCALE_TENSORS, tdmBothTensors, tdmGroupingAccepted, \
+                                       tdmGroupingName, tdmLiveScales, tdmPapRejectReason
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -84,6 +84,22 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
+
+
+def _oneSidedMX(state):
+  """True when exactly one of A and B carries MX scales."""
+  problemType = state["ProblemType"]
+  return bool(problemType.get("MXBlockA", 0)) != bool(problemType.get("MXBlockB", 0))
+
+
+def _oneSidedMXRejection(state, found):
+  """Rejection text for MX scales on one tensor only, naming the supported limit."""
+  problemType = state["ProblemType"]
+  return ("MX scales on one tensor only (MXBlockA=%d, MXBlockB=%d) are supported for gfx1250 TDM "
+          "kernels (MXLoadInst=TDM) without UseSubtileImpl, PrefetchAcrossPersistent, "
+          "ReuseAcrossPersistent, a persistent execution policy (StreamK included) or a divergent "
+          "decoupled PGR pair; got %s"
+          % (problemType.get("MXBlockA", 0), problemType.get("MXBlockB", 0), found))
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -2069,6 +2085,27 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
+    # The limits that need derived state (MXLoadInst, the decoupled pair) are checked where it exists.
+    if _oneSidedMX(state):
+      if tuple(state["ISA"])[:2] != (12, 5):
+        reject(state, printRejectionReason,
+               _oneSidedMXRejection(state, "ISA %s" % ".".join(str(v) for v in state["ISA"])))
+        return
+      for key in ("UseSubtileImpl", "PrefetchAcrossPersistent", "ReuseAcrossPersistent"):
+        if state.get(key):
+          reject(state, printRejectionReason,
+                 _oneSidedMXRejection(state, "%s=%s" % (key, state[key])))
+          return
+      if isStreamK(state):
+        reject(state, printRejectionReason,
+               _oneSidedMXRejection(state, "a StreamK execution policy"))
+        return
+      # A persistent kernel without StaggerU folds GlobalReadIncs into assembler constants,
+      # which the shared-set and every-wave increments read as SGPRs.
+      if isPersistent(state):
+        reject(state, printRejectionReason,
+               _oneSidedMXRejection(state, "a persistent execution policy"))
+        return
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
@@ -3262,6 +3299,10 @@ class Solution(collections.abc.Mapping):
         isaInfoMap[isa].archCaps,
         printRejectionReason):
       return
+    if _oneSidedMX(state) and state["MXLoadInst"] != "TDM":
+      reject(state, printRejectionReason,
+             _oneSidedMXRejection(state, "MXLoadInst=%s" % state["MXLoadInst"]))
+      return
 
     # MX scale-format combination validation. Rejects candidates whose joint
     # (A type, A scale, B type, B scale) tuple is not legal on gfx1250's
@@ -3377,7 +3418,8 @@ class Solution(collections.abc.Mapping):
                "TDMFuse=%d needs the TDM on both tensors (TDMInst=3); got TDMInst=%d"
                % (tdmFuse, state["TDMInst"]))
         return
-      if tdmFuse in (2, 3):
+      bothScales: bool = tdmLiveScales(state) == TDM_SCALE_TENSORS
+      if tdmFuse in (2, 3) and bothScales:
         owner = "A" if tdmFuse == 2 else "B"
         other = "B" if tdmFuse == 2 else "A"
         if state["NumWaves"] != 4:
@@ -3388,10 +3430,6 @@ class Solution(collections.abc.Mapping):
         if state.get("UseSubtileImpl"):
           reject(state, printRejectionReason,
                  "TDMFuse=%d requires UseSubtileImpl=0" % tdmFuse)
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=%d requires MX scales on both tensors" % tdmFuse)
           return
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
@@ -3408,7 +3446,7 @@ class Solution(collections.abc.Mapping):
                  % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
                     blkA, blkB, conflicting, owner, other))
           return
-      if tdmFuse == 1:
+      if tdmFuse == 1 and bothScales:
         if state["NumWaves"] <= 1:
           reject(state, printRejectionReason,
                  "TDMFuse=1 requires NumWaves > 1 for parity grouping; got %d"
@@ -3417,10 +3455,6 @@ class Solution(collections.abc.Mapping):
         if state.get("UseSubtileImpl"):
           reject(state, printRejectionReason,
                  "TDMFuse=1 requires UseSubtileImpl=0")
-          return
-        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
-          reject(state, printRejectionReason,
-                 "TDMFuse=1 requires MX scales on both tensors")
           return
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
@@ -3435,10 +3469,72 @@ class Solution(collections.abc.Mapping):
                  % (state["HalfPLR"], state["PrefetchGlobalReadA"],
                     state["PrefetchGlobalReadB"], blkA, blkB))
           return
+      if tdmFuse in (1, 2, 3) and len(tdmLiveScales(state)) == 1:
+        # The scale shares its data tensor's set; the other data tensor rides every wave of its own.
+        rowText: str = "TDMFuse=%d with MX scales on %s only" % (tdmFuse, tdmLiveScales(state)[0][-1])
+        if state["NumWaves"] <= 1:
+          reject(state, printRejectionReason,
+                 "%s requires NumWaves > 1; on one wave TDMFuse=0 already issues every tensor "
+                 "from its own descriptor set" % rowText)
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "%s does not support sparse metadata" % rowText)
+          return
+      if tdmFuse in (1, 2, 3) and not tdmLiveScales(state):
+        # Without MX scales A and B each take a set of their own and ride every wave.
+        rowText: str = "TDMFuse=%d without MX scales" % tdmFuse
+        if state["NumWaves"] <= 1:
+          reject(state, printRejectionReason,
+                 "%s requires NumWaves > 1; on one wave TDMFuse=0 already issues A and B "
+                 "from their own descriptor sets" % rowText)
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "%s requires UseSubtileImpl=0" % rowText)
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "%s does not support sparse metadata" % rowText)
+          return
+        decoupled, blkA, blkB = decouplePGRBlocks(state)
+        if decoupled and blkA != blkB:
+          # The divergent-pair late fill re-slots one set by wave parity.
+          reject(state, printRejectionReason,
+                 "%s requires an equal decoupled pair (PGRA=%d, PGRB=%d -> %d and %d "
+                 "LDS blocks)"
+                 % (rowText, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
+                    blkA, blkB))
+          return
+        if isStreamK(state):
+          reject(state, printRejectionReason,
+                 "%s does not support StreamK" % rowText)
+          return
+        if isPersistent(state):
+          # Without StaggerU a persistent kernel folds GlobalReadIncs into assembler constants,
+          # which the every-wave increments read as SGPRs.
+          reject(state, printRejectionReason,
+                 "%s does not support a persistent execution policy" % rowText)
+          return
+        if state.get("PrefetchAcrossPersistent", 0) or state.get("ReuseAcrossPersistent", 0):
+          reject(state, printRejectionReason,
+                 "%s does not support PrefetchAcrossPersistent or ReuseAcrossPersistent"
+                 % rowText)
+          return
       # Catch a row declined by a precondition no arm checks (TDMSplit).
       if not tdmGroupingAccepted(state):
         reject(state, printRejectionReason,
                "TDMFuse=%d grouping %s was declined" % (tdmFuse, tdmGroupingName(state)))
+        return
+    if _oneSidedMX(state) and state["enableTDMA"] and state["enableTDMB"] and state["NumWaves"] > 1:
+      decoupled, blkA, blkB = decouplePGRBlocks(state)
+      if decoupled and blkA != blkB:
+        # A set with one live member rides every wave, and the divergent-pair late fill
+        # re-slots one set by wave parity.
+        reject(state, printRejectionReason,
+               _oneSidedMXRejection(state, "PGRA=%d, PGRB=%d -> %d and %d LDS blocks"
+                                    % (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
+                                       blkA, blkB)))
         return
 
     # Check PAP after TDMFuse-specific errors.
@@ -5551,7 +5647,8 @@ class Solution(collections.abc.Mapping):
       state["1LDSBuffer"] = 0
     # MX case
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-      if state["DirectToLdsA"] != state["DirectToLdsMXSA"] or state["DirectToLdsB"] != state["DirectToLdsMXSB"]:
+      if (state["ProblemType"]["MXBlockA"] and state["DirectToLdsA"] != state["DirectToLdsMXSA"]) \
+          or (state["ProblemType"]["MXBlockB"] and state["DirectToLdsB"] != state["DirectToLdsMXSB"]):
           reject(state, printRejectionReason, "DirectToLdsA/B and DirectToLdsMXSA/B should match")
       if state["DirectToLdsA"] != state["DirectToLdsB"]:
           reject(state, printRejectionReason, "DirectToLdsA and DirectToLdsB should match")

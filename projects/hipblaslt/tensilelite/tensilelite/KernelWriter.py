@@ -2966,20 +2966,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # does not need parity-based increment selection.
       if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel["UseSubtileImpl"]:
         module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        # The scale pair passes None for a scale the problem does not carry.
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
         tdmInited = True
 
       # Tile offset assignment A(MXSA)
-      #TODO: TDM handles MXSA and MXSB
       if tdmA:
         if not tdmInited:
           # Init resolves ArgType 3 A; offsets then apply to the selected matrix.
           module.add(self.initTDMDescriptor(kernel, tensorParametersA))
           module.add(self.tdmGlobalOffset(kernel, tensorParametersA, useDescriptor=True))
+          if kernel["ProblemType"]["MXBlockA"]:
+            module.add(self.initTDMDescriptor(kernel, tensorParametersA["MX"]))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersA["MX"], useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -3012,6 +3015,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # Init resolves ArgType 3 B; offsets then apply to the selected matrix.
           module.add(self.initTDMDescriptor(kernel, tensorParametersB))
           module.add(self.tdmGlobalOffset(kernel, tensorParametersB, useDescriptor=True))
+          if kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.initTDMDescriptor(kernel, tensorParametersB["MX"]))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersB["MX"], useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -3227,8 +3233,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if tdmA and tdmB and kernel["NumWaves"] > 1:
         module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA, tensorParametersB))
 
-        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+        if kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA.get("MX"), tensorParametersB.get("MX")))
 
         if isPersistent(kernel):
           module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
@@ -6593,12 +6599,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             else:
               module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st["MX"], \
                                                                      tensorParameters2nd["MX"]))
+          elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
+            # PrefetchAcrossPersistent rejects a lone scale; the pair passes None for the absent one.
+            module.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tensorParameters1st.get("MX"), \
+                                                                   tensorParameters2nd.get("MX")))
         else:
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st))
           module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd))
-          if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-            module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st["MX"]))
-            module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd["MX"]))
+          for tPMX in (tensorParameters1st.get("MX"), tensorParameters2nd.get("MX")):
+            if tPMX is not None:
+              module.add(self.resetTDMDescriptorForTail(kernel, tPMX))
         # Metadata always uses the non-wave-separated descriptor (see initTDMDescriptor),
         # regardless of NumWaves, so its tail reset is unconditional on the branch above.
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and kernel["enableTDMMetadata"]:

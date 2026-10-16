@@ -1246,6 +1246,16 @@ validParameters = { # we need to make sure this matches develop
     #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
     #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
     #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both. NumWaves>1; no UseSubtileImpl,
+    #   sparse metadata, divergent decoupled pair, StreamK,
+    #   PrefetchAcrossPersistent or ReuseAcrossPersistent.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set. Rows 1-3 need NumWaves>1. One-sided MX is gfx1250 TDM
+    #   only: no UseSubtileImpl, divergent decoupled pair, StreamK,
+    #   PrefetchAcrossPersistent or ReuseAcrossPersistent.
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],

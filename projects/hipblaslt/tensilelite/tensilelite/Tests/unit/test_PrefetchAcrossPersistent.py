@@ -1412,12 +1412,15 @@ def test_declined_grouping_answers_with_the_fallback(decline):
     assert tdmPapRejectReason(_ks(fuse=2, **decline)) is None
 
 
-@pytest.mark.parametrize("missing", [{"MXBlockA": 0, "MXBlockB": 32},
-                                     {"MXBlockA": 32, "MXBlockB": 0},
-                                     {"MXBlockA": 0, "MXBlockB": 0}])
-def test_scale_less_types_share_nothing(missing):
+def test_scale_less_types_share_nothing():
     """No live MXSA/MXSB means no scale to seat on a data tensor's set."""
-    assert tdmPapRejectReason(_ks(fuse=1, ProblemType=missing)) is None
+    assert tdmPapRejectReason(_ks(fuse=1, ProblemType={"MXBlockA": 0, "MXBlockB": 0})) is None
+
+
+@pytest.mark.parametrize("live", [{"MXBlockA": 32, "MXBlockB": 0}, {"MXBlockA": 0, "MXBlockB": 32}])
+def test_a_lone_scale_still_rides_a_data_tensors_set(live):
+    """Solution rejects MX on one tensor first; the grouping alone keeps the live scale paired."""
+    assert _PAP_GROUPING_MSG in tdmPapRejectReason(_ks(fuse=1, ProblemType=live))
 
 
 @pytest.mark.parametrize("row, shares", [("MX_AB", False), ("paired", True),

@@ -6,7 +6,7 @@ from typing import Mapping, Optional
 from rocisa.code import Module, Label
 from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
-    VReadfirstlaneB32
+    VReadfirstlaneB32, SSubU32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -184,7 +184,8 @@ class TensorDataMoverLoad(TensorDataMover):
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
         numWaves: int = kernel["NumWaves"]
-        assert numWaves > 1
+        # A single-wave MX scale takes this path as its one-component case (tdmGlobalOffset).
+        assert numWaves > 1 or "MXS" in tc
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
         du: int = kernel["DepthU"]
@@ -208,7 +209,7 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
         with writer.allocTmpSgpr(3, tag="TensorDataMoverLoadWaveSeparated_tmpSgprRes") as tmpSgprRes:
-            numComp, compShift = tdmWaveComponents(kernel, tc)
+            numComp, compShift, compOffset = tdmWaveComponents(kernel, tc)
             tmpSgprIdx = tmpSgprRes.idx
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
@@ -220,6 +221,10 @@ class TensorDataMoverLoad(TensorDataMover):
             #add wave offset
             if compShift is None:
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), 0, "wCompId = 0 (one wave carries this tensor)"))
+            elif compOffset:
+                mod.add(SSubU32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), compOffset, f"wCompId = WaveIdx - {compOffset}"))
+                if compShift:
+                    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), compShift, sgpr(waveOffsetSgprIdx), f"wCompId >>= {compShift}"))
             elif compShift == 0:
                 mod.add(SMovB32(sgpr(waveOffsetSgprIdx), sgpr(waveIdxSgpr), f"wCompId = WaveIdx = fTid // wavelen({wavelen})"))
             else:
