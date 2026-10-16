@@ -796,13 +796,13 @@ def build(
         with c.cd(str(build_subdir)):
             c.run("make package")
         if distro == "ubuntu":
-            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb")
+            _elevate(c, f"dpkg -i {build_subdir}/hipblaslt[-_]*.deb {build_subdir}/tensilelite-host[-_]*.deb {build_subdir}/origami-static[-_]*.deb")
         elif distro in ("centos", "rhel", "almalinux"):
-            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"rpm --nodeps -U {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
         elif distro == "fedora":
-            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"dnf install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
         elif distro in ("sles", "opensuse-leap"):
-            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm")
+            _elevate(c, f"zypper -n --no-gpg-checks install {build_subdir}/hipblaslt-*.rpm {build_subdir}/tensilelite-host-*.rpm {build_subdir}/origami-static-*.rpm")
 
 
 # ---------------------------------------------------------------------------

@@ -119,4 +119,3 @@ namespace TensileLite
 
     } // namespace MLPClassification
 } // namespace TensileLite
-

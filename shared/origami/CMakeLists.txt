@@ -145,25 +145,62 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-rocm_install(TARGETS origami)
+if(ORIGAMI_INSTALL_COMPONENT)
+    rocm_install(TARGETS origami COMPONENT "${ORIGAMI_INSTALL_COMPONENT}")
 
-install(TARGETS origami-headers
-    EXPORT origami-targets
-    FILE_SET HEADERS
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    COMPONENT devel
-)
+    install(TARGETS origami-headers
+        EXPORT origami-targets
+        FILE_SET HEADERS
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
 
-rocm_export_targets(
-    TARGETS
-    roc::origami
-    roc::origami-headers
-    DEPENDS
-    PACKAGE
-    hip
-    NAMESPACE
-    roc::
-)
+    set(_origami_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/origami")
+    install(EXPORT origami-targets
+        NAMESPACE roc::
+        DESTINATION "${_origami_config_dir}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        INSTALL_DESTINATION "${_origami_config_dir}"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config-version.cmake"
+        VERSION "${PROJECT_VERSION}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/origami-config-version.cmake"
+        DESTINATION "${_origami_config_dir}"
+        COMPONENT "${ORIGAMI_INSTALL_COMPONENT}"
+    )
+    unset(_origami_config_dir)
+else()
+    rocm_install(TARGETS origami)
+
+    install(TARGETS origami-headers
+        EXPORT origami-targets
+        FILE_SET HEADERS
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT devel
+    )
+
+    rocm_export_targets(
+        TARGETS
+        roc::origami
+        roc::origami-headers
+        DEPENDS
+        PACKAGE
+        hip
+        NAMESPACE
+        roc::
+    )
+endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)

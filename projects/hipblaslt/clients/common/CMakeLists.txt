@@ -20,21 +20,6 @@
 #     headers (the source pulls in `<hipblaslt/hipblaslt-export.h>` and
 #     `<hipblaslt/hipblaslt-types.h>`).
 
-if(NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_THEROCK)
-        find_package(mxDataGenerator REQUIRED)
-    else()
-        # `${PROJECT_SOURCE_DIR}/../../shared/mxdatagenerator` resolves to the
-        # sibling `shared/mxdatagenerator` subtree of the project. The binary
-        # dir is anchored under the hipblaslt project's build tree to match
-        # the upstream subdirectory's existing layout assumptions.
-        add_subdirectory(
-            "${PROJECT_SOURCE_DIR}/../../shared/mxdatagenerator"
-            "${PROJECT_BINARY_DIR}/mxdatagenerator"
-        )
-    endif()
-endif()
-
 add_library(hipblaslt-mxdatagen STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mxDataGen.cpp"
 )

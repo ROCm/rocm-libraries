@@ -105,7 +105,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 )
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-host
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
