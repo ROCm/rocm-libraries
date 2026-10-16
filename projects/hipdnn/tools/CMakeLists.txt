@@ -2,6 +2,12 @@
 # SPDX-License-Identifier:  MIT
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Headers both command-line tools below share; tools-internal, never installed.
+    add_library(hipdnn_tools_common INTERFACE)
+    target_include_directories(hipdnn_tools_common
+        INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>)
+    target_link_libraries(hipdnn_tools_common INTERFACE hipdnn_data_sdk)
+
     # The training-corpus harvester; it feeds uhd_gen, so it ships with the rest of the UHD
     # training tooling.
     add_subdirectory(bench)

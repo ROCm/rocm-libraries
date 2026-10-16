@@ -18,7 +18,7 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
     set_target_properties(hipdnn_corpus_gen_tool PROPERTIES OUTPUT_NAME hipdnn_corpus_gen)
     target_compile_options(hipdnn_corpus_gen_tool PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
     target_link_libraries(hipdnn_corpus_gen_tool
-        PRIVATE hipdnn_corpus_gen hipdnn_backend hipdnn_frontend hipdnn_data_sdk)
+        PRIVATE hipdnn_corpus_gen hipdnn_tools_common hipdnn_backend hipdnn_frontend hipdnn_data_sdk)
     clang_tidy_check(hipdnn_corpus_gen_tool)
     install(TARGETS hipdnn_corpus_gen_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 

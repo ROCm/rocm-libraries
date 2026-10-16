@@ -5,6 +5,8 @@
 
 #include <hipdnn_bench/VariantPackBuilder.hpp>
 
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Half.hpp>
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
@@ -139,37 +141,6 @@ inline NumericKind numericKind(hipdnn_frontend::DataType dataType)
     }
 }
 
-/// IEEE binary16 -> double, decoded by hand so no device headers are needed.
-inline double decodeHalf(uint16_t bits)
-{
-    const auto exponent = static_cast<int>((bits >> 10) & 0x1FU);
-    const auto mantissa = static_cast<double>(bits & 0x3FFU);
-    double value = 0.0;
-    if(exponent == 0)
-    {
-        value = std::ldexp(mantissa, -24); // subnormal: mantissa * 2^-10 * 2^-14
-    }
-    else if(exponent == 0x1F)
-    {
-        value = (bits & 0x3FFU) != 0 ? std::numeric_limits<double>::quiet_NaN()
-                                     : std::numeric_limits<double>::infinity();
-    }
-    else
-    {
-        value = std::ldexp(mantissa + 1024.0, exponent - 25); // (1024+m) * 2^(e-15-10)
-    }
-    return (bits & 0x8000U) != 0 ? -value : value;
-}
-
-/// bfloat16 is the top half of a binary32, so widening the bits is the whole decode.
-inline double decodeBfloat16(uint16_t bits)
-{
-    const uint32_t widened = static_cast<uint32_t>(bits) << 16U;
-    float value = 0.0F;
-    std::memcpy(&value, &widened, sizeof(value));
-    return static_cast<double>(value);
-}
-
 /// One element's bytes -> double, per storage type. Separate functions so decodeElement() and
 /// firstDisagreement()'s per-type loops share one decode rather than keeping two that could
 /// drift: a decode that differed between them would make the mismatch detail name an element
@@ -192,14 +163,14 @@ inline double decodeHalfAt(const uint8_t* bytes)
 {
     uint16_t value = 0;
     std::memcpy(&value, bytes, sizeof(value));
-    return decodeHalf(value);
+    return static_cast<double>(hipdnn_data_sdk::types::detail::half_bits_to_float(value));
 }
 
 inline double decodeBfloat16At(const uint8_t* bytes)
 {
     uint16_t value = 0;
     std::memcpy(&value, bytes, sizeof(value));
-    return decodeBfloat16(value);
+    return static_cast<double>(hipdnn_data_sdk::types::detail::bfloat16_bits_to_float(value));
 }
 
 inline double decodeInt64At(const uint8_t* bytes)

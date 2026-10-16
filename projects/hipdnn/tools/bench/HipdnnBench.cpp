@@ -14,12 +14,12 @@
  */
 
 #include <hipdnn_bench/CandidatePageJson.hpp>
-#include <hipdnn_bench/CliNumbers.hpp>
 #include <hipdnn_bench/CsvOutput.hpp>
 #include <hipdnn_bench/DeviceIdentity.hpp>
 #include <hipdnn_bench/InputDomain.hpp>
 #include <hipdnn_bench/NumericalValidation.hpp>
 #include <hipdnn_bench/VariantPackBuilder.hpp>
+#include <hipdnn_tools/CliNumbers.hpp>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -182,7 +182,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             {
                 return;
             }
-            const auto value = hipdnn_bench::parseInteger(text);
+            const auto value = hipdnn_tools::parseInteger(text);
             const auto most = static_cast<int64_t>(std::numeric_limits<Target>::max());
             if(!value)
             {
@@ -223,7 +223,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--engine-id")
         {
             const auto text = next();
-            if(const auto id = hipdnn_bench::parseEngineId(text))
+            if(const auto id = hipdnn_tools::parseEngineId(text))
             {
                 options.engineId = *id;
                 options.haveEngineId = true;
@@ -293,7 +293,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
                 return ParseOutcome::INVALID;
             }
             const auto name = setting.substr(0, split);
-            const auto parsed = hipdnn_bench::parseInteger(setting.substr(split + 1));
+            const auto parsed = hipdnn_tools::parseInteger(setting.substr(split + 1));
             const auto value = parsed.value_or(0);
             if(name.empty() || !parsed
                || std::any_of(options.knobs.begin(),
@@ -319,7 +319,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--stability")
         {
             const auto text = next();
-            if(const auto value = hipdnn_bench::parseReal(text); value && *value >= 0.0)
+            if(const auto value = hipdnn_tools::parseReal(text); value && *value >= 0.0)
             {
                 options.stability = static_cast<float>(*value);
             }

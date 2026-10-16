@@ -8,9 +8,9 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_bench/CliNumbers.hpp>
+#include <hipdnn_tools/CliNumbers.hpp>
 
-namespace hipdnn_bench
+namespace hipdnn_tools
 {
 
 TEST(TestCliNumbers, AnIntegerIsTheWholeText)
@@ -57,4 +57,4 @@ TEST(TestCliNumbers, AnIdOfTwoToTheSixtyThreeOrMoreHasEverySpelling)
     EXPECT_FALSE(parseEngineId("18446744073709551616"));
 }
 
-} // namespace hipdnn_bench
+} // namespace hipdnn_tools

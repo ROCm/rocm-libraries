@@ -9,7 +9,6 @@
  * modelled. Output: the problems the engine accepts, as graphs plus one bench command each.
  */
 
-#include <hipdnn_corpus_gen/CliNumbers.hpp>
 #include <hipdnn_corpus_gen/CorpusManifest.hpp>
 #include <hipdnn_corpus_gen/CorpusOutput.hpp>
 #include <hipdnn_corpus_gen/EngineCoverage.hpp>
@@ -22,6 +21,7 @@
 #include <hipdnn_corpus_gen/RegimeFocus.hpp>
 #include <hipdnn_corpus_gen/RegimeLabel.hpp>
 #include <hipdnn_corpus_gen/ServedExtent.hpp>
+#include <hipdnn_tools/CliNumbers.hpp>
 
 #include <hipdnn_frontend.hpp>
 #include <sstream>
@@ -294,10 +294,9 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
         };
         const auto integer = [&](auto& target, int64_t atLeast) {
-            number(target, hipdnn_corpus_gen::parseInteger, atLeast);
+            number(target, hipdnn_tools::parseInteger, atLeast);
         };
-        const auto share
-            = [&](double& target) { number(target, hipdnn_corpus_gen::parseReal, 0.0); };
+        const auto share = [&](double& target) { number(target, hipdnn_tools::parseReal, 0.0); };
 
         if(arg == "--help" || arg == "-h")
         {
@@ -320,9 +319,8 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         }
         else if(arg == "--engine-id")
         {
-            number(options.engineId,
-                   hipdnn_corpus_gen::parseEngineId,
-                   std::numeric_limits<int64_t>::min());
+            number(
+                options.engineId, hipdnn_tools::parseEngineId, std::numeric_limits<int64_t>::min());
             options.haveEngineId = true;
         }
         else if(arg == "--without-engine")
@@ -391,7 +389,7 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
             }
             else
             {
-                const auto quota = hipdnn_corpus_gen::parseInteger(clause.substr(split + 1));
+                const auto quota = hipdnn_tools::parseInteger(clause.substr(split + 1));
                 if(quota && *quota >= 0)
                 {
                     options.regimeQuotas[""][clause.substr(0, split)] = *quota;
@@ -960,7 +958,7 @@ int runGenerator(const std::vector<std::string>& args)
             }
             else
             {
-                const auto value = hipdnn_corpus_gen::parseInteger(text);
+                const auto value = hipdnn_tools::parseInteger(text);
                 if(!value)
                 {
                     std::cerr << "--probe " << name << " needs a number, not '" << text << "'\n";

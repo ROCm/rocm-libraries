@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -52,17 +53,6 @@ struct ArgumentResolution
 
 namespace detail
 {
-
-/// Row-major contiguous strides for @p dims (`strides_of`, §4.3.6).
-inline std::vector<int64_t> rowMajorStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size() - 1; i-- > 0;)
-    {
-        strides[i] = strides[i + 1] * dims[i + 1];
-    }
-    return strides;
-}
 
 /// Binds a problem point as `$q.*` variables for the §6.2 evaluator.
 inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& point)
@@ -182,7 +172,8 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
                                    + "', which is not a dims list";
                 return resolution;
             }
-            resolved.value = detail::rowMajorStrides(*dims);
+            // Row-major contiguous strides (`strides_of`, §4.3.6).
+            resolved.value = hipdnn_data_sdk::utilities::generateStrides(*dims);
             break;
         }
 

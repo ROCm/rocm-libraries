@@ -169,7 +169,7 @@ inline std::optional<builders::TensorSpec>
     if(!declared.empty() && spec.dims.size() < static_cast<size_t>(std::stoll(declared)))
     {
         spec.dims.resize(static_cast<size_t>(std::stoll(declared)), 1);
-        spec.strides = rowMajorStrides(spec.dims);
+        spec.strides = hipdnn_data_sdk::utilities::generateStrides(spec.dims);
     }
     return spec;
 }
@@ -1273,19 +1273,27 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              }
              // Scale and bias: x's rank, 1 except the normalized trailing dim (normAffineDims).
              const auto x = detail::padToDeclaredRank(resolved, *d);
-             const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
+             const auto xStrides
+                 = x.size() == d->size() ? *st : hipdnn_data_sdk::utilities::generateStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
-             return {
-                 builders::layernormForward(
-                     detail::tensorFrom(1, "x", x, xStrides, *type),
-                     detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
-                     detail::tensorFrom(3, "bias", affine, detail::rowMajorStrides(affine), *type),
-                     detail::normEpsilon(4),
-                     detail::tensorFrom(5, "y", x, xStrides, *type),
-                     detail::paddedNormalizedDimCount(resolved, d->size(), 1),
-                     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                     detail::graphTypesFrom(resolved, *type)),
-                 ""};
+             return {builders::layernormForward(
+                         detail::tensorFrom(1, "x", x, xStrides, *type),
+                         detail::tensorFrom(2,
+                                            "scale",
+                                            affine,
+                                            hipdnn_data_sdk::utilities::generateStrides(affine),
+                                            *type),
+                         detail::tensorFrom(3,
+                                            "bias",
+                                            affine,
+                                            hipdnn_data_sdk::utilities::generateStrides(affine),
+                                            *type),
+                         detail::normEpsilon(4),
+                         detail::tensorFrom(5, "y", x, xStrides, *type),
+                         detail::paddedNormalizedDimCount(resolved, d->size(), 1),
+                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
+                         detail::graphTypesFrom(resolved, *type)),
+                     ""};
          }},
 
         {"rmsNormForward",
@@ -1298,17 +1306,21 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "rmsNormForward needs dims, strides, dataType"};
              }
              const auto x = detail::padToDeclaredRank(resolved, *d);
-             const auto xStrides = x.size() == d->size() ? *st : detail::rowMajorStrides(x);
+             const auto xStrides
+                 = x.size() == d->size() ? *st : hipdnn_data_sdk::utilities::generateStrides(x);
              const auto affine = detail::padToDeclaredRank(resolved, detail::normAffineDims(*d));
-             return {
-                 builders::rmsNormForward(
-                     detail::tensorFrom(1, "x", x, xStrides, *type),
-                     detail::tensorFrom(2, "scale", affine, detail::rowMajorStrides(affine), *type),
-                     detail::normEpsilon(3),
-                     detail::tensorFrom(4, "y", x, xStrides, *type),
-                     hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
-                     detail::graphTypesFrom(resolved, *type)),
-                 ""};
+             return {builders::rmsNormForward(
+                         detail::tensorFrom(1, "x", x, xStrides, *type),
+                         detail::tensorFrom(2,
+                                            "scale",
+                                            affine,
+                                            hipdnn_data_sdk::utilities::generateStrides(affine),
+                                            *type),
+                         detail::normEpsilon(3),
+                         detail::tensorFrom(4, "y", x, xStrides, *type),
+                         hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase::INFERENCE,
+                         detail::graphTypesFrom(resolved, *type)),
+                     ""};
          }},
 
         {"reduction",

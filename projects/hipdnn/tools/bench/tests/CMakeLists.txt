@@ -17,7 +17,8 @@ target_compile_definitions(hipdnn_bench_tests PRIVATE
 
 target_link_libraries(hipdnn_bench_tests
     GTest::gtest GTest::gtest_main Threads::Threads
-    hipdnn_bench_lib hipdnn_backend hipdnn_frontend hipdnn_flatbuffers_sdk hipdnn_plugin_sdk
+    hipdnn_bench_lib hipdnn_tools_common hipdnn_backend hipdnn_frontend hipdnn_flatbuffers_sdk
+    hipdnn_plugin_sdk
     hip::host)
 
 clang_tidy_check(hipdnn_bench_tests)

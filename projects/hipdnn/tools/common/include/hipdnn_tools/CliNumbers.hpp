@@ -17,7 +17,7 @@
 ///
 /// `strtol` and friends read "abc" as 0 and "5x" as 5, so a mistyped value runs as a different
 /// request than the one asked for. These refuse both.
-namespace hipdnn_corpus_gen
+namespace hipdnn_tools
 {
 
 /// A decimal integer filling all of @p text.
@@ -65,4 +65,4 @@ inline std::optional<int64_t> parseEngineId(const std::string& text)
     return static_cast<int64_t>(value);
 }
 
-} // namespace hipdnn_corpus_gen
+} // namespace hipdnn_tools

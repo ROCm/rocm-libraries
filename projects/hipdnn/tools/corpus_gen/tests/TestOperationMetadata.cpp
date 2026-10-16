@@ -174,11 +174,13 @@ TEST(TestOperationMetadata, RefusesToResolveAPointMissingAParameter)
     EXPECT_NE(resolved.error.find("hidden_dim"), std::string::npos);
 }
 
-TEST(TestOperationMetadata, ComputesRowMajorStridesForAnyRank)
+TEST(TestOperationMetadata, StridesOfIsRowMajorForAnyRank)
 {
-    EXPECT_EQ(detail::rowMajorStrides({2, 3, 4}), (std::vector<int64_t>{12, 4, 1}));
-    EXPECT_EQ(detail::rowMajorStrides({5}), (std::vector<int64_t>{1}));
-    EXPECT_EQ(detail::rowMajorStrides({2, 1, 4, 1}), (std::vector<int64_t>{4, 4, 1, 1}));
+    // `strides_of` (§4.3.6) resolves through the data SDK's packed strides.
+    using hipdnn_data_sdk::utilities::generateStrides;
+    EXPECT_EQ(generateStrides({2, 3, 4}), (std::vector<int64_t>{12, 4, 1}));
+    EXPECT_EQ(generateStrides({5}), (std::vector<int64_t>{1}));
+    EXPECT_EQ(generateStrides({2, 1, 4, 1}), (std::vector<int64_t>{4, 4, 1, 1}));
 }
 
 TEST(TestOperationMetadata, DefaultsToZerosWhenNoContentsAreDeclared)
