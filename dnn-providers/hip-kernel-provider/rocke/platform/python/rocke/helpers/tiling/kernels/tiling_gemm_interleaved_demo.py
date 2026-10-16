@@ -23,6 +23,7 @@ import numpy as np
 from .. import (
     TileMma,
     Tiling,
+    check_gemm_shapes,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -381,6 +382,9 @@ def build_interleaved_gemm(
     else:
         ldc = ldc if ldc is not None else M_LEN  # C (N,M): M contiguous
         c_td = make_tensor_desc((N_LEN, M_LEN), (ldc, 1), F16)
+    # The logical (M, N) C the store writes through: the canonical branch spells C (N, M).
+    c_view = c_td if mma_layout == "interleaved" else c_td.permute([1, 0])
+    check_gemm_shapes(a_td, b_td, c_view)
 
     # TWO orthogonal layout knobs for apples-to-apples sweeps:
     #   prefetch -> coop-load staging into LDS + the layout the wave READ produces (a_pf/b_pf);
@@ -704,9 +708,6 @@ def build_interleaved_gemm(
         )
         accumulator = transform_fragment(b, accumulator, c_store)
 
-    c_view = (
-        c_td if mma_layout == "interleaved" else c_td.permute([1, 0])
-    )  # both -> (M, N)
     c_win = make_window(
         c_view,
         (
@@ -955,6 +956,8 @@ def build_lds_staged_gemm(
     a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)
     b_td = make_tensor_desc((N_LEN, K_LEN), (ldb, 1), F16)
     c_td = make_tensor_desc((N_LEN, M_LEN), (ldc, 1), F16)
+    # Check the logical (M, N) C the store sees: this kernel spells C (N, M).
+    check_gemm_shapes(a_td, b_td, c_td.permute([1, 0]))
     a_desc, b_desc, c_desc = _wave_descs()  # single-atom (1,1,1)
 
     # LDS buffers for the A (M,K) and B (N,K) tiles, addressed as ordinary tiles: a tensor_desc for

@@ -16,6 +16,7 @@ adding to it -- read ``docs/tiling_api_contract.md``.
 FRONT DOOR -- what you reach for by default:
     ``TileMma``   resolve a concrete intrinsic + A/B/C layouts and drive the atom grid.
     ``make_tensor_desc`` / ``make_window``   where a tensor sits + which sub-box a tile covers.
+    ``check_gemm_shapes``   check at build time that a GEMM's A, B (and C) agree on their extents.
     ``make_tile_desc``   author a custom (non-MMA) tile layout; for MMA operands use
         ``mma.a_desc`` / ``b_desc`` / ``c_desc``.
     ``make_fragment``    a ``TileDesc`` bound to a dtype + its SSA registers.
@@ -50,7 +51,13 @@ solver core): import from its own module only if you are extending the layer.
 
 from __future__ import annotations
 
-from .descriptors import TensorDesc, TensorWindow, make_tensor_desc, make_window
+from .descriptors import (
+    TensorDesc,
+    TensorWindow,
+    check_gemm_shapes,
+    make_tensor_desc,
+    make_window,
+)
 from .emit import (
     emit_tensor_coordinates,
     fill_fragment,
@@ -104,6 +111,7 @@ __all__ = [
     "TileMma",
     "make_tensor_desc",
     "make_window",
+    "check_gemm_shapes",
     "make_tile_desc",
     "make_fragment",
     "load_fragment",

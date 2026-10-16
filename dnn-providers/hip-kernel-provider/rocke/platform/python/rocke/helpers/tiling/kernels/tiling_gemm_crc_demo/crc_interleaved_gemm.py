@@ -43,6 +43,7 @@ import numpy as np
 from ... import (
     TileMma,
     Tiling,
+    check_gemm_shapes,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -236,6 +237,8 @@ def build_crc_gemm(
     a_td = make_tensor_desc((M_LEN, K_LEN), (1, lda), F16)
     b_td = make_tensor_desc((N_LEN, K_LEN), (1, ldb), F16)
     c_td = make_tensor_desc((M_LEN, N_LEN), (1, ldc), F32)
+    # The logical (M, N) C, checked before ab_swap's crossed (N, M) view of it.
+    check_gemm_shapes(a_td, b_td, c_td)
 
     # Interleaved wave-tile MMA operands (free-dim-contiguous per lane). ab_swap swaps which physical
     # operand feeds which MMA slot: the A-slot gets the N-major operand, the B-slot the M-major one.

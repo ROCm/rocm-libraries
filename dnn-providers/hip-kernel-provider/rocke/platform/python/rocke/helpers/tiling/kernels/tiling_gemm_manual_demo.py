@@ -47,6 +47,7 @@ import numpy as np
 
 from .. import (
     TileMma,
+    check_gemm_shapes,
     fill_fragment,
     load_fragment,
     make_fragment,
@@ -112,6 +113,8 @@ def build_manual_gemm(
     a_td = make_tensor_desc((M_LEN, K_LEN), (lda, 1), F16)  # (M, K), K-contiguous
     b_td = make_tensor_desc((N_LEN, K_LEN), (ldb, 1), F16)  # (N, K), K-contiguous
     c_td = make_tensor_desc((M_LEN, N_LEN), (1, ldc), F16)  # (M, N), M-contiguous
+    # A's K is B's K, A's M is C's M, B's N is C's N -- checked at build time, no IR.
+    check_gemm_shapes(a_td, b_td, c_td)
 
     # ---- DISTRIBUTION (the heart of this demo: PURE CUSTOMIZATION) -----------------------------
     # `make_tile_desc` is the quantity-major surface: one axes-ordered list per geometric quantity.
