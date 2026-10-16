@@ -178,7 +178,7 @@ typedef struct rocke_unified_attention_3d_tiled_spec
 
     const char* kv_storage_dtype; /* Optional[str] None ("fp8e4m3") */
 
-    bool has_tile_size_override; /* Optional[int] None (gfx942-only knob; ignored) */
+    bool has_tile_size_override; /* Optional[int] None (KV tile in tokens) */
     int tile_size_override;
 
     bool use_invariant_hoist; /* False (gfx942-only knob; ignored on gfx950) */
