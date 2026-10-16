@@ -9,17 +9,6 @@ name: hipDNN Superbuild CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    paths:
-      - '.github/workflows/hipdnn-superbuild-ci.yml'
-      - 'projects/hipdnn/**'
-      - 'dnn-providers/**'
-      # Docs-only PRs (RFCs, READMEs, guides) do not need a full superbuild.
-      # Negated patterns must come after the patterns they carve out of; a PR
-      # that also touches any non-doc file under the paths above still runs.
-      - '!**/*.md'
-      - '!**/*.rst'
-      - '!projects/hipdnn/docs/**'
-      - '!dnn-providers/**/docs/**'
   schedule:
     - cron: '17 7 * * *'
   workflow_dispatch:
@@ -31,8 +20,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The workflow itself must run on every PR (no trigger-level `paths:`): a
+  # workflow skipped by path filtering never reports a status, so the
+  # "hipDNN Superbuild Summary" check would sit at "Expected - Waiting for
+  # status" on docs-only PRs. Instead, this job decides, and the build jobs
+  # below skip (which counts as passing) while the summary job still reports.
+  changes:
+    name: Detect hipDNN changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+
+      # Schedule and manual dispatch always build; only PRs are filtered.
+      # `every` makes a file count only if it matches all patterns: inside the
+      # first (brace) pattern, and none of the exclusions. Docs-only PRs (RFCs,
+      # READMEs, guides) therefore do not run the superbuild; a PR that also
+      # touches any non-doc file still does.
+      - name: Filter changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '!**/*.md'
+              - '!**/*.rst'
+              - '!projects/hipdnn/docs/**'
+              - '!dnn-providers/**/docs/**'
+
   hipdnn-windows-superbuild:
     name: HipDNN Windows Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -311,6 +340,8 @@ jobs:
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: azure-linux-scale-rocm
     env:
       # Feeds both -DGPU_TARGETS and the multi-arch nightly device extra
@@ -568,6 +599,7 @@ jobs:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
+      - changes
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
     runs-on: ubuntu-24.04
