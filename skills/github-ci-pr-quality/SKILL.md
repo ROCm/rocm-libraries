@@ -77,6 +77,17 @@ Do not add a workflow file for each test. The default is to put a test where its
 - A required check must report on every PR. A job skipped by a path filter can leave a required status pending. Show how the check reports when it is skipped, or do not make it required.
 - `pull_request_target` workflows must never check out or execute PR head code (see the warning in `libraries-pr-bot.yml`). Any new `pull_request_target` or secret-using trigger is `BLOCKING` until that is shown.
 
+### Adds: the tested tree (what the job checks out)
+
+Every lane should test the same thing: the PR merged into its base branch (`refs/pull/<N>/merge`). On a `pull_request` event, `github.sha` is that merge commit and `actions/checkout` with no `ref:` checks it out. In a `workflow_call` workflow, `github.*` is the caller's, so a called workflow inherits the same tree. Today the PR-triggered workflows rely on this default; none of them spells it out.
+
+- **Keep the default.** A PR-triggered job checks out with no `ref:`. An explicit `ref:` (or `github.event.pull_request.head.sha`) tests a different tree from the other lanes and needs a stated reason in the PR. That is `IMPORTANT`.
+- **Know what depends on it.** `component_ci.py` computes changes with `git diff HEAD^`, which means "what this PR changed" only because `HEAD^` is the base tip of a merge commit. If a checkout moves to the PR head, `HEAD^` becomes the PR's previous commit and the path filters go quietly wrong. Anything that uses `HEAD^`, a shallow `fetch-depth`, or `github.sha` as the external repo ref (as `therock-multi-arch-ci.yml` does) is relying on the merge commit.
+- **Mixing views needs care.** A step that diffs `pull_request.base.sha` against `pull_request.head.sha` while the checkout is the merge commit must use a merge-base style diff (`base...head`). A plain two-dot diff of a PR that is behind its base reports the base's own changes as the PR's. The `.ambr` guard in `component-ci-tensilelite-coverage.yml` is the model: `check_snapshot_diff.py` computes the merge-base itself before diffing.
+- **A test job never runs on `pull_request_target`.** That trigger checks out the base branch, so a test lane there silently tests the wrong tree (and see the security rule above). It is for bots and labelers that never run PR code.
+- **Know the limits of the merge ref.** It is fixed when the event fires. Nothing re-runs when the base moves, and "Re-run jobs" reuses the same commit, so an old green PR tested an old base. A PR with merge conflicts has no merge ref and its `pull_request` workflows do not start. State these in a finding instead of treating a green check on a stale PR as current.
+- **Pinned inputs are a separate choice.** The TheRock ref (`therock-ref`, the `@<sha>` on reusable workflows) is pinned on purpose and comes from the merged tree. Do not confuse it with the tree under test.
+
 ### Adds: shared CI state (`ci-shared-state`)
 
 `.github/actions/ci-env` is the single source of truth for values every workflow inherits: `therock-ref`, `kpack-ref`, `baseline-run-id`, `docker-image`, `linux-runner`, `windows-runner`. Changes there, and to reusable or `therock-*` workflows, move every project at once.
@@ -110,6 +121,7 @@ When reviewing a CI PR, report each of these as pass, warn, or fail with a link 
 | Checkout and setup cost proportionate (sparse, shallow, no needless container) | `SUGGESTION` (`IMPORTANT` if setup dominates) |
 | Trigger scope, own file in `paths:`, required check reports when skipped | `IMPORTANT` |
 | Every new or edited path pattern matches an existing file; a PR that moves or deletes files updated all CI references to them | `IMPORTANT` (`BLOCKING` when the stale entry was a gating check's only trigger) |
+| PR jobs check out the default merge ref; any explicit `ref:` or `head.sha` is justified; a `base...head` diff is used where views mix | `IMPORTANT` |
 | Shared-state change has an impact statement; no value emptied silently | `BLOCKING` |
 | `pull_request_target` or secrets do not run PR head code | `BLOCKING` |
 | `timeout-minutes` and `concurrency` set on PR workflows | `SUGGESTION` |
