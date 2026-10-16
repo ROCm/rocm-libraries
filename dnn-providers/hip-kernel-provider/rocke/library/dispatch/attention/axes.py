@@ -275,6 +275,52 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("causal_diag_split", False, (True,)),
 )
 
+# RDNA WMMA (gfx11/gfx12) forward-kernel spec fields the space never varies.
+# Problem fields come from the request (``runtime_head_dims`` included: a bucket
+# object is a catalog decision, not a tuning point); ``transposed_qk`` is the
+# codepath the policy picks for aligned dense D64/D128 on the gfx11 operand
+# layout, which decides which knobs exist at all.
+WMMA_PROBLEM_FIELDS = frozenset(
+    {
+        "head_size",
+        "v_head_size",
+        "dtype",
+        "mask_mode",
+        "name",
+        "query_tail",
+        "kv_tail",
+        "use_softcap",
+        "use_sinks",
+        "use_alibi",
+        "use_qq_bias",
+        "use_attn_bias",
+        "bias_dtype",
+        "layout",
+        "page_block_size",
+        "kv_dtype",
+        "runtime_head_dims",
+    }
+)
+WMMA_PATH_FIELDS = frozenset({"transposed_qk"})
+# Output-column tile widths; the spec rejects one that does not properly divide
+# the V/O width, and runtime head widths reject tiling altogether.
+_WMMA_VALUE_TILES = (0, 32, 64, 128)
+# Every knob's default is resolved per problem by the selection policy, so each
+# axis offers both settings and the base-equal choice is pruned. The standard
+# body's knobs come first; the transposed body reads only its geometry.
+_RDNA_WMMA_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("v_lds_stage", (True, False)),
+    _choices_axis("causal_tile_skip", (True, False)),
+    _choices_axis("value_tile_size", _WMMA_VALUE_TILES),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+)
+# The transposed-QK body needs the gfx11 operand duplication, so only gfx11
+# targets carry its key-tile and wave-count geometry.
+_GFX11_WMMA_AXES: Tuple[KnobAxis, ...] = _RDNA_WMMA_AXES + (
+    _choices_axis("block_n", (32, 64)),
+    _choices_axis("num_waves", (1, 2)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
@@ -283,6 +329,10 @@ _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
     ("gfx942", "dense"): _GFX942_DENSE_AXES,
+    ("gfx11-generic", "wmma"): _GFX11_WMMA_AXES,
+    ("gfx1151", "wmma"): _GFX11_WMMA_AXES,
+    ("gfx12-generic", "wmma"): _RDNA_WMMA_AXES,
+    ("gfx1201", "wmma"): _RDNA_WMMA_AXES,
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.

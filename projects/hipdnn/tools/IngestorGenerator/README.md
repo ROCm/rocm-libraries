@@ -480,6 +480,13 @@ carries its own resolved values for the fields the dispatcher derives.
 **It is not a grid.** Each shape names its own knob set; on the shipped sets most shapes
 carry four arms and 63 carry six.
 
+**Shared shape lists.** Where every shape of a group repeats the same values, the group's
+`shape_axes` states them once: a mapping of spec field to a non-empty value list, crossed
+with each shape first axis outermost (`shape_axes: {dtype: [fp16, bf16], head_size: [64,
+128]}` with one shape `{knobs: rt}` expands to four shapes). An axis must name a spec field
+of the group, and a shape may not restate an axis field.
+`configs/gfx1151_wmma_attention.yaml` keeps its head-size bucket list there.
+
 **The tri-state.** An omitted or null policy knob retains the builder's policy intent, not
 an explicit false. `resolved` supplies an authored metadata projection, not compiler
 evidence; final composition includes pack defaults before projection, and the producing
@@ -490,6 +497,12 @@ legal only under its reviewed binding or matcher-only classification.
 producing two kernels with the same name. A slot is a spec field, an `md_<field>` metadata
 mirror, the arm's `{tag}`, or `{ordinal}`. A shape sets its serial with `ordinal:`;
 each arm shifts it with `ordinal_offset:`.
+
+**Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
+UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
+absent one inherits the pack's. Use it for kernels only some of the pack's architectures
+can run -- `configs/gfx1151_wmma_attention.yaml` restricts its transposed-QK group to the
+gfx11 shards of a gfx11+gfx12 pack.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
 the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;
@@ -603,6 +616,13 @@ one `reduction.fields` list; in `space: full`, a varying field in none is held a
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
 `launch_surface:` block feeds `tools/launch_surface.py`.
+
+A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
+inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard
+for: `native` (the default when absent) is the shard arch, `generic` its LLVM generic
+processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole family.
+Any other value is a `ConfigError`; the key is rejected for every other kind. See the
+[packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
 ## The five pre-mint config-loader checks
 
