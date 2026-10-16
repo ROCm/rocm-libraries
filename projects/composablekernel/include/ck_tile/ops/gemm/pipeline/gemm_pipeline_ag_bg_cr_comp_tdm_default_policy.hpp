@@ -58,6 +58,188 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     using LdsBDataType = typename Problem::BDataType;
 
     static constexpr index_t VecByteSize = 16;
+
+    // Get the number of data elements in one unpadded, folded LDS row.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsRowElements()
+    {
+        using DataType = std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>;
+        constexpr index_t PackedSize = numeric_traits<DataType>::PackedSize;
+        constexpr index_t KPerBlock  = Problem::BlockGemmShape::kK;
+
+        // Bytes in one pass over all LDS banks (one dword per bank)
+        constexpr index_t LdsBanksWidth = get_n_lds_banks() * get_n_dwords_per_128b();
+
+        // Num. logical M/N rows whose K payload fits into LdsBanksWidth
+        constexpr index_t LdsLayerRequired =
+            LdsBanksWidth / KPerBlock / index_t{sizeof(DataType)} * PackedSize;
+
+        // Fold at least one logical M/N row
+        constexpr index_t LdsLayer = max(1, LdsLayerRequired);
+
+        // Return unpadded payload length of the folded LDS row
+        return KPerBlock * LdsLayer;
+    }
+
+    // TDM can only encode a power-of-two padding interval.
+    // When padding falls inside an LDS row, pick an interval which divides both
+    // the row and one pipeline sub-tile.
+    // In gfx125, tile_window::load_with_offset() computes:
+    // offset(origin+d) = offset(origin) + offset(d)
+    // which only holds when every window origin (each K sub-tile) starts an interval.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfig()
+    {
+        constexpr auto config = Base::template GetLdsPaddingConfig<Problem, IsA>();
+
+        constexpr bool is_tr_load =
+            IsA ? Base::template is_a_load_tr<Problem> : Base::template is_b_load_tr<Problem>;
+        if constexpr(is_tr_load || !static_cast<bool>(config[Base::I0]))
+        {
+            // Transpose-load or disabled padding: stop here
+            return config;
+        }
+        else
+        {
+            using DataType = std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>;
+            constexpr index_t PackedSize = numeric_traits<DataType>::PackedSize;
+
+            // Unpadded LDS row length in dwords
+            constexpr index_t row_dwords = GetLdsRowElements<Problem, IsA>() *
+                                           index_t{sizeof(DataType)} / PackedSize / sizeof(int32_t);
+
+            // K length processed by 1 pipeline sub-tile, in dwords
+            constexpr index_t sub_tile_dwords =
+                Problem::BlockGemmShape::kK / GetPipelineSubTileNum<Problem>().value *
+                index_t{sizeof(DataType)} / PackedSize / sizeof(int32_t);
+
+            // x & -x selects the largest power-of-two divisor; the TDM field caps it at 256.
+            constexpr index_t row_interval_dwords = min(row_dwords & -row_dwords, index_t{256});
+            // Pads inside the row: each K sub-tile must also start on an interval.
+            constexpr index_t interval_dwords =
+                row_interval_dwords < row_dwords
+                    ? min(row_interval_dwords, sub_tile_dwords & -sub_tile_dwords)
+                    : row_interval_dwords;
+
+            // Do not place padding inside a 128-bit LDS access.
+            if constexpr(interval_dwords < VecByteSize / index_t{sizeof(int32_t)})
+            {
+                return make_tuple(number<false>{}, number<0>{}, number<0>{});
+            }
+            else
+            {
+                return make_tuple(
+                    number<true>{},                                     // I0: padding enabled?
+                    config[Base::I1],                                   // I1: amount P-1
+                    number<integer_log2_floor(interval_dwords) - 1>{}); // I2: interval log2(I)-1
+            }
+        }
+    }
+
+    // LDS descriptor (MN x K) for the non-transposed layout.
+    // It places the pads exactly where TDM writes them (see GetLdsPaddingConfig).
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
+    {
+        using DataType = std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>;
+        constexpr index_t MNPerBlock =
+            IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+
+        constexpr auto config        = GetLdsPaddingConfig<Problem, IsA>();
+        constexpr auto IsNeedPadding = config[Base::I0];
+
+        // -1 makes PaddingDataAmount equal 0 when padding is disabled
+        constexpr auto PaddingAmount    = IsNeedPadding ? config[Base::I1] : -1;
+        constexpr index_t PackedSize    = numeric_traits<DataType>::PackedSize;
+        constexpr index_t DataTypeSize  = sizeof(DataType);
+        constexpr index_t VectorLen     = VecByteSize / DataTypeSize * PackedSize;
+        constexpr index_t RowElements   = GetLdsRowElements<Problem, IsA>();
+        constexpr index_t LdsLayer      = RowElements / KPerBlock;
+        constexpr index_t BytesPerDword = sizeof(int32_t);
+
+        // Pad & interval: convert from dwords to logical elements
+        constexpr index_t PaddingDataAmount =
+            (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
+        constexpr index_t IntervalElements =
+            IsNeedPadding
+                ? (index_t{1} << (config[Base::I2] + 1)) * BytesPerDword / DataTypeSize * PackedSize
+                : RowElements;
+
+        if constexpr(IntervalElements == RowElements)
+        {
+            // Fold LdsLayer M/N rows into one LDS row of RowElements + pad, then unfold back to
+            // (MN, K).
+
+            // Physical layout: each LDS row holds LdsLayer logical M/N rows, then 1 pad
+            constexpr auto lds_block_desc_0 = make_naive_tensor_descriptor(
+                make_tuple(number<MNPerBlock / LdsLayer>{},
+                           number<KPerBlock / VectorLen * LdsLayer>{},
+                           number<VectorLen>{}),
+                make_tuple(
+                    number<RowElements + PaddingDataAmount>{}, number<VectorLen>{}, number<1>{}),
+                number<VectorLen>{},
+                number<1>{});
+
+            constexpr auto lds_block_desc_1 = transform_tensor_descriptor(
+                lds_block_desc_0,
+                make_tuple(make_pass_through_transform(number<MNPerBlock / LdsLayer>{}),
+                           make_unmerge_transform(
+                               make_tuple(number<LdsLayer>{}, number<KPerBlock / VectorLen>{})),
+                           make_pass_through_transform(number<VectorLen>{})),
+                make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
+
+            // Merge into logical coordinates (MN, K)
+            return transform_tensor_descriptor(
+                lds_block_desc_1,
+                make_tuple(make_merge_transform_v3_division_mod(
+                               make_tuple(number<MNPerBlock / LdsLayer>{}, number<LdsLayer>{})),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(number<KPerBlock / VectorLen>{}, number<VectorLen>{}))),
+                make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+        else
+        {
+            static_assert(KPerBlock % IntervalElements == 0 && IntervalElements % VectorLen == 0,
+                          "TDM pad interval must split K into whole 128-bit accesses");
+
+            // f(q) = q + P * floor(q / I) where:
+            // P = config[Base::I1] + 1 (dwords)
+            // I = 2^(config[Base::I2] + 1) (dwords)
+            // Each logical row holds whole intervals, so for row mn and offset k in that row, this
+            // equals:
+            // f(mn,k) = mn * KIntervals * (I + P) + k + P * floor(k / I).
+
+            constexpr index_t KIntervals = KPerBlock / IntervalElements;
+
+            // Physical layout: interval, then pad
+            constexpr auto lds_block_desc = make_naive_tensor_descriptor(
+                make_tuple(number<MNPerBlock>{},
+                           number<KIntervals>{},
+                           number<IntervalElements / VectorLen>{},
+                           number<VectorLen>{}),
+                make_tuple(number<KIntervals*(IntervalElements + PaddingDataAmount)>{},
+                           number<IntervalElements + PaddingDataAmount>{},
+                           number<VectorLen>{},
+                           number<1>{}),
+                number<VectorLen>{},
+                number<1>{});
+
+            // Merge back into logical coordinates (MN, K)
+            return transform_tensor_descriptor(
+                lds_block_desc,
+                make_tuple(make_pass_through_transform(number<MNPerBlock>{}),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(number<KIntervals>{},
+                                          number<IntervalElements / VectorLen>{},
+                                          number<VectorLen>{}))),
+                make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+        }
+    }
+
     // currently implement basic situation: the tile is divided into same parts
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
@@ -168,54 +350,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         }
         else
         {
-            constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
-            constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
-            constexpr auto LdsPaddingConfigA = Base::template GetLdsPaddingConfig<Problem, true>();
-            constexpr auto IsNeedPadding     = LdsPaddingConfigA[Base::I0];
-            // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
-            constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigA[Base::I1] : -1;
-            using ADataType              = LdsADataType<Problem>;
-            constexpr index_t PackedSize = numeric_traits<ADataType>::PackedSize;
-            constexpr auto DataTypeSize  = sizeof(ADataType);
-            constexpr index_t AVectorLen = VecByteSize / DataTypeSize * PackedSize;
-            constexpr index_t MLdsLayerRequired =
-                get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize * PackedSize;
-            constexpr auto MLdsLayer = max(1, MLdsLayerRequired);
-            // calculate how many elements to pad to avoid bank conflict
-            constexpr index_t BytesPerDword = sizeof(int32_t);
-            constexpr auto PaddingDataAmount =
-                (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
-
-            constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
-                make_tuple(number<MPerBlock / MLdsLayer>{},
-                           number<KPerBlock / AVectorLen * MLdsLayer>{},
-                           number<AVectorLen>{}),
-                make_tuple(number<KPerBlock * MLdsLayer + PaddingDataAmount>{},
-                           number<AVectorLen>{},
-                           number<1>{}),
-                number<AVectorLen>{},
-                number<1>{});
-
-            constexpr auto a_lds_block_desc_1 = transform_tensor_descriptor(
-                a_lds_block_desc_0,
-                make_tuple(make_pass_through_transform(number<MPerBlock / MLdsLayer>{}),
-                           make_unmerge_transform(
-                               make_tuple(number<MLdsLayer>{}, number<KPerBlock / AVectorLen>{})),
-                           make_pass_through_transform(number<AVectorLen>{})),
-                make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
-                make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
-
-            constexpr auto a_lds_block_desc = transform_tensor_descriptor(
-                a_lds_block_desc_1,
-                make_tuple(make_merge_transform_v3_division_mod(
-                               make_tuple(number<MPerBlock / MLdsLayer>{}, number<MLdsLayer>{})),
-                           make_merge_transform_v3_division_mod(
-                               make_tuple(number<KPerBlock / AVectorLen>{}, number<AVectorLen>{}))),
-                make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
-                make_tuple(sequence<0>{}, sequence<1>{}));
-
-            return a_lds_block_desc;
+            return MakeLdsBlockDescriptor<Problem, true>();
         }
     }
 
@@ -228,55 +363,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         }
         else
         {
-            constexpr index_t NPerBlock = Problem::BlockGemmShape::kN;
-            constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-
-            constexpr auto LdsPaddingConfigB = Base::template GetLdsPaddingConfig<Problem, false>();
-            constexpr auto IsNeedPadding     = LdsPaddingConfigB[Base::I0];
-            // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
-            constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigB[Base::I1] : -1;
-            using BDataType              = LdsBDataType<Problem>;
-            constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
-            constexpr auto DataTypeSize  = sizeof(BDataType);
-
-            constexpr index_t BVectorLen = VecByteSize / DataTypeSize * PackedSize;
-            constexpr index_t NLdsLayerRequired =
-                get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize * PackedSize;
-            constexpr auto NLdsLayer = max(1, NLdsLayerRequired);
-            // calculate how many elements to pad to avoid bank conflict
-            constexpr index_t BytesPerDword = sizeof(int32_t);
-            constexpr auto PaddingDataAmount =
-                (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
-
-            constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
-                make_tuple(number<NPerBlock / NLdsLayer>{},
-                           number<KPerBlock / BVectorLen * NLdsLayer>{},
-                           number<BVectorLen>{}),
-                make_tuple(number<KPerBlock * NLdsLayer + PaddingDataAmount>{},
-                           number<BVectorLen>{},
-                           number<1>{}),
-                number<BVectorLen>{},
-                number<1>{});
-
-            constexpr auto b_lds_block_desc_1 = transform_tensor_descriptor(
-                b_lds_block_desc_0,
-                make_tuple(make_pass_through_transform(number<NPerBlock / NLdsLayer>{}),
-                           make_unmerge_transform(
-                               make_tuple(number<NLdsLayer>{}, number<KPerBlock / BVectorLen>{})),
-                           make_pass_through_transform(number<BVectorLen>{})),
-                make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}),
-                make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}));
-
-            constexpr auto b_lds_block_desc = transform_tensor_descriptor(
-                b_lds_block_desc_1,
-                make_tuple(make_merge_transform_v3_division_mod(
-                               make_tuple(number<NPerBlock / NLdsLayer>{}, number<NLdsLayer>{})),
-                           make_merge_transform_v3_division_mod(
-                               make_tuple(number<KPerBlock / BVectorLen>{}, number<BVectorLen>{}))),
-                make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
-                make_tuple(sequence<0>{}, sequence<1>{}));
-
-            return b_lds_block_desc;
+            return MakeLdsBlockDescriptor<Problem, false>();
         }
     }
 
