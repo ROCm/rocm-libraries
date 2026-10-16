@@ -1,0 +1,19 @@
+{
+  "cudnn_frontend": {
+    "repo": "https://github.com/NVIDIA/cudnn-frontend.git",
+    "tag": "v1.24.0",
+    "frontend_version": 12400
+  },
+  "pytorch": {
+    "repo": "https://github.com/pytorch/pytorch",
+    "tag": "v2.14.1",
+    "commit": "5c4886908584029761b579af026dcfb627c84070",
+    "files": [
+      "aten/src/ATen/native/cudnn/Conv_v8.cpp",
+      "aten/src/ATen/native/quantized/cudnn/utils.h",
+      "aten/src/ATen/native/quantized/cudnn/Conv.cpp",
+      "aten/src/ATen/native/quantized/cudnn/Linear.cpp",
+      "aten/src/ATen/native/quantized/cudnn/BinaryOps.cpp"
+    ]
+  }
+}
