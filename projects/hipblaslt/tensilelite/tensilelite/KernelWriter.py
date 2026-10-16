@@ -6013,8 +6013,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
       module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
       module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      if kernel["PrefetchGL2"] == 2:
-        module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
+      for pgl in range(1, kernel["PrefetchGL2"]):
+        module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+pgl), comment="counterL<=PGR+%u" % pgl))
         module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
         module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
