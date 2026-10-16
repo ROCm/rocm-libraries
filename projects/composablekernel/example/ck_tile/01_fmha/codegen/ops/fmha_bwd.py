@@ -360,8 +360,8 @@ class FmhaBwdDQDKDVTileSize:
             + f"_r{self.F_rm0}x{self.F_rn0}x{self.F_rk0}_r{self.F_rm1}x{self.F_rn1}x{self.F_rk1}_r{self.F_rm2}x{self.F_rn2}x{self.F_rk2}"
             + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}"
             + ("" if self.F_occupancy == -1 else f"_o{self.F_occupancy}")
-            + f"_mq{self.max_seq_q}"
-            + (f"_dmq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
+            + f"_maxq{self.max_seq_q}"
+            + (f"_dmaxq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
             + (f"_q{self.qdo_slots}" if self.qdo_slots else "")
             + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
             + (f"_dmingrid{self.dispatch_min_grid}" if self.dispatch_min_grid else "")
