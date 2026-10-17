@@ -284,11 +284,51 @@ static int test_mean_divides_by_n()
     return 0;
 }
 
+/* An f64 LDS allocation is aligned to its 8-byte element. A live 2-byte f16
+ * allocation ends at byte 2; the 4-byte default would place the f64 buffer
+ * at byte 4, where each double straddles two 8-byte words. Mirrors
+ * test_f64_alloc_after_two_byte_alloc_is_8b_aligned in
+ * tests/core/test_smem_liveness_packing_extra.py. */
+static int test_lds_allocation_is_8_byte_aligned()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "f64_lds") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f64(), "global"), NULL);
+    rocke_value_t* half_in
+        = rocke_b_param(&b, "half_in", rocke_ptr_type(&b, rocke_f16(), "global"), NULL);
+    rocke_value_t* idx = rocke_b_const_i32(&b, 0);
+    const int half_shape[] = {1};
+    const int f64_shape[] = {2};
+    rocke_value_t* half_lds = rocke_b_smem_alloc(&b, rocke_f16(), half_shape, 1, "half_lds");
+    rocke_value_t* f64_lds = rocke_b_smem_alloc(&b, rocke_f64(), f64_shape, 1, "f64_lds");
+    rocke_value_t* h = rocke_b_global_load(&b, half_in, idx, rocke_f16(), 2);
+    rocke_value_t* v = rocke_b_global_load_vN(&b, out, idx, rocke_f64(), 2, 16);
+    rocke_value_t* const lds_idx[] = {idx};
+    /* The f16 buffer is written before and after the f64 one, so both are
+     * live together and the f64 buffer cannot reuse byte 0. */
+    rocke_b_smem_store_f16(&b, half_lds, lds_idx, 1, h);
+    rocke_b_smem_store_vN(&b, f64_lds, lds_idx, 1, v, 2);
+    rocke_b_smem_store_f16(&b, half_lds, lds_idx, 1, h);
+    rocke_b_ret(&b);
+    CHECK(rocke_ir_builder_ok(&b));
+
+    char* llvm_text = NULL;
+    CHECK(rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text)
+          == ROCKE_OK);
+    CHECK(std::strstr(llvm_text,
+                      "= getelementptr inbounds i8, ptr addrspace(3) @smem_pool.f64_lds, i32 8\n")
+          != NULL);
+    std::free(llvm_text);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 int main()
 {
     if(test_unsupported_ops_rejected() || test_rcp_divides_in_double()
        || test_fabs_stays_in_double() || test_vector_binops_use_float_ops()
-       || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n())
+       || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n()
+       || test_lds_allocation_is_8_byte_aligned())
     {
         std::fprintf(stderr, "f64 lowering contract failed\n");
         return 1;

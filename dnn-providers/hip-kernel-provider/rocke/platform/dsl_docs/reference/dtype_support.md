@@ -356,9 +356,11 @@ mode. The missing selector and precision contract are described in §2.5.
   memory up to 2-element vectors, and HIP lowering are present. Elementwise
   (non-transcendental ops) and reduce2d accept f64 with `vec=2`
   ([SUPPORT_MATRIX](../../python/rocke/instances/SUPPORT_MATRIX.md)).
-  `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fma`,
-  `fmax3`, `fmin3`, and `vector_fma` reject f64 in both lowerings; there
-  are no conversions to or from f64, MMA atoms, or atomics. f64 is in the
+  `exp2`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `fma`, `fmax3`, `fmin3`, and
+  `vector_fma` reject f64 in both lowerings. `exp2_fast` rejects f64 in the
+  LLVM lowering and has no HIP lowering for any dtype. `tanh` accepts only
+  f32: the builder rejects any other operand type. There are no conversions
+  to or from f64, MMA atoms, or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
   `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950 but undeclared (§4C.6).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
