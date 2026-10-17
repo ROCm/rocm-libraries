@@ -87,12 +87,14 @@ def _bootstrap_sys_path() -> None:
 # STALE below) so a fix cannot silently leave dead weight behind.
 KNOWN_BAD: dict[str, str] = {
     "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
+        "local memory (71680) exceeds limit (65536) at every flavor: the "
+        "gfx942 3D tiled kernel at d128/b64 needs more LDS than gfx942 has, "
+        "and its supports_tiled_3d admits the config without checking"
     ),
     "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
+        "local memory (71680) exceeds limit (65536) at every flavor: the "
+        "gfx942 3D tiled kernel at d128/b64 needs more LDS than gfx942 has, "
+        "and its supports_tiled_3d admits the config without checking"
     ),
 }
 
