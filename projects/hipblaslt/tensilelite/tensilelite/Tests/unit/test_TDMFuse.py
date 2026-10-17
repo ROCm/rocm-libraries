@@ -243,15 +243,6 @@ def test_solution_accepts_stagger(_gp_gfx1250, gfx1250_iim, assembler, capsys, f
 @pytest.mark.parametrize(
     "fuse, overrides, clause",
     [
-        (2, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
-         "MXSB rides A's descriptor set but follows B's LDS block count"),
-        # The mirror has to name the other scale: at 3 the set sits on B, so
-        # MXSB follows its own owner and MXSA is the member carrying the second
-        # cadence.
-        (3, {"PrefetchGlobalReadA": 1, "PrefetchGlobalReadB": 2},
-         "MXSA rides B's descriptor set but follows A's LDS block count"),
-        (3, {"PrefetchGlobalReadA": 2, "PrefetchGlobalReadB": 1},
-         "MXSA rides B's descriptor set but follows A's LDS block count"),
         (1, {"MatrixInstruction": _ONE_WAVE_MI, "WorkGroup": _ONE_WAVE_WG},
          "TDMFuse=1 requires NumWaves > 1 for parity grouping"),
         (2, {"MatrixInstruction": _ONE_WAVE_MI, "WorkGroup": _ONE_WAVE_WG},
@@ -504,7 +495,7 @@ def test_last_iter_disable_without_wave_separated_sets(monkeypatch, over):
 def _tokenWriter():
     """A writer carrying the per-side tensor tokens decoupled PGR installs."""
     return Stub(states=types.SimpleNamespace(ldsTensorTokenIdxA=7,
-                                             ldsTensorTokenIdxB=9))
+                                             ldsTensorTokenIdxB=9, kernel={}))
 
 
 def test_an_issue_declares_every_lds_side_its_set_fills():

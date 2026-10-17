@@ -12,6 +12,7 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 from ..Component import ClusterLoad
 from ..Common import clusterEnabled, persistent2DCluster, persistentSpatialCluster, \
     persistentMulticast
+from .DecouplePGR import DCP_LDS_SIDE, DCP_PEER_AXIS, dcpLdsSide, dcpThinSideAndAxis
 from .TDMFuse import tdmMemberIsLive, tdmWavePartition
 from typing import Mapping
 from rocisa.code import Module, Label
@@ -234,6 +235,13 @@ class ClusterLoadTDM(ClusterLoad):
         mod = Module()
         if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
             mask = self.maskSgprName(kernel, tc, subtile=subtile, waveSeparated=waveSeparated)
+            thin = dcpThinSideAndAxis(kernel)
+            if thin is not None and tc in DCP_LDS_SIDE and dcpLdsSide(tc, kernel) == thin[0]:
+                assert kernel["ClusterDim"][thin[1]] == 1, \
+                    "%s is single-buffered, so its multicast mask must stay self-only" % tc
+                # A scale riding the single-buffered set would multicast along its own tensor's axis.
+                if kernel["ClusterDim"][DCP_PEER_AXIS[DCP_LDS_SIDE[tc]]] != 1:
+                    return mod
             # A persistent self-only A-side mask SGPR is freed (see
             # persistentDropsSelfOnlyMaskA): with Ck == 1 the A mask carries no
             # multicast peers, so re-applying it is a no-op. Skip it so the freed
