@@ -1151,4 +1151,35 @@ namespace hipsparse
         }
     }
 #endif
+
+#if(defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12011)
+    inline cusparseSpSVUpdate_t hipSpSVUpdateToCudaSpSVUpdate(hipsparseSpSVUpdate_t update)
+    {
+        switch(update)
+        {
+        case HIPSPARSE_SPSV_UPDATE_GENERAL:
+            return CUSPARSE_SPSV_UPDATE_GENERAL;
+        case HIPSPARSE_SPSV_UPDATE_DIAGONAL:
+            return CUSPARSE_SPSV_UPDATE_DIAGONAL;
+        default:
+            throw "Non existant cusparseSpSVUpdate_t";
+        }
+    }
+#endif
+
+#if(defined(HIPSPARSE_WITH_UPDATE_MATRIX) && CUDART_VERSION >= 12040)
+    inline cusparseSpSMUpdate_t hipSpSMUpdateToCudaSpSMUpdate(hipsparseSpSMUpdate_t update)
+    {
+        switch(update)
+        {
+        case HIPSPARSE_SPSM_UPDATE_GENERAL:
+            return CUSPARSE_SPSM_UPDATE_GENERAL;
+        case HIPSPARSE_SPSM_UPDATE_DIAGONAL:
+            return CUSPARSE_SPSM_UPDATE_DIAGONAL;
+        default:
+            throw "Non existant cusparseSpSMUpdate_t";
+        }
+    }
+#endif
+
 }
