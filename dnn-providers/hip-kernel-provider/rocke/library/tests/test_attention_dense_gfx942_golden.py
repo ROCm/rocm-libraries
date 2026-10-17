@@ -15,7 +15,10 @@ fixture is re-blessed.
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
 combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here.
+gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128 CFVST
+and its K-double-buffer + V-prefetch pipeline (``use_cfvst=True``,
+``lds_num_buffers=2``) are pinned on both grids, because no default-knob case reaches
+their code paths.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -100,9 +103,8 @@ def _cases():
     def mk(**over):
         d = dict(base)
         d.update(over)
-        spec_type = (
-            Gfx942AttentionDenseSpec if d.get("emit_lse", False) else AttentionDenseSpec
-        )
+        gfx942_only = d.get("emit_lse", False) or "use_cfvst" in d
+        spec_type = Gfx942AttentionDenseSpec if gfx942_only else AttentionDenseSpec
         return lambda: build_attention_dense(spec_type(**d), arch=_ARCH)
 
     def mk_dispatch(**over):
@@ -272,6 +274,27 @@ def _cases():
             seqlen_q=256,
             seqlen_kv=64,
             sliding_window=64,
+        ),
+        # --- opt-in bf16 D128 CFVST, alone and with the K-double-buffer + V-prefetch
+        #     pipeline (lds_num_buffers=2). Default knobs never reach these bodies, so
+        #     without these entries the pipeline's IR has no drift tripwire. The
+        #     persistent grid wraps the pipeline's prologue/epilogue in the grid-stride
+        #     loop. ---
+        "attention_dense_gfx942/cfvst_d128_bf16_causal": mk(use_cfvst=True),
+        "attention_dense_gfx942/kdbvpf_d128_bf16_causal": mk(
+            use_cfvst=True, lds_num_buffers=2
+        ),
+        "attention_dense_gfx942/persist_kdbvpf_d128_bf16_qbmaj": mk(
+            use_cfvst=True,
+            lds_num_buffers=2,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        # The pipeline folds its last tile in after the loop; the LSE epilogue must
+        # read that final row max, so the LSE x pipeline body is pinned on its own.
+        "attention_dense_gfx942/lse_kdbvpf_d128_bf16_causal": mk(
+            emit_lse=True, use_cfvst=True, lds_num_buffers=2
         ),
     }
 

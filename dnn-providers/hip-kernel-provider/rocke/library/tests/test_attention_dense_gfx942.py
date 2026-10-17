@@ -53,6 +53,8 @@ from kernels.gfx942.attention_dense import (
     _FASTDIV_DIVIDEND_LIMIT,
     _k_group_pad_active,
     _k_group_stride,
+    _lds_bytes,
+    _use_kdb_vpf,
     _use_exp2_fast,
     _v_row_pad,
     _v_swizzle_width,
@@ -263,7 +265,6 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "block_size",
         "num_kv_blocks",
         "causal_bottom_right",
-        "lds_num_buffers",
     }
 )
 
@@ -276,7 +277,7 @@ _NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
 # Second LEGAL values per field. Every candidate is filtered through
 # supports_attention_dense before use, so a candidate that is illegal for a given
 # base is skipped rather than asserted on; listing several per field keeps coverage
-# when one base rejects one of them (e.g. use_cfvst=True is legal only at fp16 D128).
+# when one base rejects one of them (e.g. the KDB/VPF depth needs BF16 D128 CFVST).
 _SPEC_PERTURBATIONS = {
     # The shape fields (batch, both seqlens, both head counts) are _RUNTIME_PARAM_FIELDS
     # on BOTH grids: every perturbation must move only the kernarg values, never the
@@ -321,7 +322,7 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
-    "lds_num_buffers": (2,),  # unbuildable: only NBUF=1 is implemented
+    "lds_num_buffers": (2,),  # BF16 D128 CFVST enables the KDB/VPF pipeline
     "iglp_mode": (1,),  # legal only with iglp=True -> the *_iglp base
     "pv_loop_order": ("k_major",),
     "o_store_width": (1, 2),
@@ -334,21 +335,43 @@ _PRIVATE_PERTURBATIONS = {
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 
 # Base configurations the perturbations are applied to, one field at a time. Chosen
-# so every structurally distinct arm of the builder is a base: cfvst on (fp16 D128),
-# cfvst off at D128 (bf16, exp2_fast), both D64 dtypes (packed 2-rows-per-DMA + the
+# so every structurally distinct arm of the builder is a base: CFVST on
+# (FP16 D128 and opt-in BF16 D128), naive V on BF16 D128, and both
+# D64 dtypes (packed 2-rows-per-DMA + the
 # K row-group pad + the wpe=4 tune), and the P4 persistent grid -- without which
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous,
 # and the runtime-shape claim would be checked on the default grid only.
 # The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
+# The *_kdbvpf bases start with the K-double-buffer + V-prefetch pipeline already on
+# (lds_num_buffers=2), so every other knob is also perturbed inside the pipeline body,
+# including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
+    "d128_bf16_cfvst": dict(head_size=128, dtype="bf16", use_cfvst=True),
+    "d128_bf16_kdbvpf": dict(
+        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2
+    ),
+    "d128_bf16_kdbvpf_iglp": dict(
+        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2, iglp=True
+    ),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
+        persistent=True,
+        num_persistent=228,
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+    ),
+    "persistent_d128_bf16_kdbvpf": dict(
+        head_size=128,
+        dtype="bf16",
+        use_cfvst=True,
+        lds_num_buffers=2,
         persistent=True,
         num_persistent=228,
         seqlen_q=4096,
@@ -914,7 +937,8 @@ def test_no_sinks_emits_no_sink_param_or_load():
 
 
 def test_supports_rejects_over_budget_lds():
-    """block_n=128 at D128/bf16 needs 2*128*(128+8)*2 = 69632 B > the 64 KB gfx942 LDS.
+    """Naive-V D128/BF16 with block_n=128 needs 2*128*(128+8)*2 = 69632 B,
+    exceeding the 64 KiB gfx942 LDS capacity.
     Without this gate it reaches comgr and dies with an opaque CODEGEN abort.
 
     The pad is set EXPLICITLY on the spec rather than inherited from the field default:
@@ -923,7 +947,14 @@ def test_supports_rejects_over_budget_lds():
     flips to ACCEPT and this test's premise would silently invert into a tautology.
     The pad=0 boundary is pinned deliberately in the test below.
     """
-    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=8)
+    spec = _spec(
+        block_n=128,
+        head_size=128,
+        dtype="bf16",
+        lds_row_pad=8,
+        use_cfvst=False,
+        lds_num_buffers=1,
+    )
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in why
     # the arithmetic the rejection rests on, spelled out so a capacity/pad change is loud
@@ -945,13 +976,146 @@ def test_lds_budget_boundary_is_accepted_at_exactly_capacity():
 
     from kernels.gfx942.attention_dense import _lds_bytes
 
-    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=0)
+    spec = _spec(
+        block_n=128,
+        head_size=128,
+        dtype="bf16",
+        lds_row_pad=0,
+        use_cfvst=False,
+        lds_num_buffers=1,
+    )
     capacity = attention_lds_capacity_bytes("gfx942")
     assert _lds_bytes(spec) == capacity, "premise: exactly at capacity"
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, f"a footprint of exactly {capacity} B must be accepted: {why}"
     # supports() => build() must hold at the boundary too.
     assert build_attention_dense(spec, arch="gfx942") is not None
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in BF16 D128 CFVST and K-only double buffering / V register prefetch.
+# lds_num_buffers=1 stays byte-for-byte upstream for existing configurations.
+# --------------------------------------------------------------------------- #
+def test_bf16_cfvst_kdb_vpf_are_separate_opt_in_variants():
+    baseline = _spec()
+    cfvst_only = _spec(use_cfvst=True)
+    pipeline = _spec(use_cfvst=True, lds_num_buffers=2)
+    fp16 = _spec(dtype="fp16")
+
+    assert not baseline.resolved_use_cfvst()
+    assert not _use_kdb_vpf(baseline)
+    assert cfvst_only.resolved_use_cfvst() and not _use_kdb_vpf(cfvst_only)
+    assert pipeline.resolved_use_cfvst() and _use_kdb_vpf(pipeline)
+    assert fp16.resolved_use_cfvst() and not _use_kdb_vpf(fp16)
+
+    assert baseline.resolved_v_row_pad() == 8
+    assert cfvst_only.resolved_v_row_pad() == 0
+    assert pipeline.resolved_v_row_pad() == 0
+    assert cfvst_only.resolved_use_v_swizzle()
+    assert pipeline.resolved_use_v_swizzle()
+
+    names = {gfx942_kernel_name(s) for s in (baseline, cfvst_only, pipeline)}
+    assert len(names) == 3, "distinct codegen variants must not share a cache name"
+    assert "cfvst1" not in gfx942_kernel_name(baseline)
+    assert "cfvst1" in gfx942_kernel_name(cfvst_only)
+    assert "kdbvpf1" not in gfx942_kernel_name(cfvst_only)
+    assert "kdbvpf1" in gfx942_kernel_name(pipeline)
+    assert "kdbvpf1" not in gfx942_kernel_name(fp16)
+
+    for spec in (baseline, cfvst_only, pipeline, fp16):
+        ok, reason = supports_attention_dense(spec, arch="gfx942")
+        assert ok, reason
+        built = build_attention_dense(spec, arch="gfx942")
+        assert built.name == gfx942_kernel_name(spec)
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_bytes",
+    [
+        ({}, 34816),  # naive V, K[1, 64, 136] + V[1, 64, 136]
+        ({"use_cfvst": True}, 33792),  # K[1, 64, 136] + V^T[128, 64]
+        ({"use_cfvst": True, "lds_num_buffers": 2}, 51200),
+        ({"dtype": "fp16"}, 33792),  # unchanged upstream FP16 CFVST
+    ],
+    ids=["bf16-naive", "bf16-cfvst", "bf16-kdb-vpf", "fp16-upstream"],
+)
+def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
+    spec = _spec(**overrides)
+    ok, reason = supports_attention_dense(spec, arch="gfx942")
+    assert ok, reason
+    assert _lds_bytes(spec) == expected_bytes
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"use_cfvst": "false"},  # truthy: would silently build the CFVST kernel
+        {"use_cfvst": 1},
+        {"lds_num_buffers": 2.0},
+        {"lds_num_buffers": True},
+    ],
+    ids=["cfvst-str", "cfvst-int", "nbuf-float", "nbuf-bool"],
+)
+def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides):
+    """The spec rejects a knob of the wrong type instead of coercing it into a
+    different valid kernel (``bool("false")`` is True)."""
+    with pytest.raises(ValueError, match="must be"):
+        _spec(**overrides)
+
+
+def test_cfvst_kdb_vpf_rejects_over_budget_lds():
+    """Two K slots and one transposed V slot exceed 64 KiB with a wide K row pad.
+
+    lds_num_buffers=2 is gated to block_n=64, so the budget is reached through the
+    K pad: lds_row_pad=64 lands exactly on 65536 B (accepted), 68 is over."""
+    spec = _spec(
+        block_n=64,
+        head_size=128,
+        dtype="bf16",
+        lds_row_pad=68,
+        use_cfvst=True,
+        lds_num_buffers=2,
+    )
+    # 2 * 64 * (128 + 68) * 2 + 128 * 64 * 2 = 66560 B.
+    assert _lds_bytes(spec) == 66560
+    ok, _ = supports_attention_dense(
+        dataclasses.replace(spec, lds_row_pad=64), arch="gfx942"
+    )
+    assert ok, "65536 B is exactly the gfx942 LDS capacity and must fit"
+    ok, reason = supports_attention_dense(spec, arch="gfx942")
+    assert not ok and "LDS" in reason, reason
+    with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
+        build_attention_dense(spec, arch="gfx942")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"lds_num_buffers": 2},  # no CFVST
+        {"dtype": "fp16", "lds_num_buffers": 2},
+        {"use_cfvst": True, "lds_num_buffers": 2, "causal": False},
+        {"use_cfvst": True, "lds_num_buffers": 2, "sliding_window": 128},
+        {"use_cfvst": True, "lds_num_buffers": 2, "causal_diag_split": True},
+        {"use_cfvst": True, "use_sinks": True},  # bf16 CFVST alone: not validated
+        {"use_cfvst": True, "lds_num_buffers": 2, "use_sinks": True},
+        {
+            "use_cfvst": True,
+            "lds_num_buffers": 2,
+            "use_sinks": True,
+            "emit_lse": True,
+            "persistent": True,
+            "num_persistent": 304,
+        },
+        {"use_cfvst": True, "lds_num_buffers": 2, "block_n": 32},  # gated to 64
+        {"use_cfvst": True, "lds_num_buffers": 3},
+    ],
+)
+def test_cfvst_kdb_vpf_rejects_unsupported_modes(overrides):
+    spec = _spec(**overrides)
+    ok, reason = supports_attention_dense(spec, arch="gfx942")
+    assert not ok and reason, (overrides, reason)
+    with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
+        build_attention_dense(spec, arch="gfx942")
 
 
 def test_supports_accepts_lds_budget_that_fits():
@@ -1106,10 +1270,10 @@ _CONTRACT_GRID = [
     dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
     dict(v_row_pad=16),  # accepted
     dict(v_row_pad=-4),  # REJECTED: negative
-    # --- private: use_cfvst (the one tri-state with a rejected direction) ---
+    # --- private: use_cfvst (legal opt-in for BF16 D128; rejected on D64) ---
     dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
     dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
-    dict(dtype="bf16", head_size=128, use_cfvst=True),  # REJECTED: spills
+    dict(dtype="bf16", head_size=128, use_cfvst=True),  # ACCEPTED: CFVST-only
     # --- private: use_v_swizzle (independent of the pad; cfvst-gated) ---
     dict(dtype="fp16", use_v_swizzle=False),  # accepted: OFF is always legal
     dict(head_size=64, use_v_swizzle=True),  # REJECTED: no V^T path at D64
@@ -1121,8 +1285,10 @@ _CONTRACT_GRID = [
     dict(dtype="fp16", iglp=True),
     dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
     # --- private: performance-only codegen knobs ---
-    dict(lds_num_buffers=1),  # accepted: the only implemented depth
-    dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
+    dict(lds_num_buffers=1),  # accepted: upstream single K buffer
+    dict(lds_num_buffers=2),  # REJECTED: BF16 without CFVST
+    dict(use_cfvst=True, lds_num_buffers=2),  # ACCEPTED: BF16 D128 KDB/VPF
+    dict(dtype="fp16", lds_num_buffers=2),  # REJECTED: pipeline is BF16-only
     dict(iglp=True, iglp_mode=1),  # accepted
     dict(iglp_mode=1),  # REJECTED: needs iglp=True
     dict(pv_loop_order="k_major"),  # accepted

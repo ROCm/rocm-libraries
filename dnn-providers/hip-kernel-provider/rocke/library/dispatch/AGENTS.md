@@ -184,8 +184,13 @@ V row pads, the D64 K group pad, the conflict-free-V store and its swizzle,
 exp2, `iglp` / `iglp_mode`, the PV fence mask, `pv_priority`,
 `pv_loop_order`, the bf16 O store width, and `causal_diag_split`. The
 LDS-saving knobs lead as enablers so an over-budget tile can still reach the
-setting that fits. Untunable here: `lds_num_buffers` (only 1 is implemented)
-and `lazy_rescale` (the body never reads it).
+setting that fits. Untunable here: `lds_num_buffers` and `lazy_rescale`.
+The generic gfx942 dense tuning space does not expose
+`lds_num_buffers`: depth 1 remains the default, while
+depth 2 can be selected explicitly through
+`Gfx942AttentionDenseSpec` for supported BF16 D128
+causal CFVST configurations. `lazy_rescale` is not
+read by the kernel body.
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only

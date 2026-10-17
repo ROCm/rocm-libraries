@@ -183,12 +183,22 @@ magnitudes live outside the repo per `AGENTS.md`.
 | `lds_k_group_pad` default (8) confirmed | **D64 both dtypes** | gfx942 reuses the shared `AttentionDenseSpec.lds_k_group_pad` field; default 8 inherits from the gfx950 sweep (840 configs, pad ∈ {0,8,16,24,32} × bn × GQA × mode × seqlen). Whole-wave bank model and decision record: `library/builders/gfx950/attention/prefill/README.md §Tuning`. | **adopted** — default unchanged |
 | Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; qb-major and hkv-major decodes | **shipped** — large at long sequences; auto-on when work fills the grid |
 
+### Opt-in (off by default)
+
+Measurements, register usage per toolchain, and methodology are in the
+[bf16 D128 CFVST / K double buffering / V prefetch case study](gfx942_dense_cfvst_kdb_vprefetch_case_study.md).
+
+| Lever | Config | Mechanism | Verdict |
+|---|---|---|---|
+| Conflict-free V at **bf16 D128** (`use_cfvst=True`) | bf16 D128 standard causal | same `perm_b32` store transpose as fp16 D128; fills the `waves_per_eu=2` VGPR budget with little headroom on the `.1k` MFMA schedule | **opt-in** — not a default; the earlier spill reading does not reproduce for CFVST alone |
+| K-only LDS double buffer + V register prefetch (`lds_num_buffers=2`) | bf16 D128 CFVST standard causal, `block_n=64` only | two K LDS slots and one V LDS slot; the next V tile is carried in registers across softmax/PV, so it fits 64 KB LDS at `block_n=64` | **opt-in** — not a default; can spill depending on toolchain and grid. Gated off at `block_n=32`, where the second K slot lowers occupancy at `block_m=128` and no measurement exists |
+
 ### Evaluated and rejected
 
 | Lever | Why it lost |
 |---|---|
 | Conflict-free V at **D64** | D64 is VGPR-bound; the register round-trip costs more than the LDS-instruction saving |
-| Conflict-free V at **bf16 D128** | spills over the `waves_per_eu=2` cap on the `.1k` MFMA schedule |
+| Conflict-free V at **bf16 D128** as a default | fills the `waves_per_eu=2` VGPR budget on the `.1k` MFMA schedule; kept off by default and available as an opt-in (see the Opt-in table) |
 | `exp2_fast` at **bf16 D128** (former holdout) | initially rejected on a measured spill over the `waves_per_eu=2` cap; **revisited and adopted** (see Adopted table) — re-measurement reads 0 scratch and lower VGPR on both grids, so the original reading no longer reproduces |
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
@@ -198,7 +208,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | cfvst load/store chunking | does not bound register pressure: the later chunks' loads carry no dependency on the earlier ones, so LLVM hoists them above the intervening full `s_waitcnt(vmcnt=0)`, which then covers them anyway |
 | PV-only `s_setprio` | **proven-negative** on gfx942 `attention_tiled_2d`. Note this is one lever in one placement — it is *not* a verdict on the scheduling-intrinsic family, and hand-written `sched_group_barrier` remains open |
 | Diagonal two-phase causal peel | **proven-negative** on gfx942 `attention_tiled_2d`; gated on the bound shifting to compute, which it has not |
-| partial-vmcnt software prefetch | N/A — it is a double-buffering lever and this kernel is single-buffered (NBUF=1), so there is no prefetch to partially overlap. The older "NBUF=2 does not fit 64 KB LDS at D128" reason is **retired**: it only holds at the shipped `block_n=64` (a K-only double buffer, or `block_n=32`, does fit), so what actually closes the door is the measured `block_n=32` verdict in the row above, not the LDS arithmetic |
+| partial-vmcnt software prefetch | N/A on the default build — it is a double-buffering lever and the default build is single-buffered (NBUF=1), so there is no prefetch to partially overlap. A full K+V NBUF=2 fits 64 KB LDS at D128 only at `block_n=32`, which the `block_n=32` row above closes by measurement. The opt-in `lds_num_buffers=2` path (see the Opt-in table) doubles only K at `block_n=64` and waits with a full `vmcnt(0)`, not a partial one |
 
 ## Bench
 
