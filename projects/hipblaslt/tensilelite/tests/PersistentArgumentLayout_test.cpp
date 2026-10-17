@@ -435,6 +435,7 @@ TEST(PersistentArgumentLayout, OccupancyProbeAbsentWithoutSupportOrForGroupedGem
         EXPECT_FALSE(hasArgument(call.args, "ProbeAddr"));
         EXPECT_FALSE(hasArgument(call.args, "ProbeEpoch"));
         EXPECT_FALSE(hasArgument(call.args, "ProbeGrid"));
+        EXPECT_FALSE(call.occupancyProbe);
         EXPECT_EQ(call.numWorkGroups.x, 7u);
     }
 }
@@ -482,6 +483,7 @@ TEST(PersistentArgumentLayout, OccupancyProbeTailArgs)
         EXPECT_EQ(value<uint32_t>(args, "numWorkGroups"), 7u);
         EXPECT_EQ(value<uint32_t>(args, "ProbeGrid"), 7u);
         EXPECT_EQ(value<void*>(args, "ProbeAddr"), c.addr);
+        EXPECT_EQ(call.occupancyProbe, c.addr != nullptr);
         EXPECT_EQ(value<uint32_t>(args, "ProbeEpoch"), 41 + c.minGrid);
         auto addrOffset = offset(args, "ProbeAddr");
         EXPECT_EQ(addrOffset % 8, 0u);
@@ -514,6 +516,7 @@ TEST(PersistentArgumentLayout, OccupancyProbeDisabledForMultiDimGridBelowMinGrid
     EXPECT_LT(call.numWorkGroups.x * call.numWorkGroups.y, 256u);
     EXPECT_EQ(call.numWorkItems.x, call.workGroupSize.x * call.numWorkGroups.x);
     EXPECT_EQ(value<void*>(call.args, "ProbeAddr"), nullptr);
+    EXPECT_FALSE(call.occupancyProbe);
     EXPECT_EQ(value<uint32_t>(call.args, "ProbeGrid"),
               call.numWorkGroups.x * call.numWorkGroups.y * call.numWorkGroups.z);
 }

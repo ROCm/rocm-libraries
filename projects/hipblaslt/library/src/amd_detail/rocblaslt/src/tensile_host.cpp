@@ -2030,6 +2030,16 @@ namespace
         return needsPadFreeDim;
     }
 
+    // The adaptive launch's occupancy probe target; none outside one.
+    void setOccupancyProbe(TensileLite::ContractionProblemParameters& params,
+                           const RocblasltContractionProblem&         prob)
+    {
+        if(const auto* launch = prob.adaptive_launch)
+            params.setOccupancyProbe(launch->probeAddr, launch->epoch, launch->minGrid);
+        else
+            params.setOccupancyProbe(nullptr, 0, 0);
+    }
+
     /****************************************************************
  * Construct a Tensile Problem from a RocblasltContractionProblem *
  ****************************************************************/
@@ -2355,6 +2365,7 @@ namespace
         // the effective CU budget. Non-StreamK=5 solutions ignore it.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -2647,6 +2658,7 @@ namespace
         // companion block in ConstructTensileProblem for details.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        setOccupancyProbe(tensileProblem.setParams(), prob);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -3644,7 +3656,8 @@ TensileLite::ProblemOverride
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
-    po.smCountTarget         = problem.sm_count_target;
+    // An adaptive hint is transient; the requested target is 0 then.
+    po.smCountTarget         = problem.adaptive_sm_count ? 0 : problem.sm_count_target;
     po.uniformSummationOrder = problem.uniform_summation_order != 0;
 
     const auto& device = getDeviceIdentity();
@@ -5932,6 +5945,12 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            if(prob.adaptive_launch)
+                prob.adaptive_launch->probed
+                    = status == rocblaslt_status_success
+                      && std::any_of(kernels.begin(), kernels.end(), [](auto const& k) {
+                             return k.occupancyProbe;
+                         });
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }

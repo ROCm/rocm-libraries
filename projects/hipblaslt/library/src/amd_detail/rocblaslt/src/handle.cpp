@@ -139,6 +139,9 @@ _rocblaslt_handle::_rocblaslt_handle()
         check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
     }
 
+    adaptive_sm = rocblaslt::adaptive_sm::Controller::create(
+        c_syncSkStreamSlots, uint32_t(properties.multiProcessorCount));
+
     // Allocate the device flag. STOP_ON_FIRST uses hipHostMalloc(MAPPED) so
     // scan_D can poll without sync; on any failure we fall back to hipMalloc
     // (the cross-call short-circuit then only trips on drains). If hipMalloc

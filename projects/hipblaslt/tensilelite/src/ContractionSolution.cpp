@@ -2832,6 +2832,7 @@ namespace TensileLite
             if(needsPad && !canPad)
                 probeAddr = nullptr;
 
+            rv.occupancyProbe = probeAddr != nullptr;
             rv.args.appendAligned<void*>("ProbeAddr", probeAddr);
             rv.args.append<uint32_t>("ProbeEpoch", params.occupancyProbeEpoch());
             rv.args.append<uint32_t>("ProbeGrid", static_cast<uint32_t>(realGrid));
