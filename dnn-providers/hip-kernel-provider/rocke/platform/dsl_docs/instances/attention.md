@@ -26,8 +26,6 @@ Production tiled matrix-core, paged-KV decode:
 - `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
 RDNA / gfx1250 WMMA forward:
-- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward (the hipDNN
-  catalog's kernel; rocKE dispatch now selects the two kernels below)
 - `library/kernels/gfx1151/wmma_fmha_fwd_v2.py` -- gfx11 / gfx12 multi-wave WMMA prefill
   (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
   head counts incl. a separate V head count, head widths, masks and bias strides;

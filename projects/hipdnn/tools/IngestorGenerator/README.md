@@ -574,7 +574,8 @@ carry four arms and 63 carry six.
 with each shape first axis outermost (`shape_axes: {dtype: [fp16, bf16], head_size: [64,
 128]}` with one shape `{knobs: rt}` expands to four shapes). An axis must name a spec field
 of the group, and a shape may not restate an axis field.
-`configs/gfx1151_wmma_attention.yaml` keeps its head-size bucket list there.
+`configs/gfx1151_wmma_attention.yaml` and `configs/gfx1151_wmma_attention_decode.yaml` keep
+their dtype list there.
 
 **The tri-state.** An omitted or null policy knob retains the builder's policy intent, not
 an explicit false. `resolved` supplies an authored metadata projection, not compiler
@@ -590,8 +591,9 @@ each arm shifts it with `ordinal_offset:`.
 **Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
 UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
 absent one inherits the pack's. Use it for kernels only some of the pack's architectures
-can run -- `configs/gfx1151_wmma_attention.yaml` restricts its transposed-QK group to the
-gfx11 shards of a gfx11+gfx12 pack.
+can run, or that differ per architecture -- `configs/gfx1151_wmma_attention.yaml` gives its
+gfx11 and gfx12 shards their own wide-Q prefill geometries, and
+`configs/gfx1151_wmma_attention_decode.yaml` their own D256 decode geometries.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
 the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;

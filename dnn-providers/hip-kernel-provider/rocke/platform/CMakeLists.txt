@@ -603,7 +603,6 @@ if(ROCKE_INSTALL_TESTS)
     # (checked by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
@@ -732,7 +731,6 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
         "tests/library/tests/test_mla_prefill_gfx942_numeric.py"
-        "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
         "tests/library/tests/test_wmma_fmha_decode_numeric.py"
