@@ -28,54 +28,55 @@ int issueBatch(DsSpreadPacer& p, int wmmaIssued, unsigned& next, unsigned total)
 }  // namespace
 
 TEST(DsSpreadPacer, SparseRegionTakesItsEvenShare) {
-    // 8 loads over 32 WMMAs in batches of 4: 1 per batch, well under what a batch can hold.
+    // 8 loads over 32 WMMAs in batches of 4: 1 per batch.
     DsSpreadPacer p;
-    p.plan(loads(8), /*wmmaTotal=*/32, /*batch=*/4, /*perBatch=*/5, /*catchUp=*/2, /*drain=*/0);
+    p.plan(loads(8), /*wmmaTotal=*/32, /*batch=*/4, /*catchUp=*/2, /*drain=*/0);
     unsigned next = 0;
     for (int w = 0; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, next, 8), 1) << "w=" << w;
 }
 
-TEST(DsSpreadPacer, DenseRegionIsCappedAtWhatABatchHoldsPlusCatchUp) {
-    // 60 loads over 32 WMMAs would need 8 per batch: capped at perBatch + catchUp = 7.
+TEST(DsSpreadPacer, ADenseRegionGetsAShareAboveWhatTheLdsRateFits) {
+    // 60 loads over 32 WMMAs: 8 batches, ceil(60 / 8) = 8 per batch.
     DsSpreadPacer p;
-    p.plan(loads(60), 32, 4, 5, 2, 0);
+    p.plan(loads(60), 32, 4, 2, 0);
     unsigned next = 0;
-    EXPECT_EQ(issueBatch(p, 0, next, 60), 7);
+    EXPECT_EQ(issueBatch(p, 0, next, 60), 8);
 }
 
-TEST(DsSpreadPacer, ABatchThatMissedItsLoadsIsFollowedByAFasterOne) {
-    // 16 loads over 32 WMMAs: 2 per batch. Nothing is ready in the first 4 batches (a
-    // dependency); the share then grows to catch up, within perBatch + catchUp.
+TEST(DsSpreadPacer, TheShareDoesNotGrowWhileOnTheEvenLine) {
+    // 128 loads, 109 WMMAs, 17 kept free: 23 batches, 6 per batch every batch.
     DsSpreadPacer p;
-    p.plan(loads(16), 32, 4, 3, 2, 0);
+    p.plan(loads(128), 109, 4, 2, 17);
     unsigned next = 0;
-    EXPECT_EQ(issueBatch(p, 16, next, 16), 4);  // 16 left over 4 batches
+    for (int w = 0; w < 40; w += 4) EXPECT_EQ(issueBatch(p, w, next, 128), 6) << "w=" << w;
+}
+
+TEST(DsSpreadPacer, ABatchThatBeganBehindTakesTheCatchUpStep) {
+    // 16 loads over 32 WMMAs: 2 per batch. Nothing was ready in the first 4 batches (a
+    // dependency): batch 4 is behind the even line and takes 2 + catchUp.
+    DsSpreadPacer p;
+    p.plan(loads(16), 32, 4, 2, 0);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 16, next, 16), 4);
+    // The next batch is still behind (4 of 10 expected): another step.
     EXPECT_EQ(issueBatch(p, 20, next, 16), 4);
+    // 8 issued of 12 expected: still behind.
+    EXPECT_EQ(issueBatch(p, 24, next, 16), 4);
+    // 12 of 14: behind by 2, then the line is reached.
+    EXPECT_EQ(issueBatch(p, 28, next, 16), 4);
 }
 
 TEST(DsSpreadPacer, TheDrainMovesTheRegionEndEarlier) {
     // 12 loads, 32 WMMAs, 8 of them kept free at the end: 24 usable WMMAs = 6 batches, 2 each.
     DsSpreadPacer p;
-    p.plan(loads(12), 32, 4, 5, 2, /*drain=*/8);
+    p.plan(loads(12), 32, 4, 2, /*drain=*/8);
     unsigned next = 0;
     EXPECT_EQ(issueBatch(p, 0, next, 12), 2);
 }
 
-TEST(DsSpreadPacer, ALoadWithAnEarlierDeadlineRaisesTheShare) {
-    // 4 of 10 loads are due by WMMA 8 (2 batches): 2 per batch from the start, although the
-    // region as a whole would only ask for 1.
-    std::vector<DsSpreadPacer::Load> v;
-    for (int i = 0; i < 4; ++i) v.push_back({static_cast<unsigned>(i), 8});
-    for (int i = 4; i < 10; ++i) v.push_back({static_cast<unsigned>(i), INT_MAX});
-    DsSpreadPacer p;
-    p.plan(v, 40, 4, 5, 2, 0);
-    unsigned next = 0;
-    EXPECT_EQ(issueBatch(p, 0, next, 10), 2);
-}
-
 TEST(DsSpreadPacer, ALoadPastItsDeadlineIsAlwaysReleased) {
     DsSpreadPacer p;
-    p.plan(loads(8, /*deadline=*/4), 32, 4, 1, 0, 0);
+    p.plan(loads(8, /*deadline=*/4), 32, 4, 0, 0);
     unsigned next = 0;
     EXPECT_EQ(issueBatch(p, 0, next, 8), 1);
     EXPECT_FALSE(p.released(next, 0));
@@ -84,7 +85,7 @@ TEST(DsSpreadPacer, ALoadPastItsDeadlineIsAlwaysReleased) {
 
 TEST(DsSpreadPacer, InactiveWithoutLoadsOrWmmas) {
     DsSpreadPacer p;
-    p.plan({}, 32, 4, 5, 2, 0);
+    p.plan({}, 32, 4, 2, 0);
     EXPECT_FALSE(p.active());
     EXPECT_TRUE(p.released(0, 0));
 }

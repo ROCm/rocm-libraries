@@ -3569,14 +3569,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             loads.push_back(
                 {id, std::min(feedDeadline(id), cw == INT_MAX ? INT_MAX : cw - kDsLeadWindows)});
         }
-        const int cpl = effectiveDsCyclesPerLoad(static_cast<int>(loads.size()));
-        // What one batch of WMMAs can hold: its cycles at the LDS return rate.
-        const int perBatch =
-            cpl > 0
-                ? std::max(1, batch * windowCycles / cpl)
-                : std::max(1, static_cast<int>((loads.size() * batch + wmmaTotalThisRegion_ - 1) /
-                                               std::max(1, wmmaTotalThisRegion_)));
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, perBatch, dagFeatures.dsCatchUpPace,
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace,
                        barrierReserve);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
@@ -3584,8 +3577,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
                              << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch
-                             << " perBatch=" << perBatch << " catchUp=" << dagFeatures.dsCatchUpPace
-                             << "\n");
+                             << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);
