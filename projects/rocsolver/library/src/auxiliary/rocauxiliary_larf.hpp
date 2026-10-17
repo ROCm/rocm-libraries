@@ -226,6 +226,27 @@ void rocsolver_larf_getMemorySize(const rocblas_side side,
     else
         *size_Abyx = std::max(m, n);
     *size_Abyx *= sizeof(T) * batch_count;
+
+    // rocBLAS gates its optimized gemv kernels on receiving scratch space; without it
+    // the slower general kernel runs instead. The requirement is appended to Abyx, past
+    // the order * batch_count elements holding W, so that the callers of this function
+    // do not have to thread an additional buffer through; rocsolver_larf_template does
+    // the split.
+    //
+    // The factorizations that call larf do so over a shrinking trailing submatrix while
+    // sizing this workspace once from the full (m, n), and the rocBLAS requirement is not
+    // monotone in m and n, so one of those smaller calls can need scratch where the full
+    // problem needs none. Bound the requirement over every smaller call rather than
+    // querying (m, n) alone.
+    rocblas_operation trans = rocblas_operation_none;
+    if(side == rocblas_side_left)
+        trans = rocblas_is_complex<T> ? rocblas_operation_conjugate_transpose
+                                      : rocblas_operation_transpose;
+
+    size_t size_gemv_work;
+    rocblasCall_gemv_mem_max<BATCHED, T>(trans, rocblas_int(m), rocblas_int(n),
+                                         rocblas_int(batch_count), &size_gemv_work);
+    *size_Abyx += size_gemv_work;
 }
 
 template <typename T, typename I, typename U>
@@ -279,7 +300,11 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
                                        const I batch_count,
                                        T* scalars,
                                        T* Abyx,
-                                       T** workArr)
+                                       T** workArr,
+                                       // Bytes the caller reserved for Abyx, used only to verify
+                                       // the gemv scratch fits. Zero means the caller did not say,
+                                       // and the check is skipped.
+                                       const size_t Abyx_bytes = 0)
 {
     ROCSOLVER_ENTER("larf", "side:", side, "m:", m, "n:", n, "shiftX:", shiftx, "incx:", incx,
                     "shiftA:", shiftA, "lda:", lda, "bc:", batch_count);
@@ -349,10 +374,29 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
     //      ZERO ENTRIES ****
 
+    // rocBLAS scratch for the optimized gemv kernels occupies the tail of Abyx, past the
+    // order * batch_count elements that receive W below. Kept in step with
+    // rocsolver_larf_getMemorySize.
+    T* gemv_work = Abyx + size_t(order) * batch_count;
+
+    // The caller sized Abyx from its own m and n, which are often larger than the ones
+    // this call uses, and the rocBLAS requirement is not monotone in them. Verify that
+    // the scratch rocBLAS will ask for here really is covered by what the caller
+    // reserved; an overrun is silent otherwise.
+    if(Abyx_bytes > 0)
+    {
+        const size_t w_offset = size_t(order) * batch_count * sizeof(T);
+        const size_t gemv_work_bytes = Abyx_bytes > w_offset ? Abyx_bytes - w_offset : 0;
+        ROCSOLVER_ASSUME_X(rocblas_internal_gemv_kernel_workspace_size<T>(
+                               trans, rocblas_int(m), rocblas_int(n), rocblas_int(batch_count))
+                               <= gemv_work_bytes,
+                           "larf gemv scratch fits the workspace the caller reserved");
+    }
+
     // compute the matrix vector product  (W=-A'*X or W=-A*X)
     rocblasCall_gemv<T>(handle, trans, m, n, cast2constType<T>(scalars), 0, A, shiftA, lda, stridea,
                         x, shiftx, incx, stridex, cast2constType<T>(scalars + 1), 0, Abyx, 0, 1,
-                        order, batch_count, workArr);
+                        order, batch_count, workArr, gemv_work);
 
     // compute the rank-1 update  (A + tau*X*W'  or A + tau*W*X')
     if(leftside)
