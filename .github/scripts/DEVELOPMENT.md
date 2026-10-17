@@ -300,6 +300,11 @@ are stored as repository secrets and are not accessible in dry-run/local
 testing. The routing logic (PR title tag matching, component-name fallback) is
 pure Python and is independently testable without a live webhook.
 
+In `therock-multi-arch-ci.yml`, build and test jobs run inside TheRock's
+reusable workflows, so the `notify_teams_on_failure` job downloads each failed
+`Linux::`/`Windows::` job log through the GitHub API and calls this script once
+per failed job, passing `--platform` because it runs on an Ubuntu host.
+
 Use `--dry-run` to exercise the routing logic locally without sending a
 notification:
 
