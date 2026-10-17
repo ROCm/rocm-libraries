@@ -34,84 +34,6 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-namespace internal
-{
-
-template<typename AccumType, typename InputType, typename ReductionOp, typename PrefixType>
-[[nodiscard]]
-__device__ __forceinline__
-AccumType
-    ThreadReduceSequential(const InputType& input, ReductionOp reduction_op, PrefixType prefix)
-{
-    AccumType     retval = static_cast<AccumType>(prefix);
-    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for(int i = 0; i < length; ++i)
-    {
-        retval = reduction_op(retval, input[i]);
-    }
-    return retval;
-}
-
-template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]]
-__device__ __forceinline__
-AccumType ThreadReduceSequential(const InputType& input, ReductionOp reduction_op)
-{
-    AccumType     retval = input[0];
-    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for(int i = 1; i < length; ++i)
-    {
-        retval = reduction_op(retval, input[i]);
-    }
-    return retval;
-}
-
-// This function is not used, it is just here for compatibility
-template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
-                           "recommended.")]]
-__device__ __forceinline__
-AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_op)
-{
-    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for(int i = 1; i < length; i *= 2)
-    {
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for(int j = 0; j + i < length; j += i * 2)
-        {
-            input[j] = reduction_op(input[j], input[j + i]);
-        }
-    }
-    return input[0];
-}
-
-template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
-                           "recommended.")]]
-__device__ __forceinline__
-AccumType ThreadReduceTernaryTree(const InputType& input, ReductionOp reduction_op)
-{
-    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-    _CCCL_PRAGMA_UNROLL_FULL()
-    for(int i = 1; i < length; i *= 3)
-    {
-        _CCCL_PRAGMA_UNROLL_FULL()
-        for(int j = 0; j + i < length; j += i * 3)
-        {
-            auto value = reduction_op(input[j], input[j + i]);
-            input[j]   = (j + i * 2 < length) ? reduction_op(value, input[j + i * 2]) : value;
-        }
-    }
-    return input[0];
-}
-
-// TODO: we should also implement ThreadReduceSimd after simd intrinsics are available.
-
-} // namespace internal
-
 template<typename InputType,
          typename ReductionOp,
          typename ValueType = typename ::std::remove_cv<typename ::std::remove_reference<
@@ -125,7 +47,15 @@ AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op)
                   "InputType must support the subscript operator[] and have a compile-time size");
     static_assert(std::is_invocable<ReductionOp, ValueType, ValueType>::value,
                   "ReductionOp must be invocable with operator()(ValueType, ValueType)");
-    return ::hipcub::internal::ThreadReduceSequential<AccumType>(input, reduction_op);
+
+    AccumType     retval = input[0];
+    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
+    HIPCUB_PRAGMA_UNROLL_FULL()
+    for(int i = 1; i < length; ++i)
+    {
+        retval = reduction_op(retval, input[i]);
+    }
+    return retval;
 }
 
 template<typename InputType,
@@ -142,51 +72,15 @@ AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op, PrefixT
                   "InputType must support the subscript operator[] and have a compile-time size");
     static_assert(std::is_invocable<ReductionOp, ValueType, ValueType>::value,
                   "ReductionOp must be invocable with operator()(ValueType, ValueType)");
-    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-    return ::hipcub::internal::ThreadReduceSequential<AccumType>(input, reduction_op, prefix);
-}
 
-template<int Length,
-         typename T,
-         typename ReductionOp,
-         typename AccumType = ::rocprim::accumulator_t<ReductionOp, T>>
-[[nodiscard]]
-__device__ __forceinline__
-AccumType ThreadReduce(const T* input, ReductionOp reduction_op)
-{
-    static_assert(Length > 0, "Length must be greater than 0");
-    static_assert(std::is_invocable<ReductionOp, T, T>::value,
-                  "ReductionOp must have the binary call operator: operator(V1, V2)");
-    auto array = reinterpret_cast<const T(*)[Length]>(input);
-    return ::hipcub::ThreadReduce(*array, reduction_op);
-}
-
-template<int Length,
-         typename T,
-         typename ReductionOp,
-         typename PrefixType,
-         typename AccumType = ::rocprim::accumulator_t<ReductionOp, T, PrefixType>,
-         typename std::enable_if<(Length > 0), int>::type = 0>
-[[nodiscard]]
-__device__ __forceinline__
-AccumType ThreadReduce(const T* input, ReductionOp reduction_op, PrefixType prefix)
-{
-    static_assert(std::is_invocable<ReductionOp, T, T>::value,
-                  "ReductionOp must have the binary call operator: operator(V1, V2)");
-    auto array = reinterpret_cast<const T(*)[Length]>(input);
-    return ::hipcub::ThreadReduce(*array, reduction_op, prefix);
-}
-
-template<int Length,
-         typename T,
-         typename ReductionOp,
-         typename PrefixType,
-         typename std::enable_if<(Length == 0), int>::type = 0>
-[[nodiscard]]
-__device__ __forceinline__
-T ThreadReduce(const T*, ReductionOp, PrefixType prefix)
-{
-    return prefix;
+    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
+    AccumType     retval = static_cast<AccumType>(prefix);
+    HIPCUB_PRAGMA_UNROLL_FULL()
+    for(int i = 0; i < length; ++i)
+    {
+        retval = reduction_op(retval, input[i]);
+    }
+    return retval;
 }
 
 END_HIPCUB_NAMESPACE
