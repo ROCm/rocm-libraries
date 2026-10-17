@@ -1,11 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Adaptive sm_count_target through the C API: the heuristic-query workspace,
-// launches under a forced hint, probe readings, graph capture and the stream
-// lock. The mode is read from the environment once per process, so
-// the cases for a mode the environment does not select skip; run with
-// HIPBLASLT_ADAPTIVE_SM_COUNT=1 or HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus> (and
+// Adaptive sm_count_target through the C API: heuristic-query tagging and
+// workspace, launches under a forced hint, probe readings, graph capture, the
+// stream lock and launch-time re-selection. The mode is read from the
+// environment once per process, so the cases for a mode the environment does
+// not select skip; run with HIPBLASLT_ADAPTIVE_SM_COUNT=1 or
+// HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus> (and
 // HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE=1) to cover them. The cotenant cases
 // are Linux only; the exact one is manual (HIPBLASLT_TEST_COTENANT_PROBE=1,
 // idle GPU). Host-only cases are in
@@ -37,6 +38,8 @@ extern "C" bool hipblaslt_adaptive_sm_state_for_test(void*       handle,
                                                      size_t      size);
 extern "C" bool hipblaslt_adaptive_sm_launch_lock_for_test(
     void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter);
+extern "C" size_t hipblaslt_adaptive_reselections_for_test(void* matmulDesc);
+extern "C" int    hipblaslt_tuning_last_launch_for_test();
 
 namespace rocblaslt::adaptive_sm
 {
@@ -165,7 +168,13 @@ namespace
             return st;
         }
 
-        // Under FORCE every launch takes the forced hint. Probes run only with
+        size_t reselections()
+        {
+            return hipblaslt_adaptive_reselections_for_test(r.desc);
+        }
+
+        // Under FORCE the query is ranked and tagged for the forced hint and
+        // every launch takes it, so nothing re-selects. Probes run only with
         // FORCE_PROBE, and their readings never move the hint.
         void checkForcedHint(int32_t sk)
         {
@@ -176,11 +185,15 @@ namespace
             if(results.empty())
                 GTEST_SKIP() << "No solution for this problem in the loaded library";
             const auto& result = results[0];
+            uint32_t    tag    = 0;
+            ASSERT_TRUE(algoTag(result.algo.data, &tag));
+            EXPECT_EQ(tag, cfg.force);
 
             for(uint32_t i = 0; i < cfg.probeEvery + 1; ++i)
                 ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
             ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(reselections(), 0u);
             const StreamStateForTest st = state();
             EXPECT_EQ(st.published, 0u) << "nothing is published under FORCE";
             if(cfg.forceProbe)
@@ -188,10 +201,27 @@ namespace
             else
                 EXPECT_EQ(st.epoch, 0u);
         }
+
+        // The top result retagged as if ranked for `hint`; skips without
+        // FORCE or a solution.
+        void retaggedResult(uint32_t hint, hipblasLtMatmulHeuristicResult_t* out)
+        {
+            if(!cfg.force)
+                GTEST_SKIP() << "set HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE";
+            const auto results = query();
+            if(results.empty())
+                GTEST_SKIP() << "No solution for this problem in the loaded library";
+            *out         = results[0];
+            uint32_t tag = 0;
+            ASSERT_TRUE(algoTag(out->algo.data, &tag));
+            ASSERT_NE(hint, cfg.force);
+            tagAlgo(out->algo.data, hint);
+        }
     };
 
     // Adaptive mode reports min(limit, max(plain, c_adaptiveWorkspace)) for the
-    // top result; with it off the result reports the plain size.
+    // tagged top result; with it off the result is untagged and reports the
+    // plain size.
     TEST_F(AdaptiveSmCount_pre_checkin, QueryReportsTheAdaptiveWorkspace)
     {
         for(uint64_t limit : {kWsBudgetBytes / 4, kWsBudgetBytes * 2})
@@ -200,14 +230,29 @@ namespace
             const auto results = query(1, limit);
             if(results.empty())
                 GTEST_SKIP() << "No solution for this problem in the loaded library";
-            const auto&  result = results[0];
-            const size_t plain  = required(result.algo);
+            const auto& result = results[0];
+            uint32_t    tag    = 0;
+            EXPECT_EQ(algoTag(result.algo.data, &tag), cfg.enabled);
+            const size_t plain = required(result.algo);
             ASSERT_LE(plain, limit);
             const size_t expected
                 = cfg.enabled ? std::min<size_t>(limit, std::max(plain, c_adaptiveWorkspace))
                               : plain;
             EXPECT_EQ(result.workspaceSize, expected);
         }
+    }
+
+    // StreamK OFF never takes the adaptive hint.
+    TEST_F(AdaptiveSmCount_pre_checkin, StreamKOffIsUntagged)
+    {
+        if(!cfg.enabled)
+            GTEST_SKIP() << "adaptive mode is off";
+        setStreamK(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+        const auto results = query();
+        if(results.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        uint32_t tag = 0;
+        EXPECT_FALSE(algoTag(results[0].algo.data, &tag));
     }
 
     TEST_F(AdaptiveSmCount_pre_checkin, ForcedHintForQueryAndLaunchAuto)
@@ -481,5 +526,95 @@ namespace
             EXPECT_FALSE(heldBetween);
             EXPECT_FALSE(heldAfter);
         }
+    }
+
+    // Under FORCE a result tagged with another hint is re-selected at launch,
+    // once: the repeat launch reuses the memoised choice.
+    TEST_F(AdaptiveSmCount_pre_checkin, LaunchReselectsOnceForAnotherHint)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        EXPECT_EQ(reselections(), 0u);
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+    }
+
+    // A launch on a capturing stream runs a result tagged with another hint
+    // as given; the next live launch re-selects it.
+    TEST_F(AdaptiveSmCount_pre_checkin, CapturedLaunchDoesNotReselect)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        ASSERT_EQ(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal), hipSuccess);
+        const hipblasStatus_t captured = run(result.algo, result.workspaceSize);
+        hipGraph_t            graph    = nullptr;
+        ASSERT_EQ(hipStreamEndCapture(stream, &graph), hipSuccess);
+        hipGraphExec_t   exec = nullptr;
+        const hipError_t inst = hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0);
+        if(inst == hipSuccess)
+        {
+            EXPECT_EQ(hipGraphLaunch(exec, stream), hipSuccess);
+            EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+            static_cast<void>(hipGraphExecDestroy(exec));
+        }
+        static_cast<void>(hipGraphDestroy(graph));
+        ASSERT_EQ(captured, HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(inst, hipSuccess);
+        EXPECT_EQ(reselections(), 0u);
+
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+    }
+
+    // Under uniform summation order a result tagged with another hint is
+    // re-selected too, and the launch passes the order's launch check.
+    TEST_F(AdaptiveSmCount_pre_checkin, UniformSummationOrderReselects)
+    {
+        const int32_t uso = 1;
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      r.desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &uso, sizeof(uso)),
+                  HIPBLAS_STATUS_SUCCESS);
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+    }
+
+    // A long K, so that the top result uses a workspace when it has one.
+    class AdaptiveSmCountLongK_pre_checkin : public AdaptiveSmCount_pre_checkin
+    {
+    protected:
+        AdaptiveSmCountLongK_pre_checkin()
+        {
+            m = 256;
+            n = 256;
+            k = 16384;
+        }
+    };
+
+    // The pick is checked against the caller's workspace, not the query's: a
+    // StreamK solution needs less workspace when given less, so even without
+    // one the launch re-selects to it and runs.
+    TEST_F(AdaptiveSmCountLongK_pre_checkin, ReselectsWithoutWorkspace)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        static_cast<void>(hipblaslt_tuning_last_launch_for_test());
+        ASSERT_EQ(run(result.algo, 0), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+        // Under FORCE the launch ranks as the query did, so its pick is the
+        // query's top result.
+        EXPECT_EQ(hipblaslt_tuning_last_launch_for_test(),
+                  hipblaslt_ext::getIndexFromAlgo(result.algo));
     }
 } // namespace

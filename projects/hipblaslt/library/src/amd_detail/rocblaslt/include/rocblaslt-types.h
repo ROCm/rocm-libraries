@@ -642,7 +642,8 @@ struct RocblasltContractionProblem
     int32_t uniform_summation_order = 0;
     // The C API launch's adaptive state (null: none), set post-construction.
     // runContractionProblem forwards its probe target into
-    // ContractionProblemParameters::setOccupancyProbe and sets its `probed`.
+    // ContractionProblemParameters::setOccupancyProbe, re-selects a tagged
+    // heuristic algo under its hint and sets its `probed`.
     rocblaslt::adaptive_sm::Launch* adaptive_launch = nullptr;
     // sm_count_target came from the adaptive estimator rather than the user.
     bool adaptive_sm_count = false;
