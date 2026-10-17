@@ -10,7 +10,11 @@
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
-    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
+    // GEMMs run on the current device, which is not necessarily device 0
+    int device = 0;
+    static_cast<void>(hipGetDevice(&device));
+    const origami::hardware_t analytical_hardware
+        = origami::hardware_t::get_hardware_for_device(device);
 
     const origami::grid_selection_t DEFAULT_DYNAMIC_MODE = origami::grid_selection_t::k_split_aware;
 

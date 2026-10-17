@@ -219,7 +219,11 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
 
-    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
+    // GEMMs run on the current device, which is not necessarily device 0
+    int device = 0;
+    static_cast<void>(hipGetDevice(&device));
+    const origami::hardware_t analytical_hardware
+        = origami::hardware_t::get_hardware_for_device(device);
 
     origami::problem_t origami_problem = {
         .size        = {prob.m, prob.n, prob.k},

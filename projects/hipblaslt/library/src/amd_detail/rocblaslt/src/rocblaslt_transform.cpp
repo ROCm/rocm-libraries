@@ -36,6 +36,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -43,23 +44,18 @@
 
 namespace
 {
-    std::optional<std::filesystem::path> transformCodeObjectPath()
+    std::optional<std::filesystem::path> transformCodeObjectPath(int deviceId)
     {
-        int             deviceId{};
         hipDeviceProp_t props{};
-        if(hipGetDevice(&deviceId) != hipSuccess
-           || hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+        if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
         {
             rocblaslt_log_error("transformCodeObjectPath",
-                                "hipGetDevice/hipGetDeviceProperties",
+                                "hipGetDeviceProperties",
                                 "failed to query device for matrix-transform arch lookup");
             return std::nullopt;
         }
 
-        std::string archName = props.gcnArchName;
-        auto        colonPos = archName.find(':');
-        if(colonPos != std::string::npos)
-            archName = archName.substr(0, colonPos);
+        const std::string archName = rocblaslt_internal_get_arch_name(props);
 
         auto relpath = std::filesystem::path(archName)
                        / ("hipblasltTransform_" + archName + ".hsaco");
@@ -73,53 +69,71 @@ namespace
         return perArchPath;
     }
 
-    const std::string& transformCodeObjectFileName()
+    // Makes a device current until the end of the scope. ok() is false if the
+    // device could not be made current.
+    class ScopedDevice
     {
-        static const std::string name = [] {
-            auto path = transformCodeObjectPath();
-            return path ? path->filename().string() : std::string{};
-        }();
-        return name;
-    }
+    public:
+        explicit ScopedDevice(int device)
+        {
+            if(hipGetDevice(&m_previous) != hipSuccess)
+                m_ok = false;
+            else if(m_previous != device)
+                m_ok = m_switched = hipSetDevice(device) == hipSuccess;
+        }
 
-    TensileLite::hip::SolutionAdapter& transformAdapter()
+        bool ok() const
+        {
+            return m_ok;
+        }
+
+        ~ScopedDevice()
+        {
+            if(m_switched)
+                static_cast<void>(hipSetDevice(m_previous));
+        }
+
+        ScopedDevice(const ScopedDevice&)            = delete;
+        ScopedDevice& operator=(const ScopedDevice&) = delete;
+
+    private:
+        int  m_previous = -1;
+        bool m_ok       = true;
+        bool m_switched = false;
+    };
+
+    // The adapter and code object for a device. Each architecture has its own
+    // code object, so they are set up per device, once.
+    struct TransformDeviceKernels
     {
-        using AdapterPtr     = std::unique_ptr<TensileLite::hip::SolutionAdapter>;
-        static auto& adapter = []() -> std::vector<AdapterPtr>& {
-            static std::vector<AdapterPtr> adapters;
-            int                            numDevices{};
+        std::once_flag                                     once;
+        std::unique_ptr<TensileLite::hip::SolutionAdapter> adapter;
+        std::string                                        codeObjectFileName;
+    };
+
+    TransformDeviceKernels& transformDeviceKernels(int deviceId)
+    {
+        static std::vector<TransformDeviceKernels> devices = [] {
+            int numDevices{};
             HIP_CHECK_EXC(hipGetDeviceCount(&numDevices));
-            for(int i = 0; i < numDevices; ++i)
-            {
-                adapters.emplace_back(new TensileLite::hip::SolutionAdapter);
-            }
-            auto coPath = transformCodeObjectPath();
+            return std::vector<TransformDeviceKernels>(numDevices);
+        }();
+
+        auto& kernels = devices.at(deviceId);
+        std::call_once(kernels.once, [&] {
+            kernels.adapter = std::make_unique<TensileLite::hip::SolutionAdapter>();
+            auto coPath     = transformCodeObjectPath(deviceId);
             if(!coPath)
             {
-                rocblaslt_log_error("transformAdapter",
+                rocblaslt_log_error("transformDeviceKernels",
                                     "transformCodeObjectPath",
                                     "matrix-transform code object not found under per-base layout");
-                return adapters;
+                return;
             }
-            const std::string coFolder = coPath->parent_path().string();
-            try
-            {
-                for(auto& adp : adapters)
-                {
-                    adp->codeObjectDir(coFolder);
-                }
-            }
-            catch(const std::runtime_error& e)
-            {
-                rocblaslt_log_error(
-                    "transformAdapter", "codeObjectDir", coFolder.c_str());
-            }
-            return adapters;
-        }();
-
-        int deviceId{};
-        HIP_CHECK_EXC(hipGetDevice(&deviceId));
-        return *adapter.at(deviceId);
+            kernels.adapter->codeObjectDir(coPath->parent_path().string());
+            kernels.codeObjectFileName = coPath->filename().string();
+        });
+        return kernels;
     }
 
     rocblaslt_matrix_layout dummyMatrixLayout()
@@ -159,7 +173,8 @@ namespace
                                      bool               transA,
                                      bool               transB,
                                      hipStream_t        stream,
-                                     const std::string& kernelName)
+                                     const std::string& kernelName,
+                                     int                device)
     {
         constexpr auto TileM        = RowMajC ? NumThreadsM : NumThreadsM * VectorWidth;
         constexpr auto TileN        = RowMajC ? NumThreadsN * VectorWidth : NumThreadsN;
@@ -217,8 +232,9 @@ namespace
         }
 
         constexpr auto                NUM_WORKITEMS{NumThreadsM * NumThreadsN};
+        auto&                         kernels = transformDeviceKernels(device);
         TensileLite::KernelInvocation invocation{kernelName,
-                                                 transformCodeObjectFileName(),
+                                                 kernels.codeObjectFileName,
                                                  false,
                                                  {1, 1, 1},
                                                  {NUM_WORKITEMS, 1, 1},
@@ -226,8 +242,7 @@ namespace
                                                  {numWg * NUM_WORKITEMS, 1, batchSize},
                                                  0,
                                                  kArgs};
-        auto&                         adapter = transformAdapter();
-        return adapter.launchKernel(invocation, stream, nullptr, nullptr);
+        return kernels.adapter->launchKernel(invocation, stream, nullptr, nullptr);
     }
 
 // Generate combination of MEMORY ORDER and RowMaj{A/B/C} = true/false
@@ -255,7 +270,8 @@ namespace
         bool               opA,                                                                 \
         bool               opB,                                                                 \
         hipStream_t        stream,                                                              \
-        const std::string& kernelName) {                                                        \
+        const std::string& kernelName,                                                          \
+        int                device) {                                                                           \
          return launchTransformKernel<_DType,                                                   \
                                       _ScaleType,                                               \
                                       false,                                                    \
@@ -279,7 +295,8 @@ namespace
                                                     opA,                                        \
                                                     opB,                                        \
                                                     stream,                                     \
-                                                    kernelName);                                \
+                                                    kernelName,                                 \
+                                                    device);                                    \
      }},                                                                                        \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -303,7 +320,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           false,                                                \
@@ -328,7 +346,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -352,7 +371,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           false,                                                \
@@ -377,7 +397,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -401,7 +422,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           false,                                                \
@@ -426,7 +448,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -450,7 +473,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           true,                                                 \
@@ -475,7 +499,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -499,7 +524,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           true,                                                 \
@@ -524,7 +550,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
         {std::make_tuple(_DTYPE,                                                                \
                          _SCALETYPE,                                                            \
@@ -548,7 +575,8 @@ namespace
             bool               opA,                                                             \
             bool               opB,                                                             \
             hipStream_t        stream,                                                          \
-            const std::string& kernelName) {                                                    \
+            const std::string& kernelName,                                                      \
+            int                device) {                                                                       \
              return launchTransformKernel<_DType,                                               \
                                           _ScaleType,                                           \
                                           true,                                                 \
@@ -573,7 +601,8 @@ namespace
                  opA,                                                                           \
                  opB,                                                                           \
                  stream,                                                                        \
-                 kernelName);                                                                   \
+                 kernelName,                                                                    \
+                 device);                                                                       \
          }},                                                                                    \
     {                                                                                           \
         std::make_tuple(_DTYPE,                                                                 \
@@ -598,7 +627,8 @@ namespace
                bool               opA,                                                          \
                bool               opB,                                                          \
                hipStream_t        stream,                                                       \
-               const std::string& kernelName) {                                                 \
+               const std::string& kernelName,                                                   \
+               int                device) {                                                                    \
                 return launchTransformKernel<_DType,                                            \
                                              _ScaleType,                                        \
                                              true,                                              \
@@ -623,7 +653,8 @@ namespace
                     opA,                                                                        \
                     opB,                                                                        \
                     stream,                                                                     \
-                    kernelName);                                                                \
+                    kernelName,                                                                 \
+                    device);                                                                    \
             }                                                                                   \
     }
 
@@ -649,7 +680,8 @@ namespace
                                                              bool,
                                                              bool,
                                                              hipStream_t,
-                                                             const std::string&)>;
+                                                             const std::string&,
+                                                             int)>;
     using MatrixTransformFunctionName = std::string;
     // disable clang-format of compact view.
     // clang-format off
@@ -812,6 +844,17 @@ rocblaslt_status rocblaslt_matrix_transform(rocblaslt_handle                 han
         return rocblaslt_status_internal_error;
     }
 
+    // Code objects are loaded into, and kernels launched on, the current device
+    ScopedDevice scopedDevice(handle->device);
+    if(!scopedDevice.ok())
+    {
+        return rocblaslt_status_internal_error;
+    }
+    if(transformDeviceKernels(handle->device).codeObjectFileName.empty())
+    {
+        return rocblaslt_status_arch_mismatch;
+    }
+
     bool       transA         = desc->opA != HIPBLAS_OP_N;
     bool       transB         = desc->opB != HIPBLAS_OP_N;
     bool       scalarInDevice = desc->pointerMode == HIPBLASLT_POINTER_MODE_DEVICE;
@@ -833,7 +876,8 @@ rocblaslt_status rocblaslt_matrix_transform(rocblaslt_handle                 han
                                               transA,
                                               transB,
                                               stream,
-                                              kernelName);
+                                              kernelName,
+                                              handle->device);
 
     return (err == hipSuccess) ? rocblaslt_status_success : rocblaslt_status_internal_error;
 }

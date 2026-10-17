@@ -16,6 +16,7 @@
 
 #include "Debug.hpp"
 #include "handle.h"
+#include "rocblaslt-auxiliary.h"
 #include "utility.hpp"
 
 using namespace rocRoller;
@@ -48,7 +49,14 @@ void rocroller_create_handle(void** handle)
     auto rr_handle = new RocRollerHandle();
     *handle        = rr_handle;
 
-    if(getenv("HIPBLASLT_ROCROLLER_NO_CUSTOM_KERNEL") == nullptr)
+    // The custom kernels are built for gfx950 only. The handle belongs to the
+    // current device.
+    int             device = 0;
+    hipDeviceProp_t prop;
+    const bool      isGfx950 = hipGetDevice(&device) == hipSuccess
+                          && hipGetDeviceProperties(&prop, device) == hipSuccess
+                          && rocblaslt_internal_get_arch_name(prop) == "gfx950";
+    if(isGfx950 && getenv("HIPBLASLT_ROCROLLER_NO_CUSTOM_KERNEL") == nullptr)
     {
         // If these kernels are loaded, they are used instead of RocRoller kernels
         preloadCustomKernels(rr_handle->cache);
