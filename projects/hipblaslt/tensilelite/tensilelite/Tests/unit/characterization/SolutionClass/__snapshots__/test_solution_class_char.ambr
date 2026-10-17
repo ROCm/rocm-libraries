@@ -274,6 +274,7 @@
       'PackedC1IdxChars',
       'PackedC1IndicesX',
       'PersistentXCCMapping',
+      'PostLoopStoreInNll',
       'PrefetchAcrossPersistent',
       'PrefetchGL2',
       'PrefetchGlobalRead',

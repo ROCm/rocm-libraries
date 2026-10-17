@@ -132,7 +132,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
 
 def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                          grSA_k_gran=1, grSA_mn_gran=1, grSB_k_gran=1, grSB_mn_gran=1, pgr=2,
-                         miWaveGroup=None):
+                         miWaveGroup=None, isMxf4Subtile=False):
     """Build FP4 config with scale tensors. k_gran applies to LR A/B.
     grSA/SB_k_gran and grSA/SB_mn_gran are multipliers on the tile-info-derived values."""
     kernel = create_kernel(256, 256, fp4=True, depthU=depthU, miWaveGroup=miWaveGroup)
@@ -159,6 +159,7 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=pgr,
+        isMxf4Subtile=isMxf4Subtile,
     )
 
 
@@ -330,6 +331,8 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         unrollIdx=0,
         laneSGPRCount=1 if is_gfx1250 else 2,
         subtileLdsSwizzle=not is_gfx1250,
+        # D-tile ranges the subtile store spilled to scratch; none in this stub.
+        subtileSpilledDRanges=[],
     )
     if is_gfx1250:
         writer.sgprPool.checkOut(12)
@@ -668,6 +671,65 @@ class TestPlaceLRs:
         _assert_slot_lrs(p3[3], ['A', 'B', 'SB'])
         _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
         _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_2x2_k1_DU512_mxf4_retains_across_partitions(self):
+        """Same config as test_2x2_k1_DU512, but on the MXF4 subtile path.
+
+        At DepthU 512 A and B have four k chunks per unroll iteration, more
+        than the two register sets the deterministic allocator gives a tile
+        group, so each overwrites its own earliest chunks before the partition
+        loop comes back around and a later partition cannot read it out of
+        registers. Only the scales, at two chunks, survive. Recognising that
+        makes A and B reload in every partition -- 4.4% more ds_read at DepthU
+        512 (2.6% at 256) -- in exchange for the idle slots going away.
+
+        Off the MXF4 path the scheduler must not make this trade -- see
+        test_2x2_k1_DU512, which asserts the unchanged schedule for the same
+        tile. The two together are the scope gate.
+        """
+        cfg = make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                   isMxf4Subtile=True)
+        sched = LogicalScheduler(cfg)
+
+        assert sched._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        partitions = sched.place_LRs()
+        p0 = partitions[0]
+        _assert_slot_lrs(p0[0], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[1], ['A', 'B', 'SB'])
+        _assert_slot_lrs(p0[2], ['A', 'B', 'SA'])
+        _assert_slot_lrs(p0[3], ['A', 'B', 'SB'])
+
+        # No idle slots: A and B issue in every slot, and both MT n+1 scales
+        # land in the final one.
+        p3 = partitions[3]
+        _assert_slot_lrs(p3[0], ['A', 'B'])
+        _assert_slot_lrs(p3[1], ['A', 'B'])
+        _assert_slot_lrs(p3[2], ['A', 'B'])
+        _assert_slot_lrs(p3[3], ['A', 'B', 'SA', 'SB'])
+        _assert_lr(p3[3], 'A', 1,0, 1, 0, 4)
+        _assert_lr(p3[3], 'B', 1,0, 1, 0, 4)
+
+    def test_retention_is_gated_on_mxf4_subtile_path(self):
+        """The ungated path retains everything, which is what develop did.
+
+        Returning the full set is not a claim about register lifetimes; it is
+        what makes the load decision fall back to the tile range alone and the
+        dedup pool stay shared, i.e. the pre-existing schedule.
+        """
+        off = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4))
+        on  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, partSizeM=4, partSizeN=4,
+                                                    isMxf4Subtile=True))
+        assert off._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on._lr_tensors_retained_across_partitions() == {'SA', 'SB'}
+
+        # pgr=0 short-circuits to "nothing retained" -- but only on the gated
+        # path; off it the answer stays "all" so the schedule is untouched.
+        # (pgr=0 forces a single partition, so no partition sizes here.)
+        off0 = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0))
+        on0  = LogicalScheduler(make_cfg_256x256_fp4(depthU=512, pgr=0, isMxf4Subtile=True))
+        assert off0._lr_tensors_retained_across_partitions() == {'A', 'B', 'SA', 'SB'}
+        assert on0._lr_tensors_retained_across_partitions() == set()
 
     def test_2x2_k2_DU256(self):
         """MT=256x256, DU=256, FP4, k=2, 2x2 partition.
