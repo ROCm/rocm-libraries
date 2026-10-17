@@ -225,4 +225,14 @@ inline const std::string& testAutotunePluginPath()
     return s_testAutotunePluginPath;
 }
 #endif
+
+// Consumed only by the cuDNN v8 shim integration tests in the frontend test target.
+#ifdef TEST_CUDNN_SHIM_V8_PLUGIN_NAME
+inline const std::string& testCudnnShimV8PluginPath()
+{
+    static const std::string s_testCudnnShimV8PluginPath
+        = getTestCustomFilepathForPlugin(TEST_CUDNN_SHIM_V8_PLUGIN_NAME);
+    return s_testCudnnShimV8PluginPath;
+}
+#endif
 } // namespace hipdnn_tests::plugin_constants

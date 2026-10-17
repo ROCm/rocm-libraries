@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -46,7 +47,8 @@ private:
 
 // Converts a failed hipDNN call into a ShimError. The backend message is drained
 // immediately because reading it clears it.
-inline void checkHipdnn(hipdnnStatus_t status, const std::string& context)
+// `context` is a view so that a literal costs nothing on the success path.
+inline void checkHipdnn(hipdnnStatus_t status, std::string_view context)
 {
     if(status == HIPDNN_STATUS_SUCCESS)
     {
@@ -55,7 +57,10 @@ inline void checkHipdnn(hipdnnStatus_t status, const std::string& context)
     std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendMessage{};
     hipdnn_frontend::detail::hipdnnBackend()->getLastErrorString(backendMessage.data(),
                                                                  backendMessage.size());
-    throw ShimError(toCudnnStatus(status), context + ": " + backendMessage.data());
+    std::string message(context);
+    message += ": ";
+    message += backendMessage.data();
+    throw ShimError(toCudnnStatus(status), message);
 }
 
 class Descriptor;
