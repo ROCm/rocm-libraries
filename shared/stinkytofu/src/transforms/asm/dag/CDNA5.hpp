@@ -471,11 +471,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return f.wmmaQueueCoverCycles > 0 ? std::max(1, f.wmmaQueueDepth) : 1;
     }
     // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off).
-    // The WMMA cover the barrier drain budget counts on. Defaults to the queue cover.
-    int barrierDrainCover() const {
-        const int c = getPassContext().getPassFeatureConfig().dagFeatures.barrierDrainCoverCycles;
-        return c >= 0 ? c : wmmaQueueCover();
-    }
     int wmmaQueueCover() const {
         if (wmmaQueueDepth() <= 1) return 0;
         return std::max(0,
@@ -2020,11 +2015,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             configuredDrainLatency > 0
                 ? configuredDrainLatency
                 : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
-        // The queued WMMA work (wmmaQueueCover(), 0 with the queue off) keeps the pipe busy while
-        // the wave waits for the last ds_load, so only the drain beyond it needs WMMAs in front.
-        const int latencyWmmaBudget = (std::max(0, latencyForAfterThreshold - barrierDrainCover()) /
-                                       wmmaIssueConfig.latency) +
-                                      1;
+        // The drain is not hidden by queued WMMA work: SQTT shows an empty WMMA queue at the stage
+        // barrier wait, so the whole drain latency needs WMMAs in front of the barrier.
+        const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
@@ -3604,7 +3597,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                    dsDensityXWindows_ > 1 ? dsDensityXWindows_ * windowCycles : 0);
         }
         dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_,
-                       wmmaTotalThisRegion_, dagFeatures.dsEvenSections);
+                       wmmaTotalThisRegion_);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
