@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed `rocsparse_csrgemm` and `rocsparse_spgemm` rejecting rows whose hash table exactly fills the device shared-memory limit. The 8192-entry bucket was not checked, so 64-bit column indices requested 64 KiB of dynamic LDS, and a hash equal to the opt-in limit was still launched. Both now fall back to the bitmap path. This showed up as `rocsparse_status_internal_error` in the `GemmCalcGrids` csrgemm tests.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
