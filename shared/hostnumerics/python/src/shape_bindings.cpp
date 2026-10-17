@@ -24,7 +24,8 @@ namespace roc::hostnumerics::python_bindings {
 void registerShapeBindings(nb::module_& module) {
     nb::class_<Shape>(module, "Shape",
                       "Immutable Python tuple-like sequence of nonnegative extents. "
-                      "A rank-zero shape describes one scalar.")
+                      "A rank-zero shape describes one scalar. "
+                      "The product of nonzero extents must fit size_t.")
         .def(nb::init<>())
         .def(nb::init<std::vector<size_t>>(), "dimensions"_a)
         .def_prop_ro("rank", &Shape::rank)
@@ -87,13 +88,16 @@ void registerShapeBindings(nb::module_& module) {
             "linear_index",
             [](const Shape& shape, const std::vector<size_t>& indices,
                const std::vector<size_t>& order) { return shape.linearIndex(indices, order); },
-            "indices"_a, "order"_a = std::vector<size_t>{})
+            "indices"_a, "order"_a = std::vector<size_t>{},
+            "Order lists axis numbers from outermost to innermost (slowest to fastest); "
+            "empty selects row-major, with the last axis fastest.")
         .def(
             "coordinates",
             [](const Shape& shape, size_t index, const std::vector<size_t>& order) {
                 return shape.coordinates(index, order);
             },
-            "linear_index"_a, "order"_a = std::vector<size_t>{})
+            "linear_index"_a, "order"_a = std::vector<size_t>{},
+            "Invert linear_index using the same outermost-to-innermost axis order.")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())

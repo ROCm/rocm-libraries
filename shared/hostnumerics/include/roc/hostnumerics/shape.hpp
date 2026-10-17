@@ -8,7 +8,6 @@
 #include <initializer_list>
 #include <limits>
 #include <numeric>
-#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -17,16 +16,6 @@
 
 namespace roc::hostnumerics {
 namespace detail {
-inline std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
-    if (std::ranges::find(dimensions, size_t{0}) != dimensions.end()) return 0;
-    size_t count = 1;
-    for (size_t extent : dimensions) {
-        if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
-        count *= extent;
-    }
-    return count;
-}
-
 inline bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
     if (order.empty()) return true;
     if (order.size() != rank) return false;
@@ -50,7 +39,8 @@ inline bool canBroadcastTo(std::span<const size_t> source,
 
 // Owns logical extents independently of a datatype, strides, or storage. A
 // rank-zero shape describes one scalar; any zero extent describes an empty shape.
-// Construction requires the full element count to fit in size_t.
+// Construction requires the product of nonzero extents to fit in size_t;
+// every subrange and projection therefore has a representable element count.
 // Counts and index conversions perform checked, rank-dependent work. Reuse a
 // computed count or an iteration plan in performance-critical element loops.
 class Shape {
@@ -58,7 +48,7 @@ class Shape {
     Shape() = default;
 
     explicit Shape(std::vector<size_t> dimensions) : m_dimensions(std::move(dimensions)) {
-        validateElementCount(m_dimensions);
+        validateDimensions(m_dimensions);
     }
 
     Shape(std::initializer_list<size_t> dimensions) : Shape(std::vector<size_t>(dimensions)) {}
@@ -88,13 +78,11 @@ class Shape {
         return computeElementCount(m_dimensions);
     }
 
-    // Products use [firstDimension, onePastLastDimension). A zero extent makes
-    // the product zero even if other extents would overflow size_t.
+    // Product over [firstDimension, onePastLastDimension); an empty product is one.
     size_t elementCount(size_t firstDimension, size_t onePastLastDimension) const {
         validateDimensionRange(firstDimension, onePastLastDimension);
         const auto extents =
             dimensions().subspan(firstDimension, onePastLastDimension - firstDimension);
-        validateElementCount(extents);
         return computeElementCount(extents);
     }
 
@@ -107,13 +95,35 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
-    // Convert an n-dimensional coordinate to a logical linear index, independently
-    // of physical strides. For shape (2, 3, 5), row-major strides are (15, 5, 1).
-    // With order (1, 2, 0), strides are (1, 10, 2), so indices (1, 2, 3) give
-    // 1 * 1 + 2 * 10 + 3 * 2 = 27.
-    // \param indices One coordinate per dimension.
-    // \param order A permutation of dimensions, slowest to fastest. Ascending
-    // dimensions give row-major order (last fastest); empty selects this default.
+    // Convert coordinates to a logical linear index, independently of physical
+    // storage strides. Axis numbers are positions in dimensions(): for shape
+    // (2, 3, 5), axes 0, 1, 2 have extents 2, 3, 5. Coordinates (i0, i1, i2)
+    // always remain in that axis order, regardless of the traversal order.
+    //
+    // Order lists axis numbers from slowest to fastest (outermost to innermost
+    // loop). For shape (2, 3, 5), order (1, 2, 0) enumerates coordinates as:
+    //
+    //   size_t index = 0;
+    //   for (size_t i1 = 0; i1 < 3; ++i1)
+    //       for (size_t i2 = 0; i2 < 5; ++i2)
+    //           for (size_t i0 = 0; i0 < 2; ++i0)
+    //               visit(index++, i0, i1, i2);
+    //
+    // The first coordinates are (0,0,0), (1,0,0), (0,0,1), (1,0,1), ... .
+    // Axis 0 changes every step, axis 2 every 2 steps, and axis 1 every 10 steps.
+    // Thus index = (i1 * 5 + i2) * 2 + i0 = i0 + 10 * i1 + 2 * i2;
+    // logical strides in axis order are (1, 10, 2), and (1, 2, 3) maps to 27.
+    //
+    // Other orders for the same shape:
+    //   (0, 1, 2): last axis fastest, strides (15, 5, 1); (1, 2, 3) maps to 28.
+    //   (0, 2, 1): axis 1 fastest, strides (15, 1, 3); (1, 2, 3) maps to 26.
+    //   (2, 1, 0): first axis fastest, strides (1, 2, 6); (1, 2, 3) maps to 23.
+    //
+    // For any three-axis order (a, b, c), the formula is
+    // (indices[a] * dimensions[b] + indices[b]) * dimensions[c] + indices[c].
+    // Empty order selects ascending axes, i.e. row-major with the last fastest.
+    // \param indices One coordinate per axis, in the original axis order.
+    // \param order A permutation of axis numbers, slowest to fastest.
     size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order = {}) const {
         validateLinearIndex(indices, order);
         size_t result = 0;
@@ -124,7 +134,9 @@ class Shape {
         return result;
     }
 
-    // Invert linearIndex.
+    // Invert linearIndex using the same traversal order. The output stays in
+    // the original axis order: for shape (2, 3, 5), coordinates(27, (1, 2, 0))
+    // returns (1, 2, 3). See linearIndex above for the nested-loop interpretation.
     // \param linearIndex Logical index in [0, elementCount()).
     // \param order A permutation of dimensions, slowest to fastest. Empty
     // selects row-major order (last fastest).
@@ -172,14 +184,6 @@ class Shape {
                                          std::to_string(axis) + ".");
             seen[axis] = true;
         }
-        for (size_t axis : axes)
-            if (m_dimensions[axis] == 0) return;
-        size_t count = 1;
-        for (size_t axis : axes) {
-            if (count > std::numeric_limits<size_t>::max() / m_dimensions[axis])
-                throw std::runtime_error("Tensor shape element count exceeds size_t.");
-            count *= m_dimensions[axis];
-        }
     }
 
     void validateCoordinates(size_t linearIndex, std::span<const size_t> order,
@@ -216,13 +220,17 @@ class Shape {
         }
     }
 
-    static void validateElementCount(std::span<const size_t> extents) {
-        if (!detail::tryElementCount(extents))
-            throw std::runtime_error("Tensor shape element count exceeds size_t.");
+    static void validateDimensions(std::span<const size_t> extents) {
+        size_t count = 1;
+        for (size_t extent : extents) {
+            if (extent == 0) continue;
+            if (count > std::numeric_limits<size_t>::max() / extent)
+                throw std::runtime_error("Tensor shape product of nonzero extents exceeds size_t.");
+            count *= extent;
+        }
     }
 
     static size_t computeElementCount(std::span<const size_t> extents) noexcept {
-        if (std::ranges::find(extents, size_t{0}) != extents.end()) return 0;
         return std::accumulate(extents.begin(), extents.end(), size_t{1},
                                [](size_t count, size_t extent) { return count * extent; });
     }
