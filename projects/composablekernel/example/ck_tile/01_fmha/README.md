@@ -258,6 +258,23 @@ We support sequence padding and variable-length processing in both batch and gro
 
 Both approaches optimize memory access patterns while supporting flexible sequence length requirements commonly found in transformer inference scenarios.
 
+### batch_prefill (paged KV cache)
+`fmha_batch_prefill()` is the group-mode, paged-KV forward that aiter's `mha_batch_prefill` calls. It is not part of `all`; enable it explicitly, e.g. `-DFMHA_FWD_ENABLE_APIS="fwd;batch_prefill"`. `tile_example_fmha_fwd` then runs it for `-mode=1 -page_block_size=<n>`:
+
+| option | values |
+|---|---|
+| `-page_block_size` | page size; instances exist for 1, 16 and 1024 |
+| `-kv_layout` | `linear`: K/V `[num_pages, page_block_size, nhead_k, hdim]` with `-iperm=0` (aiter's 4D layout) or `[num_pages, nhead_k, page_block_size, hdim]` with `-iperm=1`; `vectorized`: K `[num_pages, nhead_k, hdim/kVec, page_block_size, kVec]`, V `[num_pages, nhead_k, page_block_size/kVec, hdim, kVec]`, kVec = 16 bytes |
+| `-kv_lookup` | `vllm`: `block_table[batch, max_pages]` + per-sequence `seqlen_k`; `sglang`: `kv_indptr[batch + 1]` into `kv_page_indices` + `kv_last_page_lens[batch]` |
+| `-qscale` | `pt` or `kvbs` for `-prec=fp8bf16` |
+
+Use comma-separated `-s`/`-s_k` lists for fixed per-sequence lengths. For example, aiter's SGLang layout with causal mask:
+```
+./bin/tile_example_fmha_fwd -prec=bf16 -mode=1 -b=3 -h=8 -h_k=2 -d=128 -s=300,300,300 -s_k=1000,1000,1000 \
+    -page_block_size=1024 -kv_layout=linear -kv_lookup=sglang -iperm=0 -mask=b
+```
+On gfx1250 the dispatcher tries, in order: `qr_tdm_sched` (hdim 64/128/192x128, `max_seqlen_q >= 128`), `qr_tdm` (every qr_tdm head dim for fp16/bf16; hdim 128 for fp8bf16 `pt`/`kvbs`), both for linear KV without dropout or logits soft cap, and otherwise the async pipeline (the only one on gfx9). Pages that hold the K/V rows of a warp are read with TDM box loads; smaller pages (e.g. page 1) with TDM gathers, 8 rows per instruction. `kvbs` V descales need not be powers of two: `qr_tdm` passes their exponent to the scaled MMA and applies the mantissa to the fp32 output accumulator.
+
 ## FP8 support
 FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:
 

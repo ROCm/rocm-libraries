@@ -490,9 +490,9 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
         // GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q in fmha_fwd.py). The tile is
         // embedded in the kernel name as "_b<bm0>x<bn0>x...". Only assert in batch
         // mode: there a.max_seqlen_q == seqlen_q, so the input directly drives tile
-        // selection. In group mode a.max_seqlen_q is the packed total q length across
-        // the batch (sum of per-sequence lengths), not the per-sequence seqlen, so a
-        // single input seqlen does not pin dispatch to one side of the crossover.
+        // selection. In group mode the per-sequence lengths are drawn around the input
+        // seqlen, so their maximum (a.max_seqlen_q) does not pin dispatch to one side of
+        // the crossover.
         if(mode == mode_enum::batch)
         {
             if(seqlen_q >= 128)
@@ -502,6 +502,103 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
         }
     }
 }
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+// batch_prefill: group mode with a paged KV cache, in aiter's KV layouts and page tables
+// (sglang: kv_indptr/kv_page_indices/kv_last_page_lens, vllm: 2D block table). On gfx125
+// the pipeline in the kernel name is checked as well, so a silent fallback from TDM to the
+// async pipeline is caught; other archs only have the async pipeline.
+// hdim_q, hdim_v, seqlen_q, seqlen_k, mask, page_block_size, kv_layout, kv_lookup, i_perm,
+// gfx125 pipeline
+using BatchPrefillCase =
+    std::tuple<int, int, int, int, const char*, int, const char*, const char*, bool, const char*>;
+
+class BatchPrefill : public TestWithParam<BatchPrefillCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefill,
+    Values(
+        BatchPrefillCase{
+            128, 128, 300, 1000, "0", 1024, "linear", "sglang", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 513, 2100, "b", 1024, "linear", "vllm", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{
+            64, 64, 200, 1500, "b:128,0", 1024, "linear", "sglang", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 8, 900, "b", 1024, "linear", "sglang", false, "_qr_tdm_vr"},
+        BatchPrefillCase{96, 96, 200, 700, "0", 1024, "linear", "sglang", true, "_qr_tdm_vr"},
+        BatchPrefillCase{256, 256, 130, 1100, "b", 1024, "linear", "vllm", false, "_qr_tdm_vr"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "linear", "sglang", false, "_qr_tdm_sched_"},
+        BatchPrefillCase{64, 64, 300, 1000, "0", 16, "linear", "vllm", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 77, 2049, "t:64,32", 1, "linear", "sglang", false, "_qr_tdm_vr"},
+        BatchPrefillCase{64, 64, 300, 1000, "b", 1, "linear", "vllm", true, "_qr_tdm_sched_"},
+        BatchPrefillCase{128, 128, 300, 1000, "b", 16, "vectorized", "vllm", true, "_qr_async_"}));
+
+TEST_P(BatchPrefill, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        const auto [hdim_q,
+                    hdim_v,
+                    seqlen_q,
+                    seqlen_k,
+                    mask_str,
+                    page_block_size,
+                    kv_layout,
+                    kv_lookup,
+                    i_perm,
+                    gfx125_pipeline] = GetParam();
+
+        // fixed per-sequence lengths, so max_seqlen_q selects the pipeline deterministically
+        constexpr int batch = 3;
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   4,
+                                                   2,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   hdim_q,
+                                                   hdim_v,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   i_perm,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   kv_layout,
+                                                   kv_lookup);
+        CHECK_RESULT(result);
+        const char* pipeline = ck_tile::is_gfx125_supported() ? gfx125_pipeline : "_qr_async_";
+        EXPECT_NE(selected_kernel.find(pipeline), std::string::npos) << selected_kernel;
+    }
+    else
+    {
+        GTEST_SKIP() << "batch_prefill tests run fp16 and bf16";
+    }
+}
+#endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 
 class General
     : public TestWithParam<std::tuple<std::tuple<int, int>,

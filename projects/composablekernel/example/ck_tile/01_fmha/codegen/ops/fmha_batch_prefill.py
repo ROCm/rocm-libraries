@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # generate kernel instances to speed up compilation
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import fnmatch
 import itertools
 from pathlib import Path
@@ -40,6 +40,10 @@ GFX942_ARCH = ArchTrait(
     preprocessor_check="defined(__gfx942__)",
 )
 
+# Gates for the per-arch tile sets when one build targets several archs.
+GFX9_ARCH = ArchTrait("gfx9")
+GFX125_ARCH = ArchTrait("gfx125")
+
 DTYPE_BITS = {
     "fp32": 32,
     "fp16": 16,
@@ -75,7 +79,14 @@ KV_LOAD_MODE_ENUM_MAP = {
 
 FMHA_BATCH_PREFILL_PIPELINE_MAP = {
     "qr_async": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSAsync",
+    "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
+    "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
 }
+
+# fp16/bf16 qr_tdm runs with double K/V LDS buffers and progressive K LDS loading, as in
+# fmha_fwd; its fp8 instances keep the defaults, also as in fmha_fwd.
+PROBLEM_EXTRA_MAP = {"qr_async": "", "qr_tdm": ", true, true", "qr_tdm_sched": ""}
+
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.\n
@@ -138,7 +149,7 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBatchPrefillPipelineProb
     fmha_mask_{F_idx},
     false,
     {F_page_size},
-    fmha_trait_{F_idx}>;
+    fmha_trait_{F_idx}{F_problem_extra}>;
 
 using fmha_pipeline_{F_idx} = {F_pipeline}<
     fmha_pipeline_problem_{F_idx}>;
@@ -160,6 +171,8 @@ template<>
 float fmha_batch_prefill_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_batch_prefill_args a)
 {{
     using k_ = fmha_kernel_{F_idx};
+    if(a.selected_kernel_name != nullptr)
+        *a.selected_kernel_name = "{F_kname}";
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
@@ -240,7 +253,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {F_bn0}, a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr) == {F_kv_load_mode})) {{
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ({F_kv_load_check})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
@@ -291,6 +304,9 @@ class FmhaFwdApiTrait:
     kv_lookup_table: str
     page_size: int = 1  # page block size
     use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
+    # False for archs without GLOBAL_LOAD_LDS kernels (gfx125): BUFFER_LOAD then only
+    # requires the K/V offsets to fit int32.
+    has_global_load_lds: bool = True
     # Host-side arch predicate mirroring a tile's device-only F_arch gate.
     # "true" means arch-agnostic (no host restriction).
     arch_host: str = "true"
@@ -304,6 +320,15 @@ class FmhaFwdApiTrait:
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
             + ("-gload" if self.use_global_load else "-bload")
+        )
+
+    @property
+    def kv_load_check(self) -> str:
+        if not self.has_global_load_lds:
+            return "fmha_batch_prefill_kv_fits_int32_offset(a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes)"
+        return (
+            f"fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {self.bn0}, a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr)"
+            + f" == {KV_LOAD_MODE_ENUM_MAP[self.use_global_load]}"
         )
 
     @property
@@ -342,12 +367,13 @@ class FmhaFwdApiTrait:
 
     @property
     def dcheck(self) -> str:
-        if self.pipeline_tag == "qr_async":
+        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched"):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dpad == "t":
                 return f"a.hdim_q % {vec} == 0"
             else:
-                assert False
+                assert self.pipeline_tag == "qr_tdm_sched"
+                return f"a.hdim_q == {self.bk0max}"
         elif self.pipeline_tag in ["qr"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -359,12 +385,13 @@ class FmhaFwdApiTrait:
 
     @property
     def dvcheck(self) -> str:
-        if self.pipeline_tag == "qr_async":
+        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched"):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dvpad == "t":
                 return f"a.hdim_v % {vec} == 0"
             else:
-                assert False
+                assert self.pipeline_tag == "qr_tdm_sched"
+                return f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag in ["qr"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -529,6 +556,7 @@ class FmhaFwdApiPool:
                         F_page_size=trait.page_size,
                         F_sink=BOOL_MAP[trait.sink],
                         F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[trait.use_global_load],
+                        F_kv_load_check=trait.kv_load_check,
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
@@ -596,6 +624,7 @@ class FmhaFwdKernel:
     mask_impl: str
     F_page_size: int = 1  # page block size
     F_use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
+    F_has_global_load_lds: bool = True  # arch has GLOBAL_LOAD_LDS kernels
 
     @property
     def template(self) -> str:
@@ -643,6 +672,11 @@ class FmhaFwdKernel:
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
+            F_problem_extra=(
+                ""
+                if self.F_dtype == "fp8bf16"
+                else PROBLEM_EXTRA_MAP[self.F_pipeline.tag]
+            ),
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
@@ -704,6 +738,7 @@ class FmhaFwdKernel:
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
             page_size=self.F_page_size,
             use_global_load=self.F_use_global_load,
+            has_global_load_lds=self.F_has_global_load_lds,
             arch_host=(
                 self.F_tile.F_arch.device_name_check
                 if self.F_tile.F_arch is not None
@@ -714,6 +749,13 @@ class FmhaFwdKernel:
 
 
 class KernelComponentFactory:
+    # global_load_lds_* (>2GB KV cache with page_size < kN0) exists on gfx94x/gfx950 only
+    supports_global_load_lds = True
+
+    @classmethod
+    def is_tile_supported(cls, tile, pipeline) -> bool:
+        return True
+
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
@@ -809,6 +851,130 @@ class CustomFactory(KernelComponentFactory):
         return result
 
 
+class KernelComponentFactoryGfx125(KernelComponentFactory):
+    # gfx125 runs the same async pipeline with WMMA warp tiles; K is copied with
+    # global_load_async_to_lds instead of the gfx9 M0-based buffer_load...lds.
+    # Linear KV first tries the TDM pipelines of fmha_fwd (qr_tdm_sched and qr_tdm;
+    # qr_tdm only for fp8bf16 d128) on fmha_fwd's tiles of the same head dims.
+    supports_global_load_lds = False
+
+    # Head dims in ascending order: the dispatcher takes the first hdim_q/hdim_v
+    # that fits. 192 is the hdim_v 128 (DeepSeek) case.
+    #                            bm0, bn0, bk0, bn1, bk1, bk0max
+    _QR_TDM_TILES = {
+        32  : FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        64  : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        96  : FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        128 : FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        160 : FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+        256 : FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, F_arch=GFX125_ARCH),
+    }  # fmt: skip
+
+    # fmha_fwd's qr_tdm_sched tiles; occupancy must match the sched policy tuning.
+    # D192 keeps N64: the fwd N128 choice depends on per-sequence K lengths.
+    _QR_TDM_SCHED_TILES = {
+        64  : FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  3, F_arch=GFX125_ARCH),
+        128 : FmhaFwdTileSize(128, 128,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH),
+        192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  2, F_arch=GFX125_ARCH),
+    }  # fmt: skip
+
+    # fmha_fwd's fp8 qr_tdm tile: the scaled gemm1 needs warp K 128 (kK1).
+    _QR_TDM_FP8_TILES = {
+        128 : FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, F_arch=GFX125_ARCH),
+    }  # fmt: skip
+
+    @staticmethod
+    def _async_tile(bn1, bk0max, bk=32, wk=32):
+        return FmhaFwdTileSize(64, 64, bk, bn1, bk, bk0max, 4, 1, 1, 4, 1, 1, 16, 16, wk, 16, 16, wk, -1, F_arch=GFX125_ARCH)  # fmt: skip
+
+    @classmethod
+    def is_tile_supported(cls, tile, pipeline) -> bool:
+        # The d256 qr_tdm tile has the async tile's geometry, so pair by identity.
+        if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
+            return pipeline.tag == "qr_tdm_sched"
+        if any(
+            tile is t
+            for t in (*cls._QR_TDM_TILES.values(), *cls._QR_TDM_FP8_TILES.values())
+        ):
+            return pipeline.tag == "qr_tdm"
+        # The async pipeline's vectorized V distribution spreads hdim_v over 4 warps x
+        # (32 lanes / kABKLane 2) = 64 rows per pass.
+        if pipeline.F_kv_memory_layout == "vectorized" and tile.F_bn1 % 64 != 0:
+            return False
+        return pipeline.tag == "qr_async"
+
+    @classmethod
+    def get_pipelines(cls, dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
+        pipelines = []
+        # As in fmha_fwd: qr_tdm_sched first for max_seqlen_q >= 128, then qr_tdm.
+        if dtype in ["fp16", "bf16"] and hdim in cls._QR_TDM_SCHED_TILES:
+            head_pad = "f" if hdim == 64 else "t"
+            sched_constraint = CppConstraint("a.max_seqlen_q >= 128")
+            for mask, lse, kv_lookup_table in itertools.product(
+                get_mask_map(mask_impl).keys(), ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
+            ):
+                pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", head_pad, head_pad, "f", "no", lse, "f", "no", mask, "f", "linear", kv_lookup_table, F_constraint=sched_constraint))  # fmt: skip
+        if dtype in ["fp16", "bf16"] and hdim in cls._QR_TDM_TILES:
+            for mask, bias, lse, sink, kv_lookup_table in itertools.product(
+                get_mask_map(mask_impl).keys(),
+                BIAS_MAP.keys(),
+                ["t", "f"],
+                ["t", "f"],
+                SUPPORTED_KV_LOOKUP_TABLE,
+            ):
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
+                pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", bias, lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
+        if dtype in ["fp8bf16"] and hdim in cls._QR_TDM_FP8_TILES:
+            for qscale, mask, sink, kv_lookup_table in itertools.product(
+                ["pertensor", "kv_blockscale"],
+                get_mask_map(mask_impl).keys(),
+                ["t", "f"],
+                SUPPORTED_KV_LOOKUP_TABLE,
+            ):
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
+                pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", "f", "no", "f", "f", qscale, mask, sink, "linear", kv_lookup_table))  # fmt: skip
+        return pipelines + KernelComponentFactory.get_pipelines(
+            dtype, hdim, receipt, mask_impl
+        )
+
+    @classmethod
+    def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
+        if dtype in ["fp16", "bf16"]:
+            return {
+                hdim: (
+                    [cls._QR_TDM_SCHED_TILES[hdim]]
+                    if hdim in cls._QR_TDM_SCHED_TILES
+                    else []
+                )
+                + [tdm_tile, cls._async_tile(tdm_tile.F_bn1, tdm_tile.F_bk0max)]
+                for hdim, tdm_tile in cls._QR_TDM_TILES.items()
+            }
+        elif dtype in ["fp8bf16"]:
+            return {
+                128: [
+                    cls._QR_TDM_FP8_TILES[128],
+                    cls._async_tile(128, 128, bk=64, wk=64),
+                ],
+                256: [cls._async_tile(256, 256, bk=64, wk=64)],
+            }
+        else:
+            return None
+
+
+def _gate_tiles(tiles: dict, arch: ArchTrait) -> dict:
+    # Restrict tiles without an own arch gate to `arch`.
+    return {
+        hdim: [
+            tile if tile.F_arch is not None else replace(tile, F_arch=arch)
+            for tile in tile_list
+        ]
+        for hdim, tile_list in tiles.items()
+    }
+
+
 def get_fwd_blobs(
     kernel_filter: Optional[str],
     receipt,
@@ -816,34 +982,42 @@ def get_fwd_blobs(
     mask_impl,
     targets: Optional[List[str]] = None,
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
-    # batch_prefill pipeline uses gfx9-specific async scatter-gather buffer addressing
-    # (amd_buffer_addressing.hpp raw buffer loads) that is not compatible with
-    # non-gfx9 architectures (gfx11/gfx12/gfx10 are wave32 and use different
-    # buffer instruction formats).  Skip all batch_prefill kernels for non-gfx9 targets.
-    has_non_gfx9 = targets is not None and any(
-        not t.startswith("gfx9") for t in targets
-    )
+    # The batch_prefill async pipeline copies K into LDS with gfx9 buffer_load...lds or
+    # gfx125 global_load_async_to_lds; other archs (gfx10/gfx11/gfx12) get no kernels.
+    has_gfx9 = targets is None or any(t.startswith("gfx9") for t in targets)
+    has_gfx125 = targets is not None and any(t.startswith("gfx125") for t in targets)
+    # Gate the gfx9 tiles only when other archs share the build, so gfx9-only
+    # builds generate exactly the same kernels as before.
+    gfx9_only = targets is None or all(t.startswith("gfx9") for t in targets)
+    factories = []
+    if has_gfx9:
+        factories.append((CustomFactory, None if gfx9_only else GFX9_ARCH))
+    if has_gfx125:
+        factories.append((KernelComponentFactoryGfx125, None))
     # TODO: we don't support tuning yet, so pick up one value for vlayout/pipeline/pad
     #       support this in future
 
     gen = list()
     api_pool = FmhaFwdApiPool(mask_impl)
 
-    if has_non_gfx9:
-        return api_pool, gen
-
-    for dtype in FWD_DTYPE_MAP.keys():
-        d = CustomFactory.get_hdim_tile_size_dict(dtype)
+    for (factory, arch_gate), dtype in itertools.product(
+        factories, FWD_DTYPE_MAP.keys()
+    ):
+        d = factory.get_hdim_tile_size_dict(dtype)
         if d is None:
             continue
+        if arch_gate is not None:
+            d = _gate_tiles(d, arch_gate)
         # for hdim_str, mode, mask, bias, lse in itertools.product(d.keys(), MODE_MAP.keys(), MASK_MAP.keys(), ["t", "f"], ["t", "f"]):
         for (hdim, tiles), mode in itertools.product(d.items(), MODE_MAP.keys()):
             # batch_prefill pipeline requires group mode (static_assert in pipeline problem)
             if mode != "group":
                 continue
             for tile, pipeline in itertools.product(
-                tiles, CustomFactory.get_pipelines(dtype, hdim, receipt, mask_impl)
+                tiles, factory.get_pipelines(dtype, hdim, receipt, mask_impl)
             ):
+                if not factory.is_tile_supported(tile, pipeline):
+                    continue
                 if mode == "group":
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
@@ -880,6 +1054,7 @@ def get_fwd_blobs(
                         F_pipeline=pipeline,
                         mask_impl=mask_impl,
                         F_page_size=page_size,
+                        F_has_global_load_lds=factory.supports_global_load_lds,
                     )
                     if kernel_filter != "":
                         if not fnmatch.fnmatch(k.name, kernel_filter):
@@ -942,7 +1117,7 @@ def get_fwd_blobs(
                     # variant for >2GB KV cache support. The default (BUFFER_LOAD) uses SRD
                     # buffer_load (fast, <2GB). GLOBAL_LOAD_LDS uses global_load_lds_*
                     # (slower, handles >2GB).
-                    if page_size < tile.F_bn0:
+                    if factory.supports_global_load_lds and page_size < tile.F_bn0:
                         k_global_load = FmhaFwdKernel(
                             F_idx=0,
                             F_hdim=hdim,
