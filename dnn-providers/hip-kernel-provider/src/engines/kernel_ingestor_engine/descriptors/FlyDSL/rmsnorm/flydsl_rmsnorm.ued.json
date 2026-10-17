@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "43c4a81e-f427-56ec-b01f-688019b91f85",
+  "name": "hipkernel:flydsl_rmsnorm",
+  "graph_match": {
+    "native": "hipkernel.flydsl_rmsnorm.graph_match"
+  },
+  "heuristic": "b1392faf-ca0b-527d-a523-1d723ce4420f",
+  "metadata": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
+  "knobs": [
+    "block_threads"
+  ]
+}

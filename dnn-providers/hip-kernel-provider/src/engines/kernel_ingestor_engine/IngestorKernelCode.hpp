@@ -78,6 +78,8 @@ inline int launchDeviceOrdinal(hipStream_t stream)
 /// reading one archive would answer each other's lookups.
 compilation::KpackModuleCache& pointwiseKpackModuleCache();
 compilation::KpackModuleCache& convFwdKpackModuleCache();
+compilation::KpackModuleCache& flydslRmsNormKpackModuleCache();
+
 compilation::KpackModuleCache& gfx950AttentionDenseKpackModuleCache();
 
 /// What a kpack kernel needs to be loaded again for another device: the archive it was
