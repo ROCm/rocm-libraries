@@ -75,7 +75,7 @@ class DsSpreadPacer {
     }
 
     // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far.
-    bool released(unsigned nodeId, int wmmaIssued) {
+    bool released(unsigned nodeId, int wmmaIssued) const {
         if (!active_) return true;
         auto dl = deadline_.find(nodeId);
         if (dl == deadline_.end()) return true;
@@ -98,7 +98,7 @@ class DsSpreadPacer {
 
    private:
     // The allowance is set once, when the first ds_load decision of a batch is made.
-    void openBatch(int wmmaIssued) {
+    void openBatch(int wmmaIssued) const {
         const int idx = wmmaIssued / batch_;
         if (idx == batchIdx_) return;
         batchIdx_ = idx;
@@ -122,9 +122,10 @@ class DsSpreadPacer {
     int batch_ = 1;
     int perBatch_ = 1;
     int catchUp_ = 0;
-    int batchIdx_ = -1;
-    int issuedInBatch_ = 0;
-    int allow_ = 0;
+    // The batch state opens lazily from the (const) release query.
+    mutable int batchIdx_ = -1;
+    mutable int issuedInBatch_ = 0;
+    mutable int allow_ = 0;
     bool active_ = false;
 };
 
