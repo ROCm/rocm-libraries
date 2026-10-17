@@ -303,7 +303,12 @@ def test_real_rocke_example_dtype_vocabularies_are_not_drift(rocke_root):
     every rocKE kernel that ships."""
     for kdp in _require_bundles(rocke_root):
         kernels = _kernels(_read(kdp))
-        spec = kernels[0]["kernel_source"]["spec"]
+        # A multi-launch kernel (RFC 0017 section 15.1) has `sources`, not `kernel_source`;
+        # every launch of one kernel carries the variant's spec, so the first one serves.
+        source = kernels[0].get("kernel_source") or next(
+            iter(kernels[0]["sources"].values())
+        )
+        spec = source["spec"]
         meta = kernels[0]["metadata"]
         # The premise: two different spellings of one type (bf16/BF16,
         # fp16/FP16, ...). A failure here means the bundle changed and the
