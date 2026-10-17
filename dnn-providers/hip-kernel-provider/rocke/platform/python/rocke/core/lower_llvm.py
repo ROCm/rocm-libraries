@@ -44,6 +44,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _int_add_wrap_error,
     BF16,
     F32,
     F16,
@@ -1767,6 +1768,9 @@ class _Lowerer:
         op = v.op
         if op is None:
             return v.name
+        if op.name == "arith.assume_range":
+            # A range marker is its first operand: it emits no instruction.
+            return self._operand(op.operands[0])
         if op.name == "arith.constant":
             ity = op.attrs.get("ity", "i32")
             val = op.attrs["value"]
@@ -2337,7 +2341,15 @@ class _Lowerer:
         )
 
     def _op_arith_add(self, op: Op) -> None:
-        self._binop(op, "add nsw")
+        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        if wrap_error:
+            raise ValueError(wrap_error)
+        wrap = op.attrs.get("wrap", "nsw")
+        self._binop(op, f"add {wrap}")
+
+    def _op_arith_assume_range(self, op: Op) -> None:
+        # Emits nothing: _operand prints the marked value at every use.
+        return
 
     def _op_arith_sub(self, op: Op) -> None:
         self._binop(op, "sub nsw")
@@ -2467,6 +2479,7 @@ class _Lowerer:
             "ge": "sge",
             "eq": "eq",
             "ne": "ne",
+            "ult": "ult",
         }
         a, b = op.operands
         self._current().emit(
