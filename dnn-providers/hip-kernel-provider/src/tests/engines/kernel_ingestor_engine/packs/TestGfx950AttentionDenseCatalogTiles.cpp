@@ -74,9 +74,8 @@ TEST(TestGfx950AttentionDenseCatalogTiles, EveryShippedKernelsTileIsOneTheEngine
                 << "kernel '" << kernel.name
                 << "' does not carry integer head_size, block_m and block_n metadata";
             EXPECT_TRUE(isSupportedGfx950AttentionDenseTile(*headSize, *blockM, *blockN))
-                << "kernel '" << kernel.name << "' declares head_size " << *headSize
-                << ", block_m " << *blockM << ", block_n " << *blockN
-                << ", a tile the engine declines to launch";
+                << "kernel '" << kernel.name << "' declares head_size " << *headSize << ", block_m "
+                << *blockM << ", block_n " << *blockN << ", a tile the engine declines to launch";
         }
     }
     // A catalog that loaded no kernel would pass the loop above vacuously.

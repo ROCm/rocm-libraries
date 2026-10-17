@@ -343,9 +343,7 @@ def test_a_non_attention_family_enumerates_and_generates(tmp_path, monkeypatch):
     assert re_.main(["--manifest", str(path), "--out", str(config)]) == 0
     kernels = yaml.safe_load(config.read_text())["packs"][0]["kernels"]
     cells = {
-        (c, d)
-        for c in (64, 128)
-        for d in manifest["enumerate"]["cells"][1]["values"]
+        (c, d) for c in (64, 128) for d in manifest["enumerate"]["cells"][1]["values"]
     }
     assert {k["name"] for k in kernels} == {
         f"conv_probe.{d}_c{c}_k{c}_g1_t64x64x64" for c, d in cells

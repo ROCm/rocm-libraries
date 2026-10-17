@@ -248,4 +248,3 @@ def test_g4_the_selection_header_equals_the_manifest(
     assert selection.kernel_source_kind == built.kernel_source_kind
     assert selection.workspace_policy == built.workspace_policy
     assert selection.authored_subpath == built.authored_subpath
-
