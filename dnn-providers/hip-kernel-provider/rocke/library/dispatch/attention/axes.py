@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Mapping, Tuple
 
+from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
+
 from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rules)
     KnobAxis,
     Knobs,
@@ -23,7 +25,6 @@ from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rul
     sorted_items as _items,
     values as _values,
 )
-
 
 # AMDGPU ``sched_barrier`` ABI: 0 is a full fence, and each bit lets one
 # instruction class cross it (ALU, VALU, SALU, MFMA, VMEM, VMEM rd, VMEM wr,
@@ -147,6 +148,11 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "causal_bottom_right",
     }
 )
+# Problem fields only some arches' dense specs declare (the band's right bound).
+DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"right_bound"}),
+    "gfx942": frozenset(),
+}
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
@@ -188,10 +194,19 @@ _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
 _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
-# The gfx950 bodies implement 128- and 256-row query tiles (see
-# supports_attention_dense); the validator prunes block_n the tile cannot take.
-_GFX950_BLOCK_M = (128, 256)
-_GFX950_BLOCK_N = (32, 64, 128)
+# Derive the gfx950 block_m / block_n axes from gfx950_dense_tile_legality so
+# the axis and the LDS predicate are always in sync.  The legality function is
+# the single source of truth: the axes below, the supports_attention_dense gate,
+# and (via this import) the tuning sweep all reference the same budget model.
+_GFX950_LEGAL_TILES: dict = {
+    hs: gfx950_dense_tile_legality(head_size=hs) for hs in (64, 128)
+}
+_GFX950_BLOCK_M: tuple = tuple(
+    sorted({bm for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
+_GFX950_BLOCK_N: tuple = tuple(
+    sorted({bn for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
