@@ -272,6 +272,15 @@ class TestExpectIdsPerKernel:
         regenerated["kernelDescriptors"][0]["id"] = "other"
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
 
+    def test_per_arch_twins_sharing_a_name_pass_when_identical(self, run):
+        """Two entries with one name and one spec differ only by arch; each is keyed
+        by its binary identity, so the pair is not ambiguous."""
+        a, b = _entry("twin"), _entry("twin")
+        a["arch"], b["arch"] = ["gfx950"], ["gfx942"]
+        a["id"], b["id"] = "id-a", "id-b"
+        shipped = _kdp([a, b])
+        assert run(shipped, json.loads(json.dumps(shipped)), "--expect-ids") == 0
+
     def test_a_name_repeated_on_one_side_only_cannot_be_checked(self, run, capsys):
         """The shipped `dup` is keyed by name, the regenerated pair by name and spec,
         so its id would go unchecked; `--subset` accepts the extra entry."""

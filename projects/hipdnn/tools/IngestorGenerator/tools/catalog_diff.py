@@ -27,8 +27,8 @@ from the dispatcher):
     (only the KDP is read); symbol drift is a separate follow-up gate.
 
 Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage or
-unreadable input, including an ``--expect-ids`` name used a different number of times
-in the two catalogs.
+unreadable input, including an ``--expect-ids`` name present in both catalogs used a
+different number of times.
 
 ``--subset`` requires only shipped ⊆ regenerated: kernels only the regenerated
 catalog holds are listed as registry extras, not differences.
@@ -391,7 +391,8 @@ def _name_counts(kdp: dict) -> collections.Counter:
 
 def _id_index(kdp: dict) -> tuple[dict, list[str]]:
     """Map each kernel entry to its id. Keyed by name; a name used more than
-    once is keyed by (name, full spec) instead so repeats are not conflated.
+    once is keyed by (name, binary identity) instead, so repeats -- per-arch twins
+    included -- are not conflated.
     Returns (index, names still ambiguous after that)."""
     entries = kdp["kernelDescriptors"]
     name_counts = _name_counts(kdp)
@@ -402,7 +403,7 @@ def _id_index(kdp: dict) -> tuple[dict, list[str]]:
         key = (
             name
             if name_counts[name] == 1
-            else (name, _canonical(e.get("kernel_source", {}).get("spec") or {}))
+            else (name, *binary_identity(e))
         )
         if key in index:
             ambiguous.append(str(name))
