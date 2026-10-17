@@ -2141,8 +2141,9 @@ class _Lowerer:
         is before the current start and whose size is large enough), or open
         a new slot at the end of the pool.
 
-        Alignment is preserved: 16 bytes for byte-element types, 4 bytes
-        otherwise.  The pool itself is rounded up to 16-byte alignment.
+        Each allocation's offset is aligned to 16 bytes for byte-element
+        types (i8, fp8e4m3, bf8e5m2), 8 bytes for f64, and 4 bytes otherwise.
+        The pool itself is rounded up to 16-byte alignment.
 
         Falls back to the original sequential packing when liveness analysis
         yields no intervals (e.g. zero smem allocations).
