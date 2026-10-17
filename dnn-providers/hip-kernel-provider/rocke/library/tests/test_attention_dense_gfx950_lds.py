@@ -8,8 +8,8 @@ capacity. These tests pin the closed-form byte count against the allocation the
 builder really emits -- for every tile the catalog ships and for non-default
 ``lds_*_pad`` values -- and check that ``gfx950_dense_tile_legality`` agrees with
 the gate. The C++ ``Gfx950AttentionDenseGeometry.hpp`` that restates the model is
-compared in
-``descriptor-packaging/tests/rocke/test_gfx950_dense_lds_header_parity.py``.
+exercised by the gfx950 attention-dense census, which requires every shipped
+kernel's tile to pass ``isSupportedGfx950AttentionDenseTile``.
 
 Pure text lowering -- no GPU and no comgr required.
 """
