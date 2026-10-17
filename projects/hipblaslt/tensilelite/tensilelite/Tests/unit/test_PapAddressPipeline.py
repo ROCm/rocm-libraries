@@ -298,7 +298,7 @@ def test_fragmented_pool_preflight_honors_nested_alignment(free_ranges):
     (((20, 6),), False),
     (((20, 2), (25, 4)), False),
 ])
-@pytest.mark.parametrize("strategy, halfplr", [("StreamK", 0)])
+@pytest.mark.parametrize("strategy, halfplr", [("DataParallel", 0), ("StreamK", 0)])
 def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ranges, expected, strategy, halfplr):
     kernel, tensors, writer = _writer()
     kernel.update(TileProcessingStrategy=strategy, HalfPLR=halfplr,
@@ -306,6 +306,7 @@ def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ra
     writer.states.papNextTileVgpr = 12
     # Eligibility is separate from the pool check: exercise the real allocator
     # with enough space, insufficient space, and fragmented aligned scratch.
+    monkeypatch.setattr(writer, "papDescriptorSnapshotLayout", lambda *args: ("eligible",))
     writer.states.regCaps = {"MaxSgpr": 106, "MaxVgpr": 1024}
     writer.sgprPool = RegisterPool(98, RegisterType.Sgpr, defaultPreventOverflow=False)
     writer.vgprPool = RegisterPool(8, RegisterType.Vgpr, defaultPreventOverflow=False)
