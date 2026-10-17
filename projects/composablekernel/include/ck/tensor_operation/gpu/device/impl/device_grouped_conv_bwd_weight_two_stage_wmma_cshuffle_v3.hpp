@@ -68,7 +68,12 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
 #if defined(__gfx11__)
-    if constexpr(CGlobalMemoryDataOperation != InMemoryDataOperationEnum::AtomicAdd)
+    // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions; split-K partial sums
+    // go to the AccDataType workspace, so only a 16-bit AccDataType has to be excluded.
+    using e_data_type = remove_cvref_t<remove_pointer_t<decltype(karg.p_e_grid)>>;
+    if constexpr(!(CGlobalMemoryDataOperation == InMemoryDataOperationEnum::AtomicAdd &&
+                   (std::is_same_v<e_data_type, ck::half_t> ||
+                    std::is_same_v<e_data_type, ck::bhalf_t>)))
     {
 #endif
         using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
@@ -1225,14 +1230,19 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             return false;
         }
 
-        if(arg.k_batch_ > 1 && ck::is_gfx11_supported())
+        // Stage one accumulates split-K partial sums atomically into the AccDataType workspace.
+        if constexpr(std::is_same_v<AccDataType, ck::half_t> ||
+                     std::is_same_v<AccDataType, ck::bhalf_t>)
         {
-            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            if(arg.k_batch_ > 1 && ck::is_gfx11_supported())
             {
-                std::cout << "Unsupported splitK on gfx11." << std::endl;
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Unsupported splitK on gfx11." << std::endl;
+                }
+                // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
+                return false;
             }
-            // gfx11 does not support *_atomic_pk_add_f16/bf16 instructions
-            return false;
         }
 
         // Check this here, it allows to use other instances from factory even
