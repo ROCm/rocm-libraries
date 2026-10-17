@@ -57,11 +57,6 @@ Known bugs:
   # 2026-11-01.
   - { name: matmul_fast_check_short_k, function: matmul, a_type: bf16_r, transA: T, known_bug_platforms: gfx950 }
   - { name: matmul_fast_check_streamk_batches, function: matmul, a_type: bf16_r, known_bug_platforms: "gfx942, gfx950" }
-  # ROCM-32140: batch strides of 2^32 elements or more are packed into 32-bit
-  # kernel arguments, so the GEMM returns success with a wrong D (seen on gfx90a;
-  # the packing is shared by every architecture). REMOVE this entry in the PR that
-  # fixes ROCM-32140. Review by 2026-11-01.
-  - { name: matmul_fast_check_threshold_batch_stride_2_32_ROCM32140, function: matmul }
   # ROCM-32050: an illegal memory access on gfx1250 in f32 NN 32768 x 32768 x 4096,
   # where C and D are exactly 4 GiB; it kills the test process there. REMOVE this
   # entry in the PR that fixes ROCM-32050. Review by 2026-11-01.
