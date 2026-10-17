@@ -11,6 +11,7 @@ from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, S
 from ..ExecutionPolicy import isPersistent
 from math import ceil, log2
 from ..Component import Component
+from ..Common import persistentSpatialCluster
 import abc
 
 class PersistentKernelState:
@@ -505,7 +506,9 @@ class PersistentLoop(Component):
         module.add(assignment.reserveNext(writer, kernel, skip))
         module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Next assignment data already issued?"))
         module.add(SCBranchSCC1(labelName=skip.getLabelName(), comment="Do not prefetch a reservation twice"))
-        if not skipBarrier:
+        if persistentSpatialCluster(kernel):
+            module.add(assignment.persistentClusterPrefetchHandoff(writer, kernel))
+        elif not skipBarrier:
             module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
         with writer.allocPapTileIdentity(kernel, subtile=subtile) as previous:
             module.add(writer.papCheckpointCurrentTileIdentity(kernel, previous, subtile=subtile))

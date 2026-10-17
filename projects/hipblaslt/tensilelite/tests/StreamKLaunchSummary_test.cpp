@@ -959,10 +959,10 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelGridRoundsToClustersAndBloc
 }
 
 // ---------------------------------------------------------------------------
-// PrefetchAcrossPersistent issues the next tile's multicast loads while cluster
-// partners may still read LDS, so it keeps one cluster per tile block.
+// PrefetchAcrossPersistent synchronizes the next-tile multicast handoff, so
+// clusters can keep processing multiple spatial blocks.
 // ---------------------------------------------------------------------------
-TEST(PersistentLaunchSummaryTest, ClusterDataParallelPrefetchAcrossPersistentUsesOneBlockPerCluster)
+TEST(PersistentLaunchSummaryTest, ClusterDataParallelPrefetchAcrossPersistentPreservesPersistentGrid)
 {
     ContractionSolution solution;
     initStreamKSolution(solution, 3);
@@ -973,8 +973,10 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelPrefetchAcrossPersistentUse
     auto device = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.persistentDynamicGrid = 0;
     auto launch = solution.resolvePersistentSettings(problem, device);
-    EXPECT_TRUE(launch.clusterGridClamp);
-    EXPECT_EQ(launch.grid, 16u * 17u * 4u);
+    EXPECT_FALSE(launch.clusterGridClamp);
+    EXPECT_EQ(launch.grid, _CPX_CU / 4 * 4);
+    solution.sizeMapping.prefetchAcrossPersistent = 0;
+    EXPECT_EQ(launch.grid, solution.resolvePersistentSettings(problem, device).grid);
 }
 
 // Padded peers count toward the kernel's 32-bit scheduling bound even when the
@@ -1048,8 +1050,9 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterR
         auto launch = solution.resolvePersistentSettings(problem, device);
         const size_t blockCount = cluster.y == 1 ? 27 : cluster.y == 2 ? 18 : 9;
         const size_t clusterSize = cluster.x * cluster.y;
-        const size_t clusters = prefetch ? blockCount
-            : std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
+        const size_t clusters
+            = std::min(blockCount, std::max(size_t{1}, size_t(selected) / clusterSize));
+        EXPECT_FALSE(launch.clusterGridClamp);
         ASSERT_EQ(launch.grid, clusters * clusterSize);
         ASSERT_EQ(launch.totalTiles, 45u);
         ContractionInputs inputs;
