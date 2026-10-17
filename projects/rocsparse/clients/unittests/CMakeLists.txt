@@ -308,6 +308,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
+  unit_test_internal_level2_csrmv_default_dispatch.cpp
 )
 
 # Host building-block library translation units under test by the

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,6 +100,10 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
         return rocsparse_status_success;
     }
 
+    // Remember an explicit adaptive request before default is rewritten to it.
+    const bool may_retarget_default
+        = (alg == rocsparse::csrmv_alg_default && trans == rocsparse_operation_none);
+
     // Dispatch default algorithm to specific algorithm based on operation
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
 
@@ -107,8 +111,30 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     {
     case rocsparse::csrmv_alg_adaptive:
     {
+        bool retarget_to_nnzsplit = false;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_adaptive_template_dispatch(
-            handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
+            handle,
+            trans,
+            m,
+            n,
+            nnz,
+            descr,
+            csr_val,
+            csr_row_ptr,
+            csr_col_ind,
+            p_csrmv_info,
+            may_retarget_default ? &retarget_to_nnzsplit : nullptr));
+        if(retarget_to_nnzsplit)
+        {
+            // Adaptive analysis returns without an info object when it asks to leave.
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_nnzsplit_template_dispatch(
+                handle, trans, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
+            p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_nnzsplit);
+        }
+        else if(may_retarget_default && p_csrmv_info[0] != nullptr)
+        {
+            p_csrmv_info[0]->resolved_alg = static_cast<int32_t>(rocsparse::csrmv_alg_adaptive);
+        }
         return rocsparse_status_success;
     }
 
@@ -227,8 +253,18 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
-    // Dispatch default algorithm to specific algorithm based on operation
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+    // Default uses the algorithm analysis selected. An explicit selection,
+    // including adaptive, is left unchanged.
+    if(alg == rocsparse::csrmv_alg_default && csrmv_info != nullptr
+       && csrmv_info->resolved_alg != static_cast<int32_t>(rocsparse::csrmv_alg_default))
+    {
+        alg = static_cast<rocsparse::csrmv_alg>(csrmv_info->resolved_alg);
+    }
+    else
+    {
+        // Dispatch default algorithm to specific algorithm based on operation
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_alg_default2csrmv_alg(alg, trans));
+    }
 
     // Another quick return.
     if(m == 0 || n == 0 || nnz == 0)
