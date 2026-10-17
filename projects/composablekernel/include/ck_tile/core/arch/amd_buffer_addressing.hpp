@@ -3145,7 +3145,6 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
                                            tdm_desc_grp.get(I3),
                                            tdm_desc_grp.get(I4),
                                            static_cast<index_t>(coherence));
-}
 #else
     ignore = descriptor;
 #endif
