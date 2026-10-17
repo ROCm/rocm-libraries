@@ -922,6 +922,17 @@ def _single_round_warning(noise: NoiseFloor) -> str | None:
     )
 
 
+def _graph_at_device(key: str) -> str:
+    """``graph@device`` for one ranking key, a JSON ``[graph, device]`` pair."""
+    graph, device = json.loads(key)
+
+    def label(doc, field):
+        shown = doc.get(field) if isinstance(doc, dict) else None
+        return shown if isinstance(shown, str) else json.dumps(doc, sort_keys=True)
+
+    return f"{label(graph, 'key')}@{label(device, 'gcn_arch_name')}"
+
+
 def _applied_loss(applied, rankings) -> tuple:
     """`_ranking_loss` of the union of the ``applied`` rules' removed kernels."""
     return _ranking_loss(set().union(*(rule.removed for rule in applied)), rankings)
@@ -960,7 +971,7 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
         lines.append(
             f"- applied rules together: worst gain lost {_eps(worst, 4)} (bound: "
             f"rules eps {_eps(r.rules_epsilon)}); graphs losing best {len(losing)}"
-            + (f": {', '.join(losing)}" if losing else "")
+            + (f": {'; '.join(map(_graph_at_device, losing))}" if losing else "")
         )
     if noise.rounds > 1:
         lines.append(
