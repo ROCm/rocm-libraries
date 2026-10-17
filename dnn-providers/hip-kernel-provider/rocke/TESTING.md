@@ -454,6 +454,25 @@ Python root and, only where indicated, the matching `cpp/bindings` build directo
 | Strict C++ | `cpp` | `1` | Yes | Native exception; fallback is an error |
 | Differential | `both` | `1` | Yes | Python runs first; its rejection prevents a native comparison |
 
+On Linux, direct source pytest runs need a matching engine archive for the native
+compiler-detection fixture. Build it once outside the source tree and set
+`ROCKE_TEST_ENGINE_ARCHIVE` to its absolute path before the commands below:
+
+```bash
+cmake -S . -B "$TMPDIR/engine" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DROCKE_BUILD_PYBIND=OFF -DROCKE_INSTALL_TESTS=OFF
+cmake --build "$TMPDIR/engine" --target rocke_core --parallel 2
+export ROCKE_TEST_ENGINE_ARCHIVE="$TMPDIR/engine/librocke_core.a"
+```
+
+Use an absolute, unique `TMPDIR` as described below. With a multi-config generator,
+select `--config Release` and use `engine/Release/librocke_core.a`. The developer
+runner supplies an archive from its build root to both pytest passes automatically;
+an explicit archive override takes precedence. Installed tests use the packaged
+archive beside the detector module. Missing or invalid explicit archives fail.
+Without either archive, standalone source tests build the engine in their fixture
+setup, which counts toward the per-test timeout; prebuilding keeps that work outside
+the documented `--timeout=60` run.
+
 For rejection-contract changes, run these affected modules from `platform/` under
 every row, then the complete platform pytest suite in the default missing-binding
 lane:
