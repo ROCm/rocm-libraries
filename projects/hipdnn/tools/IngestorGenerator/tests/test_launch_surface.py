@@ -7,13 +7,15 @@ The headline class: a manifest whose ``kmd_fields`` omits a metadata field its o
 engine reads. Nothing else cross-references a mirror against the KMD.
 
 ``TestKmdFieldsCheck`` uses fresh minimal fixtures; the classes below drive the same
-check over a WHOLE manifest from ``tests/fixtures/launch_surface/``, so every class runs on a
-bare checkout. Those fixtures are controlled INPUTS: a literal like
+check over a WHOLE manifest from ``tests/fixtures/launch_surface/``, against mirror
+files the test writes into a temporary check root, so every class runs on a bare
+checkout. Those manifests and mirrors are controlled INPUTS: a literal like
 ``set(unguarded) == {"kernargs", "spec_resolution"}`` describes the fixture, not the
-real pack.
+real pack. ``TestAgainstTheShippedEngineManifest`` audits the real shipped manifest.
 
 An author auditing their own manifest overrides the fixture per arch, one variable each
-because the two manifests are not interchangeable:
+because the two manifests are not interchangeable (the check then resolves paths
+against the repository root):
 
     HIPDNN_INGESTOR_MANIFEST_GFX942=/abs/path/to/gfx942.engine.yaml \\
     HIPDNN_INGESTOR_MANIFEST_GFX950=/abs/path/to/gfx950.engine.yaml \\
@@ -67,6 +69,51 @@ def _manifest_path(var: str, fixture: str) -> Path:
 
 _MANIFEST_942 = _manifest_path(_MANIFEST_VAR_942, "gfx942.engine.yaml")
 _MANIFEST_950 = _manifest_path(_MANIFEST_VAR_950, "gfx950.engine.yaml")
+
+#: What the fixture manifests' paths resolve to: a python mirror defining the four
+#: functions they name, a C++ mirror whose ``matches`` reads ``dtype`` and
+#: ``block_size`` through required accessors, and a test file.
+_FIXTURE_FILES = {
+    "provider/rocke/library/kernels/mirror.py": (
+        "def grid_fn():\n    pass\n\n\n"
+        "def is_valid_fn():\n    pass\n\n\n"
+        "def build_fn():\n    pass\n\n\n"
+        "def resolve_fn():\n    pass\n"
+    ),
+    "provider/Mirror.cpp": """
+        constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
+        constexpr std::string_view DTYPE_FIELD = "dtype";
+        struct Handler { void prepare() {} };
+        bool matches(const KernelDefinition& kernel) {
+            return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == "f16"
+                && kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)) > 0;
+        }
+        void signature() {}
+    """,
+    "tests/test_mirror.py": "def test_it():\n    pass\n",
+}
+
+
+@pytest.fixture(scope="module")
+def fixture_root(tmp_path_factory) -> Path:
+    root = tmp_path_factory.mktemp("launch_surface_mirrors")
+    for relative, text in _FIXTURE_FILES.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return root
+
+
+def _audit_root(variable: str, fixture_root: Path) -> Path:
+    """Where the audited manifest's paths resolve: the fixture's temporary root, or the
+    repository when the author overrides the manifest."""
+    return _REPO_ROOT if os.environ.get(variable) else fixture_root
+
+
+def _main_at(monkeypatch, root: Path, *args) -> int:
+    """`launch_surface.main` with its repo-root lookup answered by ``root``."""
+    monkeypatch.setattr(launch_surface, "find_repo_root", lambda start: root)
+    return launch_surface.main(list(args))
 
 
 def _manifest(kmd_fields, surfaces) -> dict:
@@ -296,9 +343,12 @@ class TestAgainstTheGfx942Manifest:
     literal keyed to that fixture.
     """
 
-    def test_the_manifest_check_names_only_genuinely_unguarded_surfaces(self):
+    def test_the_manifest_check_names_only_genuinely_unguarded_surfaces(
+        self, fixture_root
+    ):
         manifest = yaml.safe_load(_MANIFEST_942.read_text(encoding="utf-8"))
-        failures, unguarded = launch_surface.check(manifest, _REPO_ROOT)
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        failures, unguarded = launch_surface.check(manifest, root)
         assert failures == [], (
             f"the manifest's launch_surface block must be structurally sound: "
             f"{failures}"
@@ -309,11 +359,21 @@ class TestAgainstTheGfx942Manifest:
         # dispatcher's resolution at runtime.
         assert set(unguarded) == {"kernargs", "spec_resolution"}
 
-    def test_the_manifest_passes_with_allow_unguarded(self):
-        result = _run(
-            "--check", str(_MANIFEST_942), "--allow-unguarded", cwd=_REPO_ROOT
+    def test_the_manifest_passes_with_allow_unguarded(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        rc = _main_at(
+            monkeypatch, root, "--check", str(_MANIFEST_942), "--allow-unguarded"
         )
-        assert result.returncode == 0, result.stdout
+        assert rc == 0, capsys.readouterr().out
+
+    def test_the_manifest_without_the_flag_fails_on_the_unguarded_surfaces(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_942, fixture_root)
+        assert _main_at(monkeypatch, root, "--check", str(_MANIFEST_942)) == 1
+        assert "kernargs" in capsys.readouterr().out
 
     def test_the_manifest_report_covers_every_surface(self):
         manifest = yaml.safe_load(_MANIFEST_942.read_text(encoding="utf-8"))
@@ -636,9 +696,9 @@ class TestPythonSourceExistence:
 class TestUndeclaredSurfaceLimit:
     """The documented residual gap: check 1b catches a deleted surface only when it
     uniquely covered a required metadata field. Both branches come from the gfx950
-    manifest, whose `applicability` and `kernargs` cite the SAME cpp_mirror."""
+    fixture, whose `applicability` and `kernargs` cite the SAME cpp_mirror."""
 
-    def test_deleting_the_kernargs_surface_is_not_caught(self):
+    def test_deleting_the_kernargs_surface_is_not_caught(self, fixture_root):
         """kernargs declares no kmd_fields and shares its mirror with applicability,
         which covers every required field, so the scan has no observable -- the real
         shape of a kernarg surface."""
@@ -646,20 +706,26 @@ class TestUndeclaredSurfaceLimit:
         manifest["launch_surface"] = [
             s for s in manifest["launch_surface"] if s["name"] != "kernargs"
         ]
-        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
+        failures, _ = launch_surface.check(
+            manifest, _audit_root(_MANIFEST_VAR_950, fixture_root)
+        )
         assert failures == [], (
             "documenting a known limit: deleting kernargs is NOT caught because no "
             f"required field loses its only declarer; unexpected failures: {failures}"
         )
 
-    def test_deleting_a_surface_with_unique_required_fields_is_caught(self):
+    def test_deleting_a_surface_with_unique_required_fields_is_caught(
+        self, fixture_root
+    ):
         """The contrast: applicability is the sole declarer of the fields its cpp_mirror
         reads through a required accessor, so deleting it leaves them undeclared."""
         manifest = yaml.safe_load(_MANIFEST_950.read_text(encoding="utf-8"))
         manifest["launch_surface"] = [
             s for s in manifest["launch_surface"] if s["name"] != "applicability"
         ]
-        failures, _ = launch_surface.check(manifest, _REPO_ROOT)
+        failures, _ = launch_surface.check(
+            manifest, _audit_root(_MANIFEST_VAR_950, fixture_root)
+        )
         assert any("dtype" in f for f in failures), failures
 
 
@@ -669,9 +735,12 @@ class TestAgainstTheGfx950Manifest:
     where gfx942 splits mirror coverage across two surfaces. Its unguarded set is a
     literal keyed to the committed fixture."""
 
-    def test_the_gfx950_manifest_check_names_only_genuinely_unguarded_surfaces(self):
+    def test_the_gfx950_manifest_check_names_only_genuinely_unguarded_surfaces(
+        self, fixture_root
+    ):
         manifest = yaml.safe_load(_MANIFEST_950.read_text(encoding="utf-8"))
-        failures, unguarded = launch_surface.check(manifest, _REPO_ROOT)
+        root = _audit_root(_MANIFEST_VAR_950, fixture_root)
+        failures, unguarded = launch_surface.check(manifest, root)
         assert failures == [], (
             f"the gfx950 manifest's launch_surface block must be structurally "
             f"sound: {failures}"
@@ -681,12 +750,16 @@ class TestAgainstTheGfx950Manifest:
         # own numbers.
         assert set(unguarded) == {"spec_resolution"}
 
-    def test_the_gfx950_manifest_passes_with_allow_unguarded(self):
-        result = _run(
-            "--check", str(_MANIFEST_950), "--allow-unguarded", cwd=_REPO_ROOT
+    def test_the_gfx950_manifest_passes_with_allow_unguarded(
+        self, fixture_root, monkeypatch, capsys
+    ):
+        root = _audit_root(_MANIFEST_VAR_950, fixture_root)
+        rc = _main_at(
+            monkeypatch, root, "--check", str(_MANIFEST_950), "--allow-unguarded"
         )
-        assert result.returncode == 0, result.stdout
-        assert "CHECK PASSED" in result.stdout
+        out = capsys.readouterr().out
+        assert rc == 0, out
+        assert "CHECK PASSED" in out
 
 
 class TestAgainstTheShippedEngineManifest:
@@ -705,14 +778,13 @@ class TestRepoRootResolution:
         found = launch_surface.find_repo_root(_TOOLS)
         assert (found / ".git").exists()
 
-    def test_check_from_a_nested_cwd_matches_check_from_the_repo_root(self):
-        from_root = _run(
-            "--check", str(_MANIFEST_950), "--allow-unguarded", cwd=_REPO_ROOT
+    def test_check_from_a_nested_cwd_matches_check_from_the_repo_root(self, tmp_path):
+        manifest_path = tmp_path / "p.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump(_manifest(kmd_fields=[], surfaces=[_surface()]))
         )
-        nested_cwd = _MANIFEST_950.parent  # wherever the manifest happens to live
-        from_nested = _run(
-            "--check", str(_MANIFEST_950), "--allow-unguarded", cwd=nested_cwd
-        )
+        from_root = _run("--check", str(manifest_path), cwd=_REPO_ROOT)
+        from_nested = _run("--check", str(manifest_path), cwd=tmp_path)
         assert from_root.returncode == 0, from_root.stdout
         assert from_nested.returncode == 0, from_nested.stdout
         assert "CHECK PASSED" in from_root.stdout
