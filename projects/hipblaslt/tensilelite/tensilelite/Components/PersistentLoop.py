@@ -3,7 +3,7 @@
 
 """Persistent lifecycle, prefetch/reuse orchestration, and emitter state."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC, MemTokenData
@@ -13,7 +13,7 @@ from math import ceil, log2
 from ..Component import Component
 from ..Common import persistentSpatialCluster
 import abc
-from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SSchedulingFence, SAddCU32
+from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SCmpLeU32, SSchedulingFence, SAddCU32
 from rocisa.functions import scalarUInt32DivideAndRemainder
 
 class PersistentKernelState:
@@ -194,6 +194,16 @@ class PersistentKernelState:
                 and not pt.get("UseScaleAlphaVec", 0)
                 and pt.get("UseScaleAB", "") != "Vector"
                 and not pt.get("OutputAmaxD", False))
+
+    def papHalfPlrAddressPreparationEnabled(self, kernel, tPA, tPB):
+        """Prepare next-range addresses before the existing final-trip handoff."""
+        pt = kernel["ProblemType"]
+        return (bool(kernel["HalfPLR"]) and kernel["NoTailLoop"]
+                and kernel["SuppressNoLoadLoop"] and kernel["LoopIters"] >= 2
+                and self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB)
+                and bool(pt["MXBlockA"]) == bool(pt["MXBlockB"])
+                and (not pt["MXBlockA"] or self.papTdmSupportsShadowAddressPair(
+                    kernel, tPA["MX"], tPB["MX"])))
 
     @staticmethod
     def papPgr2TensorCount(kernel):
@@ -446,6 +456,10 @@ class PersistentKernelState:
                   ((1, 1), (1, 1), (1, 1), (1, 1)),
                   ((1, 1), (3, 2), (1, 1)), ((1, 1), (1, 1), (2, 2)),
                   ((4, 2),))
+        if kernel["HalfPLR"]:
+            # The out-of-line return selector can span the ordinary clustered
+            # mapping fallback. The dispatch predicate scratch is in the carrier.
+            shapes += (((1, 1), (3, 2), (4, 2)),)
         needsNestedDivide = (persistentSpatialCluster(kernel)
                              or (not kernel["NoTailLoop"] and kernel["DepthU"] & (kernel["DepthU"] - 1)))
         shapes += (((3, 2), (4, 2)),) if needsNestedDivide else (((3, 2),),)
@@ -458,7 +472,10 @@ class PersistentKernelState:
                 return None
         except RuntimeError:
             return None
-        for size in ((7, 5) if scales else (5,)):
+        for payloadSize in ((7, 5) if scales else (5,)):
+            # SCC must be reserved before cached main-loop scratch, just like
+            # the address payload. A late checkout could alias a cached operand.
+            size = payloadSize + int(bool(kernel["HalfPLR"]))
             pool = deepcopy(self.sgprPool)
             try:
                 base = pool.checkOutAligned(size, 2, "PAP address carrier preflight", preventOverflow=False)
@@ -471,8 +488,9 @@ class PersistentKernelState:
                         fits = False
                         break
                 if fits:
-                    return dict(base=base, size=size, data=base, mx=base + 2 if size == 7 else None,
-                                coordinates={i: base + size - 3 + i for i in range(3)})
+                    return dict(base=base, size=size, data=base, mx=base + 2 if payloadSize == 7 else None,
+                                coordinates={i: base + payloadSize - 3 + i for i in range(3)},
+                                scc=base + payloadSize if kernel["HalfPLR"] else None)
             except RuntimeError:
                 continue
         return None
@@ -542,6 +560,8 @@ class PersistentKernelState:
         # pure leaf overwrites that word. Full EXEC makes the divider's readlane
         # independent of whichever lanes the current computation has active.
         module.add(SMovB32(dst=sgpr(plan["data"]), src=EXEC(), comment="PAP mapper save current EXEC"))
+        if kernel["HalfPLR"]:
+            module.add(SMovB32(dst=sgpr(plan["data"] + 1), src=VCC(), comment="PAP mapper save current VCC"))
         module.add(SMovB32(dst=EXEC(), src=-1, comment="PAP mapper scratch uses full EXEC"))
         with self.allocTmpSgpr(4, alignment=2, tag="PAP address preparation scratch") as scratch:
             a, b, d, rem = (scratch.idx + i for i in range(4))
@@ -590,6 +610,8 @@ class PersistentKernelState:
                     module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr), src0=sgpr(c[i]), src1=i,
                                              comment="PAP retain next coordinate through store"))
             module.add(SMovB32(dst=EXEC(), src=sgpr(plan["data"]), comment="PAP mapper restore exact current EXEC"))
+            if kernel["HalfPLR"]:
+                module.add(SMovB32(dst=VCC(), src=sgpr(plan["data"] + 1), comment="PAP mapper restore exact current VCC"))
             module = address
             module.add(self.papTdmPrepareAddressPair(kernel, tPA, tPB, c, plan["data"], scratch))
             if plan.get("packed"):
@@ -892,18 +914,37 @@ class PersistentKernelState:
       return self.states.halfPlrPapEntryLabels[loopCopy]
 
     def callHalfPlrPrefetchAcrossPersistent(self, kernel, loopCopy):
-      """Jump to the shared PAP block before the final HalfPLR loop trip."""
+      """Use the shared dispatch for bounded preparation and final-trip PAP."""
       module = Module("callHalfPlrPrefetchAcrossPersistent")
       if not (kernel["HalfPLR"] and kernel["PrefetchAcrossPersistent"]):
         return module
 
-      module.add(SCmpEQU32(
-          src0=self.loopCounter(kernel, self.states.unrollIdx),
-          src1=1,
-          comment="HalfPLR PAP before final unrolled-loop trip"))
+      carrier = getattr(self.states, "papAddressCarrier", None)
+      if carrier is not None and carrier.get("packed"):
+        # No scalar carrier is held across the rotating loop copies.
+        module.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), src1=2))
+        module.add(SCBranchSCC1(labelName=self.halfPlrPrefetchAcrossPersistentEntryLabel(loopCopy).getLabelName()))
+        module.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), src1=1))
+      elif carrier is not None:
+        # Unsigned (counter - 1) <= 1 selects exactly counters one and two.
+        # Use the carrier's reserved scratch: loop increments already hold
+        # their own temporary operands across these out-of-line calls.
+        module.add(SSubU32(
+            dst=sgpr(carrier["scc"]),
+            src0=self.loopCounter(kernel, self.states.unrollIdx), src1=1,
+            comment="HalfPLR PAP dispatch range starts at counter one"))
+        module.add(SCmpLeU32(src0=sgpr(carrier["scc"]), src1=1,
+                            comment="HalfPLR PAP prepare at two or issue at one"))
+      else:
+        module.add(SCmpEQU32(
+            src0=self.loopCounter(kernel, self.states.unrollIdx),
+            src1=1,
+            comment="HalfPLR PAP before final unrolled-loop trip"))
       module.add(SCBranchSCC1(
           labelName=self.halfPlrPrefetchAcrossPersistentEntryLabel(loopCopy).getLabelName(),
-          comment="short branch to out-of-line PAP entry when LoopCounter == 1"))
+          comment=("short branch to shared HalfPLR preparation or issue"
+                   if carrier is not None else
+                   "short branch to out-of-line PAP entry when LoopCounter == 1")))
       module.add(self.halfPlrPrefetchAcrossPersistentReturnLabel(loopCopy))
       return module
 
@@ -923,29 +964,64 @@ class PersistentKernelState:
       assert entryLabels, "no HalfPLR loop copy registered a PAP entry"
       assert set(entryLabels) == set(returnLabels), \
           "every HalfPLR PAP entry needs its own return label"
-      # The selector is live from an entry trampoline, through the shared body, to the
-      # return dispatch, so hold it across all of them; nested PAP code then cannot
-      # reuse it.
-      with self.allocTmpSgpr(1, tag="HalfPlrPAPReturnSelector") as selector:
-        returnSelector = selector.idx
+      # StreamK needs more scalar scratch for its local K-range mapping.
+      # Park its uniform return identity in a VGPR until that scratch is free;
+      # retain the existing scalar-only DataParallel path.
+      with ExitStack() as lifetime:
+        returnVgpr = None
+        if isStreamK(kernel):
+          returnVgpr = self.vgprPool.checkOut(1, "HalfPlrPAPReturnSelector")
+          lifetime.callback(self.vgprPool.checkIn, returnVgpr)
+          selectMove, returnReg = VMovB32, vgpr(returnVgpr)
+        else:
+          selector = lifetime.enter_context(self.allocTmpSgpr(1, tag="HalfPlrPAPReturnSelector"))
+          selectMove, returnReg = SMovB32, sgpr(selector.idx)
         for loopCopy in sorted(entryLabels):
           module.add(entryLabels[loopCopy])
-          module.add(SMovB32(
-              dst=sgpr(returnSelector),
-              src=loopCopy,
+          module.add(selectMove(
+              dst=returnReg, src=loopCopy,
               comment="select branch-back label for HalfPLR loop copy %u" % loopCopy))
           module.add(SBranch(
               labelName=self.halfPlrPrefetchAcrossPersistentLabel().getLabelName(),
               comment="join shared HalfPLR PAP body"))
         module.add(self.halfPlrPrefetchAcrossPersistentLabel())
+        preparedReturn = None
+        if getattr(self.states, "papAddressCarrier", None) is not None:
+          issue = Label(self.labels.getNameInc("HalfPlrPAPIssue"), "")
+          preparedReturn = Label(self.labels.getNameInc("HalfPlrPAPPreparedReturn"), "")
+          module.add(SCmpEQU32(
+              src0=self.loopCounter(kernel, self.states.unrollIdx), src1=2,
+              comment="HalfPLR PAP shared dispatch prepares only at counter two"))
+          module.add(SCBranchSCC0(labelName=issue.getLabelName()))
+          # The return selector is already held while mapper scratch is built.
+          # This arm only prepares addresses; the counter-one arm retains all
+          # reservation checks, descriptor mutation, bank release and loads.
+          mapper, address = self.papNextTileAddressModules(
+              kernel, tensorParametersA, tensorParametersB)
+          module.add(SSchedulingFence(comment="PAP HalfPLR mapper begins EXEC scratch phase"))
+          module.add(mapper)
+          module.add(SSchedulingFence(comment="PAP HalfPLR mapper restored current EXEC and VCC"))
+          module.add(address)
+          module.add(SBranch(labelName=preparedReturn.getLabelName(),
+                             comment="HalfPLR PAP prepared addresses return without issuing"))
+          module.add(issue)
         module.add(self.prefetchAcrossPersistent(
             kernel, tensorParametersA, tensorParametersB, skipBarrier=False))
-
+        if returnVgpr is not None and getattr(self.states, "papAddressCarrier", None) is not None:
+          # HalfPLR bypasses the classic NLL publication site. Its packed
+          # coordinates also survive store, so reuse them after an issued load.
+          module.add(self.papPublishNextTileCoordinates())
+          module.add(self.papClearPreparedAddress("PAP HalfPLR consume prepared addresses"))
+        if preparedReturn is not None:
+          module.add(preparedReturn)
+        if returnVgpr is not None:
+          selector = lifetime.enter_context(self.allocTmpSgpr(1, tag="HalfPlrPAPReturnDispatch"))
+          module.add(VReadfirstlaneB32(dst=sgpr(selector.idx), src=vgpr(returnVgpr),
+                                      comment="restore HalfPLR loop-copy selector after PAP"))
         returnIds = sorted(returnLabels)
         for loopCopy in returnIds[:-1]:
           module.add(SCmpEQU32(
-              src0=sgpr(returnSelector),
-              src1=loopCopy,
+              src0=sgpr(selector.idx), src1=loopCopy,
               comment="return to HalfPLR loop copy %u" % loopCopy))
           module.add(SCBranchSCC1(
               labelName=returnLabels[loopCopy].getLabelName(),
@@ -1220,8 +1296,6 @@ class PersistentKernelState:
       start = (self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu) \
               if kernel["ReuseAcrossPersistent"] else 0
       return start, self.states.lastValuMXSAB - start
-
-
 
 class PersistentLoop(Component):
     """
