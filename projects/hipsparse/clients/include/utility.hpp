@@ -296,6 +296,23 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 // CHECK_HIPSPARSE_ERROR
 #define CHECK_HIPSPARSE_ERROR(ERROR) EXPECT_HIPSPARSE_STATUS(ERROR, HIPSPARSE_STATUS_SUCCESS)
 
+// A pivot position of -1 requires success. Any other position requires zero pivot.
+// This is a macro so a GoogleTest failure returns from the calling test.
+#define CHECK_HIPSPARSE_ZERO_PIVOT(STATUS, PIVOT)                                               \
+    do                                                                                          \
+    {                                                                                           \
+        const hipsparseStatus_t hipsparse_zero_pivot_status_   = (STATUS);                      \
+        const int               hipsparse_zero_pivot_position_ = (PIVOT);                       \
+        if(hipsparse_zero_pivot_position_ == -1)                                                \
+        {                                                                                       \
+            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_, HIPSPARSE_STATUS_SUCCESS);    \
+        }                                                                                       \
+        else                                                                                    \
+        {                                                                                       \
+            EXPECT_HIPSPARSE_STATUS(hipsparse_zero_pivot_status_, HIPSPARSE_STATUS_ZERO_PIVOT); \
+        }                                                                                       \
+    } while(0)
+
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
 {
