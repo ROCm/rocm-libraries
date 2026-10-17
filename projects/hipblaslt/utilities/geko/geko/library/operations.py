@@ -20,7 +20,7 @@ Functions:
         Load all YAML libraries in a folder into a collection.
     merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
-    extract_solutions(df, match_table_path, hipblaslt_path=None) -> LibraryCollection
+    extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
         Same-name libraries with different default solutions are merged with
         TensileMergeLibrary when hipblaslt_path is given.
@@ -295,6 +295,7 @@ def extract_solutions(
     df: pd.DataFrame,
     match_table_path: str | Path,
     hipblaslt_path: str | Path | None = None,
+    fill_perf: bool = False,
 ) -> LibraryCollection:
     """Extract solutions by solution index from a DataFrame.
 
@@ -308,9 +309,11 @@ def extract_solutions(
             checkout. When provided, libraries with the same filename but
             different default solutions are merged with TensileMergeLibrary.
             Defaults to None.
+        fill_perf (bool, optional): Whether to fill performance data for the extracted solutions.
+            Defaults to False.
 
     Returns:
-        LibraryCollection: LibraryCollection with all exctractes solutions.
+        LibraryCollection: LibraryCollection with all extracted solutions.
 
     Raises:
         ValueError: If no valid YAML library logic files found.
@@ -340,12 +343,15 @@ def extract_solutions(
     for lib, lib_path in zip(parallel_for(load_library, lib_paths), lib_paths):
         mapping = {}
         for _, row in df.iterrows():
-            if match_table[row["solutionIdx"]][0] != lib_path:
+            solution_idx = int(row["solutionIdx"])
+            if match_table[solution_idx][0] != lib_path:
                 continue
-            kidx = match_table[row["solutionIdx"]][1]
+            kidx = match_table[solution_idx][1]
             if kidx not in mapping:
                 mapping[kidx] = []
-            mapping[kidx].append([row["m"], row["n"], row["batch_count"], row["k"]])
+            mapping[kidx].append(
+                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"]), row.get("hipblaslt-Gflops", 0.0)]
+            )
 
         lib.order = [2, 3, 0, 1]
         lib.metric = "DeviceEfficiency"
@@ -356,7 +362,7 @@ def extract_solutions(
         for kidx, sizes in mapping.items():
             sol = copy.deepcopy(lib.solutions[kidx])
             sol["SolutionIndex"] = len(new_sols)
-            sizes = [[size, [sol["SolutionIndex"], 0.0]] for size in sizes]
+            sizes = [[size[:4], [sol["SolutionIndex"], size[4] if fill_perf else 0.0]] for size in sizes]
             new_sols.append(sol)
             new_sizes.extend(sizes)
         logger.debug(

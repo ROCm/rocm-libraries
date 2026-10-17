@@ -306,6 +306,7 @@ def run_search(
         winners,
         match_table_path,
         hipblaslt_path=hipblaslt_path,
+        fill_perf=True, # Needed to set proper iterations during optim.analyze call
     )
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")

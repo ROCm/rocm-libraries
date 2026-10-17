@@ -405,6 +405,69 @@ def test_extract_solutions_happy_path(tmp_path: Path) -> None:
     assert len(libs[0].sizes) == 1
 
 
+def test_extract_solutions_fill_perf_uses_measured_gflops(tmp_path: Path) -> None:
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    p = _write_library_yaml(lib_dir, "a.yaml")
+
+    mt = _write_match_table(tmp_path, [[str(p), 0]])
+    df = pd.DataFrame(
+        [
+            {
+                "m": 16,
+                "n": 16,
+                "batch_count": 1,
+                "k": 16,
+                "solutionIdx": 0,
+                "compute_type": "f32_r",
+                "hipblaslt-Gflops": 123.4,
+            }
+        ]
+    )
+
+    libs_default = operations.extract_solutions(df, mt)
+    assert libs_default[0].sizes[0][0] == [16, 16, 1, 16]
+    assert libs_default[0].sizes[0][1][1] == 0.0
+
+    libs_filled = operations.extract_solutions(df, mt, fill_perf=True)
+    assert libs_filled[0].sizes[0][0] == [16, 16, 1, 16]
+    assert libs_filled[0].sizes[0][1][1] == 123.4
+
+
+def test_extract_solutions_all_numeric_dataframe(tmp_path: Path) -> None:
+    # All-numeric (int + float) DataFrame, with no string columns. This makes
+    # df.iterrows() upcast each row to a common float64 dtype, so solutionIdx,
+    # m, n, batch_count, and k all arrive as numpy.float64 inside the loop.
+    # extract_solutions must int()-cast them before using them as list/dict
+    # indices (e.g. match_table[solutionIdx]) or storing them as size dims.
+    lib_dir = tmp_path / "libs"
+    lib_dir.mkdir()
+    p = _write_library_yaml(lib_dir, "a.yaml")
+
+    mt = _write_match_table(tmp_path, [[str(p), 0]])
+    df = pd.DataFrame(
+        [
+            {
+                "m": 16,
+                "n": 16,
+                "batch_count": 1,
+                "k": 16,
+                "solutionIdx": 0,
+                "hipblaslt-Gflops": 123.4,
+            }
+        ]
+    )
+    assert df.dtypes.apply(lambda dt: dt.kind in "if").all()
+
+    libs = operations.extract_solutions(df, mt, fill_perf=True)
+    assert len(libs) == 1
+    size, (sol_idx, perf) = libs[0].sizes[0]
+    assert size == [16, 16, 1, 16]
+    assert all(isinstance(v, int) for v in size)
+    assert sol_idx == 0
+    assert perf == 123.4
+
+
 def test_prune_library_missing_hipblaslt_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         operations.prune_library(tmp_path / "missing", _make_min_library())
