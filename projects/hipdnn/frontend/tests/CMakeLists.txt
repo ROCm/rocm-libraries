@@ -72,6 +72,15 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Tu.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationBuilders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8MixedTu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Heuristics.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8EngineBuilders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8ExecutionPlanBuilder.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Filters.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8PlanCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8GetPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8FindPlan.cpp>
+    # The errata filter exists only when the frontend keeps its JSON library.
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<NOT:$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>>>:TestCudnnShimV8Errata.cpp>
     # SDPA node coverage additionally needs the SDPA build.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
@@ -225,6 +234,7 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         main.cpp
         TestCudnnShimV8NoExcept.cpp
         TestCudnnShimV8NoexceptOperations.cpp
+        TestCudnnShimV8NoexceptPlans.cpp
     )
     target_compile_definitions(
         hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
@@ -264,10 +274,38 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE hipdnn_frontend hip::host
     )
 
+    # Compile-only: each autotune header outside the umbrella, first and alone in its TU,
+    # plain and under each JSON opt-out (CUDNN_ / HIPDNN_FRONTEND_SKIP_JSON_LIB).
+    set(_hipdnn_cudnn_v8_header_find_plan TestCudnnShimV8HeaderFindPlan.cpp)
+    set(_hipdnn_cudnn_v8_header_get_plan TestCudnnShimV8HeaderGetPlan.cpp)
+    set(_hipdnn_cudnn_v8_header_engine_config_generator
+        TestCudnnShimV8HeaderEngineConfigGenerator.cpp
+    )
+    set(_hipdnn_cudnn_v8_header_targets)
+    foreach(_header find_plan get_plan engine_config_generator)
+        foreach(_skip_owner NONE CUDNN HIPDNN)
+            set(_target hipdnn_frontend_cudnn_v8_header_${_header})
+            if(NOT _skip_owner STREQUAL "NONE")
+                string(TOLOWER "${_skip_owner}" _owner)
+                string(APPEND _target "_skip_${_owner}_json")
+            endif()
+            add_library(${_target} OBJECT ${_hipdnn_cudnn_v8_header_${_header}})
+            if(NOT _skip_owner STREQUAL "NONE")
+                target_compile_definitions(
+                    ${_target} PRIVATE ${_skip_owner}_FRONTEND_SKIP_JSON_LIB
+                )
+            endif()
+            target_compile_options(${_target} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+            target_link_libraries(${_target} PRIVATE hipdnn_frontend hip::host)
+            list(APPEND _hipdnn_cudnn_v8_header_targets ${_target})
+        endforeach()
+    endforeach()
+
     # Attached to the unit binary so targeted builds cannot skip the gates.
     add_dependencies(
         hipdnn_frontend_tests
         hipdnn_frontend_cudnn_v8_skip_cudnn_json
         hipdnn_frontend_cudnn_v8_skip_hipdnn_json
+        ${_hipdnn_cudnn_v8_header_targets}
     )
 endif()

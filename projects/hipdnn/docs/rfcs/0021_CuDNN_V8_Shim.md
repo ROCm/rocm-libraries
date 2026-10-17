@@ -203,13 +203,15 @@ runs no heuristics and needs no GPU.
 - **Notes.** Behavior notes map by name. `NONDETERMINISTIC` is reported for every engine not known to be
   deterministic, so deterministic filtering works. No other numerical notes are reported.
 - **Knobs.** hipDNN knobs that map onto a cuDNN knob type are shown; others are hidden, and choosing a
-  hidden knob is `NOT_SUPPORTED`.
+  hidden knob is `NOT_SUPPORTED`. A choice of `-1` is upstream's "unset" and is ignored unless the knob
+  is shown and accepts `-1`.
 
 ### 3.6 Plans and execution
 
-- A plan's handle must match its graph's handle (`BAD_PARAM` otherwise). hipDNN takes the stream from
-  the execute handle and the plan context from the graph handle, so a mismatch can't be served
-  correctly.
+- A built plan runs on its graph's handle. Its `HANDLE` is optional (upstream's builder never sets it);
+  when set it must match the graph's handle (`BAD_PARAM` otherwise), because hipDNN takes the stream
+  from the execute handle and the plan context from the graph handle, so a mismatch can't be served
+  correctly. A plan loaded from JSON requires `HANDLE`.
 - `cudnnBackendExecute` checks the handle and makes exactly one `hipdnnBackendExecute` call. The hipDNN
   variant pack is built when the shim's variant pack is finalized.
 - JSON plans: `getJsonRepresentation` always returns a valid JSON object with engine index, ID (as a
@@ -237,7 +239,7 @@ runs no heuristics and needs no GPU.
 
 - Port upstream headers unchanged in behavior. Edits:
   - namespace and include paths;
-  - CUDA timing calls → HIP;
+  - CUDA event timing → hipDNN's profiling-control descriptor on the handle's stream;
   - dynamic loading, CUDA-graph and v7 helpers removed;
   - friend declarations of v9 node classes removed;
   - edits needed to build under hipDNN's `-Werror` warning set, with no warning suppression.
@@ -247,8 +249,13 @@ runs no heuristics and needs no GPU.
   reports the mismatch as `BAD_PARAM`. `OperationGraphBuilder_v8::addOperation` on a builder with no
   operations yet stores the descriptor at `ops[-1]` (the count starts at -1); it now starts from 0.
   `OperationBuilder_v8::setcDesc` copies `CUDNN_DIM_MAX + 1` padding, dilation and stride entries into
-  arrays of `CUDNN_DIM_MAX`; the arrays now hold `CUDNN_DIM_MAX + 1`. The misspelled alias
-  `EngineHeuristicsBuilde` is kept.
+  arrays of `CUDNN_DIM_MAX`; the arrays now hold `CUDNN_DIM_MAX + 1`. The errata `check_shape` reads
+  the fifth element of its dimension array, which a 4-D tensor never writes; the array is now
+  value-initialized. `time_sorted_plan` collects timed plans in a `std::set` ordered by time, which keeps
+  only one of several plans with equal times; it now uses a `std::multiset`. `cudnnFindPlanAndCache`
+  reads the front of the sorted plans even when none ran; it now fails with `NOT_SUPPORTED` (a thrown
+  `cudnnException`, or a plan whose status is not `SUCCESS` under `NV_CUDNN_DISABLE_EXCEPTION`). The
+  misspelled alias `EngineHeuristicsBuilde` is kept.
 - FE-enum JSON rendering goes through a shim name table. `describe()` output matches upstream, but the
   shim defines no nlohmann serializer for hipDNN's enums, so serializing a frontend enum directly yields
   an integer.

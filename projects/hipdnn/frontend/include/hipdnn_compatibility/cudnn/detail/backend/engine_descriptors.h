@@ -593,6 +593,7 @@ protected:
                             "configured");
         }
 
+        constexpr std::int64_t UNSET_KNOB_VALUE = -1;
         KnobChoices choices;
         std::vector<::hipdnn_frontend::KnobSetting> settings;
         for(const std::shared_ptr<Descriptor>& descriptor :
@@ -601,8 +602,19 @@ protected:
             const auto& choice = descriptorCast<KnobChoiceDescriptor>(
                 *descriptor, CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
             const cudnnBackendKnobType_t type = choice.knobType();
-            const std::string label = knobTypeLabel(type);
             const EngineKnob* knob = engine->visibleKnob(type);
+            // Once any knob is set, upstream's builder sends -1 for every other
+            // knob of the engine; that means "unset" unless the knob accepts -1.
+            if(choice.value() == UNSET_KNOB_VALUE
+               && (knob == nullptr
+                   || knob->native
+                          .validate(::hipdnn_frontend::KnobSetting(knob->native.knobId(),
+                                                                   UNSET_KNOB_VALUE))
+                          .is_bad()))
+            {
+                continue;
+            }
+            const std::string label = knobTypeLabel(type);
             if(knob == nullptr)
             {
                 throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,

@@ -9,11 +9,12 @@
 
 /**
  * @file cudnn_frontend_shim.h
- * @brief cuDNN FE `detail::` wrappers over the emulated cuDNN C API (descriptor subset).
+ * @brief cuDNN FE `detail::` wrappers over the emulated cuDNN C API, plus the plan timer.
  */
 
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -22,6 +23,8 @@
 #include <hipdnn_compatibility/cudnn/cudnn.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
+#include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 // The shim never loads cuDNN dynamically, so the runtime version checks are empty.
 #define NV_CUDNN_FE_DYNAMIC_CHECK_BACKEND_DESCRIPTOR(MINIMUM_VERSION, DESCRIPTOR, MESSAGE)
@@ -167,5 +170,113 @@ inline cudnnStatus_t get_stream(cudnnHandle_t handle, hipStream_t* stream)
 }
 
 // NOLINTEND(readability-identifier-naming,modernize-redundant-void-arg,readability-redundant-inline-specifier,misc-misplaced-const,readability-avoid-return-with-void-value,misc-const-correctness,bugprone-unused-local-non-trivial-variable)
+
+// Replaces upstream's CUDA event wrappers: device time between start() and stop() on the
+// handle's stream, measured by one hipDNN profiling descriptor reused across measurements.
+class PlanTimer
+{
+public:
+    explicit PlanTimer(cudnnHandle_t handle)
+        : _handle(handle)
+        , _profiling(HIPDNN_BACKEND_PROFILING_CONTROL_EXT)
+    {
+    }
+
+    cudnnStatus_t start()
+    {
+        if(!_profiling.valid())
+        {
+            return CUDNN_STATUS_NOT_INITIALIZED;
+        }
+        cudnnStatus_t status = setTrigger(HIPDNN_ATTR_PROFILING_RESET_EXT);
+        if(status != CUDNN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        status = toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            _profiling.get(),
+            HIPDNN_ATTR_PROFILING_HANDLE_EXT,
+            HIPDNN_TYPE_HANDLE,
+            1,
+            static_cast<const void*>(&_handle)));
+        if(status != CUDNN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        return setTrigger(HIPDNN_ATTR_PROFILING_START_EXT);
+    }
+
+    cudnnStatus_t stop()
+    {
+        if(!_profiling.valid())
+        {
+            return CUDNN_STATUS_NOT_INITIALIZED;
+        }
+        const cudnnStatus_t status = setTrigger(HIPDNN_ATTR_PROFILING_STOP_EXT);
+        if(status != CUDNN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        return toCudnnStatus(
+            hipdnn_frontend::detail::hipdnnBackend()->backendFinalize(_profiling.get()));
+    }
+
+    cudnnStatus_t elapsedMs(float* ms) const
+    {
+        if(!_profiling.valid())
+        {
+            return CUDNN_STATUS_NOT_INITIALIZED;
+        }
+        if(ms == nullptr)
+        {
+            return CUDNN_STATUS_BAD_PARAM;
+        }
+        float value = 0.0F;
+        const cudnnStatus_t status
+            = toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendGetAttribute(
+                _profiling.get(),
+                HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT,
+                HIPDNN_TYPE_FLOAT,
+                1,
+                nullptr,
+                &value));
+        if(status != CUDNN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        // The backend passes a finite negative span through as an invalid measurement.
+        if(!std::isfinite(value) || value < 0.0F)
+        {
+            return CUDNN_STATUS_EXECUTION_FAILED;
+        }
+        *ms = value;
+        return CUDNN_STATUS_SUCCESS;
+    }
+
+private:
+    cudnnStatus_t setTrigger(hipdnnBackendAttributeName_t attribute)
+    {
+        const bool trigger = true;
+        return toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+            _profiling.get(), attribute, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
+    }
+
+    cudnnHandle_t _handle;
+    hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor _profiling;
+};
+
+// Upstream's cuda_device_synchronize; the backend synchronizes on SET, so there is no finalize.
+inline cudnnStatus_t deviceSynchronize()
+{
+    const hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor sync(
+        HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+    if(!sync.valid())
+    {
+        return CUDNN_STATUS_NOT_INITIALIZED;
+    }
+    const bool trigger = true;
+    return toCudnnStatus(hipdnn_frontend::detail::hipdnnBackend()->backendSetAttribute(
+        sync.get(), HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trigger));
+}
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail

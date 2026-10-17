@@ -200,6 +200,37 @@ if(NOT PIN_PROBE_OK)
         "${PIN_PROBE_OUTPUT}")
 endif()
 
+# Each public shim header must compile first in a TU against the install alone. The
+# overlay is deliberately absent: its forwarders would mask a broken include.
+set(_e25_headers
+    cudnn.h
+    cudnn_graph.h
+    cudnn_frontend.h
+    cudnn_frontend_EngineConfigGenerator.h
+    cudnn_frontend_find_plan.h
+    cudnn_frontend_get_plan.h)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+foreach(_hdr IN LISTS _e25_headers)
+    string(MAKE_C_IDENTIFIER "${_hdr}" _hdr_id)
+    set(_hdr_probe "${CMAKE_BINARY_DIR}/header_probe_${_hdr_id}.cpp")
+    file(WRITE "${_hdr_probe}" "\
+#include <hipdnn_compatibility/cudnn/${_hdr}>
+namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
+int main() { return 0; }
+")
+    try_compile(_hdr_probe_ok "${CMAKE_BINARY_DIR}/header_probe_${_hdr_id}"
+        SOURCES "${_hdr_probe}"
+        LINK_LIBRARIES hipdnn_frontend
+        CXX_STANDARD 17
+        OUTPUT_VARIABLE _hdr_probe_output)
+    if(NOT _hdr_probe_ok)
+        message(FATAL_ERROR
+            "E25 HEADER: <hipdnn_compatibility/cudnn/${_hdr}> does not compile alone "
+            "against the installed hipDNN\n${_hdr_probe_output}")
+    endif()
+endforeach()
+unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+
 # ---------------------------------------------------------------------------------------
 # Per-sample registration
 # ---------------------------------------------------------------------------------------
