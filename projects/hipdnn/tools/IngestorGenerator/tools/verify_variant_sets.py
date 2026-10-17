@@ -26,8 +26,6 @@ import os
 import sys
 from pathlib import Path
 
-import yaml
-
 #: KMD value meaning "unresolved"; never legal in a shipped descriptor.
 SENTINEL = -1
 
@@ -54,7 +52,7 @@ def _agreement_python_root() -> Path:
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(_agreement_python_root()))
 
-from codegen.config_loader import read_json_or_yaml  # noqa: E402
+from codegen import json_input  # noqa: E402
 from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
 from hkp_pack import generic_targets as gtmod  # noqa: E402
@@ -124,13 +122,37 @@ class Manifest:
 
     @classmethod
     def load(cls, path: str) -> "Manifest":
+        """Read a manifest as JSON, else as YAML. Only the YAML fallback needs PyYAML,
+        so a JSON manifest loads where it is not installed."""
         try:
-            raw = read_json_or_yaml(Path(path))
-        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
             raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
+        try:
+            raw = json_input.loads(text)
+        except json_input.RepeatedJsonKey as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {path}: {exc}")
+        except ValueError:
+            raw = cls._read_yaml(path)
         if not isinstance(raw, dict):
             raise SystemExit(f"FAIL: manifest {path} must be a mapping.")
         return cls(raw, path)
+
+    @staticmethod
+    def _read_yaml(path: str):
+        try:
+            import yaml
+
+            from codegen.config_loader import read_yaml
+        except ImportError:
+            raise SystemExit(
+                f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
+                f"as YAML."
+            )
+        try:
+            return read_yaml(Path(path))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
 
     @classmethod
     def empty(cls) -> "Manifest":

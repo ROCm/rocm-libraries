@@ -10,7 +10,6 @@ after dropping a whole pack or engine.
 
 import gzip
 import itertools
-import json
 import math
 import posixpath
 import re
@@ -22,6 +21,7 @@ from typing import Any
 import yaml
 
 from . import generic_targets as gtmod
+from . import json_input
 from .models import (
     ARCH_BASE_ID_PATTERN,
     AUTHORED_TEST_SETS,
@@ -151,21 +151,6 @@ def read_yaml(path: Path) -> Any:
         return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
 
-class _RepeatedJsonKey(Exception):
-    """A JSON object declared one key twice."""
-
-
-def _reject_repeated_json_keys(pairs: list) -> dict:
-    keys = [k for k, _ in pairs]
-    repeated = sorted({k for k in keys if keys.count(k) > 1})
-    if repeated:
-        raise _RepeatedJsonKey(
-            f"found duplicate key {repeated[0]!r}; JSON would silently keep only the "
-            f"last value"
-        )
-    return dict(pairs)
-
-
 def read_json_or_yaml(path: Path) -> Any:
     """Parse one manifest as JSON, falling back to `read_yaml`. A mapping declaring
     one key twice raises ``yaml.YAMLError`` in either format; input that is neither
@@ -173,8 +158,8 @@ def read_json_or_yaml(path: Path) -> Any:
     with open(path, encoding="utf-8") as f:
         text = f.read()
     try:
-        return json.loads(text, object_pairs_hook=_reject_repeated_json_keys)
-    except _RepeatedJsonKey as exc:
+        return json_input.loads(text)
+    except json_input.RepeatedJsonKey as exc:
         raise yaml.YAMLError(f"{path}: {exc}") from exc
     except ValueError:
         return read_yaml(path)

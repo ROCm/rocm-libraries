@@ -615,6 +615,53 @@ class TestGateRefusesAmbiguity:
         assert gate_module.Manifest.load(str(path)).engine_name == "hipkernel:Dense"
 
 
+class TestRunsWithoutPyYaml:
+    """The gate reads a JSON manifest with the standard library alone; PyYAML is needed
+    only to read a manifest that is not JSON."""
+
+    @staticmethod
+    def _run_without_yaml(gate, manifest: Path):
+        code = (
+            "import runpy, sys\n"
+            "sys.modules['yaml'] = None\n"
+            "sys.argv = sys.argv[1:]\n"
+            "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+        )
+        argv = [
+            sys.executable,
+            "-c",
+            code,
+            str(_TOOL),
+            "small",
+            "small",
+            "--mode",
+            "structural",
+            "--manifest",
+            str(manifest),
+        ]
+        return subprocess.run(argv, cwd=gate.tmp, capture_output=True, text=True)
+
+    def test_a_json_manifest_gates_without_pyyaml(self, gate):
+        manifest = gate.tmp / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "engine": {"name": "test:TestEngine"},
+                    "specialization": {"vocabulary": {"dtype": ["BF16", "FP16"]}},
+                }
+            )
+        )
+        result = self._run_without_yaml(gate, manifest)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_a_yaml_manifest_fails_cleanly_without_pyyaml(self, gate):
+        result = self._run_without_yaml(gate, gate.manifest)
+        assert result.returncode != 0
+        assert "FAIL:" in result.stdout + result.stderr
+        assert "Traceback" not in result.stderr
+
+
 class TestGateCatchesSpecializationTwins:
     """A bigger set may only OVERRIDE a compiler-settled knob if it keeps the settled
     variant beside it. The knob is read off the UKDs' own declarations, since the fields
