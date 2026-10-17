@@ -18,6 +18,8 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -92,7 +94,9 @@ namespace
         hipblasLtMatmulDesc_t       desc    = nullptr;
         hipblasLtMatmulPreference_t pref    = nullptr;
 
-        bool create()
+        // `streamK`: a HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT value,
+        // or none to keep the desc's default.
+        bool create(std::optional<int32_t> streamK = std::nullopt)
         {
             if(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, kM, kK, kM)
                    != HIPBLAS_STATUS_SUCCESS
@@ -103,6 +107,14 @@ namespace
                || hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                       != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatmulPreferenceCreate(&pref) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            if(streamK
+               && hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &*streamK,
+                                                  sizeof(*streamK))
+                      != HIPBLAS_STATUS_SUCCESS)
                 return false;
 
             const uint64_t maxWs = kWorkspaceBytes;
@@ -1389,5 +1401,58 @@ namespace
         }
         ASSERT_EQ(selected, m_identities[1].index) << "the override file was not consulted";
         EXPECT_EQ(out.find("tuning-cache:"), std::string::npos) << out;
+    }
+
+    // The top heuristic result through the C API with StreamK AUTO.
+    bool autoModeHeuristic(hipblasLtMatmulHeuristicResult_t* result)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return false;
+        bool ok = false;
+        {
+            Problem problem;
+            int     returned = 0;
+            ok               = problem.create(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO)
+                 && hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                    problem.desc,
+                                                    problem.layoutA,
+                                                    problem.layoutB,
+                                                    problem.layoutC,
+                                                    problem.layoutC,
+                                                    problem.pref,
+                                                    1,
+                                                    result,
+                                                    &returned)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && returned > 0;
+        }
+        hipblasLtDestroy(handle);
+        return ok;
+    }
+
+    // In adaptive mode a heuristic result is tagged for launch-time
+    // re-selection, but not one the tuning file supplied: the file's choice
+    // is launched as recorded.
+    TEST_F(TuningCache_pre_checkin, FileEntryIsNotAdaptiveTagged)
+    {
+        if(!rocblaslt::adaptive_sm::Config::fromEnv().enabled)
+            GTEST_SKIP() << "adaptive mode is off";
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        uint32_t                         hint = 0;
+        hipblasLtMatmulHeuristicResult_t r{};
+        ASSERT_TRUE(autoModeHeuristic(&r));
+        ASSERT_TRUE(rocblaslt::adaptive_sm::algoTag(r.algo.data, &hint));
+
+        const auto& recorded = m_identities[1];
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
+        useTuningFile();
+
+        r = {};
+        ASSERT_TRUE(autoModeHeuristic(&r));
+        EXPECT_EQ(hipblaslt_ext::getIndexFromAlgo(r.algo), recorded.index);
+        EXPECT_FALSE(rocblaslt::adaptive_sm::algoTag(r.algo.data, &hint));
     }
 } // namespace

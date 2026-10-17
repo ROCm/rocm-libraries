@@ -1,9 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Adaptive sm_count_target through the C API: the heuristic-query workspace,
-// launches under a forced hint, probe readings, graph capture and the stream
-// lock. The mode is read from the environment once per process, so
+// Adaptive sm_count_target through the C API: heuristic-query tagging and
+// workspace, launches under a forced hint, probe readings, graph capture, the
+// stream lock and launch-time re-selection. The mode is read from the environment once per process, so
 // the cases for a mode the environment does not select skip; run with
 // HIPBLASLT_ADAPTIVE_SM_COUNT=1 or HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus> (and
 // HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE=1) to cover them. The cotenant cases
@@ -31,12 +31,15 @@
 #include <string>
 #include <vector>
 
-extern "C" bool hipblaslt_adaptive_sm_state_for_test(void*       handle,
-                                                     hipStream_t stream,
-                                                     void*       state,
-                                                     size_t      size);
-extern "C" bool hipblaslt_adaptive_sm_launch_lock_for_test(
-    void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter);
+extern "C" bool   hipblaslt_adaptive_sm_state_for_test(void*       handle,
+                                                       hipStream_t stream,
+                                                       void*       state,
+                                                       size_t      size);
+extern "C" bool   hipblaslt_adaptive_sm_launch_lock_for_test(
+      void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter);
+extern "C" size_t hipblaslt_adaptive_reselections_for_test(void* matmulDesc);
+extern "C" void   hipblaslt_debug_reload();
+extern "C" int    hipblaslt_tuning_last_launch_for_test();
 
 namespace rocblaslt::adaptive_sm
 {
@@ -166,7 +169,13 @@ namespace
             return st;
         }
 
-        // Under FORCE every launch takes the forced hint. Probes run only with
+        size_t reselections()
+        {
+            return hipblaslt_adaptive_reselections_for_test(r.desc);
+        }
+
+        // Under FORCE the query is ranked and tagged for the forced hint and
+        // every launch takes it, so nothing re-selects. Probes run only with
         // FORCE_PROBE, and their readings never move the hint.
         void checkForcedHint(int32_t sk)
         {
@@ -177,12 +186,16 @@ namespace
             if(results.empty())
                 GTEST_SKIP() << "No solution for this problem in the loaded library";
             const auto& result = results[0];
+            uint32_t    tag    = 0;
+            ASSERT_TRUE(algoTag(result.algo.data, &tag));
+            EXPECT_EQ(tag, cfg.force);
             EXPECT_EQ(state().hint, cfg.force);
 
             for(uint32_t i = 0; i < c_probeRing * cfg.probeEvery + 1; ++i)
                 ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
             ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(reselections(), 0u);
             const StreamStateForTest st = state();
             EXPECT_EQ(st.hint, cfg.force);
             EXPECT_EQ(st.readingsTaken, 0u);
@@ -191,10 +204,27 @@ namespace
             else
                 EXPECT_EQ(st.epoch, 0u);
         }
+
+        // The top result retagged as if ranked for `hint`; skips without
+        // FORCE or a solution.
+        void retaggedResult(uint32_t hint, hipblasLtMatmulHeuristicResult_t* out)
+        {
+            if(!cfg.force)
+                GTEST_SKIP() << "set HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE";
+            const auto results = query();
+            if(results.empty())
+                GTEST_SKIP() << "No solution for this problem in the loaded library";
+            *out         = results[0];
+            uint32_t tag = 0;
+            ASSERT_TRUE(algoTag(out->algo.data, &tag));
+            ASSERT_NE(hint, cfg.force);
+            tagAlgo(out->algo.data, hint);
+        }
     };
 
     // Adaptive mode reports min(limit, max(plain, c_adaptiveWorkspace)) for the
-    // top result; with it off the result reports the plain size.
+    // tagged top result; with it off the result is untagged and reports the
+    // plain size.
     TEST_F(AdaptiveSmCount, smoke_QueryReportsTheAdaptiveWorkspace)
     {
         for(uint64_t limit : {kWsBudgetBytes / 4, kWsBudgetBytes * 2})
@@ -203,14 +233,29 @@ namespace
             const auto results = query(1, limit);
             if(results.empty())
                 GTEST_SKIP() << "No solution for this problem in the loaded library";
-            const auto&  result = results[0];
-            const size_t plain  = required(result.algo);
+            const auto& result = results[0];
+            uint32_t    tag    = 0;
+            EXPECT_EQ(algoTag(result.algo.data, &tag), cfg.enabled);
+            const size_t plain = required(result.algo);
             ASSERT_LE(plain, limit);
             const size_t expected
                 = cfg.enabled ? std::min<size_t>(limit, std::max(plain, c_adaptiveWorkspace))
                               : plain;
             EXPECT_EQ(result.workspaceSize, expected);
         }
+    }
+
+    // StreamK OFF never takes the adaptive hint.
+    TEST_F(AdaptiveSmCount, smoke_StreamKOffIsUntagged)
+    {
+        if(!cfg.enabled)
+            GTEST_SKIP() << "adaptive mode is off";
+        setStreamK(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+        const auto results = query();
+        if(results.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        uint32_t tag = 0;
+        EXPECT_FALSE(algoTag(results[0].algo.data, &tag));
     }
 
     TEST_F(AdaptiveSmCount, smoke_ForcedHintForQueryAndLaunchAuto)
@@ -485,5 +530,95 @@ namespace
             EXPECT_FALSE(heldBetween);
             EXPECT_FALSE(heldAfter);
         }
+    }
+
+    // Under FORCE a result tagged with another hint is re-selected at launch,
+    // once: the repeat launch reuses the memoised choice.
+    TEST_F(AdaptiveSmCount, smoke_LaunchReselectsOnceForAnotherHint)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        EXPECT_EQ(reselections(), 0u);
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+    }
+
+    // hipblaslt_debug_reload drops the memoised re-selections, on the next
+    // launch.
+    TEST_F(AdaptiveSmCount, smoke_DebugReloadDropsTheReselections)
+    {
+        hipblasLtMatmulHeuristicResult_t result{};
+        retaggedResult(cfg.force ^ 1, &result);
+        if(IsSkipped() || HasFatalFailure())
+            return;
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        // Another query hint is another memo entry.
+        hipblasLtMatmulHeuristicResult_t other = result;
+        tagAlgo(other.algo.data, cfg.force ^ 2);
+        ASSERT_EQ(run(other.algo, other.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(reselections(), 2u);
+
+        hipblaslt_debug_reload();
+        ASSERT_EQ(run(result.algo, result.workspaceSize), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+    }
+
+    // A long K, so that the top candidates need a workspace.
+    class AdaptiveSmCountLongK : public AdaptiveSmCount
+    {
+    protected:
+        AdaptiveSmCountLongK()
+        {
+            m = 256;
+            n = 256;
+            k = 16384;
+        }
+    };
+
+    // With a workspace no re-selection candidate fits, the launch keeps the
+    // query's solution, under the query hint.
+    TEST_F(AdaptiveSmCountLongK, smoke_NoFitKeepsTheQuerySolution)
+    {
+        if(!cfg.force)
+            GTEST_SKIP() << "set HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE";
+        // The launch ranks the candidates as the query did, under the forced
+        // hint and the query's workspace limit.
+        const auto candidates = query(c_reselectTopK);
+        if(candidates.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        size_t smallest = SIZE_MAX;
+        for(const auto& c : candidates)
+            smallest = std::min(smallest, required(c.algo));
+
+        // The query solution's workspace under a smaller explicit hint.
+        const uint32_t queryHint = std::max(cfg.force / 4, 1u);
+        if(queryHint == cfg.force)
+            GTEST_SKIP() << "needs a forced hint above 1";
+        const int32_t explicitHint = int32_t(queryHint), noHint = 0;
+        ASSERT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                r.desc, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &explicitHint, sizeof(explicitHint)),
+            HIPBLAS_STATUS_SUCCESS);
+        const size_t workspace = required(candidates[0].algo);
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
+                      r.desc, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &noHint, sizeof(noHint)),
+                  HIPBLAS_STATUS_SUCCESS);
+        if(workspace >= smallest)
+            GTEST_SKIP() << "every candidate fits the query solution's " << workspace
+                         << "-byte workspace at hint " << queryHint;
+
+        hipblasLtMatmulHeuristicResult_t result = candidates[0];
+        tagAlgo(result.algo.data, queryHint);
+        static_cast<void>(hipblaslt_tuning_last_launch_for_test());
+        ASSERT_EQ(run(result.algo, workspace), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(reselections(), 1u);
+        // The launch ranks its own candidate list; one that fits there means
+        // the no-fit case did not arise.
+        if(hipblaslt_tuning_last_launch_for_test() != hipblaslt_ext::getIndexFromAlgo(result.algo))
+            GTEST_SKIP() << "the launch found a candidate that fits " << workspace << " bytes";
     }
 } // namespace

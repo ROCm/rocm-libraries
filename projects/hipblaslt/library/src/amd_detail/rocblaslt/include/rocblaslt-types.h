@@ -623,7 +623,8 @@ struct RocblasltContractionProblem
     uint32_t occupancy_probe_epoch    = 0;
     uint32_t occupancy_probe_min_grid = 0;
     bool*    occupancy_probed         = nullptr;
-    // sm_count_target came from the adaptive estimator rather than the user.
+    // sm_count_target came from the adaptive estimator rather than the user;
+    // enables launch-time re-selection of a tagged heuristic algo.
     bool adaptive_sm_count = false;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
