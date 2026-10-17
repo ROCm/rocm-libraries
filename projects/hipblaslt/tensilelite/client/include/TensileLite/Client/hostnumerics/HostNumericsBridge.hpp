@@ -85,7 +85,7 @@ namespace TensileLite::Client
             case DescriptorError::NullStorage:
                 return "Nonempty tensor storage is null.";
             case DescriptorError::ElementCountOverflow:
-                return "Tensor shape element count exceeds size_t.";
+                return "Tensor shape product of nonzero extents exceeds size_t.";
             case DescriptorError::PrimeStrideOverflow:
                 return "Prime-stride output selection overflow.";
             }
@@ -113,6 +113,11 @@ namespace TensileLite::Client
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::StrideRankMismatch));
+        }
+        if(!roc::hostnumerics::detail::tryElementCount(descriptor.sizes()))
+        {
+            return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
+                hostnumerics::detail::DescriptorError::ElementCountOverflow));
         }
         std::vector<ptrdiff_t> strides;
         strides.reserve(descriptor.strides().size());
