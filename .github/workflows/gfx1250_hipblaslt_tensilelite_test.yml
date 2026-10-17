@@ -108,7 +108,7 @@ jobs:
     runs-on: blas-rocm-mi455-sandbox
     timeout-minutes: 600
     # The ROCm SDK comes from the nightly pip index, not a host /opt/rocm: it must be
-    # new enough to compile and run gfx1250-strict. The SDK install reuses downloaded
+    # new enough to compile and run gfx1250-strict. pip reuses downloaded
     # wheels from a pip cache on a host mount. Only the nightly writes it; other jobs get
     # it read-only, so their builds and tests can't change it by accident.
     container:
@@ -117,7 +117,6 @@ jobs:
       # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       # -e without a value copies ROCR_VISIBLE_DEVICES from the runner's .env (one
       # runner per GPU); the runner passes no host env into job containers itself.
-      # Unset: the strict-mode check falls back to the runner name's -gpuN.
       options: >-
         -e ROCR_VISIBLE_DEVICES
         --ipc host
@@ -205,10 +204,10 @@ jobs:
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           python3 -m pip install --upgrade pip
           IDX=https://nightly.repo.amd.com/rocm/whl-next/
-          # rocm is a 28 kB sdist: build it without the cache (read-only outside the
-          # nightly; pip writes built wheels there). Its multi-GB wheels still come from it.
-          pip install --pre --index-url "$IDX" --no-cache-dir --no-deps "rocm==${ROCM_SDK_VERSION}"
-          pip install --pre --index-url "$IDX" "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
+          # --no-cache-dir: rocm is an sdist, and pip writes the wheel it builds into the
+          # cache, which is read-only outside the nightly.
+          pip install --pre --index-url "$IDX" --no-cache-dir \
+            "rocm[libraries,devel,device-gfx1250]==${ROCM_SDK_VERSION}"
           rocm-sdk init
           R="$(rocm-sdk path --root)"
           rocm-sdk path --bin >> "$GITHUB_PATH"
@@ -271,19 +270,12 @@ jobs:
         id: strict
         # Fail before the long build if strict mode is not in effect. Uses the same
         # detection tox uses for the client target; prints arch names only.
-        env:
-          RUNNER_LABEL: ${{ runner.name }}
         run: |
+          set -euo pipefail
           # One runner per GPU: all shards and workers must stay on this runner's GPU,
-          # set by ROCR_VISIBLE_DEVICES in the runner's .env, else N from ...-gpuN.
-          if [ -z "${ROCR_VISIBLE_DEVICES:-}" ] && [[ "$RUNNER_LABEL" =~ -gpu([0-9]+)$ ]]; then
-            export ROCR_VISIBLE_DEVICES="${BASH_REMATCH[1]}"
-            echo "::warning::ROCR_VISIBLE_DEVICES is not set on this runner; using GPU $ROCR_VISIBLE_DEVICES from the runner name"
-            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES" >> "$GITHUB_ENV"
-          fi
-          N="$(tr ',' '\n' <<<"${ROCR_VISIBLE_DEVICES:-}" | grep -c . || true)"
-          [ "$N" = 1 ] \
-            || { echo "::error::ROCR_VISIBLE_DEVICES must name exactly one GPU: set it in the runner's .env, or name the runner ...-gpuN"; exit 1; }
+          # set by ROCR_VISIBLE_DEVICES in the runner's .env.
+          [[ "${ROCR_VISIBLE_DEVICES:-}" =~ ^[0-9]+$ ]] \
+            || { echo "::error::ROCR_VISIBLE_DEVICES='${ROCR_VISIBLE_DEVICES:-}' must be a single GPU index: set it in the runner's .env"; exit 1; }
           ARCH="$(python3 - <<'EOF'
           import importlib.util
           spec = importlib.util.spec_from_file_location("ga", "projects/hipblaslt/tensilelite/tensilelite/GpuArch.py")
@@ -323,12 +315,14 @@ jobs:
           RUNNERS_PER_HOST: "4"
         run: |
           set -o pipefail
-          # The CPU reference (OpenMP, BLIS, OpenBLAS) starts one thread per host CPU in
-          # each pool by default: with every runner busy that oversubscribes the CPU
-          # ~16x and the step runs ~7x slower. Split the CPUs between all shards instead.
+          # The CPU reference's OpenMP and OpenBLAS pools start one thread per host CPU by
+          # default: with every runner busy that oversubscribes the CPU ~16x and the step
+          # runs ~7x slower. Split the CPUs between all shards instead. BLIS is capped at
+          # 8 threads in-process (blis_interface.cpp), but only while OMP_NUM_THREADS is
+          # unset, so keep that cap here.
           T=$(( $(nproc) / (RUNNERS_PER_HOST * HIPBLASLT_TEST_SHARDS) ))
           [ "$T" -ge 1 ] || T=1
-          export OMP_NUM_THREADS=$T BLIS_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T
+          export OMP_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T BLIS_NUM_THREADS=$(( T < 8 ? T : 8 ))
           cd projects/hipblaslt
           INSTALL="$PWD/hipblaslt-install"
           export LD_LIBRARY_PATH="$INSTALL/lib:$LD_LIBRARY_PATH"
