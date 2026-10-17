@@ -72,6 +72,10 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
     target_link_libraries(${TEST_TARGET} PRIVATE hipcub)
   endif()
 
+  # Makes the shared test_utils_controller.hpp available to the test.
+  # PROJECT_DIR must match the directory control.txt is installed into (see ../CMakeLists.txt).
+  test_controller_configure_target(${TEST_TARGET} PROJECT_DIR hipcub)
+
   if(HIP_COMPILER STREQUAL "nvcc")
     # For test/hipcub, std::exclusive_scan is used, which is a c++ 17 feature
     target_compile_features(${TEST_TARGET} PUBLIC cuda_std_17)
@@ -296,4 +300,8 @@ add_hipcub_test("hipcub.ThreadOperators" test_hipcub_thread_operators.cpp)
 add_hipcub_test("hipcub.ThreadSort" test_hipcub_thread_sort.cpp)
  
 add_hipcub_test("hipcub.SinglePassScanOperators" test_hipcub_single_pass_scan_operators.cpp)
-add_hipcub_test("hipcub.TestController" test_hipcub_test_controller.cpp)
+# Unit tests for the shared test controller. The source lives in the shared directory, so
+# the target is named explicitly (rather than deriving it from the source file name, as
+# add_hipcub_test does) to keep the binary name hipCUB-specific.
+add_hipcub_test_internal("hipcub.TestController" "${TEST_CONTROLLER_UNIT_TEST_SOURCE}" test_hipcub_test_controller)
+set_build_coverage(test_hipcub_test_controller)

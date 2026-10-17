@@ -2,7 +2,10 @@
 # Test Control File
 # -----------------
 #
-# This file lists tests that are disabled.
+# This file lists tests that are disabled. It is read by the shared test controller in
+# rocm-libraries/shared/primlibs/test_controller (see the README.md there for more details).
+# By default, the control file is located relative to the running test binary. To use a different control file, set the
+# environment variable PRIMLIBS_TEST_CONTROL_FILE to its path.
 # The format is:
 # /test_name_regex/ : /arch_regex/ : size_limit[units] : build_type[, build_type...] : "skip_msg"
 #
@@ -20,7 +23,7 @@
 # - build_type        : is a comma-delimited (or space-delimited) list of build types that will be used to restrict the scope of the current
 #                       line to particular build types.
 #                       For example, you can make the current line apply only to asan or valgrind builds. See the section below for details.
-# - skip_msg          : is a message to print to stdout when the test is skipped. Note: if environment variable HIPCUB_EXTRA_TC_INFO == 1,
+# - skip_msg          : is a message to print to stdout when the test is skipped. Note: if environment variable PRIMLIBS_EXTRA_TC_INFO == 1,
 #                       then additional information about which test sizes were skipped and which control file line caused them to be skipped
 #                       is also printed.
 #
@@ -40,7 +43,7 @@
 # - <all>           : all architectures from any vendor
 # - <amd>           : all AMD architectures
 # - <nvidia>        : Nvidia devices
-# - <apus>          : gfx1103, gfx1150, gfx1151, gfx1152
+# - <apus>          : gfx1103, gfx1150, gfx1151, gfx1152, gfx1170, gfx1171
 # - <navi2x-family> : gfx1030, gfx1031, gfx1032
 # - <navi3x-family> : gfx1100, gfx1101, gfx1102
 # - <navi4x-family> : gfx1200, gfx1201
@@ -48,8 +51,8 @@
 # - <mi200-family>  : gfx90a
 # - <mi300-family>  : gfx942, gfx950
 #
-# For a full list of keywords and their regex equivalents, please see the definition of the keywords unordered map at the bottom of
-# the test/hipcub/test_utils_controller.hpp file.
+# For a full list of keywords and their regex equivalents, please see the definition of the keywords unordered map in
+# rocm-libraries/shared/primlibs/test_controller/include/test_utils_controller.hpp.
 #
 # -----------
 # Build Types
@@ -72,8 +75,8 @@
 # -------
 # Caveats
 # -------
-# - After modifying this file, please rebuild target copy_control_file_changes, which copies it into the correct location in the build directory.
-#   - If you have other code changes, it's sufficient to just rebuild that target, since test targets are all dependent on copy_control_file_changes.
+# - After modifying this file, please rebuild target hipcub_copy_control_file, which copies it into the correct location in the build directory.
+#   - If you have other code changes, it's sufficient to just rebuild that target, since test targets are all dependent on hipcub_copy_control_file.
 #
 # - Regexes are sensitive to spaces, so those should be omitted unless you want to match them.
 #   For example, /(gfx1100|gfx1101) | gfx1200/ will not match "gfx1100" or "gfx1200" but will match "gfx1100 " or " gfx1200".
@@ -96,7 +99,7 @@
 #
 # - Some tests specify sizes using types other than size_t. However, values in size expressions in this control file are always interpreted as type size_t.
 #   To work around this, you can create a "transformer" functor that's passed into the filter functions. For more information, see the documentation
-#   in test_utils_controller.cpp.
+#   in test_utils_controller.hpp.
 
 # ---------------
 # Add rules here:

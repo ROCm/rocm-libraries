@@ -24,12 +24,15 @@
 
 #include <algorithm>
 #include <any>
+#include <array>
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
+#include <numeric>
 #include <optional>
 #include <regex>
 #include <set>
@@ -38,6 +41,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -54,7 +58,16 @@
 
 #include <gtest/gtest.h>
 
-#include "common_test_header.hpp"
+#include "test_controller_detail.hpp"
+
+// -- Project configuration --
+
+// Name of the directory (relative to the directory containing the test binaries) that the
+// control file is installed into, eg. "hipcub" for <install prefix>/bin/hipcub/control.txt.
+// This is normally set by test_controller_configure_target() in TestController.cmake.
+#ifndef TEST_CONTROLLER_PROJECT_DIR
+    #error "TEST_CONTROLLER_PROJECT_DIR must be defined. Use test_controller_configure_target() from TestController.cmake to set it."
+#endif
 
 // -- Compile-time checks for build types --
 
@@ -156,16 +169,19 @@ namespace
 // These functions are used to query information about the environment the test is running in.
 namespace env
 {
-    // Checks if the HIPCUB_EXTRA_TC_INFO exists and is defined and set to 1. If so,
+    // Names of the environment variables that affect the behaviour of the test controller.
+    // These are shared by all of the libraries that use it.
+    constexpr inline const char* extra_info_env_var   = "PRIMLIBS_EXTRA_TC_INFO";
+    constexpr inline const char* control_file_env_var = "PRIMLIBS_TEST_CONTROL_FILE";
+
+    // Checks if the PRIMLIBS_EXTRA_TC_INFO exists and is defined and set to 1. If so,
     // individual skipped sizes and the control file line numbers that caused them to
     // be skipped will be appended to messages that are output by the filtering functions.
     // Information about the path to the control file will also be displayed.
     inline bool should_print_extra_info()
     {
-        char* val_str = test_common_utils::__get_env("HIPCUB_EXTRA_TC_INFO");
-        const bool result = (val_str && std::strlen(val_str) == 1 && val_str[0] == '1');
-        test_common_utils::clean_env(val_str);
-        return result;
+        const std::optional<std::string> val_str = detail::get_env(extra_info_env_var);
+        return val_str && val_str.value() == "1";
     }
 
     inline bool is_running_valgrind()
@@ -239,14 +255,13 @@ namespace env
         return true;
     }
 
-    // Check if the control file path is give in the HIPCUB_TEST_CONTROL_FILE env var.
+    // Check if the control file path is give in the PRIMLIBS_TEST_CONTROL_FILE env var.
     inline bool get_control_file_path_from_env(std::filesystem::path& path)
     {
-        char* env_str = test_common_utils::__get_env("HIPCUB_TEST_CONTROL_FILE");
+        const std::optional<std::string> env_str = detail::get_env(control_file_env_var);
         if (env_str)
         {
-            path = std::filesystem::path(std::string(env_str));
-            test_common_utils::clean_env(env_str);
+            path = std::filesystem::path(env_str.value());
             return true;
         }
 
@@ -260,10 +275,11 @@ namespace env
     // If multiple control files are found, the most recently modified one will be used.
     inline bool find_control_file_path(std::filesystem::path& path)
     {
-        // Note: if you change either of these, you'll also need to update the CMake rule that copies
-        // it to the build folder. See hipcub/test_CMakeLists.txt.
+        // Note: if you change the file name, you'll also need to update the CMake rule that copies
+        // it to the build folder. See test_controller_add_control_file() in TestController.cmake.
+        // The project directory is configured by test_controller_configure_target().
         const static std::filesystem::path control_file_name("control.txt");
-        const static std::filesystem::path project_dir("hipcub");
+        const static std::filesystem::path project_dir(TEST_CONTROLLER_PROJECT_DIR);
 
         std::filesystem::path cur_bin_dir;
         if (!env::get_running_binary_path(cur_bin_dir))
@@ -274,7 +290,7 @@ namespace env
 
         // We will grab the path to the currently running binary, and then look for the test
         // control file in these locations relative to it.
-        // When running a test binary that exists in the install directory (eg. /opt/rocm/bin/), we expect the control file to be at hipcub/control.txt
+        // When running a test binary that exists in the install directory (eg. /opt/rocm/bin/), we expect the control file to be at <project_dir>/control.txt
         // When running a test binary that lives in the build directory (eg. build/test/hipcub/), we expect the control file to be at ../control.txt.
         std::vector<std::filesystem::path> possible_paths = {
             cur_bin_dir / project_dir / control_file_name,
@@ -443,13 +459,13 @@ private:
         // If the env var is set, read the control file path from it.
         if (env::get_control_file_path_from_env(control_path) && env::should_print_extra_info())
         {
-            std::cout << "HIPCUB_TEST_CONTROL_FILE is set." << std::endl;
+            std::cout << env::control_file_env_var << " is set." << std::endl;
         }
         // Otherwise, fall back on search for it in expected locations.
         else
         {
             if (env::should_print_extra_info())
-                std::cout << "HIPCUB_TEST_CONTROL_FILE is not set, falling back to searching for control file." << std::endl;
+                std::cout << env::control_file_env_var << " is not set, falling back to searching for control file." << std::endl;
             
             if (!env::find_control_file_path(control_path))
                 return;
@@ -751,7 +767,7 @@ public:
     // function chaining). If some sizes should be skipped,
     // msg is populated with the message specified on the corresponding line
     // in the control file.
-    // If the environment variable HIPCUB_EXTRA_TC_INFO == 1,
+    // If the environment variable PRIMLIBS_EXTRA_TC_INFO == 1,
     // extra text is appended to msg that describes the sizes that
     // were skipped and which control file line caused it.
     template<class T>
@@ -851,16 +867,16 @@ public:
     
 private:
     // These tests need to access private member functions.
-    // See hipcub/test/hipcub/test_hipcub_test_controller.cpp.
-    friend class HipcubTestControllerTests;
-    FRIEND_TEST(HipcubTestControllerTests, GetArch);
-    FRIEND_TEST(HipcubTestControllerTests, CheckTestEnablement);
-    FRIEND_TEST(HipcubTestControllerTests, FilterSizes);
-    FRIEND_TEST(HipcubTestControllerTests, FilterSizesWithTransformer);
-    FRIEND_TEST(HipcubTestControllerTests, FilterSizesWithUnits);
-    FRIEND_TEST(HipcubTestControllerTests, CheckSizeEnablement);
-    FRIEND_TEST(HipcubTestControllerTests, test_filter);
-    FRIEND_TEST(HipcubTestControllerTests, test_size);
+    // See shared/primlibs/test_controller/test/test_controller_tests.cpp.
+    friend class TestControllerTests;
+    FRIEND_TEST(TestControllerTests, GetArch);
+    FRIEND_TEST(TestControllerTests, CheckTestEnablement);
+    FRIEND_TEST(TestControllerTests, FilterSizes);
+    FRIEND_TEST(TestControllerTests, FilterSizesWithTransformer);
+    FRIEND_TEST(TestControllerTests, FilterSizesWithUnits);
+    FRIEND_TEST(TestControllerTests, CheckSizeEnablement);
+    FRIEND_TEST(TestControllerTests, test_filter);
+    FRIEND_TEST(TestControllerTests, test_size);
 
     // Private constructor accepting a flag that indicates whether it
     // should read from the control file. If not, the object is left
@@ -920,9 +936,9 @@ private:
 #ifdef __HIP_PLATFORM_AMD__
         // Make sure we get the device ID from ctest, in case we're running tests in
         // parallel on multiple devices.
-        const int device_id = test_common_utils::obtain_device_from_ctest();
+        const int device_id = detail::obtain_device_from_ctest();
         hipDeviceProp_t dev_prop;
-        HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
+        TEST_CONTROLLER_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
         std::string gcn_arch_name(dev_prop.gcnArchName);
 
         // The name may contain extra bits we don't need - eg. the xnack portion of "gfx942:xnack+".
@@ -1171,7 +1187,7 @@ private:
 
 // Filters a vector of sizes down to those that are enabled.
 // Prints a message indicating the number of sizes that were skipped.
-// If env var HIPCUB_EXTRA_TC_INFO is defined and set to 1, also
+// If env var PRIMLIBS_EXTRA_TC_INFO is defined and set to 1, also
 // prints the size values that were skipped (useful for debugging when adding a new control file rule).
 #define CHECK_SIZE_FILTERS(sizes) test_controller::TestController::get_instance().filter_sizes(sizes)
 
