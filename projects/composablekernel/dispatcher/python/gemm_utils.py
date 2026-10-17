@@ -2937,8 +2937,18 @@ def expand_sweep(
                     elementwise_op=ew_op,
                     d_layout=d_layout_word,
                 )
+                # A native-width kernel whose A/B load tile cannot be distributed
+                # fails a static_assert at compile time; fixed widths are checked
+                # by with_vector_sizes, so only the native variant is dropped here.
+                native_unbuildable = (
+                    _codegen_common().gemm_native_dram_tile_reject_reason(
+                        **c._vector_args(), pipeline=pipe, epilogue=epi
+                    )
+                )
                 val = None
                 for vec in vector_sizes:
+                    if native_unbuildable and not any(vec):
+                        continue
                     cv, reason = c.with_vector_sizes(tuple(vec))
                     if reason:
                         if rejects is not None:

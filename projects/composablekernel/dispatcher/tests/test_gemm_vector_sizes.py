@@ -14,7 +14,8 @@ build the same tile with narrower fixed widths instead; these tests lock in:
     the per-tile legality checks;
   * that gemm_utils, the codegen KernelNaming and the generated kernel agree on
     the kernel name and actually pass the widths to the CK problem/epilogue;
-  * expand_sweep emitting fallback configs and counting rejects.
+  * expand_sweep emitting fallback configs and counting rejects;
+  * the native-width A/B load-tile check that keeps unbuildable tiles out of a sweep.
 
 Run: python3 -m pytest tests/test_gemm_vector_sizes.py -v
 """
@@ -45,6 +46,7 @@ from codegen_common import (  # noqa: E402
     gemm_problem_vector_sizes,
     gemm_vector_size_suffix,
     gemm_lockstep_vector_bytes,
+    gemm_native_dram_tile_reject_reason,
     gemm_vector_size_sweep,
     resolve_gemm_vector_sizes,
 )
@@ -1075,6 +1077,106 @@ class TestTileDividesProblem(unittest.TestCase):
             gemm_tile_divides_problem(
                 256, 256, 256, "rcr", 128, 128, 128, **self.UNPADDED, k_batch=0
             )
+
+
+def _native_dram_reason(
+    layout, tile, pipeline="compv3", arch="gfx1250", epilogue="cshuffle"
+):
+    return gemm_native_dram_tile_reject_reason(
+        dtype_a="bf16",
+        dtype_b="bf16",
+        dtype_c="bf16",
+        layout=layout,
+        tile=tile,
+        waves=(2, 2, 1),
+        warp_tile=(16, 16, 32),
+        gfx_arch=arch,
+        pipeline=pipeline,
+        epilogue=epilogue,
+    )
+
+
+class TestNativeDramTileGate(unittest.TestCase):
+    """A native-width A/B load tile must satisfy the static_asserts of
+    tile_distribution_encoding_pattern_2d, or the kernel does not compile."""
+
+    def test_mn_contiguous_tile_that_cannot_cover_the_wavefront(self):
+        # Column-major A loads M contiguously, row-major B loads N contiguously.
+        for layout, tile, operand in (
+            ("crr", (96, 64, 64), "A tile 64x96"),
+            ("ccr", (192, 64, 64), "A tile 64x192"),
+            ("rrr", (64, 96, 64), "B tile 64x96"),
+            ("crr", (384, 64, 64), "A tile 64x384"),
+        ):
+            for pipeline in ("compv3", "compv4", "mem"):
+                with self.subTest(layout=layout, tile=tile, pipeline=pipeline):
+                    reason = _native_dram_reason(layout, tile, pipeline)
+                    self.assertIsNotNone(reason)
+                    self.assertTrue(reason.startswith(operand), reason)
+
+    def test_buildable_tiles_pass(self):
+        for layout, tile in (
+            ("rcr", (96, 96, 64)),  # K-contiguous A and B
+            ("rrr", (96, 64, 64)),  # A is K-contiguous; B's 64 is fine
+            ("ccr", (64, 96, 64)),  # B is K-contiguous; A's 64 is fine
+            ("crr", (128, 64, 64)),
+            ("crr", (512, 16, 64)),
+        ):
+            with self.subTest(layout=layout, tile=tile):
+                self.assertIsNone(_native_dram_reason(layout, tile))
+
+    def test_wave64_has_the_same_limit(self):
+        self.assertIsNotNone(_native_dram_reason("crr", (96, 64, 64), arch="gfx950"))
+
+    def test_other_pipelines_are_not_checked(self):
+        # TDM moves A/B with the Tensor Data Mover; comp_async uses an
+        # XOR-swizzled distribution when neither operand is transpose-loaded.
+        self.assertIsNone(
+            _native_dram_reason("crr", (96, 64, 64), "comp_tdm", epilogue="tdm")
+        )
+        self.assertIsNone(_native_dram_reason("crr", (96, 64, 64), "comp_async"))
+
+    def test_sweep_drops_only_the_native_variant(self):
+        from gemm_utils import expand_sweep
+
+        config = {
+            "tile_config": {
+                "tile_m": {"values": [96, 128]},
+                "tile_n": {"values": [64]},
+                "tile_k": {"values": [64]},
+                "warp_m": {"values": [2]},
+                "warp_n": {"values": [2]},
+                "warp_k": {"values": [1]},
+                "warp_tile_m": {"values": [16]},
+                "warp_tile_n": {"values": [16]},
+                "warp_tile_k": {"values": [32]},
+            },
+            "trait_config": {
+                "pipeline": {"values": ["compv3"]},
+                "scheduler": {"values": ["intrawave"]},
+                "epilogue": {"values": ["cshuffle"]},
+                "pad_m": {"values": [True]},
+                "pad_n": {"values": [True]},
+                "pad_k": {"values": [True]},
+                "persistent": {"values": [False]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "crr_tiles.json"
+            path.write_text(json.dumps(config))
+            configs = expand_sweep(
+                str(path),
+                "gfx1250",
+                dtype="bf16",
+                layout="crr",
+                vector_sizes=[(0, 0, 0), (1, 0, 0)],
+            )
+        native = {c.tile_m for c in configs if not any(c.vector_sizes)}
+        fixed = {c.tile_m for c in configs if any(c.vector_sizes)}
+        self.assertEqual(native, {128})
+        # A one-element A width distributes 96 over the wavefront, so that
+        # variant is still offered.
+        self.assertIn(96, fixed)
 
 
 if __name__ == "__main__":
