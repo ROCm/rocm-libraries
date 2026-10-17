@@ -16,6 +16,17 @@
 
 #define CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD 0
 
+// Number of XCDs the workgroups are dispatched round-robin across, used by the
+// head-major decode to remap the grid into contiguous per-XCD segments.
+// 0 disables the remap. Only enabled where it has been measured (gfx1250).
+#if !defined(CK_TILE_FMHA_FWD_NUM_XCDS)
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+#define CK_TILE_FMHA_FWD_NUM_XCDS 8
+#else
+#define CK_TILE_FMHA_FWD_NUM_XCDS 0
+#endif
+#endif
+
 #if !defined(CK_TILE_FMHA_FORCE_HEAD_MAJOR)
 #if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
 #define CK_TILE_FMHA_FORCE_HEAD_MAJOR 1
@@ -1566,6 +1577,35 @@ struct FmhaFwdKernel
         }
     }
 
+#if CK_TILE_FMHA_FWD_NUM_XCDS
+    // Whether every (batch, head) has the same work. The grid is sized by the
+    // longest sequence, so with per-batch lengths (group mode, or cu_seqlen_q/k
+    // in batch mode) the short batches' blocks exit early and whole-batch XCD
+    // segments would leave the XCDs unbalanced; those keep the round-robin.
+    CK_TILE_DEVICE static bool HasUniformWork([[maybe_unused]] const Kargs& kargs)
+    {
+        if constexpr(kIsGroupMode)
+            return false;
+        else
+            return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
+    }
+
+    // Block L is dispatched to XCD L % kNumXCDs, which scatters consecutive ids
+    // over every L2. Remap them to contiguous per-XCD segments, the bijection of
+    // GemmSpatiallyLocalTilePartitioner::RemapXCD in branch-free form: segment x
+    // starts at x * short_len + min(x, tall_xcds) and holds short_len + 1 ids on
+    // the first tall_xcds XCDs, short_len on the others.
+    CK_TILE_DEVICE static index_t RemapXCD(index_t linear_id)
+    {
+        constexpr index_t kNumXCDs = CK_TILE_FMHA_FWD_NUM_XCDS;
+        const index_t num_blocks   = gridDim.x * gridDim.y * gridDim.z;
+        const index_t short_len    = num_blocks / kNumXCDs;
+        const index_t tall_xcds    = num_blocks - short_len * kNumXCDs;
+        const index_t xcd          = linear_id % kNumXCDs;
+        return xcd * short_len + min(xcd, tall_xcds) + linear_id / kNumXCDs;
+    }
+#endif
+
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
     {
         bool has_padded_seqlen_k = false;
@@ -1692,6 +1732,7 @@ struct FmhaFwdKernel
                 {
                     // Square causal tiles have monotonically increasing work along Q.
                     // Visit the longest tiles across all heads within each batch first.
+                    // Takes precedence over the XCD remap below.
                     if(kargs.seqlen_q == kargs.seqlen_k && kargs.window_size_left < 0 &&
                        kargs.window_size_right == 0 && num_tile_n1 == 1)
                     {
@@ -1705,8 +1746,14 @@ struct FmhaFwdKernel
                 const index_t num_tile_total   = has_padded_seqlen_k ? gridDim.z : gridDim.y;
                 const index_t num_head         = gridDim.x;
                 const index_t blocks_per_batch = num_head * num_tile_total;
-                const index_t linear_id =
-                    blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+                index_t linear_id = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
+
+#if CK_TILE_FMHA_FWD_NUM_XCDS
+                // The m-tiles of one (batch, head) are consecutive in linear_id
+                // and read the same K/V; keep them on one XCD (see RemapXCD).
+                if(HasUniformWork(kargs))
+                    linear_id = RemapXCD(linear_id);
+#endif
 
                 const index_t i_batch = linear_id / blocks_per_batch;
                 const index_t rem0    = linear_id - i_batch * blocks_per_batch;
@@ -1761,9 +1808,39 @@ struct FmhaFwdKernel
             const index_t num_tile_n1 =
                 ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
 
-            const index_t i_block = blockIdx.y; // blockIdx.x
-            const index_t i_nhead = blockIdx.x; // blockIdx.y
-            const index_t i_batch = blockIdx.z;
+            index_t i_block = blockIdx.y; // blockIdx.x
+            index_t i_nhead = blockIdx.x; // blockIdx.y
+            index_t i_batch = blockIdx.z;
+
+#if CK_TILE_FMHA_FWD_NUM_XCDS
+            // bshd inputs take this path. Dispatch order is blockIdx.x (head)
+            // fastest, so the m-tiles of one (batch, head) sit num_head apart in
+            // linear_id and scatter over the XCDs just like above. Apply the same
+            // bijection, then decode with the m-tile fastest so each (batch, head)
+            // is contiguous inside its XCD segment.
+            //
+            // Masked grids reverse the m-tile order below (long tiles first). Their
+            // round-robin runs every head's long tiles first; remapped, each XCD
+            // runs its heads one after another, which keeps the tail short only
+            // when each XCD holds several heads. This is a locality heuristic, not
+            // a grouping guarantee: an XCD segment need not be a multiple of
+            // gridDim.y, so a head can straddle two segments (3 x 10 heads x 3
+            // m-tiles: segments of 12, 12, then 11). A single m-tile per
+            // (batch, head) (gridDim.y == 1) has no K/V to share, and per-batch
+            // lengths keep the round-robin (see HasUniformWork).
+            const bool remap_masked =
+                gridDim.x * gridDim.z >= CK_TILE_FMHA_FWD_NUM_XCDS * gridDim.y;
+            if(HasUniformWork(kargs) && gridDim.y > 1 && (!kHasMask || remap_masked))
+            {
+                const index_t linear_id =
+                    RemapXCD(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+
+                const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
+                i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);
+                i_batch            = rest / static_cast<index_t>(gridDim.x);
+                i_nhead            = rest - i_batch * static_cast<index_t>(gridDim.x);
+            }
+#endif
 
             const auto f = [](index_t dividend, index_t divisor) {
                 index_t quotient = dividend / divisor;
@@ -2030,6 +2107,13 @@ struct FmhaFwdKernel
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
@@ -2798,6 +2882,13 @@ struct FmhaFwdKernel
                 {
                     kargs.seqlen_q =
                         kargs.cu_seqlen_q_ptr[i_batch + 1] - kargs.cu_seqlen_q_ptr[i_batch];
+
+                    // the grid covers the padded seqlen_q; return early for the blocks
+                    // past this batch's effective length, as group mode does
+                    if(kargs.seqlen_q <= i_m0)
+                    {
+                        return;
+                    }
                 }
                 if(kargs.cu_seqlen_k_ptr != nullptr)
                 {
