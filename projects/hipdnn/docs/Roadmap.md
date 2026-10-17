@@ -85,7 +85,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
   - Behavioral notes for filtering ✅
 - **Graph + execution-plan binary serialize/deserialize** ✅
 
-## Q3 2026 (Current milestone)
+## Q3 2026
 
 **Focus:** SDPA, GEMM with MX low-precision data types, better heuristics & improved kernel provider selection
 
@@ -119,9 +119,16 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Support matrix
 - Matrix published as a regular CI artifact ⏳
-- Whole-graph bundled integration tests ⏳
+- Whole-graph bundled integration tests ✅
   - Default authoring format for new graph-verification tests ✅
-  - Enabled as the default execution path in CI ⏳
+  - Enabled as the default execution path in CI ✅
+
+### Testing
+- **Op coverage: detailed per-op integration tests**, in order Attention, then Convolution, then Normalization
+  - A test plan per tier (quick, standard, comprehensive, full) for each op
+  - Pairwise feature coverage per op, so the smallest set flags obvious breaks across providers
+  - Bundles that execute the plans
+  - Golden-reference baseline per op
 
 ### Universal descriptors
 - Data-driven kernel ingestion via universal kernel, match, dispatch, engine and heuristic descriptors (RFC 0017)
@@ -149,7 +156,23 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Python API wrappers (general availability beyond POC) ⏳
 - Plugin SDK utility expansion to further streamline new-provider development
 
-## Q4 2026 & beyond
+## Q4 2026 (Current milestone)
+
+**Focus:** Per-op test coverage and a quality gate for new integrations.
+
+### Testing
+- **Op coverage: detailed per-op integration tests**, continued from Q3: Attention, then Convolution, then Normalization
+- Unified gate for a new integration or kernel source, built on the per-op coverage, giving high confidence in its quality
+
+## Q1 2027
+
+### Testing
+- Fuzzy mode for release testing: exploratory runs within an affordable pre-release budget to find uncovered cases, grow the set, and show where coverage stands
+
+### Benchmarking & performance testing
+- Automated benchmark runs weekly or daily off `develop`, with release-by-release regression tracking
+
+## Q2 2027 & beyond
 
 **Focus:** Broader operation, layout & datatype coverage; deeper framework integrations; and the graph-execution, tensor and packaging work that moves hipDNN from tech preview toward general availability. We still value community input on what you would like to see prioritized!
 

@@ -681,7 +681,7 @@ Integration tests validate end-to-end functionality of your plugin:
 
 For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
-Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#principles).
+Moreover, see our [general testing principles](./testing/TESTING_STRATEGY.md#methodology).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 

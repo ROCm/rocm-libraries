@@ -1,21 +1,22 @@
 # hipDNN Feature Release Run Template
 
-This is the recording artifact for a **hipDNN milestone / release verification** run. It captures the traceability, evidence, and reproducible commands that show a release build was validated and is ready to ship. It is **not** the per-PR development testing form; for the day-to-day bar during development, see [Testing](../TESTING.md#development-workflow).
+This is the recording artifact for a **hipDNN milestone / release verification** run. It captures the traceability, evidence, and reproducible commands that show a release build was validated and is ready to ship. It is **not** the per-PR development testing form; for the day-to-day bar during development, see [Testing](../TESTING.md).
 
 **How to use this template:**
 
-- Copy this file to a working notes file for your feature or milestone (e.g. `ROCM-<ticket> <short name> validation.md`) and fill in every `<placeholder>`.
+- Copy this file to a working notes file for your feature or milestone (e.g. `<version> <short name> validation.md`) and fill in every `<placeholder>`.
 - The run this template records is a run of the [Feature Release Test Plan](./TestPlan.md). Follow the plan's procedures; record the results here.
 - Replace the illustrative snippets with your own observed commands and output. Keep it evidence-based: paste real command output, not a summary.
 - See [hipDNN testing documentation](../../README.md#testing) for how this template and the Feature Release Test Plan fit together.
 
-**Filling this in as you follow the Feature Release Test Plan.** The sections below are ordered to match the qualifier's path through the plan. Work top to bottom:
+**Filling this in as you follow the Feature Release Test Plan.** The sections below follow the plan in order. Work top to bottom:
 
 1. Record identifiers as you go (section 1) and describe what the run covers (section 2).
 2. [Feature Release Test Plan → Prerequisites](./TestPlan.md#prerequisites): record the CI evidence (section 3).
 3. [Feature Release Test Plan → Running Tests From TheRock Builds](./TestPlan.md#running-tests-from-therock-builds): prepare the artifacts and manifest (section 4), then run the tests and paste the output (section 5).
 4. [Feature Release Test Plan → Running Tests From Source Build](./TestPlan.md#running-tests-from-source-build): build from source and record its results (section 6).
-5. Sign off once every plan step is evidenced (section 7).
+5. [Feature Release Test Plan → Performance Testing](./TestPlan.md#performance-testing): record the benchmark results and the comparison (section 7).
+6. Sign off once every plan step is evidenced (section 8).
 
 ---
 
@@ -24,11 +25,11 @@ This is the recording artifact for a **hipDNN milestone / release verification**
 Fill in the identifiers that let a reader trace exactly what was validated back to source.
 
 - **Feature or milestone**: `<feature name or milestone>`
-- **Epic / ticket**: `<JIRA-EPIC>` / `<JIRA-TICKET>`
+- **Tracking issue**: `<issue link>`
 - **Delivery PR**: `<https://github.com/ROCm/rocm-libraries/pull/NNNN>`
 - **PR head commit**: `<sha>`
 - **PR merge commit**: `<https://github.com/ROCm/rocm-libraries/commit/sha>`
-- **GPU / ASIC family used**: `<e.g. gfx942 (MI300), gfx950 (MI350)>`
+- **GPU / ASIC families used**: `<every family validated, e.g. gfx942 (MI300), gfx950 (MI350)>`
 - **Build(s) validated** (artifact identifiers/URLs, which encode OS / ASIC / ROCm version):
   - `<https://.../therock-dist-linux-<gpu-family>-<version>.tar.gz>`
   - `<https://.../therock-dist-linux-<gpu-family>-tests-<version>.tar.gz>`
@@ -60,12 +61,12 @@ Link the CI, superbuild, and release-artifact runs that back this validation.
 
 | Evidence | Link | Status |
 |---|---|---|
-| hipDNN Jenkins / codecov test job (`<gpu-family>`) | `<consoleText URL>` | `<Passed; e.g. 100% tests passed, 0 failed out of N>` |
+| TheRock multi-arch CI hipdnn test step (`<gpu-family>`) | `<job log URL>` | `<Passed; e.g. 100% tests passed, 0 failed out of N>` |
 | hipDNN Superbuild CI | `<actions run URL>` | `<Passed>` |
 | Final TheRock / release artifact run | `<actions run URL>` | `<Passed / TBD>` |
 | Final sample run artifact / log | `<actions run URL>` | `<Passed / TBD>` |
 
-> **Scope note:** The command/output snippets in section 5 are *focused* validation runs (targeted gtest/ctest filters for the feature under test). The *full* hipDNN CTest suite evidence comes from the linked CI job. A complete release validation runs **both** the focused filters below **and** the full installed CTest suite on the selected artifacts.
+> **Scope note:** The command/output snippets in section 5 are *focused* validation runs (targeted gtest/ctest filters for the feature under test). The CI job shows the `standard` tier only. A complete release validation runs **both** the focused filters below **and** the `full`-tier installed CTest suites on the selected artifacts.
 
 ---
 
@@ -99,15 +100,15 @@ grep -A3 '"submodule_name": "rocm-libraries"' rocm-artifacts/share/therock/thero
 Example output:
 
 ```text
-  "the_rock_commit": "d9551ec95643eb12cc1fdb81a95530e105539415",
-  "github_run_id": "30227121935",
-  "rocm_package_version": "7.15.0a20260727",
-  "rocm_version": "7.15.0",
+  "the_rock_commit": "4d992b34d67c91397ecaf4483d73d01c0b5c3fa3",
+  "github_run_id": "38827024577",
+  "rocm_package_version": "10.2.0a20261016",
+  "rocm_version": "10.2.0",
       "submodule_name": "rocm-libraries",
-      "pin_sha": "bbb68174083e83e9465b60ecd8e20e4439a8e101",
+      "pin_sha": "3dc098eb2db3c8329b7d447bab37021d529bc23d",
 ```
 
-> Record the above output from the manifest; the `pin_sha` confirm the delivery commit (section 1) is contained in the history of that SHA. This proves the feature is actually present in the validated build. The manifest lists a `pin_sha` for every submodule, so use the `rocm-libraries` entry specifically, not the first `pin_sha` in the file.
+> Confirm the delivery commit (section 1) is in the history of the `rocm-libraries` `pin_sha`; that proves the feature is in the validated build. The manifest lists a `pin_sha` for every submodule, so use the `rocm-libraries` entry.
 
 See the [Feature Release Test Plan](./TestPlan.md#running-tests-from-therock-builds) for more on obtaining a ROCm build with the hipDNN test executables.
 
@@ -119,53 +120,29 @@ See the [Feature Release Test Plan](./TestPlan.md#running-tests-from-therock-bui
 
 The core of the record: repeatable command → observed-output blocks. Paste the **actual** output you saw. Reference the real hipDNN test binaries under `rocm-artifacts/bin/` (e.g. `hipdnn_frontend_tests`, `hipdnn_backend_tests`, `hipdnn_public_frontend_tests`). Numeric timings and tensor values vary by GPU and run.
 
-### Example: focused gtest filter run
+Example commands for a focused area. Integration tests in the public frontend binary need `HIPDNN_PLUGIN_DIR` pointing at the test plugins; the samples need it pointing at the engine plugins:
 
 ```bash
-./rocm-artifacts/bin/<test_binary> \
-  --gtest_filter="<Suite1*:Suite2*>" \
-  --gtest_brief=1
-```
+# Focused gtest filter
+./rocm-artifacts/bin/<test_binary> --gtest_filter="<Suite1*:Suite2*>" --gtest_brief=1
 
-Observed passing output:
-
-```text
-[==========] <N> tests from <M> test suites ran. (<t> ms total)
-[  PASSED  ] <N> tests.
-```
-
-### Example: GPU integration filter (plugin dir required)
-
-```bash
+# Integration tests that load test plugins
 HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/test_plugins/custom" \
-./rocm-artifacts/bin/hipdnn_public_frontend_tests \
-  --gtest_filter="<*IntegrationFeature*>" \
-  --gtest_brief=1
-```
+  ./rocm-artifacts/bin/hipdnn_public_frontend_tests --gtest_filter="<*IntegrationFeature*>" --gtest_brief=1
 
-Observed passing output:
-
-```text
-[==========] <N> tests from <M> test suites ran. (<t> ms total)
-[  PASSED  ] <N> tests.
-```
-
-### Example: installed CTest filter
-
-```bash
+# One installed sample
 HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/hipdnn_plugins/engines" \
-ctest --test-dir ./rocm-artifacts/bin/hipdnn_samples \
-  -R <test_name_regex> \
-  --output-on-failure
+  ctest --test-dir ./rocm-artifacts/bin/hipdnn_samples -R <test_name_regex> --output-on-failure
 ```
 
-Observed passing output:
+Paste the result lines you observed, for example:
 
 ```text
+[  PASSED  ] <N> tests.
 100% tests passed, 0 tests failed out of <N>
 ```
 
-> Repeat one command/output block per focused area from section 2. For the full-suite requirement in the scope note, run the installed hipDNN CTest suite (see the [Feature Release Test Plan](./TestPlan.md#running-the-hipdnn-tests)) and record its `100% tests passed, 0 tests failed out of <N>` line here as well.
+> Repeat one command/output block per focused area from section 2. For the full-suite requirement in the scope note, run the `full` tier in every test directory (see the [Feature Release Test Plan](./TestPlan.md#running-the-hipdnn-tests)) and record each directory's `100% tests passed, 0 tests failed out of <N>` line here as well.
 
 ---
 
@@ -181,7 +158,7 @@ Check out the matching source tree (use the `pin_sha` from section 4, or `develo
 git clone --filter=blob:none --no-checkout https://github.com/ROCm/rocm-libraries.git rocm-libraries
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set projects/hipdnn dnn-providers cmake test
+git sparse-checkout set projects/hipdnn dnn-providers cmake shared
 git checkout <develop-or-pin-sha>
 ```
 
@@ -198,7 +175,7 @@ cmake -S projects/hipdnn \
   -DHIPDNN_SKIP_TESTS=OFF \
   -DENABLE_CLANG_TIDY=OFF
 
-cmake --build build/hipdnn-tests --target <targets>
+cmake --build build/hipdnn-tests
 ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
 ```
 
@@ -208,16 +185,42 @@ ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
 
 ---
 
-## 7. Final validation checklist
+## 7. Performance results
+
+> Records [Feature Release Test Plan → Performance Testing](./TestPlan.md#performance-testing).
+
+For each GPU family, attach the results file and paste the comparison against the previous release.
+
+- **Results file**: `<headline-<version>-<arch>.json, attached or linked>`
+- **Baseline**: `<previous release's results file for the same GPU family>`
+
+```bash
+dnn-benchmark compare headline-<previous-version>-<arch>.json headline-<version>-<arch>.json
+```
+
+Observed output:
+
+```text
+<paste the compare output>
+```
+
+| Flagged regression | Explanation or tracking issue |
+|---|---|
+| `<graph / engine>` | `<reason or issue link>` |
+
+---
+
+## 8. Final validation checklist
 
 Sign-off gate. Every box must be checked with real evidence before marking the milestone verified.
 
 - [ ] Filled section 1 with the merged release/nightly **build identifier(s)** and the physical GPU/ASIC family used.
 - [ ] Confirmed the delivery commit is contained in the artifact's manifest `pin_sha` (section 4).
 - [ ] Replaced every `TBD` evidence link in section 3 with the final CI / release-artifact run and sample log.
-- [ ] Ran the focused gtest/ctest filters **and** the full installed hipDNN CTest suite on the final artifacts.
+- [ ] Ran the focused gtest/ctest filters **and** the `full` tier in every installed test directory, on every supported GPU family.
 - [ ] Pasted the passing snippets into section 5 (elapsed times updated if rerun on final artifacts).
 - [ ] Confirmed all [Feature Release Test Plan](./TestPlan.md) prerequisites (CI green, documentation/changelog current) are satisfied.
+- [ ] Attached the headline benchmark results for each GPU family, and explained or tracked every regression `compare` flagged (section 7).
 
 **Tips for a defensible record:**
 
