@@ -1,0 +1,697 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_position_encoding.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_default_policy.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce.hpp"
+
+namespace ck_tile {
+
+// SpargeAttention attention pipeline (consumes a delta-encoded LUT).
+template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSAsyncDefaultPolicy>
+struct BlockFmhaPipelineQRKSVSAsyncSparge
+{
+    using Problem               = remove_cvref_t<Problem_>;
+    using Policy                = remove_cvref_t<Policy_>;
+    using QDataType             = remove_cvref_t<typename Problem::QDataType>;
+    using KDataType             = remove_cvref_t<typename Problem::KDataType>;
+    using VDataType             = remove_cvref_t<typename Problem::VDataType>;
+    using SaccDataType          = remove_cvref_t<typename Problem::SaccDataType>;
+    using SMPLComputeDataType   = remove_cvref_t<typename Problem::SMPLComputeDataType>;
+    using BiasDataType          = remove_cvref_t<typename Problem::BiasDataType>;
+    using RandValOutputDataType = remove_cvref_t<typename Problem::RandValOutputDataType>;
+    using LSEDataType           = remove_cvref_t<typename Problem::LSEDataType>;
+    using PDataType             = remove_cvref_t<typename Problem::PDataType>;
+    using OaccDataType          = remove_cvref_t<typename Problem::OaccDataType>;
+    using ODataType             = remove_cvref_t<typename Problem::ODataType>;
+    using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
+    using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
+
+    using BlockFmhaShape             = remove_cvref_t<typename Problem::BlockFmhaShape>;
+    using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
+    static constexpr bool kQLoadOnce = true;
+    static_assert(kQLoadOnce == Policy::QLoadOnce);
+
+    static constexpr index_t kBlockSize = Problem::kBlockSize;
+
+    static constexpr index_t kM0           = BlockFmhaShape::kM0;
+    static constexpr index_t kN0           = BlockFmhaShape::kN0;
+    static constexpr index_t kK0           = BlockFmhaShape::kK0;
+    static constexpr index_t kN1           = BlockFmhaShape::kN1;
+    static constexpr index_t kK1           = BlockFmhaShape::kK1;
+    static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;
+    static constexpr index_t kSubQKHeaddim = BlockFmhaShape::kSubQKHeaddim;
+
+    static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
+
+    static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
+    static_assert(Problem::kPadSeqLenQ == true && Problem::kPadHeadDimQ == true &&
+                  Problem::kPadHeadDimV == true);
+    static constexpr bool kPadSeqLenQ       = true;
+    static constexpr bool kPadSeqLenK       = Problem::kPadSeqLenK;
+    static constexpr bool kPadHeadDimQ      = true;
+    static constexpr bool kPadHeadDimV      = true;
+    static constexpr bool kHasLogitsSoftCap = Problem::kHasLogitsSoftCap;
+    static constexpr auto BiasEnum          = Problem::BiasEnum;
+    static constexpr bool kStoreLSE         = Problem::kStoreLSE;
+    static constexpr bool kHasDropout       = Problem::kHasDropout;
+
+    static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
+                      BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                      BiasEnum == BlockAttentionBiasEnum::ALIBI,
+                  "Sparge: only NO_BIAS / ELEMENTWISE_BIAS / ALIBI supported.");
+    static_assert(!kHasDropout, "Sparge does not support dropout.");
+    static_assert(!kStoreLSE, "Sparge does not support LSE output.");
+
+    static constexpr index_t kAlignmentQ = Policy::template GetAlignmentQ<Problem>();
+    static constexpr index_t kAlignmentK = Policy::template GetAlignmentK<Problem>();
+    static constexpr index_t kAlignmentV = []() {
+        if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+            return Policy::template GetAlignmentV<Problem>();
+        else
+            return kPadSeqLenK ? 1 : Policy::template GetAlignmentV<Problem>();
+    }();
+    static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
+
+    static constexpr index_t kBlockPerCu = []() {
+        if constexpr(Problem::kBlockPerCu != -1)
+            return Problem::kBlockPerCu;
+        else
+        {
+            if constexpr(kQKHeaddim <= 128)
+            {
+                if constexpr(kPadSeqLenK)
+                    return 1;
+                else
+                    return 2;
+            }
+            else
+            {
+                return 1;
+            };
+        }
+    }();
+
+    static constexpr const char* name = "qr_async_sparge";
+
+    static constexpr index_t kNumWarps = kBlockSize / get_warp_size();
+
+    // Tail kNumWarps floats reserved for the pv-skip predicate reduction.
+    CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
+    {
+        return Policy::template GetSmemSize<Problem>() +
+               static_cast<ck_tile::index_t>(kNumWarps * sizeof(float));
+    }
+
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices>
+    CK_TILE_HOST_DEVICE auto
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,
+               const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // NO_BIAS / ALIBI: unused
+               PositionEncoding position_encoding, // ALIBI: Alibi<...>; else: empty
+               const int* kv_block_idx_ptr,
+               int kv_blocks,
+               FmhaMask mask,
+               float scale_s,
+               const AttentionVariant& variant,
+               const AttentionVariantParams& variant_params,
+               const BlockIndices& block_indices,
+               void* smem_ptr,
+               float pvthreshd                = 0.0f,
+               const void* pvthreshd_per_head = nullptr) const
+    {
+        static_assert(
+            std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
+                std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
+            "Q/K/V DRAM window data type does not match BlockFmhaPipelineProblem");
+
+        static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
+                          kN0 == KDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
+                          kK0 == KDramBlockWindowTmp{}.get_window_lengths()[number<1>{}] &&
+                          kN1 == VDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
+                          kK1 == VDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
+                      "BlockFmhaShape kM0/kN0/kK0/kN1/kK1 do not match Q/K/V DRAM window lengths");
+
+        constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
+
+        float* const skip_scratch = reinterpret_cast<float*>(
+            reinterpret_cast<char*>(smem_ptr) + Policy::template GetSmemSize<Problem>());
+
+        auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
+        auto k_lds_store = generate_tuple(
+            [&](auto i_buf) {
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(
+                        k_lds_ptr, Policy::template MakeKLdsStoreBlockDescriptor<Problem>(i_buf)),
+                    Policy::template MakeKLdsStoreBlockDescriptor<Problem>(i_buf).get_lengths(),
+                    {0, 0, 0});
+            },
+            number<Policy::NumKVLdsBuffers>{});
+
+        auto k_lds_Load_view = make_tensor_view<address_space_enum::lds>(
+            k_lds_ptr, Policy::template MakeKLdsLoadBlockDescriptor<Problem>());
+
+        auto k_lds_load =
+            make_tile_window(k_lds_Load_view,
+                             Policy::template MakeKLdsLoadBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0});
+
+        auto v_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<VDataType*>(smem_ptr),
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
+        auto v_lds_window = make_tile_window(
+            v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
+
+        constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
+        constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
+
+        // LUT entries index K-blocks; multiply by kN0 (K-tile width).
+        int seqlen_k_start = kv_block_idx_ptr[0] * kN0;
+        auto q_dram_window = make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
+                                              q_dram_block_window_tmp.get_window_lengths(),
+                                              q_dram_block_window_tmp.get_window_origin(),
+                                              Policy::template MakeQRegTileDistribution<Problem>());
+        q_dram_window.init_raw();
+
+        auto q = decltype(load_tile(q_dram_window)){};
+        load_tile_raw(q, q_dram_window);
+        __builtin_amdgcn_sched_barrier(0);
+
+        using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
+        auto s_acc              = SaccBlockTileType{};
+
+        const auto f_max = [](auto e0, auto e1) { return max(e0, e1); };
+        const auto f_sum = [](auto e0, auto e1) { return e0 + e1; };
+
+        using SBlockTileType = decltype(cast_tile<SMPLComputeDataType>(s_acc));
+
+        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+
+        using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
+
+        auto o_acc = OaccBlockTileType{};
+        auto m     = MLBlockTileType{};
+        auto l     = MLBlockTileType{};
+
+        clear_tile(o_acc);
+        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+        clear_tile(l);
+
+        __builtin_amdgcn_sched_barrier(0);
+        const auto q_origin       = q_dram_window.get_window_origin();
+        const auto num_total_loop = kv_blocks;
+
+        if constexpr(FmhaMask::IsMasking || kPadSeqLenK)
+        {
+            if(num_total_loop <= 0)
+            {
+                buffer_load_fence(0);
+                return o_acc;
+            }
+            __builtin_amdgcn_sched_barrier(0);
+        }
+
+        auto k_dram_block_window =
+            make_tile_window(k_dram_block_window_tmp.get_bottom_tensor_view(),
+                             k_dram_block_window_tmp.get_window_lengths(),
+                             {seqlen_k_start, 0});
+
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                             k_dram_block_window.get_window_lengths(),
+                             k_dram_block_window.get_window_origin(),
+                             Policy::template MakeKDramTileDistribution<Problem>());
+        k_dram_window.init_raw();
+        constexpr auto k_oob_ck = bool_constant<true>{};
+        constexpr auto k_pre_np = bool_constant<false>{};
+        auto v_dram_window =
+            make_tile_window(v_dram_block_window_tmp.get_bottom_tensor_view(),
+                             v_dram_block_window_tmp.get_window_lengths(),
+                             {0, seqlen_k_start},
+                             Policy::template MakeVDramTileDistribution<Problem>());
+
+        // Bias window origin and per-iter advance use the LUT delta, not sequential
+        // iterations, so bias tracks the K-block actually loaded.
+        auto bias_dram_window = [&]() {
+            if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
+            {
+                return make_tile_window(
+                    bias_dram_block_window_tmp.get_bottom_tensor_view(),
+                    bias_dram_block_window_tmp.get_window_lengths(),
+                    {q_origin.at(number<0>{}), seqlen_k_start},
+                    Policy::template MakeBiasDramTileDistribution<decltype(gemm_0)>());
+            }
+            else
+            {
+                return BiasDramBlockWindowTmp{};
+            }
+        }();
+
+        async_load_tile_raw(
+            k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
+        move_tile_window(k_dram_window, {0, kK0});
+        __builtin_amdgcn_sched_barrier(0);
+
+        buffer_load_fence(k_dram_window.get_num_of_access());
+
+        index_t i_total_loops      = 0;
+        constexpr index_t k0_loops = kQKHeaddim / kK0;
+        constexpr index_t k1_loops = kN0 / kK1;
+
+        static_assert(1 <= k0_loops);
+        static_assert(1 <= k1_loops);
+
+        // pv-skip: m_local is taken after bias, so the predicate is valid for NO_BIAS/ALIBI/
+        // ELEMENTWISE. Threshold in log2 units; soft-cap disables it (raw-QK units no longer
+        // apply).
+        const float pvthreshd_eff =
+            pvthreshd_per_head
+                ? reinterpret_cast<const float*>(pvthreshd_per_head)[block_indices.qo_head_idx]
+                : pvthreshd;
+        const bool stage2_enabled  = (pvthreshd_eff > 0.0f) && !kHasLogitsSoftCap;
+        const float skip_threshold = -pvthreshd_eff;
+
+        auto compute_skip_flag = [&](const auto& m_local_t, const auto& m_ij_t) -> bool {
+            if(!stage2_enabled)
+                return false;
+            float lane_max_diff    = -ck_tile::numeric<float>::infinity();
+            constexpr auto m_spans = remove_cvref_t<decltype(m_ij_t)>::get_distributed_spans();
+            sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const float diff =
+                    static_cast<float>(m_local_t[i_idx]) - static_cast<float>(m_ij_t[i_idx]);
+                if(diff > lane_max_diff)
+                    lane_max_diff = diff;
+            });
+            for(index_t o = get_warp_size() / 2; o > 0; o /= 2) // intra-warp max
+            {
+                const float v_remote = warp_shuffle_down(lane_max_diff, static_cast<uint32_t>(o));
+                if(v_remote > lane_max_diff)
+                    lane_max_diff = v_remote;
+            }
+            const index_t lane_id = ck_tile::get_lane_id();
+            const index_t warp_id = ck_tile::get_warp_id();
+            if(lane_id == 0)
+                skip_scratch[warp_id] = lane_max_diff;
+            block_sync_lds();
+            float block_max_diff = -ck_tile::numeric<float>::infinity();
+#pragma unroll
+            for(index_t w = 0; w < kNumWarps; ++w)
+            {
+                const float v = skip_scratch[w];
+                if(v > block_max_diff)
+                    block_max_diff = v;
+            }
+            return block_max_diff < skip_threshold;
+        };
+
+        do
+        {
+            clear_tile(s_acc);
+            if constexpr(k0_loops > 1)
+            {
+                static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
+                    async_load_tile_raw(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
+                                        k_dram_window,
+                                        number<-1>{},
+                                        k_oob_ck,
+                                        k_pre_np);
+                    if constexpr(i_k0 < k0_loops - 1)
+                        move_tile_window(k_dram_window, {0, kK0});
+
+                    async_load_fence(k_dram_window.get_num_of_access());
+                    __builtin_amdgcn_s_barrier();
+                    __builtin_amdgcn_sched_barrier(0);
+                    gemm_0(s_acc,
+                           get_slice_tile(
+                               q, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{}),
+                           get_slice_tile(k_lds_load,
+                                          sequence<(LdsSeq.at(number<i_k0>{})) * kN0, 0>{},
+                                          sequence<(LdsSeq.at(number<i_k0>{}) + 1) * kN0, kK0>{}));
+                });
+            }
+
+            if constexpr(k0_loops <= 2)
+                __builtin_amdgcn_sched_barrier(0);
+
+            async_load_fence();
+            __builtin_amdgcn_s_barrier();
+
+            // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
+            // Guard the read: on the last iteration kv_block_idx_ptr[i_total_loops + 1] would
+            // index one past the per-row LUT (OOB on the final row); block_idx is unused there.
+            int block_idx =
+                (i_total_loops + 1 < num_total_loop)
+                    ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
+                    : 0;
+            auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            const auto bias_tile = [&]() {
+                if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
+                    return load_tile(bias_dram_window);
+                else
+                    return number<0>{};
+            }();
+            __builtin_amdgcn_sched_barrier(0);
+            {
+                gemm_0(
+                    s_acc,
+                    get_slice_tile(
+                        q, sequence<0, (k0_loops - 1) * kK0>{}, sequence<kM0, k0_loops * kK0>{}),
+                    get_slice_tile(k_lds_load,
+                                   sequence<(LdsSeq.at(number<k0_loops - 1>{})) * kN0, 0>{},
+                                   sequence<(LdsSeq.at(number<k0_loops - 1>{}) + 1) * kN0, kK0>{}));
+            }
+            __builtin_amdgcn_sched_barrier(1);
+
+            // Two scaling regimes (matches upstream FMHA):
+            //   NO_BIAS    : leave s_acc raw; exp2 below folds scale_s.
+            //   BIAS/ALIBI : apply scale_s here so bias/alibi sums in correct units.
+            if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
+            {
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+            }
+            else if constexpr(kHasLogitsSoftCap)
+            {
+                // Gemma soft cap: s = soft_cap*tanh(s*sm_scale/soft_cap). variant_params already
+                // folded sm_scale (and log2e under FAST_EXP2), so no standalone scale_s here.
+                for(index_t i = 0; i < s_acc.thread_buf_.size(); ++i)
+                {
+                    s_acc.thread_buf_[i] = variant.LogitsTransform(variant_params,
+                                                                   s_acc.thread_buf_[i],
+                                                                   block_indices.batch_idx,
+                                                                   block_indices.qo_head_idx,
+                                                                   block_indices.kv_head_idx);
+                }
+            }
+            else
+            {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+#endif
+            }
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+            {
+                // FAST_EXP2: pre-multiply bias by log2e so softmax exp2 stays consistent with QK.
+                tile_elementwise_inout(
+                    [&](auto& x, const auto& y) {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                        x += type_convert<SaccDataType>(y);
+#else
+                        x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
+#endif
+                    },
+                    s_acc,
+                    bias_tile);
+            }
+            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+            {
+                const auto k_origin    = k_dram_block_window.get_window_origin();
+                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
+                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
+                        const auto tile_idx = get_x_indices_from_distributed_indices(
+                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                        const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        position_encoding.update(s_acc(i_j_idx), row, col);
+                    });
+                });
+            }
+            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+            {
+                const auto k_origin      = k_dram_block_window.get_window_origin();
+                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
+                                                           k_origin.at(number<0>{}),
+                                                           number<kM0>{},
+                                                           number<kN0>{});
+
+                if(need_perpixel_check)
+                {
+                    set_tile_if(
+                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                            const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                            const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                            return !variant.LogitsMask(variant_params,
+                                                       block_indices.batch_idx,
+                                                       row,
+                                                       col,
+                                                       block_indices.qo_head_idx,
+                                                       block_indices.kv_head_idx);
+                        });
+                }
+            }
+
+            const auto s = cast_tile<SMPLComputeDataType>(s_acc);
+            auto m_local = block_tile_reduce<SMPLComputeDataType>(
+                s, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
+            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+
+            const auto m_old = m;
+            tile_elementwise_inout(
+                [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local);
+
+            const bool skip_block = compute_skip_flag(m_local, m);
+
+            __builtin_amdgcn_sched_barrier(0x7F);
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V
+            // store.
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
+            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+            {
+                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+                shuffle_tile(v_shuffle_tmp, v_buf);
+                auto v_lds_window_tmp =
+                    get_slice_tile(v_lds_window,
+                                   sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
+                                   sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
+                store_tile(v_lds_window_tmp, v_shuffle_tmp);
+            }
+            else
+            {
+                auto v_lds_window_tmp =
+                    get_slice_tile(v_lds_window,
+                                   sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
+                                   sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
+                store_tile(v_lds_window_tmp, v_buf);
+            }
+
+            if constexpr(k1_loops > 1)
+            {
+                move_tile_window(v_dram_window, {0, kK1});
+                v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            }
+            __builtin_amdgcn_sched_barrier(0);
+
+            static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
+                if constexpr(FmhaMask::IsMasking)
+                {
+                    return raw_m == -numeric<SMPLComputeDataType>::infinity()
+                               ? type_convert<SMPLComputeDataType>(0.f)
+                               : raw_m;
+                }
+                else
+                {
+                    return raw_m;
+                }
+            };
+
+            if(!skip_block)
+            {
+                auto p_compute =
+                    make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
+                constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
+                sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                    // BIAS/ALIBI/SoftCap pre-scaled s_acc above; NO_BIAS folds scale_s into exp2
+                    // here.
+                    constexpr bool s_acc_prescaled =
+                        (BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap;
+                    auto row_max = s_acc_prescaled ? get_validated_m(m[i_idx])
+                                                   : scale_s * get_validated_m(m[i_idx]);
+#endif
+                    sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                        if constexpr(s_acc_prescaled)
+                            p_compute(i_j_idx) = exp2(s[i_j_idx] - row_max);
+                        else
+                            p_compute(i_j_idx) = exp2(scale_s * s[i_j_idx] - row_max);
+#else
+                        p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+#endif
+                    });
+                });
+
+                auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
+                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+
+                constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+                sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                    const auto tmp = [&]() {
+                        if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) ||
+                                     kHasLogitsSoftCap)
+                        {
+                            // s_acc already in log2-space (BIAS path / LogitsTransform).
+                            return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
+                        }
+                        else
+                        {
+                            auto row_max = scale_s * get_validated_m(m[i_idx]);
+                            return exp2(scale_s * m_old[i_idx] - row_max);
+                        }
+                    }();
+#else
+                    const auto tmp = exp(m_old[i_idx] - get_validated_m(m[i_idx]));
+#endif
+                    l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
+                    sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        o_acc(i_j_idx) *= tmp;
+                    });
+                });
+
+                const auto p = [&]() {
+                    if constexpr(std::is_same_v<PDataType, fp16_t>)
+                        return impl::cast_tile_pkrtz_fp16_fp32<PDataType>(p_compute);
+                    else
+                        return cast_tile<PDataType>(p_compute);
+                }();
+
+                if constexpr(k1_loops > 1)
+                {
+                    static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
+                        if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
+                        {
+                            v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+                        }
+                        block_sync_lds();
+                        gemm_1(
+                            o_acc,
+                            get_slice_tile(
+                                p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{}),
+                            get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{}));
+
+                        if constexpr(std::is_same_v<VLayout,
+                                                    ck_tile::tensor_layout::gemm::RowMajor>)
+                        {
+                            auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                                Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+                            shuffle_tile(v_shuffle_tmp, v_buf);
+                            auto v_lds_window_tmp = get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1,
+                                         kK1>{});
+                            store_tile(v_lds_window_tmp, v_shuffle_tmp);
+                        }
+                        else
+                        {
+                            auto v_lds_window_tmp = get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1,
+                                         kK1>{});
+                            store_tile(v_lds_window_tmp, v_buf);
+                        }
+                        if constexpr(i_k1 < k1_loops - 1)
+                            move_tile_window(v_dram_window, {0, kK1});
+                    });
+                }
+                {
+                    block_sync_lds();
+                    gemm_1(o_acc,
+                           get_slice_tile(
+                               p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
+                           get_slice_tile(
+                               v_lds_window,
+                               sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
+                               sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1,
+                                        kK1>{}));
+                }
+            }
+            else
+            {
+                // Skip path must still advance v_dram_window to keep it in sync.
+                if constexpr(k1_loops > 1)
+                {
+                    static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
+                        if constexpr(i_k1 < k1_loops - 1)
+                            move_tile_window(v_dram_window, {0, kK1});
+                    });
+                }
+            }
+
+            // K prefetch must run on every iteration (collective, outside the skip if).
+            i_total_loops++;
+            if(i_total_loops < num_total_loop)
+            {
+                // bias must follow K's delta jump; otherwise non-contiguous LUT blocks misalign
+                // bias.
+                if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
+                    move_tile_window(bias_dram_window, {0, kN0 * block_idx});
+                // v_dram_window already sits at this block's end (prefetch + per-k1 moves), so the
+                // (block_idx-1) delta tops it up to the next LUT-selected block's start.
+                move_tile_window(v_dram_window, {0, kN0 * (block_idx - 1)});
+                move_tile_window(k_dram_block_window, {kN0 * block_idx, 0});
+                k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
+
+                if constexpr(k1_loops >= 2 &&
+                             LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
+                    __builtin_amdgcn_s_barrier();
+                async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
+                                    k_dram_window,
+                                    number<-1>{},
+                                    k_oob_ck,
+                                    k_pre_np);
+                move_tile_window(k_dram_window, {0, kK0});
+            }
+        } while(i_total_loops < num_total_loop);
+
+        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+        sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            const auto tmp       = [&]() {
+                if constexpr(FmhaMask::IsMasking)
+                {
+                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
+                }
+                else
+                    return 1 / l[i_idx];
+            }();
+            sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                o_acc(i_j_idx) *= tmp;
+            });
+        });
+
+        return o_acc;
+    }
+};
+
+} // namespace ck_tile
