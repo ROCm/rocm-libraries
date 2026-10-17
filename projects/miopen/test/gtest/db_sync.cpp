@@ -1074,7 +1074,10 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          std::make_pair("gfx950", 256),
                                          std::make_pair("gfx1030", 36),
                                          std::make_pair("gfx1100", 0),
-                                         std::make_pair("gfx1101", 0),
+                                         // Only the 54-CU (27-WGP) gfx1101 ships a system DB
+                                         // (gfx110136). 27 makes StaticFDBSync skip the 24- and
+                                         // 30-WGP parts instead of failing on a missing file.
+                                         std::make_pair("gfx1101", 27),
                                          std::make_pair("gfx1102", 0),
                                          std::make_pair("gfx1151", 0),
                                          std::make_pair("gfx1200", 0),
