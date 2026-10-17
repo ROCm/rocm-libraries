@@ -761,10 +761,11 @@ among variants sharing its other knobs, which divide every shape a larger tile d
    each variant's keep/drop reason and numerics tag, the cells with no corpus evidence,
    and proposed rules (`drop knob X`, `drop X=v`, `keep X=v only for <cells>`) with their
    saving and cost. Exit 2 is unusable or stale input. Exit 3: the sweep cannot support a
-   reduction of this arm, because `summary.json` or its `expected_phases` is missing (the
+   reduction of this arm, because `summary.json` or its `expected_phases` is missing or unusable (the
    sweep did not finish), an expected timing or correctness phase of the arm has no
-   record, or a timing phase ranked nothing (nothing is written), or a correctness attempt
-   failed (the report is written). No selection is written, so investigate or rerun the
+   record, or a timing phase ranked nothing (nothing is written), or timing phases are
+   missing for some (round, corpus), or a correctness attempt failed (the report is
+   written). No selection is written, so investigate or rerun the
    sweep. A single round warns
    that the noise floor is assumed (`reduction.single_round_epsilon`, default 0.05), not
    measured; with two or more rounds the floor is `reduction.drift_multiplier` (default

@@ -5,10 +5,11 @@
 
 Exit-code contract: exit 0 success; exit 1 a gate refusal or internal failure (a
 strict budget overrun, --check-placeholders findings, an unreadable emitted file, a
-template error); exit 2 unusable input (a missing or invalid config, a missing
+template error); exit 2 unusable input (a missing or invalid config, a non-existent
 --emitted-root, an --output-dir that is a file, a non-empty output directory without
---force, a render ValueError), which is also argparse's code for a bad flag. --dry-run must not create the output dir.
---force is required to overwrite an existing non-empty output directory.
+--force, a render ValueError), which is also argparse's code for a bad flag. --dry-run
+must not create the output dir. --force is required to overwrite an existing non-empty
+output directory.
 """
 
 import subprocess

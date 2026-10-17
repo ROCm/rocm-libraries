@@ -11,7 +11,7 @@ manifest's ``ground_truth`` template; ``compare`` joins those graphs to a
 Exit 0 on success (``compare`` whatever the comparison finds), 2 on unusable input
 (including a ground-truth row or graph that no longer matches what ``graphs``
 recorded). ``compare --strict`` exits 1 unless every row is within the margin, was
-served in every timing round, and has a passing correctness verdict (outside, missing,
+not declined in any timing round, and has a passing correctness verdict (outside, missing,
 declined, failing, not run and no-reference rows all refuse).
 """
 
