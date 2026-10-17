@@ -368,6 +368,10 @@ static __host__ void prepDeviceForWork() {
     if (gpuThreadFromHost_counter++ != 0) {
         return;
     }
+    // Construct the enqueue stream first so it outlives the scheduler stream.
+    // Its final queued stop notification must remain available while we drain
+    // the persistent kernel at process shutdown.
+    (void)getEnqueingStream();
     // 1 zero followed by 511 ones
     static constexpr uint32_t cuMask[] = {
         0x7FFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
@@ -381,6 +385,13 @@ static __host__ void prepDeviceForWork() {
     static uint32_t temp = ([&isFirstTime]() {
         // TODO: investigate using hipExtStreamCreateWithCUMask for this
         __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
+        struct SchedulerStreamOwner {
+            ~SchedulerStreamOwner() {
+                (void)hipStreamSynchronize(mainStream);
+                (void)hipStreamDestroy(mainStream);
+            }
+        };
+        static SchedulerStreamOwner schedulerStreamOwner;
         isFirstTime = true;
     }(), -1U);
 
@@ -461,6 +472,7 @@ __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::se
     // __LIBHIPTHREADS_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
 
     __LIBHIPTHREADS_HIP_CHECK__(hipEventSynchronize(copyFinished));
+    __LIBHIPTHREADS_HIP_CHECK__(hipEventDestroy(copyFinished));
     return worknode_d;
 }
 __host__ ::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
