@@ -48,6 +48,14 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
   unit_test_csrmv_adaptive_analysis.cpp
+  unit_test_bfloat16.cpp
+)
+
+# rocsparse_bfloat16.h only defines the full rocsparse_bfloat16 struct when
+# compiled as HIP. Build this TU as HIP host code only: no device code object,
+# so the binary stays GPU-independent.
+set_source_files_properties(unit_test_bfloat16.cpp PROPERTIES
+  COMPILE_OPTIONS "-x;hip;--offload-host-only"
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -308,6 +316,17 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  unit_test_internal_common_blas.cpp
+  unit_test_internal_conversion_convert_array.cpp
+  unit_test_host_auxiliary_branches.cpp
+  unit_test_device_precond_kernels.cpp
+  unit_test_internal_conversion_cov.cpp
+  unit_test_internal_level3_sddmm_branches.cpp
+  unit_test_device_spmv_sptr.cpp
+  unit_test_device_extra_gemm_geam.cpp
+  unit_test_device_conversion_prune_extract.cpp
+  unit_test_device_cov_gap.cpp
+  unit_test_device_cov_81.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -405,6 +424,30 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
   # binary. Build wiring only -- no library source changes.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ell2dense.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2dense_aos.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ggthr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_identity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcreate_identity_permutation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2csc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2coo.cpp
+  # csritilu0x_*_impl is not reachable from the public itilu0 API. The symbols
+  # are hidden in librocsparse, so the defining TUs (and the x-driver TUs they
+  # reference) are compiled into this test binary.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/common.cpp
+  # csxsldu buffer-size and preprocess are hidden and the C wrappers are
+  # garbage-collected from librocsparse. Compile the defining TUs so the
+  # column-direction and same-direction branches can run.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_preprocess.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -450,6 +493,8 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).

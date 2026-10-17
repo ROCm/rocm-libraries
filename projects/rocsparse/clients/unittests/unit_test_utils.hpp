@@ -35,9 +35,12 @@
 #include "rocsparse.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <string>
 #include <vector>
 
 namespace rocsparse_ut
@@ -315,4 +318,29 @@ namespace rocsparse_ut
         return hipErrorInvalidValue;
     }
 #endif // __HIPCC__
+
+    // setenv / unsetenv do not exist on Windows.
+    inline void set_env(const char* name, const char* value)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, value);
+#else
+        (void)::setenv(name, value, 1);
+#endif
+    }
+
+    inline void unset_env(const char* name)
+    {
+#ifdef _WIN32
+        (void)_putenv_s(name, "");
+#else
+        (void)::unsetenv(name);
+#endif
+    }
+
+    // A file in the system temporary directory (/tmp on Linux).
+    inline std::string temp_file_path(const char* name)
+    {
+        return (std::filesystem::temp_directory_path() / name).string();
+    }
 } // namespace rocsparse_ut
