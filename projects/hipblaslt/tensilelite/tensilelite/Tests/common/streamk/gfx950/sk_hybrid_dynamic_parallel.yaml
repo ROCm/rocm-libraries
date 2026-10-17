@@ -1,0 +1,114 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Dynamic StreamK (SK5 Hybrid, DynamicWorkQueue sub-path) with the parallel
+# (PostGSU) reduction of split tiles, launched several times per solution.
+#
+# Every size below has at most CUs / 4 tiles of at least 64 iterations, where
+# the static path reduces in parallel, so the host splits every tile and,
+# since these kernels advertise SupportStreamKDynamicParallel, sets the
+# parallel-reduction bit: each work item stores its unscaled partial
+# to the M x N workspace slot of its part and returns to its queue, and the
+# PostGSU kernel applies alpha, beta*C, bias, scaleAlphaVec and the activation.
+# The epilogue features are what the PostGSU kernel takes over from the GEMM
+# kernel; the problems cover one tile with a long K, edge tiles, batches whose
+# parts span batches, and 64 tiles. Both raw-rank queue regimes are built
+# (WorkGroupMappingXCC -1, and PersistentXCCMapping 8 with WorkGroupMappingXCC
+# 8), with and without ActivationFuncCall. Each problem is validated after its
+# first launch and again after a group of back-to-back launches
+# (ValidateAfterEnqueues) whose last launch writes a rotating output buffer no
+# earlier launch wrote; the Synchronizer check (on by default) runs after both
+# and catches queue counters left nonzero by a work item that did not return
+# to its queue.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+
+GlobalParameters:
+  Architecture: gfx950
+  HybridAssignmentPolicy: [DynamicWorkQueue]
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 8
+  # alpha = 2, beta = 2: both applied by the PostGSU kernel. Bias and
+  # scaleAlphaVec are constant (2): random values let the long-K sums cancel to
+  # near zero, where fp32 summation-order noise exceeds the validation
+  # tolerance on the static reduction paths just as on this one.
+  DataInitTypeAlpha: 2
+  DataInitTypeBeta: 2
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeBias: 2
+  DataInitTypeScaleAlphaVec: 2
+  MaxWorkspaceSize: 134217728
+  # 2 warmups and one group of 3 back-to-back launches per run, 2 runs per
+  # problem.
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 3
+  ValidateAfterEnqueues: True
+  RotatingBufferSize: 512
+  NumWarmups: 2
+  NumBenchmarks: 2
+  SleepPercent: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      Activation: True
+      ActivationType: all
+      UseScaleAlphaVec: 1
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [Hybrid]
+        - GlobalSplitU: [0]
+        - DepthU: [16]
+        # MT 64x64.
+        - MatrixInstruction: [[16, 16, 4, 1, 1, 2, 2, 2, 2]]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - MIArchVgpr: [False]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [1]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+      ForkParameters:
+        - Groups:
+          - # Auto WGMXCC (resolved to NUM_XCD at launch).
+            - WorkGroupMappingXCC: -1
+              PersistentXCCMapping: 0
+            # SKXCC remap with WGMXCC > 1.
+            - WorkGroupMappingXCC: 8
+              PersistentXCCMapping: 8
+        - ActivationFuncCall: [False, True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # 1 tile, long K.
+          - Exact: [64, 64, 1, 65536]
+          # 12 edge tiles.
+          - Exact: [200, 130, 1, 16384]
+          # 3 batches x 4 tiles: workspace slots span the batches.
+          - Exact: [96, 96, 3, 32768]
+          # 64 tiles (CUs / 4) of 64 iterations: 4 parts each.
+          - Exact: [512, 512, 1, 1024]
+          # 4 batches of one tile, very long K.
+          - Exact: [32, 32, 4, 262144]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: gelu]
