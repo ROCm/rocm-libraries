@@ -1,0 +1,137 @@
+{
+    "generated_on": "14 Sep 2026, 06:02:26",
+    "gpu": {
+        "num_cu": 256,
+        "arch": "gfx950_gfx1250"
+    },
+    "version_info": {
+        "miopen_version": "91815205"
+    },
+    "source": "perf_db",
+    "device_run_id": 335,
+    "num_inputs": 27,
+    "num_solvers": 12,
+    "num_outputs": 12,
+    "encodings": {
+        "in_layout": {
+            "NCDHW": 0,
+            "NDHWC": 1
+        },
+        "fil_layout": {
+            "NCDHW": 0,
+            "NDHWC": 1
+        },
+        "out_layout": {
+            "NCDHW": 0,
+            "NDHWC": 1
+        },
+        "precision": {
+            "BF16": 0,
+            "FP16": 1,
+            "FP32": 2,
+            "INT8": 3
+        },
+        "direction": {
+            "B": 0,
+            "F": 1,
+            "W": 2
+        },
+        "solver": {
+            "ConvDirectNaiveConvBwd": 0,
+            "ConvDirectNaiveConvFwd": 1,
+            "ConvDirectNaiveConvWrw": 2,
+            "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
+            "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
+            "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
+            "GemmBwd1x1_stride1": 6,
+            "GemmBwdRest": 7,
+            "GemmFwd1x1_0_1": 8,
+            "GemmFwdRest": 9,
+            "GemmWrw1x1_stride1": 10,
+            "GemmWrwUniversal": 11
+        }
+    },
+    "conv_params_used_as_features": [
+        "in_channels",
+        "in_d",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_d",
+        "out_h",
+        "out_w",
+        "fil_d",
+        "fil_h",
+        "fil_w",
+        "pad_d",
+        "pad_h",
+        "pad_w",
+        "conv_stride_d",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_d",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count",
+        "num_cu",
+        "arch"
+    ],
+    "redundant_columns": {
+        "spatial_dim": 3,
+        "bias": 0
+    },
+    "decodings": {
+        "solver": {
+            "0": "ConvDirectNaiveConvBwd",
+            "1": "ConvDirectNaiveConvFwd",
+            "2": "ConvDirectNaiveConvWrw",
+            "3": "ConvHipImplicitGemm3DGroupBwdXdlops",
+            "4": "ConvHipImplicitGemm3DGroupFwdXdlops",
+            "5": "ConvHipImplicitGemm3DGroupWrwXdlops",
+            "6": "GemmBwd1x1_stride1",
+            "7": "GemmBwdRest",
+            "8": "GemmFwd1x1_0_1",
+            "9": "GemmFwdRest",
+            "10": "GemmWrw1x1_stride1",
+            "11": "GemmWrwUniversal"
+        }
+    },
+    "input_params": [
+        "in_channels",
+        "in_d",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_d",
+        "out_h",
+        "out_w",
+        "fil_d",
+        "fil_h",
+        "fil_w",
+        "pad_d",
+        "pad_h",
+        "pad_w",
+        "conv_stride_d",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_d",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count",
+        "num_cu",
+        "arch"
+    ],
+    "note": "Combined multi-arch TunaNet dataset: gfx950(cu=256,bin=0) + gfx1250(cu=256,bin=1). Union solver vocab; per-arch applicability via p=0/t=NaN. Added input features: num_cu (numeric), arch (binary). Promoted per-arch constant features to real columns: ['dilation_d', 'dilation_h', 'dilation_w']."
+}
