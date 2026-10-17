@@ -1,9 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// The C++ heuristic query must apply a workspace limit from 2 GiB to UINT32_MAX as the C query
-// does. Kernels address the workspace with 32-bit offsets, so both APIs clamp anything larger to
-// UINT32_MAX. Callers pass SIZE_MAX to mean "no limit", so a larger value must not be an error.
+// The C and C++ heuristic query APIs clamp the effective workspace limit to UINT32_MAX at
+// invocation time, because kernels address the workspace with 32-bit offsets.  The preference
+// stores the raw user value without clamping (so that the emulation path, which uses 64-bit
+// addressing, is not unnecessarily constrained).  Callers pass SIZE_MAX to mean "no limit",
+// so a value above UINT32_MAX must not be an error.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -171,32 +173,6 @@ namespace
             ASSERT_EQ(cppHeuristic(limit, cpp), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(c.front().algo.max_workspace_bytes, limit);
             EXPECT_EQ(summary(cpp), summary(c));
-        }
-    }
-
-    // The preference stores a limit above UINT32_MAX as UINT32_MAX, so no solution library is
-    // needed.
-    TEST_F(HeuristicWorkspaceLimit, smoke_PreferenceClampsLimitAboveUint32Max)
-    {
-        for(uint64_t limit : {4 * kGiB, std::numeric_limits<uint64_t>::max()})
-        {
-            SCOPED_TRACE(limit);
-            hipblasLtMatmulPreference_t pref = nullptr;
-            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(hipblasLtMatmulPreferenceSetAttribute(
-                          pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit)),
-                      HIPBLAS_STATUS_SUCCESS);
-            uint64_t stored  = 0;
-            size_t   written = 0;
-            EXPECT_EQ(
-                hipblasLtMatmulPreferenceGetAttribute(pref,
-                                                      HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-                                                      &stored,
-                                                      sizeof(stored),
-                                                      &written),
-                HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(stored, kUint32Max);
-            hipblasLtMatmulPreferenceDestroy(pref);
         }
     }
 

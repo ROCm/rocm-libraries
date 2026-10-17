@@ -399,6 +399,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE                 = 106,
 #endif
+    ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR                        = 107,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 

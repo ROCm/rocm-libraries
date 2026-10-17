@@ -36,6 +36,24 @@
 #include <iostream>
 #include <vector>
 
+/********************************************************************************
+ * \brief Internal definition of the opaque hipblasLtEmulationDescriptor type.
+ * Emulation is enabled by attaching the descriptor to a matmul descriptor.
+ * Use force_off (internal only) to prevent re-entry from the native-GEMM fallback.
+ *******************************************************************************/
+struct hipblasLtEmulationDescriptor
+{
+    hipblasLtEmulationStrategy_t             emulation_strategy   = HIPBLASLT_EMULATION_STRATEGY_DEFAULT;              /**< DEFAULT = use process-wide env-var default (PERFORMANT unless overridden) */
+    hipblasltEmulationSpecialValuesSupport_t emulation_sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /**< DEFAULT = detect both Inf and NaN */
+    int emulation_fixedpoint_mantissa_control            = 0;   /**< Not used at the moment */
+    int emulation_fixedpoint_max_mantissa_bits           = 0;   /**< 0=inherit, 1..52=explicit bit count */
+    int emulation_fixedpoint_mantissa_bit_offset         = 0;   /**< Not used at the moment */
+    int emulation_fixedpoint_mantissa_bit_count_pointer  = 0;   /**< Not used at the moment */
+    /** Internal use only: set by native_gemm_fallback to prevent recursive re-entry.
+     *  Not accessible via any public API. Must not be set from user code. */
+    bool force_off = false;
+};
+
 struct _rocblaslt_attribute
 {
     _rocblaslt_attribute() {};
@@ -382,42 +400,48 @@ struct _rocblaslt_matmul_desc
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
 #endif
 
+    /* FP64/FP32 emulation settings attached via HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR.
+     * Non-owning: the caller's hipblasLtEmulationDesc_t must outlive every matmul
+     * using this descriptor.  nullptr means "use all env-var / built-in defaults". */
+    const struct hipblasLtEmulationDescriptor* emulation_desc = nullptr;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                    = src.op_A;
-        this->op_B                    = src.op_B;
-        this->epilogue                = src.epilogue;
-        this->bias                    = src.bias;
-        this->scaleA                  = src.scaleA;
-        this->scaleB                  = src.scaleB;
-        this->scaleC                  = src.scaleC;
-        this->scaleD                  = src.scaleD;
-        this->scaleE                  = src.scaleE;
-        this->scaleAType              = src.scaleAType;
-        this->scaleBType              = src.scaleBType;
-        this->pointermode             = src.pointermode;
-        this->amaxD                   = src.amaxD;
-        this->bias_type               = src.bias_type;
-        this->e                       = src.e;
-        this->aux_type                = src.aux_type;
-        this->lde                     = src.lde;
-        this->stride_e                = src.stride_e;
-        this->compute_type            = src.compute_type;
-        this->compute_type_original   = src.compute_type_original;
-        this->compute_input_typeA     = src.compute_input_typeA;
-        this->compute_input_typeB     = src.compute_input_typeB;
-        this->scale_type              = src.scale_type;
-        this->act0                    = src.act0;
-        this->act1                    = src.act1;
-        this->sm_count_target         = src.sm_count_target;
+        this->op_A                        = src.op_A;
+        this->op_B                        = src.op_B;
+        this->epilogue                    = src.epilogue;
+        this->bias                        = src.bias;
+        this->scaleA                      = src.scaleA;
+        this->scaleB                      = src.scaleB;
+        this->scaleC                      = src.scaleC;
+        this->scaleD                      = src.scaleD;
+        this->scaleE                      = src.scaleE;
+        this->scaleAType                  = src.scaleAType;
+        this->scaleBType                  = src.scaleBType;
+        this->pointermode                 = src.pointermode;
+        this->amaxD                       = src.amaxD;
+        this->bias_type                   = src.bias_type;
+        this->e                           = src.e;
+        this->aux_type                    = src.aux_type;
+        this->lde                         = src.lde;
+        this->stride_e                    = src.stride_e;
+        this->compute_type                = src.compute_type;
+        this->compute_type_original       = src.compute_type_original;
+        this->compute_input_typeA         = src.compute_input_typeA;
+        this->compute_input_typeB         = src.compute_input_typeB;
+        this->scale_type                  = src.scale_type;
+        this->act0                        = src.act0;
+        this->act1                        = src.act1;
+        this->sm_count_target             = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
         this->bias_stride             = src.bias_stride;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
+        this->emulation_desc              = src.emulation_desc;
     }
 };
 

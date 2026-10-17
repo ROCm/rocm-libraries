@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
@@ -259,6 +259,13 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         endif()
     endif()
 
+    # Pull in the fixed-point emulation (FP32/FP64) object files directly
+    # (same objects the hipblaslt shared library is built from) so the test
+    # can call the internal entry points without them being exported from the
+    # release ABI.
+    if(HIPBLASLT_ENABLE_HOST)
+        target_link_libraries(hipblaslt-test PRIVATE hipblaslt-fixed-point-emulation)
+    endif()
     # The tuning file's row format and store, tested on their own: no device,
     # no solution library and no test hooks, so they run wherever the tests
     # build. CI runs the same cases inside hipblaslt-test. Don't register this

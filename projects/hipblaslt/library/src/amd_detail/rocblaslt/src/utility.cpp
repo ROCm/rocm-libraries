@@ -291,6 +291,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
     case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
         return "MATMUL_DESC_FUSED_EPILOGUE";
 #endif
+    case ROCBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR:
+        return "MATMUL_DESC_EMULATION_DESC";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
