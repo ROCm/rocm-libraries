@@ -122,15 +122,33 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     /// MIIR compiler, which is very slow.
     ///
     /// The loop below does all the above at once.
+    ///
+    /// The workspace size stored in a find-db record is not trusted. Records in shipped system
+    /// find-dbs can carry a size that is smaller than what the solver needs today (for example
+    /// 0 for GemmFwd1x1_0_2, ROCM-30131), and callers of GetSolution allocate exactly the
+    /// reported size before calling Immediate. So for every returned solution the reported size
+    /// is raised to the solver's current requirement, the same value that
+    /// GetSolutionWorkspaceSize returns.
     std::sort(begin(interim), end(interim), SolutionTimeComparator{});
     auto out = std::vector<miopenConvSolution_t>{};
     out.reserve(maxSolutionCount);
     auto n_copied = 0;
-    for(const auto& s : interim)
+    for(auto s : interim)
     {
         const auto solver_id = solver::Id{s.solution_id};
-        if(!solver_id.GetSolver().IsApplicable(ctx, problem))
+        const auto solver    = solver_id.GetSolver();
+        if(!solver.IsApplicable(ctx, problem))
             continue;
+        if(solver.MayNeedWorkspace())
+        {
+            const auto required = solver.GetWorkspaceSize(ctx, problem);
+            if(required > s.workspace_size)
+            {
+                MIOPEN_LOG_I2(solver_id.ToString() << ": find-db workspace " << s.workspace_size
+                                                   << " is less than required " << required);
+                s.workspace_size = required;
+            }
+        }
         if(!conv::IsEnoughWorkspace("GetSolutions", solver_id, s.workspace_size, invokeParams))
             continue;
         out.push_back(s);
