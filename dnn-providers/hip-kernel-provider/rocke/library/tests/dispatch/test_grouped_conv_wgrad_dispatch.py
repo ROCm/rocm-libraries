@@ -20,18 +20,20 @@ a match here proves the dispatch path launches a correct grid.
 from __future__ import annotations
 
 import math
+import os
 import unittest
+from dataclasses import replace
+from unittest import mock
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
     _block,
     _problem,
-    # Deliberately the alias dispatch itself calls, not a fresh import from
-    # kernels: the test asserts on exactly the predicate dispatch consults.
-    _wgrad_atomic_epilogue_available,
     conv_grouped_candidates,
     dispatch_conv_grouped,
 )
+from kernels.common.conv_implicit_gemm_wgrad import wgrad_atomic_epilogue_available
+from kernels.common.conv_split_k import ENV_CONV_SPLIT_K, resolve_conv_split_k
 
 
 def _wgrad(arch="gfx942", **kw):
@@ -58,8 +60,8 @@ def _wgrad(arch="gfx942", **kw):
 def _expected_grid(req, spec):
     # Mirror dispatch._wgrad_grid: per-tile tiling on x/y, and z = (groups/Gm)
     # * split_k with the merged group riding block_id_z alongside the K-slice.
-    # split_k == -1 is the auto sentinel; resolve it via the same CK formula
-    # the grid uses so this stays an independent re-derivation of the wiring.
+    # split_k == -1 is the auto sentinel; it is resolved by the shared conv
+    # split-K resolver, so this checks that dispatch wires that degree into z.
     p = _problem(req)
     spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
     gm = max(1, getattr(spec, "group_merge", 1))
@@ -69,21 +71,19 @@ def _expected_grid(req, spec):
     wg_N = spatial * (p.C // p.groups) * gm
     gx = math.ceil(wg_N / spec.tile_n)
     gy = math.ceil(wg_M / spec.tile_m)
-    split_k = spec.split_k
-    if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
-
-        split_k = select_split_k_wgrad(
-            wg_M=wg_M,
-            wg_N=wg_N,
-            wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
-            tile_m=spec.tile_m,
-            tile_n=spec.tile_n,
-            tile_k=spec.tile_k,
-            arch=spec.arch,
-            groups=p.groups // gm,
-            block_size=_block(spec)[0],
-        ).split_k
+    split_k = resolve_conv_split_k(
+        "wgrad",
+        p,
+        arch=spec.arch,
+        dtype=spec.dtype,
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        block_size=_block(spec)[0],
+        group_merge=gm,
+        split_k=spec.split_k,
+        env={},
+    ).split_k
     return (gx, gy, (p.groups // gm) * split_k)
 
 
@@ -160,7 +160,7 @@ class TestGroupedConvDirectionSurface(unittest.TestCase):
 
 
 class TestTwoStageSelection(unittest.TestCase):
-    """two_stage is chosen by atomic availability, not by a caller flag."""
+    """two_stage follows the reductions a problem admits, not a caller flag."""
 
     def test_odd_wg_N_takes_the_scratch_path(self):
         # wg_N = Y*X*cpg odd => the packed <2 x bf16> atomic pair is not
@@ -173,14 +173,28 @@ class TestTwoStageSelection(unittest.TestCase):
                 "odd wg_N with a 16-bit dW must resolve to the two-stage path",
             )
 
-    def test_even_wg_N_stays_on_the_packed_atomic(self):
-        # wg_N even => the packed atomic can address dW directly and no
-        # scratch/second launch is needed.
+    def test_even_wg_N_admits_the_packed_atomic(self):
+        # wg_N even => the packed atomic can address dW directly, so it is a
+        # reduction the resolver may pick (whether it does is the split-K
+        # cost model's call; see test_conv_split_k.py): pinning it must give a
+        # single-stage spec, no scratch and no second launch.
         r = dispatch_conv_grouped(_wgrad("gfx950", C=64, K=64, Y=3, X=3, dtype="bf16"))
-        ws = r.spec.to_wgrad_spec(_problem(r.request))
-        self.assertFalse(
-            ws.two_stage, "an even wg_N should reach split-K via packed atomics"
+        p = _problem(r.request)
+        ok, why = wgrad_atomic_epilogue_available(p, "bf16", None)
+        self.assertTrue(ok, why)
+        pinned = resolve_conv_split_k(
+            "wgrad",
+            p,
+            arch="gfx950",
+            dtype="bf16",
+            tile_m=r.spec.tile_m,
+            tile_n=r.spec.tile_n,
+            tile_k=r.spec.tile_k,
+            block_size=_block(r.spec)[0],
+            split_k=8,
+            env={},
         )
+        self.assertEqual((pinned.split_k, pinned.two_stage), (8, False))
 
     def test_split_k_1_needs_no_two_stage(self):
         r = dispatch_conv_grouped(_wgrad("gfx1250"))
@@ -196,7 +210,7 @@ class TestTwoStageSelection(unittest.TestCase):
         # Taking it anyway would accumulate an off-diagonal pair's partial sum
         # into a live dW element -- wrong gradients, and nothing raises.
         #
-        # Today the `gm > 1` clause in _resolve_wgrad_split_k is *subsumed*, and
+        # Today the merged-group clause in conv_split_k is *subsumed*, and
         # this test deliberately does not pretend otherwise. Dispatch emits only
         # fp16/bf16, and merging is depthwise-only, so cpg == 1 forces a
         # store-vector width of 1 and wgrad_atomic_epilogue_available already
@@ -225,7 +239,9 @@ class TestTwoStageSelection(unittest.TestCase):
                     )
                 )
                 p = _problem(r.request)
-                ws = r.spec.to_wgrad_spec(p)
+                # Pin a split: the invariant is about the reduction path a
+                # merged split takes, whatever degree auto would choose here.
+                ws = replace(r.spec, split_k=8).to_wgrad_spec(p)
                 if ws.group_merge <= 1 or ws.split_k <= 1:
                     continue
                 seen_merged += 1
@@ -235,11 +251,11 @@ class TestTwoStageSelection(unittest.TestCase):
                 self.assertTrue(
                     ws.two_stage, f"{where}: merged split-K must be two-stage"
                 )
-                atomic_ok, _ = _wgrad_atomic_epilogue_available(p, dtype, None)
+                atomic_ok, _ = wgrad_atomic_epilogue_available(p, dtype, None)
                 self.assertFalse(
                     atomic_ok,
                     f"{where}: the packed atomic became available on a mergeable "
-                    f"shape -- the `gm > 1` clause in _resolve_wgrad_split_k is no "
+                    f"shape -- the merged-group clause in conv_split_k is no "
                     f"longer subsumed and is now the sole guard; re-read it",
                 )
         self.assertGreater(seen_merged, 0, "no merged split-K case was exercised")
@@ -431,8 +447,8 @@ class TestGfx1250WgradKOuterReachable(unittest.TestCase):
     def test_agrees_with_the_selection_policy(self):
         # Dispatch must not hand-roll the gate; it must match the one policy
         # function the sweep driver also calls.
-        from rocke.core.arch import ArchTarget
         from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from rocke.core.arch import ArchTarget
 
         spec = self._spec()
         self.assertEqual(
@@ -476,7 +492,11 @@ class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
         from dataclasses import replace as _replace
 
         r = dispatch_conv_grouped(_wgrad("gfx950", C=3, K=24, Y=3, X=3, dtype="bf16"))
-        ws = r.spec.to_wgrad_spec(_problem(r.request))
+        # Pin a split so the spec is two-stage whatever auto split-K would
+        # choose for this small problem: odd C leaves the workspace as the only
+        # split-K reduction.
+        ws = _replace(r.spec, split_k=8).to_wgrad_spec(_problem(r.request))
+        self.assertTrue(ws.two_stage)
         self.assertNotEqual(
             ws.kernel_name(),
             _replace(ws, ws_replicas=ws.ws_replicas + 1).kernel_name(),
@@ -722,6 +742,39 @@ class TestLaunchContractMatchesKernel(unittest.TestCase):
         )
         self.assertEqual((values["p_num_pid_m"], values["p_num_pid_n"]), (1, 1))
         self.assertEqual((r.grid[1], r.grid[0]), (1, 1))
+
+
+class TestSmallDepthwiseDispatches(unittest.TestCase):
+    """A depthwise wgrad whose reduction fits in one K tile still dispatches."""
+
+    def test_batch_one_small_spatial(self):
+        for hw in (4, 8):
+            r = dispatch_conv_grouped(
+                _wgrad("gfx950", N=1, C=64, K=64, G=64, Hi=hw, Wi=hw, dtype="bf16")
+            )
+            ws = r.spec.to_wgrad_spec(_problem(r.request))
+            self.assertEqual(ws.split_k, 1)
+            self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+
+class TestCompileIdentity(unittest.TestCase):
+    """An auto spec's compile key names the binary the resolver launches."""
+
+    def _key(self, override):
+        req = _wgrad("gfx950", N=32, C=64, K=64, Hi=56, Wi=56, dtype="bf16")
+        with mock.patch.dict(os.environ, {ENV_CONV_SPLIT_K: override}):
+            r = dispatch_conv_grouped(req)
+            return r.spec, r.kernel_id.compile_key
+
+    def test_split_and_unsplit_binaries_get_different_keys(self):
+        spec_off, off = self._key("off")
+        spec_on, on = self._key("8")
+        self.assertEqual(spec_off, spec_on)  # same unresolved spec...
+        self.assertNotEqual(off, on)  # ...but a different binary
+
+    def test_the_degree_alone_does_not_change_the_key(self):
+        # The degree is the ks/ks_count kernarg: one binary serves both.
+        self.assertEqual(self._key("8")[1], self._key("16")[1])
 
 
 if __name__ == "__main__":
