@@ -28,6 +28,7 @@
 #include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "logging.h"
+#include "rocblaslt_secure_env.hpp"
 #include "rocroller_host.hpp"
 
 #include <hip/hip_runtime.h>
@@ -46,22 +47,6 @@ namespace
     constexpr const char* kEnvScanUntil     = "HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL";
     constexpr const char* kEnvStopOnFirst   = "HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST";
     constexpr const char* kEnvCheckSynchronizer = "HIPBLASLT_CHECK_SYNCHRONIZER";
-
-    // Trim leading/trailing whitespace + lowercase. Used for the two
-    // text-token env vars; numeric-only vars use std::atoi.
-    std::string normalize_env(const char* raw)
-    {
-        std::string s(raw);
-        size_t      first = s.find_first_not_of(" \t");
-        if(first == std::string::npos)
-            return {};
-        s.erase(0, first);
-        if(auto p = s.find_last_not_of(" \t"); p != std::string::npos)
-            s.erase(p + 1);
-        for(auto& c : s)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return s;
-    }
 } // namespace
 
 /*******************************************************************************
@@ -107,7 +92,7 @@ _rocblaslt_handle::_rocblaslt_handle()
     // (including the removed =4 fail bit) collapses to no_check.
     if(const char* cn = std::getenv(kEnvCheckNumerics))
     {
-        const std::string s = normalize_env(cn);
+        const std::string s = rocblaslt::normalizeEnv(cn);
         if(s == "info" || s == "1")
             check_numerics = hipblaslt_check_numerics_mode_info;
         else if(s == "warn" || s == "2")
@@ -150,7 +135,7 @@ _rocblaslt_handle::_rocblaslt_handle()
 
     if(const char* sof = std::getenv(kEnvStopOnFirst))
     {
-        const std::string s = normalize_env(sof);
+        const std::string s          = rocblaslt::normalizeEnv(sof);
         check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
     }
 
@@ -227,7 +212,7 @@ _rocblaslt_handle::_rocblaslt_handle()
     // MBSK kernel leaves the handle's flag buffers all-zero on exit.
     if(const char* cs = std::getenv(kEnvCheckSynchronizer))
     {
-        const std::string s = normalize_env(cs);
+        const std::string s = rocblaslt::normalizeEnv(cs);
         check_synchronizer  = (s == "1" || s == "on" || s == "true");
     }
 }
