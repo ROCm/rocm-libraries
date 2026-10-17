@@ -80,9 +80,8 @@ rocke/helpers/
 │ # the i4-quant weight path in block-scale GEMM
 │ # and fused MoE down-projection.
 ├── mx_scale.py # OCP MX E8M0 shared-exponent decode +
-│ # apply: ``2^(e - 127)`` with NaN / zero
-│ # sentinel handling matching the AMDGPU MX
-│ # MFMA hardware path.
+│ # apply: ``2^(e - 127)`` for the unsigned
+│ # byte 0..254, NaN for 255.
 ├── preshuffle.py # Preshuffled-B tile-major layout
 │ # descriptor + per-lane offset emitter for the
 │ # high-bandwidth FP8 / BF8 GEMM path.

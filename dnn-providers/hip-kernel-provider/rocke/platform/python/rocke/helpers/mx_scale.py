@@ -9,12 +9,11 @@ of 32 mantissa elements. The dequantisation pipeline is uniform across
 the three mantissa types and across the CK Tile ``42_mx_gemm`` /
 ``38_block_scale_gemm`` mx variants::
 
- 1. Load the 8-bit unbiased E8M0 scale (one byte per 32-element
- mantissa block).
+ 1. Load the 8-bit E8M0 scale (one byte per 32-element mantissa
+ block). The byte is an unsigned biased exponent.
  2. Decode the scale into an f32 multiplier: ``scale_f32 = 2^(e - 127)``
- where ``e`` is the unbiased exponent. Special cases: ``e == 0``
- -> denormal (treated as 0 for ML use); ``e == 255`` -> NaN
- (treated as 0 by AMDGPU's MX MFMA hardware path).
+ where ``e`` is the byte value (0..255). ``e == 255`` is NaN.
+ E8M0 has no zero code: ``e == 0`` is ``2^-127``, a subnormal f32.
  3. Apply the scale to the dequantised mantissa value via a single
  ``fmul`` before it enters the accumulator.
 
@@ -39,7 +38,7 @@ f16/bf16)`` if the consumer wants the scale in a narrower dtype.
 
 from __future__ import annotations
 
-from ..core.ir import I8, I32, IRBuilder, PtrType, Value
+from ..core.ir import F32, I8, I32, IRBuilder, PtrType, Value
 
 
 __all__ = [
@@ -51,34 +50,31 @@ __all__ = [
 
 
 def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
-    """Decode an 8-bit E8M0 exponent (unbiased, no mantissa, no sign)
-    into an f32 multiplier ``2^(e - 127)``.
+    """Decode an 8-bit E8M0 scale into an f32 multiplier ``2^(e - 127)``.
 
-    E8M0 layout matches IEEE-754's f32 exponent field:
+    The input is the raw ``i8`` storage byte. E8M0 is an unsigned biased
+    exponent with no sign, no mantissa, and no zero or infinity code.
+    The decoder zero-extends the byte, so codes 128..255 stay positive.
 
-    * ``e == 0`` -> subnormal multiplier; we return ``0.0`` since
-    ML uses the all-zero scale as a "block disabled" sentinel.
-    * ``e == 255`` -> NaN; we return ``0.0`` so downstream
-    accumulators don't poison their row. Matches the AMDGPU MX
-    MFMA hardware path.
-    * ``1 <= e <= 254`` -> ``2^(e - 127)``, exact.
+    * ``0 <= e <= 254`` -> ``2^(e - 127)``, exact. ``e == 0`` gives
+    ``2^-127``, a subnormal f32. A consumer that flushes f32 denormals
+    reads this value as zero.
+    * ``e == 255`` -> NaN, as the OCP MX format defines.
 
-    Lowering: ``sitofp(sext(e)) - 127.0`` then ``exp2``; with both
-    sentinels handled via ``select``. The AMDGPU backend fuses the
-    select chain into a single ``v_med3_f32`` + ``v_exp_f32``.
+    Lowering: ``sitofp(zext(e)) - 127.0``, then ``exp2``. One ``select``
+    replaces the result with NaN for ``e == 255``.
     """
     if e8m0.type.name != "i8":
         raise ValueError(f"decode_mx_scale_e8m0 expects i8 input, got {e8m0.type.name}")
-    e_i32 = b.sext(e8m0, I32)
-    is_zero = b.cmp_eq(e_i32, b.const_i32(0))
+    e_i32 = b.zext(e8m0, I32)
     is_nan = b.cmp_eq(e_i32, b.const_i32(255))
     e_minus_127_f32 = b.fsub(b.sitofp_f32(e_i32), b.const_f32(127.0))
-    # ``exp2`` returns f32 here; the per-byte ML quant block size
-    # caps the exponent range to roughly +/-127 so the result fits
-    # well within f32's dynamic range.
+    # ``exp2(128)`` overflows for ``e == 255``; the select below replaces
+    # that lane with NaN. The NaN comes from its bit pattern, so the IR holds
+    # no non-finite float constant (the JSON export cannot carry one).
     raw_scale = b.exp2(e_minus_127_f32)
-    zero = b.const_f32(0.0)
-    return b.select(b.lor(is_zero, is_nan), zero, raw_scale)
+    nan = b.bitcast(b.const_i32(0x7FC00000), F32)
+    return b.select(is_nan, nan, raw_scale)
 
 
 def apply_mx_scale(b: IRBuilder, value_f32: Value, scale_f32: Value) -> Value:
@@ -166,6 +162,4 @@ def load_and_decode_mx_scales_wave(
     src_lane = src_lane_fn(b, lane)
     addr = b.mul(src_lane, b.const_i32(4))  # i32 lane index in bits[7:2]
     bcast_i32 = b.ds_bpermute(addr, raw_i32)
-    from ..core.ir import F32
-
     return b.bitcast(bcast_i32, F32)

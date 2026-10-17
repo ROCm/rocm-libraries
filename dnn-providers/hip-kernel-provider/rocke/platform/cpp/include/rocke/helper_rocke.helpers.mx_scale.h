@@ -7,24 +7,23 @@
  * helpers in helpers/mx_scale.py -- apply_mx_scale, load_and_decode_mx_scale_byte,
  * load_and_decode_mx_scales_wave -- are out of scope for this phase).
  *
- * MX (microscaling) shared-exponent helper. Decodes an 8-bit unbiased E8M0
- * exponent (one byte per 32-element mantissa block) into an f32 multiplier
+ * MX (microscaling) shared-exponent helper. Decodes an 8-bit E8M0 scale
+ * (one byte per 32-element mantissa block) into an f32 multiplier
  * ``2^(e - 127)``, byte-faithfully to the Python:
  *
  *     def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
  *         if e8m0.type.name != "i8":
  *             raise ValueError(...)
- *         e_i32 = b.sext(e8m0, I32)
- *         is_zero = b.cmp_eq(e_i32, b.const_i32(0))
- *         is_nan  = b.cmp_eq(e_i32, b.const_i32(255))
+ *         e_i32 = b.zext(e8m0, I32)
+ *         is_nan = b.cmp_eq(e_i32, b.const_i32(255))
  *         e_minus_127_f32 = b.fsub(b.sitofp_f32(e_i32), b.const_f32(127.0))
  *         raw_scale = b.exp2(e_minus_127_f32)
- *         zero = b.const_f32(0.0)
- *         return b.select(b.lor(is_zero, is_nan), zero, raw_scale)
+ *         nan = b.bitcast(b.const_i32(0x7FC00000), F32)
+ *         return b.select(is_nan, nan, raw_scale)
  *
- * Sentinels: ``e == 0`` (subnormal) and ``e == 255`` (NaN) both decode to
- * ``0.0`` so downstream accumulators are not poisoned, matching the AMDGPU MX
- * MFMA hardware path. ``1 <= e <= 254`` decodes to ``2^(e - 127)``.
+ * The byte is an unsigned biased exponent, so the decoder zero-extends it.
+ * ``0 <= e <= 254`` decodes to ``2^(e - 127)``. ``e == 0`` gives ``2^-127``,
+ * a subnormal f32. ``e == 255`` decodes to NaN, as the OCP MX format defines.
  *
  * The Python raises ValueError on a non-i8 input. C99 has no exceptions, so the
  * builder-aware spelling follows the rest of the C port's sticky-error model:
@@ -41,8 +40,8 @@
 extern "C" {
 #endif
 
-/* Decode an 8-bit E8M0 exponent value into an f32 multiplier ``2^(e - 127)``,
- * with the ``e == 0`` / ``e == 255`` sentinels mapped to ``0.0``.
+/* Decode an 8-bit E8M0 scale into an f32 multiplier ``2^(e - 127)``. The byte
+ * is unsigned: ``0 <= e <= 254`` gives ``2^(e - 127)`` and ``e == 255`` gives NaN.
  *
  * `e8m0` must be an i8 Value. On a non-i8 input the builder's sticky error
  * (ROCKE_ERR_VALUE) is set with the Python-matching message and NULL is returned.
