@@ -212,8 +212,8 @@ These differ from cuDNN:
 | `ENGINE_KNOB_INFO`, `ENGINE_BEHAVIOR_NOTE` | read from hipDNN on the first GET, not at `ENGINE` finalize; a failure is returned by that GET and a later GET retries |
 | `ENGINE_KNOB_INFO` contents | lists only hipDNN knobs that project onto a cuDNN knob type (see [Knobs](#knobs): int64 value, plain minimum/maximum/stride, no list of valid values). A cuDNN type that two of an engine's knobs map onto is not listed (the v9 `get_knobs_for_engine` lists both) |
 | `KNOB_INFO` finalized by the caller | `BAD_PARAM`; knob-information descriptors are filled by `ENGINE_KNOB_INFO` only |
-| `ENGINECFG_KNOB_CHOICES` | checked at `ENGINECFG` finalize: a type not listed in the engine's `KNOB_INFO` is `NOT_SUPPORTED`; a type chosen twice, or a value outside the knob's range or off its stride, is `BAD_PARAM`. A failure building the hipDNN configuration is reported at `EXECUTION_PLAN` finalize |
-| `EXECUTION_PLAN_HANDLE` | required; `BAD_PARAM` at finalize when it differs from the operation graph's `HANDLE` (hipDNN builds the plan on the graph's handle) |
+| `ENGINECFG_KNOB_CHOICES` | checked at `ENGINECFG` finalize: a type not listed in the engine's `KNOB_INFO` is `NOT_SUPPORTED`; a type chosen twice, or a value outside the knob's range or off its stride, is `BAD_PARAM`. A failure building the hipDNN configuration is reported at `EXECUTION_PLAN` finalize. A choice of `-1` means "unset" (upstream's `EngineConfigBuilder` sends `-1` for every knob it was not asked to set once one is set): it is ignored (not checked, not applied, not counted as a repeat, not in the plan JSON `"knobs"`) unless the knob is listed and its range accepts `-1`. The `KNOB_CHOICES` GET still returns every choice as set. A configuration whose choices are all ignored uses the engine's default hipDNN configuration |
+| `EXECUTION_PLAN_HANDLE` | optional for a plan built from `ENGINE_CONFIG` (upstream's `ExecutionPlanBuilder` never sets it): unset or null, the plan runs on the operation graph's `HANDLE`; when set, `BAD_PARAM` at finalize unless it is that handle (hipDNN builds the plan on the graph's handle). Required for a plan loaded from `JSON_REPRESENTATION` (`BAD_PARAM` otherwise), as upstream's `loadFromJson` sets it |
 | `EXECUTION_PLAN_KERNEL_CACHE` | `NOT_SUPPORTED` when set |
 | `EXECUTION_PLAN_JSON_REPRESENTATION` format | the shim's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, knob choices and, when hipDNN can serialize the plan, a base64 payload. Notes and knob types are the shim's enum values. JSON written by cuDNN or by another tool is `BAD_PARAM` at finalize |
 | Loading a plan without `"payload"` | `NOT_SUPPORTED` at finalize; engines whose plans hipDNN cannot serialize cannot be reloaded |
@@ -226,8 +226,11 @@ These differ from cuDNN:
 
 The v0.x builders (`TensorBuilder`, `ConvDescBuilder`, `PointWiseDescBuilder`, `MatMulDescBuilder`,
 `ReductionDescBuilder`, `ResampleDescBuilder`, `RngDescBuilder`, `OperationBuilder`,
-`OperationGraphBuilder`, `VariantPackBuilder`) are upstream's, running on the C API above, so every
-C API row applies to their `build()`. These differ as well:
+`OperationGraphBuilder`, `VariantPackBuilder`, `EngineHeuristicsBuilder`, `EngineBuilder`,
+`EngineConfigBuilder`, `EngineFallbackListBuilder`, `ExecutionPlanBuilder`) and the plan helpers
+(`get_heuristics_list`, `cudnnGetPlan`, `time_sorted_plan`, `cudnnFindPlan`,
+`cudnnFindPlanAndCache`) are upstream's, running on the C API above, so every C API row applies to
+their `build()`. These differ as well:
 
 | Case | Shim behavior |
 |---|---|
@@ -240,3 +243,12 @@ C API row applies to their `build()`. These differ as well:
 | Operation and operation-graph `build()` errors | an operation the C API rejects at finalize fails `OperationBuilder::build()` with that row's status, and a graph rejection fails `OperationGraphBuilder::build()` the same way: see [Operations](#operations) and [Operation graphs](#operation-graphs). `GenStats`, `BNFinalize`, `Dgrad_Drelu_BN_Bwd`, `Rng`, paged-cache-load and `Reshape` operations always fail with `NOT_SUPPORTED` |
 | `OperationGraphBuilder` without `setHandle` | `build()` fails with `BAD_PARAM`. cuDNN 9.8 and later build the graph without a handle |
 | PyTorch fused convolutions | `cudnn_convolution_relu` passes `alpha2 = 0` to the pointwise add, so it always gets `NOT_SUPPORTED`; `cudnn_convolution_add_relu` does whenever its alpha is not 1 (see the scaling row under [Operations](#operations)) |
+| Heuristic mode strings | every mode returns the same list (see [Heuristic modes](#heuristic-modes)), so a mode list such as `{"heuristics_instant", "heuristics_fallback"}` given to `get_heuristics_list` or `EngineConfigGenerator` yields every engine configuration once per mode. `cudnnGetPlan` and `time_sorted_plan` build and time the duplicates, and they count against a plan or benchmark limit |
+| `get_fallback_engine_list` | returns upstream's table of NVIDIA engine numbers; under the shim those numbers select unrelated hipDNN engines or none (see the engine-indices row under [Engines, plans and execution](#engines-plans-and-execution)) |
+| `setKernelCache`, `setDeviceProperties`, `setSMCount` | a non-null kernel cache or device properties, or an SM count of 0 or more, makes `build()` fail with `NOT_SUPPORTED` |
+| `cudnnReorderFilterAndBiasInt8x32` | checks its arguments as upstream, then returns `NOT_SUPPORTED`: the shim has no int8x32 reordering |
+| Plan tags | the `_k<type>=<value>` segments of `ExecutionPlan::getTag()` use the shim's knob-type integers, so errata `"knob"` entries written against cuDNN's integers do not match |
+| `time_sorted_plan` timing | measured with hipDNN profiling events on the handle's stream: device time between the start and stop of each timed execution, as upstream's CUDA events |
+| `time_sorted_plan` ties | plans with equal times are all kept; upstream keeps only one of them |
+| `cudnnFindPlanAndCache` with no plan that ran | throws `cudnnException` with `NOT_SUPPORTED` (with `NV_CUDNN_DISABLE_EXCEPTION`, returns a plan whose status is not `SUCCESS`); upstream reads the front of an empty list |
+| PyTorch quantized operations across threads | PyTorch's quantized convolution, linear and add operations cache plans process-wide, so a plan cached on one thread and executed with another thread's handle is `BAD_PARAM` (see the `cudnnBackendExecute` handle row). PyTorch's `Conv_v8` caches are per-thread and unaffected |

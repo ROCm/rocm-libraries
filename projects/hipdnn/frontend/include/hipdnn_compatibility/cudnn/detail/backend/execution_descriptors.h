@@ -598,12 +598,9 @@ public:
 protected:
     void finalizeImpl() override
     {
-        const std::optional<cudnnHandle_t> handle
+        const std::optional<cudnnHandle_t> planHandle
             = scalarAttribute<cudnnHandle_t>(CUDNN_ATTR_EXECUTION_PLAN_HANDLE);
-        if(!handle || *handle == nullptr)
-        {
-            throw ShimError(CUDNN_STATUS_BAD_PARAM, "CUDNN_ATTR_EXECUTION_PLAN_HANDLE is required");
-        }
+        const cudnnHandle_t handle = planHandle ? *planHandle : nullptr;
         const std::shared_ptr<Descriptor> config
             = descriptorAttribute(CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG);
         const std::optional<std::string> json
@@ -617,19 +614,28 @@ protected:
 
         std::shared_ptr<EngineConfigDescriptor> engineConfig;
         hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor plan;
+        cudnnHandle_t contextHandle = nullptr;
         if(config != nullptr)
         {
             engineConfig = std::shared_ptr<EngineConfigDescriptor>(
                 config,
                 &descriptorCast<EngineConfigDescriptor>(*config,
                                                         CUDNN_BACKEND_ENGINECFG_DESCRIPTOR));
-            plan = build(*handle, *engineConfig);
+            plan = build(handle, *engineConfig);
+            contextHandle = engineConfig->graph().handle();
         }
         else
         {
-            auto loaded = load(*handle, *json);
+            if(handle == nullptr)
+            {
+                throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                                "CUDNN_ATTR_EXECUTION_PLAN_HANDLE is required to load a serialized "
+                                "execution plan");
+            }
+            auto loaded = load(handle, *json);
             engineConfig = std::move(loaded.first);
             plan = std::move(loaded.second);
+            contextHandle = handle;
         }
 
         std::int64_t workspaceSize = 0;
@@ -650,7 +656,7 @@ protected:
         }
         _config = std::move(engineConfig);
         _plan = std::move(plan);
-        _contextHandle = *handle;
+        _contextHandle = contextHandle;
     }
 
     std::optional<StoredAttribute> lazyAttribute(cudnnBackendAttributeName_t name,
@@ -675,9 +681,10 @@ private:
     {
         using hipdnn_frontend::detail::hipdnnBackend;
 
-        // hipDNN ignores a plan HANDLE and creates the execution context on the
-        // graph's handle, so a different plan handle cannot be honored.
-        if(handle != config.graph().handle())
+        // hipDNN creates the execution context on the graph's handle, so a plan
+        // HANDLE is optional (upstream's builder never sets one) and, when set,
+        // must name that handle.
+        if(handle != nullptr && handle != config.graph().handle())
         {
             throw ShimError(CUDNN_STATUS_BAD_PARAM,
                             "CUDNN_ATTR_EXECUTION_PLAN_HANDLE differs from the "

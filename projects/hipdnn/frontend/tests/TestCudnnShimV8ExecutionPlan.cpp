@@ -371,13 +371,37 @@ TEST_F(TestCudnnShimV8ExecutionPlan, WorkspaceSizeReadFromHipdnnPlan)
     EXPECT_EQ(workspaceSize(plan(engineConfig())), WORKSPACE_SIZE);
 }
 
-TEST_F(TestCudnnShimV8ExecutionPlan, HandleRequired)
+TEST_F(TestCudnnShimV8ExecutionPlan, HandleOptionalForBuiltPlan)
 {
     cudnnBackendDescriptor_t config = engineConfig();
-    cudnnBackendDescriptor_t descriptor = create(CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-    set(descriptor, CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, CUDNN_TYPE_BACKEND_DESCRIPTOR, config);
-    EXPECT_EQ(cudnnBackendFinalize(descriptor), CUDNN_STATUS_BAD_PARAM);
+    cudnnBackendDescriptor_t absent = create(CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+    set(absent, CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, CUDNN_TYPE_BACKEND_DESCRIPTOR, config);
+    finalize(absent);
+    cudnnBackendDescriptor_t null = create(CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+    set(null, CUDNN_ATTR_EXECUTION_PLAN_HANDLE, CUDNN_TYPE_HANDLE, cudnnHandle_t{nullptr});
+    set(null, CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, CUDNN_TYPE_BACKEND_DESCRIPTOR, config);
+    finalize(null);
+    EXPECT_EQ(workspaceSize(absent), WORKSPACE_SIZE);
+
+    // Both run on the graph's handle and on no other.
+    cudnnBackendDescriptor_t pack = variantPack(_workspace.data());
+    EXPECT_EQ(cudnnBackendExecute(_otherHandle, absent, pack), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(cudnnBackendExecute(_handle, absent, pack), CUDNN_STATUS_SUCCESS) << lastError();
+    EXPECT_EQ(cudnnBackendExecute(_handle, null, pack), CUDNN_STATUS_SUCCESS) << lastError();
+    const std::vector<hipdnn_shim_test::CapturedExecute> calls = executions();
+    ASSERT_EQ(calls.size(), 2U);
+    EXPECT_EQ(calls[0].handle, _handle);
+    EXPECT_EQ(calls[1].handle, _handle);
+}
+
+TEST_F(TestCudnnShimV8ExecutionPlan, HandleRequiredForLoadedPlan)
+{
+    const std::string text = json(plan(engineConfig()));
+    cudnnBackendDescriptor_t loaded = create(CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+    setJson(loaded, text);
+    EXPECT_EQ(cudnnBackendFinalize(loaded), CUDNN_STATUS_BAD_PARAM);
     EXPECT_NE(lastError().find("CUDNN_ATTR_EXECUTION_PLAN_HANDLE"), std::string::npos);
+    EXPECT_EQ(deserializeCalls(), 0);
 }
 
 TEST_F(TestCudnnShimV8ExecutionPlan, PlanHandleMismatchRejected)

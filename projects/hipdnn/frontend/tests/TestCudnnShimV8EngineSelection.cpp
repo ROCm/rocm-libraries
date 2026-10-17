@@ -814,6 +814,84 @@ TEST_F(TestCudnnShimV8EngineSelection, KnobFreeConfigUsesDefault)
     EXPECT_EQ(std::count(gets.begin(), gets.end(), HIPDNN_ATTR_ENGINE_KNOB_INFO), 0);
 }
 
+// Upstream's builder sends -1 for every knob it was not asked to set.
+TEST_F(TestCudnnShimV8EngineSelection, UnsetKnobChoiceIgnored)
+{
+    installHeuristicResults({KNOB_ENGINE});
+    std::vector<MockKnob> knobs = mixedKnobs();
+    knobs.push_back({"prov.split_k_slc", 1, 1, 8, 1, {}});
+    installEngineKnobs(KNOB_ENGINE, knobs);
+    cudnnBackendDescriptor_t graph = reluGraph();
+    cudnnBackendDescriptor_t descriptor = engine(graph, 0);
+
+    // Visible, hidden and repeated unset choices all drop out.
+    cudnnBackendDescriptor_t unset = config(descriptor,
+                                            {{CUDNN_KNOB_TYPE_TILE_SIZE, -1},
+                                             {CUDNN_KNOB_TYPE_BLOCK_SIZE, -1},
+                                             {CUDNN_KNOB_TYPE_TILE_SIZE, -1}});
+    finalize(unset);
+    const backend::EngineConfigDescriptor& shimUnset = shimConfig(unset);
+    EXPECT_TRUE(shimUnset.knobChoices().empty());
+    EXPECT_EQ(shimUnset.hipdnnEngineConfig(), shimGraph(graph).defaultEngineConfig(KNOB_ENGINE));
+    EXPECT_TRUE(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).empty());
+
+    cudnnBackendDescriptor_t partial
+        = config(descriptor, {{CUDNN_KNOB_TYPE_TILE_SIZE, 16}, {CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}});
+    finalize(partial);
+    const backend::EngineConfigDescriptor& shimPartial = shimConfig(partial);
+    EXPECT_EQ(shimPartial.knobChoices(), (Choices{{CUDNN_KNOB_TYPE_TILE_SIZE, 16}}));
+    shimPartial.hipdnnEngineConfig();
+    const std::vector<hipdnnBackendDescriptor_t> hipdnnChoices
+        = created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
+    ASSERT_EQ(hipdnnChoices.size(), 1U);
+    const auto typeCalls = callsOn(hipdnnChoices.front(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE);
+    ASSERT_EQ(typeCalls.size(), 1U);
+    const std::vector<char> knobId = typeCalls.front().values<char>();
+    EXPECT_EQ(std::string(knobId.begin(), std::find(knobId.begin(), knobId.end(), '\0')),
+              "prov.tile_size");
+
+    // The GET still returns every stored choice, so plan tags keep the -1.
+    std::int64_t count = -1;
+    std::array<cudnnBackendDescriptor_t, 2> stored = {create(CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR),
+                                                      create(CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR)};
+    EXPECT_EQ(cudnnBackendGetAttribute(partial,
+                                       CUDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                                       CUDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       static_cast<std::int64_t>(stored.size()),
+                                       &count,
+                                       static_cast<void*>(stored.data())),
+              CUDNN_STATUS_SUCCESS)
+        << lastError();
+    ASSERT_EQ(count, 2);
+    EXPECT_EQ(int64Of(stored[0], CUDNN_ATTR_KNOB_CHOICE_KNOB_VALUE), 16);
+    EXPECT_EQ(int64Of(stored[1], CUDNN_ATTR_KNOB_CHOICE_KNOB_VALUE), -1);
+}
+
+TEST_F(TestCudnnShimV8EngineSelection, MinusOneKeptWhenInRange)
+{
+    installHeuristicResults({KNOB_ENGINE});
+    installEngineKnobs(KNOB_ENGINE, {{"prov.split_k_slc", 1, -1, 8, 1, {}}});
+    cudnnBackendDescriptor_t descriptor = engine(reluGraph(), 0);
+
+    cudnnBackendDescriptor_t chosen = config(descriptor, {{CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}});
+    finalize(chosen);
+    const backend::EngineConfigDescriptor& shimChosen = shimConfig(chosen);
+    EXPECT_EQ(shimChosen.knobChoices(), (Choices{{CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}}));
+    shimChosen.hipdnnEngineConfig();
+    const std::vector<hipdnnBackendDescriptor_t> hipdnnChoices
+        = created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
+    ASSERT_EQ(hipdnnChoices.size(), 1U);
+    const auto valueCalls = callsOn(hipdnnChoices.front(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE);
+    ASSERT_EQ(valueCalls.size(), 1U);
+    EXPECT_EQ(valueCalls.front().value<std::int64_t>(), -1);
+
+    // A real choice, so a repeat is a duplicate.
+    cudnnBackendDescriptor_t repeated = config(
+        descriptor, {{CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}, {CUDNN_KNOB_TYPE_SPLIT_K_SLC, -1}});
+    EXPECT_EQ(cudnnBackendFinalize(repeated), CUDNN_STATUS_BAD_PARAM);
+    EXPECT_NE(lastError().find("is chosen more than once"), std::string::npos);
+}
+
 TEST_F(TestCudnnShimV8EngineSelection, NondeterministicUnlessClaimed)
 {
     const std::int64_t deterministic = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;

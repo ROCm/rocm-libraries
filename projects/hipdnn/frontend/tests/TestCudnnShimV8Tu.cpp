@@ -1,15 +1,23 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Includes only the shim umbrella, as a ported consumer does, and pins the
-// v0.x builder surface it exposes next to the v9 graph API.
+// Includes the shim umbrella and the two autotune headers PyTorch includes
+// next to it, as a ported consumer does, and pins the v0.x builder surface
+// they expose next to the v9 graph API.
 #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend_find_plan.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend_get_plan.h>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
@@ -55,6 +63,119 @@ static_assert(IS_ALIAS_OF<cudnn_frontend::OperationBuilder, cudnn_frontend::Oper
 static_assert(IS_ALIAS_OF<cudnn_frontend::OperationGraph, cudnn_frontend::OperationGraph_v8>);
 static_assert(
     IS_ALIAS_OF<cudnn_frontend::OperationGraphBuilder, cudnn_frontend::OperationGraphBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineHeuristicsBuilder,
+                          cudnn_frontend::EngineHeuristicsBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineHeuristicsBuilde,
+                          cudnn_frontend::EngineHeuristicsBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineHeuristics, cudnn_frontend::EngineHeuristics_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::Engine, cudnn_frontend::Engine_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineBuilder, cudnn_frontend::EngineBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineConfig, cudnn_frontend::EngineConfig_v8>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::EngineConfigBuilder, cudnn_frontend::EngineConfigBuilder_v8>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::EngineFallbackList, cudnn_frontend::EngineFallbackList_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineFallbackListBuilder,
+                          cudnn_frontend::EngineFallbackListBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::ExecutionPlan, cudnn_frontend::ExecutionPlan_v8>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::ExecutionPlanBuilder, cudnn_frontend::ExecutionPlanBuilder_v8>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::ExecutionPlanCache, cudnn_frontend::ExecutionPlanCache_v2>);
+static_assert(std::is_base_of_v<cudnn_frontend::ExecutionPlanCache_v1,
+                                cudnn_frontend::ExecutionPlanCache_v2>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::EngineConfigList,
+                          std::vector<cudnn_frontend::ManagedOpaqueDescriptor>>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::ManagedOpaqueDescriptor,
+                          std::shared_ptr<cudnn_frontend::OpaqueBackendPointer>>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::executionPlans_t, std::vector<cudnn_frontend::ExecutionPlan>>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::Predicate,
+                          std::function<bool(const cudnn_frontend::ExecutionPlan&)>>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::GeneratorSource,
+                std::function<cudnn_frontend::EngineConfigList(cudnn_frontend::OperationGraph&)>>);
+
+// PyTorch stores plans by value and copies them out of its benchmark cache.
+static_assert(std::is_copy_constructible_v<cudnn_frontend::ExecutionPlan>);
+static_assert(std::is_copy_assignable_v<cudnn_frontend::ExecutionPlan>);
+static_assert(std::is_move_constructible_v<cudnn_frontend::ExecutionPlan>);
+static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::EngineHeuristics_v8>);
+static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::Engine_v8>);
+static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::EngineConfig_v8>);
+static_assert(
+    std::is_base_of_v<cudnn_frontend::BackendDescriptor, cudnn_frontend::EngineFallbackList_v8>);
+
+static_assert(static_cast<int>(cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE)
+              == 0);
+static_assert(
+    static_cast<int>(cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE)
+    == 1);
+static_assert(
+    static_cast<int>(cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE)
+    == 2);
+
+// The free functions PyTorch calls, with its argument shapes.
+static_assert(
+    std::is_same_v<decltype(cudnn_frontend::time_sorted_plan<
+                            cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
+                       std::declval<cudnnHandle_t>(),
+                       std::declval<cudnn_frontend::executionPlans_t>(),
+                       std::declval<const cudnn_frontend::VariantPack&>(),
+                       std::declval<std::uint64_t>())),
+                   cudnn_frontend::executionPlans_t>);
+static_assert(std::is_same_v<decltype(cudnn_frontend::filter(
+                                 std::declval<cudnn_frontend::EngineConfigList&>(),
+                                 std::declval<cudnn_frontend::EngineConfigList&>(),
+                                 std::declval<std::function<bool(cudnnBackendDescriptor_t)>>())),
+                             void>);
+static_assert(
+    std::is_same_v<decltype(cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+                       std::declval<cudnnBackendDescriptor_t>())),
+                   bool>);
+static_assert(
+    std::is_same_v<decltype(std::declval<cudnn_frontend::EngineConfigGenerator&>().cudnnGetPlan(
+                       std::declval<cudnnHandle_t>(),
+                       std::declval<cudnn_frontend::OperationGraph&>(),
+                       std::declval<cudnn_frontend::Predicate>())),
+                   cudnn_frontend::executionPlans_t>);
+static_assert(std::is_same_v<decltype(cudnn_frontend::get_heuristics_list(
+                                 std::declval<const std::vector<std::string>&>(),
+                                 std::declval<cudnn_frontend::OperationGraph&>(),
+                                 std::declval<std::function<bool(cudnnBackendDescriptor_t)>>(),
+                                 std::declval<cudnn_frontend::EngineConfigList&>())),
+                             std::vector<cudnnStatus_t>>);
+static_assert(std::is_same_v<decltype(cudnn_frontend::get_heuristics_list<2>(
+                                 std::declval<std::array<std::string, 2>>(),
+                                 std::declval<cudnn_frontend::OperationGraph&>(),
+                                 std::declval<std::function<bool(cudnnBackendDescriptor_t)>>(),
+                                 std::declval<cudnn_frontend::EngineConfigList&>())),
+                             std::vector<cudnnStatus_t>>);
+static_assert(std::is_same_v<decltype(cudnn_frontend::get_heuristics_list<2>(
+                                 std::declval<std::array<cudnnBackendHeurMode_t, 2>>(),
+                                 std::declval<cudnn_frontend::OperationGraph&>(),
+                                 std::declval<std::function<bool(cudnnBackendDescriptor_t)>>())),
+                             cudnn_frontend::EngineConfigList>);
+static_assert(std::is_same_v<decltype(cudnn_frontend::cudnnReorderFilterAndBiasInt8x32(
+                                 std::declval<cudnnHandle_t>(),
+                                 std::declval<const cudnn_frontend::Tensor_v8&>(),
+                                 std::declval<const cudnn_frontend::ConvDesc_v8&>(),
+                                 std::declval<void*>(),
+                                 std::declval<void*>(),
+                                 std::declval<void*>(),
+                                 std::declval<void*>())),
+                             cudnnStatus_t>);
+#if !defined(CUDNN_FRONTEND_SKIP_JSON_LIB) && !defined(HIPDNN_FRONTEND_SKIP_JSON_LIB)
+static_assert(std::is_same_v<decltype(cudnn_frontend::load_from_config(
+                                 std::declval<json&>(), std::declval<const std::string&>())),
+                             bool>);
+static_assert(
+    std::is_same_v<decltype(cudnn_frontend::check_errata(std::declval<const json&>(),
+                                                         std::declval<const std::string&>(),
+                                                         std::declval<cudnnHandle_t>(),
+                                                         std::declval<bool (*)()>())),
+                   bool>);
+#endif
 
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::Tensor_v8>);
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::ConvDesc_v8>);

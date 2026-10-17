@@ -3,8 +3,9 @@
 
 // Mock-backend fixture for the cuDNN v8 backend shim: records every hipDNN
 // descriptor it hands out with its type, every SetAttribute with a copy of its
-// payload, and executions, and can play back a heuristic result list and
-// per-engine knobs, behavior notes and names.
+// payload, and executions, and can play back a heuristic result list,
+// per-engine knobs, behavior notes and names, plan workspace and serialization,
+// profiling times, and execute failures.
 #pragma once
 
 #include "MockBackendFixture.hpp"
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -94,8 +96,27 @@ protected:
             .WillByDefault([this](hipdnnBackendDescriptorType_t type,
                                   hipdnnBackendDescriptor_t* descriptor) {
                 const std::lock_guard<std::mutex> lock(_mutex);
+                if(type == HIPDNN_BACKEND_PROFILING_CONTROL_EXT && _failProfilingCreate)
+                {
+                    *descriptor = nullptr;
+                    _profilingTimeline.emplace_back("create failed");
+                    return HIPDNN_STATUS_ALLOC_FAILED;
+                }
                 *descriptor = allocate(type);
+                if(type == HIPDNN_BACKEND_PROFILING_CONTROL_EXT)
+                {
+                    _profilingTimeline.emplace_back("create");
+                }
                 return *descriptor == nullptr ? HIPDNN_STATUS_ALLOC_FAILED : HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
+            .WillByDefault([this](hipdnnBackendDescriptor_t descriptor) {
+                const std::lock_guard<std::mutex> lock(_mutex);
+                if(isProfiling(descriptor))
+                {
+                    _profilingTimeline.emplace_back("destroy");
+                }
+                return HIPDNN_STATUS_SUCCESS;
             });
         ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
             .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
@@ -112,10 +133,21 @@ protected:
                 const std::lock_guard<std::mutex> lock(_mutex);
                 _finalized.push_back(descriptor);
                 _setCountAtFinalize.emplace(descriptor, _setAttributes.size());
+                if(isProfiling(descriptor))
+                {
+                    _profilingTimeline.emplace_back("finalize");
+                }
                 const auto config = _configIds.find(descriptor);
                 if(config != _configIds.end() && _failingConfigIds.count(config->second) != 0)
                 {
                     _lastError = "mock engine config " + std::to_string(config->second)
+                                 + " failed to finalize";
+                    return FAILED_CONFIG_STATUS;
+                }
+                const auto plan = _planIds.find(descriptor);
+                if(plan != _planIds.end() && _failingPlanIds.count(plan->second) != 0)
+                {
+                    _lastError = "mock plan for engine " + std::to_string(plan->second)
                                  + " failed to finalize";
                     return FAILED_CONFIG_STATUS;
                 }
@@ -137,7 +169,8 @@ protected:
                                   hipdnnBackendDescriptor_t variantPack) {
                 const std::lock_guard<std::mutex> lock(_mutex);
                 _executions.push_back({handle, plan, variantPack});
-                return HIPDNN_STATUS_SUCCESS;
+                _profilingTimeline.emplace_back("execute");
+                return answerExecute(plan);
             });
         ON_CALL(*_mockBackend, getLastErrorString(_, _))
             .WillByDefault([this](char* message, std::size_t size) {
@@ -180,6 +213,146 @@ protected:
     {
         const std::lock_guard<std::mutex> lock(_mutex);
         _engineNames[engineId] = std::move(name);
+    }
+
+    // Every hipDNN plan reports this workspace size.
+    void installPlanWorkspace(std::int64_t bytes)
+    {
+        using ::testing::_;
+
+        ON_CALL(*_mockBackend,
+                backendGetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, _, _, _, _))
+            .WillByDefault([bytes](hipdnnBackendDescriptor_t,
+                                   hipdnnBackendAttributeName_t,
+                                   hipdnnBackendAttributeType_t,
+                                   std::int64_t,
+                                   std::int64_t* count,
+                                   void* elements) {
+                *static_cast<std::int64_t*>(elements) = bytes;
+                if(count != nullptr)
+                {
+                    *count = 1;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+
+    // Every hipDNN plan serializes to `bytes`; deserializing gives a new plan
+    // for the engine of the plan serialized last, and a plan reports its
+    // engine ID through EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT.
+    void installSerializedPlan(std::vector<std::uint8_t> bytes)
+    {
+        using ::testing::_;
+
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            _serializedPlan = std::move(bytes);
+        }
+        ON_CALL(*_mockBackend, backendGetSerializedExecutionPlanExt(_, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t plan,
+                                  std::size_t requested,
+                                  std::size_t* size,
+                                  std::uint8_t* serialized) {
+                const std::lock_guard<std::mutex> lock(_mutex);
+                const auto engine = _planIds.find(plan);
+                _lastSerializedEngineId = engine == _planIds.end() ? -1 : engine->second;
+                *size = _serializedPlan.size();
+                if(serialized != nullptr && requested >= _serializedPlan.size())
+                {
+                    std::memcpy(serialized, _serializedPlan.data(), _serializedPlan.size());
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_, _, _, _))
+            .WillByDefault([this](hipdnnHandle_t,
+                                  hipdnnBackendDescriptor_t* descriptor,
+                                  const std::uint8_t*,
+                                  std::size_t) {
+                const std::lock_guard<std::mutex> lock(_mutex);
+                *descriptor = allocate(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+                if(*descriptor == nullptr)
+                {
+                    return HIPDNN_STATUS_ALLOC_FAILED;
+                }
+                _planIds[*descriptor] = _lastSerializedEngineId;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(
+            *_mockBackend,
+            backendGetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t plan,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  std::int64_t,
+                                  std::int64_t* count,
+                                  void* elements) {
+                const std::lock_guard<std::mutex> lock(_mutex);
+                const auto engine = _planIds.find(plan);
+                if(engine == _planIds.end())
+                {
+                    return HIPDNN_STATUS_BAD_PARAM;
+                }
+                *static_cast<std::int64_t*>(elements) = engine->second;
+                if(count != nullptr)
+                {
+                    *count = 1;
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+
+    // Successive PROFILING_ELAPSED_MS_EXT reads return these times in order
+    // (any float, NaN and negatives included), then 0.
+    void installProfilingTimes(std::vector<float> times)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _profilingTimes = std::move(times);
+        _nextProfilingTime = 0;
+    }
+
+    // Finalizing a hipDNN plan for `engineId` fails, as a plan whose context
+    // cannot be created does.
+    void failPlanFinalizeFor(std::int64_t engineId)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _failingPlanIds.insert(engineId);
+    }
+
+    // Executing a plan of `engineId` fails on its nth (1-based) execution, or
+    // on every execution when `nth` is 0.
+    void failExecuteFor(std::int64_t engineId, std::size_t nth)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _executeFailures[engineId] = nth;
+    }
+
+    // Creating a PROFILING_CONTROL_EXT descriptor fails (recorded as "create failed").
+    void failProfilingCreate()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _failProfilingCreate = true;
+    }
+
+    // Profiling-control calls ("create", "reset", "handle", "start", "stop",
+    // "finalize", "elapsed", "sync", "destroy") interleaved with "execute".
+    std::vector<std::string> profilingTimeline() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _profilingTimeline;
+    }
+
+    // Engine ID of every executed plan, in execution order (-1 if unknown).
+    std::vector<std::int64_t> executedEngineIds() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        std::vector<std::int64_t> ids;
+        ids.reserve(_executions.size());
+        for(const CapturedExecute& execution : _executions)
+        {
+            const auto engine = _planIds.find(execution.plan);
+            ids.push_back(engine == _planIds.end() ? -1 : engine->second);
+        }
+        return ids;
     }
 
     // How many SetAttribute calls had been recorded when `descriptor` was
@@ -266,7 +439,7 @@ protected:
         return _executions;
     }
 
-    // Engine ID behind a mock ENGINE or ENGINECFG descriptor, or -1.
+    // Engine ID behind a mock ENGINE, ENGINECFG or EXECUTION_PLAN descriptor, or -1.
     std::int64_t engineIdOf(hipdnnBackendDescriptor_t descriptor) const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -276,7 +449,12 @@ protected:
             return engine->second;
         }
         const auto config = _configIds.find(descriptor);
-        return config == _configIds.end() ? -1 : config->second;
+        if(config != _configIds.end())
+        {
+            return config->second;
+        }
+        const auto plan = _planIds.find(descriptor);
+        return plan == _planIds.end() ? -1 : plan->second;
     }
 
     // Hands out a typed mock descriptor, for tests that replace the create action.
@@ -298,6 +476,52 @@ private:
         _types[descriptor] = type;
         _creationOrder.emplace_back(descriptor, type);
         return descriptor;
+    }
+
+    bool isProfiling(hipdnnBackendDescriptor_t descriptor) const
+    {
+        const auto found = _types.find(descriptor);
+        return found != _types.end() && found->second == HIPDNN_BACKEND_PROFILING_CONTROL_EXT;
+    }
+
+    static const char* profilingEventName(hipdnnBackendAttributeName_t name)
+    {
+        switch(name)
+        {
+        case HIPDNN_ATTR_PROFILING_RESET_EXT:
+            return "reset";
+        case HIPDNN_ATTR_PROFILING_HANDLE_EXT:
+            return "handle";
+        case HIPDNN_ATTR_PROFILING_START_EXT:
+            return "start";
+        case HIPDNN_ATTR_PROFILING_STOP_EXT:
+            return "stop";
+        case HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT:
+            return "sync";
+        default:
+            return "set";
+        }
+    }
+
+    hipdnnStatus_t answerExecute(hipdnnBackendDescriptor_t plan)
+    {
+        const auto engine = _planIds.find(plan);
+        if(engine == _planIds.end())
+        {
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        const auto failure = _executeFailures.find(engine->second);
+        if(failure == _executeFailures.end())
+        {
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        const std::size_t run = ++_executeCounts[engine->second];
+        if(failure->second != 0 && run != failure->second)
+        {
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        _lastError = "mock engine " + std::to_string(engine->second) + " failed to execute";
+        return HIPDNN_STATUS_EXECUTION_FAILED;
     }
 
     static std::size_t elementSize(hipdnnBackendAttributeType_t type)
@@ -358,6 +582,24 @@ private:
             {
                 _configIds[descriptor] = engineId->second;
             }
+        }
+        // A plan built by the shim names its engine through its hipDNN config.
+        if(name == HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG
+           && call.payload.size() == sizeof(hipdnnBackendDescriptor_t))
+        {
+            hipdnnBackendDescriptor_t config = nullptr;
+            std::memcpy(static_cast<void*>(&config),
+                        call.payload.data(),
+                        sizeof(hipdnnBackendDescriptor_t));
+            const auto engineId = _configIds.find(config);
+            if(engineId != _configIds.end())
+            {
+                _planIds[descriptor] = engineId->second;
+            }
+        }
+        if(call.descriptorType == HIPDNN_BACKEND_PROFILING_CONTROL_EXT)
+        {
+            _profilingTimeline.emplace_back(profilingEventName(name));
         }
         _setAttributes.push_back(std::move(call));
     }
@@ -450,6 +692,19 @@ private:
                 return HIPDNN_STATUS_NOT_SUPPORTED;
             }
             return answerString(engineName->second, requested, count, elements);
+        }
+        case HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT:
+        {
+            _profilingTimeline.emplace_back("elapsed");
+            const float time = _nextProfilingTime < _profilingTimes.size()
+                                   ? _profilingTimes[_nextProfilingTime++]
+                                   : 0.0F;
+            *static_cast<float*>(elements) = time;
+            if(count != nullptr)
+            {
+                *count = 1;
+            }
+            return HIPDNN_STATUS_SUCCESS;
         }
         default:
             return HIPDNN_STATUS_SUCCESS;
@@ -593,6 +848,16 @@ private:
     std::unordered_map<hipdnnBackendDescriptor_t, MockKnob> _knobInfos;
     std::unordered_map<std::int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotes;
     std::unordered_map<std::int64_t, std::string> _engineNames;
+    std::unordered_map<hipdnnBackendDescriptor_t, std::int64_t> _planIds;
+    std::vector<std::uint8_t> _serializedPlan;
+    std::int64_t _lastSerializedEngineId = -1;
+    std::vector<float> _profilingTimes;
+    std::size_t _nextProfilingTime = 0;
+    bool _failProfilingCreate = false;
+    std::vector<std::string> _profilingTimeline;
+    std::map<std::int64_t, std::size_t> _executeFailures;
+    std::map<std::int64_t, std::size_t> _executeCounts;
+    std::set<std::int64_t> _failingPlanIds;
     std::string _lastError;
 };
 

@@ -276,7 +276,7 @@ Evidence: FALLBACK-only check at
 | `CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE` (EP.h:193, F.h:84) | `=`; enumerators differ | mapped by name; only `RUNTIME_COMPILATION` exists on both sides |
 | `CUDNN_ATTR_ENGINE_LAYOUT_INFO`, `SM_COUNT_TARGET`, `DEVICEPROP` | NS (`SM_COUNT_TARGET` `≈` `CU_COUNT_TARGET_EXT`) | `NOT_SUPPORTED` |
 | `CUDNN_ATTR_KNOB_INFO_TYPE` / `MAXIMUM_VALUE` / `MINIMUM_VALUE` / `STRIDE` :126-150 | `=`; `TYPE` is a string, T! | projected through the v9 shim's `detail/knob_wrapper.h`; a knob with no cuDNN type, or whose valid values cannot be expressed as min / max / stride, is hidden |
-| `CUDNN_ATTR_KNOB_CHOICE_KNOB_TYPE` / `KNOB_VALUE` (EC.h:122, :134) | `=`; `KNOB_TYPE` is a string, T! | reverse-mapped; a hidden type → `NOT_SUPPORTED`; a duplicate type → `BAD_PARAM`; values checked with hipDNN's knob validation |
+| `CUDNN_ATTR_KNOB_CHOICE_KNOB_TYPE` / `KNOB_VALUE` (EC.h:122, :134) | `=`; `KNOB_TYPE` is a string, T! | reverse-mapped; a hidden type → `NOT_SUPPORTED`; a duplicate type → `BAD_PARAM`; values checked with hipDNN's knob validation. A value of `-1` (upstream's "unset", sent for every knob not chosen once one is) is ignored at `ENGINECFG` finalize unless the knob is visible and accepts `-1`; `KNOB_CHOICES` get still returns it |
 | `cudnnBackendKnobType_t`, `CUDNN_KNOB_TYPE_*`, `CUDNN_KNOB_TYPE_COUNTS` | **MISSING** (knobs are plugin-defined string IDs) | shim-defined enum, values shim-assigned |
 | `CUDNN_ATTR_ENGINECFG_ENGINE` (EC.h:184; get EP.h:447, F.h:50) | `=`; get allocates | in-place fill |
 | `CUDNN_ATTR_ENGINECFG_KNOB_CHOICES` (EC.h:202 set; EP.h:253 get) | `=`; set supported, get NS | answered from shim state |
@@ -292,7 +292,7 @@ layout info, CU count, device properties → `NOT_SUPPORTED`);
 
 | cuDNN identifier | hipDNN | Shim |
 |---|---|---|
-| `CUDNN_ATTR_EXECUTION_PLAN_HANDLE` :505 | `=`; accepted and ignored | **required**; must equal the operation graph's handle (`BAD_PARAM` otherwise); stored as the context handle that `cudnnBackendExecute` compares against |
+| `CUDNN_ATTR_EXECUTION_PLAN_HANDLE` :505 | `=`; accepted and ignored | built path (`ENGINE_CONFIG` set): optional; unset or null → the operation graph's handle, set → must equal it (`BAD_PARAM` otherwise). Load path (`JSON_REPRESENTATION` set): required (`BAD_PARAM` otherwise), as upstream's `loadFromJson` sets it. Stored as the context handle that `cudnnBackendExecute` compares against |
 | `CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG` :399 (get :537) | `=`; set requires a finalized config; get allocates | must be finalized; get fills in place |
 | `CUDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE` :298 | `=` | forwarded |
 | `CUDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION` :128, :492 | NS both ways | get: shim-generated JSON object; `"engine"` is always an object with `globalIndex`, `id` (a decimal string, since hashed IDs exceed JSON's exact integer range), optional `name` and `behaviorNotes`; `payload` (base64) only when `hipdnnBackendGetSerializedExecutionPlan_ext` succeeds (§4.7). Set (`loadFromJson`): parsed at plan finalize by a fixed-format reader; any other format → `BAD_PARAM`; no `payload` → `NOT_SUPPORTED`; otherwise deserialized via `hipdnnBackendCreateAndDeserializeExecutionPlan_ext` |
@@ -374,7 +374,7 @@ Line counts are `wc -l`. Caption directory: `upstream:include/`. "Shim" is the R
 | `cudnn_frontend_Reorder_Tensor.h` | 105 | `cudnnReorderFilterAndBiasInt8x32` | port (`NOT_SUPPORTED`) |
 | `cudnn_frontend_EngineConfigGenerator.h` | 123 | `executionPlans_t`, `Predicate`, `GeneratorSource`, `CudnnFindSamplingTechnique`, `EngineConfigGenerator`, `filter(Predicate, plans)` | port |
 | `cudnn_frontend_get_plan.h` | 62 | `EngineConfigGenerator::cudnnGetPlan` definitions | port |
-| `cudnn_frontend_find_plan.h` | 163 | `time_sorted_plan<>`, `cudnnFindPlan<>`, `cudnnFindPlanAndCache<>` | port (HIP events) |
+| `cudnn_frontend_find_plan.h` | 163 | `time_sorted_plan<>`, `cudnnFindPlan<>`, `cudnnFindPlanAndCache<>` | port (hipDNN profiling-control descriptor for timing; includes `get_plan.h`, since its `cudnnFindPlan*` call `cudnnGetPlan`) |
 
 Totals: v0.x-only headers excluding the umbrella, `utils` and `shim`: **9,593 lines**; including
 `utils` and `shim`: **12,931 lines**. `Operation.h` alone is about 32% of the v0.x-only code.
@@ -448,7 +448,7 @@ move-only. Exceptions: `PointWiseDescBuilder_v8::build()` returns by value
 | Errata (`Errata.h`, JSON builds only) | — | `load_from_config` (reads `CUDNN_ERRATA_JSON_FILE`), `check_shape`, `check_rule` :120, `check_errata`; a rule blocks tag prefix `<Op>_eng<N>_` within a `CUDNN_VERSION` range (:131-135) |
 | `ExecutionPlanCache_v1` / `_v2` (`ExecutionPlanCache.h`) | — | keyed by conv feature vectors; `_v2` adds a saturation tracker |
 | `EngineConfigGenerator` (`EngineConfigGenerator.h`) | — | `generate_engine_config`, `cudnnGetPlan` ×2, `cudnnFindPlan<Sampling>` ×2, `cudnnFindPlanAndCache<Sampling>`; `CudnnFindSamplingTechnique` |
-| `time_sorted_plan<Sampling>` (`find_plan.h`) | — | one warm-up, then 1, 3 or 100 timed runs; HIP events in the shim |
+| `time_sorted_plan<Sampling>` (`find_plan.h`) | — | one warm-up, then 1, 3 or 100 timed runs; timed in the shim with hipDNN's profiling-control descriptor |
 
 ### 2.5 Class → backend descriptor → attributes
 
@@ -473,7 +473,7 @@ Every `build()` does Create(type), one SetAttribute per attribute, Finalize. "Ge
 | `VariantPack_v8` | `VARIANT_PACK` | `DATA_POINTERS` (VOID_PTR×n), `UNIQUE_IDS` (INT64×n), `WORKSPACE` (VOID_PTR) |
 | Filters | temporary `ENGINE` | Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) |
 | Errata | temporary `TENSOR` | Get the conv op's X/W, X/DW or DX/W tensors, then `TENSOR_DIMENSIONS` |
-| find/get plan, cache | — | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events |
+| find/get plan, cache | — | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events (shim: hipDNN profiling-control descriptor; no `cudnnGetStream`) |
 
 ---
 
