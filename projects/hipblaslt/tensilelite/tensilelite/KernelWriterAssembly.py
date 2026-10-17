@@ -3128,12 +3128,12 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["UseSubtileImpl"]:
         if self.states.lastValuMXSAB:
           mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-          self.vgprPool.add(mxsStart, mxsSize, "ValuMXSAB") # Add as available
+          self.papReclaimValuRegisters(kernel, mxsStart, mxsSize, "ValuMXSAB") # Add as available
           moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
                               (mxsStart, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
 
         reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-        self.vgprPool.add(reclaimStart, reclaimSize, "ValuAB") # Add as available
+        self.papReclaimValuRegisters(kernel, reclaimStart, reclaimSize, "ValuAB") # Add as available
         moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
                             (reclaimStart, self.states.lastValuAB+self.states.a.startVgprValu))
 
@@ -3729,6 +3729,13 @@ class KernelWriterAssembly(KernelWriter):
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.graWorkGroup(self, kernel))
 
+    # Prepared coordinates already include the supported WGM transform.
+    preparedMapping = getattr(self.states, "papNextTileVgpr", -1) >= 0
+    if preparedMapping:
+      mapped = Label(self.labels.getNameInc("PapEntryWorkgroupMapped"), "")
+      module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=5))
+      module.add(SCBranchSCC1(labelName=mapped.getLabelName(), comment="PAP skip repeated workgroup mapping"))
+
     # Start of WGM algos
     sgprWGM = "WGM"
     if len(kernel["SpaceFillingAlgo"]):
@@ -3737,6 +3744,10 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SpaceFillingCurveWalk(self, kernel, sgprWGM))
     else:
       module.add(DefaultWGM(self, kernel, sgprWGM))
+    if preparedMapping:
+      module.add(mapped)
+      module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=hex(0xffffffdf),
+                        comment="PAP consume retained coordinate handoff"))
 
     # Resolving &counter3 here makes the per-work-group tally in the epilogue a bare
     # atomic on a register pair rather than a kernarg load it has to wait on.
@@ -6706,7 +6717,7 @@ class KernelWriterAssembly(KernelWriter):
     # registers which were never added raises "already unavailable" warnings.
     if self.states.lastValuMXSAB:
       mxsStart, mxsSize = self.rapReclaimableValuMXSABRange(kernel)
-      self.vgprPool.remove(mxsStart, mxsSize, "ValuMXSAB")
+      self.papReclaimValuRegisters(kernel, mxsStart, mxsSize, "ValuMXSAB", add=False)
       module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(mxsStart, self.states.lastValuMXSAB))
 
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
@@ -6715,7 +6726,7 @@ class KernelWriterAssembly(KernelWriter):
     self.agprPool.remove(0, numAccvgprs, "ValuC")
     module.addComment1("initC: remove acc vgpr buffer [%u...%u) from pool"%(0, numAccvgprs))
     reclaimStart, reclaimSize = self.rapReclaimableValuABRange(kernel)
-    self.vgprPool.remove(reclaimStart, reclaimSize, "ValuAB")
+    self.papReclaimValuRegisters(kernel, reclaimStart, reclaimSize, "ValuAB", add=False)
     module.addComment1("initC: remove ValuA/B vgpr buffer [%u...%u) from pool"%(reclaimStart, self.states.lastValuAB))
     numCVgpr = self.states.c.numVgprValu + numAccvgprs
 

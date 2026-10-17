@@ -7,18 +7,172 @@ from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC, MemTokenData
-from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
+from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative, VWritelaneB32, VReadlaneB32
 from ..ExecutionPolicy import isPersistent, isStreamK
 from math import ceil, log2
 from ..Component import Component
 from ..Common import persistentSpatialCluster
 import abc
 from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SSchedulingFence, SAddCU32
-from rocisa.instruction import VReadlaneB32, VWritelaneB32
 from rocisa.functions import scalarUInt32DivideAndRemainder
 
 class PersistentKernelState:
     """Emitter state and borrowed registers for the persistent loop lifecycle."""
+
+    def papLocalReadPayloadRanges(self, kernel):
+        """First PLR operands kept live across both store and persistent setup.
+
+        Reuse X0 in each existing operand block. X1 and alignment gaps remain
+        available to the store/setup allocators. The conservative headroom test
+        rejects geometries whose withheld payload plus local-address scratch
+        could exceed the VGPR limit; the ordinary two-group path still works.
+        """
+        if hasattr(self.states, "papLocalReadPayload"):
+            return self.states.papLocalReadPayload
+        ranges = []
+        if (kernel.get("PrefetchAcrossPersistent") and getattr(self, "tPA", None) is not None
+                and getattr(self, "tPB", None) is not None
+                and self.papPgr2PipelineEnabled(kernel, self.tPA, self.tPB)):
+            tensors = [("A", self.states.a), ("B", self.states.b)]
+            if kernel["ProblemType"]["MXBlockA"]:
+                tensors += [("MXSA", self.states.mxsa), ("MXSB", self.states.mxsb)]
+            # Packed/converted inputs need an additional pack lifetime contract.
+            # The initial path uses reads that already produce WMMA operands.
+            if all(kernel["UnrollMajorLDS" + tc] for tc, _ in tensors):
+                ranges = [(info.startVgprValu, info.numVgprValuPerBlock)
+                          for _, info in tensors]
+                if (self.states.totalVgprs + sum(size for _, size in ranges) + 16
+                        > self.states.regCaps["MaxVgpr"]):
+                    ranges = []
+        self.states.papLocalReadPayload = tuple(ranges)
+        return self.states.papLocalReadPayload
+
+
+    def papReclaimValuRegisters(self, kernel, start, size, tag, *, add=True):
+        """Apply a normal RAP reclaim range minus any live PAP PLR payload."""
+        ranges = [(start, start + size)]
+        for held, count in self.papLocalReadPayloadRanges(kernel):
+            end = held + count
+            ranges = [(lo, hi) for first, last in ranges
+                      for lo, hi in ((first, min(last, held)), (max(first, end), last))
+                      if lo < hi]
+        operation = self.vgprPool.add if add else self.vgprPool.remove
+        for first, last in ranges:
+            operation(first, last - first, tag)
+
+
+    def papLocalReadEntry(self, kernel, reads, packs):
+        """Keep normal pointer increments outside the already-primed read skip."""
+        from rocisa.instruction import Instruction
+        if not self.papLocalReadPayloadRanges(kernel):
+            return reads
+        # Reject actual pack work too, rather than assuming every unroll-major
+        # format has no conversion. Such formats retain the ordinary entry PLR.
+        if any(isinstance(item, Instruction) for pack in packs for item in pack.flatitems()):
+            return reads
+        from rocisa.instruction import DSLoadInstruction
+        for item in reads.flatitems():
+            if isinstance(item, DSLoadInstruction):
+                tokens = list(item.getMemToken().tokens)
+                item.setMemToken(MemTokenData(tokens + [self.states.memTokenPapPlr]))
+        self.states.papFirstPlrReads = deepcopy(reads)
+        module = Module("PAP consume retained first PLR operands")
+        ready = Label(self.labels.getNameInc("PapFirstPlrReady"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
+                              comment="PAP first PLR operands already ready?"))
+        module.add(SCBranchSCC1(labelName=ready.getLabelName(),
+                               comment="PAP skip redundant first local reads"))
+        module.add(reads)
+        module.add(ready)
+        module.add(SAndB32(dst=sgpr("PersistentPrefetchState"),
+                           src0=sgpr("PersistentPrefetchState"), src1=hex(0xffffffef),
+                           comment="PAP consume first PLR ready flag"))
+        return module
+
+
+    def papLocalReadCompletion(self):
+        """Complete carried DS operands at the common entry consumer boundary.
+
+        The native pass rebuilds ordinary waits from cold-entry operand order.
+        This rendezvous names the separate operand-completion token on every
+        cold and carried first PLR read. The reads retain their LDS bank token
+        too, so producer readiness and bank release keep their dependencies.
+        Only the DS operations match this extra token: neither tensor group is
+        drained again at operand completion.
+        """
+        module = Module("Persistent PAP retained operand completion")
+        barrier = SBarrier(comment="PAP complete all carried first PLR operands before first WMMA")
+        barrier.setMemToken(MemTokenData([self.states.memTokenPapPlr]))
+        module.add(barrier)
+        return module
+
+    def papPrefetchLocalRead(self, kernel, tPA, tPB):
+        """Read next group0 after the final current WMMA releases X0 operands."""
+        from rocisa.container import MemTokenData
+        from rocisa.instruction import DSLoadInstruction, SSchedulingFence, VAddU32
+        module = Module("PAP next tile first local reads")
+        reads = getattr(self.states, "papFirstPlrReads", None)
+        # A multicast producer must publish group0 to its peers even when the
+        # VGPR budget leaves its first local reads at the ordinary entry site.
+        cluster = persistentSpatialCluster(kernel)
+        if reads is None and not (cluster and self.papPgr2PipelineEnabled(kernel, tPA, tPB)):
+            return module
+        skip = Label(self.labels.getNameInc("PapSkipNextLocalRead"), "")
+        module.add(SSchedulingFence(comment="PAP current final WMMA releases first PLR operands"))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
+                              comment="PAP both next groups issued?"))
+        module.add(SCBranchSCC0(labelName=skip.getLabelName()))
+        if reads is None:
+            module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
+            module.add(skip)
+            return module
+        # Rebuild lane-relative base pointers without exposing live accumulators
+        # or retained operands. Setup's cached scratch could clobber either.
+        snapshot = self.rapSnapshotEmitterState(kernel, tPA, tPB)
+        # The final WMMA has consumed X1 as well as X0. Borrow only unused
+        # data-operand blocks beyond the live accumulator range for address
+        # setup; X0 remains reserved for the carried first local reads.
+        from rocisa.register import RegisterPool
+        cEnd = self.states.c.startVgprValu + self.states.c.numVgprValu
+        for info in (self.states.a, self.states.b):
+            start = max(info.startVgprValu + info.numVgprValuPerBlock, cEnd)
+            end = info.startVgprValu + info.numVgprValu
+            if (start < end and all(slot.status == RegisterPool.Status.Unavailable
+                                   for slot in self.vgprPool.getPool()[start:end])):
+                self.vgprPool.add(start, end - start, "PAP released operand scratch")
+        try:
+            module.add(self.localReadAddresses(kernel, tPA, tPB, tPA["tpsMetadata"]))
+        finally:
+            self.rapRestoreEmitterState(kernel, tPA, tPB, snapshot)
+        with self.allocTmpSgpr(1, tag="PAP first PLR bank") as bank:
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=1,
+                                  comment="PAP group0 physical bank"))
+            module.add(SCSelectB32(dst=sgpr(bank.idx), src0=kernel["LdsOffsetA_Blk"], src1=0))
+            tensors = [tPA, tPB]
+            if kernel["ProblemType"]["MXBlockA"]:
+                tensors += [tPA["MX"], tPB["MX"]]
+            for tp in tensors:
+                tc = tp["tensorChar"]
+                info = getattr(self.states, tc.lower())
+                for i in range(info.numVgprLocalReadAddr):
+                    addr = vgpr("LocalReadAddr%s+%d" % (tc, i))
+                    module.add(VAddU32(dst=addr, src0=addr, src1=sgpr(bank.idx),
+                                       comment="PAP select group0 bank for " + tc))
+        module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
+        token = self.states.memTokenLdsBuffer0
+        retainedReads = deepcopy(reads)
+        for item in retainedReads.flatitems():
+            if isinstance(item, DSLoadInstruction):
+                item.setMemToken(MemTokenData([token, self.states.memTokenPapPlr]))
+        module.add(retainedReads)
+        # Bit4 means issued into durable slots, not yet completed. The common
+        # entry/first WMMA consumer waits for DS completion after store/setup.
+        module.add(SOrB32(dst=sgpr("PersistentPrefetchState"),
+                          src0=sgpr("PersistentPrefetchState"), src1=16,
+                          comment="PAP record first PLR operands issued into durable slots"))
+        module.add(skip)
+        return module
+
 
     def papPgr2PipelineEnabled(self, kernel, tPA, tPB):
         """Two next-range groups in the classic two-bank PLR1 drain."""
@@ -147,6 +301,47 @@ class PersistentKernelState:
         module.add(self.papPgr2ClusterPhase(kernel, group, "ready"))
         return module
 
+    def papPgr2DeferredClusterReadyEnabled(self, kernel, tPA, tPB):
+        """Keep group1 publication pending only on ordinary retained-PLR entry.
+
+        The common pre-openLoop consumer precedes both the InitC first-trip
+        clone and the ordinary loop's next cluster arrive. Rotating copies and
+        alternate body dispatch need their own phase/lifetime proof.
+        """
+        return (bool(persistentSpatialCluster(kernel))
+                and self.papPgr2PipelineEnabled(kernel, tPA, tPB)
+                and not kernel.get("ExpandPointerSwap", False)
+                and kernel.get("UnrollLoopSwapGlobalReadOrder", 0) != 1
+                and not kernel.get("DirectToVgprA", False)
+                and not kernel.get("DirectToVgprB", False)
+                and not kernel.get("AdaptiveGemmNTAB", 0)
+                and bool(self.papLocalReadPayloadRanges(kernel)))
+
+    def papPgr2EntryMerge(self, kernel, tPA, tPB):
+        """Keep only operand readiness and this entry's pending publication."""
+        mask = 144 if self.papPgr2DeferredClusterReadyEnabled(kernel, tPA, tPB) else 16
+        return SAndB32(dst=sgpr("PersistentPrefetchState"),
+                       src0=sgpr("PersistentPrefetchState"), src1=mask,
+                       comment="PAP second PGR common merge retains PLR and pending readiness")
+
+    def papCompleteDeferredClusterReady(self, kernel, tPA, tPB):
+        """Publish group1 before openLoop can enter the next cluster phase."""
+        module = Module("PAP deferred group1 publication")
+        if not self.papPgr2DeferredClusterReadyEnabled(kernel, tPA, tPB):
+            return module
+        done = Label(self.labels.getNameInc("PapDeferredGroup1ReadyDone"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=7,
+                              comment="PAP group1 publication pending for this entry?"))
+        module.add(SCBranchSCC0(labelName=done.getLabelName()))
+        module.add(SSchedulingFence(comment="PAP deferred group1 publication begins after carried PLR"))
+        module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 1))
+        module.add(SSchedulingFence(comment="PAP deferred group1 cluster wait precedes pending consumption"))
+        module.add(SAndB32(dst=sgpr("PersistentPrefetchState"),
+                           src0=sgpr("PersistentPrefetchState"), src1=hex(0xffffff7f),
+                           comment="PAP consume entry-local group1 publication"))
+        module.add(done)
+        return module
+
     def papPgr2EntryWait(self, kernel, tPA, tPB):
         module = Module("PAP PGR2 first group readiness")
         ordinary = Label(self.labels.getNameInc("PapPgr2ColdEntryWait"), "")
@@ -155,9 +350,29 @@ class PersistentKernelState:
                               comment="PAP second group already issued?"))
         module.add(SCBranchSCC0(labelName=ordinary.getLabelName()))
         if persistentSpatialCluster(kernel):
-            # Group0 was published before the previous tile's epilogue. Delay
-            # group1's readiness phase through that epilogue and this setup.
+            # Group0 was published before the previous tile's epilogue. Long
+            # entries with carried operands can defer the complete group1
+            # publication until after setup/PLR, before the next cluster phase.
+            immediate, ready = None, None
+            if self.papPgr2DeferredClusterReadyEnabled(kernel, tPA, tPB):
+                immediate = Label(self.labels.getNameInc("PapImmediateGroup1Ready"), "")
+                ready = Label(self.labels.getNameInc("PapGroup1ReadyOrPending"), "")
+                module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=4,
+                                      comment="PAP defer group1 only with retained first PLR"))
+                module.add(SCBranchSCC0(labelName=immediate.getLabelName()))
+                module.add(SCmpGeU32(src0=self.loopCounter(kernel, self.states.unrollIdx), src1=3,
+                                    comment="PAP defer group1 only for more than two full K chunks"))
+                module.add(SCBranchSCC0(labelName=immediate.getLabelName()))
+                # These full-K predicates are identical on padded phantom peers.
+                # Bit7 lives only until the common pre-openLoop boundary.
+                module.add(SOrB32(dst=sgpr("PersistentPrefetchState"),
+                                  src0=sgpr("PersistentPrefetchState"), src1=128,
+                                  comment="PAP defer entry-local group1 publication"))
+                module.add(SBranch(labelName=ready.getLabelName()))
+                module.add(immediate)
             module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 1))
+            if ready is not None:
+                module.add(ready)
         module.add(self._wait(kernel, tPA, tPB, self.papPgr2TensorCount(kernel), -1, -1,
                               "PAP group0 ready; retain younger group1"))
         module.add(SBranch(labelName=done.getLabelName()))
@@ -184,7 +399,7 @@ class PersistentKernelState:
         streamK = isStreamK(kernel)
         if streamK and getattr(self.states, "papNextTileVgpr", -1) < 0:
             return None
-        if streamK:
+        if streamK or self.papDescriptorSnapshotLayout(kernel, tPA, tPB):
             # The packed path borrows only temporary scalars. Keep its complete
             # preparation/consumer scratch within the existing scalar budget;
             # fragmentation must not turn this optimization into pool growth.
@@ -295,11 +510,21 @@ class PersistentKernelState:
         return module
 
     def papNextTileAddressModules(self, kernel, tPA, tPB):
-        """Prepare StreamK addresses in packed lanes; keep the scalar DP path."""
+        """Hold scalar addresses only while preparing the lane-packed payload."""
         plan = getattr(self.states, "papAddressCarrier", None)
         if plan is not None and plan.get("packed") and isStreamK(kernel):
             return self.papStreamKNextTileAddressModules(kernel, tPA, tPB)
-        return self._papNextTileAddressModules(kernel, tPA, tPB)
+        if plan is None or not plan.get("packed"):
+            return self._papNextTileAddressModules(kernel, tPA, tPB)
+        # Only the preparation itself owns scalar scratch. Lane 0..3 holds the
+        # next identity, 4..7 the two addresses, 8..11 the borrowed identity.
+        with self.allocTmpSgpr(2, alignment=2, tag="PAP packed address scratch") as tmp:
+            self.states.papAddressCarrier = dict(packed=True, data=tmp.idx, mx=tmp.idx,
+                coordinates={i: self.sgprs["WorkGroup%u" % i] for i in range(3)})
+            try:
+                return self._papNextTileAddressModules(kernel, tPA, tPB)
+            finally:
+                self.states.papAddressCarrier = plan
 
     def _papNextTileAddressModules(self, kernel, tPA, tPB):
         """Separate EXEC-changing mapping from schedulable scalar addresses."""
@@ -310,6 +535,8 @@ class PersistentKernelState:
         if plan is None:
             return mapper, address
         c = plan["coordinates"]
+        if plan.get("packed"):
+            module.add(self.papPackedSaveIdentity(kernel))
         # The data-address output does not become live until mapping finishes.
         # Borrow it to save EXEC, and restore the exact incoming mask before the
         # pure leaf overwrites that word. Full EXEC makes the divider's readlane
@@ -346,16 +573,37 @@ class PersistentKernelState:
                     module.add(SLShiftLeftB32(dst=sgpr(c[1]), shiftHex=int(log2(ck)), src=sgpr(c[1])))
                     module.add(SLShiftRightB32(dst=sgpr(a), shiftHex=int(log2(cs)), src=sgpr(a)))
                     module.add(SAddU32(dst=sgpr(c[1]), src0=sgpr(c[1]), src1=sgpr(a)))
+                    if getattr(self.states, "papNextTileVgpr", -1) >= 0:
+                        module.add(SCmpGeU32(src0=sgpr(c[0]), src1=sgpr("NumWorkGroups0")))
+                        module.add(SCSelectB32(dst=sgpr(d), src0=1, src1=0))
+                        module.add(SCmpGeU32(src0=sgpr(c[1]), src1=sgpr("NumWorkGroups1")))
+                        module.add(SCSelectB32(dst=sgpr(d), src0=1, src1=sgpr(d)))
+                        module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr), src0=sgpr(d), src1=3,
+                                                 comment="PAP retain next phantom identity through store"))
                     for i in (0, 1):
                         module.add(SSubU32(dst=sgpr(rem), src0=sgpr("NumWorkGroups%u" % i), src1=1))
                         module.add(SMinU32(dst=sgpr(c[i]), src0=sgpr(c[i]), src1=sgpr(rem), comment="PAP clamp phantom coordinate"))
             finally:
                 self.vgprPool.checkIn(vectors)
+            if getattr(self.states, "papNextTileVgpr", -1) >= 0:
+                for i in range(3):
+                    module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr), src0=sgpr(c[i]), src1=i,
+                                             comment="PAP retain next coordinate through store"))
             module.add(SMovB32(dst=EXEC(), src=sgpr(plan["data"]), comment="PAP mapper restore exact current EXEC"))
             module = address
             module.add(self.papTdmPrepareAddressPair(kernel, tPA, tPB, c, plan["data"], scratch))
+            if plan.get("packed"):
+                for i in range(2):
+                    module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr),
+                        src0=sgpr(plan["data"] + i), src1=4 + i, comment="PAP retain prepared data address"))
             if plan["mx"] is not None:
                 module.add(self.papTdmPrepareAddressPair(kernel, tPA["MX"], tPB["MX"], c, plan["mx"], scratch))
+                if plan.get("packed"):
+                    for i in range(2):
+                        module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr),
+                            src0=sgpr(plan["mx"] + i), src1=6 + i, comment="PAP retain prepared scale address"))
+            if plan.get("packed"):
+                module.add(self.papPackedRestoreIdentity(kernel))
             module.add(SMovB32(dst=sgpr(b), src=hex(0x80000004)))
             if not persistentSpatialCluster(kernel):
                 # Equality to +1 needs only the encoded low field; sign extension
@@ -469,6 +717,126 @@ class PersistentKernelState:
                     module.add(VReadlaneB32(dst=sgpr(tmp.idx + i), src0=payload,
                         src1=lane + i, comment="PAP unpack prepared address"))
                 module.add(self.papTdmUpdateDescriptor(kernel, a, b, preparedGlobalAddr=tmp.idx))
+        return module
+
+    def papDescriptorSnapshotLayout(self, kernel, tPA, tPB):
+        """Exact classic aliased descriptor words fitting the remaining lanes."""
+        if (getattr(self.states, "papNextTileVgpr", -1) < 0
+                or not self.papPgr2PipelineEnabled(kernel, tPA, tPB)
+                or not kernel["ProblemType"]["MXBlockA"]
+                or not (kernel.get("_TDMIterateModeA") or kernel.get("_TDMIterateModeB"))
+                or kernel["LdsOffsetA_Blk"] <= 0):
+            return ()
+        owners = {"A": "A", "B": "A", "MXSA": "MXSA", "MXSB": "MXSA"}
+        if any(self.tdmDescriptorSetOwner(kernel, tc) != owner for tc, owner in owners.items()):
+            return ()
+        groups = (("tdmAGroup0", 4), ("tdmAGroup1", 8), ("tdmAGroup2", 4),
+                  ("tdmMXSAGroup0", 4), ("tdmMXSAGroup1", 8))
+        physical = []
+        words = []
+        for name, count in groups:
+            if name not in self.sgprs:
+                return ()
+            physical.extend(range(self.sgprs[name], self.sgprs[name] + count))
+            words.extend(name + ("+%u" % i if i else "") for i in range(count))
+        # Four coordinate/phantom lanes plus all 28 unique descriptor words.
+        if len(set(physical)) != 28:
+            return ()
+        if isStreamK(kernel):
+            # Reconstruct the two known enable words, leaving room for K bounds.
+            words = [name for name in words if name not in ("tdmAGroup0", "tdmMXSAGroup0")]
+        return tuple(words)
+
+    def papSaveNextTileDescriptors(self, kernel, tPA, tPB):
+        """Capture K0 immediately after the guarded prepared group0 issue.
+
+        Only the issued group0 path calls this. Group1 must not advance the
+        descriptors until their K0 state is retained. Save bank-zero LDS
+        addresses so ordinary entry bank restoration remains the sole owner.
+        """
+        module = Module("PAP retain next K0 descriptors")
+        words = self.papDescriptorSnapshotLayout(kernel, tPA, tPB)
+        if not words:
+            return module
+        payload = vgpr(self.states.papNextTileVgpr)
+        with self.allocTmpSgpr(1, tag="PAP normalize snapshot LDS bank") as tmp:
+            for lane, name in enumerate(words, 5 if isStreamK(kernel) else 4):
+                value = sgpr(name)
+                if name in ("tdmAGroup0+1", "tdmMXSAGroup0+1"):
+                    module.add(SSubU32(dst=sgpr(tmp.idx), src0=value, src1=kernel["LdsOffsetA_Blk"]))
+                    module.add(SCmpGeU32(src0=value, src1=kernel["LdsOffsetA_Blk"]))
+                    module.add(SCSelectB32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=value,
+                                          comment="PAP snapshot descriptor LDS address in bank zero"))
+                    value = sgpr(tmp.idx)
+                module.add(VWritelaneB32(dst=payload, src0=value, src1=lane,
+                                         comment="PAP retain next K0 descriptor " + name))
+        module.add(SSchedulingFence(comment="PAP complete descriptor snapshot before publication"))
+        module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                          src1=64, comment="PAP publish retained K0 descriptors"))
+        return module
+
+    def papRestoreNextTileDescriptors(self, kernel, tPA, tPB, ordinary):
+        """Restore the issued K0 snapshot before normal entry increments/banking."""
+        words = self.papDescriptorSnapshotLayout(kernel, tPA, tPB)
+        if not words:
+            return ordinary
+        module = Module("PAP activate retained K0 descriptors")
+        cold = Label(self.labels.getNameInc("PapColdEntryDescriptors"), "")
+        ready = Label(self.labels.getNameInc("PapEntryDescriptorsReady"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=6,
+                              comment="PAP K0 descriptor snapshot survived the previous store?"))
+        module.add(SCBranchSCC0(labelName=cold.getLabelName()))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
+                              comment="PAP retained descriptors belong to an issued tile?"))
+        module.add(SCBranchSCC0(labelName=cold.getLabelName()))
+        for lane, name in enumerate(words, 5 if isStreamK(kernel) else 4):
+            module.add(VReadlaneB32(dst=sgpr(name), src0=vgpr(self.states.papNextTileVgpr), src1=lane,
+                                   comment="PAP activate retained K0 descriptor " + name))
+        if isStreamK(kernel):
+            for name in ("tdmAGroup0", "tdmMXSAGroup0"):
+                module.add(SMovB32(dst=sgpr(name), src=1, comment="PAP restore issued descriptor enable"))
+        module.add(SBranch(labelName=ready.getLabelName()))
+        module.add(cold)
+        module.add(ordinary)
+        module.add(ready)
+        if not isStreamK(kernel):
+            module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                               src1=hex(0xffffffbf), comment="PAP consume retained descriptor snapshot"))
+        return module
+
+    def papApplyEntryKOffset(self, kernel, tPA, tPB):
+        """A restored StreamK descriptor already includes the local K start."""
+        module = Module("PAP entry local K offset")
+        guarded = isStreamK(kernel) and bool(self.papDescriptorSnapshotLayout(kernel, tPA, tPB))
+        if guarded:
+            ordinary = Label(self.labels.getNameInc("PapEntryKOffset"), "")
+            done = Label(self.labels.getNameInc("PapEntryKOffsetDone"), "")
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=6))
+            module.add(SCBranchSCC0(labelName=ordinary.getLabelName()))
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0))
+            module.add(SCBranchSCC1(labelName=done.getLabelName(), comment="PAP restored local K offset exactly once"))
+            module.add(ordinary)
+        module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tPA, tPB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(self.tdmApplyTileKOffsetWaveSeparated(kernel, tPA["MX"], tPB["MX"]))
+        if guarded:
+            module.add(done)
+            module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                               src1=hex(0xffffffbf), comment="PAP consume retained descriptor snapshot"))
+        return module
+
+    def papPublishNextTileCoordinates(self):
+        """Publish the durable coordinates only after a prepared load was issued."""
+        module = Module("PAP publish next tile coordinates")
+        if getattr(self.states, "papNextTileVgpr", -1) < 0:
+            return module
+        with self.allocTmpSgpr(1, tag="PAP coordinate publication") as tmp:
+            module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("PersistentPrefetchState"), src1=5))
+            module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=5,
+                                comment="PAP prepared coordinates belong to an issued tile?"))
+            module.add(SCSelectB32(dst=sgpr(tmp.idx), src0=32, src1=0))
+            module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                              src1=sgpr(tmp.idx), comment="PAP publish durable next coordinates for entry"))
         return module
 
     def papTileIdentityNames(self, kernel):
@@ -854,19 +1222,6 @@ class PersistentKernelState:
       return start, self.states.lastValuMXSAB - start
 
 
-    def papPgr2PublishGroup0(self, kernel, tPA, tPB):
-        """Publish multicast group0 while its local reads remain at entry."""
-        module = Module("PAP group0 publication without retained local reads")
-        if not (persistentSpatialCluster(kernel) and self.papPgr2PipelineEnabled(kernel, tPA, tPB)):
-            return module
-        skip = Label(self.labels.getNameInc("PapSkipGroup0Publication"), "")
-        module.add(SSchedulingFence(comment="PAP group0 publication after current final WMMA"))
-        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
-                              comment="PAP both next groups issued?"))
-        module.add(SCBranchSCC0(labelName=skip.getLabelName()))
-        module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
-        module.add(skip)
-        return module
 
 class PersistentLoop(Component):
     """
@@ -1026,6 +1381,11 @@ class PersistentLoop(Component):
             # producers and all old P reads before F is named by the entry token1.
             # Group1 releases only F; next group0 on token0 may stay in flight.
             tokens = [first, final] if group == 0 else [final]
+            # Group0 also acquires the current final bank, whose producer
+            # may still be outstanding. Only group1 is a pure reader release.
+            if (group == 1 and getattr(writer.states, "papFirstPlrReads", None) is not None
+                    and not persistentSpatialCluster(kernel)):
+                tokens = [writer.states.memTokenPapReaders[t] for t in tokens]
             barrier.setMemToken(MemTokenData(tokens))
             release.add(barrier)
             return release
@@ -1100,7 +1460,10 @@ class PersistentLoop(Component):
                           src1=1 if group == 0 else 8, comment="PAP PGR2 group%d actually issued" % group))
         if group == 0:
             if carrier.get("packed"):
+                # Snapshot reuses address/scratch lanes after current identity
+                # is restored; next coordinates and K bounds remain live.
                 module.add(writer.papPackedRestoreIdentity(kernel))
+            module.add(writer.papSaveNextTileDescriptors(kernel, tPA, tPB))
             module.add(writer.papTdmSaveLdsBank(kernel))
             if not carrier.get("packed"):
                 module.add(swapCoordinates())
