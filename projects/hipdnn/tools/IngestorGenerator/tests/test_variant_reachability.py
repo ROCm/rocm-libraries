@@ -352,7 +352,7 @@ class TestGfx950RealBundle:
     _KDP = (
         _REPO_ROOT
         / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
-        / "descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json"
+        / "descriptors/rocKE/gfx950_attention_dense/artifacts/gfx950_attention_dense.kdp.json"
     )
 
     #: The request corpus is an author's input that this repository does not ship: the
@@ -403,7 +403,9 @@ class TestGfx950RealBundle:
     @classmethod
     def _require_assets(cls):
         if not cls._KDP.exists():
-            pytest.skip(f"gfx950 bundle not present in this checkout: {cls._KDP}")
+            pytest.skip(
+                f"gfx950 bundle not present in this checkout (dvc pull -r ingestor): {cls._KDP}"
+            )
 
     @classmethod
     def _corpus(cls, head_sizes):
@@ -430,7 +432,11 @@ class TestGfx950RealBundle:
 
     @classmethod
     def _metas(cls):
-        defaults, descriptors = variant_reachability.load_bundle(str(cls._KDP))
+        # The KDP sits in the bundle's DVC `artifacts/` folder; its engine and schema
+        # descriptors are siblings of that folder, so resolve across the bundle directory.
+        defaults, descriptors = variant_reachability.load_bundle(
+            str(cls._KDP), tree=str(cls._KDP.parent.parent)
+        )
         return [
             variant_reachability._resolved_metadata(d, defaults) for d in descriptors
         ]
