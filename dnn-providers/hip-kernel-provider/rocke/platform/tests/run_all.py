@@ -138,6 +138,11 @@ NATIVE_PARITY_TESTS = (
         "rocke_nontemporal_hip",
         "native nontemporal HIP parity",
     ),
+    (
+        "ROCKE_BUFFER_RSRC_HIP_TEST",
+        "rocke_buffer_rsrc_hip",
+        "native buffer descriptor HIP parity",
+    ),
 )
 
 

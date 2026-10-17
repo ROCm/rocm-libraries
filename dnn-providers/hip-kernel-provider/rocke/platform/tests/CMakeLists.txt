@@ -140,6 +140,22 @@ if(BUILD_TESTING)
                  rocke_nontemporal_hip)
   endif()
 
+  # The buffer descriptor word (DWORD3) the HIP lowerer emits per target, and
+  # its agreement with the LLVM lowerer's word.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
+    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
+    target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
+    add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
+    set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_buffer_rsrc_hip)
+    set_target_properties(rocke_buffer_rsrc_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_buffer_rsrc_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_buffer_rsrc_hip)
+  endif()
+
   # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
     add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)

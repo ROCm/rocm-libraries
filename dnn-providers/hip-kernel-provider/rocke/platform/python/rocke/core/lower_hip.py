@@ -36,6 +36,7 @@ from .ir import (
     dpp_xor_ctrl,
     require_streaming_arch,
 )
+from .isa.backend import backend_for
 
 
 _HIP_TYPE = {
@@ -2077,23 +2078,22 @@ class _Lowerer:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
         # int num_records, int flags)``
         #
-        # The flags word is the rsrc DWORD3: it encodes
-        # ``TYPE=BUFFER_RESOURCE, DATA_FORMAT=32-bit dword, NUM_FORMAT=UINT``.
-        # Without it the AMDGPU compiler can lower buffer loads to
-        # "unbounded" single-dword loads (no bounds check) which then
-        # produce mismatching output for shapes whose OOB lanes need to
-        # see zero. Value matches the LLVM-direct path
-        # (``lower_llvm._op_tile_buffer_rsrc`` -> ``i32 159744`` =
-        # ``0x00027000``) and CK Tile's
-        # ``__builtin_amdgcn_make_buffer_rsrc(p, 0, bytes, 0x00027000)``
-        # in ``cktile_fixed_lean_kernel.hpp``.
+        # The flags word is the rsrc DWORD3. Its format / out-of-bounds
+        # encoding is ISA-specific (the gfx9 value makes every raw buffer
+        # access on gfx11 / gfx12 read 0 or drop the write), so it comes from
+        # the target's ISA backend -- the same ``buffer_rsrc_word3`` the
+        # LLVM-direct path (``lower_llvm._op_tile_buffer_rsrc``) emits. With
+        # the right word, out-of-range byte offsets return 0 on load and are
+        # dropped on store; without it the compiler can lower buffer loads to
+        # unbounded single-dword loads with no bounds check.
         ptr, num_bytes = op.operands
+        word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(
             f"rsrc_t {_name(op.result)} = "
             f"__builtin_amdgcn_make_buffer_rsrc("
             f"(void*){_name(ptr)}, /*stride=*/(short)0, "
             f"/*num_records=*/(int){_name(num_bytes)}, "
-            f"/*flags=*/(int)0x00027000);"
+            f"/*flags=*/(int)0x{word3:08X});"
         )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
