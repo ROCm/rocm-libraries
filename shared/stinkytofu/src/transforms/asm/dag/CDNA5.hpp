@@ -471,6 +471,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return f.wmmaQueueCoverCycles > 0 ? std::max(1, f.wmmaQueueDepth) : 1;
     }
     // Cycles of queued WMMA work needed before a non-WMMA pick may issue (0 = off).
+    // The WMMA cover the barrier drain budget counts on. Defaults to the queue cover.
+    int barrierDrainCover() const {
+        const int c = getPassContext().getPassFeatureConfig().dagFeatures.barrierDrainCoverCycles;
+        return c >= 0 ? c : wmmaQueueCover();
+    }
     int wmmaQueueCover() const {
         if (wmmaQueueDepth() <= 1) return 0;
         return std::max(0,
@@ -2017,9 +2022,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                 : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
         // The queued WMMA work (wmmaQueueCover(), 0 with the queue off) keeps the pipe busy while
         // the wave waits for the last ds_load, so only the drain beyond it needs WMMAs in front.
-        const int latencyWmmaBudget =
-            (std::max(0, latencyForAfterThreshold - wmmaQueueCover()) / wmmaIssueConfig.latency) +
-            1;
+        const int latencyWmmaBudget = (std::max(0, latencyForAfterThreshold - barrierDrainCover()) /
+                                       wmmaIssueConfig.latency) +
+                                      1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
