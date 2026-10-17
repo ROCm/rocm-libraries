@@ -567,6 +567,71 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
   }
 }
 
+// rank_configs scans the candidate list. A missing non-temporal variant must
+// not reject every temporal kernel that the direct latency shortcut would drop.
+TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hints]") {
+  const double rejected = std::numeric_limits<double>::max();
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - keeps temporal B when no variant exists") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(256, 8192, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      configs.push_back(make_config(64, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == configs.size());
+      for (const auto& result : results) {
+        REQUIRE(result.latency < rejected);
+        REQUIRE(result.config.cache_hints_b == 0);
+      }
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - prefers an available non-temporal B variant") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(256, 8192, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == 1);
+      REQUIRE(results.front().latency < rejected);
+      REQUIRE(results.front().config.cache_hints_b == 4);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - keeps temporal A when no variant exists") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(8192, 256, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == 1);
+      REQUIRE(results.front().latency < rejected);
+      REQUIRE(results.front().config.cache_hints_a == 0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - prefers an available non-temporal A variant") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(8192, 256, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == 1);
+      REQUIRE(results.front().latency < rejected);
+      REQUIRE(results.front().config.cache_hints_a == 4);
+    }
+  }
+}
+
 TEST_CASE("Origami: select_topk_configs unit test", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_topk_configs unit test") {

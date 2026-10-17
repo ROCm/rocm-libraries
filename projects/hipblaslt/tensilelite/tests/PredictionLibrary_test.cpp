@@ -193,3 +193,38 @@ TEST(PredictionLibraryTest, ClusterDimStaysIndexAlignedWithSolutionList)
     expectClusterDim(lib.origami_config_list[0], TensileLite::dim3(2, 4, 1));
     expectClusterDim(lib.origami_config_list[1], TensileLite::dim3(1, 1, 1));
 }
+
+TEST(PredictionLibraryTest, LegacyNonTemporalBecomesOrigamiCacheHint)
+{
+    auto solution                      = makeMappedSolution(42);
+    solution->sizeMapping.nonTemporalA = 4;
+    solution->sizeMapping.nonTemporalB = 0;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
+
+TEST(PredictionLibraryTest, TemporalHintsOverrideLegacyNonTemporal)
+{
+    auto solution                         = makeMappedSolution(42);
+    solution->sizeMapping.hasTemporalHint = true;
+    solution->sizeMapping.temporalHintA   = 1;
+    solution->sizeMapping.temporalHintB   = 2;
+    solution->sizeMapping.nonTemporalA    = 0;
+    solution->sizeMapping.nonTemporalB    = 4;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
