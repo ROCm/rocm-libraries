@@ -781,7 +781,7 @@ class StaticGrid(WorkAssignment):
         if not partition.tile_units:
             return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
         module = Module("StaticGrid activate tile")
-        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB))
+        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB, preparedEntry=True))
         module.add(SAddU32(dst=sgpr(partition.cursor), src0=sgpr(partition.cursor), src1=sgpr(partition.grid), comment="Advance by the persistent grid in tile units"))
         module.add(SCSelectB32(dst=sgpr(partition.cursor), src0=sgpr(partition.bound), src1=sgpr(partition.cursor), comment="A wrapped cursor is exhausted"))
         return module

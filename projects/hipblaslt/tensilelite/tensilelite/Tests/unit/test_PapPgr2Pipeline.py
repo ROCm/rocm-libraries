@@ -212,7 +212,7 @@ def test_multicast_groups_release_and_publish_four_balanced_phases(
             writer, kernel, tensors["A"], tensors["B"], group))
     # No retained payload simulates the VGPR fallback. Group0 still needs its
     # remote-producer phase, and group1 is published only after store/setup.
-    ready0 = writer.papPgr2PublishGroup0(kernel, tensors["A"], tensors["B"])
+    ready0 = writer.papPrefetchLocalRead(kernel, tensors["A"], tensors["B"])
     ready1 = writer.papPgr2EntryWait(kernel, tensors["A"], tensors["B"])
     close = assignment.persistentClusterNextTileArrive(writer, kernel)
     active = prepared and has_next and q >= 2
@@ -398,6 +398,7 @@ def test_streamk_two_group_guard_checks_next_range_and_restores_current(
     writer.papTdmUpdateDescriptor = lambda *args, **kwargs: Module()
     writer.papPgr2AdvanceDescriptor = lambda *args: Module()
     writer.tdmSwapLdsOffset = lambda *args: Module()
+    writer.papSaveNextTileDescriptors = lambda *args: Module()
     writer.papTdmSaveLdsBank = lambda *args: Module()
     writer.papPgr2IssueGroup = lambda k, a, b, group: SAddU32(
         sgpr(f"Group{group}Issues"), sgpr(f"Group{group}Issues"), 1)
