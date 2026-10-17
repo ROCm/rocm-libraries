@@ -135,6 +135,10 @@ void typesBindings(nb::module_& m)
         .value("GATHER", MoeGroupedMatmulMode::GATHER)
         .value("SCATTER", MoeGroupedMatmulMode::SCATTER);
 
+    nb::enum_<GateDomain>(m, "GateDomain")
+        .value("LOG", GateDomain::LOG)
+        .value("LINEAR", GateDomain::LINEAR);
+
     nb::enum_<NormFwdPhase>(m, "NormFwdPhase")
         .value("NOT_SET", NormFwdPhase::NOT_SET)
         .value("INFERENCE", NormFwdPhase::INFERENCE)

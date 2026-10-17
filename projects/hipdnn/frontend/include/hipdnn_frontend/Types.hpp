@@ -37,6 +37,7 @@
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
 #include <HipdnnDiagonalAlignment.h>
+#include <HipdnnGateDomain.h>
 #include <HipdnnMoeGroupedMatmulMode.h>
 #include <HipdnnNormFwdPhase.h>
 #include <HipdnnPaddingMode.h>
@@ -290,6 +291,17 @@ enum class MoeGroupedMatmulMode
     SCATTER = 3 ///< Scatter grouped-matmul output to source token order.
 };
 typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mode alias
+
+/**
+ * @enum GateDomain
+ * @brief How the g tensor of a linear-attention op (GDN, KDA) encodes the decay alpha
+ */
+enum class GateDomain
+{
+    LOG = 0, ///< g holds ln(alpha), the log of the per-token decay.
+    LINEAR = 1 ///< g holds alpha in (0, 1] directly.
+};
+typedef GateDomain GateDomain_t; ///< @brief Linear-attention gate domain alias
 
 /**
  * @enum HeuristicMode
@@ -594,6 +606,19 @@ inline std::optional<hipdnnMoeGroupedMatmulMode_t>
     }
 }
 
+inline std::optional<hipdnnGateDomain_t> toBackendGateDomain(const GateDomain& type)
+{
+    switch(type)
+    {
+    case GateDomain::LOG:
+        return HIPDNN_GATE_DOMAIN_LOG_EXT;
+    case GateDomain::LINEAR:
+        return HIPDNN_GATE_DOMAIN_LINEAR_EXT;
+    default:
+        return std::nullopt;
+    }
+}
+
 /**
  * @brief Convert backend hipdnnDiagonalAlignment_t to frontend DiagonalAlignment
  *
@@ -663,6 +688,21 @@ inline std::pair<MoeGroupedMatmulMode, Error>
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
                  "Unknown hipdnnMoeGroupedMatmulMode_t value: "
                      + std::to_string(static_cast<int>(mode))}};
+    }
+}
+
+inline std::pair<GateDomain, Error> fromHipdnnGateDomain(hipdnnGateDomain_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_GATE_DOMAIN_LOG_EXT:
+        return {GateDomain::LOG, {}};
+    case HIPDNN_GATE_DOMAIN_LINEAR_EXT:
+        return {GateDomain::LINEAR, {}};
+    default:
+        return {GateDomain::LOG,
+                {ErrorCode::HIPDNN_BACKEND_ERROR,
+                 "Unknown hipdnnGateDomain_t value: " + std::to_string(static_cast<int>(mode))}};
     }
 }
 

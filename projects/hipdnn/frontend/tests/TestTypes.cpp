@@ -1116,3 +1116,51 @@ TEST(TestTypes, MoeGroupedMatmulModeUnknownValueReturnsError)
     EXPECT_EQ(mode, MoeGroupedMatmulMode::NOT_SET);
     EXPECT_EQ(error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
+
+TEST(TestTypes, FromHipdnnGateDomainAllValidModes)
+{
+    using namespace hipdnn_frontend;
+
+    const std::vector<std::pair<hipdnnGateDomain_t, GateDomain>> validModes = {
+        {HIPDNN_GATE_DOMAIN_LOG_EXT, GateDomain::LOG},
+        {HIPDNN_GATE_DOMAIN_LINEAR_EXT, GateDomain::LINEAR},
+    };
+
+    for(const auto& [hipdnnMode, expectedMode] : validModes)
+    {
+        auto [mode, err] = fromHipdnnGateDomain(hipdnnMode);
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnGateDomain failed for mode value " << static_cast<int>(hipdnnMode);
+        EXPECT_EQ(mode, expectedMode) << "Mismatch for mode value " << static_cast<int>(hipdnnMode);
+    }
+}
+
+TEST(TestTypes, FromHipdnnGateDomainUnknownReturnsError)
+{
+    using namespace hipdnn_frontend;
+
+    auto unknownMode = static_cast<hipdnnGateDomain_t>(9999);
+    auto [mode, err] = fromHipdnnGateDomain(unknownMode);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(err.get_message().find("Unknown") != std::string::npos);
+}
+
+TEST(TestTypes, FromHipdnnGateDomainRoundTrip)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto mode : {
+            GateDomain::LOG,
+            GateDomain::LINEAR,
+        })
+    {
+        auto hipdnnOpt = toBackendGateDomain(mode);
+        ASSERT_TRUE(hipdnnOpt.has_value())
+            << "toBackendGateDomain failed for mode " << static_cast<int>(mode);
+        auto [roundTripped, err] = fromHipdnnGateDomain(hipdnnOpt.value());
+        EXPECT_TRUE(err.is_good())
+            << "fromHipdnnGateDomain failed for mode " << static_cast<int>(mode);
+        EXPECT_EQ(roundTripped, mode) << "Round-trip mismatch for mode " << static_cast<int>(mode);
+    }
+}

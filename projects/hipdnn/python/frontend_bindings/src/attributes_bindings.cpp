@@ -13,6 +13,8 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/GdnAttributes.hpp>
+#include <hipdnn_frontend/attributes/KdaAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -748,6 +750,218 @@ void attributesBindings(nb::module_& m)
         .def("get_output", &graph::MoeGroupedMatmulAttributes::get_output)
         .def("get_mode", &graph::MoeGroupedMatmulAttributes::get_mode)
         .def("get_top_k", &graph::MoeGroupedMatmulAttributes::get_top_k);
+
+    // GdnAttributes
+    nb::class_<graph::GdnAttributes>(m, "GdnAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::GdnAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::GdnAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::GdnAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::GdnAttributes::get_compute_data_type)
+        .def("set_q",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_q),
+             nb::rv_policy::reference_internal)
+        .def("set_k",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_k),
+             nb::rv_policy::reference_internal)
+        .def("set_v",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_v),
+             nb::rv_policy::reference_internal)
+        .def("set_g",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_g),
+             nb::rv_policy::reference_internal)
+        .def("set_beta",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_beta),
+             nb::rv_policy::reference_internal)
+        .def("set_cu_seqlens",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_cu_seqlens),
+             nb::rv_policy::reference_internal)
+        .def("set_initial_state",
+             static_cast<TensorSetter<graph::GdnAttributes>>(
+                 &graph::GdnAttributes::set_initial_state),
+             nb::rv_policy::reference_internal)
+        .def("set_a_log",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_a_log),
+             nb::rv_policy::reference_internal)
+        .def("set_dt_bias",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_dt_bias),
+             nb::rv_policy::reference_internal)
+        .def("set_state_indices",
+             static_cast<TensorSetter<graph::GdnAttributes>>(
+                 &graph::GdnAttributes::set_state_indices),
+             nb::rv_policy::reference_internal)
+        .def("set_o",
+             static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_o),
+             nb::rv_policy::reference_internal)
+        .def(
+            "set_final_state",
+            static_cast<TensorSetter<graph::GdnAttributes>>(&graph::GdnAttributes::set_final_state),
+            nb::rv_policy::reference_internal)
+        .def("set_state_checkpoints",
+             static_cast<TensorSetter<graph::GdnAttributes>>(
+                 &graph::GdnAttributes::set_state_checkpoints),
+             nb::rv_policy::reference_internal)
+        .def("set_scale", &graph::GdnAttributes::set_scale, nb::rv_policy::reference_internal)
+        .def("set_output_final_state",
+             &graph::GdnAttributes::set_output_final_state,
+             nb::rv_policy::reference_internal)
+        .def("set_use_qk_l2norm",
+             &graph::GdnAttributes::set_use_qk_l2norm,
+             nb::rv_policy::reference_internal)
+        .def("set_checkpoint_every_n_tokens",
+             &graph::GdnAttributes::set_checkpoint_every_n_tokens,
+             nb::rv_policy::reference_internal)
+        .def("set_use_beta_sigmoid",
+             &graph::GdnAttributes::set_use_beta_sigmoid,
+             nb::rv_policy::reference_internal)
+        .def("set_allow_neg_eigval",
+             &graph::GdnAttributes::set_allow_neg_eigval,
+             nb::rv_policy::reference_internal)
+        .def("set_safe_gate",
+             &graph::GdnAttributes::set_safe_gate,
+             nb::rv_policy::reference_internal)
+        .def("set_gate_domain",
+             &graph::GdnAttributes::set_gate_domain,
+             nb::rv_policy::reference_internal)
+        .def("set_batch_invariant",
+             &graph::GdnAttributes::set_batch_invariant,
+             nb::rv_policy::reference_internal)
+        .def("set_overwrite_initial_state",
+             &graph::GdnAttributes::set_overwrite_initial_state,
+             nb::rv_policy::reference_internal)
+        .def("get_q", &graph::GdnAttributes::get_q)
+        .def("get_k", &graph::GdnAttributes::get_k)
+        .def("get_v", &graph::GdnAttributes::get_v)
+        .def("get_g", &graph::GdnAttributes::get_g)
+        .def("get_beta", &graph::GdnAttributes::get_beta)
+        .def("get_cu_seqlens", &graph::GdnAttributes::get_cu_seqlens)
+        .def("get_initial_state", &graph::GdnAttributes::get_initial_state)
+        .def("get_a_log", &graph::GdnAttributes::get_a_log)
+        .def("get_dt_bias", &graph::GdnAttributes::get_dt_bias)
+        .def("get_state_indices", &graph::GdnAttributes::get_state_indices)
+        .def("get_o", &graph::GdnAttributes::get_o)
+        .def("get_final_state", &graph::GdnAttributes::get_final_state)
+        .def("get_state_checkpoints", &graph::GdnAttributes::get_state_checkpoints)
+        .def("get_scale", &graph::GdnAttributes::get_scale)
+        .def("get_output_final_state", &graph::GdnAttributes::get_output_final_state)
+        .def("get_use_qk_l2norm", &graph::GdnAttributes::get_use_qk_l2norm)
+        .def("get_checkpoint_every_n_tokens", &graph::GdnAttributes::get_checkpoint_every_n_tokens)
+        .def("get_use_beta_sigmoid", &graph::GdnAttributes::get_use_beta_sigmoid)
+        .def("get_allow_neg_eigval", &graph::GdnAttributes::get_allow_neg_eigval)
+        .def("get_safe_gate", &graph::GdnAttributes::get_safe_gate)
+        .def("get_gate_domain", &graph::GdnAttributes::get_gate_domain)
+        .def("get_batch_invariant", &graph::GdnAttributes::get_batch_invariant)
+        .def("get_overwrite_initial_state", &graph::GdnAttributes::get_overwrite_initial_state);
+
+    // KdaAttributes
+    nb::class_<graph::KdaAttributes>(m, "KdaAttributes")
+        .def(nb::init<>())
+        .def("set_name", &graph::KdaAttributes::set_name, nb::rv_policy::reference_internal)
+        .def("get_name", &graph::KdaAttributes::get_name)
+        .def("set_compute_data_type",
+             &graph::KdaAttributes::set_compute_data_type,
+             nb::rv_policy::reference_internal)
+        .def("get_compute_data_type", &graph::KdaAttributes::get_compute_data_type)
+        .def("set_q",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_q),
+             nb::rv_policy::reference_internal)
+        .def("set_k",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_k),
+             nb::rv_policy::reference_internal)
+        .def("set_v",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_v),
+             nb::rv_policy::reference_internal)
+        .def("set_g",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_g),
+             nb::rv_policy::reference_internal)
+        .def("set_beta",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_beta),
+             nb::rv_policy::reference_internal)
+        .def("set_cu_seqlens",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_cu_seqlens),
+             nb::rv_policy::reference_internal)
+        .def("set_initial_state",
+             static_cast<TensorSetter<graph::KdaAttributes>>(
+                 &graph::KdaAttributes::set_initial_state),
+             nb::rv_policy::reference_internal)
+        .def("set_a_log",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_a_log),
+             nb::rv_policy::reference_internal)
+        .def("set_dt_bias",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_dt_bias),
+             nb::rv_policy::reference_internal)
+        .def("set_state_indices",
+             static_cast<TensorSetter<graph::KdaAttributes>>(
+                 &graph::KdaAttributes::set_state_indices),
+             nb::rv_policy::reference_internal)
+        .def("set_o",
+             static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_o),
+             nb::rv_policy::reference_internal)
+        .def(
+            "set_final_state",
+            static_cast<TensorSetter<graph::KdaAttributes>>(&graph::KdaAttributes::set_final_state),
+            nb::rv_policy::reference_internal)
+        .def("set_state_checkpoints",
+             static_cast<TensorSetter<graph::KdaAttributes>>(
+                 &graph::KdaAttributes::set_state_checkpoints),
+             nb::rv_policy::reference_internal)
+        .def("set_scale", &graph::KdaAttributes::set_scale, nb::rv_policy::reference_internal)
+        .def("set_output_final_state",
+             &graph::KdaAttributes::set_output_final_state,
+             nb::rv_policy::reference_internal)
+        .def("set_use_qk_l2norm",
+             &graph::KdaAttributes::set_use_qk_l2norm,
+             nb::rv_policy::reference_internal)
+        .def("set_checkpoint_every_n_tokens",
+             &graph::KdaAttributes::set_checkpoint_every_n_tokens,
+             nb::rv_policy::reference_internal)
+        .def("set_use_beta_sigmoid",
+             &graph::KdaAttributes::set_use_beta_sigmoid,
+             nb::rv_policy::reference_internal)
+        .def("set_allow_neg_eigval",
+             &graph::KdaAttributes::set_allow_neg_eigval,
+             nb::rv_policy::reference_internal)
+        .def("set_safe_gate",
+             &graph::KdaAttributes::set_safe_gate,
+             nb::rv_policy::reference_internal)
+        .def("set_gate_domain",
+             &graph::KdaAttributes::set_gate_domain,
+             nb::rv_policy::reference_internal)
+        .def("set_gate_lower_bound",
+             &graph::KdaAttributes::set_gate_lower_bound,
+             nb::rv_policy::reference_internal)
+        .def("set_batch_invariant",
+             &graph::KdaAttributes::set_batch_invariant,
+             nb::rv_policy::reference_internal)
+        .def("set_overwrite_initial_state",
+             &graph::KdaAttributes::set_overwrite_initial_state,
+             nb::rv_policy::reference_internal)
+        .def("get_q", &graph::KdaAttributes::get_q)
+        .def("get_k", &graph::KdaAttributes::get_k)
+        .def("get_v", &graph::KdaAttributes::get_v)
+        .def("get_g", &graph::KdaAttributes::get_g)
+        .def("get_beta", &graph::KdaAttributes::get_beta)
+        .def("get_cu_seqlens", &graph::KdaAttributes::get_cu_seqlens)
+        .def("get_initial_state", &graph::KdaAttributes::get_initial_state)
+        .def("get_a_log", &graph::KdaAttributes::get_a_log)
+        .def("get_dt_bias", &graph::KdaAttributes::get_dt_bias)
+        .def("get_state_indices", &graph::KdaAttributes::get_state_indices)
+        .def("get_o", &graph::KdaAttributes::get_o)
+        .def("get_final_state", &graph::KdaAttributes::get_final_state)
+        .def("get_state_checkpoints", &graph::KdaAttributes::get_state_checkpoints)
+        .def("get_scale", &graph::KdaAttributes::get_scale)
+        .def("get_output_final_state", &graph::KdaAttributes::get_output_final_state)
+        .def("get_use_qk_l2norm", &graph::KdaAttributes::get_use_qk_l2norm)
+        .def("get_checkpoint_every_n_tokens", &graph::KdaAttributes::get_checkpoint_every_n_tokens)
+        .def("get_use_beta_sigmoid", &graph::KdaAttributes::get_use_beta_sigmoid)
+        .def("get_allow_neg_eigval", &graph::KdaAttributes::get_allow_neg_eigval)
+        .def("get_safe_gate", &graph::KdaAttributes::get_safe_gate)
+        .def("get_gate_domain", &graph::KdaAttributes::get_gate_domain)
+        .def("get_gate_lower_bound", &graph::KdaAttributes::get_gate_lower_bound)
+        .def("get_batch_invariant", &graph::KdaAttributes::get_batch_invariant)
+        .def("get_overwrite_initial_state", &graph::KdaAttributes::get_overwrite_initial_state);
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")

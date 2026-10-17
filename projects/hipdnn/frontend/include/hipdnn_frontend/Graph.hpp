@@ -88,7 +88,9 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
+#include <hipdnn_frontend/attributes/GdnAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/KdaAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
@@ -128,6 +130,8 @@
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
+#include <hipdnn_frontend/node/GdnNode.hpp>
+#include <hipdnn_frontend/node/KdaNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
@@ -6054,6 +6058,158 @@ public:
             std::make_shared<MoeGroupedMatmulBwdNode>(std::move(attributes), graph_attributes));
 
         return dweight;
+    }
+
+    /**
+     * @brief Adds a Gated DeltaNet (GDN) forward node (hipDNN extension).
+     *
+     * Gated delta-rule linear attention with one decay per token and head; mirrors the
+     * cudnn-frontend Python op graph.gdn. Inputs are token-packed ([T, H, D]) with sequence
+     * offsets in @p cuSeqlens; optional inputs (initial_state, a_log, dt_bias, state_indices)
+     * and settings are taken from @p attributes.
+     *
+     * @param q Query tensor.
+     * @param k Key tensor.
+     * @param v Value tensor.
+     * @param g Per-token, per-head decay.
+     * @param beta Per-token, per-head write strength.
+     * @param cuSeqlens Sequence offsets, [N + 1].
+     * @param attributes Operation configuration.
+     * @return {o, final_state, state_checkpoints}. final_state is created only when
+     *         output_final_state is set, state_checkpoints only when
+     *         checkpoint_every_n_tokens > 0; otherwise they are nullptr.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        gdn_ext(std::shared_ptr<TensorAttributes> q,
+                std::shared_ptr<TensorAttributes> k,
+                std::shared_ptr<TensorAttributes> v,
+                std::shared_ptr<TensorAttributes> g,
+                std::shared_ptr<TensorAttributes> beta,
+                std::shared_ptr<TensorAttributes> cuSeqlens,
+                GdnAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Gdn_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        for(auto [tensor, suffix] : {std::pair{&q, "::Q"},
+                                     std::pair{&k, "::K"},
+                                     std::pair{&v, "::V"},
+                                     std::pair{&g, "::G"},
+                                     std::pair{&beta, "::BETA"},
+                                     std::pair{&cuSeqlens, "::CU_SEQLENS"}})
+        {
+            if(*tensor && (*tensor)->get_name().empty())
+            {
+                (*tensor)->set_name(attributes.get_name() + suffix);
+            }
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        std::shared_ptr<TensorAttributes> finalState;
+        std::shared_ptr<TensorAttributes> stateCheckpoints;
+        if(attributes.get_output_final_state())
+        {
+            finalState = outputTensor(attributes.get_name() + "::FINAL_STATE");
+        }
+        if(attributes.get_checkpoint_every_n_tokens() > 0)
+        {
+            stateCheckpoints = outputTensor(attributes.get_name() + "::STATE_CHECKPOINTS");
+        }
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_g(std::move(g));
+        attributes.set_beta(std::move(beta));
+        attributes.set_cu_seqlens(std::move(cuSeqlens));
+        attributes.set_o(o);
+        attributes.set_final_state(finalState);
+        attributes.set_state_checkpoints(stateCheckpoints);
+
+        _sub_nodes.emplace_back(std::make_shared<GdnNode>(std::move(attributes), graph_attributes));
+
+        return {o, finalState, stateCheckpoints};
+    }
+
+    /**
+     * @brief Adds a Kimi Delta Attention (KDA) forward node (hipDNN extension).
+     *
+     * Gated delta-rule linear attention with one decay per token, head and key channel;
+     * mirrors the cudnn-frontend Python op graph.kda. Inputs are token-packed ([T, H, D]) with
+     * sequence offsets in @p cuSeqlens; optional inputs (initial_state, a_log, dt_bias,
+     * state_indices) and settings are taken from @p attributes.
+     *
+     * @param q Query tensor.
+     * @param k Key tensor.
+     * @param v Value tensor.
+     * @param g Per-token, per-head, per-key-channel decay.
+     * @param beta Per-token, per-head write strength.
+     * @param cuSeqlens Sequence offsets, [N + 1].
+     * @param attributes Operation configuration.
+     * @return {o, final_state, state_checkpoints}. final_state is created only when
+     *         output_final_state is set, state_checkpoints only when
+     *         checkpoint_every_n_tokens > 0; otherwise they are nullptr.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        kda_ext(std::shared_ptr<TensorAttributes> q,
+                std::shared_ptr<TensorAttributes> k,
+                std::shared_ptr<TensorAttributes> v,
+                std::shared_ptr<TensorAttributes> g,
+                std::shared_ptr<TensorAttributes> beta,
+                std::shared_ptr<TensorAttributes> cuSeqlens,
+                KdaAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Kda_" + std::to_string(_sub_nodes.size()));
+        }
+        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
+        // missing-input error rather than a crash while auto-naming.
+        for(auto [tensor, suffix] : {std::pair{&q, "::Q"},
+                                     std::pair{&k, "::K"},
+                                     std::pair{&v, "::V"},
+                                     std::pair{&g, "::G"},
+                                     std::pair{&beta, "::BETA"},
+                                     std::pair{&cuSeqlens, "::CU_SEQLENS"}})
+        {
+            if(*tensor && (*tensor)->get_name().empty())
+            {
+                (*tensor)->set_name(attributes.get_name() + suffix);
+            }
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        std::shared_ptr<TensorAttributes> finalState;
+        std::shared_ptr<TensorAttributes> stateCheckpoints;
+        if(attributes.get_output_final_state())
+        {
+            finalState = outputTensor(attributes.get_name() + "::FINAL_STATE");
+        }
+        if(attributes.get_checkpoint_every_n_tokens() > 0)
+        {
+            stateCheckpoints = outputTensor(attributes.get_name() + "::STATE_CHECKPOINTS");
+        }
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_g(std::move(g));
+        attributes.set_beta(std::move(beta));
+        attributes.set_cu_seqlens(std::move(cuSeqlens));
+        attributes.set_o(o);
+        attributes.set_final_state(finalState);
+        attributes.set_state_checkpoints(stateCheckpoints);
+
+        _sub_nodes.emplace_back(std::make_shared<KdaNode>(std::move(attributes), graph_attributes));
+
+        return {o, finalState, stateCheckpoints};
     }
 
     /** @brief Add a custom operation to the graph

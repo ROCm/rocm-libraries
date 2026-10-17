@@ -634,4 +634,34 @@ hipdnnMoeGroupedMatmulMode_t
                               "Unsupported SDK MoeGroupedMatmulMode value");
     }
 }
+
+hipdnn_flatbuffers_sdk::data_objects::GateDomain toSdkGateDomain(hipdnnGateDomain_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GateDomain;
+
+    switch(mode)
+    {
+    case HIPDNN_GATE_DOMAIN_LOG_EXT:
+        return GateDomain::LOG;
+    case HIPDNN_GATE_DOMAIN_LINEAR_EXT:
+        return GateDomain::LINEAR;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnGateDomain_t value");
+    }
+}
+
+hipdnnGateDomain_t fromSdkGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::GateDomain;
+
+    switch(mode)
+    {
+    case GateDomain::LOG:
+        return HIPDNN_GATE_DOMAIN_LOG_EXT;
+    case GateDomain::LINEAR:
+        return HIPDNN_GATE_DOMAIN_LINEAR_EXT;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK GateDomain value");
+    }
+}
 } // namespace hipdnn_backend

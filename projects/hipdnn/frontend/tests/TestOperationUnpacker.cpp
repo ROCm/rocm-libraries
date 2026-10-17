@@ -545,3 +545,21 @@ TEST(TestOperationUnpacker, CreateNodeForTypeCreatesMoeGroupedMatmulBwdNode)
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->getNodeType(), NodeType::MOE_GROUPED_MATMUL_BWD);
 }
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesGdnNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_GDN_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::GDN);
+}
+
+TEST(TestOperationUnpacker, CreateNodeForTypeCreatesKdaNode)
+{
+    const GraphAttributes graphAttrs;
+    const auto [node, error] = createNodeForType(HIPDNN_OPERATION_TYPE_KDA_EXT, graphAttrs);
+    EXPECT_TRUE(error.is_good()) << error.get_message();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getNodeType(), NodeType::KDA);
+}

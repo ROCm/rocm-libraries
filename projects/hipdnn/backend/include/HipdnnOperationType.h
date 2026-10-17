@@ -46,4 +46,6 @@ typedef enum
     HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT = 21, ///< Resample backward operation
     HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT = 22, ///< Forward MoE grouped matmul
     HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT = 23, ///< Backward MoE grouped matmul
+    HIPDNN_OPERATION_TYPE_GDN_EXT = 24, ///< Gated DeltaNet forward
+    HIPDNN_OPERATION_TYPE_KDA_EXT = 25, ///< Kimi Delta Attention forward
 } hipdnnOperationType_ext_t;

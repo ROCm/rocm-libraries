@@ -60,6 +60,10 @@ add_executable(
     IntegrationMoeGroupedMatmulBwdDescriptorLowering.cpp
     IntegrationMoeGroupedMatmulDescriptorLifting.cpp
     IntegrationMoeGroupedMatmulDescriptorLowering.cpp
+    IntegrationGdnDescriptorLifting.cpp
+    IntegrationGdnDescriptorLowering.cpp
+    IntegrationKdaDescriptorLifting.cpp
+    IntegrationKdaDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRaggedTensorDescriptorLowering.cpp

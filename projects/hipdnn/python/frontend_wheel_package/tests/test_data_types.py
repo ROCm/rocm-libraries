@@ -82,3 +82,4 @@ def test_operation_configuration_enums_are_importable():
     assert hipdnn.DiagonalAlignment.BOTTOM_RIGHT.name == "BOTTOM_RIGHT"
     assert hipdnn.AttentionImplementation.UNIFIED.name == "UNIFIED"
     assert hipdnn.MoeGroupedMatmulMode.SCATTER.name == "SCATTER"
+    assert hipdnn.GateDomain.LINEAR.name == "LINEAR"

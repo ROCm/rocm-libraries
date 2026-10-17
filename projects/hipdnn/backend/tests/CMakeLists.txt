@@ -60,6 +60,12 @@ add_executable(
     descriptors/TestMoeGroupedMatmulBwdOperationDescriptor.cpp
     descriptors/TestMoeGroupedMatmulBwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorMoeGroupedMatmulBwd.cpp
+    descriptors/TestGdnOperationDescriptor.cpp
+    descriptors/TestGdnOperationFromNode.cpp
+    descriptors/TestGraphDescriptorGdn.cpp
+    descriptors/TestKdaOperationDescriptor.cpp
+    descriptors/TestKdaOperationFromNode.cpp
+    descriptors/TestGraphDescriptorKda.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp

@@ -9,6 +9,7 @@
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
+#include "HipdnnGateDomain.h"
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
@@ -18,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/linear_attention_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -235,6 +237,19 @@ void getMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMat
                              int64_t* elementCount,
                              void* arrayOfElements,
                              const char* errorPrefix);
+
+void setGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain& target,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t elementCount,
+                   const void* arrayOfElements,
+                   const char* errorPrefix);
+
+void getGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain source,
+                   hipdnnBackendAttributeType_t attributeType,
+                   int64_t requestedElementCount,
+                   int64_t* elementCount,
+                   void* arrayOfElements,
+                   const char* errorPrefix);
 
 // setOptionalScalar/getOptionalScalar are templated on flatbuffers::Optional<T>.
 // This works with std::optional<T> members because flatbuffers aliases Optional to

@@ -1,0 +1,207 @@
+operation:
+  name: "Gdn"
+  class_name: "GdnOperationDescriptor"
+  fbs_table: "GdnAttributes"
+  fbs_generated_header: "gdn_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_GDN_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_GDN"
+
+  error_label: "GDN"
+  packer_operation_label: "GDN"
+  packer_finalize_label: "GDN"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_GDN_EXT"
+
+  frontend:
+    packer_function: "createGdnOperation"
+    unpacker_function: "unpackGdnOperation"
+    node_class: "GdnNode"
+    attributes_class: "GdnAttributes"
+
+    inputs:
+      - { name: "q", enum_name: "Q", required: true, getter_name: "get_q", setter_name: "set_q" }
+      - { name: "k", enum_name: "K", required: true, getter_name: "get_k", setter_name: "set_k" }
+      - { name: "v", enum_name: "V", required: true, getter_name: "get_v", setter_name: "set_v" }
+      - { name: "g", enum_name: "G", required: true, getter_name: "get_g", setter_name: "set_g" }
+      - { name: "beta", enum_name: "BETA", required: true, getter_name: "get_beta", setter_name: "set_beta" }
+      - { name: "cu_seqlens", enum_name: "CU_SEQLENS", required: true, getter_name: "get_cu_seqlens", setter_name: "set_cu_seqlens" }
+      - { name: "initial_state", enum_name: "INITIAL_STATE", required: false, getter_name: "get_initial_state", setter_name: "set_initial_state" }
+      - { name: "a_log", enum_name: "A_LOG", required: false, getter_name: "get_a_log", setter_name: "set_a_log" }
+      - { name: "dt_bias", enum_name: "DT_BIAS", required: false, getter_name: "get_dt_bias", setter_name: "set_dt_bias" }
+      - { name: "state_indices", enum_name: "STATE_INDICES", required: false, getter_name: "get_state_indices", setter_name: "set_state_indices" }
+    outputs:
+      - { name: "o", enum_name: "O", required: true, getter_name: "get_o", setter_name: "set_o" }
+      - { name: "final_state", enum_name: "FINAL_STATE", required: false, getter_name: "get_final_state", setter_name: "set_final_state" }
+      - { name: "state_checkpoints", enum_name: "STATE_CHECKPOINTS", required: false, getter_name: "get_state_checkpoints", setter_name: "set_state_checkpoints" }
+    graph_method_name: "gdn_ext"
+    graph_method_params:
+      - { name: "q", tensor_name: "q" }
+      - { name: "k", tensor_name: "k" }
+      - { name: "v", tensor_name: "v" }
+      - { name: "g", tensor_name: "g" }
+      - { name: "beta", tensor_name: "beta" }
+      - { name: "cuSeqlens", tensor_name: "cu_seqlens" }
+    graph_return_type: "array"
+    graph_return_outputs: ["o", "final_state", "state_checkpoints"]
+    node_type_enum: "NodeType::GDN"
+    node_attributes_union_type: "GdnAttributes"
+
+  infer_properties:
+    strategy: "stub"
+    dimension_formula: "o = v dims with heads = max(H, HV); final_state = [N, HO, V, K]; state_checkpoints = [C, HO, V, K]"
+
+  validation:
+    required_input_tensors: ["q", "k", "v", "g", "beta", "cu_seqlens"]
+    required_input_dims: ["q", "k", "v", "g", "beta", "cu_seqlens"]
+    custom_checks:
+      - "q, k, v, g, beta are token-packed: rank 3 [T, heads, dim], sequences given by cu_seqlens [N + 1]"
+      - "k heads equal q heads or v heads; g is one decay per token and head"
+
+  tensor_fields:
+    - { name: "q", fbs_field: "q_tensor_uid", attr_suffix: "Q_DESC_EXT", required: true }
+    - { name: "k", fbs_field: "k_tensor_uid", attr_suffix: "K_DESC_EXT", required: true }
+    - { name: "v", fbs_field: "v_tensor_uid", attr_suffix: "V_DESC_EXT", required: true }
+    - { name: "g", fbs_field: "g_tensor_uid", attr_suffix: "G_DESC_EXT", required: true }
+    - { name: "beta", fbs_field: "beta_tensor_uid", attr_suffix: "BETA_DESC_EXT", required: true }
+    - { name: "cu_seqlens", fbs_field: "cu_seqlens_tensor_uid", attr_suffix: "CU_SEQLENS_DESC_EXT", required: true }
+    - { name: "initial_state", fbs_field: "initial_state_tensor_uid", attr_suffix: "INITIAL_STATE_DESC_EXT", required: false }
+    - { name: "a_log", fbs_field: "a_log_tensor_uid", attr_suffix: "A_LOG_DESC_EXT", required: false }
+    - { name: "dt_bias", fbs_field: "dt_bias_tensor_uid", attr_suffix: "DT_BIAS_DESC_EXT", required: false }
+    - { name: "state_indices", fbs_field: "state_indices_tensor_uid", attr_suffix: "STATE_INDICES_DESC_EXT", required: false }
+    - { name: "o", fbs_field: "o_tensor_uid", attr_suffix: "O_DESC_EXT", required: true }
+    - { name: "final_state", fbs_field: "final_state_tensor_uid", attr_suffix: "FINAL_STATE_DESC_EXT", required: false }
+    - { name: "state_checkpoints", fbs_field: "state_checkpoints_tensor_uid", attr_suffix: "STATE_CHECKPOINTS_DESC_EXT", required: false }
+
+  data_fields:
+    - name: "scale"
+      fbs_field: "scale"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_SCALE_EXT"
+      type: "scalar_float"
+      required: false
+      fbs_optional: true
+      frontend_getter: "get_scale()"
+    - name: "output_final_state"
+      fbs_field: "output_final_state"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_OUTPUT_FINAL_STATE_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_output_final_state()"
+    - name: "use_qk_l2norm"
+      fbs_field: "use_qk_l2norm"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_USE_QK_L2NORM_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_use_qk_l2norm()"
+    - name: "checkpoint_every_n_tokens"
+      fbs_field: "checkpoint_every_n_tokens"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_CHECKPOINT_EVERY_N_TOKENS_EXT"
+      type: "scalar_int64"
+      default_value: "0"
+      required: true
+      frontend_getter: "get_checkpoint_every_n_tokens()"
+    - name: "use_beta_sigmoid"
+      fbs_field: "use_beta_sigmoid"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_USE_BETA_SIGMOID_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_use_beta_sigmoid()"
+    - name: "allow_neg_eigval"
+      fbs_field: "allow_neg_eigval"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_ALLOW_NEG_EIGVAL_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_allow_neg_eigval()"
+    - name: "safe_gate"
+      fbs_field: "safe_gate"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_SAFE_GATE_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_safe_gate()"
+    - name: "gate_domain"
+      fbs_field: "gate_domain"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_GATE_DOMAIN_EXT"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::GateDomain"
+      frontend_type: "GateDomain"
+      required: false
+      default_value: "GateDomain::LOG"
+      mode_sentinel: "none"
+      mode_converter_optional: true
+      frontend_getter: "get_gate_domain()"
+      backend_setter: "setGateDomain"
+      backend_getter: "getGateDomain"
+      backend_converter: "toBackendGateDomain"
+      frontend_inverse_converter: "fromHipdnnGateDomain"
+      backend_type_name: "HIPDNN_TYPE_GATE_DOMAIN_EXT"
+      test_enum_value: "LOG"
+      test_alt_enum_value: "LINEAR"
+      test_backend_value: "HIPDNN_GATE_DOMAIN_LOG_EXT"
+      test_c_type: "hipdnnGateDomain_t"
+      test_default_value: "HIPDNN_GATE_DOMAIN_LOG_EXT"
+      shared: false
+      enum_def:
+        backend_header: "HipdnnGateDomain.h"
+        backend_prefix: "HIPDNN_GATE_DOMAIN_"
+        values:
+          - { name: "LOG_EXT", value: 0, frontend_name: "LOG", sdk_name: "LOG", description: "g holds ln(alpha), the log of the per-token decay" }
+          - { name: "LINEAR_EXT", value: 1, frontend_name: "LINEAR", sdk_name: "LINEAR", description: "g holds alpha in (0, 1] directly" }
+    - name: "batch_invariant"
+      fbs_field: "batch_invariant"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_BATCH_INVARIANT_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_batch_invariant()"
+    - name: "overwrite_initial_state"
+      fbs_field: "overwrite_initial_state"
+      attr_name: "HIPDNN_ATTR_OPERATION_GDN_OVERWRITE_INITIAL_STATE_EXT"
+      type: "bool"
+      required: false
+      frontend_getter: "get_overwrite_initial_state()"
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_OPERATION_GDN_COMP_TYPE_EXT"
+
+  test_data:
+    tensor_const_prefix: "K_GDN_"
+    tensor_uids:
+      q: 2000
+      k: 2001
+      v: 2002
+      g: 2003
+      beta: 2004
+      cu_seqlens: 2005
+      initial_state: 2006
+      a_log: 2007
+      dt_bias: 2008
+      state_indices: 2009
+      o: 2010
+      final_state: 2011
+      state_checkpoints: 2012
+    tensor_configs:
+      q: { dims: [8, 2, 8], strides: [16, 8, 1] }
+      k: { dims: [8, 2, 8], strides: [16, 8, 1] }
+      v: { dims: [8, 2, 8], strides: [16, 8, 1] }
+      g: { dims: [8, 2], strides: [2, 1] }
+      beta: { dims: [8, 2], strides: [2, 1] }
+      cu_seqlens: { dims: [3], strides: [1], data_type: INT32 }
+      initial_state: { dims: [2, 2, 8, 8], strides: [128, 64, 8, 1] }
+      a_log: { dims: [2], strides: [1] }
+      dt_bias: { dims: [2], strides: [1] }
+      state_indices: { dims: [2], strides: [1], data_type: INT32 }
+      o: { dims: [8, 2, 8], strides: [16, 8, 1] }
+      final_state: { dims: [2, 2, 8, 8], strides: [128, 64, 8, 1] }
+      state_checkpoints: { dims: [4, 2, 8, 8], strides: [128, 64, 8, 1] }
+    field_values:
+      scale: "0.35355339F"
+      checkpoint_every_n_tokens: 4
+      output_final_state: "true"
+      use_qk_l2norm: "true"
+      use_beta_sigmoid: "true"
+      allow_neg_eigval: "true"
+      safe_gate: "true"
+      batch_invariant: "true"
+      overwrite_initial_state: "false"

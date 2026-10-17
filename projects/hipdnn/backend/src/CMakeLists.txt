@@ -46,6 +46,8 @@ add_library(
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/MoeGroupedMatmulOperationDescriptor.cpp
     descriptors/MoeGroupedMatmulBwdOperationDescriptor.cpp
+    descriptors/GdnOperationDescriptor.cpp
+    descriptors/KdaOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ProfilingControlDescriptor.cpp
     descriptors/ResampleBwdOperationDescriptor.cpp

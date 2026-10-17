@@ -8,6 +8,7 @@
 #include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
+#include "HipdnnGateDomain.h"
 #include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnNormFwdPhase.h"
 #include "HipdnnPaddingMode.h"
@@ -16,6 +17,7 @@
 #include "HipdnnResampleMode.h"
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/linear_attention_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/moe_grouped_matmul_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -77,5 +79,9 @@ hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode
     toSdkMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode);
 hipdnnMoeGroupedMatmulMode_t
     fromSdkMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode);
+
+// Converts between C-API hipdnnGateDomain_t and SDK GateDomain enum values.
+hipdnn_flatbuffers_sdk::data_objects::GateDomain toSdkGateDomain(hipdnnGateDomain_t mode);
+hipdnnGateDomain_t fromSdkGateDomain(hipdnn_flatbuffers_sdk::data_objects::GateDomain mode);
 
 } // namespace hipdnn_backend
