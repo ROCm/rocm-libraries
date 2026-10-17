@@ -110,13 +110,29 @@ coordinate conversion retain their logical shape semantics.
 
 Named methods use nonnegative dimension numbers, coordinates, and range bounds:
 `extent`, `project`, `element_count_in_range`, and the `order` arguments do not
-normalize negative axes. Construction requires the full element count to fit in
-`size_t`, so `Shape([SIZE_MAX, 2])` fails immediately. Here `SIZE_MAX` is the
-maximum value of `size_t`. A zero extent makes the full count zero, so
-`Shape([SIZE_MAX, 2, 0])` remains valid. A subrange count can still overflow, and
-projection or slicing that removes the zero can fail when constructing the new
-Shape. Index conversions validate their arguments before computing the result;
-in-bounds coordinates in a nonempty Shape cannot overflow a logical index.
+normalize negative axes. Construction requires the product of all nonzero extents
+to fit in `size_t`, so both `Shape([SIZE_MAX, 2])` and
+`Shape([SIZE_MAX, 2, 0])` fail immediately. Here `SIZE_MAX` is the maximum value
+of `size_t`. Zero extents still describe empty shapes: `Shape([SIZE_MAX, 1, 0])`
+has zero elements. This invariant guarantees that every dimension subrange,
+projection, and slice has a representable element count. Counts and index
+conversions need no further overflow checks; their arguments are validated
+before computing the result.
+
+Axes are numbered by their positions in `dimensions`. For `[2, 3, 5]`, axis 0
+has extent 2, axis 1 has extent 3, and axis 2 has extent 5. `order` lists axes
+from outermost to innermost loop, so its last entry changes fastest. Empty order
+selects `[0, 1, 2]`, the row-major convention with the last axis fastest.
+
+| Order | Fastest axis | Logical strides for axes 0, 1, 2 | Index of `[1, 2, 3]` |
+| --- | --- | --- | --- |
+| `[0, 1, 2]` (default) | 2 | `[15, 5, 1]` | 28 |
+| `[2, 1, 0]` | 0 | `[1, 2, 6]` | 23 |
+| `[1, 2, 0]` | 0 | `[1, 10, 2]` | 27 |
+
+Thus `[1, 2, 0]` means a loop over axis 1 containing a loop over axis 2
+containing a loop over axis 0. Both `linear_index` and `coordinates` use this
+same order; it is independent of physical storage strides.
 
 
 ## Build and test
