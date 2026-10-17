@@ -197,6 +197,21 @@ def _entry(row, outcome="served", **fields):
     return {"graph_name": f"ground_truth_r{row:04d}", "outcome": outcome, **fields}
 
 
+def test_a_non_finite_accuracy_cell_goes_through_graphs_and_compare(tmp_path):
+    """`ingest` keeps a NaN accuracy as the owner reported it; the row digest `graphs`
+    records and `compare` rechecks must not refuse it."""
+    row = _row(1, time_ms=0.1) | {"accuracy": {"err": float("nan")}}
+    assert _graphs(tmp_path, [row])[0] == 0
+    sweep, report = tmp_path / "sweep", tmp_path / "report.md"
+    _phase(sweep, "timing", _entry(1, mean_ms=0.1))
+    (sweep / "input-identities.json").write_text(
+        json.dumps({"device": {"arch": "gfx950"}})
+    )
+    argv = f"compare --gt {tmp_path / 'GT.json'} --sweep-output {sweep} "
+    argv = (argv + f"--margin 0.05 --report {report}").split()
+    assert gt.main(argv) == 0
+
+
 def test_compare_reports_margin_correctness_and_missing(tmp_path, capsys):
     rows = [_row(n, time_ms=0.1 * n) for n in (1, 2, 3, 4)]
     assert _graphs(tmp_path, rows)[0] == 0

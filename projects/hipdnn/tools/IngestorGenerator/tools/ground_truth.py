@@ -40,7 +40,7 @@ from registry_enumerator import (  # noqa: E402
     check_value_map_cells,
     load_manifest,
 )
-from sweep import canonical, semantic_identity  # noqa: E402
+from sweep import semantic_identity  # noqa: E402
 from variant_reduce import ReduceError, load_phase_records  # noqa: E402
 
 SOURCE = "ground_truth"
@@ -202,8 +202,11 @@ def graph_name(row: dict) -> str:
 
 
 def row_digest(row: dict) -> str:
-    """sha256 of one ground-truth row, which `graphs` records and `compare` rechecks."""
-    return hashlib.sha256(canonical(row).encode()).hexdigest()
+    """sha256 of one ground-truth row, which `graphs` records and `compare` rechecks.
+    A row's accuracy cell may be non-finite, which `ingest` accepts and a JSON file
+    round-trips, so the dump allows it."""
+    text = json.dumps(row, sort_keys=True, separators=(",", ":"), allow_nan=True)
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def graphs_map_path(gt_path) -> Path:
