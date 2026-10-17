@@ -411,6 +411,100 @@ TEST(TestCkTileFmhaFwd, QrTdmLdsArenaPrefill)
     }
 }
 
+// d128 runs qr_tdm_pingpong below 640 rows with at least 2 (batch, head) pairs per
+// multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes its
+// grid to reach it on this device: the batch in batch mode; in group mode, where this
+// runner passes the packed total length as max_seqlen_q (kept below 640), 12 sequences
+// and the head count. The unpadded instance serves any seqlen_k except with an
+// elementwise bias; causal masks take its causal kernel ("_mc_", without LSE, bias or
+// sink). ALiBi without a mask makes every K tile raise the row maxima of the steep heads
+// past the rebase threshold, so those cases take the finite-to-finite rescale of o_acc
+// and l on every trip, with and without LSE.
+std::pair<int, int> PingPongGrid(mode_enum mode, int nhead)
+{
+    int device = 0;
+    hipDeviceProp_t props{};
+    EXPECT_EQ(hipGetDevice(&device), hipSuccess);
+    EXPECT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+    const int pairs = 2 * props.multiProcessorCount;
+    if(mode == mode_enum::batch)
+        return {ck_tile::integer_divide_ceil(pairs, nhead), nhead};
+    constexpr int batch = 12;
+    return {batch, ck_tile::integer_divide_ceil(pairs, batch)};
+}
+
+class QrTdmPingPong
+    : public TestWithParam<
+          std::tuple<mode_enum, int, int, int, const char*, const char*, bool, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QrTdmPingPong,
+    // mode, nhead (group mode: from the grid), seqlen_q, seqlen_k, mask, bias, lse, name part
+    Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_"},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_"},
+           std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_"},
+           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_"},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_"},
+           std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_"},
+           std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_"},
+           std::tuple{mode_enum::batch, 8, 100, 100, "2", "n", false, "_mc_"},
+           std::tuple{mode_enum::group, 4, 50, 100, "2", "n", true, ""}));
+
+TEST_P(QrTdmPingPong, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        auto [mode, nhead_hint, seqlen_q, seqlen_k, mask_str, bias_str, lse, tag] = GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode, nhead_hint);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   -1,
+                                                   {seqlen_q},
+                                                   {seqlen_k},
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   lse,
+                                                   0,
+                                                   false,
+                                                   bias_str,
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
+    }
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
