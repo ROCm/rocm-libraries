@@ -249,10 +249,11 @@ def test_verification_uses_gpu_outputs_and_frozen_scale_only(
         assert calls == ["replay", "source"]
 
 
-def test_source_adapter_selects_supported_production_cohort_without_torch():
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
+def test_source_adapter_selects_supported_production_cohort_without_torch(architecture):
     from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 
-    for case in get_architecture("gfx942").CASES:
+    for case in get_architecture(architecture).CASES:
         request = ConvGroupedRequest(
             N=case.N,
             C=case.C,
@@ -262,7 +263,7 @@ def test_source_adapter_selects_supported_production_cohort_without_torch():
             Y=case.Y,
             X=case.X,
             G=case.groups,
-            arch="gfx942",
+            arch=architecture,
             dtype=case.dtype,
             stride_h=case.sH,
             stride_w=case.sW,
@@ -281,10 +282,24 @@ def test_source_adapter_selects_supported_production_cohort_without_torch():
         elif case.name == "odd-channels":
             assert case.K % 2 == 1
             assert selected.spec.epilogue == "default"
+        elif case.name == "large":
+            assert selected.grid == (2, 7, 1)
+            assert case.Y * case.X * case.C % selected.spec.tile_k == 0
+        elif case.name == "grouped-odd":
+            assert case.C // case.groups == case.K // case.groups == 33
+            assert selected.spec.epilogue == "cshuffle"
+        elif case.name == "depthwise":
+            assert selected.grid[2] == 64
+            assert selected.spec.group_merge == 1
+        elif case.name == "out-1x1":
+            assert case.output_shape[1:3] == (1, 1)
 
 
+@pytest.mark.parametrize("architecture", ["gfx942", "gfx950"])
 @pytest.mark.parametrize("case", get_architecture("gfx942").CASES, ids=lambda c: c.id)
-def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkeypatch):
+def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(
+    case, monkeypatch, architecture
+):
     from types import SimpleNamespace
     import rocke
     import rocke.runtime
@@ -293,7 +308,7 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkey
     captured = []
 
     def compile_kernel(kernel, **kwargs):
-        assert kwargs == {"arch": "gfx942", "backend": "python"}
+        assert kwargs == {"arch": architecture, "backend": "python"}
         captured.append(kernel)
         return SimpleNamespace(hsaco=b"host-abi-fixture", kernel_name="fixture")
 
@@ -312,12 +327,13 @@ def test_adapter_builds_real_kernel_and_freezes_complete_launch_abi(case, monkey
 
     monkeypatch.setattr(rocke, "compile_kernel", compile_kernel)
     monkeypatch.setattr(rocke.runtime, "KernelLauncher", Launcher)
-    target = get_architecture("gfx942")
+    target = get_architecture(architecture)
     prepared = target.prepare(case, str(Path(kernels.__file__).parent.parent))
     target.launch(prepared, {"a": 11, "b": 22, "out": 33})
     code, metadata = target.exported_kernel(prepared)
     assert len(captured) == 1
     assert code == b"host-abi-fixture"
+    assert metadata["dispatch_spec"]["arch"] == architecture
     assert set(metadata["bindings"]) == {"A", "B", "D"}
     assert not set(metadata["scalars"]) & set(metadata["bindings"])
     json.dumps(metadata, allow_nan=False)
@@ -382,9 +398,28 @@ def test_qualification_freezes_self_contained_replay_support(
             "-c",
             "import sys; sys.path.insert(0, sys.argv[1]); "
             "import conv_reference.worker; "
+            "from conv_reference.architectures import get_architecture; "
+            "get_architecture('gfx942'); "
+            "assert 'kernels' not in sys.modules; "
+            "assert 'dispatch' not in sys.modules; "
             "assert 'torch' not in sys.modules",
             str(bundle / "payload/runner"),
         ],
         cwd=tmp_path,
         check=True,
     )
+
+
+@pytest.mark.parametrize("package", ["kernels", "dispatch"])
+def test_adapter_rejects_production_imports_outside_selected_tree(
+    tmp_path, monkeypatch, package
+):
+    import importlib
+    from conv_reference.architectures.common import validate_library_root
+
+    for name in ("kernels", "dispatch"):
+        module = importlib.import_module(name)
+        root = tmp_path if name == package else tmp_path / "selected"
+        monkeypatch.setattr(module, "__file__", str(root / name / "__init__.py"))
+    with pytest.raises(RuntimeError, match="outside the selected library"):
+        validate_library_root(str(tmp_path / "selected"))

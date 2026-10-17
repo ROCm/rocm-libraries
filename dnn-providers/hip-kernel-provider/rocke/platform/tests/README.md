@@ -168,15 +168,28 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_sdpa_gpu_gfx942_pytest` | Eight gfx942 numerical cases and three failure checks | When the SDPA bundle is installed |
-| `rocke_conv_gpu_gfx942_pytest` | Sixteen gfx942 forward cases and three failure checks | When the convolution bundle is installed |
+| `rocke_sdpa_gpu_gfx950_pytest` | Seven gfx950 numerical cases and three failure checks | When the gfx950 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1151_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1151 SDPA bundle is installed |
+| `rocke_sdpa_gpu_gfx1201_pytest` | Eight standalone FP16 WMMA cases and three failure checks | When the gfx1201 SDPA bundle is installed |
+| `rocke_conv_gpu_gfx942_pytest` | 32 gfx942 forward cases and three failure checks | When the gfx942 convolution bundle is installed |
+| `rocke_conv_gpu_gfx950_pytest` | 32 gfx950 forward cases and three failure checks | When the gfx950 convolution bundle is installed |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs. SDPA/gfx942 and convolution/gfx942 are published
-and installed by default for provider builds. Publication is listed in
+operation/architecture pairs. SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201,
+convolution/gfx942 and convolution/gfx950 are enrolled
+for installation by default in provider builds. Publication is listed in
 `platform/cmake/PublishedGpuReferences.cmake` relative to the rocKE root. CMake
 uses the standard archives and committed locks; verify replacement candidates
 with the offline CLI using explicit `--bundle` and `--lock` paths. Each operation
 and architecture retains a separate archive, lock, and installed payload.
+
+Separately, `rocke_library_gpu_pytest` includes twelve backward-data and fourteen
+backward-weight convolution cases on each of gfx942 and gfx950. They compare
+three executions per case against live NumPy oracles and require no Torch or
+pinned gradient bundle. gfx942 backward-data uses explicit specs; gfx950
+backward-data and both backward-weight lanes use production selection. Their
+62 host-contract checks run in `rocke_library_conv_pytest`. See the
+[six-lane validation record](../../docs/conv-six-lane-validation.md).
 
 The optional `conv_reference/check_torch_reference.py` is an explicit offline
 oracle audit. It is excluded from installation and normal pytest discovery.

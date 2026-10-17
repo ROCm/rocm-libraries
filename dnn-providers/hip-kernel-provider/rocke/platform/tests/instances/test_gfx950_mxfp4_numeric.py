@@ -4,6 +4,10 @@
 
 import pytest
 
+pytestmark = pytest.mark.skip(
+    reason="Disabled pending CI availability of hipcc and llvm-objdump."
+)
+
 
 @pytest.mark.parametrize("dtype", ["fp4"])
 @pytest.mark.parametrize("output", ["bf16", "fp16"])

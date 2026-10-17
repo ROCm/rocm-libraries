@@ -5,11 +5,13 @@ SPDX-License-Identifier: MIT
 
 # SDPA correctness with a pinned rocKE reference
 
-The gfx942 pilot runs current rocKE against a previously qualified rocKE kernel
+The gfx942 lane runs current rocKE against a previously qualified rocKE kernel
 on the GPU. It covers the eight base parameterizations in
 [`test_attention_dense_gfx942_numeric.py`](../library/tests/test_attention_dense_gfx942_numeric.py):
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
-Current execution uses the same dispatch factory and `run_attention_dense_torch`
+The gfx950 lane adds seven causal base configurations, described below.
+The gfx1151 and gfx1201 lanes each add eight standalone FP16 WMMA cases.
+For gfx942/gfx950, current execution uses the same dispatch factory and `run_attention_dense_torch`
 entry as those tests, passing raw HIP buffers through its existing pointer ABI.
 The selected backend is Python, matching that entry point. This lane does not
 establish C++ provider execution or Torch tensor interoperability.
@@ -36,6 +38,120 @@ to fp16 or bf16 (round-to-nearest-even for bf16). The original tests use Torch's
 GPU random generator. Their intended distribution is similar, but their sample
 values and generation path differ. Multiple executions repeat this fixed corpus;
 they do not add random seeds. Generator incompatibility fails the digest check.
+
+## gfx950 base dense cohort
+
+The gfx950 lane covers the seven base configurations from
+[`test_attention_dense_gfx950_numeric.py`](../library/tests/test_attention_dense_gfx950_numeric.py),
+using an independent gfx950 bundle and lock. All cases are causal, B=1,
+Sq=Sk=512, Hq=16, with the default softmax scale:
+
+| Dtype | D | Hkv | Grid / production candidate |
+|---|---:|---:|---|
+| FP16 | 128 | 4 | Default / `gfx950_dense_grid` |
+| FP16 | 128 | 4 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 128 | 4 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 128 | 4 | Default / `gfx950_dense_grid` |
+| FP16 | 64 | 16 | Default / `gfx950_dense_grid` |
+| FP16 | 128 | 16 | Persistent / `gfx950_dense_persist_widedma` |
+| BF16 | 64 | 4 | Persistent / `gfx950_dense_persist` |
+
+The adapter uses named production tuning candidates, matching the original
+numeric tests. Grid kernels take runtime shape scalars; persistent kernels bake
+the shape. The existing replay worker supports both ABIs for this cohort.
+The input recipe, independent oracle, absolute tolerances, and margins below
+apply to both architectures. Error bounds and output identities are qualified
+separately on each architecture.
+
+This cohort excludes non-default scales, sliding windows, sinks, unequal lengths,
+paging, binary-reuse assertions, and output-store equality checks. Those require
+additional contracts or structural assertions and their own qualification.
+
+The gfx950 bundle was qualified from committed baseline
+`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed`, using Python 3.12.3, NumPy 2.5.4,
+and COMGR with LLVM 23 on `gfx950:sramecc+:xnack-`. Three baseline executions
+per case reproduced identical output digests. FP16 baseline maximum absolute
+error bounds ranged from 0.000981060 to 0.001102120; BF16 bounds ranged from
+0.007636342 to 0.008060832 (upper endpoints rounded upward here). Exact bounds
+and compiler identity are in the authenticated manifest. No tolerance was widened.
+
+Torch-free source verification passed all seven comparisons and three failure
+controls. The installed `rocke_sdpa_gpu_gfx950_pytest` entry also passed all ten
+checks with the source tree moved aside. The installed shared and SDPA host
+suites passed 82 and 26 tests respectively. This validates Python reference
+installation and execution, not native provider execution or final artifact splitting.
+
+The archive is `library/tests/reference_bundles/sdpa/gfx950.tar.gz`, with MD5
+`45ecc9f281ba2e1f29998f73929a41cf` and size 2,540,019 bytes. The archive was uploaded to DVC, downloaded into a new empty cache, and
+authenticated against the committed lock. Follow the
+[reference workflow](gpu-reference-workflow.md) for future updates.
+
+## Standalone WMMA coverage
+
+The gfx1151 and gfx1201 bundles each cover the complete Cartesian product below,
+with B=2, Sq=Sk=64, Hq=4, contiguous `[B,S,H,D]` tensors, default SDPA scale,
+and a nonpersistent grid:
+
+| Dtype | Head dimension | KV heads | Mask | Cases per target |
+|---|---|---|---|---:|
+| FP16 | 64, 128 | 4 (MHA), 1 (GQA) | Full, causal | 8 |
+
+Both adapters use the production `WmmaFmhaFwdSpec` and builder from
+`kernels.gfx1151.wmma_fmha_fwd`, selecting the target's MMA implementation.
+They exercise the standalone verifier path. They do not exercise automatic
+unified attention selection, native hipDNN/provider execution, BF16, persistent
+kernels, sliding windows, unequal lengths, or paged KV.
+
+The frozen `wmma-strided-v1` ABI contains Q/K/V/O pointers, a float32 log2-scaled
+softmax scale, sequence lengths, and eight element strides. The production grid
+helper selects `(4,4,2)` with block `(32,1,1)` for every case. Replay uses the
+exported scalars and code object. Existing dense bundles retain their original ABI.
+
+Current-source WMMA execution uses `wmma-strided-v2`, matching the production
+runtime-shape ABI. Head counts and batch strides are runtime arguments; the
+adapter supplies top-left masking, disabled windows, and a null LSE pointer with
+LSE writes disabled. It obtains the signature from the selected production spec.
+Qualification against older source snapshots still uses `wmma-strided-v1` when
+head counts are spec fields. The published bundles retain their frozen v1 runner,
+runtime, code objects, and baseline locks.
+
+| Target | Qualification and publication status |
+|---|---|
+| gfx1151 | Eight qualified cases; archive and lock enrolled for installation |
+| gfx1201 | Eight qualified cases; archive and lock enrolled for installation |
+
+Both published WMMA targets were independently qualified from baseline
+`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed` with Python 3.12.3, NumPy 2.5.4,
+and COMGR LLVM 23. Three baseline executions per case reproduced identical
+output digests. Each target's maximum absolute error bounds ranged from
+0.000332024 to 0.001056340 (rounded upward); the FP16 tolerance remains `0.02`
+with a `0.001` reserved margin. Exact per-target provenance and bounds are in
+the authenticated manifests.
+
+Source verification passed eight comparisons and three failure controls per
+target, without Torch and with zero selected skips. Installed CTest also passed
+all eleven GPU checks per target with the source tree moved aside, plus 82 shared
+host and 56 SDPA host checks. Installation used a Python CMake harness; native
+provider execution and final TheRock artifact splitting remain unvalidated.
+
+The gfx1201 run used ROCm 7.14 HIP and COMGR. The gfx1151 run used HIP 6.4 with
+ROCm 7.14 COMGR: the container's HIP runtime failed during device initialization,
+while the host HIP runtime passed both initialization and qualification when
+mounted into the container. Use explicit `ROCKE_HIP_LIB` and `ROCKE_COMGR_LIB`
+overrides for that combination and make the host HIP dependencies available to
+the loader. This is evidence for the tested combination, not a general runtime
+compatibility claim. Run a device preflight before qualification on another setup.
+
+The archives were uploaded to DVC and downloaded into a fresh empty cache;
+both downloads authenticated against their reviewed locks:
+
+| Target | Archive MD5 | Compressed bytes |
+|---|---|---:|
+| gfx1151 | `9d806c3533bf4ab618d9acb1b1f6cbed` | 2,528,096 |
+| gfx1201 | `0373b7f4cea9cdfc0e718440d9e6226c` | 2,526,894 |
+
+Follow the [reference workflow](gpu-reference-workflow.md) using the selected
+architecture for fetching, qualification, verification, and publication.
 
 ## Accuracy contract
 
@@ -155,7 +271,8 @@ cohort. The workflow also covers replacement baselines and publication enrollmen
 The existing TheRock CI flow builds and tests the installed provider artifact:
 
 1. Source preparation fetches the DVC-tracked archive at
-   `library/tests/reference_bundles/sdpa/gfx942.tar.gz` before provider configuration.
+   `library/tests/reference_bundles/sdpa/<arch>.tar.gz` for each published SDPA
+   architecture before provider configuration.
 2. Provider CMake validates and extracts the archive against the committed
    architecture-specific baseline lock, then installs the test harness and bundle.
    `ROCKE_INSTALL_TEST_GPU_REFERENCES` defaults on for provider artifact builds
@@ -165,14 +282,15 @@ The existing TheRock CI flow builds and tests the installed provider artifact:
 3. TheRock's `ml-libs/artifact-hipkernelprovider.toml` collects the harness into the
    generic test artifact. Its `**/engines/test_arch_content/**` rule collects the
    bundle installed at
-   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/gfx942/`;
-   architecture splitting places it in the gfx942 test artifact, outside the
+   `bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/<arch>/`;
+   architecture splitting places it in the matching target test artifact, outside the
    release library payload.
 4. The test job assembles the generic and matching architecture artifacts and
    prepares the Python/runtime dependencies. The existing provider runner selects
-   CTest entries using the provider's category YAML. `rocke_sdpa_gpu_gfx942_pytest` runs
-   the same pytest file used locally: eight numerical cases and three negative
-   checks. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
+   CTest entries using the provider's category YAML. The
+   `rocke_sdpa_gpu_<arch>_pytest` entries run the same pytest file used locally:
+   eight numerical cases for gfx942, gfx1151, and gfx1201, and seven for gfx950,
+   plus three negative checks on each architecture. `rocke_sdpa_reference_unit_pytest` runs the SDPA host contract checks;
    `rocke_reference_common_pytest` runs shared archive and worker-isolation checks.
    Both host entries run independently of GPU bundles.
 
@@ -184,20 +302,20 @@ For an unpublished candidate, use the offline CLI's `verify` command with explic
 `--bundle` and `--lock` paths. Once its archive, pointer, lock, and publication
 entry are ready, validate installation through the normal CMake path.
 
-Run the installed GPU entry with:
+Run the entry matching the local GPU, for example on gfx1201:
 
 ```bash
 ctest --test-dir <install-prefix>/bin/hip_kernel_provider \
-  -R '^rocke_sdpa_gpu_gfx942_pytest$' --output-on-failure
+  -R '^rocke_sdpa_gpu_gfx1201_pytest$' --output-on-failure
 ```
 
 The GPU entry is installed when a qualified bundle is configured. In that required
 lane, a missing bundle, missing GPU, or failed qualification check is an error;
 unqualified GPU architectures remain outside this pilot and skip its cases.
 
-Further SDPA cohorts, runtime-shape reuse, sliding windows, and gfx950 need their
-own qualification and retained structural assertions. This eight-case pilot
-does not replace those tests or establish coverage for them.
+Further SDPA cohorts, runtime-shape reuse, sliding windows, and non-default
+scales need their own qualification and retained structural assertions. The
+published cohorts do not establish coverage for those paths.
 
 
 ## Configuration controls
