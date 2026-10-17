@@ -2160,6 +2160,8 @@ namespace
         // the effective CU budget. Non-StreamK=5 solutions ignore it.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        tensileProblem.setParams().setOccupancyProbe(
+            prob.occupancy_probe_addr, prob.occupancy_probe_epoch, prob.occupancy_probe_min_grid);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -2435,6 +2437,8 @@ namespace
         // companion block in ConstructTensileProblem for details.
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
+        tensileProblem.setParams().setOccupancyProbe(
+            prob.occupancy_probe_addr, prob.occupancy_probe_epoch, prob.occupancy_probe_min_grid);
 
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
@@ -3421,7 +3425,8 @@ TensileLite::ProblemOverride
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
     po.streamkTileScheduling = problem.streamk_tile_scheduling_ext;
-    po.smCountTarget         = problem.sm_count_target;
+    // An adaptive hint is transient; the requested target is 0 then.
+    po.smCountTarget         = problem.adaptive_sm_count ? 0 : problem.sm_count_target;
     po.uniformSummationOrder = problem.uniform_summation_order != 0;
 
     const auto& device = getDeviceIdentity();
@@ -3669,6 +3674,29 @@ int tuningLastLaunchedIndexForTest()
     t_lastLaunchedIndex = -1;
     return index;
 }
+
+namespace
+{
+    // Whether `kernels`, solved from `solution` for `problem`, carry the
+    // occupancy probe.
+    bool launchProbes(const RocblasltContractionProblem&                prob,
+                      const TensileLite::ContractionProblemGemm&        problem,
+                      const TensileLite::ContractionSolution&           solution,
+                      const std::vector<TensileLite::KernelInvocation>& kernels)
+    {
+        for(auto const& k : kernels)
+            if(k.kernelName == solution.kernelName)
+                return rocblaslt::adaptive_sm::launchProbed(
+                    prob.occupancy_probe_addr != nullptr,
+                    solution.internalArgsSupport.occupancyProbe,
+                    problem.groupedGemm(),
+                    k.numWorkGroups.x,
+                    k.numWorkGroups.y,
+                    k.numWorkGroups.z,
+                    prob.occupancy_probe_min_grid);
+        return false;
+    }
+} // namespace
 
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
@@ -3935,6 +3963,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+            if(prob.occupancy_probed)
+                *prob.occupancy_probed = status == rocblaslt_status_success
+                                         && launchProbes(prob, data->problem, *solution, kernels);
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }

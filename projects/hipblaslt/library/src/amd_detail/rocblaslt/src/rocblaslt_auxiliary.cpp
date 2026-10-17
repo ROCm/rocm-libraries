@@ -817,6 +817,12 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
 
+    if(adaptive_sm_count_applies(handle, matmul_descr))
+    {
+        problem.sm_count_target   = int32_t(handle->adaptiveSmCountForQuery());
+        problem.adaptive_sm_count = true;
+    }
+
     if(scaleAlphaVec)
     {
         // Fill owned storage with "1" for the compute type, and repoint alpha into it.
@@ -2625,6 +2631,19 @@ rocblaslt_status
                                       pref->max_workspace_bytes);
         }
 
+        // The top Tensile result reports enough workspace for an SK5 re-grid
+        // under a later adaptive hint. A tuning-file result, the other results
+        // and AlgoCheck report the plain size.
+        if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
+           && heuristicResultsArray[0].state == rocblaslt_status_success
+           && *(int*)heuristicResultsArray[0].algo.data >= 0)
+        {
+            using namespace rocblaslt::adaptive_sm;
+            auto& r0         = heuristicResultsArray[0];
+            r0.workspaceSize = std::min(pref->max_workspace_bytes,
+                                        std::max(r0.workspaceSize, c_adaptiveWorkspace));
+        }
+
         if(override_success)
         {
 
@@ -3243,4 +3262,25 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
     for(size_t i = 0; values && i < count && i < known; i++)
         values[i] = all[i];
     return known;
+}
+
+// Test support: the adaptive sm_count_target state of `stream` into `state`,
+// a rocblaslt::adaptive_sm::StreamStateForTest of `size` bytes. Returns false
+// when adaptive mode is off or the size differs.
+extern "C" HIPBLASLT_EXPORT bool
+    hipblaslt_adaptive_sm_state_for_test(void* handle, hipStream_t stream, void* state, size_t size)
+{
+    return handle && size == sizeof(rocblaslt::adaptive_sm::StreamStateForTest)
+           && static_cast<rocblaslt_handle>(handle)->adaptiveSmCountStateForTest(
+               stream, static_cast<rocblaslt::adaptive_sm::StreamStateForTest*>(state));
+}
+
+// Test support: both phases of an adaptive launch on `stream`, with no kernel
+// between them (see _rocblaslt_handle::adaptiveSmCountLaunchLockForTest).
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_adaptive_sm_launch_lock_for_test(
+    void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter)
+{
+    return handle
+           && static_cast<rocblaslt_handle>(handle)->adaptiveSmCountLaunchLockForTest(
+               stream, tiny, probe, heldBetween, heldAfter);
 }

@@ -28,12 +28,15 @@
 #pragma once
 
 #include "rocblaslt.h"
+#include "rocblaslt_adaptive_sm_count.hpp"
 #include <hipblaslt/hipblaslt-opt-in-features.h>
 //#include "rocblaslt_ostream.hpp"
 #include <atomic>
 #include <fstream>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 struct _rocblaslt_attribute
@@ -68,6 +71,12 @@ private:
     void*  _data      = nullptr;
     size_t _data_size = 0;
 };
+
+// Adaptive sm_count_target settings, read from the environment once.
+const rocblaslt::adaptive_sm::Config& rocblaslt_adaptive_sm_config();
+
+// Writes one adaptive sm_count_target log line to the library log stream.
+void rocblaslt_adaptive_sm_log(const std::string& line);
 
 /********************************************************************************
  * \brief rocblaslt_handle is a structure holding the rocblaslt library context.
@@ -210,6 +219,19 @@ struct _rocblaslt_handle
         if(problemIndex >= c_syncSkSlotsPerStream)
             return rocblaslt_status_internal_error;
 
+        const int i = streamSlot(stream);
+        if(i < 0)
+            return rocblaslt_status_internal_error;
+
+        *out = static_cast<char*>(StreamKFlags)
+               + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
+        return rocblaslt_status_success;
+    }
+
+    // Index of the per-stream block owned by `stream`, claiming a free one on
+    // first use; -1 once all c_syncSkStreamSlots are taken.
+    int streamSlot(hipStream_t stream)
+    {
         // hipStreamPerThread is a sentinel that resolves to a different stream
         // for every host thread, so every thread would present the same key and
         // share one block. Key those by thread instead. The legacy null stream
@@ -242,18 +264,90 @@ struct _rocblaslt_handle
                             : expected;
             }
             if(owner == key)
-            {
-                *out = static_cast<char*>(StreamKFlags)
-                       + (i * c_syncSkSlotsPerStream + problemIndex) * c_syncSkSlotBytes;
-                return rocblaslt_status_success;
-            }
+                return static_cast<int>(i);
         }
 
-        return rocblaslt_status_internal_error;
+        return -1;
     }
 
     // Value-initialised so every block starts unowned.
     std::atomic<const void*> m_skSlotOwner[c_syncSkStreamSlots] = {};
+
+    // Adaptive sm_count_target state for one stream slot (see
+    // rocblaslt_adaptive_sm_count.hpp).
+    struct AdaptiveSmStream
+    {
+        std::atomic<uint32_t>              cus{0}; // published hint, 0 = none
+        std::mutex                         lock; // guards the members below
+        rocblaslt::adaptive_sm::ProbeEpoch epoch;
+        hipEvent_t                         events[rocblaslt::adaptive_sm::c_probeRing] = {};
+        rocblaslt::adaptive_sm::Estimator  estimator;
+    };
+
+    // Probe slot arrays, one per stream slot, in host-mapped memory; null when
+    // adaptive mode is off.
+    uint32_t*                           adaptive_probe_host = nullptr;
+    void*                               adaptive_probe_dev  = nullptr;
+    std::unique_ptr<AdaptiveSmStream[]> adaptive_streams;
+    // Latest hint published on any stream: the heuristic query has no stream.
+    std::atomic<uint32_t> adaptive_query_cus{0};
+
+    bool adaptiveSmCountEnabled() const
+    {
+        return adaptive_streams != nullptr;
+    }
+
+    // One adaptive C API launch, from adaptiveSmCountForLaunch to
+    // adaptiveSmCountAfterLaunch.
+    struct AdaptiveSmLaunch
+    {
+        uint32_t                           hint       = 0;
+        void*                              probeAddr  = nullptr; // null: no probe
+        uint32_t                           probeEpoch = 0;
+        int                                slot       = -1; // -1: nothing to finish
+        rocblaslt::adaptive_sm::LaunchPlan plan;
+        bool                               probed = false; // set by the launch
+        // A probe launch holds its stream slot's lock from the first phase
+        // to the second, so probes enqueue in epoch order.
+        std::unique_lock<std::mutex> probeLock;
+    };
+
+    // Hint for a C API launch on `stream`, and the probe target when it
+    // should probe. A tiny launch never probes. A launch on a capturing
+    // stream leaves the stream's state alone and takes no hint, or the forced
+    // one under FORCE. Under FORCE the hint is fixed and probes run only with
+    // FORCE_PROBE. A full ring defers a due probe. A launch finding the
+    // slot's lock held launches without the stream's state.
+    void adaptiveSmCountForLaunch(hipStream_t stream, bool tiny, AdaptiveSmLaunch* launch);
+
+    // Records the launch's probe, if it probed, and settles the cadence.
+    // Releases the launch's probeLock. Holding it through a probe launch means
+    // other launches on the slot meanwhile go untracked (phase 1) or wait
+    // (phase 2).
+    void adaptiveSmCountAfterLaunch(hipStream_t stream, AdaptiveSmLaunch& launch);
+
+    // Publishes the slot's estimate; `old` is the previous one, for the log.
+    // Needs the slot's lock.
+    void publishAdaptiveSmCount(hipStream_t stream, int slot, uint32_t old);
+
+    uint32_t adaptiveSmCountForQuery() const
+    {
+        const uint32_t force = rocblaslt_adaptive_sm_config().force;
+        return force ? force : adaptive_query_cus.load(std::memory_order_relaxed);
+    }
+
+    // State of `stream`'s slot; false when adaptive mode is off or the
+    // stream has no slot.
+    bool adaptiveSmCountStateForTest(hipStream_t                                 stream,
+                                     rocblaslt::adaptive_sm::StreamStateForTest* out);
+
+    // Runs both phases of a launch on `stream` with no kernel between them.
+    // `*probe`: the launch planned a probe; `*heldBetween`, `*heldAfter`: the
+    // slot's lock is held between the phases and after the second. A planned
+    // probe still advances the epoch and, at a cadence point, counts a miss.
+    // False when adaptive mode is off or the stream has no slot.
+    bool adaptiveSmCountLaunchLockForTest(
+        hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Device communicator, registered once by hipblasLtSetDeviceComm. Every rank
@@ -462,6 +556,20 @@ inline int32_t effective_sm_count_target(const _rocblaslt_handle*            han
     if(handle)
         return handle->sm_count_target;
     return 0;
+}
+
+// True when the hint for a matmul comes from the adaptive estimator: adaptive
+// mode on, StreamK tile scheduling AUTO or ON, and no desc or handle hint.
+inline bool adaptive_sm_count_applies(const _rocblaslt_handle*      handle,
+                                      const _rocblaslt_matmul_desc* desc)
+{
+    return handle && desc
+           && rocblaslt::adaptive_sm::applies(
+               handle->adaptiveSmCountEnabled(),
+               desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO
+                   || desc->streamk_tile_scheduling_ext == HIPBLASLT_STREAMK_TILE_SCHEDULING_ON,
+               desc->sm_count_target,
+               handle->sm_count_target);
 }
 
 // Resolve the effective uniform-summation-order request for a matmul launch
