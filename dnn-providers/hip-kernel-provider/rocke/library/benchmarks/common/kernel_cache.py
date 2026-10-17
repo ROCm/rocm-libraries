@@ -745,6 +745,24 @@ class KernelCache:
             if not ok:
                 return False, why
 
+        # Split-K dgrad: same packed <2 x dtype> atomic constraint as wgrad
+        # above, on dX instead of dW. A 16-bit dX atomic pair must stay within
+        # one group's slab, which needs an even cpg; is_valid_dgrad_spec makes
+        # the same check at spec-build time.
+        if (
+            identity.direction == "dgrad"
+            and not identity.is_direct
+            and identity.split_k > 1
+            and identity.dtype_d in ("fp16", "bf16")
+            and cpg % 2 != 0
+        ):
+            return False, (
+                f"split_k > 1 with dtype_d={identity.dtype_d!r} requires even "
+                f"channels-per-group (packed <2 x dtype> atomic pairs on the "
+                f"innermost NHWC dimension must stay within one group's slab); "
+                f"got cpg={cpg}"
+            )
+
         # Baked filter geometry (direct conv), and the stride/dilation older
         # implicit-GEMM dgrad caches recorded per binary (current ones record
         # 0: the tilde kernel takes them at run time). For implicit GEMM 0
@@ -807,14 +825,6 @@ class KernelCache:
                 return False, (
                     f"problem needs {n_sub} tilde sub-GEMMs, kernel's record "
                     f"table supports {bound} (max_sub_gemms)"
-                )
-            # Mirrors is_valid_dgrad_spec: the grouped implicit-GEMM dgrad has
-            # no depthwise (cpg == 1) path, and the grouped binary is offered
-            # to every grouped problem otherwise.
-            if int(getattr(problem, "groups", 1)) > 1 and cpg == 1:
-                return False, (
-                    "depthwise dgrad (cpg == 1) is not supported by the "
-                    "implicit-GEMM grouped path"
                 )
 
         if not identity.is_direct:
