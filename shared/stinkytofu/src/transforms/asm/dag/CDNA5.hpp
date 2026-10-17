@@ -3491,12 +3491,13 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                 barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
             return th == barrierWmmaThresholds_.end() ? -1 : th->second;
         };
+        const auto& predsRef = preds;
         constexpr int kStageHops = 3;
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id : dsOrder) {
             int start = 0;
             int end = INT_MAX;
-            for (const auto* edges : {&deps.dag.graph, &preds}) {
+            for (const auto* edges : {&deps.dag.graph, &predsRef}) {
                 const bool forward = edges == &deps.dag.graph;
                 std::vector<unsigned> frontier{id};
                 for (int hop = 0; hop < kStageHops && !frontier.empty(); ++hop) {
