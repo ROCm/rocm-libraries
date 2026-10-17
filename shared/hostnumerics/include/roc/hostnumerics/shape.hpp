@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,21 @@
 
 namespace roc::hostnumerics {
 namespace detail {
+// Validate raw extents against Shape's invariant before constructing a Shape.
+inline std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
+    size_t count = 1;
+    bool empty = false;
+    for (size_t extent : dimensions) {
+        if (extent == 0) {
+            empty = true;
+            continue;
+        }
+        if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
+        count *= extent;
+    }
+    return empty ? 0 : count;
+}
+
 inline bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
     if (order.empty()) return true;
     if (order.size() != rank) return false;
@@ -213,13 +229,8 @@ class Shape {
     }
 
     static void validateDimensions(std::span<const size_t> extents) {
-        size_t count = 1;
-        for (size_t extent : extents) {
-            if (extent == 0) continue;
-            if (count > std::numeric_limits<size_t>::max() / extent)
-                throw std::runtime_error("Tensor shape product of nonzero extents exceeds size_t.");
-            count *= extent;
-        }
+        if (!detail::tryElementCount(extents))
+            throw std::runtime_error("Tensor shape product of nonzero extents exceeds size_t.");
     }
 
     static size_t computeElementCount(std::span<const size_t> extents) noexcept {
