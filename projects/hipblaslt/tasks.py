@@ -443,6 +443,7 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "no_compress": "Don't compress TensileLite assembly objects.",
         "keep_build_tmp": "Keep the temporary build artifacts.",
         "experimental": "Include 'Experimental' logic directories.",
+        "emit_occupancy_probe": "Emit the CU-occupancy probe in StreamK hybrid kernels.",
         "gemm_a2a_fusion": "Build experimental fused GEMM + all-to-all support.",
         "logic_filter": "Logic YAML filter (e.g. 'gfx942/Equality/*').",
         "legacy_hipblas_direct": "Enable legacy HIPBLAS_DIRECT mode.",
@@ -500,6 +501,7 @@ def build(
     clean=False,
     fortran_compiler=None,
     gemm_a2a_fusion=False,
+    emit_occupancy_probe=False,
 ):
     _supported_distros()
 
@@ -652,6 +654,8 @@ def build(
         cmake_opts.append("-DTENSILELITE_NO_COMPRESS=ON")
     if experimental:
         cmake_opts.append("-DTENSILELITE_EXPERIMENTAL=ON")
+    if emit_occupancy_probe:
+        cmake_opts.append("-DTENSILELITE_EMIT_OCCUPANCY_PROBE=ON")
     if disable_marker:
         cmake_opts.append("-DHIPBLASLT_ENABLE_MARKER=OFF")
     if not enable_asm_comments:

@@ -633,6 +633,22 @@ namespace
         }
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, OccupancyProbeRoundTrips)
+    {
+        canonical(policies[4]);
+        ContractionSolution::InternalArgsSupport args;
+        args.occupancyProbe = true;
+        internalArgs        = output(args);
+        EXPECT_TRUE(readSolution()->internalArgsSupport.occupancyProbe);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, MissingOccupancyProbeDefaultsToFalse)
+    {
+        canonical(policies[4]);
+        internalArgs.erase("occupancyProbe");
+        EXPECT_FALSE(readSolution()->internalArgsSupport.occupancyProbe);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, ArgumentLayoutV1RequiresDataParallel)
     {
         internalArgs["persistentLoopArgsVersion"] = object(1);
