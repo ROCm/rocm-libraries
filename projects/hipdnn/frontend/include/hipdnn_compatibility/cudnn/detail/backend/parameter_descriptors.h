@@ -19,11 +19,11 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/tensor_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/type_mapping.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::backend
 {

@@ -221,3 +221,18 @@ These differ from cuDNN:
 | `cudnnBackendExecute` handle | `BAD_PARAM` unless it is the handle the plan was built on (the graph's handle) or, for a loaded plan, the `HANDLE` it was loaded with |
 | `VARIANT_PACK` | the hipDNN variant pack is built at finalize; `DATA_POINTERS` and `UNIQUE_IDS` with different element counts are `BAD_PARAM` at finalize |
 | `ENGINE_LAYOUT_INFO`, `ENGINECFG_WORKSPACE_SIZE`, `VARIANT_PACK_INTERMEDIATES` | not declared (no supported consumer uses them); code that names them does not compile |
+
+### Builders
+
+The v0.x builders (`TensorBuilder`, `ConvDescBuilder`, `PointWiseDescBuilder`, `MatMulDescBuilder`,
+`ReductionDescBuilder`, `ResampleDescBuilder`, `RngDescBuilder`, `VariantPackBuilder`) are upstream's,
+running on the C API above, so every C API row applies to their `build()`. These differ as well:
+
+| Case | Shim behavior |
+|---|---|
+| Builder error text | `cudnnException::what()` ends in `cudnn_status: HIPDNN_STATUS_…`: `to_string(cudnnStatus_t)` returns `cudnnGetErrorString`, which reports hipDNN's name for the translated status. `getCudnnStatus()` and `get_status()` still carry the cuDNN status |
+| nlohmann serialization of frontend enums | `DataType_t`, `PointwiseMode_t` and the other frontend enums are hipDNN's enums, and the shim defines no nlohmann serializer for them, so `json j = DataType_t::FLOAT;` stores an integer, not upstream's `"FLOAT"`. `describe()` is unaffected: it renders enums through the shim's own name table, byte for byte as upstream |
+| Descriptor log lines | the body of a builder's log line (`describe()`) is printed only when `CUDNN_FRONTEND_LOG_INFO` is above 0, as upstream, and the line itself goes through hipDNN INFO logging. With hipDNN INFO logging on but `CUDNN_FRONTEND_LOG_INFO` unset, the line is `[cudnn_frontend] ` with nothing after it |
+| `getStream()` / `getLogger()` | no shim code calls them. A consumer call opens `CUDNN_FRONTEND_LOG_FILE` for writing, truncating it as upstream does; the `cudnnCreate()` logging bridge may also route hipDNN's log to that file, so the two writers can overwrite each other |
+| `NV_CUDNN_FRONTEND_USE_DYNAMIC_LOADING` | ignored: the shim never loads cuDNN at run time, and `NV_CUDNN_FE_DYNAMIC_CHECK_*` expand to nothing, so the run-time cuDNN version checks they guard are skipped |
+| `get_environment()`, `getLogLevel()` | `get_environment` returns a pointer into a per-thread buffer that the next call on the same thread overwrites (upstream returns `getenv`'s pointer), and returns null for a variable that is set but empty. `getLogLevel` returns 0 when the `NV_CUDNN_FRONTEND_DISABLE_LOGGING` environment variable is set to anything but `0`; upstream honors only the macro |

@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <string>
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {

@@ -241,8 +241,13 @@ runs no heuristics and needs no GPU.
   - dynamic loading, CUDA-graph and v7 helpers removed;
   - friend declarations of v9 node classes removed;
   - edits needed to build under hipDNN's `-Werror` warning set, with no warning suppression.
-- Fixed upstream bugs: `Knob::getMaxValue` and `RngDesc_v8::getUniformDistMin` return the wrong field.
-  The misspelled alias `EngineHeuristicsBuilde` is kept.
+- Fixed upstream bugs: `Knob::getMaxValue` and `RngDesc_v8::getUniformDistMin` return the wrong field;
+  `VariantPackBuilder_v8::build` passes the data-pointer count as the `UNIQUE_IDS` count, which over-reads
+  the caller's UIDs when fewer UIDs than pointers are given. It now passes the UID count, and the shim
+  reports the mismatch as `BAD_PARAM`. The misspelled alias `EngineHeuristicsBuilde` is kept.
+- FE-enum JSON rendering goes through a shim name table. `describe()` output matches upstream, but the
+  shim defines no nlohmann serializer for hipDNN's enums, so serializing a frontend enum directly yields
+  an integer.
 - Operation tags match upstream byte for byte (errata rules and plan caches match on them). Plan tags
   use the shim's engine index and knob values.
 - JSON-dependent code (errata) compiles unless `CUDNN_FRONTEND_SKIP_JSON_LIB` or

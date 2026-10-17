@@ -13,8 +13,8 @@
 
 #include <optional>
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 
 // cuDNN C enum <-> shim FE enum, matched by enumerator name as upstream's
 // convert_to_cudnn_type / convert_from_cudnn_type do. std::nullopt means the
