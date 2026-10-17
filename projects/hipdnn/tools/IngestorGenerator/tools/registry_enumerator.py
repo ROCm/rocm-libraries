@@ -117,7 +117,7 @@ def _validate_manifest(path: str, manifest: dict) -> None:
     )
     for key in ("vocabulary", "bindings"):
         _require(
-            specialization.get(key) is None or isinstance(specialization[key], dict),
+            key not in specialization or isinstance(specialization[key], dict),
             path,
             f"specialization.{key}",
             "a mapping",

@@ -217,6 +217,15 @@ def _kmd_fields_not_a_list(m):
     m["kmd_fields"] = 5
 
 
+def _null_bindings_in_the_full_space(m):
+    m["enumerate"]["space"] = "full"
+    m["specialization"]["bindings"] = None
+
+
+def _null_vocabulary(m):
+    m["specialization"]["vocabulary"] = None
+
+
 @pytest.mark.parametrize("mode", ["--plan-space", "--out"])
 @pytest.mark.parametrize(
     "mutate, field",
@@ -225,8 +234,17 @@ def _kmd_fields_not_a_list(m):
         (_enumerate_not_a_mapping, "enumerate"),
         (_max_kernels_not_an_int, "max_kernels"),
         (_kmd_fields_not_a_list, "kmd_fields"),
+        (_null_bindings_in_the_full_space, "bindings"),
+        (_null_vocabulary, "vocabulary"),
     ],
-    ids=["no-metadata-fields", "enumerate-int", "max-kernels-str", "kmd-fields-int"],
+    ids=[
+        "no-metadata-fields",
+        "enumerate-int",
+        "max-kernels-str",
+        "kmd-fields-int",
+        "bindings-null",
+        "vocabulary-null",
+    ],
 )
 def test_a_wrongly_typed_manifest_field_is_exit_2_naming_the_field(
     manifest, registry, tmp_path, capsys, mode, mutate, field
