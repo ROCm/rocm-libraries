@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <string>
@@ -570,6 +571,78 @@ namespace
         EXPECT_TRUE(tinyProblem(128, 128, 1024, 0, cfg)) << "batch 0 counts as 1";
         cfg.tinyMflops = 0;
         EXPECT_FALSE(tinyProblem(1, 1, 1, 1, cfg)) << "threshold 0";
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_AlgoTagRoundTrip)
+    {
+        const int32_t index   = 0x1234;
+        uint8_t       data[8] = {};
+        std::memcpy(data, &index, sizeof(index));
+        uint32_t hint = 1;
+        EXPECT_FALSE(algoTag(data, &hint));
+        tagAlgo(data, 192);
+        ASSERT_TRUE(algoTag(data, &hint));
+        EXPECT_EQ(hint, 192u);
+        int32_t kept = 0;
+        std::memcpy(&kept, data, sizeof(kept));
+        EXPECT_EQ(kept, index);
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_AlgoTagVersionMismatchIsUntagged)
+    {
+        uint8_t data[8] = {};
+        tagAlgo(data, 192);
+        data[5]       = c_algoTagVersion + 1;
+        uint32_t hint = 0;
+        EXPECT_FALSE(algoTag(data, &hint));
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_PickReselection)
+    {
+        {
+            SCOPED_TRACE("first fitting candidate");
+            const auto c = pickReselection(7, {3, 5, 9}, {false, true, true}, true);
+            EXPECT_EQ(c.index, 5);
+            EXPECT_FALSE(c.keepQueryHint);
+        }
+        {
+            SCOPED_TRACE("none fits, original does");
+            const auto c = pickReselection(7, {3, 5}, {false, false}, true);
+            EXPECT_EQ(c.index, 7);
+            EXPECT_FALSE(c.keepQueryHint);
+        }
+        {
+            SCOPED_TRACE("nothing fits: original under the query hint");
+            const auto c = pickReselection(7, {3, 5}, {false, false}, false);
+            EXPECT_EQ(c.index, 7);
+            EXPECT_TRUE(c.keepQueryHint);
+        }
+        {
+            SCOPED_TRACE("no candidates");
+            const auto c = pickReselection(7, {}, {}, false);
+            EXPECT_EQ(c.index, 7);
+            EXPECT_TRUE(c.keepQueryHint);
+        }
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_SmallMemoEvictsRoundRobin)
+    {
+        SmallMemo<std::pair<int, int>, 2> memo;
+        auto key = [](int k) { return [k](auto const& e) { return e.first == k; }; };
+        EXPECT_EQ(memo.find(key(1)), nullptr);
+        EXPECT_EQ(memo.insert({1, 10})->second, 10);
+        memo.insert({2, 20});
+        ASSERT_NE(memo.find(key(1)), nullptr);
+        EXPECT_EQ(memo.find(key(2))->second, 20);
+        memo.insert({3, 30});
+        EXPECT_EQ(memo.find(key(1)), nullptr) << "oldest evicted first";
+        EXPECT_EQ(memo.find(key(3))->second, 30);
+        memo.insert({4, 40});
+        EXPECT_EQ(memo.find(key(2)), nullptr);
+        EXPECT_EQ(memo.size(), 2u);
+        memo.clear();
+        EXPECT_EQ(memo.size(), 0u);
+        EXPECT_EQ(memo.find(key(4)), nullptr);
     }
 
     using Env = std::vector<std::pair<const char*, const char*>>;

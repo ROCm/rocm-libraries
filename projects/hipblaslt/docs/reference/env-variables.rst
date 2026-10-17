@@ -240,7 +240,7 @@ For requirements and behavior, see :ref:`Adapting to the available compute units
     * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_LOG``
         | Logs adaptive mode activity to ``HIPBLASLT_LOG_FILE``, or stderr if unset.
       - | 0: Off (default)
-        | 1: Configuration and hint changes
+        | 1: Configuration, hint changes, and re-selections
         | 2: Also every probe reading
 
     * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``

@@ -131,6 +131,8 @@ are available to its GEMMs and use that count as an implicit ``sm_count_target``
 Every few launches, a GEMM kernel records which CUs its workgroups ran on. hipBLASLt reads the
 result asynchronously and updates a per-stream CU estimate, the adaptive hint.
 The hint affects solution selection and the Stream-K Hybrid grid size and assignment mode.
+When the hint differs from the one the heuristic query ranked under, the top heuristic result
+is re-selected at launch.
 
 Requirements
 ------------
@@ -165,7 +167,7 @@ and logs a warning.
    "``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_EVERY``","Launches per stream between probes. Range: ``1`` or greater. Default: ``8``."
    "``HIPBLASLT_ADAPTIVE_SM_COUNT_TINY_MFLOPS``","GEMMs with fewer than this many MFLOPs (``2*M*N*K*batch / 10^6``) never probe. Default: ``4096``."
    "``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_WINDOW``","Number of latest probe readings that decide the hint. The hint changes only when all of them are below it or all are above it, and then takes the smallest reading. No hint counts as the device's CU count; when all readings reach it, the hint is cleared. Range: ``1`` to ``16``. Default: ``2``."
-   "``HIPBLASLT_ADAPTIVE_SM_COUNT_LOG``","``0``: no logging (default). ``1``: log the configuration and hint changes. ``2``: also log every reading. Lines are prefixed with ``[hipBLASLt ADAPTIVE_SM]`` and written to ``HIPBLASLT_LOG_FILE`` if set, otherwise to stderr."
+   "``HIPBLASLT_ADAPTIVE_SM_COUNT_LOG``","``0``: no logging (default). ``1``: log the configuration, hint changes, and re-selections. ``2``: also log every reading. Lines are prefixed with ``[hipBLASLt ADAPTIVE_SM]`` and written to ``HIPBLASLT_LOG_FILE`` if set, otherwise to stderr."
    "``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``","Use this fixed CU count as the hint for every query and launch instead of measuring it. A positive value enables adaptive mode on its own. Range: ``0`` to ``65535``. Default: ``0`` (measure)."
    "``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE``","With ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``, still run the probes and discard their readings, so timing includes the probe cost. Ignored with a warning without ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``. Default: ``0``."
 
@@ -173,9 +175,14 @@ Behavior notes
 --------------
 
 *  **Workspace**: In adaptive mode, the top heuristic result reports
-   ``workspaceSize = min(MAX_WORKSPACE_BYTES, max(required, 128 MiB))`` so a regridded launch
-   has room to run. Set ``HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES`` to your workspace budget.
+   ``workspaceSize = min(MAX_WORKSPACE_BYTES, max(required, 128 MiB))`` so a re-selection
+   or a regridded launch has room to run. Set ``HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES`` to your workspace budget.
+   A re-selected solution must fit the workspace passed to ``hipblasLtMatmul``.
+*  **Re-selection**: Only the top heuristic result is re-selected. An algorithm obtained by solution index
+   or from a lower-ranked heuristic result is never replaced. Re-selection is skipped when uniform
+   summation order is requested.
 *  **Precedence**: An explicit ``sm_count_target`` on the descriptor or handle always wins over the adaptive hint.
+   A ``HIPBLASLT_TUNING_OVERRIDE_FILE`` entry also wins: its solution is never re-selected.
 *  **Probing cost**: GEMMs below ``HIPBLASLT_ADAPTIVE_SM_COUNT_TINY_MFLOPS`` never probe.
    Each probe records an event on the stream. Threads that share one stream pay roughly 1-3 µs
    per launch for this.

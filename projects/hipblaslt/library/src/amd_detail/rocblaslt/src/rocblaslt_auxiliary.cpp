@@ -2631,15 +2631,17 @@ rocblaslt_status
                                       pref->max_workspace_bytes);
         }
 
-        // The top Tensile result reports enough workspace for an SK5 re-grid
-        // under a later adaptive hint. A tuning-file result, the other results
-        // and AlgoCheck report the plain size.
+        // Tag the top Tensile result with the hint it was ranked for so a launch
+        // under a different adaptive hint can re-select, and give it enough
+        // workspace for a re-grid or a re-selection. A tuning-file result is not
+        // tagged; the other results and AlgoCheck report the plain size.
         if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
            && heuristicResultsArray[0].state == rocblaslt_status_success
            && *(int*)heuristicResultsArray[0].algo.data >= 0)
         {
             using namespace rocblaslt::adaptive_sm;
-            auto& r0         = heuristicResultsArray[0];
+            auto& r0 = heuristicResultsArray[0];
+            tagAlgo(r0.algo.data, uint32_t(prob.sm_count_target));
             r0.workspaceSize = std::min(pref->max_workspace_bytes,
                                         std::max(r0.workspaceSize, c_adaptiveWorkspace));
         }
@@ -3202,6 +3204,7 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
+    resetAdaptiveReselections();
 }
 
 // Test support, like hipblaslt_debug_reload: the tuning variables are read on
@@ -3223,6 +3226,7 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
     counters.invalidated   = 0;
 
     static_cast<void>(tuningLastLaunchedIndexForTest());
+    resetAdaptiveReselections();
 }
 
 // The solution the calling thread's last hipblasLtMatmul launched, or -1,
@@ -3283,4 +3287,12 @@ extern "C" HIPBLASLT_EXPORT bool hipblaslt_adaptive_sm_launch_lock_for_test(
     return handle
            && static_cast<rocblaslt_handle>(handle)->adaptiveSmCountLaunchLockForTest(
                stream, tiny, probe, heldBetween, heldAfter);
+}
+
+// Test support: adaptive re-selections memoised for a matmul desc.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_adaptive_reselections_for_test(void* matmulDesc)
+{
+    return matmulDesc
+               ? adaptiveReselectionCount(static_cast<rocblaslt_matmul_desc>(matmulDesc)->m_data)
+               : 0;
 }

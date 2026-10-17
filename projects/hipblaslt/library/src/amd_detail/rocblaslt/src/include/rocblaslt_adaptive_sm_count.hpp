@@ -44,7 +44,7 @@ namespace rocblaslt
         struct Config
         {
             bool     enabled     = false; // HIPBLASLT_ADAPTIVE_SM_COUNT=1, or _FORCE set
-            uint32_t log         = 0; // _LOG: 1 config, hint changes; 2 + readings
+            uint32_t log         = 0; // _LOG: 1 config, hint changes, re-selections; 2 + readings
             uint32_t force       = 0; // _FORCE: fixed hint for query and launch
             bool     forceProbe  = false; // _FORCE_PROBE: probe under _FORCE, readings discarded
             uint32_t probeEvery  = 8; // _PROBE_EVERY: launches between probes
@@ -145,9 +145,12 @@ namespace rocblaslt
         // ring is full. With one, a probe is read before the next one runs,
         // so a later probe never overwrites the marks of an unread one.
         constexpr uint32_t c_probeRing = 1;
+        // Candidates examined by launch-time re-selection.
+        constexpr int c_reselectTopK = 8;
         // Least workspace reported for the top heuristic result in adaptive
         // mode, capped by the caller's limit: origami's static-grid
-        // partial-tile limit, enough for SK5 re-grids under any hint.
+        // partial-tile limit, enough for SK5 re-grids and re-selections under
+        // any hint.
         constexpr size_t c_adaptiveWorkspace = size_t(128) << 20;
 
         // The adaptive hint applies in StreamK AUTO or ON mode when neither the
@@ -276,6 +279,90 @@ namespace rocblaslt
                 return lo;
             return hint;
         }
+
+        // Heuristic-query tag in rocblaslt_matmul_algo::data[4..7] (data[0..3] is
+        // the solution index): data[4] bit 0 = eligible for launch-time
+        // re-selection, data[5] = tag version, data[6..7] = hint at query.
+        constexpr uint8_t c_algoTagVersion = 1;
+
+        inline void tagAlgo(uint8_t* data, uint32_t queryHint)
+        {
+            const uint16_t h = static_cast<uint16_t>(std::min<uint32_t>(queryHint, 0xffff));
+            data[4] |= 1;
+            data[5] = c_algoTagVersion;
+            std::memcpy(data + 6, &h, sizeof(h));
+        }
+
+        inline bool algoTag(const uint8_t* data, uint32_t* queryHint)
+        {
+            if(!(data[4] & 1) || data[5] != c_algoTagVersion)
+                return false;
+            uint16_t h;
+            std::memcpy(&h, data + 6, sizeof(h));
+            *queryHint = h;
+            return true;
+        }
+
+        // Launch-time re-selection over the top-K solutions ranked under the
+        // launch hint, given whether each fits the caller's workspace.
+        struct ReselectChoice
+        {
+            int  index;
+            bool keepQueryHint; // launch the original under the query hint
+        };
+
+        inline ReselectChoice pickReselection(int                      original,
+                                              const std::vector<int>&  candidates,
+                                              const std::vector<bool>& candidateFits,
+                                              bool                     originalFits)
+        {
+            for(size_t i = 0; i < candidates.size(); ++i)
+                if(candidateFits[i])
+                    return {candidates[i], false};
+            return {original, !originalFits};
+        }
+
+        // Small memo with round-robin eviction once it holds N entries.
+        template <typename Entry, size_t N>
+        class SmallMemo
+        {
+        public:
+            template <typename Match>
+            const Entry* find(Match match) const
+            {
+                for(auto const& e : m_entries)
+                    if(match(e))
+                        return &e;
+                return nullptr;
+            }
+
+            const Entry* insert(Entry e)
+            {
+                if(m_entries.size() < N)
+                {
+                    m_entries.push_back(std::move(e));
+                    return &m_entries.back();
+                }
+                Entry& slot = m_entries[m_next++ % N];
+                slot        = std::move(e);
+                return &slot;
+            }
+
+            size_t size() const
+            {
+                return m_entries.size();
+            }
+
+            void clear()
+            {
+                m_entries.clear();
+                m_next = 0;
+            }
+
+        private:
+            std::vector<Entry> m_entries;
+            size_t             m_next = 0;
+        };
 
         // Result of Estimator::startLaunch().
         struct LaunchPlan
