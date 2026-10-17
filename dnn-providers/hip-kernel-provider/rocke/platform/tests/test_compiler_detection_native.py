@@ -260,7 +260,15 @@ def test_empty_discovery_values_match_unset(native_detector, tmp_path, variable)
         env.pop(name, None)
     env.update(
         PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
-        LD_LIBRARY_PATH=str(library.parent),
+        # Keep the fixture first while preserving shared-Python dependencies.
+        LD_LIBRARY_PATH=os.pathsep.join(
+            [str(library.parent)]
+            + [
+                path
+                for path in env.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+                if path
+            ]
+        ),
     )
     if variable == "ROCKE_COMGR_LIB":
         env["ROCM_PATH"] = str(library.parent.parent)
