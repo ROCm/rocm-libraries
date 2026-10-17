@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 // Host-only tests for the adaptive sm_count_target estimator and helpers in
-// rocblaslt_adaptive_sm_count.hpp, reached by relative #include. Launch
-// scenarios drive Estimator::beforeLaunch/afterProbe over a hand-filled probe
-// slot array.
+// rocblaslt_adaptive_sm_count.hpp, reached by relative #include, and for the
+// benchmark timing guard built on them. Launch scenarios drive
+// Estimator::beforeLaunch/afterProbe over a hand-filled probe slot array.
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
+#include "utility.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -633,6 +636,68 @@ namespace
             EXPECT_EQ(c.describe(), Config{}.describe());
             ASSERT_EQ(w.size(), 1u);
             EXPECT_EQ(w[0].rfind(std::string(name) + "=", 0), 0u) << w[0];
+        }
+    }
+
+    // hipblaslt_timing_allowed_with_adaptive_sm_count reads the process
+    // environment on each call; the variables are restored afterwards.
+    class HostUnitAdaptiveSmCountTiming : public ::testing::Test
+    {
+    protected:
+        void SetUp() override
+        {
+            for(const char* name : kVariables)
+            {
+                const char* value = std::getenv(name);
+                m_saved.emplace_back(name,
+                                     value ? std::optional<std::string>(value) : std::nullopt);
+                set(name, nullptr);
+            }
+        }
+
+        void TearDown() override
+        {
+            for(const auto& [name, value] : m_saved)
+                set(name, value ? value->c_str() : nullptr);
+        }
+
+        static void set(const char* name, const char* value)
+        {
+#if defined(_WIN32)
+            _putenv_s(name, value ? value : "");
+#else
+            if(value)
+                setenv(name, value, 1);
+            else
+                unsetenv(name);
+#endif
+        }
+
+        static constexpr const char* kVariables[] = {kEnvEnable, kEnvForce};
+
+        std::vector<std::pair<const char*, std::optional<std::string>>> m_saved;
+    };
+
+    TEST_F(HostUnitAdaptiveSmCountTiming, smoke_RefusedOnlyWhenTheHintVaries)
+    {
+        struct Case
+        {
+            const char* label;
+            const char* enable;
+            const char* force;
+            bool        allowed;
+        };
+        const std::vector<Case> cases = {
+            {"off", nullptr, nullptr, true},
+            {"adaptive", "1", nullptr, false},
+            {"adaptive, forced", "1", "128", true},
+        };
+        for(const Case& c : cases)
+        {
+            SCOPED_TRACE(c.label);
+            set(kEnvEnable, c.enable);
+            set(kEnvForce, c.force);
+            EXPECT_EQ(hipblaslt_timing_allowed_with_adaptive_sm_count(), c.allowed);
         }
     }
 } // namespace
