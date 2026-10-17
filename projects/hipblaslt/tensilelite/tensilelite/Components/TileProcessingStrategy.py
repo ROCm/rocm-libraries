@@ -8,7 +8,7 @@ from typing import Optional
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
 from rocisa.instruction import VMovB32, SBranch, SAndB32, SCSelectB32, SCBranchSCC0, SCmpEQU32, SMaxI32, SMovB32, SMulI32, SNop, SSubU32, \
-    SAddU32, SCMovB32, SCmpGeU32, SLShiftLeftB32, SLShiftRightB32, SMinU32
+    SAddU32, SCMovB32, SCmpGeU32, SLShiftLeftB32, SLShiftRightB32, SMinU32, SBitcmp1B32, VReadlaneB32
 from rocisa.functions import scalarStaticDivideAndRemainder, BranchIfNotZero, scalarUInt32DivideAndRemainder
 from ..Common import log2, persistentSpatialCluster
 from ..Component import Component
@@ -171,7 +171,7 @@ class DataParallel(TileProcessingStrategy):
         module.add(writer.longBranchScc0(Label("PersistentLoopClose", ""), posNeg=1))
         return module
 
-    def materializeTile(self, writer, kernel, tile, tPA, tPB, skipLroReset=False):
+    def materializeTile(self, writer, kernel, tile, tPA, tPB, skipLroReset=False, preparedEntry=False):
         """Set local-read offsets and workgroup coordinates for an assigned tile.
 
         Reset the local-read offsets when prefetching requires it, then convert
@@ -191,9 +191,26 @@ class DataParallel(TileProcessingStrategy):
                 if kernel["ProblemType"]["MXBlockB"] and "MX" in tPB:
                     module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
                 module.add(writer.localReadResetOffsets(kernel, tPB))
+        prepared = preparedEntry and getattr(writer.states, "papNextTileVgpr", -1) >= 0
+        if prepared:
+            cold = Label(writer.labels.getNameInc("PapColdTileCoordinates"), "")
+            ready = Label(writer.labels.getNameInc("PapTileCoordinatesReady"), "")
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=5,
+                                  comment="PAP next coordinates survived the previous store?"))
+            module.add(SCBranchSCC0(labelName=cold.getLabelName()))
+            names = ["WorkGroup0", "WorkGroup1", "WorkGroup2"]
+            if persistentSpatialCluster(kernel):
+                names.append("PersistentPhantomTile")
+            for i, name in enumerate(names):
+                module.add(VReadlaneB32(dst=sgpr(name), src0=vgpr(writer.states.papNextTileVgpr), src1=i,
+                                       comment="PAP activate retained " + name))
+            module.add(SBranch(labelName=ready.getLabelName()))
+            module.add(cold)
         with writer.allocTmpSgpr(3, 2, "PersistentTileMapping") as tmp:
             module.add(SMovB32(dst=sgpr(tmp.idx), src=sgpr(tile), comment="Assigned output tile"))
             module.add(self.tileIndexToWorkGroup(writer, kernel, tmp.idx))
+        if prepared:
+            module.add(ready)
         return module
 
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB, skipLroReset=False):

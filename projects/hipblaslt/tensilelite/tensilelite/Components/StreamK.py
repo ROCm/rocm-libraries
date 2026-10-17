@@ -24,7 +24,7 @@ from ..ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticA
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VReadlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -3160,7 +3160,20 @@ class StreamKTwoTileDPFirst(StreamK):
     def finishStaticTile(self, writer, kernel, tPA, tPB, sTmp):
         module = Module("StreamK static tile completion")
         # Map SK index to WG
+        prepared = getattr(writer.states, "papNextTileVgpr", -1) >= 0
+        if prepared:
+            cold = Label(writer.labels.getNameInc("PapStreamKColdCoordinates"), "")
+            ready = Label(writer.labels.getNameInc("PapStreamKCoordinatesReady"), "")
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=5))
+            module.add(SCBranchSCC0(labelName=cold.getLabelName()))
+            for i in range(3):
+                module.add(VReadlaneB32(dst=sgpr("WorkGroup%u" % i), src0=vgpr(writer.states.papNextTileVgpr), src1=i,
+                                       comment="PAP activate retained StreamK coordinate"))
+            module.add(SBranch(labelName=ready.getLabelName()))
+            module.add(cold)
         module.add(self.tileIndexToWorkGroup(writer, kernel, sTmp))
+        if prepared:
+            module.add(ready)
 
         # Short circuit if alpha==0 (skip main loop and reading A/B, only do beta * C)
         # To skip main loop in stream-k, we check if this WG is responsible for writing results (ie: WG starts tile)

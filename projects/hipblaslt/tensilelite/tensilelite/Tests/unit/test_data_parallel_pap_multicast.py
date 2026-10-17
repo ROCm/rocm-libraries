@@ -113,3 +113,16 @@ def test_pap_restores_the_current_peers_store_eligibility(monkeypatch, current_p
     assert machine["PersistentPhantomTile"] == current_phantom
     result = machine.run(processing.skipPhantomTileStore(writer, kernel))
     assert (result == "label_PersistentLoopClose") == bool(current_phantom)
+
+
+@pytest.mark.parametrize("state", [0, 1, 2, 4, 5, 7, 13, 29, 0x80000004, 0x80000005])
+def test_coordinate_handoff_publishes_only_prepared_issued_tiles(monkeypatch, state):
+    _, _, writer = _setup(monkeypatch)
+    writer.states.papNextTileVgpr = 12
+    machine = Machine(PersistentPrefetchState=state, WorkGroup0=17, WorkGroup1=23,
+                      WorkGroup2=2, PersistentPhantomTile=1, NextTile=99)
+    machine.run(writer.papPublishNextTileCoordinates())
+    assert bool(machine["PersistentPrefetchState"] & 32) == (state & 5 == 5)
+    assert machine["PersistentPrefetchState"] & ~32 == state
+    assert [machine[name] for name in ("WorkGroup0", "WorkGroup1", "WorkGroup2",
+                                     "PersistentPhantomTile", "NextTile")] == [17, 23, 2, 1, 99]
