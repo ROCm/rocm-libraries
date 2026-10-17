@@ -8,7 +8,9 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` logs a warning and uses hipDNN's default engine selection. Plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` uses hipDNN's default engine selection and logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
+
+The v8 backend C API accepts every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`); every mode runs hipDNN's default engine selection, and the first use of each non-`FALLBACK` mode in a process logs one warning.
 
 ## Note filters
 
@@ -196,3 +198,26 @@ These differ from cuDNN:
 | hipDNN operation validation | Graph finalize runs hipDNN's own checks. Beyond cuDNN's: epsilon and the exponential-average factor must be single-element `IS_BY_VALUE` tensors; batch-norm scale, bias and statistics must be per-channel `[1,C,1,…]` (no per-activation mode) with N·spatial > 1 when training; a reduction must reduce at least one dimension; a max-pool index must be `INT8` or `INT32`; RMS-norm scale must match the trailing dimensions of X. A rejection is `BAD_PARAM` naming the operation type, except "no engine supports this graph", which is `NOT_SUPPORTED`. Backend failures during lowering, allocation included, also report `BAD_PARAM` with hipDNN's message |
 | `ENGINE_GLOBAL_COUNT` | computed on the first value GET by running hipDNN heuristics, which needs a HIP device; a failure returns its status and the next GET retries. It counts only engines hipDNN reports as applicable whose default configuration finalizes; an engine that fails is logged and left out, so every counted index builds. The result is a per-graph snapshot: later changes to the heuristic configuration or autotune cache do not affect an existing graph |
 | Engine indices | `0 … ENGINE_GLOBAL_COUNT-1` enumerate the applicable hipDNN engines in ascending (signed) hipDNN engine-ID order, not cuDNN's global engine numbering. They change if the set of applicable engines changes (provider added, removed or upgraded, different GPU) |
+
+### Engines, plans and execution
+
+| Case | Shim behavior |
+|---|---|
+| `ENGINEHEUR_MODE` | every mode returns the same results: the graph's engines in hipDNN's fallback rank. See [Heuristic modes](#heuristic-modes) |
+| `ENGINEHEUR_SM_COUNT_TARGET`, `ENGINEHEUR_DEVICEPROP` | `NOT_SUPPORTED` when set |
+| `ENGINEHEUR_RESULTS` | configurations are finalized when returned and are shared: two fills of the same result return the same configuration |
+| Engine indices in errata and in consumer code | errata rules and hard-coded engine numbers (for example PyTorch's cuDNN engines 5, 23, 58 and 63) name NVIDIA engines. Under the shim the same number selects an unrelated hipDNN engine, or none. At `CUDNN_VERSION` 92200 only the 3-D `ConvBwdData` engine-23 rule is active, and it applies only to a graph with more than 23 applicable engines |
+| `ENGINE_NUMERICAL_NOTE` | `NONDETERMINISTIC` for every engine except those known to be deterministic (today `MIOPEN_ENGINE_DETERMINISTIC`); no other numerical note is reported, so filters on notes such as `DOWN_CONVERT_INPUTS` or `TENSOR_CORE` never match. Deterministic-only selection keeps only the known-deterministic engines |
+| `ENGINE_BEHAVIOR_NOTE` | hipDNN behavior notes with a cuDNN counterpart, matched by name; others (for example `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`) are not reported |
+| `ENGINE_KNOB_INFO`, `ENGINE_BEHAVIOR_NOTE` | read from hipDNN on the first GET, not at `ENGINE` finalize; a failure is returned by that GET and a later GET retries |
+| `ENGINE_KNOB_INFO` contents | lists only hipDNN knobs that project onto a cuDNN knob type (see [Knobs](#knobs): int64 value, plain minimum/maximum/stride, no list of valid values). A cuDNN type that two of an engine's knobs map onto is not listed (the v9 `get_knobs_for_engine` lists both) |
+| `KNOB_INFO` finalized by the caller | `BAD_PARAM`; knob-information descriptors are filled by `ENGINE_KNOB_INFO` only |
+| `ENGINECFG_KNOB_CHOICES` | checked at `ENGINECFG` finalize: a type not listed in the engine's `KNOB_INFO` is `NOT_SUPPORTED`; a type chosen twice, or a value outside the knob's range or off its stride, is `BAD_PARAM`. A failure building the hipDNN configuration is reported at `EXECUTION_PLAN` finalize |
+| `EXECUTION_PLAN_HANDLE` | required; `BAD_PARAM` at finalize when it differs from the operation graph's `HANDLE` (hipDNN builds the plan on the graph's handle) |
+| `EXECUTION_PLAN_KERNEL_CACHE` | `NOT_SUPPORTED` when set |
+| `EXECUTION_PLAN_JSON_REPRESENTATION` format | the shim's own versioned JSON, not cuDNN's: engine index, engine ID (a decimal string), engine name, behavior notes, knob choices and, when hipDNN can serialize the plan, a base64 payload. Notes and knob types are the shim's enum values. JSON written by cuDNN or by another tool is `BAD_PARAM` at finalize |
+| Loading a plan without `"payload"` | `NOT_SUPPORTED` at finalize; engines whose plans hipDNN cannot serialize cannot be reloaded |
+| Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it. The loaded plan's engine has no `OPERATION_GRAPH` or `KNOB_INFO` (`NOT_SUPPORTED`), and its configuration cannot build a new plan (`NOT_SUPPORTED`) |
+| `cudnnBackendExecute` handle | `BAD_PARAM` unless it is the handle the plan was built on (the graph's handle) or, for a loaded plan, the `HANDLE` it was loaded with |
+| `VARIANT_PACK` | the hipDNN variant pack is built at finalize; `DATA_POINTERS` and `UNIQUE_IDS` with different element counts are `BAD_PARAM` at finalize |
+| `ENGINE_LAYOUT_INFO`, `ENGINECFG_WORKSPACE_SIZE`, `VARIANT_PACK_INTERMEDIATES` | not declared (no supported consumer uses them); code that names them does not compile |

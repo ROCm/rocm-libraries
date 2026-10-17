@@ -92,6 +92,11 @@ HIPDNN_MAP_TO_ID(NoSolverPlugin, -31);
 // HIPDNN_PLUGIN_STATUS_ALLOC_FAILED. See TestResourceFailPlugin.cpp.
 HIPDNN_MAP_TO_ID(ResourceFailPlugin, -32);
 
+// cuDNN v8 shim fake: E1 exposes one cuDNN-projectable knob plus hidden ones and
+// serializes plans; E2 fails at execution-context creation (plan build).
+HIPDNN_MAP_TO_ID(CudnnShimV8Plugin, -33);
+HIPDNN_MAP_TO_ID(CudnnShimV8PluginContextFails, -34);
+
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins. All are deliberately absent from

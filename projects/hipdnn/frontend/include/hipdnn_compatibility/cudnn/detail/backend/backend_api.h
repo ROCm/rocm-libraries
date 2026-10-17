@@ -15,6 +15,8 @@
 
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
+#include <hipdnn_compatibility/cudnn/detail/backend/engine_descriptors.h>
+#include <hipdnn_compatibility/cudnn/detail/backend/execution_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/operation_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/operation_graph_descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/parameter_descriptors.h>
@@ -128,6 +130,20 @@ HIPDNN_HIDDEN inline std::shared_ptr<Descriptor>
         return std::make_shared<ResampleForwardOperation>();
     case CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR:
         return std::make_shared<OperationGraphDescriptor>();
+    case CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR:
+        return std::make_shared<EngineHeuristicDescriptor>();
+    case CUDNN_BACKEND_ENGINE_DESCRIPTOR:
+        return std::make_shared<EngineDescriptor>();
+    case CUDNN_BACKEND_ENGINECFG_DESCRIPTOR:
+        return std::make_shared<EngineConfigDescriptor>();
+    case CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
+        return std::make_shared<KnobChoiceDescriptor>();
+    case CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR:
+        return std::make_shared<KnobInfoDescriptor>();
+    case CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR:
+        return std::make_shared<ExecutionPlanDescriptor>();
+    case CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR:
+        return std::make_shared<VariantPackDescriptor>();
     case CUDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR:
     case CUDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR:
     case CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR:
@@ -143,15 +159,8 @@ HIPDNN_HIDDEN inline std::shared_ptr<Descriptor>
     case CUDNN_BACKEND_OPERATION_SLICE_DESCRIPTOR:
     case CUDNN_BACKEND_OPERATION_TRANSPOSE_DESCRIPTOR:
         return std::make_shared<UnsupportedOperation>(type);
-    case CUDNN_BACKEND_ENGINECFG_DESCRIPTOR:
-    case CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR:
-    case CUDNN_BACKEND_ENGINE_DESCRIPTOR:
-    case CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR:
     case CUDNN_BACKEND_INTERMEDIATE_INFO_DESCRIPTOR:
-    case CUDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
-    case CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR:
     case CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR:
-    case CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR:
         return std::make_shared<StorageOnlyDescriptor>(type);
     default:
         throw ShimError(CUDNN_STATUS_BAD_PARAM,
@@ -222,13 +231,37 @@ HIPDNN_HIDDEN inline cudnnStatus_t finalize(cudnnBackendDescriptor_t descriptor)
     });
 }
 
-HIPDNN_HIDDEN inline cudnnStatus_t execute(cudnnHandle_t /*handle*/,
-                                           cudnnBackendDescriptor_t /*executionPlan*/,
-                                           cudnnBackendDescriptor_t /*variantPack*/) noexcept
+// Hot path: no allocation and exactly one hipDNN call (the variant pack was
+// built at its finalize).
+HIPDNN_HIDDEN inline cudnnStatus_t execute(cudnnHandle_t handle,
+                                           cudnnBackendDescriptor_t executionPlan,
+                                           cudnnBackendDescriptor_t variantPack) noexcept
 {
-    return guardedCall("cudnnBackendExecute", [] {
-        throw ShimError(CUDNN_STATUS_NOT_SUPPORTED,
-                        "execution is not supported by the hipDNN cuDNN shim yet");
+    return guardedCall("cudnnBackendExecute", [&] {
+        const std::shared_ptr<Descriptor> planObject
+            = requireHandle(executionPlan, "executionPlan").object;
+        const std::shared_ptr<Descriptor> packObject
+            = requireHandle(variantPack, "variantPack").object;
+        const auto& plan = descriptorCast<ExecutionPlanDescriptor>(
+            *planObject, CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+        const auto& pack = descriptorCast<VariantPackDescriptor>(
+            *packObject, CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
+        if(!plan.isFinalized() || !pack.isFinalized())
+        {
+            throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                            !plan.isFinalized() ? "executionPlan is not finalized"
+                                                : "variantPack is not finalized");
+        }
+        // hipDNN would run the plan's context on this handle's stream without
+        // noticing the mismatch.
+        if(handle != plan.contextHandle())
+        {
+            throw ShimError(CUDNN_STATUS_BAD_PARAM,
+                            "handle differs from the handle the execution plan was built for");
+        }
+        checkHipdnn(hipdnn_frontend::detail::hipdnnBackend()->backendExecute(
+                        handle, plan.hipdnnPlan(), pack.hipdnnVariantPack()),
+                    "executing the hipDNN plan");
     });
 }
 

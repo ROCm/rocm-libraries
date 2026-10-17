@@ -188,9 +188,9 @@ TEST_F(TestCudnnShimV8BackendApi, CreateRejectsUnknownType)
 
 TEST_F(TestCudnnShimV8BackendApi, StorageOnlyFinalizeNamesType)
 {
-    cudnnBackendDescriptor_t heuristics = create(CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
-    EXPECT_EQ(cudnnBackendFinalize(heuristics), CUDNN_STATUS_NOT_SUPPORTED);
-    EXPECT_NE(lastError().find("CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR"), std::string::npos);
+    cudnnBackendDescriptor_t layout = create(CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR);
+    EXPECT_EQ(cudnnBackendFinalize(layout), CUDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_NE(lastError().find("CUDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR"), std::string::npos);
 }
 
 TEST_F(TestCudnnShimV8BackendApi, NullDescriptorRejected)
@@ -956,9 +956,9 @@ TEST_F(TestCudnnShimV8BackendApi, LastErrorFallsBackToBackend)
     EXPECT_EQ(lastError(), "backend failure");
 }
 
-TEST_F(TestCudnnShimV8BackendApi, ExecuteNotSupported)
+TEST_F(TestCudnnShimV8BackendApi, ExecuteRejectsNullDescriptors)
 {
-    EXPECT_EQ(cudnnBackendExecute(_handle, nullptr, nullptr), CUDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(cudnnBackendExecute(_handle, nullptr, nullptr), CUDNN_STATUS_BAD_PARAM);
     EXPECT_NE(lastError().find("cudnnBackendExecute"), std::string::npos);
 }
 
