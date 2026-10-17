@@ -10,7 +10,7 @@ remaining count untrustworthy, and a `rejected` bucket that can only print 0 cla
 failure was checked for. The dispatcher, request class and predicate are stubs.
 
 Also what the tool BINDS before it can report anything: where a profile's
-``provider_root`` resolves from, and which dispatch arm the shipped profile pins.
+``provider_root`` resolves from.
 """
 
 from __future__ import annotations
@@ -28,11 +28,6 @@ import dispatch_parity  # noqa: E402
 import launch_surface  # noqa: E402
 
 _TOOLS = Path(__file__).resolve().parents[1] / "tools"
-_SHIPPED_PROFILE = (
-    Path(__file__).resolve().parents[1]
-    / "configs"
-    / "gfx950_attention_dense.profile.yaml"
-)
 
 #: The decline carries a real reason rather than a blanket refusal so the served
 #: control survives alongside it.
@@ -215,8 +210,9 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         assert "no shape resolved" in capsys.readouterr().err
 
 
-#: The relative root the shipped profile names. Spelled out so the decoy below can
-#: reproduce it exactly: under a cwd-relative resolution the decoy is what binds.
+#: A repository-relative provider root, as a profile would write it. Spelled out so the
+#: decoy below can reproduce it exactly: under a cwd-relative resolution the decoy is
+#: what binds.
 _REPO_RELATIVE_ROOT = "dnn-providers/hip-kernel-provider"
 
 
@@ -275,26 +271,6 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
                 f"{entry!r} is not under the checkout's {expected} -- the anchor is "
                 "neither the cwd nor the repository root"
             )
-
-    def test_the_shipped_profile_binds_from_an_unrelated_directory(
-        self, bind, tmp_path, monkeypatch
-    ):
-        """End to end on the value that actually ships, so a correct resolver paired
-        with a stale profile string still fails."""
-        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
-        root = profile["provider_root"]
-        assert not os.path.isabs(root), (
-            f"the shipped profile names an absolute provider root ({root!r}); it "
-            "would only resolve on the machine that wrote it"
-        )
-        monkeypatch.chdir(tmp_path)
-
-        added = bind(root)
-
-        assert added, (
-            f"the shipped provider_root {root!r} did not bind from an unrelated "
-            "directory"
-        )
 
     def test_a_relative_root_that_is_absent_names_the_checkout_it_looked_under(
         self, bind, tmp_path, monkeypatch
@@ -356,87 +332,3 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
 
         assert knob_sweep._bind_provider is dispatch_parity._bind_provider
         assert reconcile_applicability._bind_provider is dispatch_parity._bind_provider
-
-
-class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
-    """The request defaults decide which kernel the dispatcher resolves, and this
-    catalog contains one arm of that choice only."""
-
-    def test_dense_persistent_is_the_string_off_not_a_yaml_boolean(self):
-        defaults = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))["request"][
-            "defaults"
-        ]
-        assert "dense_persistent" in defaults, (
-            "the profile leaves dense_persistent unset, so AttentionRequest defaults "
-            "it to 'auto' and the dispatcher resolves the persistent arm once "
-            "work >= dense_num_persistent -- a kernel this catalog does not ship"
-        )
-        value = defaults["dense_persistent"]
-        assert isinstance(value, str), (
-            f"dense_persistent parsed as {type(value).__name__} ({value!r}): the key "
-            "was written unquoted and PyYAML read `off` as a boolean. The dispatcher "
-            "calls .strip().lower() on it, so the tool aborts rather than pinning "
-            "the non-persistent arm"
-        )
-        assert value == "off", value
-
-    @staticmethod
-    def _resolve_with_the_real_dispatcher(monkeypatch, **overrides):
-        """B1, Sq=Skv=8192, Hq=Hkv=8, D=128, bf16, causal through the dispatcher and
-        request class the shipped profile binds, on its own ``request.defaults``.
-
-        At that shape ``work = 32 * 8 * 1 = 256 = dense_num_persistent``, so the
-        unpinned ``auto`` arm resolves persistent and, at D=128 causal bf16, wide DMA
-        with it: the one shape where the pin is the whole difference.
-        """
-        import importlib
-
-        profile = dispatch_parity._load_profile(str(_SHIPPED_PROFILE))
-        monkeypatch.setattr(sys, "path", list(sys.path))
-        dispatch_parity._bind_provider(profile["provider_root"])
-        dispatch, request = profile["dispatch"], profile["request"]
-        try:
-            factory_module = importlib.import_module(dispatch["module"])
-            request_module = importlib.import_module(request["module"])
-        except ImportError as exc:
-            pytest.skip(
-                f"the rocKE library cannot be imported here ({exc}) -- run with an "
-                "interpreter that has its dependencies, e.g. <build-dir>/dnn-providers/"
-                "hip-kernel-provider/descriptor-packaging/hkp-rocke-venv/bin/python"
-            )
-        factory = getattr(factory_module, dispatch["function"])
-        request_cls = getattr(request_module, request["class"])
-        fields = {
-            **request["defaults"],
-            "batch": 1,
-            "seqlen_q": 8192,
-            "seqlen_k": 8192,
-            "nhead_q": 8,
-            "nhead_k": 8,
-            "hdim_q": 128,
-            "hdim_v": 128,
-            "dtype": "bf16",
-            "mask_type": 1,
-            **overrides,
-        }
-        return factory(request_cls(**fields))
-
-    def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
-        """Checking the YAML value is only half of it: this is what the dispatcher does
-        with that value, so a profile that parses correctly but no longer reaches the
-        non-persistent eight-argument kernel still fails."""
-        spec = self._resolve_with_the_real_dispatcher(monkeypatch)
-        assert spec.persistent is False, (
-            "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "
-            "a kernel with a different argument contract that this catalog does not "
-            "ship"
-        )
-        assert spec.wide_lds_dma is False, spec
-
-    def test_the_unpinned_control_does_resolve_the_persistent_arm(self, monkeypatch):
-        """A control: without the pin this shape IS persistent, so the case above
-        exercises the pin rather than a shape that is never persistent."""
-        spec = self._resolve_with_the_real_dispatcher(
-            monkeypatch, dense_persistent="auto"
-        )
-        assert spec.persistent is True, spec

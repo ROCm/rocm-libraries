@@ -5,8 +5,11 @@
 # pytest -- the descriptor-packaging suite, and the frontend wheel tests.
 # build  -- the PEP 517 frontend that packs the frontend wheel.
 # numpy  -- imported by frontend_wheel_package/tests, not by the build.
+# PyYAML, Jinja2 -- the DescriptorGenerator/IngestorGenerator tooling suites (HIPDNN_ENABLE_TOOLING_TESTS).
 #
 # Installed with --upgrade, so nothing is pinned here.
 pytest
 build
 numpy
+PyYAML
+Jinja2

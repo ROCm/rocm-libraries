@@ -45,6 +45,10 @@ test_categories:
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      # Build tree only, registered only with HIPDNN_ENABLE_TOOLING_TESTS=ON; see
+      # tools/CMakeLists.txt.
+      - "hipdnn_descriptor_generator_pytest"
+      - "hipdnn_ingestor_generator_pytest"
       # Build tree only; see plugin_sdk/tests/CMakeLists.txt.
       - "hipdnn_gpu_generic_targets_.*"
 
