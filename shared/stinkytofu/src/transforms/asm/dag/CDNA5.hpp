@@ -1206,7 +1206,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
         dsReadInflight_.push(dsReadCreditLifetime());
-        dsSpread_.noteIssue(wmmaIssuedCountThisRegion_);
+        dsSpread_.noteIssue(node->id, wmmaIssuedCountThisRegion_);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1649,7 +1649,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget || (spread && dsOverflow_)) {
-            if (!spread || wmmaRunAtLimit_ || dsSpread_.released(wmmaIssuedCountThisRegion_)) {
+            if (!spread || wmmaRunAtLimit_ ||
+                dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -2346,7 +2347,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
         for (DAGNode* n : localReadQueue) {
             if (pass == 0 && spreadOn && !wmmaRunAtLimit_ &&
-                !dsSpread_.released(wmmaIssuedCountThisRegion_))
+                !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
                 continue;
             if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
         }
@@ -2412,8 +2413,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " blockAtLeastOneNonWmmaInterleaving=" << blockWmmaForAtLeastOneNonWmmaInterleaving
             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
             << " hasPickable=" << hasPickableNonWmma << " pickKind=" << pickKind
-            << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
-            << " dsAllow=" << dsSpread_.allowance() << " clock=" << clock_
+            << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1) << " dsAllow="
+            << (pickedDS ? dsSpread_.allowance(pickedDS->id) : -1) << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " run=" << wmmaRun_ << " credFull=" << dsReadInflight_.full()
             << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
@@ -3471,12 +3472,54 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
         // hard constraints are merged into the DAG only after this runs), not by node id.
-        std::vector<unsigned> loads;
+        std::vector<unsigned> dsOrder;
         for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
-            if (isDSRead(*deps.dag.nodes[id].inst)) loads.push_back(id);
-        std::stable_sort(loads.begin(), loads.end(), [&](unsigned a, unsigned b) {
+            if (isDSRead(*deps.dag.nodes[id].inst)) dsOrder.push_back(id);
+        std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
             return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
         });
+        // The stage of a ds_load: opened by the barrier whose data it reads (the latest cut it
+        // depends on), closed by the barrier it feeds (the earliest cut it must be drained
+        // before). Tensor_loads and workgroup barriers are the cuts, at the WMMA windows the
+        // barrier logic already placed them; WMMA and ds dependencies are not.
+        auto preds = deps.dag.graph;
+        for (auto& edges : preds) edges.clear();
+        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
+            for (unsigned succ : deps.dag.graph[n]) preds[succ].insert(n);
+        auto cutWindow = [&](unsigned n) {
+            auto th =
+                barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
+            return th == barrierWmmaThresholds_.end() ? -1 : th->second;
+        };
+        constexpr int kStageHops = 3;
+        std::vector<DsSpreadPacer::Load> loads;
+        for (unsigned id : dsOrder) {
+            int start = 0;
+            int end = INT_MAX;
+            for (const auto* edges : {&deps.dag.graph, &preds}) {
+                const bool forward = edges == &deps.dag.graph;
+                std::vector<unsigned> frontier{id};
+                for (int hop = 0; hop < kStageHops && !frontier.empty(); ++hop) {
+                    std::vector<unsigned> next;
+                    for (unsigned n : frontier) {
+                        for (unsigned m : (*edges)[n]) {
+                            const int w = cutWindow(m);
+                            if (w >= 0) {
+                                if (forward)
+                                    end = std::min(end, w);
+                                else
+                                    start = std::max(start, w);
+                            } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
+                                       !isDSRead(*deps.dag.nodes[m].inst)) {
+                                next.push_back(m);
+                            }
+                        }
+                    }
+                    frontier = std::move(next);
+                }
+            }
+            loads.push_back({id, start, end});
+        }
         // WMMAs kept free at the region end for the last ds_load to return. The wave runs up to a
         // full WMMA queue ahead of the matrix pipe, so the WMMAs behind the last load cover its
         // return only after the queue: the LDS return time plus the queue depth.
@@ -3486,7 +3529,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
-                                      dsIssueCost(*deps.dag.nodes[loads.front()].inst) >
+                                      dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
                              << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch << " drain="
