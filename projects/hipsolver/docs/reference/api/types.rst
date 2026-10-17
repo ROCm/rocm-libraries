@@ -86,6 +86,12 @@ hipsolverEigRange_t
 --------------------
 .. doxygenenum:: hipsolverEigRange_t
 
+.. _eigcomp_t:
+
+hipsolverEigComp_t
+--------------------
+.. doxygenenum:: hipsolverEigComp_t
+
 .. _deterministicMode_t:
 
 hipsolverDeterministicMode_t
