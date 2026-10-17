@@ -9,10 +9,15 @@ graph's best kernel while its gain over the best kept kernel exceeds epsilon: th
 smallest grid value at or above the round-to-round noise floor that fits the budget.
 Rankings are the ``WinnerCacheFile.hpp`` shards of the successful timing phases of a
 ``tools/sweep.py`` output. Exit 1: the kept set (eps or ``--apply-rules``) exceeds
-the budget; exit 2: unusable input; exit 3: the sweep cannot support a reduction (a
-failed correctness verdict, or timing phases missing for some (round, corpus)). On exit
-1 and 3 the report is written and ``--out`` is not. A sweep of fewer than 2 timing
-rounds warns on stdout: its noise floor is assumed, not measured.
+the budget, or the applied rules together lose more of a graph's best time than the
+rules eps; exit 2: unusable input; exit 3: the sweep cannot support a reduction: no
+``summary.json`` listing ``expected_phases``, an expected timing or correctness phase
+of the arm with no record or (timing) no winners, a failed correctness verdict, or timing
+phases missing for some (round, corpus). On exit 1, and on exit 3 for a failed
+correctness verdict or missing (round, corpus), the report is written and ``--out`` is
+not; an incomplete sweep (the other exit 3 causes) writes neither. A sweep of fewer
+than 2 timing rounds warns on stdout: its noise floor is assumed, not measured. ``reduction.single_round_epsilon``
+(default 0.05) and ``reduction.drift_multiplier`` (default 2) set the noise floor.
 """
 
 from __future__ import annotations
@@ -32,7 +37,11 @@ _GENERATOR_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_GENERATOR_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH  # noqa: E402
+from codegen.config_loader import (  # noqa: E402
+    DEFAULT_AOT_BUDGET_PER_ARCH,
+    DEFAULT_DRIFT_MULTIPLIER,
+    DEFAULT_SINGLE_ROUND_EPSILON,
+)
 from codegen.models import EVERY_ARCH  # noqa: E402
 
 # WinnerCacheFile.hpp detail::WINNER_LINE_*: line, device and entry fields; version.
@@ -42,13 +51,16 @@ _ENTRY_FIELDS = frozenset({"kernel_id", "pack_id", "dispatch_id", "time_ms"})
 _LINE_FORMAT_VERSION = 1
 
 EPSILON_GRID = tuple(i / 100 for i in range(51)) + (math.inf,)
-SINGLE_ROUND_EPSILON = 0.05
 # A healthy elapsed may be 0 (BenchmarkPlan.hpp); ratios use this floor instead.
 _MIN_TIME_MS = 1e-6
 
 
 class ReduceError(RuntimeError):
     """The inputs cannot be reduced as given; exit 2."""
+
+
+class IncompleteSweep(ReduceError):
+    """The sweep did not finish the phases this arm's reduction rests on; exit 3."""
 
 
 @dataclass(frozen=True)
@@ -399,13 +411,20 @@ def choose_epsilon(curve: list, epsilon_min: float, budget: int):
     return None
 
 
-def noise_floor(rounds: dict, missing_pairs: list) -> NoiseFloor:
+def noise_floor(
+    rounds: dict,
+    missing_pairs: list,
+    single_round_epsilon: float,
+    drift_multiplier: float,
+) -> NoiseFloor:
     """Median over graphs ranked in 2+ rounds of each kernel's ``(max - min) /
-    median`` of ``t / t_best`` across rounds; ``rounds`` is ``{round: {key: Ranking}}``.
+    median`` of ``t / t_best`` across rounds, times ``drift_multiplier``;
+    ``rounds`` is ``{round: {key: Ranking}}``. One round has no drift and assumes
+    ``single_round_epsilon``.
     """
     count = len(rounds)
     if count <= 1:
-        return NoiseFloor(count, SINGLE_ROUND_EPSILON, missing_pairs=missing_pairs)
+        return NoiseFloor(count, single_round_epsilon, missing_pairs=missing_pairs)
     presence = Counter(key for keyed in rounds.values() for key in keyed)
     matched = [key for key, n in presence.items() if n >= 2]
     if not matched:
@@ -425,7 +444,14 @@ def noise_floor(rounds: dict, missing_pairs: list) -> NoiseFloor:
         raise ReduceError("matched graphs share no ranked kernel across rounds")
     drift = statistics.median(spreads)
     unmatched = len(presence) - len(matched)
-    return NoiseFloor(count, 2 * drift, drift, len(matched), unmatched, missing_pairs)
+    return NoiseFloor(
+        count,
+        drift_multiplier * drift,
+        drift,
+        len(matched),
+        unmatched,
+        missing_pairs,
+    )
 
 
 def _cell_text(cell: tuple, classification: Classification, varying: list) -> str:
@@ -526,18 +552,27 @@ def _rule_order(rule: Rule) -> tuple:
 
 
 def _rule_id(text: str) -> str:
-    """Derived from the rule text alone, so an id names the same rule under any
-    ``--budget``: the proposal depends on the budget, the text does not move."""
+    """Derived from the rule text alone: an id is stable for a rule's text. The text
+    of ``drop`` rules does not move with ``--budget``; a ``keep ... only for <cells>``
+    rule names the cells where the value wins by more than the budget-chosen eps, so
+    its text, and its id, changes with ``--budget``."""
     return "R" + hashlib.sha256(text.encode()).hexdigest()[:6]
 
 
-def _costed(text, removed, variants, rankings, protected) -> Rule:
+def _ranking_loss(removed, rankings) -> tuple:
+    """``(sorted keys of the graphs whose best kernel is in removed, worst gain
+    lost)``: the largest ``t(best remaining) / t(best) - 1`` over the rankings."""
     losing = {r.key for r in rankings if r.entries[0][0] in removed}
     worst = 0.0
     for ranking in rankings:
         remaining = [t for name, t in ranking.entries if name not in removed]
         gain = min(remaining) / ranking.best_time - 1 if remaining else math.inf
         worst = max(worst, gain)
+    return sorted(losing), worst
+
+
+def _costed(text, removed, variants, rankings, protected) -> Rule:
+    losing, worst = _ranking_loss(removed, rankings)
     before = defaultdict(set)
     for v in variants.values():
         if v.name not in protected:
@@ -651,6 +686,49 @@ def _missing_pairs(attempts, arm) -> list:
     return [(n, c) for n in numbers for c in corpora if (n, c) not in present]
 
 
+def _require_complete_arm(sweep_dir, attempts, arm) -> None:
+    """Raise `IncompleteSweep` unless ``sweep.py`` finished every timing and
+    correctness phase of ``arm`` and each timing phase ranked something. The
+    expected phases are the sweep's own list in ``summary.json``, which it writes
+    only after its last phase; another arm's phases are not this arm's evidence."""
+    summary_path = Path(sweep_dir) / "summary.json"
+    try:
+        expected = json.loads(summary_path.read_text(encoding="utf-8"))[
+            "expected_phases"
+        ]
+        if not isinstance(expected, list):
+            raise TypeError("expected_phases is not a list")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise IncompleteSweep(
+            f"{summary_path}: missing or without 'expected_phases' ({exc}): the sweep "
+            "did not finish, so which phases it owed is unknown"
+        ) from exc
+    found = {
+        (r["phase"]["kind"], r["phase"]["corpus"], r["phase"]["round"]): attempt
+        for attempt, r in attempts
+        if r["phase"]["arm"] == arm
+    }
+    problems = []
+    for phase in expected:
+        if phase.get("arm") != arm or phase.get("kind") not in (
+            "timing",
+            "correctness",
+        ):
+            continue
+        label = f"{phase['kind']} {phase['corpus']} round {phase['round']}"
+        attempt = found.get((phase["kind"], phase["corpus"], phase["round"]))
+        if attempt is None:
+            problems.append(f"{label}: no record")
+        elif phase["kind"] == "timing" and not any(
+            read_shard(shard) for shard in _shards(attempt)
+        ):
+            problems.append(f"{label}: no winners")
+    if problems:
+        raise IncompleteSweep(
+            f"arm {arm}: the sweep is incomplete: {'; '.join(problems)}"
+        )
+
+
 def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
     raw, config, classification = load_selection(selection)
     kdp = load_kdp(kdp_path)
@@ -667,12 +745,18 @@ def analyse(selection, kdp_path, sweep_dir, arm=None, budget=None) -> Reduction:
         arm = arms[0]
     elif arm not in arms:
         raise ReduceError(f"--arm {arm} ran no timing phase; arms: {arms}")
+    _require_complete_arm(sweep_dir, attempts, arm)
     rounds, correctness, duplicates, empty = _rankings_and_correctness(
         attempts, kdp, variants, arm
     )
     if not any(rounds.values()):
         raise ReduceError(f"arm {arm} has no successful timing phase with a ranking")
-    noise = noise_floor(rounds, _missing_pairs(attempts, arm))
+    noise = noise_floor(
+        rounds,
+        _missing_pairs(attempts, arm),
+        config.reduction.get("single_round_epsilon", DEFAULT_SINGLE_ROUND_EPSILON),
+        config.reduction.get("drift_multiplier", DEFAULT_DRIFT_MULTIPLIER),
+    )
     rankings = [
         ranking
         for number in sorted(rounds)
@@ -817,9 +901,14 @@ def _single_round_warning(noise: NoiseFloor) -> str | None:
     if noise.rounds >= 2:
         return None
     return (
-        f"{noise.rounds} timing round: eps_min is assumed {SINGLE_ROUND_EPSILON}, "
+        f"{noise.rounds} timing round: eps_min is assumed {noise.epsilon_min}, "
         "not measured; sweep at least 2 rounds"
     )
+
+
+def _applied_loss(applied, rankings) -> tuple:
+    """`_ranking_loss` of the union of the ``applied`` rules' removed kernels."""
+    return _ranking_loss(set().union(*(rule.removed for rule in applied)), rankings)
 
 
 def render_report(r: Reduction, selection, output_note: str, names, applied=()) -> str:
@@ -850,6 +939,13 @@ def render_report(r: Reduction, selection, output_note: str, names, applied=()) 
     ):
         if warning:
             lines.append(f"- WARNING: {warning}")
+    if applied:
+        losing, worst = _applied_loss(applied, r.rankings)
+        lines.append(
+            f"- applied rules together: worst gain lost {_eps(worst, 4)} (bound: "
+            f"rules eps {_eps(r.rules_epsilon)}); graphs losing best {len(losing)}"
+            + (f": {', '.join(losing)}" if losing else "")
+        )
     if noise.rounds > 1:
         lines.append(
             f"- drift {noise.drift:.6f}, eps_min {noise.epsilon_min:.6f}; graph keys "
@@ -968,6 +1064,25 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             return 3
+        if applied:
+            losing, worst = _applied_loss(applied, reduction.rankings)
+            if worst > reduction.rules_epsilon:
+                note = (
+                    "not written: the applied rules together lose more than the "
+                    "rules eps"
+                )
+                report.write_text(
+                    render_report(reduction, args.selection, note, names, applied),
+                    "utf-8",
+                )
+                print(
+                    f"FAIL: {what} not written: the applied rules together lose "
+                    f"{_eps(worst, 4)} of a graph's best time, over the rules eps "
+                    f"{_eps(reduction.rules_epsilon)}; {len(losing)} graphs lose "
+                    f"their best kernel; report {report}",
+                    file=sys.stderr,
+                )
+                return 1
         count = instances(reduction.variants, names)
         if count > reduction.budget:
             note = f"not written: {what} exceed budget"
@@ -985,10 +1100,15 @@ def main(argv=None) -> int:
         report.write_text(
             render_report(reduction, args.selection, note, names, applied), "utf-8"
         )
+    except IncompleteSweep as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 3
     except ReduceError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:  # noqa: BLE001 -- exit 1 means only "over budget"
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 -- 1 is a gate refusal, 3 an incomplete sweep
         traceback.print_exc()
         print(f"FAIL: unexpected {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2

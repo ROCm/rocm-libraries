@@ -2901,6 +2901,9 @@ class TestReductionBlockAndDefaultMarker:
     def _load(self, tmp_path, reduction=REDUCTION, marker=True):
         raw = TestExpandedKernelsAreKeyChecked()._variants_raw()
         raw["reduction"] = copy.deepcopy(reduction)
+        raw["kmd_fields"].append(
+            {"name": "seqlen_q", "type": "int", "default_value": 512}
+        )
         raw["packs"][0]["variants"][0]["knob_sets"]["pinned"] = [
             {"block_m": 256, "tag": "a", "default": marker},
             {"block_m": 128, "tag": "b"},
@@ -2936,6 +2939,16 @@ class TestReductionBlockAndDefaultMarker:
                 "not an identifier",
             ),
             ({**REDUCTION, "aot_budget_per_arch": True}, True, "positive integer"),
+            (
+                {
+                    "fields": {
+                        **REDUCTION["fields"],
+                        "performance": [{"name": "block_m", "divides": "not_a_field"}],
+                    }
+                },
+                True,
+                "not_a_field",
+            ),
         ],
     )
     def test_a_bad_marker_or_block_is_refused(
@@ -2943,3 +2956,17 @@ class TestReductionBlockAndDefaultMarker:
     ):
         with pytest.raises(ConfigError, match=message):
             self._load(tmp_path, reduction, marker)
+
+    @pytest.mark.parametrize("key", ["single_round_epsilon", "drift_multiplier"])
+    @pytest.mark.parametrize(
+        "value", [True, -0.1, float("nan"), float("inf"), "0.1"], ids=repr
+    )
+    def test_a_noise_policy_key_must_be_a_finite_non_negative_number(
+        self, tmp_path, key, value
+    ):
+        with pytest.raises(ConfigError, match=key):
+            self._load(tmp_path, {**self.REDUCTION, key: value})
+
+    def test_a_noise_policy_key_is_carried(self, tmp_path):
+        reduction = {**self.REDUCTION, "single_round_epsilon": 0, "drift_multiplier": 3}
+        assert self._load(tmp_path, reduction).reduction == reduction

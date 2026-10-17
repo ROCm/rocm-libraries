@@ -252,6 +252,28 @@ class TestReport:
 
 
 class TestMalformedManifest:
+    @pytest.mark.parametrize(
+        "suffix, text",
+        [
+            (".json", '{"launch_surface": [], "launch_surface": [1]}'),
+            (".yaml", "launch_surface: []\nlaunch_surface: [1]\n"),
+        ],
+    )
+    def test_a_key_declared_twice_is_exit_2_naming_the_key(
+        self, tmp_path, capsys, suffix, text
+    ):
+        path = tmp_path / f"m{suffix}"
+        path.write_text(text)
+        assert launch_surface.main([str(path), "--report"]) == 2
+        assert "launch_surface" in capsys.readouterr().err
+
+    def test_a_tab_indented_json_manifest_loads(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text('{\n\t"launch_surface": [\n\t\t{"name": "grid"}\n\t]\n}\n')
+        assert launch_surface._load_manifest(str(path))["launch_surface"] == [
+            {"name": "grid"}
+        ]
+
     def test_a_manifest_with_no_launch_surface_block_is_refused(self):
         with pytest.raises(launch_surface.LaunchSurfaceError, match="launch_surface"):
             launch_surface.load_surfaces({"kmd_fields": []})

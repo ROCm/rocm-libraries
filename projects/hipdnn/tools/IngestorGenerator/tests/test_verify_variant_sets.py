@@ -596,6 +596,24 @@ class TestGateRefusesAmbiguity:
         with pytest.raises(SystemExit, match=message):
             gate_module.Manifest(raw, "m.yaml")
 
+    @pytest.mark.parametrize(
+        "suffix, text",
+        [
+            (".json", '{"engine": {}, "engine": {}}'),
+            (".yaml", "engine: {}\nengine: {}\n"),
+        ],
+    )
+    def test_a_key_declared_twice_is_a_fail(self, tmp_path, suffix, text):
+        path = tmp_path / f"m{suffix}"
+        path.write_text(text)
+        with pytest.raises(SystemExit, match="FAIL:.*engine"):
+            gate_module.Manifest.load(str(path))
+
+    def test_a_tab_indented_json_manifest_loads(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text('{\n\t"engine": {"name": "hipkernel:Dense"}\n}\n')
+        assert gate_module.Manifest.load(str(path)).engine_name == "hipkernel:Dense"
+
 
 class TestGateCatchesSpecializationTwins:
     """A bigger set may only OVERRIDE a compiler-settled knob if it keeps the settled

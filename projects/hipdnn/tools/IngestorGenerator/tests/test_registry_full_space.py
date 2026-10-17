@@ -39,8 +39,10 @@ def _without(manifest: dict, knob: str) -> dict:
 
 @pytest.fixture(scope="module")
 def manifest() -> dict:
-    """One D64 and one D128 cell, bf16 causal, at ``space: full``."""
+    """One D64 and one D128 cell, bf16 causal, at ``space: full``. The narrowed
+    cells no longer match the ground-truth value map, which these tests do not use."""
     manifest = re_.load_manifest(str(_MANIFEST))
+    del manifest["ground_truth"]
     if not _ROCKE_LIBRARY.is_dir():
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
     re_.bind_provider(manifest.get("provider_root"))

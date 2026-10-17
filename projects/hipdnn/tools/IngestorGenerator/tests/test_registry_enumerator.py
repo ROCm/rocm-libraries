@@ -195,6 +195,71 @@ def test_an_unreadable_manifest_is_exit_2(tmp_path, capsys, text):
     assert "FAIL: manifest" in capsys.readouterr().err
 
 
+def _no_metadata_fields(m):
+    del m["specialization"]["metadata_fields"]
+
+
+def _enumerate_not_a_mapping(m):
+    m["enumerate"] = 5
+
+
+def _max_kernels_not_an_int(m):
+    m["enumerate"]["max_kernels"] = "a"
+
+
+def _kmd_fields_not_a_list(m):
+    m["kmd_fields"] = 5
+
+
+@pytest.mark.parametrize("mode", ["--plan-space", "--out"])
+@pytest.mark.parametrize(
+    "mutate, field",
+    [
+        (_no_metadata_fields, "metadata_fields"),
+        (_enumerate_not_a_mapping, "enumerate"),
+        (_max_kernels_not_an_int, "max_kernels"),
+        (_kmd_fields_not_a_list, "kmd_fields"),
+    ],
+    ids=["no-metadata-fields", "enumerate-int", "max-kernels-str", "kmd-fields-int"],
+)
+def test_a_wrongly_typed_manifest_field_is_exit_2_naming_the_field(
+    manifest, registry, tmp_path, capsys, mode, mutate, field
+):
+    broken = copy.deepcopy(manifest)
+    mutate(broken)
+    path = tmp_path / "m.engine.yaml"
+    path.write_text(yaml.safe_dump(broken, sort_keys=False))
+    out = tmp_path / "c.yaml"
+    argv = ["--manifest", str(path)]
+    argv += ["--plan-space"] if mode == "--plan-space" else ["--out", str(out)]
+    assert re_.main(argv) == 2
+    assert field in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_a_manifest_key_declared_twice_is_exit_2_naming_the_key(tmp_path, capsys):
+    path = tmp_path / "m.engine.yaml"
+    path.write_text(_MANIFEST.read_text() + "\npack: other\n")
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    assert "pack" in capsys.readouterr().err
+
+
+def test_a_builder_value_outside_the_vocabulary_is_refused(manifest, registry):
+    partial = _one_head_config(manifest)
+    partial["specialization"]["vocabulary"]["dtype"] = {"bf16": "BF16"}
+    with pytest.raises(re_.EnumerationError, match=r"dtype.*fp16|fp16.*dtype"):
+        re_.build_config(partial, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("flag", ["--out", "--shapes"])
+def test_plan_space_refuses_the_options_it_would_ignore(tmp_path, flag):
+    target = tmp_path / "ignored"
+    with pytest.raises(SystemExit) as exit_info:
+        re_.main(["--manifest", str(_MANIFEST), "--plan-space", flag, str(target)])
+    assert exit_info.value.code == 2
+    assert not target.exists()
+
+
 def test_a_tri_state_free_field_enumerates(manifest, registry):
     free = _one_head_config(manifest)
     _free("block_m", "block_n", "pv_loop_order")(free)

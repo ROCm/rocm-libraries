@@ -42,6 +42,14 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
+_GENERATOR_ROOT = Path(__file__).resolve().parents[1]
+if str(_GENERATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(_GENERATOR_ROOT))
+
+from codegen.config_loader import read_json_or_yaml  # noqa: E402
+
 #: Enforced eagerly, so a surface missing a key is reported as a shape error rather
 #: than crashing on the first check that happens to dereference it.
 REQUIRED_KEYS = ("name", "python_source", "cpp_mirror", "kmd_fields", "guard", "test")
@@ -56,20 +64,14 @@ class LaunchSurfaceError(RuntimeError):
 
 
 def _load_manifest(path: str) -> dict:
-    """Parse a manifest as JSON, falling back to YAML. The mapping check covers
-    both paths: a file that parses as valid JSON but is not an object would
-    otherwise crash later naming neither the file nor the problem."""
-    text = Path(path).read_text(encoding="utf-8")
+    """Parse a manifest as JSON, falling back to YAML; a repeated key is an error in
+    both. The mapping check covers both paths: a file that parses as valid JSON but
+    is not an object would otherwise crash later naming neither the file nor the
+    problem."""
     try:
-        import json
-
-        loaded = json.loads(text)
-    except ValueError:
-        try:
-            import yaml
-        except ImportError:  # pragma: no cover - environment-dependent
-            raise LaunchSurfaceError(f"{path} is not JSON and PyYAML is not installed.")
-        loaded = yaml.safe_load(text)
+        loaded = read_json_or_yaml(Path(path))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise LaunchSurfaceError(f"manifest {path} is not readable: {exc}") from exc
     if not isinstance(loaded, dict):
         raise LaunchSurfaceError(
             f"manifest {path} must be a mapping; got {type(loaded).__name__}."

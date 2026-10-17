@@ -8,9 +8,11 @@ manifest's request class; ``graphs`` writes one hipDNN graph per row from the
 manifest's ``ground_truth`` template; ``compare`` joins those graphs to a
 ``tools/sweep.py`` output by name and reports hipDNN / owner against a margin.
 
-Exit 0 on success (``compare`` whatever the comparison finds), 2 on unusable input.
-``compare --strict`` exits 1 unless every row is within the margin and has a passing
-correctness verdict (outside, missing, failing, not run and no-reference rows all refuse).
+Exit 0 on success (``compare`` whatever the comparison finds), 2 on unusable input
+(including a ground-truth row or graph that no longer matches what ``graphs``
+recorded). ``compare --strict`` exits 1 unless every row is within the margin, was
+served in every timing round, and has a passing correctness verdict (outside, missing,
+declined, failing, not run and no-reference rows all refuse).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import enum
+import hashlib
 import json
 import math
 import re
@@ -33,8 +36,11 @@ from registry_enumerator import (  # noqa: E402
     EnumerationError,
     Registry,
     bind_provider,
+    cell_groups,
+    check_value_map_cells,
     load_manifest,
 )
+from sweep import canonical, semantic_identity  # noqa: E402
 from variant_reduce import ReduceError, load_phase_records  # noqa: E402
 
 SOURCE = "ground_truth"
@@ -195,6 +201,11 @@ def graph_name(row: dict) -> str:
     return f"{row['_provenance']['source']}_r{int(row['_provenance']['row']):04d}"
 
 
+def row_digest(row: dict) -> str:
+    """sha256 of one ground-truth row, which `graphs` records and `compare` rechecks."""
+    return hashlib.sha256(canonical(row).encode()).hexdigest()
+
+
 def graphs_map_path(gt_path) -> Path:
     gt_path = Path(gt_path)
     return gt_path.with_name(gt_path.name.removesuffix(".json") + ".graphs.json")
@@ -228,6 +239,7 @@ def ground_truth_block(manifest: dict, manifest_path) -> tuple:
         not isinstance(v, dict) for v in value_map.values()
     ):
         raise GroundTruthError("ground_truth.value_map must map field -> {value: x}")
+    check_value_map_cells(cell_groups(manifest["enumerate"].get("cells")), value_map)
     return template, value_map
 
 
@@ -365,8 +377,13 @@ def write_graphs(gt_path, manifest_path, out_dir) -> list:
         text = json.dumps(graph, indent=4) + "\n"
         (out_dir / f"{graph['name']}.json").write_text(text, encoding="utf-8")
     mapping = [
-        {"row": row["_provenance"]["row"], "graph_name": name}
-        for row, name in zip(rows, names)
+        {
+            "row": row["_provenance"]["row"],
+            "graph_name": graph["name"],
+            "semantic_identity": semantic_identity(graph),
+            "gt_row_sha256": row_digest(row),
+        }
+        for row, graph in zip(rows, graphs)
     ]
     text = json.dumps(mapping, indent=1) + "\n"
     graphs_map_path(gt_path).write_text(text, encoding="utf-8")
@@ -395,9 +412,13 @@ def compare(gt_path, sweep_dir, arm, margin: float) -> dict:
     rows = load_gt(gt_path)
     map_path = graphs_map_path(gt_path)
     try:
-        names = {m["row"]: m["graph_name"] for m in _read_json(map_path, "row map")}
+        mapped = {m["row"]: m for m in _read_json(map_path, "row map")}
+        for entry in mapped.values():
+            entry["graph_name"], entry["semantic_identity"], entry["gt_row_sha256"]
     except (KeyError, TypeError) as exc:
-        raise GroundTruthError(f"{map_path} is not a `graphs` row map") from exc
+        raise GroundTruthError(
+            f"{map_path} is not a `graphs` row map with identities; rerun `graphs`"
+        ) from exc
     identities = Path(sweep_dir) / "input-identities.json"
     try:
         arch = _read_json(identities, "sweep identity")["device"]["arch"]
@@ -424,12 +445,27 @@ def compare(gt_path, sweep_dir, arm, margin: float) -> dict:
         if r["phase"]["kind"] == "timing" and r.get("status") == "success"
     ]
     checks = [r for r in ours if r["phase"]["kind"] == "correctness"]
+    ours_timing = [r for r in ours if r["phase"]["kind"] == "timing"]
     results = []
     for row in rows:
         number = row["_provenance"]["row"]
-        if number not in names:
+        if number not in mapped:
             raise GroundTruthError(f"{map_path} maps no graph for row {number}")
-        name = names[number]
+        recorded = mapped[number]
+        name = recorded["graph_name"]
+        if row_digest(row) != recorded["gt_row_sha256"]:
+            raise GroundTruthError(
+                f"row {number} of {gt_path} differs from the row `graphs` wrote "
+                f"{name} from; rerun `graphs` and the sweep"
+            )
+        for entry in (*_entries(ours_timing, name), *_entries(checks, name)):
+            if entry.get("semantic_identity") != recorded["semantic_identity"]:
+                raise GroundTruthError(
+                    f"row {number}: the sweep ledger's graph {name} has semantic "
+                    f"identity {entry.get('semantic_identity')!r}, not the "
+                    f"{recorded['semantic_identity']!r} `graphs` recorded: the sweep "
+                    f"timed a different graph under this name"
+                )
         timed = list(_entries(timing, name))
         times = [e["mean_ms"] for e in timed if e.get("outcome") == "served"]
         outcomes = {
@@ -437,6 +473,14 @@ def compare(gt_path, sweep_dir, arm, margin: float) -> dict:
             for e in timed
             if e.get("outcome") != "served"
         }
+        # `--strict` also refuses a graph any timing round declined, and one whose
+        # correctness phase failed a gate, whatever its own verdict.
+        declined = sum(
+            e.get("outcome") == "declined" for e in _entries(ours_timing, name)
+        )
+        phase_failed = any(
+            r.get("status") != "success" for r in checks if any(_entries([r], name))
+        )
         # A graph declined in the correctness phase has no verdict.
         verdicts = [e for e in _entries(checks, name) if e.get("outcome") == "served"]
         compared = [e for e in verdicts if (e.get("reference") or {}).get("usable")]
@@ -457,6 +501,7 @@ def compare(gt_path, sweep_dir, arm, margin: float) -> dict:
             | dict(ratio=ratio, within_margin=ratio <= 1 + margin if times else None)
             | dict(correctness=correctness, missing_reason=None if times else missing)
             | {"correctness_detail": [e.get("correctness") for e in verdicts]}
+            | dict(declined_rounds=declined, correctness_phase_failed=phase_failed)
         )
     rounds = sorted({r["phase"]["round"] for r in timing})
     return dict(
@@ -571,7 +616,10 @@ def main(argv=None) -> int:
             refused = [
                 r["row"]
                 for r in comparison["results"]
-                if r["within_margin"] is not True or r["correctness"] != "pass"
+                if r["within_margin"] is not True
+                or r["correctness"] != "pass"
+                or r["declined_rounds"]
+                or r["correctness_phase_failed"]
             ]
             if args.strict and refused:
                 print(f"FAIL: --strict: rows {refused} are refused", file=sys.stderr)

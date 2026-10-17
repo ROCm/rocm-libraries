@@ -373,6 +373,23 @@ class TestRungsStaySeparable:
             "reports another engine's work as this engine's"
         )
 
+    def test_a_serving_threshold_this_tool_cannot_check_fails_the_gate(self, tmp_path):
+        """Rungs 1 and 2 green, rung 3 not run: asking for served graphs must not
+        pass on that evidence."""
+        validator = tmp_path / "validator"
+        validator.write_text(
+            f'#!{sys.executable}\nprint(\'{{"engines": ["stub"]}}\')\n'
+        )
+        validator.chmod(0o755)
+        argv = ["--tree", str(_minimal_tree(tmp_path)), "--mode", "structural"]
+        argv += ["--validator", str(validator)]
+        without = _run(*argv)
+        assert without.returncode == 0, without.stdout + without.stderr
+        asked = _run(*argv, "--min-served", "1")
+        assert asked.returncode == 1
+        failed = next(l for l in asked.stdout.splitlines() if "GATE FAILED" in l)
+        assert "serving-not-run" in failed
+
     def test_a_missing_tree_is_an_error_not_an_empty_pass(self, tmp_path):
         result = _run("--tree", str(tmp_path / "nope"), "--mode", "structural")
         assert result.returncode == 2

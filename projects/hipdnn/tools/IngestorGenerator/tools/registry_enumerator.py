@@ -37,6 +37,8 @@ import typing
 from collections import Counter, OrderedDict
 from pathlib import Path
 
+import yaml
+
 _REPO = Path(__file__).resolve().parents[5]
 _GENERATOR_ROOT = Path(__file__).resolve().parents[1]
 if str(_GENERATOR_ROOT) not in sys.path:
@@ -46,6 +48,7 @@ from codegen.config_loader import (  # noqa: E402
     DEFAULT_AOT_BUDGET_PER_ARCH,
     ConfigError,
     check_reduction,
+    read_yaml,
 )
 
 #: A projected value's Python type -> its KMD field type.
@@ -63,14 +66,106 @@ class OverBudget(EnumerationError):
     """``build_config(strict=True)`` found more kernels than the AOT budget allows."""
 
 
+def _require(ok: bool, path: str, field: str, shape: str) -> None:
+    if not ok:
+        raise EnumerationError(f"manifest {path}: '{field}' must be {shape}.")
+
+
+def _is_names(value) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _validate_manifest(path: str, manifest: dict) -> None:
+    """Check the structure and types of every manifest field `Registry`,
+    `plan_space` and `build_config` read, so a malformed manifest is an
+    `EnumerationError` naming the field rather than a crash in a consumer."""
+    for key in ("source", "builder", "arch"):
+        _require(
+            isinstance(manifest[key], str) and manifest[key], path, key, "a string"
+        )
+    for key in (
+        "authored_subpath",
+        "pack",
+        "provider_root",
+        "dialect",
+        "kernel_source_kind",
+        "workspace_policy",
+        "kernel_name_template",
+    ):
+        if key in manifest:
+            _require(isinstance(manifest[key], str), path, key, "a string")
+    engine = manifest["engine"]
+    _require(isinstance(engine, dict), path, "engine", "a mapping")
+    _require(isinstance(engine.get("name"), str), path, "engine.name", "a string")
+    kmd_fields = manifest["kmd_fields"]
+    _require(
+        isinstance(kmd_fields, list)
+        and all(
+            isinstance(f, dict) and isinstance(f.get("name"), str) for f in kmd_fields
+        ),
+        path,
+        "kmd_fields",
+        "a list of mappings, each with a 'name'",
+    )
+    specialization = manifest["specialization"]
+    _require(isinstance(specialization, dict), path, "specialization", "a mapping")
+    _require(
+        _is_names(specialization.get("metadata_fields")),
+        path,
+        "specialization.metadata_fields",
+        "a list of field names",
+    )
+    for key in ("vocabulary", "bindings"):
+        _require(
+            specialization.get(key) is None or isinstance(specialization[key], dict),
+            path,
+            f"specialization.{key}",
+            "a mapping",
+        )
+    decl = manifest["enumerate"]
+    _require(isinstance(decl, dict), path, "enumerate", "a mapping")
+    for key in ("free_fields", "spec_fields"):
+        _require(
+            decl.get(key) is None or _is_names(decl[key]),
+            path,
+            f"enumerate.{key}",
+            "a list of field names",
+        )
+    limit = decl.get("max_kernels")
+    _require(
+        limit is None
+        or (isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0),
+        path,
+        "enumerate.max_kernels",
+        "a non-negative integer",
+    )
+    _require(
+        isinstance(decl.get("sweep_level", ""), str),
+        path,
+        "enumerate.sweep_level",
+        "a string",
+    )
+    _require(
+        manifest.get("ground_truth") is None
+        or isinstance(manifest["ground_truth"], dict),
+        path,
+        "ground_truth",
+        "a mapping",
+    )
+    _require(
+        manifest.get("reduction") is None or isinstance(manifest["reduction"], dict),
+        path,
+        "reduction",
+        "a mapping",
+    )
+
+
 def load_manifest(path: str) -> dict:
+    """The manifest at ``path``, parsed with `read_yaml` (a repeated key is an
+    error) and checked by `_validate_manifest`."""
     try:
-        import yaml
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise EnumerationError("PyYAML is required to read the manifest") from exc
-    try:
-        loaded = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+        loaded = read_yaml(Path(path))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise EnumerationError(f"manifest {path} is not readable YAML: {exc}") from exc
     if not isinstance(loaded, dict):
         raise EnumerationError(f"manifest {path} must be a mapping")
@@ -85,6 +180,7 @@ def load_manifest(path: str) -> dict:
     ):
         if key not in loaded:
             raise EnumerationError(f"manifest {path} is missing '{key}'")
+    _validate_manifest(path, loaded)
     return loaded
 
 
@@ -168,6 +264,75 @@ def _mapping(decl: dict, key: str) -> dict:
     return dict(value)
 
 
+def cell_groups(raw) -> list:
+    """``[(fields, rows), ...]`` from ``enumerate.cells``: each row one raw value per
+    field, as the manifest writes it."""
+    if not isinstance(raw, list) or not raw:
+        raise EnumerationError("enumerate.cells must be a non-empty list of groups.")
+    groups = []
+    seen: set = set()
+    for index, group in enumerate(raw):
+        where = f"enumerate.cells[{index}]"
+        if not isinstance(group, dict) or set(group) != {"fields", "values"}:
+            raise EnumerationError(
+                f"{where} must be a mapping with exactly 'fields' and 'values'."
+            )
+        fields = group["fields"]
+        if not _is_names(fields) or not fields:
+            raise EnumerationError(f"{where}.fields must be a list of field names.")
+        repeated = sorted(seen & set(fields))
+        if repeated or len(set(fields)) != len(fields):
+            raise EnumerationError(
+                f"{where} repeats cell field(s) {repeated or fields}."
+            )
+        seen |= set(fields)
+        values = group["values"]
+        if not isinstance(values, list) or not values:
+            raise EnumerationError(f"{where}.values must be a non-empty list.")
+        rows = []
+        for value in values:
+            row = value if isinstance(value, list) else [value]
+            if len(row) != len(fields):
+                raise EnumerationError(
+                    f"{where}: value {value!r} does not have one entry per field "
+                    f"{fields}."
+                )
+            rows.append(row)
+        groups.append((list(fields), rows))
+    return groups
+
+
+def check_value_map_cells(groups: list, value_map) -> None:
+    """Each ``ground_truth.value_map`` field that is also a cell field maps exactly
+    the values its cells declare (an enum cell by its member name), so no declared
+    value is unmapped and no key is dead."""
+    if not isinstance(value_map, dict):
+        return
+    declared: dict = {}
+    for fields, rows in groups:
+        for position, field in enumerate(fields):
+            for row in rows:
+                value = row[position]
+                if isinstance(value, (list, dict)):
+                    raise EnumerationError(
+                        f"enumerate.cells value {value!r} of '{field}' must be a scalar."
+                    )
+                declared.setdefault(field, set()).add(
+                    value.name if isinstance(value, enum.Enum) else value
+                )
+    for field, table in value_map.items():
+        if field not in declared or not isinstance(table, dict):
+            continue
+        missing = sorted(map(str, declared[field] - set(table)))
+        extra = sorted(map(str, set(table) - declared[field]))
+        if missing or extra:
+            raise EnumerationError(
+                f"ground_truth.value_map.{field} must have exactly the keys of the "
+                f"enumerate.cells values of '{field}': missing {missing}, extra "
+                f"{extra}."
+            )
+
+
 class Registry:
     """One manifest's view of the registry: its candidate, request class and cells."""
 
@@ -211,6 +376,9 @@ class Registry:
             )
         self.groups = self._parse_groups(decl["cells"])
         self.cell_fields = [f for fields, _ in self.groups for f in fields]
+        check_value_map_cells(
+            self.groups, (manifest.get("ground_truth") or {}).get("value_map")
+        )
         for name in itertools.chain(self.pin, self.fixed, self.cell_fields):
             if name not in self.request_fields:
                 raise EnumerationError(
@@ -254,47 +422,16 @@ class Registry:
         self._sweep_level = walk.sweep_level
 
     def _parse_groups(self, raw) -> list:
-        if not isinstance(raw, list) or not raw:
-            raise EnumerationError(
-                "enumerate.cells must be a non-empty list of groups."
-            )
-        groups = []
-        seen: set = set()
-        for index, group in enumerate(raw):
-            where = f"enumerate.cells[{index}]"
-            if not isinstance(group, dict) or set(group) != {"fields", "values"}:
-                raise EnumerationError(
-                    f"{where} must be a mapping with exactly 'fields' and 'values'."
-                )
-            fields = group["fields"]
-            if (
-                not isinstance(fields, list)
-                or not fields
-                or any(not isinstance(f, str) for f in fields)
-            ):
-                raise EnumerationError(f"{where}.fields must be a list of field names.")
-            repeated = sorted(seen & set(fields))
-            if repeated or len(set(fields)) != len(fields):
-                raise EnumerationError(
-                    f"{where} repeats cell field(s) {repeated or fields}."
-                )
-            seen |= set(fields)
-            values = group["values"]
-            if not isinstance(values, list) or not values:
-                raise EnumerationError(f"{where}.values must be a non-empty list.")
-            rows = []
-            for value in values:
-                row = value if isinstance(value, list) else [value]
-                if len(row) != len(fields):
-                    raise EnumerationError(
-                        f"{where}: value {value!r} does not have one entry per field "
-                        f"{fields}."
-                    )
-                rows.append(
+        return [
+            (
+                fields,
+                [
                     tuple(self.coerce(f, v, strict=True) for f, v in zip(fields, row))
-                )
-            groups.append((list(fields), rows))
-        return groups
+                    for row in rows
+                ],
+            )
+            for fields, rows in cell_groups(raw)
+        ]
 
     def coerce(self, field: str, value, strict: bool = False):
         """``value`` as the request's own type: a member, by name or value, of the
@@ -431,7 +568,9 @@ class Classification:
                 )
             return cls([], OrderedDict(), [], DEFAULT_AOT_BUDGET_PER_ARCH)
         try:
-            check_reduction(reduction)
+            check_reduction(
+                reduction, kmd_fields={f["name"] for f in manifest["kmd_fields"]}
+            )
         except ConfigError as exc:
             raise EnumerationError(str(exc)) from exc
         fields = reduction.get("fields") or {}
@@ -664,6 +803,8 @@ def build_config(
     template = manifest.get("kernel_name_template")
     if not template:
         raise EnumerationError("manifest declares no kernel_name_template")
+    if not manifest.get("authored_subpath"):
+        raise EnumerationError("manifest declares no authored_subpath")
     registry = registry or Registry(manifest)
     enumeration = enumerate_space(manifest, registry)
     for name, value, why in enumeration.held:
@@ -813,7 +954,13 @@ def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) ->
         value = _rendered(value)
         mapping = vocabulary.get(name)
         if isinstance(mapping, dict) and isinstance(value, str):
-            value = mapping.get(value, value)
+            if value not in mapping:
+                raise EnumerationError(
+                    f"metadata field '{name}' has value {value!r}, which "
+                    f"specialization.vocabulary.{name} does not map. Mapped: "
+                    f"{sorted(map(str, mapping))}."
+                )
+            value = mapping[value]
         metadata[name] = value
     return metadata
 
@@ -917,7 +1064,8 @@ def _field_default(field: dataclasses.Field):
 def shapes_report(registry: Registry, shapes: list) -> tuple:
     """``(report lines, GAP shape count, covered shape count)``: each shape in its
     first matching category of outside cell axes, declined by registry, covered,
-    GAP."""
+    GAP. "Covered" is coverage by the manifest's cell axes: a shape's sequence
+    lengths are not checked against what the catalog's kernels can serve."""
     listed = {registry.cell_key(cell) for cell in registry.cells()}
     controlled = set(registry.fixed) | set(registry.cell_fields)
     categories = OrderedDict(
@@ -973,6 +1121,9 @@ def shapes_report(registry: Registry, shapes: list) -> tuple:
         if detail:
             entry["detail"][detail] += 1
     lines = [f"shape coverage: {len(shapes)} shapes, {len(distinct)} distinct cells"]
+    lines.append(
+        "  (by cell axes; sequence lengths are not checked against the kernels)"
+    )
     for name, entry in categories.items():
         lines.append(f"  {name}: {entry['shapes']} shapes, {len(entry['cells'])} cells")
         for detail, n in sorted(entry["detail"].items()):
@@ -989,7 +1140,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--shapes",
         help="Report how this JSON list of request-field mappings falls on the "
-        "manifest's cells.",
+        "manifest's cells (coverage by cell axes; sequence lengths are not checked).",
     )
     parser.add_argument(
         "--plan-space",
@@ -1007,9 +1158,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not args.plan_space and not args.out:
         parser.error("--out is required unless --plan-space is given")
+    if args.plan_space and (args.out or args.shapes):
+        parser.error("--plan-space builds and writes nothing; drop --out and --shapes")
     try:
-        import yaml
-
         manifest = load_manifest(args.manifest)
         bind_provider(manifest.get("provider_root"))
         if args.plan_space:

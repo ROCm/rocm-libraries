@@ -26,6 +26,8 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
+
 #: KMD value meaning "unresolved"; never legal in a shipped descriptor.
 SENTINEL = -1
 
@@ -52,6 +54,7 @@ def _agreement_python_root() -> Path:
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(_agreement_python_root()))
 
+from codegen.config_loader import read_json_or_yaml  # noqa: E402
 from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
 from hkp_pack import generic_targets as gtmod  # noqa: E402
@@ -121,19 +124,10 @@ class Manifest:
 
     @classmethod
     def load(cls, path: str) -> "Manifest":
-        with open(path) as fh:
-            text = fh.read()
         try:
-            raw = json.loads(text)
-        except json.JSONDecodeError:
-            try:
-                import yaml
-            except ImportError:  # pragma: no cover - environment-dependent
-                raise SystemExit(
-                    f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
-                    f"as YAML."
-                )
-            raw = yaml.safe_load(text)
+            raw = read_json_or_yaml(Path(path))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
         if not isinstance(raw, dict):
             raise SystemExit(f"FAIL: manifest {path} must be a mapping.")
         return cls(raw, path)
@@ -442,7 +436,7 @@ def check(
         for field, declared_spellings in vocabulary.items():
             # A mapping declares builder-spelling -> matcher-spelling and its VALUES
             # are the legal set; a bare list declares the legal set directly. Both are
-            # accepted so one manifest serves this tool and the parity generator.
+            # accepted so one manifest serves this tool and the descriptor generator.
             allowed = (
                 declared_spellings.values()
                 if isinstance(declared_spellings, dict)

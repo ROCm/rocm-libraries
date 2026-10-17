@@ -102,8 +102,8 @@ class TestTheMaskHidesIdsAndNothingElse:
         assert run(shipped, regenerated) == 1
 
     def test_a_dropped_kernel_is_caught(self, run, capsys):
-        """The failure the gate is FOR: a profile change that silently ships
-        less than it did. Counting alone would catch this one."""
+        """The failure the gate is FOR: a manifest or registry change that silently
+        ships less than it did. Counting alone would catch this one."""
         assert (
             run(
                 _kdp([_entry("k0"), _entry("k1", 32)]),
@@ -134,17 +134,21 @@ class TestTheMaskHidesIdsAndNothingElse:
             lambda e: e["kernel_source"].update(source="kernels/gfx950/other.py"),
             lambda e: e.update(version="2.0"),
             lambda e: e["metadata"].update(dtype="FP16"),
+            lambda e: e["kernel_source"].update(target="gfx942"),
+            lambda e: e["kernel_source"].update(entry_point="other"),
+            lambda e: e.update(arch=["gfx942"]),
         ],
-        ids=["builder", "source", "version", "metadata"],
+        ids=["builder", "source", "version", "metadata", "target", "entry", "arch"],
     )
-    def test_each_key_component_alone_is_caught(self, run, edit):
+    @pytest.mark.parametrize("flags", [(), ("--subset",), ("--strict-spec",)])
+    def test_each_key_component_alone_is_caught(self, run, edit, flags):
         """One flip at a time, so removing any one component from `entry_key`
         leaves its own case green-to-red. Metadata moves without the spec: the
         spec and metadata agreeing is the contract's job, not the key's."""
         shipped = _kdp([_entry("k0")])
         regenerated = json.loads(json.dumps(shipped))
         edit(regenerated["kernelDescriptors"][0])
-        assert run(shipped, regenerated, "--ignore-ids") == 1
+        assert run(shipped, regenerated, "--ignore-ids", *flags) == 1
 
     def test_a_changed_priority_is_caught(self, run):
         """Priority orders selection, so two catalogs that differ only there
@@ -198,6 +202,23 @@ class TestTheDuplicateSpecCheck:
         assert run(twins, twins, "--ignore-ids") == 1
         assert "share one spec" in capsys.readouterr().out
 
+    def test_distinct_prebuilt_objects_with_no_spec_are_not_duplicates(self, run):
+        """A prebuilt object carries no spec: what names its binary is the file."""
+
+        def hsaco(name, file):
+            entry = _entry(name)
+            entry["kernel_source"] = {"kind": "hsaco", "file": file, "symbol": "k"}
+            return entry
+
+        kdp = _kdp([hsaco("k0", "a.hsaco"), hsaco("k1", "b.hsaco")])
+        assert run(kdp, kdp, "--ignore-ids") == 0
+
+    def test_one_binary_on_two_arches_is_not_a_duplicate(self, run):
+        twin = _entry("k1")
+        twin["arch"] = ["gfx942"]
+        kdp = _kdp([_entry("k0"), twin])
+        assert run(kdp, kdp, "--ignore-ids") == 0
+
 
 class TestExpectIds:
     def test_preserved_ids_pass_and_fresh_ones_fail(self, run, capsys):
@@ -250,6 +271,15 @@ class TestExpectIdsPerKernel:
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 0
         regenerated["kernelDescriptors"][0]["id"] = "other"
         assert run(shipped, regenerated, "--ignore-ids", "--expect-ids") == 1
+
+    def test_a_name_repeated_on_one_side_only_cannot_be_checked(self, run, capsys):
+        """The shipped `dup` is keyed by name, the regenerated pair by name and spec,
+        so its id would go unchecked; `--subset` accepts the extra entry."""
+        shipped = _kdp([_entry("dup", block_n=32)])
+        regenerated = _kdp([_entry("dup", block_n=32), _entry("dup", block_n=64)])
+        flags = ("--ignore-ids", "--subset", "--expect-ids")
+        assert run(shipped, regenerated, *flags) == 2
+        assert "dup" in capsys.readouterr().err
 
 
 def _kmd(fields: list[dict]) -> dict:
@@ -498,8 +528,16 @@ def _write(path: Path, document) -> str:
         "k0",
         {"name": "k0", "kernel_source": None},
         {"name": "k0", "kernel_source": {"spec": ["block_n", 64]}},
+        {"name": 5, "kernel_source": {"spec": {}}},
+        {"name": None, "kernel_source": {"spec": {}}},
     ],
-    ids=["string-entry", "null-kernel-source", "list-spec"],
+    ids=[
+        "string-entry",
+        "null-kernel-source",
+        "list-spec",
+        "numeric-name",
+        "null-name",
+    ],
 )
 def test_a_malformed_catalog_entry_exits_2(tmp_path, capsys, entry):
     """Exit 1 means 'the catalogs differ'; an entry the comparison cannot read
@@ -508,6 +546,24 @@ def test_a_malformed_catalog_entry_exits_2(tmp_path, capsys, entry):
     bad = _write(tmp_path / "b.kdp.json", _kdp([entry]))
     assert catalog_diff.main(["--shipped", good, "--regenerated", bad]) == 2
     assert "kernelDescriptors[0]" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "provenance",
+    [
+        "x",
+        {"specialization_contract": "x"},
+        {"specialization_contract": {"consumers": "x"}},
+        {"specialization_contract": {"consumers": ["x"]}},
+    ],
+    ids=["string", "string-contract", "string-consumers", "string-consumer"],
+)
+@pytest.mark.parametrize("flags", [(), ("--expect-ids",)])
+def test_a_malformed_provenance_block_exits_2(tmp_path, capsys, provenance, flags):
+    good = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
+    bad = _write(tmp_path / "b.kdp.json", _kdp([_entry("k0")], provenance=provenance))
+    assert catalog_diff.main(["--shipped", good, "--regenerated", bad, *flags]) == 2
+    assert "provenance" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

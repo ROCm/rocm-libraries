@@ -2,7 +2,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CLI entry point for the hipDNN generic-kernel-ingestor descriptor generator."""
+"""CLI entry point for the hipDNN generic-kernel-ingestor descriptor generator.
+
+Exit 0 on success. Exit 1 is a gate refusal or an internal failure: a ``--strict``
+budget overrun, ``--check-placeholders`` findings, an emitted file that cannot be
+read back, or a template error. Exit 2 is unusable input: a missing or invalid
+config, a non-existent ``--emitted-root``, a non-empty output directory without
+``--force``, or a ``ValueError`` from rendering (and argparse's code for a bad flag).
+"""
 
 import argparse
 import sys
@@ -14,6 +21,9 @@ import yaml
 from codegen.config_loader import DEFAULT_AOT_BUDGET_PER_ARCH, ConfigError, load_config
 from codegen.generator import IngestorGenerator
 from codegen.models import EVERY_ARCH
+
+EXIT_REFUSED = 1
+EXIT_BAD_INPUT = 2
 
 
 def warn_over_budget(config) -> int:
@@ -106,13 +116,13 @@ def main() -> None:
 
     if not args.config.exists():
         print(f"Error: Config file not found: {args.config}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_BAD_INPUT)
 
     try:
         config = load_config(args.config)
     except (ConfigError, yaml.YAMLError) as e:
         print(f"Config error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_BAD_INPUT)
 
     over_budget = warn_over_budget(config)
     if over_budget and args.strict:
@@ -120,7 +130,7 @@ def main() -> None:
             f"Error: {over_budget} arch(es) exceed the AOT budget and --strict is set.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        sys.exit(EXIT_REFUSED)
 
     print(f"Loaded config for engine: {config.engine.name}")
     print(f"  Packs: {[p.name for p in config.packs]}")
@@ -145,10 +155,14 @@ def main() -> None:
         shown = ", ".join(f"'{root}'" for root in roots)
         try:
             located, missing, ambiguous = generator.locate_emitted(roots, expected)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(EXIT_BAD_INPUT)
+        try:
             unfilled = generator.unfilled_placeholders(roots, expected)
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
+            sys.exit(EXIT_REFUSED)
         total_shippable = len(located) + len(missing) + len(ambiguous)
         print(
             f"\nLocated {len(located)} of this engine's {total_shippable} shippable "
@@ -191,7 +205,7 @@ def main() -> None:
                 print(f"  {count:4}  {rel}")
             failed = True
         if failed:
-            sys.exit(1)
+            sys.exit(EXIT_REFUSED)
         print(f"No unfilled placeholders across all {total_shippable} located files.")
         return
 
@@ -202,7 +216,7 @@ def main() -> None:
             f"regenerate over hand-filled content you have already reviewed).",
             file=sys.stderr,
         )
-        sys.exit(1)
+        sys.exit(EXIT_BAD_INPUT)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -210,10 +224,10 @@ def main() -> None:
         written = generator.render(config, args.output_dir)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_BAD_INPUT)
     except RuntimeError as e:
         print(f"Template rendering error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_REFUSED)
 
     print(f"\nGenerated {len(written)} files:")
     for f in written:
@@ -226,7 +240,7 @@ def main() -> None:
         unfilled = generator.unfilled_placeholders([args.output_dir], written)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(EXIT_REFUSED)
     if unfilled:
         total = sum(unfilled.values())
         print(

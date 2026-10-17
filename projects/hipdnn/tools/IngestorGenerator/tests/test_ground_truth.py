@@ -11,11 +11,13 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "tools"))
 
 import ground_truth as gt  # noqa: E402
+import sweep as sweep_tool  # noqa: E402
 import registry_enumerator as re_  # noqa: E402
 
 _MANIFEST = _ROOT / "configs" / "gfx950_attention_dense.engine.yaml"
@@ -98,10 +100,16 @@ def test_graphs_fill_placeholders_patches_and_bshd_strides(tmp_path):
         "output": [1, 8, 512, 32],
     }
     assert plain["tensors"][0]["strides"] == [524288, 128, 1024, 1]
-    assert json.loads(gt.graphs_map_path(gt_path).read_text()) == [
-        {"row": 1, "graph_name": "ground_truth_r0001"},
-        {"row": 2, "graph_name": "ground_truth_r0002"},
+    mapping = json.loads(gt.graphs_map_path(gt_path).read_text())
+    assert [(m["row"], m["graph_name"]) for m in mapping] == [
+        (1, "ground_truth_r0001"),
+        (2, "ground_truth_r0002"),
     ]
+    graphs = {g["name"]: g for g in (causal, plain)}
+    for entry in mapping:
+        assert entry["semantic_identity"] == sweep_tool.semantic_identity(
+            graphs[entry["graph_name"]]
+        )
 
 
 @pytest.mark.parametrize(
@@ -118,14 +126,74 @@ def test_graphs_refuse_unusable_rows(tmp_path, capsys, overrides, message):
     assert not out.exists()
 
 
+def _value_map_manifest(tmp_path, field, edit):
+    """A copy of the shipped manifest whose value_map for ``field`` is ``edit``ed."""
+    manifest = yaml.safe_load(_MANIFEST.read_text())
+    block = manifest["ground_truth"]
+    block["graph_template"] = str(_ROOT / "configs" / block["graph_template"])
+    edit(block["value_map"][field])
+    path = tmp_path / "m.engine.yaml"
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False))
+    return path
+
+
+@pytest.mark.parametrize("command", ["ingest", "graphs"])
+@pytest.mark.parametrize(
+    "field, edit",
+    [
+        ("mask_type", lambda m: m.pop("NO_MASK")),
+        ("mask_type", lambda m: m.update(BOTTOM_RIGHT_CAUSAL=True)),
+        ("dtype", lambda m: m.pop("fp16")),
+    ],
+    ids=["missing-key", "extra-key", "missing-dtype"],
+)
+def test_a_value_map_must_cover_exactly_the_declared_cell_values(
+    tmp_path, capsys, command, field, edit
+):
+    """The offending row's category need not occur in the owner rows."""
+    if not _ROCKE.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE}")
+    manifest = _value_map_manifest(tmp_path, field, edit)
+    out = tmp_path / "out"
+    if command == "graphs":
+        rows = tmp_path / "GT.json"
+        rows.write_text(
+            json.dumps([_row(1, dtype="bf16", mask_type="TOP_LEFT_CAUSAL")])
+        )
+        argv = f"graphs --gt {rows} --manifest {manifest} --out {out}"
+    else:
+        source = tmp_path / "owner.csv"
+        source.write_text(_CSV)
+        argv = f"ingest --input {source} --manifest {manifest} --time-col time_us "
+        argv += f"--time-unit us --filter arch=gfx950 --out {out} --device gfx950 "
+        argv += "--map " + " --map ".join(_MAP.split())
+    assert gt.main(argv.split()) == 2
+    assert field in capsys.readouterr().err
+    assert not out.exists()
+
+
+def _recorded(sweep) -> dict:
+    """``{graph name: entry}`` of the row map `graphs` wrote beside GT.json."""
+    mapping = json.loads(gt.graphs_map_path(sweep.parent / "GT.json").read_text())
+    return {m["graph_name"]: m for m in mapping}
+
+
 def _phase(sweep, kind, *ledger, number=1, status="success"):
+    """A phase record whose ledger entries carry the identity `graphs` recorded for
+    their graph, unless the entry names its own."""
     path = sweep / "attempts" / f"{kind}-r{number}" / "phase.json"
     path.parent.mkdir(parents=True)
     phase = {"kind": kind, "corpus": "ground_truth", "arm": "full", "round": number}
+    recorded = _recorded(sweep)
+    ledger = [
+        {"semantic_identity": recorded[e["graph_name"]].get("semantic_identity"), **e}
+        for e in ledger
+    ]
     path.write_text(json.dumps({"status": status, "phase": phase, "ledger": ledger}))
 
 
 def _entry(row, outcome="served", **fields):
+    """A ledger entry; ``semantic_identity`` is filled by `_phase`."""
     return {"graph_name": f"ground_truth_r{row:04d}", "outcome": outcome, **fields}
 
 
@@ -254,6 +322,74 @@ def test_strict_compare_wants_a_passing_correctness_verdict(tmp_path, checked, r
     argv += f"--report {tmp_path / 'report.md'}"
     assert gt.main(argv.split()) == 0
     assert gt.main(argv.split() + ["--strict"]) == rc
+
+
+_OK = {"passed": True, "execution_success": True, "tolerance_match": True}
+
+
+def _compare_argv(tmp_path, sweep):
+    argv = f"compare --gt {tmp_path / 'GT.json'} --sweep-output {sweep} --margin 0.05 "
+    return (argv + f"--report {tmp_path / 'report.md'}").split()
+
+
+def test_the_recorded_identity_is_the_one_a_sweep_computes_for_the_graph(tmp_path):
+    rows = [_row(1), _row(2, nhead_q=16, nhead_k=16)]
+    _, _, out = _graphs(tmp_path, rows)
+    inventory = sweep_tool.corpus_inventory({"path": out, "expected_graphs": 2}, "none")
+    recorded = _recorded(tmp_path / "sweep")
+    assert {g["graph_name"]: g["semantic_identity"] for g in inventory} == {
+        name: entry["semantic_identity"] for name, entry in recorded.items()
+    }
+
+
+def test_compare_refuses_a_ground_truth_row_edited_after_graphs(tmp_path, capsys):
+    rows = [_row(1), _row(2, nhead_q=16, nhead_k=16)]
+    served = [_entry(1, mean_ms=0.1), _entry(2, mean_ms=0.1)]
+    gt_path, sweep = _compare(tmp_path, rows, (served, 1, "success"))
+    rows = json.loads(gt_path.read_text())
+    rows[1]["time_ms"] = 0.5
+    gt_path.write_text(json.dumps(rows))
+    assert gt.main(_compare_argv(tmp_path, sweep)) == 2
+    assert "row 2" in capsys.readouterr().err
+    assert not (tmp_path / "report.md").exists()
+
+
+@pytest.mark.parametrize("identity", ["not-the-recorded-one", None])
+def test_compare_refuses_a_ledger_graph_whose_identity_is_not_the_recorded_one(
+    tmp_path, capsys, identity
+):
+    """A different or absent identity means the sweep timed some other graph under
+    this graph's name."""
+    phases = [([_entry(1, mean_ms=0.1, semantic_identity=identity)], 1, "success")]
+    _, sweep = _compare(tmp_path, [_row(1)], *phases)
+    assert gt.main(_compare_argv(tmp_path, sweep)) == 2
+    assert "row 1" in capsys.readouterr().err
+    assert not (tmp_path / "report.md").exists()
+
+
+def test_strict_compare_refuses_a_graph_declined_in_any_timing_round(tmp_path):
+    phases = [
+        ([_entry(1, "declined", reason="no kernel")], 1, "success"),
+        ([_entry(1, mean_ms=0.1)], 2, "success"),
+    ]
+    _, sweep = _compare(tmp_path, [_row(1, time_ms=0.1)], *phases)
+    checked = _entry(1, correctness=_OK, reference={"usable": True})
+    _phase(sweep, "correctness", checked)
+    argv = _compare_argv(tmp_path, sweep)
+    assert gt.main(argv) == 0
+    assert gt.main(argv + ["--strict"]) == 1
+
+
+@pytest.mark.parametrize("status, rc", [("success", 0), ("failed", 1)])
+def test_strict_compare_refuses_a_failed_correctness_phase(tmp_path, status, rc):
+    """The row's own verdict passes; its phase failed another gate."""
+    timing = ([_entry(1, mean_ms=0.1)], 1, "success")
+    _, sweep = _compare(tmp_path, [_row(1, time_ms=0.1)], timing)
+    checked = _entry(1, correctness=_OK, reference={"usable": True})
+    _phase(sweep, "correctness", checked, status=status)
+    argv = _compare_argv(tmp_path, sweep)
+    assert gt.main(argv) == 0
+    assert gt.main(argv + ["--strict"]) == rc
 
 
 def test_patch_pointers_accept_a_node_name_or_a_legacy_index():

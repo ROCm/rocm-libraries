@@ -10,6 +10,8 @@ after dropping a whole pack or engine.
 
 import gzip
 import itertools
+import json
+import math
 import posixpath
 import re
 import warnings as _warnings
@@ -147,6 +149,35 @@ def read_yaml(path: Path) -> Any:
     with opener(path, "rt") as f:
         # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
         return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
+
+
+class _RepeatedJsonKey(Exception):
+    """A JSON object declared one key twice."""
+
+
+def _reject_repeated_json_keys(pairs: list) -> dict:
+    keys = [k for k, _ in pairs]
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        raise _RepeatedJsonKey(
+            f"found duplicate key {repeated[0]!r}; JSON would silently keep only the "
+            f"last value"
+        )
+    return dict(pairs)
+
+
+def read_json_or_yaml(path: Path) -> Any:
+    """Parse one manifest as JSON, falling back to `read_yaml`. A mapping declaring
+    one key twice raises ``yaml.YAMLError`` in either format; input that is neither
+    raises the YAML parser's ``yaml.YAMLError``."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        return json.loads(text, object_pairs_hook=_reject_repeated_json_keys)
+    except _RepeatedJsonKey as exc:
+        raise yaml.YAMLError(f"{path}: {exc}") from exc
+    except ValueError:
+        return read_yaml(path)
 
 
 def load_config(path: Path) -> IngestorConfig:
@@ -361,7 +392,7 @@ def load_config(path: Path) -> IngestorConfig:
     specialization_raw = raw.get("specialization") or {}
     _require_specialization_mapping(specialization_raw)
     if "reduction" in raw:
-        check_reduction(raw["reduction"])
+        check_reduction(raw["reduction"], kmd_fields={f.name for f in kmd_fields})
 
     config = IngestorConfig(
         engine=engine,
@@ -859,7 +890,13 @@ def _expand_one_arm(
             # The matcher compares the hipDNN spelling; the spec carries the
             # builder's. Copying one over the other declines every graph while
             # the engine still loads and every count reconciles.
-            value = vocabulary[field_name].get(value, value)
+            if value not in vocabulary[field_name]:
+                raise ConfigError(
+                    f"{shape_where}: metadata field '{field_name}' has value "
+                    f"{value!r}, which this group's vocabulary does not map. Mapped: "
+                    f"{sorted(map(str, vocabulary[field_name]))}."
+                )
+            value = vocabulary[field_name][value]
         metadata[field_name] = value
 
     # A bool renders as `True`/`False` under str.format, but every shipped
@@ -919,7 +956,14 @@ def _default_marker(value, where: str) -> bool:
 #: Kernels per arch in one pack above which the AOT build is a red flag.
 DEFAULT_AOT_BUDGET_PER_ARCH = 1000
 
-_KNOWN_REDUCTION = frozenset({"fields", "aot_budget_per_arch"})
+_KNOWN_REDUCTION = frozenset(
+    {"fields", "aot_budget_per_arch", "single_round_epsilon", "drift_multiplier"}
+)
+
+#: Reduction noise policy: the eps_min a one-round sweep assumes, and the multiple
+#: of the measured round-to-round drift that eps_min takes when there are 2+ rounds.
+DEFAULT_SINGLE_ROUND_EPSILON = 0.05
+DEFAULT_DRIFT_MULTIPLIER = 2
 _KNOWN_REDUCTION_FIELDS = frozenset({"feature", "performance", "ignored"})
 _KNOWN_PERFORMANCE_KNOB = frozenset({"name", "divides", "unset_resolves_by"})
 
@@ -934,9 +978,10 @@ def _require_known_keys(value, known: frozenset, where: str) -> None:
         )
 
 
-def check_reduction(reduction) -> None:
+def check_reduction(reduction, *, kmd_fields) -> None:
     """Validate a ``reduction`` block: ``fields.feature``/``performance``/``ignored``
-    (each field in at most one) and a positive ``aot_budget_per_arch``."""
+    (each field in at most one), a ``divides`` target that is one of ``kmd_fields``
+    (the engine's KMD field names), and a positive ``aot_budget_per_arch``."""
     _require_known_keys(reduction, _KNOWN_REDUCTION, "'reduction'")
     if "fields" not in reduction:
         raise ConfigError("'reduction' is missing required key 'fields'.")
@@ -985,6 +1030,24 @@ def check_reduction(reduction) -> None:
             f"'reduction.aot_budget_per_arch' must be a positive integer; got "
             f"{budget!r}."
         )
+    for key in ("single_round_epsilon", "drift_multiplier"):
+        value = reduction.get(key, 0)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ConfigError(
+                f"'reduction.{key}' must be a finite number >= 0; got {value!r}."
+            )
+    for index, knob in enumerate(knobs):
+        target = knob.get("divides")
+        if target is not None and target not in kmd_fields:
+            raise ConfigError(
+                f"'reduction.fields.performance[{index}]' 'divides' names "
+                f"{target!r}, which is not a kmd_fields name: {sorted(kmd_fields)}."
+            )
 
 
 def _reject_deprecated_dict_key(

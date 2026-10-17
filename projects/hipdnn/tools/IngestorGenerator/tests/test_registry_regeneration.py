@@ -78,11 +78,20 @@ def _shipped_spec_fields(selection) -> frozenset:
     )
 
 
-def _key(name: str, source: tuple, spec: dict, metadata: dict, fields: frozenset):
-    """`source` is the kernel_source (kind, source, builder)."""
+def _key(
+    name: str,
+    source: tuple,
+    spec: dict,
+    metadata: dict,
+    default: bool,
+    fields: frozenset,
+):
+    """`source` is the kernel_source (kind, source, builder); `default` the kernel's
+    `default` marker, which reduction keeps as the cell's floor."""
     return (
         name,
         source,
+        default,
         _canonical({k: v for k, v in spec.items() if k in fields}),
         _canonical(metadata),
     )
@@ -96,6 +105,7 @@ def _selection_keys(selection) -> collections.Counter:
             (k.kernel_source.kind, k.kernel_source.source, k.kernel_source.builder),
             k.kernel_source.spec,
             k.metadata,
+            k.default,
             fields,
         )
         for k in _selection_kernels(selection)
@@ -109,6 +119,7 @@ def _registry_key(kernel: dict, fields: frozenset) -> tuple:
         (source["kind"], source.get("source", ""), source.get("builder", "")),
         source["spec"],
         kernel["metadata"],
+        kernel.get("default", False),
         fields,
     )
 
@@ -132,8 +143,9 @@ def _field_default(f: dataclasses.Field):
 def test_g1_every_selection_kernel_is_a_registry_kernel_at_defaults(
     selection, manifest, registry, registry_config
 ):
-    """Every selection kernel is in the enumeration, and every spec field it omits
-    sits at its dataclass default (what hkp_pack compiles for an omitted field)."""
+    """Every selection kernel is in the enumeration, with the same `default` marker,
+    and every spec field it omits sits at its dataclass default (what hkp_pack compiles for an omitted field).
+    """
     fields = _shipped_spec_fields(selection)
     missing = _selection_keys(selection) - _registry_keys(registry_config, fields)
     assert not missing, sorted(key[0] for key in missing)[:10]
@@ -243,14 +255,16 @@ def test_g5_the_dtype_vocabulary_is_spelled_as_the_cpp_matcher_compares_it(manif
     """The manifest's vocabulary is what the generator writes into every kernel's
     metadata, so a misspelling there agrees with itself in every Python gate while the
     matcher's exact string comparison never selects the kernel. Fails only on a
-    spelling the matcher does not compare; a matcher whose source can no longer be
-    read this way skips rather than flagging a manifest that may be right."""
+    spelling the matcher does not compare, and when the matcher's source or its dtype
+    literals can no longer be read this way: the guard must then be updated, not
+    skipped."""
     matcher = next(
         (s for s in manifest.get("launch_surface", []) if s["name"] == "matcher"), None
     )
     source_path = matcher and enumerator._REPO / matcher["cpp_mirror"]
-    if not source_path or not source_path.is_file():
-        pytest.skip("the manifest's matcher source is not in this checkout")
+    assert (
+        source_path and source_path.is_file()
+    ), "the manifest's launch_surface 'matcher' cpp_mirror is not a file"
     function = re.search(
         r"supportedDataTypeName\([^)]*\)\s*\{(.*?)\n\}",
         source_path.read_text(encoding="utf-8"),
@@ -259,10 +273,9 @@ def test_g5_the_dtype_vocabulary_is_spelled_as_the_cpp_matcher_compares_it(manif
     compared = (
         set(re.findall(r'std::string\("([^"]+)"\)', function[1])) if function else set()
     )
-    if not compared:
-        pytest.skip(
-            "supportedDataTypeName no longer spells its dtypes as std::string literals; "
-            "update this test to read the new shape"
-        )
+    assert compared, (
+        "supportedDataTypeName no longer spells its dtypes as std::string literals; "
+        "update this test to read the new shape"
+    )
     declared = set(manifest["specialization"]["vocabulary"]["dtype"].values())
     assert declared <= compared, (sorted(declared), sorted(compared))

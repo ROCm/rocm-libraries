@@ -3,9 +3,9 @@
 
 """Compare a regenerated bundle against the shipped one, UUID-blind.
 
-The no-op gate. Before a profile change can be trusted to preserve a shipped
-catalog, regeneration has to be shown to reproduce it -- and the one comparison
-that cannot be used is byte equality, because ``codegen/generator.py`` mints
+The no-op gate. Before a manifest or registry change can be trusted to preserve a
+shipped catalog, regeneration has to be shown to reproduce it -- and the one
+comparison that cannot be used is byte equality, because ``codegen/generator.py`` mints
 every descriptor id with ``uuid.uuid4()``: two runs of the SAME config differ in
 every id. So the ids are masked, and everything they point at is compared
 instead.
@@ -17,8 +17,8 @@ The two halves are compared by different rules, because they are produced by
 different things (see the generator's own split: only ``packs[].kernels`` comes
 from the dispatcher):
 
-  * the CATALOG -- ``kernelDescriptors`` -- as a multiset of
-    ``(name, kernel_source.spec, metadata, priority)``. Order is not meaningful,
+  * the CATALOG -- ``kernelDescriptors`` -- as a multiset of ``(name, kernel_source
+    (every key; the spec filtered as below), arch, metadata, priority, version)``. Order is not meaningful,
     but multiplicity is: two entries that differ only by id are two compiled
     kernels, and dropping one silently halves what ships.
   * the ENGINE-LEVEL blocks -- ``engine``/``dispatch``/``matchers`` reference
@@ -26,7 +26,9 @@ from the dispatcher):
     masked. Native symbol strings in the UED/UHD/UDD/UMD are NOT compared here
     (only the KDP is read); symbol drift is a separate follow-up gate.
 
-Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage.
+Exit 0 on no differences, 1 on any difference (with a report), 2 on bad usage or
+unreadable input, including an ``--expect-ids`` name used a different number of times
+in the two catalogs.
 
 ``--subset`` requires only shipped ⊆ regenerated: kernels only the regenerated
 catalog holds are listed as registry extras, not differences.
@@ -38,7 +40,7 @@ regenerated-only fields; whoever reads a pass owns the claim that they sit at th
 defaults (``test_registry_regeneration`` asserts it for the shipped engine).
 
 What a pass does NOT establish: that the regenerated bundle is CORRECT, only
-that it is the same catalog. A profile that is wrong in the same way twice
+that it is the same catalog. A manifest that is wrong in the same way twice
 passes. And a KDP carries no UUID stability of its own -- the ``--ignore-ids``
 mask is why this exits 0 at all, so preserving the SHIPPED ids through a splice
 is a separate obligation (``extend.md``: resolve by UUID, not filename), checked
@@ -101,7 +103,34 @@ def _load(path: str, label: str) -> dict:
             raise CatalogDiffError(f"{where} 'kernel_source' must be an object")
         if not isinstance(source.get("spec", {}), dict):
             raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
+        if "name" in entry and not isinstance(entry["name"], str):
+            raise CatalogDiffError(f"{where} 'name' must be a string")
+    _check_provenance(kdp.get("provenance"), f"the {label} KDP")
     return kdp
+
+
+def _check_provenance(provenance, where: str) -> None:
+    """``provenance.specialization_contract.consumers[]`` as the comparisons read it."""
+    if provenance is None:
+        return
+    if not isinstance(provenance, dict):
+        raise CatalogDiffError(f"{where} 'provenance' must be an object")
+    contract = provenance.get("specialization_contract")
+    if contract is None:
+        return
+    if not isinstance(contract, dict):
+        raise CatalogDiffError(
+            f"{where} 'provenance.specialization_contract' must be an object"
+        )
+    consumers = contract.get("consumers")
+    if consumers is not None and (
+        not isinstance(consumers, list)
+        or not all(isinstance(c, dict) for c in consumers)
+    ):
+        raise CatalogDiffError(
+            f"{where} 'provenance.specialization_contract.consumers' must be an "
+            f"array of objects"
+        )
 
 
 def _canonical(value) -> str:
@@ -133,6 +162,18 @@ def _entry_counters(
     )
 
 
+def binary_identity(entry: dict, spec_keys: frozenset | None = None) -> tuple:
+    """What names the kernel an entry ships: its whole ``kernel_source`` (every key,
+    whatever the kind) with the spec reduced to ``spec_keys`` (``None``: the full
+    spec), and the entry's ``arch``."""
+    source = dict(entry.get("kernel_source") or {})
+    spec = source.get("spec") or {}
+    if spec_keys is not None:
+        spec = {k: v for k, v in spec.items() if k in spec_keys}
+    source["spec"] = spec
+    return (_canonical(source), _canonical(entry.get("arch")))
+
+
 def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     """What makes two catalog entries the same kernel. Deliberately excludes
     ``id`` (minted per run) and includes ``priority`` (it orders selection).
@@ -140,18 +181,11 @@ def entry_key(entry: dict, spec_keys: frozenset | None = None) -> tuple:
     ``spec_keys``: when given, only those spec fields are compared. ``None``
     compares the FULL spec (the ``--strict-spec`` mode, see ``compare_catalog``).
     """
-    spec = entry.get("kernel_source", {}).get("spec") or {}
-    if spec_keys is not None:
-        spec = {k: v for k, v in spec.items() if k in spec_keys}
-    ks = entry.get("kernel_source", {})
     return (
         entry.get("name"),
-        _canonical(spec),
+        *binary_identity(entry, spec_keys),
         _canonical(entry.get("metadata")),
         entry.get("priority"),
-        ks.get("kind"),
-        ks.get("source"),
-        ks.get("builder"),
         entry.get("version"),
     )
 
@@ -218,20 +252,19 @@ def compare_subset(shipped: dict, regenerated: dict) -> tuple[list[str], list[st
 def find_duplicate_specs(kdp: dict) -> list[str]:
     """Two entries naming one binary.
 
-    The packer dedups compilation on (source, builder, spec), so two catalog
-    entries with the same spec are one kernel under two names -- and if their
-    completed metadata also collides, the loader keeps one and the catalog
-    silently ships less than it claims. Uses the full spec (not a filtered
+    The packer dedups compilation on the kernel's source and full spec, so two
+    catalog entries with one `binary_identity` are one kernel under two names --
+    and if their completed metadata also collides, the loader keeps one and the
+    catalog silently ships less than it claims. Uses the full spec (not a filtered
     subset) since the packer dedup itself uses the full spec.
     """
-    by_spec: dict[str, list[str]] = collections.defaultdict(list)
+    by_binary: dict[tuple, list[str]] = collections.defaultdict(list)
     for entry in kdp["kernelDescriptors"]:
-        spec = entry.get("kernel_source", {}).get("spec") or {}
-        by_spec[_canonical(spec)].append(entry.get("name", "<unnamed>"))
+        by_binary[binary_identity(entry)].append(entry.get("name", "<unnamed>"))
     return [
         f"  {len(names)} entries share one spec: {', '.join(sorted(names)[:4])}"
         + (" ..." if len(names) > 4 else "")
-        for names in by_spec.values()
+        for names in by_binary.values()
         if len(names) > 1
     ]
 
@@ -352,12 +385,16 @@ def compare_kmd_fields(shipped_kmd: dict, regenerated_kmd: dict) -> list[str]:
     return problems
 
 
+def _name_counts(kdp: dict) -> collections.Counter:
+    return collections.Counter(e.get("name") for e in kdp["kernelDescriptors"])
+
+
 def _id_index(kdp: dict) -> tuple[dict, list[str]]:
     """Map each kernel entry to its id. Keyed by name; a name used more than
     once is keyed by (name, full spec) instead so repeats are not conflated.
     Returns (index, names still ambiguous after that)."""
     entries = kdp["kernelDescriptors"]
-    name_counts = collections.Counter(e.get("name") for e in entries)
+    name_counts = _name_counts(kdp)
     index: dict = {}
     ambiguous: list[str] = []
     for e in entries:
@@ -409,6 +446,18 @@ def compare_expected_ids(shipped: dict, regenerated: dict) -> list[str]:
             f"{left_consumers!r} was not preserved (regenerated {right_consumers!r})"
         )
 
+    left_counts, right_counts = _name_counts(shipped), _name_counts(regenerated)
+    repeated = sorted(
+        str(name)
+        for name, count in left_counts.items()
+        if name in right_counts and right_counts[name] != count
+    )
+    if repeated:
+        raise CatalogDiffError(
+            f"--expect-ids cannot check the id of {repeated}: the name is used a "
+            f"different number of times in the shipped and regenerated catalogs, so "
+            f"its entries cannot be paired"
+        )
     left_ids, left_amb = _id_index(shipped)
     right_ids, right_amb = _id_index(regenerated)
     for name in sorted(set(left_amb) | set(right_amb)):
@@ -549,7 +598,13 @@ def main(argv=None) -> int:
             )
         )
     if args.expect_ids:
-        sections.append(("preserved ids", compare_expected_ids(shipped, regenerated)))
+        try:
+            sections.append(
+                ("preserved ids", compare_expected_ids(shipped, regenerated))
+            )
+        except CatalogDiffError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 2
 
     print("catalog diff")
     print(f"  shipped      {len(shipped['kernelDescriptors'])} kernels")

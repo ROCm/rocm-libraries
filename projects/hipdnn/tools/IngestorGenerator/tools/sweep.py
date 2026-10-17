@@ -309,6 +309,18 @@ def load_config(path):
     return config
 
 
+def semantic_identity(graph):
+    """Digest of what a graph computes: every key but its ``name``, ``provenance``
+    and private ``_`` keys, which label a graph without changing it."""
+    return digest(
+        {
+            k: v
+            for k, v in graph.items()
+            if k not in ("name", "provenance") and not k.startswith("_")
+        }
+    )
+
+
 def corpus_inventory(corpus, exclusions):
     root = Path(corpus["path"])
     inventory = []
@@ -326,11 +338,6 @@ def corpus_inventory(corpus, exclusions):
                 raise ValueError(
                     f"excluded tensor hazard: {sorted(tensor_names & set(exclusions))}"
                 )
-            semantic = {
-                k: v
-                for k, v in graph.items()
-                if k not in ("name", "provenance") and not k.startswith("_")
-            }
             inventory.append(
                 {
                     "graph_name": name,
@@ -338,7 +345,7 @@ def corpus_inventory(corpus, exclusions):
                     "source_path": str(path),
                     "relative_path": str(path.relative_to(root)),
                     "sha256": file_hash(path),
-                    "semantic_identity": digest(semantic),
+                    "semantic_identity": semantic_identity(graph),
                     "provenance": graph.get("_provenance", graph.get("provenance", {})),
                 }
             )

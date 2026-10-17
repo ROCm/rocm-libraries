@@ -66,6 +66,7 @@ def build(
             {"name": "dtype", "type": "string"},
             {"name": "tile", "type": "int"},
             {"name": "unroll", "type": "int"},
+            {"name": "rows", "type": "int", "default_value": 64},
         ],
         "packs": [dict(pack, kernels=kernels)],
     }
@@ -82,6 +83,7 @@ def build(
     phases = [("timing", n, graphs) for n, graphs in enumerate(rounds, 1)]
     if checked:
         phases.append(("correctness", 1, {"g_perf": [(checked, 1.0)]}))
+    written = []
     for kind, number, graphs in phases:
         attempt = tmp_path / "sweep" / "attempts" / f"{kind}__c__full__r{number}-0001"
         shard = attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
@@ -89,6 +91,7 @@ def build(
         phase = {"kind": kind, "corpus": "c", "arm": "full", "round": number}
         ledger = [{"correctness": {"passed": True}}]
         record = {"status": "success", "phase": phase, "ledger": ledger}
+        written.append((phase, attempt))
         (attempt / "phase.json").write_text(json.dumps(record))
         ids = {"pack_id": PACK_ID, "dispatch_id": DISPATCH_ID}
         lines = ["1.0.0"]
@@ -102,6 +105,9 @@ def build(
                 edit(line)
             lines.append(json.dumps(line))
         (shard / "winners.jsonl").write_text("\n".join(lines) + "\n")
+    summary = {"expected_phases": [phase for phase, _ in written]}
+    (tmp_path / "sweep" / "summary.json").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sweep" / "summary.json").write_text(json.dumps(summary))
     files = "selection.yaml installed.kdp.json sweep reduced.yaml report.md".split()
     flags = ("--selection", "--kdp", "--sweep-output", "--out", "--report")
     return [a for flag, f in zip(flags, files) for a in (flag, str(tmp_path / f))]
@@ -144,6 +150,38 @@ def test_a_win_under_the_round_to_round_drift_is_not_kept(tmp_path):
         kept[len(rounds)] = kname("fp32", 128, 1) in reduction.keep(reduction.epsilon)
     assert reduction.epsilon >= 2 * reduction.noise.drift > 0
     assert kept == {1: True, 2: False}
+
+
+def _noise_policy(tmp_path, rounds, **policy):
+    args = build(tmp_path, rounds=rounds)
+    selection = tmp_path / "selection.yaml"
+    raw = yaml.safe_load(selection.read_text())
+    raw["reduction"].update(policy)
+    selection.write_text(yaml.safe_dump(raw))
+    return variant_reduce.analyse(*args[1:6:2]).noise
+
+
+def test_the_single_round_epsilon_is_the_selections(tmp_path):
+    noise = _noise_policy(tmp_path, (GRAPHS,), single_round_epsilon=0.1)
+    assert noise.epsilon_min == 0.1
+
+
+def test_the_drift_multiplier_is_the_selections(tmp_path):
+    r1 = {"g_perf": [(("fp32", 128, 4), 1.0), (("fp32", 128, 2), 1.08)]}
+    r2 = {"g_perf": [(("fp32", 128, 4), 1.0), (("fp32", 128, 2), 1.12)]}
+    noise = _noise_policy(tmp_path, (r1, r2), drift_multiplier=3)
+    assert noise.drift > 0
+    assert noise.epsilon_min == pytest.approx(3 * noise.drift)
+
+
+def test_the_single_round_warning_states_the_assumed_epsilon(tmp_path, capsys):
+    args = build(tmp_path)
+    selection = tmp_path / "selection.yaml"
+    raw = yaml.safe_load(selection.read_text())
+    raw["reduction"]["single_round_epsilon"] = 0.1
+    selection.write_text(yaml.safe_dump(raw))
+    assert variant_reduce.main(args) == 0
+    assert "eps_min is assumed 0.1," in capsys.readouterr().out
 
 
 def test_floor_and_coverage_over_budget_exit_1(tmp_path, capsys):
@@ -196,6 +234,116 @@ def test_combined_rules_keep_a_kernel_for_every_ranked_graph(tmp_path):
     assert variant_reduce.main(args + ["--apply-rules", every_rule]) == 0
     kept = {k.name for k in load_config(tmp_path / "reduced.yaml").packs[0].kernels}
     assert kept & {kname(*k) for k, _ in g_two}
+
+
+# Two rules, each cheap alone, that together drop the best kernel of both graphs:
+# "drop knob tile" removes t256_u2 and "drop knob unroll" removes t128_u4, leaving
+# only the 2.0 ms default.
+UNION_KERNELS = [
+    ("fp32", 128, 2, True),
+    ("fp32", 256, 2, False),
+    ("fp32", 128, 4, False),
+]
+UNION_GRAPHS = {
+    "graph_alpha": [
+        (("fp32", 256, 2), 1.0),
+        (("fp32", 128, 4), 1.01),
+        (("fp32", 128, 2), 2.0),
+    ],
+    "graph_beta": [
+        (("fp32", 128, 4), 1.0),
+        (("fp32", 256, 2), 1.01),
+        (("fp32", 128, 2), 2.0),
+    ],
+}
+
+
+def _union_rules(tmp_path):
+    args = build(tmp_path, rounds=(UNION_GRAPHS,), kernels=UNION_KERNELS)
+    reduction = variant_reduce.analyse(*args[1:6:2])
+    texts = ("drop knob tile", "drop knob unroll")
+    return args, reduction, [r for r in reduction.rules if r.text in texts]
+
+
+def test_applied_rules_whose_union_loses_more_than_epsilon_are_refused(
+    tmp_path, capsys
+):
+    args, reduction, rules = _union_rules(tmp_path)
+    assert len(rules) == 2
+    assert all(r.worst_gain_lost <= reduction.rules_epsilon for r in rules)
+    chosen = ",".join(r.id for r in rules)
+    assert variant_reduce.main(args + ["--apply-rules", chosen]) == 1
+    assert not (tmp_path / "reduced.yaml").exists()
+    report = (tmp_path / "report.md").read_text()
+    assert "graph_alpha" in report and "graph_beta" in report
+    assert "applied" in capsys.readouterr().err
+
+
+def test_applied_rules_within_epsilon_together_are_accepted(tmp_path):
+    args, _, rules = _union_rules(tmp_path)
+    (tile,) = [r for r in rules if r.text == "drop knob tile"]
+    assert variant_reduce.main(args + ["--apply-rules", tile.id]) == 0
+    assert (tmp_path / "reduced.yaml").exists()
+
+
+def test_a_union_loses_at_least_what_its_worst_rule_loses(tmp_path):
+    _, reduction, rules = _union_rules(tmp_path)
+    union = set().union(*(r.removed for r in rules))
+    losing, worst = variant_reduce._ranking_loss(union, reduction.rankings)
+    assert worst >= max(r.worst_gain_lost for r in rules)
+    assert len(losing) >= max(r.graphs_losing_best for r in rules)
+
+
+def _summary(tmp_path):
+    return tmp_path / "sweep" / "summary.json"
+
+
+def _expect(tmp_path, *phases):
+    summary = json.loads(_summary(tmp_path).read_text())
+    summary["expected_phases"] += list(phases)
+    _summary(tmp_path).write_text(json.dumps(summary))
+
+
+def test_a_sweep_that_never_wrote_its_summary_is_incomplete(tmp_path, capsys):
+    args = build(tmp_path, rounds=(GRAPHS, GRAPHS))
+    _summary(tmp_path).unlink()
+    assert variant_reduce.main(args) == 3
+    assert not (tmp_path / "reduced.yaml").exists()
+
+
+def test_a_summary_without_expected_phases_is_incomplete(tmp_path):
+    """The warmup-failure summary carries no phase list."""
+    args = build(tmp_path)
+    _summary(tmp_path).write_text(json.dumps({"validated_complete": False}))
+    assert variant_reduce.main(args) == 3
+
+
+def test_an_expected_phase_with_no_record_is_incomplete(tmp_path, capsys):
+    """A corpus killed before round 2's timing phase wrote anything."""
+    args = build(tmp_path)
+    _expect(tmp_path, {"kind": "timing", "corpus": "c", "arm": "full", "round": 2})
+    assert variant_reduce.main(args) == 3
+    assert "round" in capsys.readouterr().err
+    assert not (tmp_path / "reduced.yaml").exists()
+
+
+def test_an_expected_correctness_phase_with_no_record_is_incomplete(tmp_path):
+    args = build(tmp_path)
+    _expect(tmp_path, {"kind": "correctness", "corpus": "c", "arm": "full", "round": 1})
+    assert variant_reduce.main(args) == 3
+
+
+def test_a_timing_phase_with_no_winners_is_incomplete(tmp_path):
+    args = build(tmp_path)
+    for shard in (tmp_path / "sweep").rglob("winners.jsonl"):
+        shard.write_text("1.0.0\n")
+    assert variant_reduce.main(args) == 3
+
+
+def test_another_arms_missing_phase_does_not_refuse_this_arm(tmp_path):
+    args = build(tmp_path)
+    _expect(tmp_path, {"kind": "timing", "corpus": "c", "arm": "other", "round": 1})
+    assert variant_reduce.main(args + ["--arm", "full"]) == 0
 
 
 def test_a_zero_time_entry_is_a_ranking(tmp_path):
@@ -393,7 +541,12 @@ def test_the_noise_floor_is_the_median_spread_not_the_largest():
         return variant_reduce.Ranking(number, "c", "g", entries, cell)
 
     rounds = {1: {"g": ranking(1, 1.0, 2.0, 4.0)}, 2: {"g": ranking(2, 1.0, 2.4, 8.0)}}
-    noise = variant_reduce.noise_floor(rounds, [])
+    noise = variant_reduce.noise_floor(
+        rounds,
+        [],
+        variant_reduce.DEFAULT_SINGLE_ROUND_EPSILON,
+        variant_reduce.DEFAULT_DRIFT_MULTIPLIER,
+    )
     assert noise.drift == pytest.approx(0.4 / 2.2)
     assert noise.epsilon_min == pytest.approx(0.8 / 2.2)
     assert (noise.rounds, noise.matched_keys, noise.unmatched_keys) == (2, 1, 0)
