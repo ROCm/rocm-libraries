@@ -121,8 +121,11 @@ bool isWorkgroupBarrierSignal(const StinkyInstruction& inst) {
 }
 
 bool isClusterBarrierWait(const StinkyInstruction& inst) {
+    // Memory tokens select LDS dependencies; the physical barrier ID still
+    // identifies a cluster rendezvous. Explicit typed waits must remain hard
+    // stops and count toward cluster-token balance and idempotency.
     return isBarrierWithLiteralId(inst, /*wantSignal=*/false, kClusterBarrierId,
-                                  /*rejectMemToken=*/true);
+                                  /*rejectMemToken=*/false);
 }
 
 bool isClusterBarrierSignal(const StinkyInstruction& inst) {
@@ -446,18 +449,24 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
     return sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol;
 }
 
-/// Forward scan from ``wgSignal`` for its paired ``s_barrier_wait -1`` and
-/// return the first real instruction after that wait.
-IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor) {
+/// Scan only within the hard stop's segment and before the wait being led.
+/// A later WG pair cannot anchor an earlier signal, and labels/branches/calls
+/// end the straight-line proof even though labels are pseudo instructions.
+IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* defaultAnchor,
+                                        const IRBase* limit) {
     BasicBlock* parent = wgSignal->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(wgSignal)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (isWorkgroupBarrierSignal(*inst)) break;
         if (!isWorkgroupBarrierWait(*inst)) continue;
         for (auto after = std::next(it); after != parent->end(); ++after) {
+            if (after.getNodePtr() == limit) break;
             auto* next = dyn_cast<StinkyInstruction>(after.getNodePtr());
+            if (next != nullptr && isSegmentBoundary(*next)) break;
             if (next == nullptr || isPseudoInst(next)) continue;
             return next;
         }
@@ -466,17 +475,19 @@ IRBase* anchorAfterWorkgroupBarrierPair(StinkyInstruction* wgSignal, IRBase* def
     return defaultAnchor;
 }
 
-/// Forward scan from ``afterWait`` for the next workgroup barrier handshake
-/// (signal then wait).  Returns the first real instruction after that wait, or
-/// ``defaultAnchor`` when the pair is missing or incomplete.
-IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor) {
+/// Find a complete earlier WG pair after the previous cluster wait. Missing or
+/// out-of-bounds pairs leave the signal co-located with its own wait.
+IRBase* anchorAfterWorkgroupBarrierFollowing(StinkyInstruction* afterWait, IRBase* defaultAnchor,
+                                             const IRBase* limit) {
     BasicBlock* parent = afterWait->getParent();
     if (parent == nullptr) return defaultAnchor;
     for (auto it = std::next(BasicBlock::iterator(afterWait)); it != parent->end(); ++it) {
+        if (it.getNodePtr() == limit) break;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst != nullptr && isSegmentBoundary(*inst)) break;
         if (inst == nullptr || isPseudoInst(inst)) continue;
         if (!isWorkgroupBarrierSignal(*inst)) continue;
-        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+        return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, limit);
     }
     return defaultAnchor;
 }
@@ -849,9 +860,9 @@ Rule3SignalAnchor findRule3SignalAnchorByCycleLead(
     // which is where the group is gathered again.
     auto hardStopAnchor = [&](StinkyInstruction* inst) -> IRBase* {
         if (isClusterBarrierWait(*inst))
-            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierFollowing(inst, defaultAnchor, sccLimit(inst));
         if (isWorkgroupBarrierSignal(*inst) && priorWaitAnchors.count(inst) != 0)
-            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor);
+            return anchorAfterWorkgroupBarrierPair(inst, defaultAnchor, sccLimit(inst));
         return nullptr;
     };
 

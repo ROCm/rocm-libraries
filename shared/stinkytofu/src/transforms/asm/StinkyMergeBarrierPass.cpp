@@ -232,6 +232,14 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
                   Layer2OverlapResult& overlaps) {
     if (!isLayer2OverlapPair(g1, g2, overlaps)) return false;
 
+    // Count contracts are tied to this exact tensor-issue boundary, including
+    // producers whose static tokens are disjoint on the first loop iteration.
+    for (const BarrierGroup* group : {&g1, &g2})
+        for (const StinkyInstruction* barrier : group->barriers) {
+            const auto* tensorWait = barrier->getModifier<SWaitTensorCntData>();
+            if (tensorWait != nullptr && tensorWait->tlcnt >= 0) return false;
+        }
+
     // Only distinct token sets are merge candidates. Same-token consecutive
     // legal groups are successive syncs of one token and must both remain.
     if (g1.tokens == g2.tokens) return false;

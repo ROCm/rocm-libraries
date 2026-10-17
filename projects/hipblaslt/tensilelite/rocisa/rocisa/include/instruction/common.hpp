@@ -24,6 +24,7 @@
 #include "enum.hpp"
 #include "instruction.hpp"
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1635,14 +1636,18 @@ namespace rocisa
     struct SBarrier : public Instruction
     {
         SBarrier(const bool separate = false, const bool wait = false,
-                 const bool clusterBarrier = false, const std::string& comment = "")
+                 const bool clusterBarrier = false, const std::string& comment = "",
+                 const int tensorcnt = -1)
             : Instruction(InstType::INST_NOTYPE, comment)
             , separate(separate)
             , wait(wait)
             , clusterBarrier(clusterBarrier)
             , hasNewBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasNewBarrier")))
             , hasClusterBarrier(static_cast<bool>(capOrDefault(getAsmCaps(), "HasClusterBarrier")))
+            , tensorcnt(tensorcnt)
         {
+            if(tensorcnt < -1 || tensorcnt > 63)
+                throw std::invalid_argument("SBarrier tensorcnt must be -1 or in [0, 63]");
             if(hasNewBarrier)
             {
                 int code = -1;
@@ -1680,6 +1685,7 @@ namespace rocisa
             , clusterBarrier(other.clusterBarrier)
             , hasNewBarrier(other.hasNewBarrier)
             , hasClusterBarrier(other.hasClusterBarrier)
+            , tensorcnt(other.tensorcnt)
         {
         }
 
@@ -1705,9 +1711,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            return formatWithComment(instStr);
+            const std::string completion = tensorcnt >= 0
+                ? "s_wait_tensorcnt " + std::to_string(tensorcnt) + "\n" : "";
+            return formatWithComment(completion + instStr);
         }
 
+        int getTensorcnt() const { return tensorcnt; }
         bool getSeparate() const { return separate; }
         bool getWait() const { return wait; }
         bool getClusterBarrier() const { return clusterBarrier; }
@@ -1725,6 +1734,10 @@ namespace rocisa
         // exact form that was emitted into instStr.
         bool hasNewBarrier;
         bool hasClusterBarrier;
+        // Maximum outstanding tensor operations at this barrier. This explicit
+        // pipeline contract remains required when entry-path inference sees no
+        // producer for a later iteration's rotating LDS bank. -1 is inferred.
+        int tensorcnt;
     };
 
     // s_barrier_signal_isfirst: like SBarrier signal, but the first wave to
@@ -6497,6 +6510,17 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VWritelaneB32>(*this);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // Only the selected lane changes; every other lane reads old dst.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+            {
+                params.push_back(dst);
+            }
+            return params;
         }
     };
 

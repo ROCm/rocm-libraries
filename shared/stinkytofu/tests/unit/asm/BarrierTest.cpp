@@ -286,3 +286,42 @@ TEST_F(BarrierTest, TokenGrouped_PassesPreserveOrderWithinGroup) {
     EXPECT_LT(getPos(g2_wait), getPos(g2_tensorLoad1))
         << "g2: s_barrier_wait must precede tensor_load1";
 }
+
+TEST_F(BarrierTest, TensorContractSurvivesLegacyBarrierLegalization) {
+    auto* barrier = createSBarrier();
+    ASSERT_NE(barrier, nullptr);
+    barrier->addModifier<MemTokenData>(MemTokenData{{1}});
+    barrier->addModifier<SWaitTensorCntData>(SWaitTensorCntData{2});
+    AsmIRBuilder builder(*bb, arch);
+    auto legalized = legalizeBarrier(barrier, builder, arch);
+    ASSERT_NE(legalized.first, nullptr);
+    ASSERT_NE(legalized.last, nullptr);
+    ASSERT_NE(legalized.first->getModifier<SWaitTensorCntData>(), nullptr);
+    EXPECT_EQ(legalized.first->getModifier<SWaitTensorCntData>()->tlcnt, 2);
+    EXPECT_EQ(legalized.last->getModifier<SWaitTensorCntData>(), nullptr);
+}
+
+TEST_F(BarrierTest, TensorContractPinsBarrierAgainstDisjointProducer) {
+    AsmIRBuilder builder(*bb, arch);
+    auto makeLoad = [&](int token) {
+        auto* load = builder.create(getMCIDByUOp(GFX::tensor_load_to_lds, arch));
+        load->addSrcReg(StinkyRegister("s", 0, 4));
+        load->addSrcReg(StinkyRegister("s", 4, 8));
+        load->addModifier<MemTokenData>(MemTokenData{{token}});
+        return load;
+    };
+    auto* before = makeLoad(0);
+    auto* signal = createSBarrierSignal(-1, {1});
+    signal->addModifier<SWaitTensorCntData>(SWaitTensorCntData{1});
+    createSBarrierWait(-1, {1});
+    auto* after = makeLoad(2);
+    runPasses();
+    EXPECT_TRUE(hasSideEffect(*signal));
+    std::vector<const StinkyInstruction*> order;
+    for (auto& ir : *bb)
+        if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) order.push_back(inst);
+    EXPECT_LT(std::find(order.begin(), order.end(), before),
+              std::find(order.begin(), order.end(), signal));
+    EXPECT_LT(std::find(order.begin(), order.end(), signal),
+              std::find(order.begin(), order.end(), after));
+}
