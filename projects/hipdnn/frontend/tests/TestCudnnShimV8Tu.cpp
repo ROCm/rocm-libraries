@@ -50,6 +50,11 @@ static_assert(IS_ALIAS_OF<cudnn_frontend::RngDescBuilder, cudnn_frontend::RngDes
 static_assert(IS_ALIAS_OF<cudnn_frontend::VariantPack, cudnn_frontend::VariantPack_v8>);
 static_assert(
     IS_ALIAS_OF<cudnn_frontend::VariantPackBuilder, cudnn_frontend::VariantPackBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::Operation, cudnn_frontend::Operation_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::OperationBuilder, cudnn_frontend::OperationBuilder_v8>);
+static_assert(IS_ALIAS_OF<cudnn_frontend::OperationGraph, cudnn_frontend::OperationGraph_v8>);
+static_assert(
+    IS_ALIAS_OF<cudnn_frontend::OperationGraphBuilder, cudnn_frontend::OperationGraphBuilder_v8>);
 
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::Tensor_v8>);
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::ConvDesc_v8>);
@@ -59,6 +64,15 @@ static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::ReductionDesc_v8>)
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::ResampleDesc_v8>);
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::RngDesc_v8>);
 static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::VariantPack_v8>);
+static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::Operation_v8>);
+static_assert(IS_MOVE_ONLY_BACKEND_DESCRIPTOR<cudnn_frontend::OperationGraph_v8>);
+
+static_assert(std::is_same_v<decltype(::MAX_OPGRAPH_OPS), const int64_t>);
+static_assert(::MAX_OPGRAPH_OPS == 250);
+// Under the JSON opt-outs a pointwise operation's tag is the mode's integer,
+// so the ordinals must match upstream's.
+static_assert(static_cast<int>(cudnn_frontend::PointwiseMode_t::ADD) == 1);
+static_assert(static_cast<int>(cudnn_frontend::PointwiseMode_t::RECIPROCAL) == 50);
 
 static_assert(std::is_base_of_v<std::runtime_error, cudnn_frontend::cudnnException>);
 static_assert(std::is_same_v<cudnn_frontend::feature_vector_t, std::vector<int64_t>>);

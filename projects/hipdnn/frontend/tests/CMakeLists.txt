@@ -70,6 +70,8 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8DescriptorBuilders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8AuxBuilders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Tu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationBuilders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8MixedTu.cpp>
     # SDPA node coverage additionally needs the SDPA build.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
@@ -218,7 +220,12 @@ endif()
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     # build() bodies depend on NV_CUDNN_DISABLE_EXCEPTION, so the status-return path needs its
     # own binary: mixing TUs with and without the macro in one binary is an ODR violation.
-    add_executable(hipdnn_frontend_cudnn_v8_noexcept_tests main.cpp TestCudnnShimV8NoExcept.cpp)
+    add_executable(
+        hipdnn_frontend_cudnn_v8_noexcept_tests
+        main.cpp
+        TestCudnnShimV8NoExcept.cpp
+        TestCudnnShimV8NoexceptOperations.cpp
+    )
     target_compile_definitions(
         hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
     )
