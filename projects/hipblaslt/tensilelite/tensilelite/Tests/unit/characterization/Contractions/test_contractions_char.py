@@ -8,6 +8,7 @@ and the ``ProblemType`` / predicate / ``SizeMapping`` / ``Solution`` builders,
 driven from the vendored LibraryIO logic fixture's original-state dicts."""
 
 import importlib
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -91,9 +92,20 @@ def test_size_mapping(solution_state, snapshot):
     assert isinstance(state(sm), dict)
 
 
-def test_internal_args_support(solution_state):
-    ias = C.InternalArgsSupport.FromOriginalState(solution_state)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_internal_args_support(solution_state, enabled):
+    explicit_state = deepcopy(solution_state)
+    explicit_state["InternalSupportParams"]["SupportDeviceScalarAlpha"] = enabled
+    ias = C.InternalArgsSupport.FromOriginalState(explicit_state)
     assert ias is not None
+    assert ias.deviceScalarAlpha is enabled
+
+
+def test_internal_args_support_device_scalar_alpha_defaults_false(solution_state):
+    old_state = deepcopy(solution_state)
+    old_state["InternalSupportParams"].pop("SupportDeviceScalarAlpha")
+    ias = C.InternalArgsSupport.FromOriginalState(old_state)
+    assert ias.deviceScalarAlpha is False
 
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):

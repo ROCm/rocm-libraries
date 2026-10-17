@@ -1030,6 +1030,11 @@ namespace TensileLite
         // Synchronizer pointer (not allocated yet). Wired into softwarePredicate().
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
+        // Device scalar alpha reuses the ScaleAlphaVec pointer and reserves
+        // internalArg0 bit 11. Reject older kernels which do not advertise the
+        // matching load and GSU-mask layout.
+        bool                 deviceScalarAlphaSupported(Problem const& problem) const;
+        bool                 deviceScalarAlphaSupported(std::vector<Problem> const& problems) const;
         size_t               partialTileSize(size_t skGrid) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
@@ -1306,6 +1311,7 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            bool deviceScalarAlpha  = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };

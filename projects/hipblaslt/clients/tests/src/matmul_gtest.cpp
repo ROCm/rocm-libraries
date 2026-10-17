@@ -245,6 +245,9 @@ namespace
                 if(arg.scaleAlpha_vector)
                     name << "_SAV";
 
+                if(arg.device_scalar_alpha)
+                    name << "_DSA";
+
                 if(arg.amaxScaleA)
                     name << "_ASA";
 

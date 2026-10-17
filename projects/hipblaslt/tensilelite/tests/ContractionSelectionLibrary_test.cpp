@@ -259,3 +259,103 @@ TEST(ContractionSelectionLibraryTest, ConcurrentFindBestSolutionIsStable)
     for(auto& worker : workers)
         worker.join();
 }
+
+TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaRequiresAdvertisedKernelSupport)
+{
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    ContractionSolution solution;
+    solution.problemType.useScaleAlphaVec = 1;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.internalArgsSupport.deviceScalarAlpha = true;
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(true);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setGroupedGemm(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+
+    solution.problemType.useScaleAlphaVec = 0;
+    EXPECT_FALSE(solution.deviceScalarAlphaSupported(problem));
+
+    problem.setParams().setDeviceScalarAlpha(false);
+    EXPECT_TRUE(solution.deviceScalarAlphaSupported(problem));
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceScalarAlphaSelectionWithoutUniformSummationOrder)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    ASSERT_FALSE(problem.getParams().uniformSummationOrder());
+
+    auto solution = std::make_shared<ContractionSolution>();
+    SingleContractionLibrary lib(solution);
+    for(bool scalar : {false, true})
+        for(bool capability : {false, true})
+            for(int sav : {0, 1, 2, 3})
+            {
+                SCOPED_TRACE(::testing::Message() << "scalar=" << scalar
+                                                 << " capability=" << capability << " SAV=" << sav);
+                problem.setUseScaleAlphaVec(sav);
+                problem.setParams().setDeviceScalarAlpha(scalar);
+                solution->problemType.useScaleAlphaVec = sav;
+                solution->internalArgsSupport.deviceScalarAlpha = capability;
+                Task task(hardware, problem, *solution);
+                const bool supported = !scalar || (capability && sav != 0);
+
+                EXPECT_EQ(selectionPredicate(task, hardware, *solution, problem), supported);
+                EXPECT_EQ(lib.findBestSolution(problem, hardware) != nullptr, supported);
+                EXPECT_EQ(lib.findAllSolutions(problem, hardware).size(), supported ? 1u : 0u);
+            }
+}
+
+TEST(ContractionSelectionLibraryTest, GroupedSelectionRequiresUniformScalarModeAndCapability)
+{
+    // Exercise selection without packing a synthetic kernel's launch arguments.
+    struct SelectionOnlySolution : ContractionSolution
+    {
+        size_t requiredWorkspaceSizeGroupedGemm(std::vector<ContractionProblemGemm> const&,
+                                               Hardware const&) const
+        {
+            return 0;
+        }
+    };
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setGroupedGemm(true);
+    auto solution = std::make_shared<SelectionOnlySolution>();
+    solution->problemType.useScaleAlphaVec = 1;
+    solution->internalArgsSupport.deviceScalarAlpha = true;
+    solution->requiredHostWorkspaceSizePerProblem = 0;
+    solution->problemType.groupedGemm = true;
+    SingleSolutionLibrary<ContractionProblemGemm, SelectionOnlySolution> lib(solution);
+
+    for(bool scalar : {false, true})
+        for(bool capability : {false, true})
+        {
+            solution->internalArgsSupport.deviceScalarAlpha = capability;
+            problem.setParams().setDeviceScalarAlpha(scalar);
+            std::vector<ContractionProblemGemm> problems{problem, problem};
+            const bool                          supported = !scalar || capability;
+            EXPECT_NO_THROW(
+                { EXPECT_EQ(lib.findBestSolution(problems, hardware) != nullptr, supported); });
+            EXPECT_NO_THROW({
+                EXPECT_EQ(lib.findAllSolutionsGroupedGemm(problems, hardware).size(),
+                          supported ? 1u : 0u);
+            });
+            problems[1].setParams().setDeviceScalarAlpha(!scalar);
+            EXPECT_EQ(lib.findBestSolution(problems, hardware), nullptr);
+            EXPECT_TRUE(lib.findAllSolutionsGroupedGemm(problems, hardware).empty());
+        }
+}
+
+TEST(ContractionSelectionLibraryTest, DeviceUserScalarAlphaOffsetMatchesCodegen)
+{
+    // KernelWriterAssembly selects this fixed offset for the ArgType==2 record.
+    EXPECT_EQ(offsetof(DeviceUserArguments<float>, scaleAlphaVec), 144u);
+}

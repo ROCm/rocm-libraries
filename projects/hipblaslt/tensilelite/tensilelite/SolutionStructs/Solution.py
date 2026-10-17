@@ -2320,6 +2320,18 @@ class Solution(collections.abc.Mapping):
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
         _supportStreamKPerTileExtraIters(state)
 
+    # Explicit opt-in: ordinary SAV kernels retain their existing ABI and GSU
+    # mask. DeviceScalarAlpha is a separate client runtime selector, not a
+    # request to change the generated kernel's capability.
+    if (state["InternalSupportParams"]["SupportDeviceScalarAlpha"]
+          and not isCustomKernelConfig(state)
+          and not (state["ProblemType"]["UseScaleAlphaVec"]
+                   and state["ProblemType"]["ComputeDataType"].isSingle()
+                   and state["KernelLanguage"] == "Assembly")):
+      reject(state, printRejectionReason,
+             "SupportDeviceScalarAlpha requires an Assembly kernel with UseScaleAlphaVec and FP32 compute")
+      return
+
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU

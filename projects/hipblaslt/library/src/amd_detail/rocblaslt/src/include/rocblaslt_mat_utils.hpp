@@ -55,6 +55,26 @@ inline size_t clampWorkspaceSize(const char* func, size_t workspaceBytes)
     return rocblaslt_max_workspace_bytes;
 }
 
+inline bool isScaleAlphaVecPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_vector_beta_host
+           || pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
+inline bool isDeviceScalarAlphaPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
+inline rocblaslt_status validateDeviceScalarAlphaType(const rocblaslt_matmul_desc descriptor)
+{
+    // Device scalar kernels load one FP32 value from the alpha pointer.
+    if(isDeviceScalarAlphaPointerMode(descriptor->pointermode)
+       && descriptor->scale_type != HIP_R_32F)
+        return rocblaslt_status_invalid_value;
+    return rocblaslt_status_continue;
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -183,6 +203,15 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            = rocblaslt_pointer_mode_host)
 {
     rocblaslt_status status = rocblaslt_status_continue;
+
+    // The current Matmul host path dereferences both scalars. Keep DEVICE reserved until
+    // device-resident alpha and beta plumbing is implemented; MatrixTransform handles it separately.
+    if(pointermode == rocblaslt_pointer_mode_device)
+        return rocblaslt_status_not_implemented;
+
+    if(pointermode != rocblaslt_pointer_mode_host
+       && !isScaleAlphaVecPointerMode(pointermode))
+        return rocblaslt_status_invalid_value;
 
     if(!(type_a == HIP_R_32F && type_b == HIP_R_32F && type_c == HIP_R_32F && type_d == HIP_R_32F)
        && compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -499,7 +528,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_offset_d,
                                             matmul_descr->pointermode);
 
-    const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
+    const void* alphaVecPtr
+        = isScaleAlphaVecPointerMode(matmul_descr->pointermode) ? alpha : nullptr;
     auto        epilogue_status = rocblaslt_epilogue_valid_args(matmul_descr->epilogue,
                                                          num_rows_d,
                                                          num_cols_d,
@@ -524,6 +554,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          gradient);
 
     // rocblaslt_epilogue_valid_args must to be called otherwise bias_type will be garbage value
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     if(matmul_status != rocblaslt_status_continue)
         return matmul_status;
 
