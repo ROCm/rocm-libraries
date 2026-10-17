@@ -375,9 +375,11 @@ matching unpack helpers as v2.
 
 The decode chain
 (:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
-sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
-matching the AMDGPU MX MFMA hardware path's denormal flush.
+:func:`rocke.helpers.apply_mx_scale`) reads each E8M0 byte as an
+unsigned exponent. Codes 0..254 decode to ``2^(e - 127)``. Code 255
+decodes to NaN, and the NaN scale makes the block's contribution NaN.
+Code 0 decodes to ``2^-127``, a subnormal f32. A kernel that flushes
+f32 denormals reads it as zero.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

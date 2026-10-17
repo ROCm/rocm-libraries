@@ -449,9 +449,9 @@ dequant_i4_byte_to_fp8_pair(b, packed_byte, *, inv_scale)
 dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 
 # OCP MX E8M0 shared-exponent decode + apply.
-# decode_mx_scale_e8m0(e8m0) -> f32 multiplier ``2^(e - 127)`` with
-# ``e == 0`` and ``e == 255`` mapped to ``0.0`` (matches the AMDGPU
-# MX MFMA hardware path's denormal flush).
+# decode_mx_scale_e8m0(e8m0) -> f32 multiplier ``2^(e - 127)`` for the
+# unsigned byte ``e`` in 0..254. ``e == 255`` gives NaN. The input is the
+# raw ``i8`` byte; the decoder zero-extends it.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
