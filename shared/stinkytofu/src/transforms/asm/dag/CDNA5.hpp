@@ -3482,7 +3482,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         // return only after the queue: the LDS return time plus the queue depth.
         const int drainWindows =
             (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + wmmaQueueDepth();
-        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
+        const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *

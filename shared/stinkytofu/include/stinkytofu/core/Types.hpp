@@ -144,6 +144,8 @@ struct PassFeatureConfig {
         /// the batch began behind the even line (a dependency delayed its loads), so the region
         /// closes the gap gradually. 0 = no catching up.
         int dsCatchUpPace = 2;
+        /// WMMAs per ds_load pacing batch (independent of the queue refill batch wmmaBatchSize).
+        int dsBatchWmmas = 4;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra
