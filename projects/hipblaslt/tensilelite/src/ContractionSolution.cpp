@@ -62,6 +62,8 @@
 #define TENSILELITE_TO_STR(x) #x
 #define TENSILELITE_ENUMSTR(x) x, TENSILELITE_TO_STR(x)
 
+#define HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE 70353390
+
 namespace TensileLite
 {
     namespace
@@ -1326,7 +1328,7 @@ namespace TensileLite
                        || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
                 {
                     int32_t esmRuntimeSupported = 0;
-#if HIP_VERSION >= 70353390
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
                     HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
                                                         hipDeviceAttributeExpertSchedMode,
                                                         hipAMDGPU->deviceId));
@@ -1707,7 +1709,7 @@ namespace TensileLite
                        || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
                 {
                     int32_t esmRuntimeSupported = 0;
-#if HIP_VERSION >= 70353390
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
                     HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
                                                         hipDeviceAttributeExpertSchedMode,
                                                         hipAMDGPU->deviceId));
@@ -3585,6 +3587,24 @@ namespace TensileLite
                 case CustomArgSemantic::GSUSync:
                     rv.args.template append<uint32_t>("GSUSync", 0);
                     break;
+                case CustomArgSemantic::ESMRuntimeSupported:
+                {
+                    int32_t esmRuntimeSupported = 0;
+                    
+                    hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                    if(hipAMDGPU
+                       && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                           || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+                    {
+#if HIP_VERSION >= HIP_VERSION_WITH_EXPERT_SCHEDULING_MODE
+                        HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                            hipDeviceAttributeExpertSchedMode,
+                                                            hipAMDGPU->deviceId));
+#endif
+                    }
+                    rv.args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+                    break;
+                }
                 case CustomArgSemantic::BatchOffsetD:
                     rv.args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
                     break;
