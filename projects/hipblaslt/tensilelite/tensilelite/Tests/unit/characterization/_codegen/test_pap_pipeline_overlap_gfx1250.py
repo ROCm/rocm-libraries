@@ -68,6 +68,30 @@ def test_carried_plr_completion_does_not_drain_second_tensor_group(tmp_path, str
         assert not any('s_wait_dscnt' in line for line in lines[persistent_entry:begin])
 
 
+@pytest.mark.parametrize("prepare", [False, True])
+def test_static_streamk_halfplr_pap_fits_scalar_budget_and_returns_to_all_copies(tmp_path, prepare):
+    results = emit_kernels_from_config(
+        _config(tmp_path, TileProcessingStrategy='StreamK', HalfPLR=1, SuppressNoLoadLoop=True,
+                AssertSummationElementMultiple=256 if prepare else 32),
+        limit=1, arch='gfx1250')
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+        assert max(map(int, re.findall(r'\.amdhsa_next_free_sgpr\s+(\d+)', src))) <= 106
+        assert 'restore HalfPLR loop-copy selector after PAP' in src
+        if prepare:
+            assert 'PAP retain prepared StreamK address' in src
+            assert 'PAP publish durable next coordinates for entry' in src
+            assert 'PAP activate retained StreamK coordinate' in src
+            assert 'PAP unpack current StreamKLocalEnd' in src
+        else:
+            assert 'checkpoint StreamKLocalStart for PAP restore' in src
+            assert 'restore current StreamKLocalEnd after PAP' in src
+        assert 'PAP group1 positive DepthU increment' not in src
+        for copy in range(3):
+            assert f'select branch-back label for HalfPLR loop copy {copy}' in src
+
+
 @pytest.mark.parametrize("cluster", [[1, 1], [2, 4]])
 def test_prepared_entry_coordinates_survive_epilogue(tmp_path, monkeypatch, cluster):
     reclaimed, protected = [], {}
