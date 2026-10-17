@@ -484,8 +484,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // A barrier is preceded by a tail of kBarrierTailWmmas WMMAs issued back to back: the wave
     // waits for the stage's last ds_loads while the tail runs, so the tail hides that much of the
     // drain. 4 is the best batch size measured on gfx1250 (never above 8, the useful queue depth).
-    // No ds_load is planned inside the tail: the sections and the consumer deadlines of the loads
-    // feeding a barrier end `wmmaBarrierReserve()` (= the tail) WMMAs before its threshold.
     static constexpr int kBarrierTailWmmas = 4;
     // Queued cover to hold for a barrier (0 = off); see DagFeatures::wmmaBarrierCoverCycles.
     int wmmaBarrierCover(int wmmaLatency) const {
@@ -496,11 +494,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const int want = f.wmmaBarrierCoverCycles < 0 ? kBarrierTailWmmas * std::max(1, wmmaLatency)
                                                       : f.wmmaBarrierCoverCycles;
         return std::min(want, fullQueue);
-    }
-    // WMMAs held back in front of a barrier's threshold to hide its stall.
-    int wmmaBarrierReserve(int wmmaLatency) const {
-        const int cover = wmmaBarrierCover(wmmaLatency);
-        return cover > 0 ? (cover + std::max(1, wmmaLatency) - 1) / std::max(1, wmmaLatency) : 0;
     }
     bool wmmaRefillActive(int wmmaLatency) {
         if (wmmaQueueCover() <= 0) return false;
@@ -3482,7 +3475,11 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (isMatrixInstruction(*deps.dag.nodes[id].inst)) wmmaIndex[id] = wmmaOrdinal++;
         }
         constexpr int kConsumerHops = 3;
-        const int barrierReserve = wmmaBarrierReserve(wmmaIssueConfig.latency);
+        // WMMAs kept free in front of a barrier (and the region end) for the last ds_load feeding
+        // it to return.
+        const int barrierReserve =
+            (dsReadCreditLifetime() + std::max(1, wmmaIssueConfig.latency) - 1) /
+            std::max(1, wmmaIssueConfig.latency);
         auto consumerWindow = [&](unsigned id) {
             int best = INT_MAX;
             std::vector<unsigned> frontier{id};
