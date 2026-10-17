@@ -52,9 +52,9 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.project([0, 2]).element_count, 8)
         self.assertEqual(hn.Shape([7]).project([]).element_count, 1)
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
-            if math.prod(dimensions) > SIZE_MAX:
+            if math.prod(d for d in dimensions if d != 0) > SIZE_MAX:
                 with self.assertRaisesRegex(
-                    RuntimeError, "element count exceeds size_t"
+                    RuntimeError, "product of nonzero extents exceeds size_t"
                 ):
                     hn.Shape(dimensions)
                 continue
@@ -63,30 +63,33 @@ class ShapeTests(unittest.TestCase):
                 for end in range(first, 4):
                     expected = math.prod(dimensions[first:end])
                     with self.subTest(dimensions=dimensions, first=first, end=end):
-                        if expected > SIZE_MAX:
-                            with self.assertRaises(RuntimeError):
-                                shape.element_count_in_range(first, end)
-                        else:
-                            self.assertEqual(
-                                shape.element_count_in_range(first, end), expected
-                            )
+                        self.assertEqual(
+                            shape.element_count_in_range(first, end), expected
+                        )
             for excluded in range(3):
                 expected = math.prod(
                     d for i, d in enumerate(dimensions) if i != excluded
                 )
                 with self.subTest(dimensions=dimensions, excluded=excluded):
-                    if expected > SIZE_MAX:
-                        with self.assertRaises(RuntimeError):
-                            shape.project(
-                                [i for i in range(3) if i != excluded]
-                            ).element_count
-                    else:
-                        self.assertEqual(
-                            shape.project(
-                                [i for i in range(3) if i != excluded]
-                            ).element_count,
-                            expected,
-                        )
+                    self.assertEqual(
+                        shape.project(
+                            [i for i in range(3) if i != excluded]
+                        ).element_count,
+                        expected,
+                    )
+            for axes in itertools.permutations(range(3)):
+                projected = shape.project(axes)
+                self.assertEqual(projected.dimensions, [dimensions[a] for a in axes])
+                self.assertEqual(projected.element_count, math.prod(dimensions))
+            for selection in (
+                slice(None),
+                slice(None, None, -1),
+                slice(0, 2),
+                slice(1, None),
+            ):
+                sliced = shape[selection]
+                self.assertEqual(sliced.dimensions, list(dimensions[selection]))
+                self.assertEqual(sliced.element_count, math.prod(dimensions[selection]))
 
     def test_descriptive_bounds_errors(self):
         shape = hn.Shape([2, 3, 4])
@@ -153,7 +156,7 @@ class ShapeTests(unittest.TestCase):
         # more restrictive native integer limits.
         for dimensions in itertools.product((0, 1, 2, SIZE_MAX), repeat=3):
             count = math.prod(dimensions)
-            if count > SIZE_MAX:
+            if math.prod(d for d in dimensions if d != 0) > SIZE_MAX:
                 with self.assertRaises(RuntimeError):
                     hn.Shape(dimensions)
                 continue
@@ -185,12 +188,12 @@ class ShapeTests(unittest.TestCase):
                         )
 
     def test_coordinate_bounds_before_arithmetic(self):
-        shape = hn.Shape([SIZE_MAX, 2, 0])
+        shape = hn.Shape([SIZE_MAX, 1, 0])
         for order in itertools.permutations(range(shape.rank)):
             for indices, dimension, coordinate, extent in (
-                ([SIZE_MAX - 1, 1, 0], 2, 0, 0),
-                ([0, 1, 5], 2, 5, 0),
-                ([SIZE_MAX, 1, 0], 0, SIZE_MAX, SIZE_MAX),
+                ([SIZE_MAX - 1, 0, 0], 2, 0, 0),
+                ([0, 0, 5], 2, 5, 0),
+                ([SIZE_MAX, 0, 0], 0, SIZE_MAX, SIZE_MAX),
             ):
                 with self.subTest(order=order, indices=indices):
                     with self.assertRaisesRegex(
@@ -242,9 +245,9 @@ class ShapeTests(unittest.TestCase):
                 hn.Shape().coordinates(1)
             for dimensions in (
                 [0],
-                [0, SIZE_MAX, 2],
-                [SIZE_MAX, 0, 2],
-                [SIZE_MAX, 2, 0],
+                [0, SIZE_MAX, 1],
+                [SIZE_MAX, 0, 1],
+                [SIZE_MAX, 1, 0],
             ):
                 empty = hn.Shape(dimensions)
                 self.assertEqual(empty.element_count, 0)
@@ -263,22 +266,24 @@ class ShapeTests(unittest.TestCase):
             self.assertEqual(
                 boundary.coordinates(SIZE_MAX - 1, order), [SIZE_MAX - 1, 0]
             )
-        for dimensions in ([SIZE_MAX, 2], [SIZE_MAX, 2, 1, 1]):
+        for dimensions in (
+            [SIZE_MAX, 2],
+            [SIZE_MAX, 2, 1, 1],
+            [0, SIZE_MAX, 2],
+            [SIZE_MAX, 0, 2],
+            [SIZE_MAX, 2, 0],
+        ):
             for extents in (dimensions, tuple(dimensions)):
-                with self.assertRaisesRegex(
-                    RuntimeError, "element count exceeds size_t"
+                with self.subTest(extents=extents), self.assertRaisesRegex(
+                    RuntimeError, "product of nonzero extents exceeds size_t"
                 ):
                     hn.Shape(extents)
-        empty = hn.Shape([SIZE_MAX, 2, 0])
+        empty = hn.Shape([SIZE_MAX, 1, 0])
         self.assertEqual(empty.element_count, 0)
-        for operation in (
-            lambda: empty.element_count_in_range(0, 2),
-            lambda: empty.project([0, 1]),
-            lambda: empty[:2],
-            lambda: empty[::-1][1:],
-        ):
-            with self.assertRaisesRegex(RuntimeError, "element count exceeds size_t"):
-                operation()
+        self.assertEqual(empty.element_count_in_range(0, 2), SIZE_MAX)
+        self.assertEqual(empty.project([0, 1]).element_count, SIZE_MAX)
+        self.assertEqual(empty[:2].element_count, SIZE_MAX)
+        self.assertEqual(empty[::-1][1:].element_count, SIZE_MAX)
         self.assertEqual(empty.project([1, 2, 0]).element_count, 0)
         self.assertEqual(empty[::-1].element_count, 0)
 
