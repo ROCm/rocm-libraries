@@ -315,7 +315,7 @@ def _module_from_source(source):
 # The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
 # spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
 # reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
-# spec-first predicate and are unvalidated.
+# spec-first predicate, so ``_check_support_predicate`` refuses to pack them.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
     "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
@@ -387,7 +387,8 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     fails late (or worse, succeeds and ships something untested).
 
     Only spec-first predicates can be called generically (see
-    `_PREDICATE_ALIASES`); a builder with no resolvable predicate is unvalidated.
+    `_PREDICATE_ALIASES`). A builder with no resolvable predicate cannot be
+    validated, so the pack refuses it rather than ship the spec unchecked.
 
     Exception policy: a predicate that raises has no verdict on the spec, and the
     builder does not re-check every rule a predicate enforces (some only fail much
@@ -402,7 +403,12 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     """
     name, predicate = _resolve_support_predicate(module, builder)
     if predicate is None:
-        return
+        raise HkpPackError(
+            f"builder '{builder}' in module {getattr(module, '__name__', module)} "
+            f"has no spec-first support predicate, so its spec cannot be validated "
+            f"@ {arch}; add an `is_valid_spec(spec, *, arch)`/`supports_*_spec` "
+            f"predicate or an entry in _PREDICATE_ALIASES"
+        )
 
     params = inspect.signature(predicate).parameters
     kwargs = {"arch": arch} if "arch" in params else {}

@@ -12,8 +12,11 @@ and can wrongly reject (or admit) a spec. This runs both on specs the dispatcher
 produces, over fp8 / ALiBi / QQ-bias problems and over problems the gate rejects as
 well as the ones it admits, and compares the whole verdict, reason included.
 
-The 4-warp fast cohort (``_gfx942_4warp_fast``) is excluded: its flag is not a
-spec field, so that builder is intentionally not aliased in ``hkp_pack``.
+The 4-warp fast cohort (``_gfx942_4warp_fast``) is excluded from the 2D comparison:
+its flag is not a spec field, so ``supports_tiled_2d_spec`` cannot reproduce the gate
+for it. ``hkp_pack`` does alias that builder, ``build_gfx942_4warp_gqa``, to
+``supports_gfx942_4warp_gqa_spec``, which fixes ``use_d256_fast=True`` from the builder;
+that wrapper is covered by ``dispatch/attention/test_tiled_support_spec_wrappers.py``.
 """
 
 from __future__ import annotations

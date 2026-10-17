@@ -182,30 +182,44 @@ def test_resolves_only_the_predicate_written_for_the_builders_spec():
 
 
 @pytest.mark.quick
-def test_skips_kwargs_only_predicate():
-    """Not callable from a spec instance, so it must be skipped, not guessed at.
+def test_refuses_kwargs_only_predicate_without_calling_it():
+    """Not callable from a spec instance, so the builder has no usable predicate:
+    the pack refuses it, and never guesses a spec-field-to-kwarg mapping.
 
     The real supports_tiled_2d takes head_size/block_size/dtype individually as
-    keyword-only args. Inventing a spec-field-to-kwarg mapping would validate
-    something other than what gets built.
+    keyword-only args; mapping them would validate something other than what gets
+    built.
     """
+    calls = []
 
     def supports_tiled_2d_spec(*, spec: _Spec, head_size, block_size, dtype):
-        raise AssertionError("must not be called from a spec instance")
+        calls.append(spec)
 
     module = _Mod(
         builders=("build_unified_attention_2d_tiled",),
         supports_tiled_2d_spec=supports_tiled_2d_spec,
     )
 
-    _check_support_predicate(
-        module, "build_unified_attention_2d_tiled", _Spec(n=1), "gfx942"
-    )
+    with pytest.raises(HkpPackError, match="build_unified_attention_2d_tiled"):
+        _check_support_predicate(
+            module, "build_unified_attention_2d_tiled", _Spec(n=1), "gfx942"
+        )
+    assert calls == []
 
 
 @pytest.mark.quick
-def test_missing_predicate_is_not_an_error():
-    _check_support_predicate(_Mod(), "build_x", _Spec(n=1), "gfx942")
+def test_refuses_builder_with_no_predicate():
+    """A builder whose spec cannot be validated is refused, not packed unchecked.
+    The message names the builder, its module and the arch."""
+    module = _Mod()
+    module.__name__ = "kernels.fake_module"
+
+    with pytest.raises(HkpPackError) as exc:
+        _check_support_predicate(module, "build_x", _Spec(n=1), "gfx950")
+    message = str(exc.value)
+    assert "build_x" in message
+    assert "kernels.fake_module" in message
+    assert "gfx950" in message
 
 
 @pytest.mark.quick
@@ -246,19 +260,25 @@ def test_predicate_with_positional_only_arch_fails_with_call_error():
 
 
 @pytest.mark.quick
-def test_reduce_tiled_builder_has_no_predicate():
-    # The reduce spec lacks the fields supports_tiled_3d_spec reads.
+def test_reduce_tiled_builder_is_refused_not_matched_to_a_tiled_predicate():
+    """The reduce spec lacks the fields supports_tiled_3d_spec reads, so that
+    predicate must neither be called for it nor stand in for a missing one."""
+    calls = []
+
     def supports_tiled_3d_spec(spec: _Spec, *, arch="gfx942"):
-        return spec.kv_storage_dtype is None, ""
+        calls.append(spec)
+        return True, ""
 
     module = _Mod(
         builders=("build_unified_attention_reduce_tiled",),
         supports_tiled_3d_spec=supports_tiled_3d_spec,
     )
 
-    _check_support_predicate(
-        module, "build_unified_attention_reduce_tiled", _Spec(n=1), "gfx942"
-    )
+    with pytest.raises(HkpPackError, match="build_unified_attention_reduce_tiled"):
+        _check_support_predicate(
+            module, "build_unified_attention_reduce_tiled", _Spec(n=1), "gfx942"
+        )
+    assert calls == []
 
 
 _HAS_ROCKE_LIBRARY = (
@@ -302,55 +322,6 @@ def test_every_rocke_builder_resolves_a_predicate_for_its_own_spec():
             f"for {hint!r}"
         )
     assert checked
-
-
-#: Builders `_check_support_predicate` cannot validate today, because they have no
-#: spec-first predicate. Every builder in the library is either resolvable or listed
-#: here, and the test below holds the list equal to the unresolved set: a builder
-#: added without a predicate must be listed, and one that gains a predicate must be
-#: removed.
-_UNVALIDATED_BUILDERS = frozenset(
-    {
-        "kernels.common.attention_unified.build_unified_attention_2d",
-        "kernels.common.attention_unified.build_unified_attention_3d",
-        "kernels.common.attention_unified.build_unified_attention_reduce",
-        "kernels.common.conv_direct_grouped.build_direct_transpose_weights_dgrad",
-        "kernels.common.conv_direct_grouped.build_direct_reorganize_weights",
-        "kernels.common.conv_direct_grouped.build_direct_coalesced_weights_dgrad",
-        "kernels.common.conv_direct_grouped.build_direct_mfma_dgrad",
-        "kernels.common.conv_implicit_gemm_wgrad_two_stage.build_implicit_gemm_conv_wgrad_two_stage",
-        "kernels.common.conv_wgrad_workspace_reduce.build_conv_wgrad_workspace_reduce",
-        "kernels.gfx1250.attention_tiled_2d.build_unified_attention_2d_tiled",
-        "kernels.gfx1250.attention_tiled_3d.build_unified_attention_3d_tiled",
-        "kernels.gfx1250.attention_tiled_3d.build_unified_attention_reduce_tiled",
-        "kernels.gfx942.attention_tiled_3d.build_unified_attention_reduce_tiled",
-        "kernels.gfx950.attention_tiled_2d_fastkv_regp.build_unified_attention_2d_fastkv_register_p",
-        "kernels.gfx950.attention_tiled_3d.build_unified_attention_reduce_tiled",
-    }
-)
-
-
-@pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
-def test_unvalidated_builder_list_matches_the_library():
-    """The pack validates a spec only through a predicate it can resolve, so a builder
-    added without one ships unvalidated. Give it a predicate, or list it above on
-    purpose; and delist a builder once it resolves one."""
-    unvalidated = {
-        f"{module.__name__}.{builder}"
-        for module, builder, _ in _library_builders()
-        if _resolve_support_predicate(module, builder)[1] is None
-    }
-    new = sorted(unvalidated - _UNVALIDATED_BUILDERS)
-    assert not new, (
-        f"builder(s) with no support predicate: {new}. Add a spec-first "
-        "`supports_*_spec`/`is_valid_*` predicate (see _PREDICATE_ALIASES) or list "
-        "them in _UNVALIDATED_BUILDERS."
-    )
-    stale = sorted(_UNVALIDATED_BUILDERS - unvalidated)
-    assert not stale, (
-        f"builder(s) listed in _UNVALIDATED_BUILDERS that now resolve a support "
-        f"predicate (or no longer exist): {stale}. Remove them from the list."
-    )
 
 
 @pytest.mark.skipif(

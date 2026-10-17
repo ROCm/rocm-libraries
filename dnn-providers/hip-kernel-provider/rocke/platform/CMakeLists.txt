@@ -494,8 +494,8 @@ if(ROCKE_INSTALL_TESTS)
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
     # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
-    # because tests/__init__.py exists while rocke/library/__init__.py does not,
-    # so pytest's prepend-mode basedir is already tests/library regardless of CWD
+    # because pytest runs in importlib import mode (library/tests/pytest.ini), which
+    # does not put the test directory on sys.path, whatever the CWD
     # (confirmed by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
@@ -533,8 +533,12 @@ if(ROCKE_INSTALL_TESTS)
     endforeach()
 
     # Library attention GPU numeric tests (gfx950-specific; require a GPU).
-    # Separate from the omnibus GPU suite so this label can be targeted on its
-    # own when only attention hardware is available.
+    # Separate from the omnibus GPU suite so it can be targeted on its own when only
+    # attention hardware is available. Select it by name (`ctest -R
+    # rocke_library_attention_gpu_pytest`), not by label: the ROCKE_ENGINE YAML
+    # category pass replaces the "ckc;python;attention;gpu" labels below with its
+    # own, so `-L gpu` and `-L attention` do not match it in a YAML-categorized
+    # install tree.
     set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
         "tests/library/tests/test_attention_dense_gfx950_numeric.py"
         "tests/library/tests/test_extended_parity_attention.py")
