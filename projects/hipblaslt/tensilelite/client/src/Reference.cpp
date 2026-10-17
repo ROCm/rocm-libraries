@@ -3085,7 +3085,7 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #ifndef _WIN32
-            // Half/BFloat16 dest for pure 6-bit and F6/B6 mixed gemms
+            // Half/BFloat16 dest for 6-bit and 6-bit/other mixed gemms
             case TypedGemm_F6_H_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_F6_H_S, float>::SolveCPU(
@@ -3124,6 +3124,106 @@ namespace TensileLite
             case TypedGemm_B6F6_B_S::TypeId():
             {
                 return ReferenceSolution<TypedGemm_B6F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F4_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F4_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6F8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F6B8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6B8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8F6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F4_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F4_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6F8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F8B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F8B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6B8_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6B8_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B6B8_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6B8_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8B6_H_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8B6_H_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_B8B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B8B6_B_S, float>::SolveCPU(
                     problem, inputs, elementsToValidate);
             }
 #endif // !_WIN32
