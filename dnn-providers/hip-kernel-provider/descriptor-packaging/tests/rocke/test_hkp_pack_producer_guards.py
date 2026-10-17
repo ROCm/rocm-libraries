@@ -131,7 +131,7 @@ def test_resolves_predicate_by_derived_name():
 @pytest.mark.quick
 def test_resolves_predicate_by_alias_for_tiled_family():
     # The tiled family's predicates do not follow the naming convention; without
-    # the alias map this builder would go unvalidated.
+    # the alias map the pack of this builder fails with no resolvable predicate.
     def supports_tiled_2d_spec(spec: _Spec, *, arch="gfx942"):
         return (False, "tiled no")
 
@@ -333,7 +333,7 @@ def test_predicate_aliases_resolve_to_real_predicates():
 
     The alias map exists so builders whose predicates don't follow the naming
     convention still get pre-flight validation.  If a predicate is renamed, the
-    alias becomes stale and hkp_pack silently skips validation for that builder.
+    alias becomes stale and hkp_pack fails the pack of that builder.
     This test makes stale aliases a test failure rather than a silent regression.
     """
     import kernels.gfx942.attention_tiled_2d as gfx942_2d
