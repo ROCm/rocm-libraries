@@ -34,6 +34,7 @@ from config_harness import (
     assert_real_gfx1250_kernels,
     emit_kernels_from_config,
     golden_digest,
+    solutions_from_config,
 )
 
 pytestmark = pytest.mark.unit
@@ -67,9 +68,14 @@ def _assert_pap_handoff(src, *, late=False):
     checkpoint = src.index("checkpoint WorkGroup0 for PAP restore", start)
     issue = src.index("tensor_load_to_lds", start)
     assert checkpoint < issue
-    # The issue helper can add its own automatic cluster phases. Isolate the
-    # explicit PAP handoff, while still bounding it by the very first load.
-    phase_end = src.index("Begin setupPrefetchAcrossPersistentLoads", checkpoint) if late else checkpoint
+    # The issue helper can add its own automatic cluster phases, and SIA4
+    # can remove the setup module comment. Bound the explicit PAP phase by
+    # its elected-wave join and the following all-peer cluster wait instead.
+    phase = re.search(
+        r"^label_PersistentMC_SkipPapSignal\w*:\s*\n\s*s_barrier_wait\s+-3\b",
+        src[start:issue], re.MULTILINE)
+    assert phase is not None
+    phase_end = start + phase.end() if late else checkpoint
     assert phase_end < issue
     region = src[start:phase_end]
     barriers = list(re.finditer(r"s_barrier_(signal|wait)\s+(-[13])", region))
@@ -88,7 +94,7 @@ def _assert_pap_handoff(src, *, late=False):
         assert checkpoint < start + joins[-1].end() < handoff_start
         assert start + alpha_join.end() < handoff_start
     else:
-        # StreamK and unsupported layouts retain their original early handoff.
+        # SIA0 and unsupported layouts retain their original early handoff.
         assert handoff_end < checkpoint
     assert handoff_end < issue
     assert "restore current PersistentPhantomTile after PAP" in src
@@ -97,6 +103,25 @@ def _assert_pap_handoff(src, *, late=False):
 
 def _max_sgpr(src):
     return max((int(m.group(1)) for m in _NEXT_FREE_SGPR.finditer(src)), default=0)
+
+
+def _expected_handoff_timing(cluster_dim):
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+
+    # The legacy-named fixture resolves to DataParallel/StaticGrid. Its SIA0
+    # kernels retain the early handoff; eligible SIA4 kernels defer it. Derive
+    # that expectation from configuration, independently of assembly placement.
+    solutions = solutions_from_config(_CONFIG, arch=_ARCH, limit_solutions=16)
+    kernels = [kernel for kernel in generateKernelObjectsFromSolutions(solutions)
+               if tuple(kernel["ClusterDim"]) == tuple(cluster_dim)]
+    assert all(kernel["TileProcessingStrategy"] == "DataParallel"
+               and kernel["WorkAssignment"] == "StaticGrid" for kernel in kernels)
+    schedules = {getKernelFileBase(False, kernel): kernel["ScheduleIterAlg"]
+                 for kernel in kernels}
+    assert len(schedules) == len(kernels)
+    assert set(schedules.values()) == {0, 4}
+    return {base: schedule == 4 for base, schedule in schedules.items()}
 
 
 def _emit(cluster_dim):
@@ -113,11 +138,13 @@ def _emit(cluster_dim):
 def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_peers):
     """PAP keeps every mask that carries real peers live across the persistent
     refresh, and only frees the A mask when Ck == 1 makes it self-only."""
+    late_by_kernel = _expected_handoff_timing(cluster_dim)
     results = _emit(cluster_dim)
     assert_real_gfx1250_kernels(results)
+    assert {base for base, _src, _err in results} == set(late_by_kernel)
     for base, src, _err in results:
         assert_assembles(src, base)
-        _assert_pap_handoff(src)
+        _assert_pap_handoff(src, late=late_by_kernel[base])
         # B broadcasts along Cs in both shapes, so it is always re-applied.
         assert _B_ATTACH in src, (
             f"Kernel {base!r} dropped the B-multicast mask (MulticastMaskB)"
@@ -160,3 +187,13 @@ def test_streamk_pap_cluster_multicast_gfx1250_mask_liveness(cluster_dim, a_has_
 def test_streamk_pap_cluster_multicast_gfx1250_golden(snapshot, cluster_dim, _a_has_peers):
     """Golden: order-invariant {basename, err} digest, one per cluster shape."""
     assert golden_digest(_emit(cluster_dim)) == snapshot
+
+
+def test_dataparallel_halfplr_pap_preserves_handoff_after_barrier_rebuild():
+    config = os.path.join(os.path.dirname(_CONFIG), "dataparallel_halfplr_pap_multicast.yaml")
+    results = emit_kernels_from_config(config, limit=1, arch=_ARCH)
+    assert_real_gfx1250_kernels(results)
+    for base, src, _err in results:
+        assert_assembles(src, base)
+        _assert_pap_handoff(src, late=True)
+        assert 0 < _max_sgpr(src) <= _SGPR_BUDGET
