@@ -3378,6 +3378,12 @@ namespace TensileLite
                 case CustomArgSemantic::AddressTD:
                     rv.args.template append<void const*>("AddressTD", inputs.d);
                     break;
+                case CustomArgSemantic::AddressScaleZeroA:
+                    rv.args.template append<void const*>("AddressScaleZeroA", inputs.scaleZeroA);
+                    break;
+                case CustomArgSemantic::ScaleBlockSizeA:
+                    rv.args.appendCustomType("groupSize", problem.scaleBlockSizeA(), arg.type);
+                    break;
                 case CustomArgSemantic::AddressScaleA:
                     rv.args.template append<void const*>("AddressScaleA", inputs.scaleA);
                     break;
