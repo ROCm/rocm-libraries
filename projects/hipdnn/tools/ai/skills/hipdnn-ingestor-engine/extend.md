@@ -12,8 +12,8 @@ KMD whose filename does not follow the individual packs.
 
 Preserve old names, UUIDs, symbols, references and native hooks; only genuinely new
 objects get new IDs. Compare completed, KMD-typed metadata across the whole engine:
-conflicting tuples on overlapping effective architectures fail, equal tuples on disjoint
-architectures are legal. New topology, layouts, attributes or feature combinations
+equal tuples fail only when they compete at the same arch tier on a device; disjoint
+architectures or different tiers (explicit over generic over empty) are legal. New topology, layouts, attributes or feature combinations
 reopen [graph-contract.md](graph-contract.md), even for a "variant".
 
 A new variant can be one added KDP entry or a standalone UKD reference, with no new
@@ -68,7 +68,7 @@ The one registration a generated engine needs is the **kernel source**, and only
 | Group | Kinds | What happens |
 |---|---|---|
 | Compilation inputs | `hip`, `rocke` | Authored, lowered to a code object at pack time. No CMake registration. |
-| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory: list every arch the object runs on (a generic-target object lists all of them), on the kernel or inherited from its pack. |
+| Prebuilt input | `hsaco` | Authored as `{file, symbol}`, packed byte-for-byte: no compile, no CMake registration. `arch` is mandatory; see [hsaco kernels and `arch`](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#hsaco-kernels-and-arch). |
 | Passthrough | `embedded_source` | Shipped as authored, no producer runs, no archive entry. **Needs the registration below.** |
 | Runtime descriptor form | `kpack` | Written *by* the packer and shipped; the runtime sees only this. The packer's intermediate also uses `kind: hsaco` for compiled variants. |
 

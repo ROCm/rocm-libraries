@@ -278,6 +278,27 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
     }
 }
 
+TEST(TestKpackModuleCacheSelectArch, PrefersTheExactDeviceArchOverAGenericKey)
+{
+    // The generic key sorts first; first-match-wins would pick it.
+    const std::vector<std::string> keys{"gfx11-generic", "gfx1151"};
+
+    const auto* selected = KpackModuleCache::selectArch(keys, "gfx1151:sramecc+:xnack-");
+
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected, &keys[1]);
+}
+
+TEST(TestKpackModuleCacheSelectArch, FallsBackToAGenericKeyContainingTheDevice)
+{
+    const std::vector<std::string> keys{"gfx942", "gfx12-generic", "gfx11-generic"};
+
+    const auto* selected = KpackModuleCache::selectArch(keys, "gfx1100:xnack-");
+
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(selected, &keys[2]);
+}
+
 TEST(TestKpackModuleCacheLoad, ReportsAnArchiveThatDeclaresNoArchitectures)
 {
     const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");

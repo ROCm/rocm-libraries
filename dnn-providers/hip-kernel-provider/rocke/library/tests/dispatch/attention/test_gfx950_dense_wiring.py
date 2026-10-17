@@ -34,7 +34,10 @@ from dispatch.attention import (
     iter_registered_attention_combos,
     tuning_spec_with_knobs,
 )
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+from kernels.common.attention_dense_spec import (
+    DENSE_TILE_GEOMETRIES,
+    attention_dense_cache_key,
+)
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import (
     AttentionDenseSpec,
@@ -328,6 +331,108 @@ class TestDenseBottomRightWiring(unittest.TestCase):
                     self.assertIn("br", spec.kernel_name().split("_"))
                     self.assertNotIn("persist", spec.kernel_name())
                     self.assertNotIn("wdma", spec.kernel_name())
+
+    def test_cross_length_top_left_ragged_is_unshifted(self):
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.TOP_LEFT_CAUSAL,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertTrue(spec.causal)
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertTrue(spec.ragged)
+                br = _spec(
+                    self._moving_req(
+                        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+                        seqlen_q=min(sq, sk),
+                        seqlen_k=max(sq, sk),
+                    )
+                )
+                self.assertNotEqual(spec.kernel_name(), br.kernel_name())
+                self.assertNotEqual(
+                    attention_dense_cache_key(spec, arch="gfx950"),
+                    attention_dense_cache_key(br, arch="gfx950"),
+                )
+
+    def test_no_mask_cross_length_unaligned_is_ragged_cross_attention(self):
+        # Full attention between different lengths (cross-attention) is standard; the
+        # ragged body handles it with the key-pad mask and the guarded store.
+        for sq, sk in ((8180, 8230), (8230, 8180)):
+            with self.subTest(sq=sq, sk=sk):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                    )
+                )
+                self.assertFalse(spec.causal)
+                self.assertTrue(spec.ragged)
+
+    def test_band_requests_map_to_the_dense_band_fields(self):
+        cases = {
+            "left_only": (dict(sliding_window=256), False, 0),
+            "two_sided": (dict(sliding_window=256, right_bound=64), True, 64),
+            "lookahead": (dict(right_bound=16), True, 16),
+        }
+        for name, (kw, causal, right) in cases.items():
+            with self.subTest(band=name):
+                spec = _spec(
+                    self._moving_req(
+                        AttentionMaskType.NO_MASK,
+                        seqlen_q=2048,
+                        seqlen_k=2048,
+                        **kw,
+                    )
+                )
+                self.assertEqual((spec.causal, spec.right_bound), (causal, right))
+                self.assertFalse(spec.causal_bottom_right)
+                self.assertEqual(spec.sliding_window, kw.get("sliding_window", 0))
+
+    def test_band_names_are_distinct_and_default_names_unchanged(self):
+        base = dict(
+            seqlen_q=2048,
+            seqlen_k=2048,
+        )
+        names = {
+            label: _spec(
+                self._moving_req(AttentionMaskType.NO_MASK, **base, **kw)
+            ).kernel_name()
+            for label, kw in {
+                "full": {},
+                "left_only": dict(sliding_window=256),
+                "causal_window": dict(sliding_window=256, right_bound=0),
+                "two_sided": dict(sliding_window=256, right_bound=64),
+                "lookahead": dict(right_bound=64),
+            }.items()
+        }
+        self.assertEqual(len(set(names.values())), len(names), names)
+        causal = _spec(
+            self._moving_req(AttentionMaskType.TOP_LEFT_CAUSAL, **base)
+        ).kernel_name()
+        self.assertNotIn("_rb", causal)
+
+    def test_bottom_right_alignment_cross_length_with_a_band_is_rejected(self):
+        # The dense body anchors a window / lookahead on the top-left diagonal; a
+        # shifted (bottom-right) band would silently compute the wrong mask.
+        for kw in (
+            dict(sliding_window=256, diagonal_alignment=1),
+            dict(right_bound=16, diagonal_alignment=1),
+        ):
+            with self.subTest(**kw):
+                with self.assertRaisesRegex(ValueError, "bottom-right alignment"):
+                    _spec(
+                        self._moving_req(
+                            AttentionMaskType.NO_MASK,
+                            seqlen_q=2048,
+                            seqlen_k=4096,
+                            **kw,
+                        )
+                    )
 
     def test_persistent_candidates_refuse_moving_bottom_right(self):
         for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
