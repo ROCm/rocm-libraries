@@ -60,8 +60,8 @@ class LraTileAssignmentVALU(LraTileAssignment):
         # dot2: currently only support unroll major LDS
         tc               = tP["tensorChar"]
         umlds            = kernel["UnrollMajorLDS%s" % tc]
-        LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
-        strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+        # LdsBlockSizePerPad is 0 or (f64c+TDM) exactly one K-row, so the pad is per row either way.
+        strideTile       = kernel["_DepthU%s"%tc] + kernel["LdsPad%s" % tc] if umlds else 1
         tmpVgpr          = writer.vgprPool.checkOutAligned(2,2, tag="LraTileAssignmentVALU_tmpVgpr")
         tmpVgprRes       = ContinuousRegister(tmpVgpr, 2)
 
@@ -93,6 +93,9 @@ class LraTileAssignmentVALU(LraTileAssignment):
                         "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
                 else:
                     module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
+                    if umlds:
+                        module.add(vectorStaticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
+                        "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
 
                 # release and return resource
                 tP["gpr"]["lro"] = rReg
@@ -108,7 +111,7 @@ class LraTileAssignmentVALU(LraTileAssignment):
                 # generate instruction
                 module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
 
-                if kernel["UseDotInstruction"]:
+                if kernel["UseDotInstruction"] or umlds:
                     # tile offset
                     module.add(vectorStaticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
                     "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
