@@ -341,7 +341,17 @@ TEST(ShapeCpp, ConstructionAndOwnership) {
     EXPECT_THROW((Shape{maximum, 2}), std::runtime_error);
     EXPECT_THROW(Shape(std::span<const size_t>(oversized)), std::runtime_error);
     EXPECT_THROW((Shape(std::vector<size_t>{maximum, 2})), std::runtime_error);
-    EXPECT_EQ(Shape({maximum, 2, 0}).elementCount(), 0);
+    for (const auto& extents :
+         {std::vector<size_t>{0, maximum, 2}, std::vector<size_t>{maximum, 0, 2},
+          std::vector<size_t>{maximum, 2, 0}}) {
+        EXPECT_THROW((Shape(extents)), std::runtime_error);
+        EXPECT_THROW(Shape(std::span<const size_t>(extents)), std::runtime_error);
+    }
+    EXPECT_THROW((Shape{maximum, 2, 0}), std::runtime_error);
+    const Shape empty{maximum, 1, 0};
+    EXPECT_EQ(empty.elementCount(), 0);
+    EXPECT_EQ(empty.elementCount(0, 2), maximum);
+    EXPECT_EQ(empty.project(std::array<size_t, 2>{0, 1}).elementCount(), maximum);
 }
 
 TEST(ShapeCpp, CallerProvidedCoordinates) {
@@ -360,7 +370,7 @@ TEST(ShapeCpp, CallerProvidedCoordinates) {
         EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
     }
     for (const Shape& invalidShape :
-         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
+         {Shape{2, 3, 0}, Shape{std::numeric_limits<size_t>::max(), 1, 0}}) {
         output.fill(99);
         EXPECT_THROW(invalidShape.coordinates(0, order, output), std::runtime_error);
         EXPECT_EQ(output, (std::array<size_t, 3>{99, 99, 99}));
