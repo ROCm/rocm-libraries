@@ -277,6 +277,47 @@ int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask)
     }
 }
 
+rocke_value_t* rocke_b_warp_shuffle_xor_quad(rocke_ir_builder_t* b, rocke_value_t* v, int xor_mask)
+{
+    /* Mirror of Python IRBuilder.warp_shuffle_xor_quad: xor_mask 1 -> perm
+     * [1,0,3,2], xor_mask 2 -> perm [2,3,0,1], both inside the quad so they
+     * lower to quad_perm. Wider masks are not intra-quad and must go through
+     * rocke_b_warp_shuffle_xor instead. */
+    int p0, p1, p2, p3;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_quad: NULL operand");
+    if(xor_mask == 1)
+    {
+        p0 = 1;
+        p1 = 0;
+        p2 = 3;
+        p3 = 2;
+    }
+    else if(xor_mask == 2)
+    {
+        p0 = 2;
+        p1 = 3;
+        p2 = 0;
+        p3 = 1;
+    }
+    else
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "warp_shuffle_xor_quad supports xor_mask 1 or 2, got %d", xor_mask);
+    if(rocke_i_type_is(v->type, "f32"))
+    {
+        rocke_value_t* v_i = rocke_b_bitcast(b, v, rocke_i32());
+        rocke_value_t* r = rocke_b_quad_perm(b, v_i, p0, p1, p2, p3);
+        return rocke_b_bitcast(b, r, rocke_f32());
+    }
+    if(rocke_flow_is_i32(v->type))
+        return rocke_b_quad_perm(b, v, p0, p1, p2, p3);
+    return (rocke_value_t*)rocke_i_set_err(
+        b, ROCKE_ERR_VALUE, "warp_shuffle_xor_quad: unsupported type %s", v->type->name);
+}
+
 static bool flow_wave_reduce_allowed(const char* reduce_op, const char* ty)
 {
     if(!reduce_op || !ty)

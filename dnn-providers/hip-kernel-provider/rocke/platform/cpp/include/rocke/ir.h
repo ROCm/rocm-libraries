@@ -1290,6 +1290,11 @@ rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int x
  * of the row must be active for a butterfly reduction. See
  * IRBuilder.warp_shuffle_xor_dpp for the mask -> instruction table. */
 rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
+/* warp_shuffle_xor_quad: XOR shuffle within a four-lane quad. xor_mask 1 and 2
+ * stay inside the quad and lower to quad_perm (VALU DPP, no LDS crossbar / no
+ * lgkmcnt(0) wait); wider masks must use rocke_b_warp_shuffle_xor (ds_swizzle).
+ * Supports xor_mask 1 or 2 and f32/i32 data only. */
+rocke_value_t* rocke_b_warp_shuffle_xor_quad(rocke_ir_builder_t* b, rocke_value_t* v, int xor_mask);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,
