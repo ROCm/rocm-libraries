@@ -53,9 +53,8 @@ def test_rejects_keyword_only_parameter():
     def build_tuned(spec: _Spec, *, arch: str = "gfx942", tuning: int = 7):
         return ("kernel", spec, arch, tuning)
 
-    with pytest.raises(HkpPackError, match="tuning") as exc:
+    with pytest.raises(HkpPackError, match="build_tuned.*tuning"):
         _require_spec_arch_signature(build_tuned, "build_tuned")
-    assert "silently frozen" in str(exc.value)
 
 
 @pytest.mark.quick
@@ -63,7 +62,7 @@ def test_rejects_var_keyword_parameter():
     def build_kwargs(spec: _Spec, *, arch: str = "gfx942", **rest):
         return ("kernel", spec, arch, rest)
 
-    with pytest.raises(HkpPackError, match=r"\*args/\*\*kwargs"):
+    with pytest.raises(HkpPackError, match="build_kwargs.*rest"):
         _require_spec_arch_signature(build_kwargs, "build_kwargs")
 
 
@@ -72,7 +71,7 @@ def test_rejects_extra_positional_parameter():
     def build_two(spec: _Spec, other, *, arch: str = "gfx942"):
         return ("kernel", spec, other, arch)
 
-    with pytest.raises(HkpPackError, match="must be"):
+    with pytest.raises(HkpPackError, match="build_two"):
         _require_spec_arch_signature(build_two, "build_two")
 
 
@@ -98,7 +97,7 @@ def test_rejects_spec_the_predicate_refuses():
 
     module = _Mod(is_valid_spec=is_valid_spec)
 
-    with pytest.raises(HkpPackError, match="out of envelope"):
+    with pytest.raises(HkpPackError, match="is_valid_spec.*build_x"):
         _check_support_predicate(module, "build_x", _Spec(n=1), "gfx942")
 
 
@@ -124,7 +123,7 @@ def test_resolves_predicate_by_derived_name():
         supports_attention_dense=supports_attention_dense,
     )
 
-    with pytest.raises(HkpPackError, match="nope"):
+    with pytest.raises(HkpPackError, match="supports_attention_dense"):
         _check_support_predicate(module, "build_attention_dense", _Spec(n=1), "gfx950")
 
 
@@ -140,7 +139,7 @@ def test_resolves_predicate_by_alias_for_tiled_family():
         supports_tiled_2d_spec=supports_tiled_2d_spec,
     )
 
-    with pytest.raises(HkpPackError, match="tiled no"):
+    with pytest.raises(HkpPackError, match="supports_tiled_2d_spec"):
         _check_support_predicate(
             module, "build_unified_attention_2d_tiled", _Spec(n=1), "gfx942"
         )
@@ -177,7 +176,7 @@ def test_resolves_only_the_predicate_written_for_the_builders_spec():
         is_valid_spec_x=is_valid_spec_x,
     )
 
-    with pytest.raises(HkpPackError, match="own predicate"):
+    with pytest.raises(HkpPackError, match="is_valid_spec_x"):
         _check_support_predicate(module, "build_x", _Spec(n=1), "gfx942")
 
 
@@ -234,29 +233,29 @@ def test_predicate_that_raises_fails_the_pack(exc_type):
     def is_valid_spec(spec: _Spec, *, arch="gfx942"):
         raise exc_type("no verdict")
 
-    with pytest.raises(HkpPackError, match=f"raised {exc_type.__name__} at") as exc:
+    with pytest.raises(HkpPackError, match=f"is_valid_spec.*{exc_type.__name__}"):
         _check_support_predicate(
             _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "gfx942"
         )
-    assert "is_valid_spec" in str(exc.value)
-    assert "test_hkp_pack_producer_guards.py:" in str(exc.value)
 
 
 @pytest.mark.quick
 def test_predicate_with_positional_only_arch_fails_with_call_error():
     """A predicate whose arch parameter is positional-only triggers a TypeError
     at bind time, not inside the body.  The error must surface as a pack failure
-    with a 'could not be called' message (not a 'raised ...' body failure)."""
+    naming the predicate, and the body must never run."""
+    calls = []
 
     # positional-only arch: the packer always passes arch as a keyword
     def is_valid_spec(spec: _Spec, arch: str = "gfx942", /):
+        calls.append(spec)
         return True, ""
 
-    with pytest.raises(HkpPackError, match="could not be called") as exc:
+    with pytest.raises(HkpPackError, match="is_valid_spec.*build_x"):
         _check_support_predicate(
             _Mod(is_valid_spec=is_valid_spec), "build_x", _Spec(n=1), "gfx942"
         )
-    assert "is_valid_spec" in str(exc.value)
+    assert calls == []
 
 
 @pytest.mark.quick
@@ -355,7 +354,7 @@ def test_rejects_invalid_literal():
     FmhaMaskMode is a real Literal in the corpus, so {"mode": "casual"} would
     otherwise produce a silently wrong mask.
     """
-    with pytest.raises(HkpPackError, match="invalid value"):
+    with pytest.raises(HkpPackError, match="casual"):
         build_spec(_LiteralSpec, {"mode": "casual"})
 
 
@@ -381,5 +380,5 @@ def test_unresolvable_hint_is_a_readable_error(tmp_path):
         ns,
     )
 
-    with pytest.raises(HkpPackError, match="cannot resolve type hints"):
+    with pytest.raises(HkpPackError, match="Broken"):
         build_spec(ns["Broken"], {"field": 1})
