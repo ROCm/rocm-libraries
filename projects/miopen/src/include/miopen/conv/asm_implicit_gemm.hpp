@@ -29,6 +29,7 @@
 #include <miopen/config.h>
 #include <miopen/conv/problem_description.hpp>
 
+#include <algorithm>
 #include <string>
 #include <cmath>
 #include <ostream>
@@ -251,25 +252,41 @@ HeuristicInitMacroTileNoPadGemmK(size_t gemm_m,
 // with 64-bit arithmetic, so the per-group weight size is the only quantity that must fit the
 // window.
 //
-// Backward-weights is deliberately stricter, and the asymmetry is NOT an oversight. 292 of its
-// 900 kernels ignore the batch-split dimension entirely and compute only the first slice however
-// many were requested. The int32 bound is what holds backward-weights to a single split;
-// relaxing it to match the other two directions turns on a silent wrong-result path. See
-// https://github.com/ROCm/rocm-libraries/issues/11805. Do not align these branches until those
-// kernels are split-aware.
-static inline bool
-igemm_tensor_size_exceeds_asm_gtc_addressing(const miopen::conv::ProblemDescription& problem)
+// Backward-weights cannot split: 292 of its 900 kernels ignore the batch-split dimension and
+// compute only the first slice (https://github.com/ROCm/rocm-libraries/issues/11805). Every
+// activation must therefore fit one 4 GiB window, so the solver never asks for a split.
+//
+// Inside that window there is a second hazard. The FP16/BF16 kernels with filter padding
+// (nxe == 1) load batch rows in packs of 4 or 8 and rely on the buffer range check to zero the
+// rows past N. Those row offsets are computed in 32 bits, so a padding row whose offset reaches
+// 4 GiB wraps back into the tensor and reads real data. FP32 kernels and the last gemm-k
+// split of any kernel can read past N as well. The WRW solver therefore checks every perf
+// config it may run (see ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC) and this function only
+// bounds the tensors themselves.
+//
+// `max_wrw_bytes` is INT_MAX except on targets where the 4 GiB window was validated against a
+// GPU reference, and only FP32 with NCHW or NHWC on all three tensors may use it. FP16/BF16
+// keep INT_MAX: on some 2-4 GiB shapes their error was several times that of another solver on
+// the same data (cause not isolated), and none of those find-db rows was the fastest entry.
+// Mixed layouts keep INT_MAX (#13219).
+static inline bool igemm_tensor_size_exceeds_asm_gtc_addressing(
+    const miopen::conv::ProblemDescription& problem,
+    std::size_t max_wrw_bytes = std::numeric_limits<int>::max())
 {
+    constexpr std::size_t max_uint32 = 0xffffffffULL;
     if(problem.IsDirectionBackwardWrW())
     {
-        constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        return problem.GetIn().GetNumBytes() > max_int32 ||
-               problem.GetOut().GetNumBytes() > max_int32 ||
-               problem.GetWeights().GetNumBytes() > max_int32;
+        const auto max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        const auto window =
+            problem.IsFp32() && (problem.IsLayoutDefault() || problem.IsLayoutNHWC()) ? max_uint32
+                                                                                      : max_int32;
+        const auto max_bytes = std::min(max_wrw_bytes, window);
+        return problem.GetIn().GetNumBytes() > max_bytes ||
+               problem.GetOut().GetNumBytes() > max_bytes ||
+               problem.GetWeights().GetNumBytes() > max_bytes;
     }
 
-    constexpr std::size_t max_uint32 = 0xffffffffULL;
-    const auto group_count           = static_cast<std::size_t>(problem.GetGroupCount());
+    const auto group_count = static_cast<std::size_t>(problem.GetGroupCount());
     return problem.GetWeights().GetNumBytes() / group_count > max_uint32;
 }
 
