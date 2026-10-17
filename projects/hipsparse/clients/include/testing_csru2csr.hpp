@@ -259,7 +259,7 @@ void testing_csru2csr(Arguments argus)
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
-    hipsparseSetMatIndexBase(descr, idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
     std::unique_ptr<csru2csr_struct> unique_ptr_info(new csru2csr_struct);
     csru2csrInfo_t                   info = unique_ptr_info->info;
