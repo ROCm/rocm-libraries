@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 """registry_enumerator: the manifest + rocKE registry -> generator config. The
-slice's agreement with the shipped catalog is gated in test_registry_regeneration."""
+slice's agreement with the shipped catalog is gated in test_registry_regeneration.
+
+The contradiction, coercion, vocabulary and cross-family behaviours run over the
+synthetic registry in tests/synthetic_registry.py, so they do not move with rocKE's
+candidates, tiles or messages. The shipped manifest is read against the live
+registry only where the test asserts a fact the tool owns."""
 
 from __future__ import annotations
 
@@ -25,12 +30,10 @@ _TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import registry_enumerator as re_  # noqa: E402
+from tests import synthetic_registry as synth  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST = _ROOT / "configs" / "gfx950_attention_dense.engine.yaml"
-_CONV_MANIFEST = (
-    _ROOT / "tests" / "fixtures" / "registry" / "conv_fwd_gfx950.engine.yaml"
-)
 _ROCKE_LIBRARY = (
     re_._REPO / "dnn-providers" / "hip-kernel-provider" / "rocke" / "library"
 )
@@ -77,8 +80,29 @@ def test_provider_root_is_required_and_repository_relative(
     re_.bind_provider(manifest["provider_root"])
 
 
+@pytest.fixture
+def probe(tmp_path, monkeypatch):
+    """The synthetic probe manifest and the means to write and run it."""
+    root = synth.provider(tmp_path, monkeypatch)
+    return types.SimpleNamespace(
+        manifest=synth.probe_manifest(root), tmp=tmp_path, out=tmp_path / "c.yaml"
+    )
+
+
+def _run_probe(probe, manifest=None, *extra) -> int:
+    path = synth.write_manifest(probe.tmp / "m.engine.yaml", manifest or probe.manifest)
+    return re_.main(["--manifest", str(path), "--out", str(probe.out), *extra])
+
+
+def test_the_synthetic_manifest_enumerates(probe):
+    """The baseline every refusal below departs from."""
+    assert _run_probe(probe) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len({k["name"] for k in kernels}) == len(kernels) > 0
+
+
 def _declined(m):
-    m["enumerate"]["cells"][0]["values"] = [[96, 96, 8, 8]]
+    m["enumerate"]["cells"][0]["values"] = [[96, 8]]
 
 
 def _pin(pin):
@@ -86,11 +110,11 @@ def _pin(pin):
 
 
 def _bad_enum(m):
-    m["enumerate"]["fixed"]["mask_type"] = "NO_SUCH_MASK"
+    m["enumerate"]["fixed"]["mask"] = "NO_SUCH_MASK"
 
 
 def _enum_cells_by_value(m):
-    group = next(g for g in m["enumerate"]["cells"] if g["fields"] == ["mask_type"])
+    group = next(g for g in m["enumerate"]["cells"] if g["fields"] == ["mask"])
     group["values"] = [1, 0]
 
 
@@ -107,34 +131,36 @@ def _free(*fields):
 
 
 @pytest.mark.parametrize(
-    "mutate, message",
+    "mutate, offender",
     [
-        (_declined, "hdim_q: 96.*head_size must be"),
-        (_pin({"algorithm": "no_such_candidate"}), "matches 0 registry candidates"),
+        (_declined, "hdim"),
+        (_pin({"algorithm": "no_such_candidate"}), "no_such_candidate"),
         # Two registered candidates share the persistent algorithm.
-        (
-            _pin({"algorithm": "attention_dense_persist"}),
-            "matches 2 registry candidates",
-        ),
-        (_bad_enum, "'NO_SUCH_MASK' is not a member"),
-        (_enum_cells_by_value, "mask_type"),
-        (_max_kernels, "over the manifest's max_kernels 1"),
-        (_bad_template, "cannot be rendered"),
-        (_free("block_m", "blok_k"), r"free_fields names \['blok_k'\]"),
+        (_pin({"algorithm": "persist"}), "persist"),
+        (_bad_enum, "NO_SUCH_MASK"),
+        (_enum_cells_by_value, "mask"),
+        (_max_kernels, "max_kernels"),
+        (_bad_template, "no_such_field"),
+        (_free("tile_n", "tile_x"), "tile_x"),
+    ],
+    ids=[
+        "declined-cell",
+        "pin-matches-none",
+        "pin-matches-two",
+        "unknown-enum-name",
+        "enum-cell-by-value",
+        "over-budget",
+        "unrenderable-template",
+        "unknown-free-field",
     ],
 )
-def test_a_manifest_the_registry_contradicts_is_exit_2(
-    manifest, registry, tmp_path, capsys, mutate, message
-):
-    broken = _one_head_config(manifest)
-    mutate(broken)
-    path = tmp_path / "m.engine.yaml"
-    path.write_text(yaml.safe_dump(broken, sort_keys=False))
-    rc = re_.main(["--manifest", str(path), "--out", str(tmp_path / "c.yaml")])
+def test_a_manifest_the_registry_contradicts_is_exit_2(probe, capsys, mutate, offender):
+    mutate(probe.manifest)
+    rc = _run_probe(probe)
     err = capsys.readouterr().err
     assert rc == 2
-    assert re.search(message, err), err
-    assert not (tmp_path / "c.yaml").exists()
+    assert offender in err, err
+    assert not probe.out.exists()
 
 
 def _raises(exc):
@@ -268,11 +294,10 @@ def test_a_manifest_key_declared_twice_is_exit_2_naming_the_key(tmp_path, capsys
     assert "pack" in capsys.readouterr().err
 
 
-def test_a_builder_value_outside_the_vocabulary_is_refused(manifest, registry):
-    partial = _one_head_config(manifest)
-    partial["specialization"]["vocabulary"]["dtype"] = {"bf16": "BF16"}
-    with pytest.raises(re_.EnumerationError, match=r"dtype.*fp16|fp16.*dtype"):
-        re_.build_config(partial, warn=lambda message: None)
+def test_a_builder_value_outside_the_vocabulary_is_refused(probe):
+    probe.manifest["specialization"]["vocabulary"]["dtype"] = {"fp16": "FP16"}
+    with pytest.raises(re_.EnumerationError, match=r"dtype.*bf16|bf16.*dtype"):
+        re_.build_config(probe.manifest, warn=lambda message: None)
 
 
 @pytest.mark.parametrize("flag", ["--out", "--shapes"])
@@ -284,19 +309,21 @@ def test_plan_space_refuses_the_options_it_would_ignore(tmp_path, flag):
     assert not target.exists()
 
 
-def test_a_tri_state_free_field_enumerates(manifest, registry):
-    free = _one_head_config(manifest)
-    _free("block_m", "block_n", "pv_loop_order")(free)
-    values = {ks.pv_loop_order for _, ks, _ in re_.enumerate_space(free).rows}
+def test_a_tri_state_free_field_enumerates(probe):
+    _free("tile_n", "order")(probe.manifest)
+    values = {ks.order for _, ks, _ in re_.enumerate_space(probe.manifest).rows}
     assert None in values and len(values) > 1, values
 
 
-def test_a_fixed_enum_field_resolves_by_name(manifest, registry):
-    non_causal = _one_head_config(manifest)
-    non_causal["enumerate"]["cells"] = non_causal["enumerate"]["cells"][:2]
-    non_causal["enumerate"]["fixed"]["mask_type"] = "NO_MASK"
-    rows = re_.enumerate_space(non_causal).rows
-    assert rows and {ks.causal for _, ks, _ in rows} == {False}
+def test_a_fixed_enum_field_resolves_by_name(probe):
+    def causal(name):
+        probe.manifest["enumerate"]["fixed"]["mask"] = name
+        probe.manifest["enumerate"]["cells"] = probe.manifest["enumerate"]["cells"][:1]
+        rows = re_.enumerate_space(probe.manifest).rows
+        return {ks.causal for _, ks, _ in rows}
+
+    assert causal("NO_MASK") == {False}
+    assert causal("CAUSAL") == {True}
 
 
 def test_a_cell_lists_its_default_first_then_sorted(manifest, registry):
@@ -306,18 +333,28 @@ def test_a_cell_lists_its_default_first_then_sorted(manifest, registry):
     assert first[1:] == sorted(first[1:])
 
 
-def test_a_non_attention_family_enumerates_and_generates(tmp_path, capsys):
-    if not _ROCKE_LIBRARY.is_dir():
-        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+def test_a_non_attention_family_enumerates_and_generates(tmp_path, monkeypatch):
+    """A second family, unrelated to the first: request-only fields reach the name
+    and metadata but not the spec, and the generator accepts the result."""
+    root = synth.provider(tmp_path, monkeypatch)
+    manifest = synth.conv_probe_manifest(root)
     config = tmp_path / "config.yaml"
-    assert re_.main(["--manifest", str(_CONV_MANIFEST), "--out", str(config)]) == 0
+    path = synth.write_manifest(tmp_path / "conv.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--out", str(config)]) == 0
     kernels = yaml.safe_load(config.read_text())["packs"][0]["kernels"]
-    assert {k["name"] for k in kernels} == {
-        f"conv_fwd.{d}_c{c}_k{c}_g1_t64x64x64.gfx950"
+    cells = {
+        (c, d)
         for c in (64, 128)
-        for d in ("fp16", "bf16")
+        for d in manifest["enumerate"]["cells"][1]["values"]
     }
-    assert all("C" not in k["kernel_source"]["spec"] for k in kernels)
+    assert {k["name"] for k in kernels} == {
+        f"conv_probe.{d}_c{c}_k{c}_g1_t64x64x64" for c, d in cells
+    }
+    assert all(not {"C", "K", "G"} & set(k["kernel_source"]["spec"]) for k in kernels)
+    assert {(k["metadata"]["C"], k["metadata"]["K"]) for k in kernels} == {
+        (64, 64),
+        (128, 128),
+    }
     gen = subprocess.run(
         [
             sys.executable,
@@ -332,6 +369,21 @@ def test_a_non_attention_family_enumerates_and_generates(tmp_path, capsys):
         text=True,
     )
     assert gen.returncode == 0, gen.stderr[-2000:]
+
+
+@pytest.mark.skipif(
+    not _ROCKE_LIBRARY.is_dir(),
+    reason=f"rocKE library not in this checkout: {_ROCKE_LIBRARY}",
+)
+def test_the_shipped_manifest_enumerates_against_the_live_registry(tmp_path):
+    """Asserts only what the tool owns; which kernels rocKE yields is g1/g3's."""
+    config = tmp_path / "config.yaml"
+    assert re_.main(["--manifest", str(_MANIFEST), "--out", str(config)]) == 0
+    kernels = yaml.safe_load(config.read_text())["packs"][0]["kernels"]
+    assert kernels
+    assert len({k["name"] for k in kernels}) == len(kernels)
+    declared = re_.load_manifest(str(_MANIFEST))["specialization"]["metadata_fields"]
+    assert all(set(k["metadata"]) == set(declared) for k in kernels)
 
 
 class _Color(enum.Enum):

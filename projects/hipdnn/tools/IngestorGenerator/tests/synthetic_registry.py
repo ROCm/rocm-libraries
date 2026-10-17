@@ -196,7 +196,7 @@ def probe_manifest(provider_root, **enumerate_overrides) -> dict:
         "provider_root": str(provider_root),
         "source": "kernels/probe.py",
         "builder": "build_probe",
-        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_tn{tile_n}",
+        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}",
         "enumerate": enumerate_block,
     }
 
