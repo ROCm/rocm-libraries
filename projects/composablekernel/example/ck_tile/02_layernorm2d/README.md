@@ -38,6 +38,26 @@ make tile_example_layernorm2d_fwd -j
 ```
 This will result in an executable `build/bin/tile_example_layernorm2d_fwd`
 
+### Build selected instances
+
+To reduce compilation for a focused workload, set
+`LAYERNORM2D_FWD_INSTANCE_FILTER` to a shell-style wildcard pattern matching
+generated instance names, without `.cpp`. From the CK project root:
+
+```bash
+cmake -S . -B build -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
+  -DGPU_TARGETS=gfx942 \
+  -DLAYERNORM2D_FWD_INSTANCE_FILTER=layernorm2d_fwd_fp16_n256
+cmake --build build --target tile_example_layernorm2d_fwd --parallel 2
+```
+
+For example, `layernorm2d_fwd_fp16_n*` selects all generated FP16 instances,
+including their fusion variants. Quote wildcard patterns on the command line.
+The generated dispatcher includes only the selected instances; workloads that
+need an omitted instance are unsupported by that executable. A pattern that
+matches no instances is an error. The default empty filter builds all instances;
+reset it with `-DLAYERNORM2D_FWD_INSTANCE_FILTER=`.
+
 ## Example
 ```
 args:

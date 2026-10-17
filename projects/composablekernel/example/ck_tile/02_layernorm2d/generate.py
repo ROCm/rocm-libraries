@@ -11,6 +11,7 @@ from typing import List, Any
 import functools
 import itertools
 import copy
+import fnmatch
 from dataclasses import dataclass
 
 
@@ -1534,6 +1535,18 @@ float layernorm2d_fwd(layernorm2d_fwd_traits t,
                         dtype, current_n_str, xbias, fused_add, fused_quant, current_hs
                     )
                 )
+        # --filter: keep only the kernels whose name matches the fnmatch pattern.
+        # The API dispatcher is generated from the same list, so it only refers
+        # to the kept kernels; inputs that need another kernel are reported as
+        # not supported at runtime.
+        if self.kernel_filter:
+            total_blob = [
+                b for b in total_blob if fnmatch.fnmatch(b.name, self.kernel_filter)
+            ]
+            if not total_blob:
+                sys.exit(
+                    f"--filter '{self.kernel_filter}' matches no layernorm2d kernel"
+                )
         return total_blob
 
     def list_blobs(self, args) -> None:
@@ -1616,7 +1629,7 @@ if __name__ == "__main__":
         help="generate all kernels into different tile",
     )
 
-    # TODO: if using filter, must apply same value to output_dir and list_blobs
+    # Use the same filter for --list_blobs and --gen_blobs.
     parser.add_argument(
         "-f",
         "--filter",

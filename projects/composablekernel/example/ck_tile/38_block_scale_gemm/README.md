@@ -37,6 +37,26 @@ make tile_example_gemm_quant -j
 ```
 This will result in an executable `build/bin/tile_example_gemm_quant`
 
+### Build selected instances
+
+`GEMM_QUANT_INSTANCE_FILTER` limits compilation to instance source names that
+match a CMake regular expression, without the `.cpp` suffix. From the CK project
+root, this example builds only the B-quantized FP8 instance source:
+
+```bash
+cmake -S . -B build -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc \
+  -DGPU_TARGETS=gfx942 \
+  -DGEMM_QUANT_INSTANCE_FILTER='^gemm_bquant_quantgrouped_fp8$'
+cmake --build build --target tile_example_gemm_quant --parallel 2
+```
+
+Use `^gemm_bquant_quantgrouped_(fp8|bf8)$` to select both FP8 and BF8 sources.
+Each retained source registers its kernels normally; omitted sources contribute
+no kernels to the executable's lookup table. The filter selects whole source
+files, not individual template instantiations within a file. A pattern that
+matches no sources is an error. The default empty filter builds all instance
+sources; reset it with `-DGEMM_QUANT_INSTANCE_FILTER=`.
+
 ## example
 ```
 args:
