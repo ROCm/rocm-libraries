@@ -201,23 +201,30 @@ knob into the spec, KMD, metadata, bindings and kernel name. A varying field in 
 manifest stays `space: slice` until a full-derived selection ships with the flip; set
 `space: full` in a copy beside it in `configs/` (`graph_template` is manifest-relative).
 
-Set `KNOBS` to the comma-separated `reduction.fields.performance` names, and `VOCABULARY` to
-the manifest's `specialization.vocabulary` as `field:from=to,from=to`, fields separated by
-`;` (gfx950 dense: `dtype:bf16=BF16,fp16=FP16`). Enumerate, compact into the selection,
-and print the space by knob for the knob checkpoint:
+Print the space by knob first, for the knob checkpoint. Nothing is written:
+
+```bash
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --plan-space
+```
+
+Set `KNOBS` to the comma-separated names it lists under `varying spec fields` as
+`(performance)`, in `reduction.fields.performance` order. A performance name the registry
+does not vary in this space is not a knob, and `factorise_config.py` refuses it. Set
+`VOCABULARY` to the manifest's `specialization.vocabulary` as `field:from=to,from=to`,
+fields separated by `;` (gfx950 dense: `dtype:bf16=BF16,fp16=FP16`). Then enumerate and
+compact into the selection:
 
 ```bash
 "$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --out "$SCRATCH/registry.yaml"
 "$PY" "$GEN/tools/factorise_config.py" --config "$SCRATCH/registry.yaml" \
   --out "$CONFIG" --knobs "$KNOBS" --vocabulary "$VOCABULARY"
-"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --plan-space
 ```
 
 `registry_enumerator.py` marks each cell's `select_spec` arm `default: true`;
 `factorise_config.py` keeps it and refuses output that does not re-expand. Nothing
 compiles here. Record the knob answer in `$MANIFEST`
 (`reduction.fields.performance` in priority order, `reduction.fields.ignored`,
-`enumerate.cells`) and enumerate and factorise again if it changed.
+`enumerate.cells`) and rerun all three commands if it changed.
 
 **Gate:** every GAP cell added to `enumerate.cells` or excluded with its reason; recorded
 checkpoint answers; a round-tripped `$CONFIG`. A shipped engine's selection is also gated
@@ -753,13 +760,17 @@ among variants sharing its other knobs, which divide every shape a larger tile d
 4. **Reduce and present the proposal.** The report holds the ε-versus-instances curve,
    each variant's keep/drop reason and numerics tag, the cells with no corpus evidence,
    and proposed rules (`drop knob X`, `drop X=v`, `keep X=v only for <cells>`) with their
-   saving and cost. Exit 2 is unusable or stale input. Exit 3: a correctness attempt
-   failed, or a timing phase is missing for some (round, corpus), so the sweep cannot
-   support a reduction; the report is written and no selection is, so investigate or
-   rerun the sweep. A single round warns that the noise floor is assumed, not measured.
-   Exit 1: floor plus coverage alone exceed the budget; with the user's approval raise
-   it (`reduction.aot_budget_per_arch` or `--budget`) or narrow cells, corpus or knobs
-   and rerun from stage 2:
+   saving and cost. Exit 2 is unusable or stale input. Exit 3: the sweep cannot support a
+   reduction of this arm, because `summary.json` or its `expected_phases` is missing (the
+   sweep did not finish), an expected timing or correctness phase of the arm has no
+   record, or a timing phase ranked nothing (nothing is written), or a correctness attempt
+   failed (the report is written). No selection is written, so investigate or rerun the
+   sweep. A single round warns
+   that the noise floor is assumed (`reduction.single_round_epsilon`, default 0.05), not
+   measured; with two or more rounds the floor is `reduction.drift_multiplier` (default
+   2) times the measured drift. Exit 1: floor plus coverage alone exceed the budget; with
+   the user's approval raise it (`reduction.aot_budget_per_arch` or `--budget`) or narrow
+   cells, corpus or knobs and rerun from stage 2:
 
    ```bash
    "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
@@ -769,9 +780,13 @@ among variants sharing its other knobs, which divide every shape a larger tile d
 
 5. **Apply what the user picks.** Set `RULES` to the comma-separated rule ids the user
    chose from the report's rule table (`R` and six hex digits, derived from the rule
-   text, so an id names the same rule under any `--budget`; a rule the sweep no longer
-   proposes exits 2), then write and adopt that selection (or copy
-   `$SCRATCH/reduced.yaml` if the user accepts the ε keep-set):
+   text, so an id is stable while the rule's text is; a `keep X=v only for <cells>` rule
+   names cells chosen with the budget's ε, so its text and id can change with
+   `--budget`; a rule the sweep no longer proposes exits 2), then write and adopt that
+   selection (or copy `$SCRATCH/reduced.yaml` if the user accepts the ε keep-set). The
+   report gives the applied rules' combined worst gain lost and the graphs that lose
+   their best kernel; above the rules' ε it exits 1 and writes no selection, so choose
+   fewer rules:
 
    ```bash
    "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
@@ -789,9 +804,11 @@ among variants sharing its other knobs, which divide every shape a larger tile d
      --margin "$GT_MARGIN" --report "$EVIDENCE/ground_truth.md"
    ```
 
-   This iteration's `compare` exits 0 whatever it finds: its report is for review, and an
-   outside-the-margin row is expected while the selection is still being reduced. Stage 7
-   reruns it with `--strict` as the gate.
+   This iteration's `compare` exits 0 whatever the comparison finds: its report is for
+   review, and an outside-the-margin row is expected while the selection is still being
+   reduced. It exits 2 when a ground-truth row, or the graph a sweep ran for it, no longer
+   matches what `graphs` recorded; rerun `graphs` and the sweep. Stage 7 reruns it with
+   `--strict` as the gate.
 
 7. **Stop when the user accepts the instance count.** No served graph may lose coverage
    or regress beyond the chosen ε or the applied rules' reported worst gain lost (`inf`:
@@ -810,9 +827,9 @@ the exact phase key set; stage 6 checked only each graph's winner.
 [workloads.md](workloads.md)'s *Installed measurement contract* owns what each terminal
 status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and what resume
 does and does not make a single cohort. With ground truth, rerun stage 6's `compare` on
-this output with `--strict`: exit 1 means a row is outside the margin, missing, failing
-correctness or without a passing correctness verdict, so fix it or record the user's
-acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
+this output with `--strict`: exit 1 means a row is outside the margin, missing, declined
+in any timing round, failing correctness or without a passing correctness verdict, so fix
+it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
 nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
 further or justify the count in `$EVIDENCE`:
 
