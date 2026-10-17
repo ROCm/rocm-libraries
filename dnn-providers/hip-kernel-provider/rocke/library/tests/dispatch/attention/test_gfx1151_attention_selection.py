@@ -176,8 +176,8 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                 self.assertEqual(dispatch_attention(request).candidate.name, name)
 
     def test_decode_rule_vectors(self):
-        # (Sq, visible keys, Hq, Hkv, B, family, CUs) -> decode; a hipDNN
-        # native mirror of the rule must pin the same vectors.
+        # (Sq, visible keys, Hq, Hkv, B, family, CUs) -> decode; the hipDNN
+        # native pins the same vectors.
         for args, decode in (
             ((1, 4096, 32, 8, 1, "gfx11", 60), True),
             ((32, 32768, 64, 8, 8, "gfx11", 60), True),

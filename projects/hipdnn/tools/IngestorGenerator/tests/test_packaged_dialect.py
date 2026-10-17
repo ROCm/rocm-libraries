@@ -11,6 +11,7 @@ import json
 import re
 
 import pytest
+import yaml
 from codegen.config_loader import ConfigError, load_config
 from codegen.models import (
     DIALECT_DIRECT_LOAD,
@@ -38,14 +39,35 @@ class TestKernelSourceEmission:
     def test_rocke_target_is_emitted_only_when_set(self):
         ks = KernelSource(
             kind="rocke",
-            source="kernels/gfx1151/wmma_fmha_fwd.py",
-            builder="build_wmma_fmha_fwd",
-            spec={"head_size": 64},
+            source="kernels/gfx1151/wmma_fmha_fwd_v2.py",
+            builder="build_wmma_fmha_fwd_v2",
+            spec={"head_dim": 64},
             target="generic",
         )
         # Key order is part of the descriptor bytes: target sits before the spec.
         assert list(ks.as_document()) == ["kind", "source", "builder", "target", "spec"]
         assert ks.as_document()["target"] == "generic"
+
+    def test_rocke_companion_kernels_are_emitted_only_when_set(self):
+        ks = KernelSource(
+            kind="rocke",
+            source="kernels/gfx1151/wmma_fmha_decode.py",
+            builder="build_wmma_fmha_decode",
+            spec={"head_size": 64},
+            target="generic",
+            companion_kernels=["merge"],
+        )
+        assert list(ks.as_document()) == [
+            "kind",
+            "source",
+            "builder",
+            "target",
+            "companion_kernels",
+            "spec",
+        ]
+        assert ks.as_document()["companion_kernels"] == ["merge"]
+        plain = KernelSource(kind="rocke", source="m.py", builder="b", spec={"a": 1})
+        assert "companion_kernels" not in plain.as_document()
 
     def test_hip_never_emits_a_target(self):
         ks = KernelSource(kind="hip", source="X.cpp", entry="X", target="generic")
@@ -279,3 +301,125 @@ class TestDialectDefaultIsBackwardCompatible:
         ks = json.loads(kdp_path.read_text())["kernelDescriptors"][0]["kernel_source"]
         assert set(ks) == {"kind", "source_file", "entry_point"}
         assert ks["kind"] == "embedded_source"
+
+
+class TestCompanionKernels:
+    """A rocke builder emitting a merge kernel into its primary's code object.
+
+    The UKD declares the role; hkp_pack writes ``merge_symbol`` and
+    ``merge_signature`` from the compiled object, so the config declares those
+    KMD fields matcher-only and never authors them.
+    """
+
+    def _raw(self, config_path):
+        raw = yaml.safe_load(config_path("gfx950_attention_dense.yaml").read_text())
+        raw["packs"][0]["kernel_defaults"]["companion_kernels"] = ["merge"]
+        raw["kmd_fields"] += [
+            {"name": "merge_symbol", "type": "string"},
+            {"name": "merge_signature", "type": "string"},
+        ]
+        raw["specialization"]["matcher_only_fields"] = [
+            "merge_symbol",
+            "merge_signature",
+        ]
+        return raw
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "companions.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        return load_config(path)
+
+    def test_companion_fields_are_left_for_the_packer(
+        self, generator, config_path, tmp_path
+    ):
+        config = self._load(tmp_path, self._raw(config_path))
+        out = tmp_path / "out"
+        written = generator.render(config, out)
+        kdp = json.loads(
+            next(out / w for w in written if w.endswith(".kdp.json")).read_text()
+        )
+        kmd = json.loads(
+            next(out / w for w in written if w.endswith(".kmd.json")).read_text()
+        )
+        # Mandatory in the KMD, so a shipped kernel the packer did not complete
+        # fails at load rather than matching without its merge kernel.
+        assert {"name": "merge_symbol", "type": "string"} in kmd["fields"]
+        assert {"name": "merge_signature", "type": "string"} in kmd["fields"]
+        for ukd in kdp["kernelDescriptors"]:
+            assert ukd["kernel_source"]["companion_kernels"] == ["merge"]
+            assert "merge_symbol" not in ukd["metadata"]
+            assert "merge_signature" not in ukd["metadata"]
+
+    def test_optional_companion_fields_are_left_for_the_packer(
+        self, generator, config_path, tmp_path
+    ):
+        """An engine mixing kernels with and without the companion declares its
+        fields optional (empty default). The packer still writes them for the
+        kernels declaring the role, so generation must not demand them there."""
+        raw = self._raw(config_path)
+        for field in raw["kmd_fields"]:
+            if field["name"] in ("merge_symbol", "merge_signature"):
+                field["default_value"] = ""
+        config = self._load(tmp_path, raw)
+        out = tmp_path / "out"
+        written = generator.render(config, out)
+        kdp = json.loads(
+            next(out / w for w in written if w.endswith(".kdp.json")).read_text()
+        )
+        for ukd in kdp["kernelDescriptors"]:
+            assert "merge_symbol" not in ukd["metadata"]
+            assert "merge_signature" not in ukd["metadata"]
+
+    def test_a_kernel_without_the_companion_states_its_empty_fields(
+        self, generator, config_path, tmp_path
+    ):
+        """Optional companion fields of a kernel that does not declare the role are
+        ordinary metadata: nothing writes them, so the config states them."""
+        raw = self._raw(config_path)
+        del raw["packs"][0]["kernel_defaults"]["companion_kernels"]
+        for field in raw["kmd_fields"]:
+            if field["name"] in ("merge_symbol", "merge_signature"):
+                field["default_value"] = ""
+        with pytest.raises(ValueError, match="merge_s"):
+            generator.render(self._load(tmp_path, raw), tmp_path / "out")
+
+    @pytest.mark.parametrize("roles", [[], ["Merge"], ["merge", "merge"], "merge"])
+    def test_an_unusable_role_list_is_rejected(self, config_path, tmp_path, roles):
+        raw = self._raw(config_path)
+        raw["packs"][0]["kernel_defaults"]["companion_kernels"] = roles
+        with pytest.raises(ConfigError, match="companion_kernels"):
+            self._load(tmp_path, raw)
+
+    def test_the_kmd_must_declare_each_companion_field(self, config_path, tmp_path):
+        raw = self._raw(config_path)
+        raw["kmd_fields"] = [
+            f for f in raw["kmd_fields"] if f["name"] != "merge_signature"
+        ]
+        raw["specialization"]["matcher_only_fields"] = ["merge_symbol"]
+        with pytest.raises(
+            ConfigError, match=re.escape("kmd_fields entry 'merge_signature'")
+        ):
+            self._load(tmp_path, raw)
+
+    def test_a_companion_field_must_be_a_string(self, config_path, tmp_path):
+        raw = self._raw(config_path)
+        for field in raw["kmd_fields"]:
+            if field["name"] == "merge_symbol":
+                field["type"] = "int"
+        with pytest.raises(ConfigError, match="of type 'string'"):
+            self._load(tmp_path, raw)
+
+    def test_a_companion_field_is_never_authored(self, config_path, tmp_path):
+        raw = self._raw(config_path)
+        raw["packs"][0]["variants"][0]["metadata"].append("merge_symbol")
+        raw["packs"][0]["variants"][0]["spec_defaults"]["merge_symbol"] = "forged"
+        with pytest.raises(ConfigError, match="hkp_pack writes from the compiled"):
+            self._load(tmp_path, raw)
+
+    def test_a_companion_field_is_not_spec_bound(self, config_path, tmp_path):
+        raw = self._raw(config_path)
+        raw["specialization"]["matcher_only_fields"] = ["merge_signature"]
+        raw["specialization"]["metadata_fields"].append("merge_symbol")
+        raw["specialization"]["bindings"]["merge_symbol"] = {"field": "dtype"}
+        with pytest.raises(ConfigError, match="matcher_only_fields"):
+            self._load(tmp_path, raw)

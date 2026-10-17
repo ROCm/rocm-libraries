@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 target_sources(hip_kernel_provider_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestCompanionKernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHandleDeviceResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorKernelCode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp

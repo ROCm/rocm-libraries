@@ -132,7 +132,6 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     ),
     "kernels.common.sparse_attention.VsaSparseSpec": ("common", "seqlen_k", "seqlen_q"),
     "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": ("head_size",),
-    "kernels.gfx1151.wmma_fmha_fwd.WmmaFmhaFwdSpec": ("head_size",),
     "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": (),
     "kernels.gfx1250.attention_tiled_2d.UnifiedAttention2DTiledSpec": (
         "block_size",

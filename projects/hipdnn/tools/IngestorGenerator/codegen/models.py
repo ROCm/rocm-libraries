@@ -221,6 +221,11 @@ class KernelSource:
     #: serves the family. Empty omits the key, which ``hkp_pack`` reads as
     #: ``native``.
     target: str = ""
+    #: ``packaged`` / ``rocke``: the roles of the further kernels the builder
+    #: emits into the same code object (it returns a ``KernelModule``). For each
+    #: role ``hkp_pack`` writes ``<role>_symbol`` and ``<role>_signature`` into
+    #: the shipped metadata. Empty omits the key: a single-kernel builder.
+    companion_kernels: list[str] = field(default_factory=list)
     #: ``packaged`` / ``hsaco``: a prebuilt code object's path relative to the
     #: descriptor naming it, and its kernel symbol.
     file: str = ""
@@ -253,6 +258,8 @@ class KernelSource:
             }
             if self.target:
                 document["target"] = self.target
+            if self.companion_kernels:
+                document["companion_kernels"] = list(self.companion_kernels)
             document["spec"] = self.spec
             return document
         if self.kind == KERNEL_SOURCE_KIND_HSACO:

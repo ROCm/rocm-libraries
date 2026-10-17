@@ -321,6 +321,12 @@ def load_config(path: Path) -> IngestorConfig:
                     f"('native' builds for the shard arch, 'generic' for its LLVM "
                     f"generic processor)."
                 )
+            if "companion_kernels" in ks_raw:
+                _check_companion_roles(
+                    ks_raw["companion_kernels"],
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source.companion_kernels",
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
@@ -334,6 +340,7 @@ def load_config(path: Path) -> IngestorConfig:
                         builder=ks_raw.get("builder", ""),
                         spec=dict(ks_raw.get("spec", {})),
                         target=ks_raw.get("target", ""),
+                        companion_kernels=list(ks_raw.get("companion_kernels", [])),
                         file=ks_raw.get("file", ""),
                         symbol=ks_raw.get("symbol", ""),
                     ),
@@ -720,6 +727,19 @@ def _expand_one_variant_group(
     # as a hand-authored kernel's own `arch`: it must stay within the pack's,
     # and an absent one inherits the pack's.
     group_arch = _unique_arch(group.get("arch", []), f"{where} arch")
+    # A group-level kernel_source overrides the pack's kernel_defaults for the
+    # kernels this group expands to, the same as a hand-authored kernel's own
+    # kernel_source: one engine can then ship kernels of several builders. The
+    # spec stays the group's `spec_defaults` / shapes / arms.
+    group_source = group.get("kernel_source")
+    if group_source is not None:
+        _require_mapping(group_source, f"{where} kernel_source")
+        if "spec" in group_source:
+            raise ConfigError(
+                f"{where} kernel_source states 'spec'; a group's spec fields belong "
+                f"in its 'spec_defaults', shapes and knob_set arms."
+            )
+    group_source = dict(group_source or {})
     expanded = []
     for index, shape in enumerate(group["shapes"]):
         shape_where = f"{where} shapes[{index}]"
@@ -784,6 +804,15 @@ def _expand_one_variant_group(
                 )
                 if group_arch:
                     kernel["arch"] = list(group_arch)
+                if group_source:
+                    kernel["kernel_source"] = {
+                        **group_source,
+                        **kernel["kernel_source"],
+                    }
+                    kernel[_AUTHORED_KERNEL_SOURCE] = (
+                        f"{where} kernel_source",
+                        group_source,
+                    )
                 expanded.append(kernel)
     return expanded
 
@@ -1167,6 +1196,7 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "spec_defaults",
         "spec_order",
         "shape_axes",
+        "kernel_source",
     }
 )
 _KNOWN_KERNEL = frozenset(
@@ -1185,7 +1215,7 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
     KERNEL_SOURCE_KIND_HIP: ("build",),
-    KERNEL_SOURCE_KIND_ROCKE: ("target",),
+    KERNEL_SOURCE_KIND_ROCKE: ("target", "companion_kernels"),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.
@@ -1466,10 +1496,46 @@ def _int64_overflow(value, field_type: str):
     return None
 
 
+_COMPANION_ROLE = re.compile(r"[a-z][a-z0-9_]*\Z")
+
+
+def _check_companion_roles(roles, where: str) -> None:
+    """A rocke ``kernel_source.companion_kernels``: the roles of the further
+    kernels the builder emits into the same code object (it returns a
+    ``rocke.helpers.KernelModule``). ``hkp_pack`` writes each role's
+    ``<role>_symbol`` / ``<role>_signature`` metadata from the compiled object."""
+    if (
+        not isinstance(roles, list)
+        or not roles
+        or any(not isinstance(r, str) or not _COMPANION_ROLE.match(r) for r in roles)
+        or len(set(roles)) != len(roles)
+    ):
+        raise ConfigError(
+            f"{where} is {roles!r}; it must be a non-empty list of distinct "
+            f"lowercase identifiers ([a-z][a-z0-9_]*), each naming one companion "
+            f"kernel's role."
+        )
+
+
+def companion_metadata_fields(kernel: KernelSpec) -> list:
+    """The metadata fields ``hkp_pack`` writes for a kernel's companions:
+    ``<role>_symbol`` and ``<role>_signature`` per declared role. Mirrors
+    ``hkp_pack.companions.metadata_fields``."""
+    return [
+        name
+        for role in kernel.kernel_source.companion_kernels
+        for name in (f"{role}_symbol", f"{role}_signature")
+    ]
+
+
 def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
     """Pre-mint check #3: every kernel's metadata type-checks against the KMD,
     with no mandatory field omitted. A wrong type, an undeclared field or an
-    omitted mandatory field drops the whole pack at load."""
+    omitted mandatory field drops the whole pack at load.
+
+    A companion field is the packer's to write, so it is exempt from the
+    omission check, must not be authored, and must be a declared ``string``
+    field the specialization calls matcher-only."""
     declared = config.kmd_field_by_name
     for field_type in {f.type for f in config.kmd_fields}:
         if field_type not in KMD_FIELD_TYPES:
@@ -1478,9 +1544,30 @@ def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
                 f"{KMD_FIELD_TYPES}."
             )
 
+    specialized = set((config.specialization or {}).get("metadata_fields") or [])
     for pack in config.packs:
         for kernel in pack.kernels:
             where = f"pack '{pack.name}' kernel '{kernel.name}'"
+            produced = companion_metadata_fields(kernel)
+            for name in produced:
+                if name in kernel.metadata:
+                    raise ConfigError(
+                        f"{where}: metadata states companion field '{name}', which "
+                        f"hkp_pack writes from the compiled code object. Remove it."
+                    )
+                if name not in declared or declared[name].type != "string":
+                    raise ConfigError(
+                        f"{where}: kernel_source.companion_kernels needs a "
+                        f"kmd_fields entry '{name}' of type 'string'; hkp_pack "
+                        f"writes it into the shipped metadata."
+                    )
+                if name in specialized:
+                    raise ConfigError(
+                        f"{where}: companion field '{name}' is listed in "
+                        f"'specialization.metadata_fields', but no builder spec "
+                        f"binds it -- it is read off the compiled object. List it "
+                        f"under 'matcher_only_fields'."
+                    )
             for key in kernel.metadata:
                 if key not in declared:
                     raise ConfigError(
@@ -1489,7 +1576,11 @@ def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
                         f"the whole pack at resolveDescriptorSets()."
                     )
             for kmd_field in config.kmd_fields:
-                if kmd_field.is_mandatory and kmd_field.name not in kernel.metadata:
+                if (
+                    kmd_field.is_mandatory
+                    and kmd_field.name not in kernel.metadata
+                    and kmd_field.name not in produced
+                ):
                     raise ConfigError(
                         f"{where}: omits mandatory metadata field "
                         f"'{kmd_field.name}' (its kmd_fields entry has no "

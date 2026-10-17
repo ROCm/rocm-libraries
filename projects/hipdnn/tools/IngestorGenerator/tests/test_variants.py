@@ -116,6 +116,54 @@ class TestExpansion:
         assert kernel.kernel_source.kind == "rocke"
         assert kernel.kernel_source.builder == "build_attention_dense"
 
+    def test_group_kernel_source_overrides_the_pack_defaults(self, tmp_path):
+        """One engine may ship kernels of several builders, one group each."""
+        raw = _config(
+            variants=[
+                _group(
+                    kernel_source={
+                        "source": "kernels/gfx942/attention_decode.py",
+                        "builder": "build_attention_decode",
+                        "companion_kernels": ["merge"],
+                    }
+                )
+            ]
+        )
+        raw["kmd_fields"] += [
+            {"name": "merge_symbol", "type": "string", "default_value": ""},
+            {"name": "merge_signature", "type": "string", "default_value": ""},
+        ]
+        kernels = _load(tmp_path, raw).packs[0].kernels
+        assert {k.kernel_source.builder for k in kernels} == {"build_attention_decode"}
+        assert {k.kernel_source.source for k in kernels} == {
+            "kernels/gfx942/attention_decode.py"
+        }
+        assert all(k.kernel_source.kind == "rocke" for k in kernels)
+        assert all(k.kernel_source.companion_kernels == ["merge"] for k in kernels)
+        assert [k.kernel_source.spec["block_m"] for k in kernels] == [128, 256]
+
+    def test_group_kernel_source_leaves_other_groups_alone(self, tmp_path):
+        decode = _group(
+            name="decode.{dtype}_sq{seqlen_q}_bm{block_m}_e{md_use_exp2_fast}",
+            kernel_source={"builder": "build_attention_decode"},
+        )
+        raw = _config(variants=[_group(), decode])
+        kernels = _load(tmp_path, raw).packs[0].kernels
+        assert [k.kernel_source.builder for k in kernels] == [
+            "build_attention_dense",
+            "build_attention_dense",
+            "build_attention_decode",
+            "build_attention_decode",
+        ]
+
+    def test_group_kernel_source_may_not_state_a_spec(self, tmp_path):
+        with pytest.raises(ConfigError, match="spec_defaults"):
+            _kernels(tmp_path, kernel_source={"spec": {"block_n": 64}})
+
+    def test_group_kernel_source_is_held_to_the_kinds_keys(self, tmp_path):
+        with pytest.raises(ConfigError, match="kernel_source"):
+            _kernels(tmp_path, kernel_source={"entry_point": "main"})
+
     def test_group_spec_defaults_reach_every_kernel(self, tmp_path):
         kernels = _kernels(tmp_path, spec_defaults={"block_n": 64})
         assert all(k.kernel_source.spec["block_n"] == 64 for k in kernels)
@@ -244,12 +292,12 @@ class TestArchAndTarget:
     def test_shipped_wmma_catalog_compiles_only_generic_objects(
         self, gfx1151_wmma_attention_config
     ):
-        """Gfx1151WmmaAttentionNative's scoreKernel ranks the 32-key single-wave
-        transposed geometry above 64-key two-wave unconditionally. That holds for
-        generic objects only; #12710 measured the wide geometry faster for
-        processor-specific gfx1151 objects at long sequences, and the matcher
-        cannot see an object's compile target. A native kernel here needs that
-        score keyed on the target first."""
+        """Gfx1151WmmaAttentionNative ranks objects by bucket and by the rocKE
+        dispatcher's decode rule alone, and the catalog states one geometry per
+        RDNA family (the gfx11 wave pair vs the gfx12 unsplit wide-Q prefill, the
+        per-family decode dv_split): every object is a family-wide generic build,
+        and the matcher cannot see an object's compile target. A processor-specific
+        object here needs that score keyed on the target first."""
         kernels = [k for p in gfx1151_wmma_attention_config.packs for k in p.kernels]
         assert kernels
         assert {k.kernel_source.target for k in kernels} == {"generic"}

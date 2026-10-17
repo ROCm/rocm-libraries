@@ -154,7 +154,6 @@ prefix for brevity).
 | `instances/common/fmha_mfma.py` | `FmhaMfmaSpec`, `build_fmha_fwd_mfma`, `is_valid_spec`, `fmha_fwd_mfma_grid`, `fmha_fwd_mfma_signature`, `MFMA_ATTN_BLOCK_M/K`. Unified tiled FMHA forward: one body emits MFMA on CDNA (gfx942/gfx950) and WMMA on RDNA wave32 (gfx1151), selected by `arch`. The `_mfma` suffix is historical — the builder is not CDNA-only. |
 | `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
 | `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
-| `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
 | `kernels/gfx1151/wmma_fmha_fwd_v2.py` | `WmmaFmhaFwdV2Spec`, `build_wmma_fmha_fwd_v2`, `is_valid_spec`, `wmma_fmha_fwd_v2_grid`, `wmma_fmha_fwd_v2_signature`. gfx11/gfx12 multi-wave WMMA FMHA prefill (body in `rocke/helpers/rdna_attention.py`). |
 | `kernels/gfx1151/wmma_fmha_decode.py` | `WmmaFmhaDecodeSpec`, `build_wmma_fmha_decode`, `build_wmma_fmha_decode_module`, split/grid/workspace host helpers. gfx11/gfx12 split-KV, GQA-packed WMMA decode plus merge. |
 

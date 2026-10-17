@@ -293,9 +293,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
-    # One generic kernel set ships in every RDNA3/3.5 and RDNA4 shard; the census checks
-    # each wired one against its own inventory (gfx11 shards: standard + transposed-QK
-    # kernels, gfx12 shards: standard kernels only). Gated per arch like gfx950 above.
+    # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard
+    # (prefill and split-KV decode objects; the wide-Q prefill and D256 decode geometries
+    # differ per family); the census checks each wired shard against its own inventory.
+    # Gated per arch like gfx950 above.
     set(_hkp_rdna_wmma_attention_arches "")
     foreach(_arch IN ITEMS gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153
                            gfx1200 gfx1201)

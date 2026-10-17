@@ -291,6 +291,17 @@ def _load_compiler():
     return compile_kernel, ComgrError
 
 
+def _load_module_compiler():
+    """Lazy handle for rocke's multi-kernel module type and its compile entrypoint.
+
+    Separate from `_load_compiler` so a stub single-kernel compiler need not
+    model modules; consulted only to recognise a builder's `KernelModule`.
+    """
+    from rocke.helpers import KernelModule, compile_module
+
+    return KernelModule, compile_module
+
+
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
@@ -463,6 +474,11 @@ def compile_rocke_variant(
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
 
+    A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
+    plus role-keyed companions), lowered via `compile_module` into one code
+    object. The captured symbol is then the primary's, and the observations gain
+    `companions`: `{role: symbol}`, which the pipeline turns into metadata.
+
     `arch` is the shard the object is packed for; `target` (the UKD's
     `kernel_source.target`) decides the processor it is compiled for, which the
     support predicate, the builder and comgr all receive. See `rocke_compile_arch`.
@@ -512,6 +528,9 @@ def compile_rocke_variant(
         ) from exc
 
     compile_kernel, ComgrError = _load_compiler()
+    KernelModule, compile_module = _load_module_compiler()
+    if isinstance(kernel, KernelModule):
+        compile_kernel = compile_module
     _reset_backend_audit()
     try:
         artifact = compile_kernel(
@@ -522,6 +541,15 @@ def compile_rocke_variant(
             f"comgr compile failed for {source} @ {compile_arch}: {exc} "
             f"(comgr loaded from {_resolved_comgr_path()}; set ROCKE_COMGR_LIB "
             "to override)"
+        ) from exc
+    except ValueError as exc:
+        # compile_module raises ValueError from target resolution and per-kernel
+        # lowering as well as from its link-option check; report it as it is.
+        if not isinstance(kernel, KernelModule):
+            raise
+        raise HkpPackError(
+            f"compiling the kernels of '{builder}' @ {compile_arch} into one code "
+            f"object failed: {exc}"
         ) from exc
     _assert_no_backend_fallback(source, builder, compile_arch)
 
@@ -539,4 +567,8 @@ def compile_rocke_variant(
     observations["compile_target"] = compile_arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
+    if isinstance(kernel, KernelModule):
+        # Only a module records companions, so a single-kernel compile's
+        # evidence -- and the descriptor digest binding it -- is unchanged.
+        observations["companions"] = dict(artifact.companion_names)
     return co_path, artifact.kernel_name, observations
