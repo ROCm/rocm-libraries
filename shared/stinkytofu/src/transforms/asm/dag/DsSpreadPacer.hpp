@@ -116,12 +116,7 @@ class DsSpreadPacer {
         if (dl != deadline_.end() && clock >= dl->second) return true;
         if (continuesGroup()) return true;
         auto slot = slot_.find(nodeId);
-        // The slot says not before; the group timer says not sooner than one period after the last
-        // group. Without the timer every overdue slot (after a barrier wait, a dependency) is
-        // released at once and the loads burst.
-        const double due = slot != slot_.end()
-                               ? std::max(static_cast<double>(slot->second), nextGroupAt_)
-                               : nextGroupAt_;
+        const double due = slot != slot_.end() ? static_cast<double>(slot->second) : nextGroupAt_;
         return clock >= due && (runLength_ == 0 || separatorsSinceDs_ >= pace_.separators);
     }
 
