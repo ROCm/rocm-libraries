@@ -64,7 +64,7 @@ inline std::vector<std::string> buildBatchnormBwdDefines()
 
 class GpuFpReferenceBatchnorm
 {
-private:
+public:
     struct TensorProps
     {
         std::string name;
@@ -79,7 +79,6 @@ private:
         }
     };
 
-public:
     template <class XDataType,
               class ScaleBiasDataType,
               class MeanVarianceDataType,
@@ -232,7 +231,8 @@ public:
               class ScaleBiasDataType,
               class MeanVarianceDataType = ScaleBiasDataType,
               class DxDataType = XDataType,
-              class ComputeDataType = MeanVarianceDataType>
+              class ComputeDataType
+              = std::conditional_t<std::is_same_v<MeanVarianceDataType, double>, double, float>>
     static void backward(hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
                          hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
                          hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
@@ -274,6 +274,41 @@ public:
         dx.memory().markDeviceModified();
         dscale.memory().markDeviceModified();
         dbias.memory().markDeviceModified();
+    }
+
+    static void validateBackwardMetadata(const TensorProps& dyTensorProps,
+                                         const TensorProps& inputTensorProps,
+                                         const TensorProps& scaleTensorProps,
+                                         const TensorProps& dxTensorProps,
+                                         const TensorProps& dscaleTensorProps,
+                                         const TensorProps& dbiasTensorProps,
+                                         const TensorProps* meanTensorProps = nullptr,
+                                         const TensorProps* invVarianceTensorProps = nullptr)
+    {
+        if((meanTensorProps == nullptr) != (invVarianceTensorProps == nullptr))
+        {
+            throw std::invalid_argument(
+                "Batchnorm backward requires mean and invVariance to be provided together.");
+        }
+
+        std::vector<TensorProps> affineTensorProps{
+            scaleTensorProps, dscaleTensorProps, dbiasTensorProps};
+        if(meanTensorProps != nullptr)
+        {
+            affineTensorProps.push_back(*meanTensorProps);
+            affineTensorProps.push_back(*invVarianceTensorProps);
+        }
+
+        validateConsistentDimensions(inputTensorProps, dxTensorProps, affineTensorProps);
+        if(dyTensorProps.dims != inputTensorProps.dims)
+        {
+            throw std::invalid_argument(
+                "Batchnorm backward requires dy and input tensors to have the same shape.");
+        }
+
+        affineTensorProps.push_back(dyTensorProps);
+        affineTensorProps.push_back(dxTensorProps);
+        validateConsistentLayouts(inputTensorProps, affineTensorProps);
     }
 
 private:
@@ -571,35 +606,32 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean,
         const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance)
     {
-        if((mean == nullptr) != (invVariance == nullptr))
-        {
-            throw std::invalid_argument(
-                "Batchnorm backward requires mean and invVariance to be provided together.");
-        }
-
         const TensorProps inputTensorProps("input", x.dims(), x.strides());
-        TensorProps outputTensorProps("dx", dx.dims(), dx.strides());
-        std::vector<TensorProps> affineTensorProps;
-        affineTensorProps.emplace_back("scale", scale.dims(), scale.strides());
-        affineTensorProps.emplace_back("dscale", dscale.dims(), dscale.strides());
-        affineTensorProps.emplace_back("dbias", dbias.dims(), dbias.strides());
+        const TensorProps dyTensorProps("dy", dy.dims(), dy.strides());
+        const TensorProps scaleTensorProps("scale", scale.dims(), scale.strides());
+        const TensorProps dxTensorProps("dx", dx.dims(), dx.strides());
+        const TensorProps dscaleTensorProps("dscale", dscale.dims(), dscale.strides());
+        const TensorProps dbiasTensorProps("dbias", dbias.dims(), dbias.strides());
+        std::optional<TensorProps> meanTensorProps;
+        std::optional<TensorProps> invVarianceTensorProps;
         if(mean != nullptr)
         {
-            affineTensorProps.emplace_back("mean", mean->dims(), mean->strides());
-            affineTensorProps.emplace_back(
+            meanTensorProps.emplace("mean", mean->dims(), mean->strides());
+        }
+        if(invVariance != nullptr)
+        {
+            invVarianceTensorProps.emplace(
                 "invVariance", invVariance->dims(), invVariance->strides());
         }
 
-        validateConsistentDimensions(inputTensorProps, outputTensorProps, affineTensorProps);
-        if(dy.dims() != x.dims())
-        {
-            throw std::invalid_argument(
-                "Batchnorm backward requires dy and input tensors to have the same shape.");
-        }
-
-        affineTensorProps.emplace_back("dy", dy.dims(), dy.strides());
-        affineTensorProps.push_back(std::move(outputTensorProps));
-        validateConsistentLayouts(inputTensorProps, affineTensorProps);
+        validateBackwardMetadata(dyTensorProps,
+                                 inputTensorProps,
+                                 scaleTensorProps,
+                                 dxTensorProps,
+                                 dscaleTensorProps,
+                                 dbiasTensorProps,
+                                 meanTensorProps ? &*meanTensorProps : nullptr,
+                                 invVarianceTensorProps ? &*invVarianceTensorProps : nullptr);
 
         static_assert(IS_SUPPORTED_DATA_TYPE<DyDataType>,
                       "Batchnorm backward supports only double, float, half, and bfloat16 dy data "
