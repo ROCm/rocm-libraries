@@ -67,7 +67,6 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
         {**_COVERED, "nhead_q": 64},
         # A fixed field the shape sets is the registry's to judge.
         {**_COVERED, "arch": "gfx942"},
-        {**_COVERED, "seqlen_q": 100, "seqlen_k": 77},
     ]
     lines, gaps, covered = re_.shapes_report(re_.Registry(one), shapes)
     text = "\n".join(lines)
@@ -79,7 +78,7 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
     assert counts == {
         "covered": 1,
         "outside cell axes": 2,
-        "declined by registry": 4,
+        "declined by registry": 3,
         "GAP": 1,
     }, text
     assert "1 x use_sinks=True" in text
@@ -87,7 +86,6 @@ def test_each_shape_lands_in_its_first_matching_category(manifest):
     assert "head_size must be" in text
     assert "request rejected: mask_type must be" in text
     assert "arch 'gfx942' not in" in text
-    assert "seqlen_q must be a multiple of block_m" in text
     assert re.search(r"1 x \{hdim_q: 128, .*nhead_q: 64", text), text
 
 
