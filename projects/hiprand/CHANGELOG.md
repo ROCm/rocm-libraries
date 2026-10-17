@@ -8,6 +8,27 @@ Documentation for hipRAND is available at
 ### Added
 
 * gfx1250 support
+* Generated Fortran bindings, as a single `hiprand` module: `use hiprand`, link
+  `hip::hiprand_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (`ON` on Linux with the ROCm
+  backend, `OFF` on Windows and on the CUDA backend), `BUILD_FORTRAN_CLIENTS` and
+  `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default; `none` or `assumed-rank`). Found with
+  `find_package(hiprand-fortran)`; the archive and the `.mod` files install per compiler, under
+  `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+
+### Changed
+
+* The FRUIT Fortran test suite moved from `test/fortran/` to `fortran/test/`, was ported to the
+  generated bindings, and now registers as the CTest test `hiprand_fortran_fruit`.
+
+### Removed
+
+* The hand-written Fortran wrapper `library/src/fortran/hiprand_m.f90`, its private HIP module
+  `library/src/fortran/hip/` and its `BUILD_FORTRAN_WRAPPER` option, deprecated in favour of
+  hipfort in hipRAND 3.0.0 and never shipped enabled. Builds passing
+  `-DBUILD_FORTRAN_WRAPPER=ON` should switch to `use hiprand`.
+* `find_package(hiprand)` no longer sets `hiprand_FORTRAN_FOUND`, `hiprand_FORTRAN_SRC_DIR` or
+  `hiprand_FORTRAN_SRC_DIRS`; use `find_package(hiprand-fortran)`, which sets
+  `hiprand_FORTRAN_FOUND`.
 
 ## Since last release ROCm 7.12
 
