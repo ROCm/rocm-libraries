@@ -578,6 +578,109 @@ _CODEGEN_KNOB_DEFAULTS = MappingProxyType(
 AttentionDenseSpec = Gfx950AttentionDenseSpec
 
 
+#: gfx950 LDS per workgroup (``ArchTarget("gfx950").lds_capacity_bytes``).
+GFX950_LDS_CAPACITY_BYTES = 163840
+
+
+def gfx950_dense_static_lds_bytes(
+    *,
+    head_size: int,
+    block_n: int,
+    k_row_pad: int = _DEFAULT_LDS_K_ROW_PAD,
+    v_row_pad: int = _DEFAULT_GFX950_LAYOUT["lds_v_row_pad"],
+    k_group_pad: int = 8,
+    wide_lds_dma: bool = False,
+) -> int:
+    """Static LDS the non-persistent body allocates for one ``(head_size, block_n)``.
+
+    The K/V slabs, ``_NBUF`` = 2 buffers, 2-byte elements. The pad arguments are
+    the spec's ``lds_k_row_pad`` / ``lds_v_row_pad`` / ``lds_k_group_pad`` and
+    default to the layout every shipped variant is built with (K pad 8, V pad 32,
+    group pad 8).
+
+    ``wide_lds_dma=True`` uses the wide 8-rows-x-64-cols per slab-line layout
+    (the ``wide_lds_dma`` K/V slab allocations in ``build_attention_dense``)::
+
+        wide D128: K [2, D/64, BN/8, 64*8 + k_row_pad] +
+                   V [2, D/64, BN/8, 64*8 + v_row_pad]
+        wide D64:  same formula with D=64
+
+    Standard (non-wide) layout::
+
+        D128: K [2, BN, 128 + k_row_pad] + V [2, BN, 128 + v_row_pad]
+              = 1184 * BN bytes at the defaults
+        D64:  K [2, BN / 2, 2 * 64 + k_group_pad] + V [2, BN, 64]
+              =  528 * BN bytes at the defaults
+
+    D128 pads per row (K and V); D64 packs two rows per DMA group, pads K between
+    groups and leaves V unpadded. ``block_m`` does not enter it. Returns 0 for any
+    other head size; callers have already required 64 or 128.
+    """
+    buffers, element_bytes = 2, 2
+    if head_size not in (64, 128):
+        return 0
+    if wide_lds_dma:
+        # Wide layout: K[NBUF, D/64, BN/8, 64*8 + k_row_pad] +
+        #              V[NBUF, D/64, BN/8, 64*8 + v_row_pad]
+        k_line_stride = 64 * 8 + k_row_pad
+        v_line_stride = 64 * 8 + v_row_pad
+        k_d_rpt = head_size // 64
+        k_n_rpt = block_n // 8
+        k_bytes = buffers * k_d_rpt * k_n_rpt * k_line_stride
+        v_bytes = buffers * k_d_rpt * k_n_rpt * v_line_stride
+        return (k_bytes + v_bytes) * element_bytes
+    if head_size == 128:
+        return (
+            buffers
+            * block_n
+            * ((head_size + k_row_pad) + (head_size + v_row_pad))
+            * element_bytes
+        )
+    # head_size == 64
+    rows_per_group = 2
+    k_bytes = (
+        buffers
+        * (block_n // rows_per_group)
+        * (rows_per_group * head_size + k_group_pad)
+    )
+    v_bytes = buffers * block_n * head_size
+    return (k_bytes + v_bytes) * element_bytes
+
+
+def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]:
+    """Every ``(block_m, block_n)`` the gfx950 dense kernel is built with.
+
+    This is the single LDS-budget gate for the gfx950 dense catalog.
+    ``dispatch/attention/axes.py`` derives ``_GFX950_BLOCK_M`` and
+    ``_GFX950_BLOCK_N`` from this function, so the tuning sweep axis and
+    the predicate stay in sync automatically.
+
+    The C++ ``Gfx950AttentionDenseGeometry.hpp`` has its own independent
+    implementation (hardcoded pads vs. the spec's actual pads here), so the
+    two are intentionally kept separate rather than derived.
+
+    The LDS budget is the rule none of the structural checks imply: D128
+    block_n=256 satisfies every divisibility rule but needs 303,104 bytes
+    against gfx950's 163,840-byte limit.
+    """
+    if head_size not in (64, 128):
+        return ()
+    legal = []
+    for block_m in (128, 256):
+        # Mirrors AttentionDenseSpec.num_waves: one wave per 32 query rows.
+        num_waves = block_m // 32
+        for block_n in range(32, block_m + 1, 32):
+            if block_m % block_n or block_n % num_waves:
+                continue
+            if (
+                gfx950_dense_static_lds_bytes(head_size=head_size, block_n=block_n)
+                > GFX950_LDS_CAPACITY_BYTES
+            ):
+                continue
+            legal.append((block_m, block_n))
+    return tuple(legal)
+
+
 def supports_attention_dense(
     spec: AttentionDenseSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -613,6 +716,24 @@ def supports_attention_dense(
         return False, (
             f"block_n={spec.block_n} must be divisible by num_waves="
             f"{spec.num_waves} so K/V DMA rows distribute evenly"
+        )
+    # Last, because it is the only tile rule the structural checks above do not
+    # imply: D128 block_n 256 divides correctly and still over-allocates. Without
+    # it the spec is accepted here and fails in codegen, so a catalog built from
+    # this predicate would ship a tile that cannot be lowered.
+    lds_bytes = gfx950_dense_static_lds_bytes(
+        head_size=int(spec.head_size),
+        block_n=int(spec.block_n),
+        k_row_pad=int(spec.lds_k_row_pad),
+        v_row_pad=int(spec.lds_v_row_pad),
+        k_group_pad=int(spec.lds_k_group_pad),
+        wide_lds_dma=bool(spec.wide_lds_dma),
+    )
+    if lds_bytes > GFX950_LDS_CAPACITY_BYTES:
+        return False, (
+            f"static LDS {lds_bytes} bytes for head_size={spec.head_size} "
+            f"block_n={spec.block_n} exceeds gfx950's "
+            f"{GFX950_LDS_CAPACITY_BYTES}"
         )
     return True, ""
 
