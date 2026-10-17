@@ -27,7 +27,7 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -1193,6 +1193,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         iterCode.addItems(macItems)
       else:
         if(kernel["PrefetchGlobalRead"] >= 2):
+          papReadiness = [item for item in syncCode.flatitems()
+                          if isinstance(item, SBarrier) and getattr(item, "tensorcnt", -1) >= 0]
+          if papReadiness and not isNLLorNGLL:
+            # The partial readiness count leaves this youngest TDM group live.
+            # Its descriptor swap/increment belongs to the previous subiteration;
+            # order the actual issue before the pinned rendezvous, then let the
+            # token pass insert the prior bank's read-to-write release before it.
+            assert pointerLWCode.itemsSize() == 0
+            tensorIssues = sum(isinstance(item, TensorLoadToLds) for item in globalReadCode.flatitems())
+            assert len(papReadiness) == 1 and tensorIssues == papReadiness[0].tensorcnt
+            iterCode.add(globalReadCode)
+            globalReadCode = Module()
           iterCode.add(waitLWCode)
           iterCode.add(syncCode)
           iterCode.add(localReadCode)
@@ -3400,7 +3412,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.globalReadDo(kernel, 0, tPM))
         if usePrimedSkip:
           module.add(lbl_prefetchPrimedMerge)
-          module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
+          if self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
+            module.add(SAndB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=11,
+                              comment="PAP first PGR merge retains issued-group and bank state"))
+          else:
+            module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0, comment="clear after first PGR group merge"))
         tPA = tensorParametersA
         tPB = tensorParametersB
         if kernel["PrefetchGlobalRead"] == 2:
@@ -3985,6 +4001,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
         if self.states.dcpTokenGate:
           self._dcpAdvanceTokens("Read")
+      if (isNGLL and hasLiveLdsData and doNext
+          and getattr(self.states, "papAddressCarrier", None) is not None
+          and self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB)):
+        # The group0 handoff precedes these reads and completes all current
+        # tensor producers and old P reads. Rebase the surviving F bank onto
+        # the next entry's token1; token0 is then free for next group0.
+        # This applies to data and MX alike, before localReadDo attaches tokens.
+        self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.memTokenLdsBuffer0)
       if isOptNLL and not self.states.lockLdsReadTokenSwap:
         # After entering OptNLL body, keep the read token fixed.
         self.states.lockLdsReadTokenSwap = True
@@ -4288,6 +4312,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         preparedMac.add(address)
         preparedMac.add(macIterCode)
         macIterCode = preparedMac
+      if (u == kernel["LoopIters"] - self.states.numItersPLR
+          and self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB)):
+        # Ordinary PLR1 has finished every current-bank local read here. NGLL's
+        # current tensor wait is already in waitLWCode, before this issue site.
+        syncCode.add(Component.PersistentLoop.find(self).prefetchPgr2Group(
+            self, kernel, tensorParametersA, tensorParametersB, 0 if isNGLL else 1))
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True)
@@ -4410,7 +4440,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self._syncThreads(kernel, "wait for local write done, sync"))
       papPriorSync = True
     elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-      module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
+      if (not isNGLL and self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB)
+          and getattr(self.states, "papAddressCarrier", None) is not None):
+        priorReady = Label(self.labels.getNameInc("PapPgr2CurrentFinalReady"), "")
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0,
+                              comment="PAP early group0 follows completion of current final loads"))
+        module.add(SCBranchSCC1(labelName=priorReady.getLabelName(),
+                               comment="PAP retain outstanding next group0 through NLL"))
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
+        module.add(priorReady)
+      else:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for tensor load to finish"))
       module.add(self._syncThreads(kernel, "wait for tensor load done, sync"))
       papPriorSync = True
 
@@ -4424,6 +4464,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # generate no Load Loop Body code
     module.add(self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, pack, packPre, isOptNLL, isNGLL, NLLfirst, NLLlast, NLLindex=NLLindex, \
                                    NLLnum=NLLnum, useTailloopInNll=useTailloopInNll, remainPgr=remainPgr))
+
+    if isPapNll:
+      module.add(self.papPgr2PublishGroup0(kernel, tensorParametersA, tensorParametersB))
 
     if self.do["executeToLoopEnd"] and isOptNLL:
       module.add(self.functionEnd(kernel, addLabel=False))
@@ -5076,7 +5119,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
              (kernel["enableTDMA"] and kernel["enableTDMB"]):
             # DTVA/B, DTLA/B, or TDM case: global read wait is handled above, skip force waitcnt0
             skipForceWaitcnt0 = True
-          syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync", skipForceWaitcnt0=skipForceWaitcnt0))
+          papLoopSync = self.papPgr2MainLoopReadiness(kernel, tensorParametersA, tensorParametersB)
+          if papLoopSync is not None:
+            syncCode.add(papLoopSync)
+          else:
+            syncCode.add(self._syncThreads(kernel, "PGR, and wait until LW done to sync", skipForceWaitcnt0=skipForceWaitcnt0))
           if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["PrefetchGlobalRead"] == 1:
             syncCode.add(self._syncThreads(kernel, "PGR1 and TDM, another wait to sync", skipForceWaitcnt0=skipForceWaitcnt0))
 
@@ -5723,7 +5770,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self.closeShadowInit(kernel))
 
       # Wait for PGR code in setupNewTile
-      module.add(self.getWaitcntCodeForPGR(kernel, tensorParametersA, tensorParametersB, "wait for global read"))
+      if self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
+        module.add(self.papPgr2EntryWait(kernel, tensorParametersA, tensorParametersB))
+      else:
+        module.add(self.getWaitcntCodeForPGR(kernel, tensorParametersA, tensorParametersB, "wait for global read"))
       # These cases loop back and run the prefetch loop again
       # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
       # have finished before we generate the prefetch for the next summation index.
@@ -5780,6 +5830,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["PrefetchGlobalRead"] >= 2:
         for idxPgr in range(1, kernel["PrefetchGlobalRead"]):
           module.add(self.openPrefetchGlobalRead2orMore(kernel, idxPgr))
+          papSecondMerge = None
+          if idxPgr == 1 and self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
+            papSecondMerge = Label(self.labels.getNameInc("PapPgr2SecondGroupMerge"), "")
+            module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=3,
+                                  comment="PAP second PGR group already issued?"))
+            module.add(SCBranchSCC1(labelName=papSecondMerge.getLabelName(),
+                                   comment="PAP skip only second PGR load group"))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -5836,6 +5893,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if kernel["enableTDMMetadata"] and not kernel["DirectToVgprSparseMetadata"]:
             module.add(self.directToLdsM0Update(kernel, 1, tPM))
             module.add(self.globalReadDo(kernel, 0, tPM, g2lBufIdx=0))
+          if papSecondMerge is not None:
+            module.add(papSecondMerge)
           if idxPgr < kernel["PrefetchGlobalRead"] - 1:
             # generate GR inc code except for the last prefetch
             prefetchIdx = kernel["PrefetchGlobalRead"] - 1 - idxPgr
@@ -5867,6 +5926,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # generate exit code
         for idxPgr in range(0, kernel["PrefetchGlobalRead"] + 1):
           module.add(self.closePrefetchGlobalRead2orMore(kernel, tensorParametersA, tensorParametersB, idxPgr))
+        if self.papPgr2PipelineEnabled(kernel, tensorParametersA, tensorParametersB):
+          module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
+                            comment="PAP second PGR common merge consumes issued-group state"))
 
       self.states.subTileIdx = 0
 
@@ -11614,6 +11676,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       access = _classifyTokenAccess(item)
       tokens = _getTokenList(item)
+      if isinstance(item, SBarrier) and getattr(item, "tensorcnt", -1) >= 0:
+        # A contracted rendezvous already completes the named producer bank.
+        # Do not rebuild a duplicate join before its following local reads.
+        for token in tokens:
+          tokenState[token] = "standby"
+          loopEntryOverride.pop(token, None)
+          loopPendingTokens.discard(token)
+        continue
       if access is None and tokens:
         print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
       if access is None or not tokens:
