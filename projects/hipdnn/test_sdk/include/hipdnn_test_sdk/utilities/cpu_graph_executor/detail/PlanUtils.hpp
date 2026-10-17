@@ -26,7 +26,7 @@ template <typename SdpaAttributesType>
 DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttributes,
                                              const char* planName)
 {
-    int64_t leftBound
+    const int64_t leftBound
         = nodeAttributes.left_bound().has_value() ? nodeAttributes.left_bound().value() : -1;
     int64_t rightBound
         = nodeAttributes.right_bound().has_value() ? nodeAttributes.right_bound().value() : -1;
@@ -49,16 +49,18 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
                                     "left_bound=-1, right_bound=0 instead.");
     }
 
-    // Check deprecated attributes
+    // Check deprecated attributes. Each one fixes the alignment and the right bound
+    // (the diagonal) but not the left bound: a graph that also carries left_bound is
+    // a causal sliding window, as cuDNN reads set_causal_mask(true) next to a window.
+    // left_bound counts like flash-attn's window_size_left (L keeps L + 1 keys with
+    // the diagonal), one more than cuDNN's set_sliding_window_length(L); see #12982.
     if(nodeAttributes.causal_mask())
     {
-        leftBound = -1;
         rightBound = 0;
         isTopLeft = true;
     }
     if(nodeAttributes.causal_mask_bottom_right())
     {
-        leftBound = -1;
         rightBound = 0;
         isTopLeft = false;
     }

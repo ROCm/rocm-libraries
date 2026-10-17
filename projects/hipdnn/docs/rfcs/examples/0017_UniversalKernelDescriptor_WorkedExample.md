@@ -292,8 +292,8 @@ instance.
 The classifier this maps onto is a 5-input **precedence machine** (`causal_mask`,
 `causal_mask_bottom_right`, `left_bound`, `right_bound`, `diagonal_alignment`; first match wins;
 both deprecated booleans set is a contradiction). Its canonical form is
-`asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType`, reproduced in the gfx942
-`attention_dense` pack as `maskTypeFor`, and its order is:
+`asm_sdpa_engine/plans/SdpaPlanUtils.hpp::resolveMask` (the `type` it returns), reproduced in the
+gfx942 `attention_dense` pack as `maskTypeFor`, and its order is:
 
 1. both deprecated booleans set — contradiction, decline.
 2. **`left_bound != -1` — sliding window, whatever the booleans say.**
