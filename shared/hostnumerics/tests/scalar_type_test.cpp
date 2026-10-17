@@ -5,9 +5,13 @@
 
 #include <complex>
 #include <initializer_list>
+#include <memory>
 #include <roc/hostnumerics/scalar_type.hpp>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <typeindex>
 #include <utility>
 
 TEST(Core, ScalarTypes) {
@@ -122,3 +126,161 @@ TEST(Core, ScalarTypes) {
             << "ScalarType value: " << static_cast<int>(invalid);
     }
 }
+
+namespace {
+using namespace roc::hostnumerics;
+
+TEST(Core, ScalarDispatchTags) {
+    for (size_t i = 0; i < scalarTypeCount; ++i) {
+        const auto type = static_cast<ScalarType>(i);
+        SCOPED_TRACE(scalarTypeName(type));
+        int calls = 0;
+        visitScalarType(type, [&]<typename Tag>() {
+            ++calls;
+            // Code that knows its encoding at compile time names this same tag type.
+            static_assert(std::is_same_v<Tag, detail::ScalarTag<Tag::type>>);
+            EXPECT_EQ(Tag::type, type);
+            EXPECT_EQ(Tag::storageBits, scalarTypeInfo(type).storageBits);
+            EXPECT_EQ(std::is_void_v<typename Tag::Storage>, scalarTypeInfo(type).isPacked());
+            if constexpr (!std::is_void_v<typename Tag::Storage>) {
+                EXPECT_EQ(sizeof(typename Tag::Storage) * 8, Tag::storageBits);
+            }
+        });
+        EXPECT_EQ(calls, 1);
+    }
+
+    // Verify storage independently of enum order, especially encodings sharing
+    // a storage type and packed formats that cannot occupy one C++ object.
+    const std::pair<ScalarType, std::type_index> storageTypes[] = {
+        {ScalarType::Boolean, typeid(uint8_t)},
+        {ScalarType::Int4, typeid(void)},
+        {ScalarType::Int8, typeid(int8_t)},
+        {ScalarType::Int16, typeid(int16_t)},
+        {ScalarType::Int32, typeid(int32_t)},
+        {ScalarType::Int64, typeid(int64_t)},
+        {ScalarType::UInt8, typeid(uint8_t)},
+        {ScalarType::UInt16, typeid(uint16_t)},
+        {ScalarType::UInt32, typeid(uint32_t)},
+        {ScalarType::UInt64, typeid(uint64_t)},
+        {ScalarType::Float4E2M1, typeid(void)},
+        {ScalarType::Float6E2M3, typeid(void)},
+        {ScalarType::Float6E3M2, typeid(void)},
+        {ScalarType::Float8E4M3, typeid(uint8_t)},
+        {ScalarType::Float8E5M2, typeid(uint8_t)},
+        {ScalarType::Float8E4M3Fnuz, typeid(uint8_t)},
+        {ScalarType::Float8E5M2Fnuz, typeid(uint8_t)},
+        {ScalarType::E4M3, typeid(uint8_t)},
+        {ScalarType::E5M3, typeid(uint8_t)},
+        {ScalarType::E8M0, typeid(uint8_t)},
+        {ScalarType::E8M0Zero, typeid(uint8_t)},
+        {ScalarType::Float16, typeid(uint16_t)},
+        {ScalarType::BFloat16, typeid(uint16_t)},
+        {ScalarType::Float32, typeid(float)},
+        {ScalarType::Float64, typeid(double)},
+        {ScalarType::ComplexFloat32, typeid(std::complex<float>)},
+        {ScalarType::ComplexFloat64, typeid(std::complex<double>)},
+    };
+    static_assert(std::size(storageTypes) == scalarTypeCount);
+    for (const auto& [type, expected] : storageTypes) {
+        SCOPED_TRACE(scalarTypeName(type));
+        EXPECT_EQ(visitScalarType(type,
+                                  []<typename Tag>() {
+                                      return std::type_index(typeid(typename Tag::Storage));
+                                  }),
+                  expected);
+    }
+}
+
+enum class VisitorQualification { LValue, ConstLValue, RValue };
+
+// Reports which overload ran. The move-only member makes the visitor
+// non-copyable, so dispatching an lvalue visitor shows that it is not copied.
+struct QualifiedVisitor {
+    std::unique_ptr<int> moveOnly;
+
+    template <typename Tag>
+    VisitorQualification operator()() & {
+        return VisitorQualification::LValue;
+    }
+    template <typename Tag>
+    VisitorQualification operator()() const& {
+        return VisitorQualification::ConstLValue;
+    }
+    template <typename Tag>
+    VisitorQualification operator()() && {
+        return VisitorQualification::RValue;
+    }
+};
+
+TEST(Core, ScalarDispatchForwarding) {
+    QualifiedVisitor visitor;
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, visitor), VisitorQualification::LValue);
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::as_const(visitor)),
+              VisitorQualification::ConstLValue);
+    EXPECT_EQ(visitScalarType(ScalarType::Float32, std::move(visitor)),
+              VisitorQualification::RValue);
+
+    // A move-only rvalue argument reaches a visitor that takes it by value.
+    auto argument = std::make_unique<int>(42);
+    EXPECT_EQ(visitScalarType(
+                  ScalarType::Int4, []<typename Tag>(std::unique_ptr<int> p) { return *p; },
+                  std::move(argument)),
+              42);
+    EXPECT_EQ(argument, nullptr);
+}
+
+TEST(Core, ScalarDispatchReturnTypes) {
+    int value = 5;
+    auto identity = []<typename Tag>(auto&& argument) -> decltype(auto) {
+        return std::forward<decltype(argument)>(argument);
+    };
+    static_assert(
+        std::is_same_v<decltype(visitScalarType(ScalarType::UInt8, identity, value)), int&>);
+    EXPECT_EQ(&visitScalarType(ScalarType::UInt8, identity, value), &value);
+    static_assert(
+        std::is_same_v<decltype(visitScalarType(ScalarType::Float16, identity, std::move(value))),
+                       int&&>);
+    int&& returned = visitScalarType(ScalarType::Float16, identity, std::move(value));
+    EXPECT_EQ(&returned, &value);
+
+    auto increment = []<typename Tag>(int& argument) { ++argument; };
+    static_assert(std::is_void_v<decltype(visitScalarType(ScalarType::Boolean, increment, value))>);
+    visitScalarType(ScalarType::Boolean, increment, value);
+    EXPECT_EQ(value, 6);
+}
+
+TEST(Core, ScalarDispatchExceptions) {
+    int calls = 0;
+    auto visitor = [&calls]<typename Tag>(std::unique_ptr<int> argument) {
+        ++calls;
+        return *argument;
+    };
+    auto argument = std::make_unique<int>(42);
+    // Invalid types are rejected before the visitor is called: calls stays zero,
+    // and the argument passed with std::move is never moved from.
+    // Deliberately construct unnamed enum values to test boundary rejection.
+    // NOLINTBEGIN(clang-analyzer-optin.core.EnumCastOutOfRange)
+    const ScalarType invalidTypes[] = {ScalarType::Count,
+                                       static_cast<ScalarType>(scalarTypeCount + 1),
+                                       static_cast<ScalarType>(0xffff)};
+    // NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
+    for (const auto type : invalidTypes) {
+        EXPECT_THROW(visitScalarType(type, visitor, std::move(argument)), std::runtime_error);
+        EXPECT_EQ(calls, 0);
+        ASSERT_NE(argument, nullptr);
+    }
+    EXPECT_EQ(visitScalarType(ScalarType::BFloat16, visitor, std::move(argument)), 42);
+    EXPECT_EQ(calls, 1);
+
+    // A visitor's own failure retains its original type and payload.
+    struct VisitorError {
+        int marker;
+    };
+    try {
+        visitScalarType(ScalarType::ComplexFloat64, []<typename Tag>() { throw VisitorError{37}; });
+        FAIL() << "Visitor error was swallowed";
+    } catch (const VisitorError& error) {
+        EXPECT_EQ(error.marker, 37);
+    }
+}
+}  // namespace

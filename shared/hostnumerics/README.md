@@ -133,3 +133,68 @@ The Python bindings expose scalar metadata and `__version__` through the single
 `ScalarType` identifies an encoding, and `scalarTypeInfo(type)` describes its
 category, storage width, exponent, fraction, and special-value support. Python
 exposes the same metadata through `scalar_type_info(type)`.
+
+C++ code that handles elements of a runtime `ScalarType` uses
+`visitScalarType(type, visitor)` to select code specialized for that encoding
+once per operation. The visitor's template parameter supplies `Tag::type`,
+`Tag::storageBits`, and `Tag::Storage`. The storage type describes the encoded
+representation: `Float16`, `BFloat16`, and `UInt16` all use `uint16_t`, even though
+the same bits can represent different numbers. It is not generally a type to
+perform arithmetic on, or the inverse of `nativeScalarType`.
+
+For example, this operation counts zeros in a buffer of `Float16`, `BFloat16`,
+or `UInt16` elements. Both floating-point formats have positive and negative
+zero (`0x0000` and `0x8000`); for `UInt16`, only `0x0000` is zero. The dispatch
+selects the storage type and zero mask once, outside the element loop:
+
+```cpp
+#include <cstddef>
+#include <cstring>
+#include <roc/hostnumerics/scalar_type.hpp>
+#include <span>
+#include <stdexcept>
+
+using namespace roc::hostnumerics;
+
+size_t countZeros16(ScalarType type, std::span<const std::byte> data) {
+    return visitScalarType(type, [&]<typename Tag>() -> size_t {
+        if constexpr (Tag::type == ScalarType::Float16 ||
+                      Tag::type == ScalarType::BFloat16 || Tag::type == ScalarType::UInt16) {
+            using Storage = typename Tag::Storage;
+            if (data.size() % sizeof(Storage) != 0)
+                throw std::runtime_error("Incomplete encoded element.");
+            constexpr Storage mask = Tag::type == ScalarType::UInt16 ? 0xffff : 0x7fff;
+            size_t zeros = 0;
+            for (size_t offset = 0; offset < data.size(); offset += sizeof(Storage)) {
+                Storage encoded;
+                std::memcpy(&encoded, data.data() + offset, sizeof(encoded));
+                zeros += (encoded & mask) == 0;
+            }
+            return zeros;
+        } else {
+            throw std::runtime_error("Expected Float16, BFloat16, or UInt16.");
+        }
+    });
+}
+```
+
+The input contains encoded elements in host byte order. `memcpy` loads them
+without requiring the byte buffer to contain aligned `Storage` objects.
+The visitor is instantiated for every supported `ScalarType`, even when a
+caller passes a constant type. The `if constexpr` keeps the typed loop out of
+unsupported specializations, including sub-byte formats whose `Storage` is
+`void`; the explicit `size_t` return type also covers the throwing branch.
+An empty buffer returns zero for the three accepted formats.
+
+`scalar_type.hpp` documents the full visitor contract, including forwarding,
+reference returns, and rejecting invalid enum values. Use `scalarTypeInfo`
+directly when only runtime metadata is needed. A visitor can access metadata
+at compile time through `scalarTypeInfo(Tag::type)`.
+
+## Error handling
+
+HostNumerics-owned terminal errors throw `std::runtime_error` with a useful
+message. Expected support and compatibility failures should use explicit results
+or checks. Allocation, system, dependency and visitor errors retain their
+original types. Dispatch rejects invalid enum values before invoking the visitor
+or moving its arguments. This policy does not promise exceptions-disabled builds.
