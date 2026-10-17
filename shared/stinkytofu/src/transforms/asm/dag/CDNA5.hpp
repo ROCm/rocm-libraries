@@ -1206,7 +1206,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
         dsReadInflight_.push(dsReadCreditLifetime());
-        dsSpread_.noteIssue(node->id, wmmaIssuedCountThisRegion_);
+        dsSpread_.noteIssue(wmmaIssuedCountThisRegion_);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1649,8 +1649,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget || (spread && dsOverflow_)) {
-            if (!spread || wmmaRunAtLimit_ ||
-                dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
+            if (!spread || wmmaRunAtLimit_ || dsSpread_.released(wmmaIssuedCountThisRegion_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -2347,7 +2346,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
         for (DAGNode* n : localReadQueue) {
             if (pass == 0 && spreadOn && !wmmaRunAtLimit_ &&
-                !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
+                !dsSpread_.released(wmmaIssuedCountThisRegion_))
                 continue;
             if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
         }
@@ -3469,115 +3468,29 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     dsSpread_.reset();
     dsOverflow_ = false;
     if (dagFeatures.dsSpread) {
-        std::vector<int> wmmaIndex(deps.dag.nodes.size(), INT_MAX);
-        int wmmaOrdinal = 0;
-        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id) {
-            if (isMatrixInstruction(*deps.dag.nodes[id].inst)) wmmaIndex[id] = wmmaOrdinal++;
-        }
-        constexpr int kConsumerHops = 3;
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
-        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
         // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
         // hard constraints are merged into the DAG only after this runs), not by node id.
-        std::vector<unsigned> dsOrder;
+        std::vector<unsigned> loads;
         for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
-            if (isDSRead(*deps.dag.nodes[id].inst)) dsOrder.push_back(id);
-        std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
+            if (isDSRead(*deps.dag.nodes[id].inst)) loads.push_back(id);
+        std::stable_sort(loads.begin(), loads.end(), [&](unsigned a, unsigned b) {
             return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
         });
-        // The barriers (cuts) and their WMMA windows. Tensor_loads and workgroup barriers are the
-        // cuts; WMMA dependencies are not.
-        auto cutWindow = [&](unsigned n) {
-            auto th =
-                barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
-            return th == barrierWmmaThresholds_.end() ? -1 : th->second;
-        };
-        // The window of the earliest barrier a ds_load feeds (INT_MAX = none within the hops).
-        auto feedCut = [&](unsigned id) {
-            int end = INT_MAX;
-            std::vector<unsigned> frontier{id};
-            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
-                std::vector<unsigned> next;
-                for (unsigned n : frontier) {
-                    for (unsigned m : deps.dag.graph[n]) {
-                        const int w = cutWindow(m);
-                        if (w >= 0)
-                            end = std::min(end, w);
-                        else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
-                                 !isDSRead(*deps.dag.nodes[m].inst))
-                            next.push_back(m);
-                    }
-                }
-                frontier = std::move(next);
-            }
-            return end;
-        };
-        std::vector<int> cuts;
-        for (const auto& kv : barrierWmmaThresholds_) cuts.push_back(kv.second);
-        std::sort(cuts.begin(), cuts.end());
-        cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
-        std::map<int, int> feedCount;
-        for (unsigned id : dsOrder) {
-            const int w = feedCut(id);
-            if (w != INT_MAX) ++feedCount[w];
-        }
-        // WMMAs kept free in front of a barrier (and the region end) for the last ds_load feeding
-        // it to return. The wave runs up to a full WMMA queue ahead of the matrix pipe, so the
-        // WMMAs behind the last load cover its return only after the queue: the LDS return time
-        // plus the queue depth, but never more than the barrier's stage can spare after issuing
-        // its own loads at the LDS rate (down to one batch).
+        // WMMAs kept free at the region end for the last ds_load to return. The wave runs up to a
+        // full WMMA queue ahead of the matrix pipe, so the WMMAs behind the last load cover its
+        // return only after the queue: the LDS return time plus the queue depth.
         const int drainWindows =
             (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + wmmaQueueDepth();
-        const int stageCpl = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
-        auto reserveFor = [&](int w) {
-            auto prev = std::lower_bound(cuts.begin(), cuts.end(), w);
-            const int start = prev == cuts.begin() ? 0 : *(prev - 1);
-            const int need =
-                stageCpl > 0 ? (feedCount[w] * stageCpl + windowCycles - 1) / windowCycles : 0;
-            return std::clamp(w - start - need, std::min(batch, drainWindows), drainWindows);
-        };
-        const int barrierReserve = drainWindows;
-        auto consumerWindow = [&](unsigned id) {
-            int best = INT_MAX;
-            std::vector<unsigned> frontier{id};
-            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
-                std::vector<unsigned> next;
-                for (unsigned n : frontier) {
-                    for (unsigned succ : deps.dag.graph[n]) {
-                        auto th = barrierWmmaThresholds_.find(
-                            const_cast<StinkyInstruction*>(deps.dag.nodes[succ].inst));
-                        if (th != barrierWmmaThresholds_.end())
-                            best = std::min(best, th->second - reserveFor(th->second));
-                        if (wmmaIndex[succ] != INT_MAX)
-                            best = std::min(best, wmmaIndex[succ]);
-                        else
-                            next.push_back(succ);
-                    }
-                }
-                frontier = std::move(next);
-            }
-            return best;
-        };
-        auto feedDeadline = [&](unsigned id) {
-            const int w = feedCut(id);
-            return w == INT_MAX ? INT_MAX : std::max(0, w - reserveFor(w));
-        };
-        constexpr int kDsLeadWindows = 2;
-        std::vector<DsSpreadPacer::Load> loads;
-        for (unsigned id : dsOrder) {
-            const int cw = consumerWindow(id);
-            loads.push_back(
-                {id, std::min(feedDeadline(id), cw == INT_MAX ? INT_MAX : cw - kDsLeadWindows)});
-        }
-        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace,
-                       barrierReserve);
+        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
-                                      dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
+                                      dsIssueCost(*deps.dag.nodes[loads.front()].inst) >
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
         PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
-                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch
-                             << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
+                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch << " drain="
+                             << drainWindows << " catchUp=" << dagFeatures.dsCatchUpPace << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

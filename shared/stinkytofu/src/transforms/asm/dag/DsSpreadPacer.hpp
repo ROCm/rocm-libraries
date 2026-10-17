@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <climits>
-#include <unordered_map>
 #include <vector>
 
 namespace stinkytofu {
@@ -18,43 +17,34 @@ namespace stinkytofu {
 // A sparse region gets a small X, so its loads leave room for stalls; a dense one an X above what
 // one batch holds at the LDS rate (the LDS credits then throttle it). A batch that began behind
 // the even line (a dependency delayed its loads) may take `catchUp` more, so the region closes
-// the gap gradually. A load past its deadline (its first consumer, or the barrier it feeds) is
-// always released.
+// the gap gradually. Once the region's last WMMA has issued nothing is held.
 class DsSpreadPacer {
    public:
-    struct Load {
-        unsigned nodeId;
-        int deadline;  // WMMA index the load must have issued by, INT_MAX = the region end
-    };
-
     void reset() {
-        deadline_.clear();
-        total_ = 0;
-        share_ = 0;
-        issuedTotal_ = 0;
         active_ = false;
         batchIdx_ = -1;
         issuedInBatch_ = 0;
         allow_ = 0;
+        total_ = 0;
+        share_ = 0;
+        issuedTotal_ = 0;
+        wmmaTotal_ = 0;
     }
 
     // loads: the region's ds_loads. wmmaTotal: the region's WMMAs. drainWindows: WMMAs kept free
-    // in front of the region end for the last load to return.
-    void plan(const std::vector<Load>& loads, int wmmaTotal, int batch, int catchUp,
+    // at the region end for the last load to return.
+    void plan(const std::vector<unsigned>& loads, int wmmaTotal, int batch, int catchUp,
               int drainWindows) {
         reset();
         if (loads.empty() || wmmaTotal <= 0) return;
         active_ = true;
         batch_ = std::max(1, batch);
         catchUp_ = std::max(0, catchUp);
-        const int regionEnd = std::max(0, wmmaTotal - std::max(0, drainWindows));
-        const int batches = std::max(1, (regionEnd + batch_ - 1) / batch_);
+        wmmaTotal_ = wmmaTotal;
+        const int usable = std::max(0, wmmaTotal - std::max(0, drainWindows));
+        const int batches = std::max(1, (usable + batch_ - 1) / batch_);
         total_ = static_cast<int>(loads.size());
         share_ = (total_ + batches - 1) / batches;
-        for (const Load& l : loads) {
-            const int d = std::min(std::max(0, l.deadline), regionEnd);
-            deadline_[l.nodeId] = d;
-        }
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -74,23 +64,19 @@ class DsSpreadPacer {
         return std::max(0, allow_ - issuedInBatch_);
     }
 
-    // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far.
-    bool released(unsigned nodeId, int wmmaIssued) const {
-        if (!active_) return true;
-        auto dl = deadline_.find(nodeId);
-        if (dl == deadline_.end()) return true;
-        if (wmmaIssued >= dl->second) return true;
+    // Whether a ds_load may issue with `wmmaIssued` WMMAs of the region issued so far.
+    bool released(int wmmaIssued) const {
+        if (!active_ || wmmaIssued >= wmmaTotal_) return true;
         openBatch(wmmaIssued);
         return issuedInBatch_ < allow_;
     }
 
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
-    void noteIssue(unsigned nodeId, int wmmaIssued) {
+    void noteIssue(int wmmaIssued) {
         if (!active_) return;
         openBatch(wmmaIssued);
         ++issuedInBatch_;
         ++issuedTotal_;
-        deadline_.erase(nodeId);
     }
 
    private:
@@ -104,9 +90,9 @@ class DsSpreadPacer {
         allow_ = share_ + (behind ? catchUp_ : 0);
     }
 
-    std::unordered_map<unsigned, int> deadline_;
     int batch_ = 1;
     int catchUp_ = 0;
+    int wmmaTotal_ = 0;
     int total_ = 0;
     int share_ = 0;
     int issuedTotal_ = 0;

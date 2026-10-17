@@ -116,9 +116,9 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
-        /// Spread ds_loads over the region's WMMA batches: each batch takes its even share of the
-        /// loads still due (see DsSpreadPacer), and a load issues only while the ds queue has a
-        /// free credit. Off = ds_loads issue as soon as they are ready and a credit is free.
+        /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
+        /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
+        /// ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
         /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
         /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
@@ -140,9 +140,9 @@ struct PassFeatureConfig {
         /// "Y ds_loads every X cycles", dsPaceCount (Y) and dsPaceCycles (X). < 0 = searched.
         int dsPaceCycles = -1;
         int dsPaceCount = -1;
-        /// ds_loads a WMMA batch (wmmaBatchSize WMMAs) may take above what the LDS return rate
-        /// (dsReadCyclesPerLoad) fits, when the region fell behind its even share (a dependency
-        /// delayed the loads). 0 = never above the rate.
+        /// ds_loads a WMMA batch (wmmaBatchSize WMMAs) may take above the region's even share when
+        /// the batch began behind the even line (a dependency delayed its loads), so the region
+        /// closes the gap gradually. 0 = no catching up.
         int dsCatchUpPace = 2;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
