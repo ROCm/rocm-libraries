@@ -1129,12 +1129,32 @@ class TestReduceInstance(unittest.TestCase):
             self.assertIn("define amdgpu_kernel void", ll)
 
     def test_f64_path_builds(self):
+        # An f64 reduction must accumulate in double, not just load double:
+        # every combine step is a double op, no float op appears, and the
+        # LDS pool holds one 8-byte partial per thread (block_size * 8 bytes).
         from rocke.instances import Reduce2DSpec, build_reduce2d
 
-        for op in ("sum", "max", "mean"):
+        combine = {
+            "sum": "fadd double",
+            "max": "@llvm.maxnum.f64(",
+            "mean": "fadd double",
+        }
+        for op, double_combine in combine.items():
             spec = Reduce2DSpec(n_per_block=4096, op=op, dtype="f64", vec=2)
             ll = lower_kernel_to_llvm(build_reduce2d(spec))
-            self.assertIn("double", ll)
+            self.assertIn(double_combine, ll, op)
+            self.assertNotIn("fadd float", ll, op)
+            self.assertNotIn("llvm.maxnum.f32", ll, op)
+            pool_bytes = spec.block_size * 8
+            self.assertRegex(ll, rf"@smem_pool\.\S+ = .*\[{pool_bytes} x i8\]", op)
+            lds_stores = [
+                line.strip()
+                for line in ll.splitlines()
+                if line.lstrip().startswith("store ") and "ptr addrspace(3)" in line
+            ]
+            self.assertTrue(lds_stores, op)
+            for line in lds_stores:
+                self.assertTrue(line.startswith("store double "), line)
 
     def test_f64_output_store_is_8_byte_aligned(self):
         # The one f64 result store per row claims the 8-byte element alignment.
