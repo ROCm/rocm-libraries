@@ -405,9 +405,11 @@ def _check_support_predicate(module, builder, spec_obj, arch):
     if predicate is None:
         raise HkpPackError(
             f"builder '{builder}' in module {getattr(module, '__name__', module)} "
-            f"has no spec-first support predicate, so its spec cannot be validated "
-            f"@ {arch}; add an `is_valid_spec(spec, *, arch)`/`supports_*_spec` "
-            f"predicate or an entry in _PREDICATE_ALIASES"
+            f"has no support predicate that takes its spec, so the spec cannot be "
+            f"validated @ {arch}; the module needs the _PREDICATE_ALIASES target, "
+            f"`supports_{builder.removeprefix('build_')}` or an `is_valid*` callable "
+            f"whose first positional parameter is annotated with the builder's spec "
+            f"class (or a base) and that requires no other parameter than `arch`"
         )
 
     params = inspect.signature(predicate).parameters
