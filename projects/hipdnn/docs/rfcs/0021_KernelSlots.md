@@ -89,7 +89,8 @@ what reads the graph. Four rules define the model:
 1. **Order is the contract.** Slots launch in declaration order. A slot may read anything an
    earlier slot wrote.
 2. **Every slot is required.** The engine accepts a graph only if every slot has an applicable
-   kernel. Optional slots are deferred (§ 11).
+   kernel, the shared-workspace token is valid, and the shared region fits the workspace limit (§ 6).
+   Optional slots are deferred (§ 11).
 3. **Slots are selected independently.** Nothing in one slot constrains the choice in another.
 4. **Hand-off conventions belong to the engine.** The format and layout of data passed between
    slots, and any convention two slots must agree on (such as the dropout random-number layout), are
@@ -154,7 +155,8 @@ is rejected, naming the knob. An unslotted engine keeps bare knob ids.
 **Candidate enumeration** lists every combination of per-slot kernels, so its size is the product of
 the slot catalog sizes. Entries are computed on demand in a fixed order, independent of rankers and
 records, so pages stay stable. The enumeration schema is unchanged, and a candidate's knob settings
-cover every slot.
+cover every slot. A candidate is named by its per-slot kernel ids joined in slot order
+(`prep=<id>|dkdv=<id>|dq=<id>`).
 
 **Plan build.** Each slot resolves its kernel as an engine does today: order the catalog (winner
 record, else ranker, else static order), apply the slot's knob filter, and take the first kernel
@@ -169,14 +171,23 @@ does between any engines.
 
 **Shared region.** Slots pass data through a region at the start of the plan's workspace. Its layout
 depends only on the graph, so the engine's native graph match (provider code, not a declarative
-pattern) computes it and publishes it as bound tokens, named values written `$ws.*`. The UED's
-`shared_workspace` names the token holding the total size. For split SDPA backward, the region
+pattern) computes it and publishes it as bound tokens, named values written `ws.*`. The UED's
+`shared_workspace` names the token holding the total size. The match also publishes
+`ws.scratch_offset`, the shared size rounded up to 256 B, and an offset token per shared object
+(for example `ws.delta.offset`). The runtime checks the token at catalog build: a missing, non-integer
+or negative value makes the engine decline the graph with an error naming the token. For a slotted
+engine the `ws.` root is reserved: its tokens are excluded from ranker features, problem features and
+training rows. For split SDPA backward, the region
 holds Delta and the sanitized log-sum-exp, sized once for the maximum sequence length.
 
-**Workspace size** is the shared region plus the largest scratch any one slot needs. Slots run one
-at a time, so they reuse the same scratch. Each slot's scratch starts after the shared region; in
-v1 every slot dispatches through a native handler, which places it there. Workspace limits and
-checks apply to the total.
+**Workspace size** is the aligned shared region plus the largest scratch any one slot needs. Slots run
+one at a time, so they reuse the same scratch. A slotted kernel's workspace query reports its scratch
+only. Every handler receives the unshifted workspace base; in v1 each slot dispatches through a native
+handler, which reads the offset tokens in `prepare` and adds them to the base at launch. The plan
+rejects a null workspace when shared plus scratch is non-zero. The workspace limit applies to the
+total: a kernel is pruned from its slot when the aligned shared region plus its scratch exceeds the
+limit, and the engine declines when the shared region alone exceeds it. The shared region does not
+depend on any pick, so slots stay independent.
 
 **Shared arguments.** Every runtime argument more than one slot uses (scale, dropout parameters and
 random-number seed, ragged sequence information, maximum sequence lengths) is computed once in the
@@ -189,28 +200,38 @@ dropout mask.
 have no time of their own. With benchmarking enabled, the plan times:
 
 1. The **reference program**: each slot at its first kernel in plan-build order (§ 5), its
-   **reference pick**. If a reference pick fails at launch, that slot moves to its next kernel.
+   **reference pick**. If a reference pick fails at launch while benchmarking, that slot moves to
+   its next kernel.
 2. Each other kernel in each slot, with the remaining slots at their reference picks.
 
 This takes 1 + Σₛ(Kₛ − 1) runs instead of ∏ₛ Kₛ. The plan then times the **winners program**, each
 slot at its measured winner, and serves it. If the winners program fails, the plan serves the
-reference program. A slot whose winner record already covers its catalog is not re-measured.
+reference program and writes no program record, so the next run re-times only the winners
+program. A slot whose winner record already covers its catalog is not re-measured. While a knob
+filter or workspace limit is active, the plan times the filtered catalogs, serves the winner and
+writes no records.
 
 **Winner records are per slot**, ranking that slot's kernels by the whole-program times above. A
-separate record stores the winners program and its time, which is the engine's measured time.
+separate **program record** stores the winners program, as a slot-to-kernel-id map, and its time,
+which is the engine's measured time. A program record is valid only if every kernel it names is in
+the current catalogs and equals the slot winners; validity is checked on read. Slot records and the
+program record are written in one locked append.
 
 **Heuristics.**
 
 - A slot's ranker orders only its own slot. It predicts no time, since a slot has none.
 - The engine's estimate comes only from its engine-level model (`predict_engine`), which models the
   whole program.
-- A configuration-level prediction comes only from measurement. It exists once every slot has a
-  winner record and the winners program has been timed, and only for knob settings that leave that
-  program unchanged.
+- A configuration-level prediction comes only from measurement. It exists while a valid program
+  record exists, and only for knob settings that leave that program unchanged; otherwise it is
+  unavailable.
 
 **Training data.** Rankers are trained on benchmark data. In v1 the benchmark tool times every
-enumerated candidate, which for a slotted engine is the full product of slot catalogs. Slot rankers
-train on the rows where the other slots hold their reference picks.
+enumerated candidate, which for a slotted engine is the full product of slot catalogs; a reference
+kernel that fails to launch fails the sweep. Training reference picks are each slot's first kernel in
+kernel-id order, marked by a `slot_reference` column; slot rankers train on the rows where the other
+slots hold their training reference picks. These can differ from the runtime reference picks, which
+is acceptable under the separability assumption (§ 11).
 
 ## 8. Validation
 
@@ -219,18 +240,26 @@ rule in § 4: engine-level selection members beside `slots`, an empty or misname
 ranker that declares a metric, `shared_workspace` without a native graph match, a pack with a
 missing or unknown `slot`, or one kernel in two slots. The existing per-engine checks (RFC 0020
 § 13.2, RFC 0019 § 6.3, RFC 0018 § A.5) run per slot. A slot with no loadable pack is a warning:
-the engine stays registered and declines every graph.
+the engine stays registered and declines every graph. An unslotted engine with no loadable pack is
+still dropped, as today. Within a slotted engine, a duplicate metadata tuple in a slot or a duplicate
+kernel id in a slot's arch group drops the offending pack; unslotted engines keep today's behavior.
 
 ## 9. Compatibility
 
-UED and KDP take a minor bump to 1.1, adding `slots`, `shared_workspace` and `slot`. A 1.0 runtime
-rejects 1.1 files; a 1.1 runtime reads 1.0 files unchanged. A slot ranker's provenance names its
-slot, and a slotted engine's `predict_engine` model names every slot's KMD; both are minor UHD
-format changes (RFC 0019 § 8.1).
+UED and KDP take a minor bump to 1.1, adding `slots`, `shared_workspace` and `slot`; UHD takes 1.1
+for a slot ranker, whose `trained_against` adds `slot`, and a slotted `predict_engine` model, whose
+`trained_against` carries `kmds: [{slot, id, revision}]` instead of `kmd` (RFC 0019 § 8.1). Only
+files that use slots are written as 1.1. A 1.0 runtime skips 1.1 files with a warning, and a 1.1 KDP
+beside a skipped UED is reported as orphaned; a 1.1 runtime reads 1.0 files unchanged. A 1.0-labelled
+file that contains slot members is rejected.
 
 An engine without slots keeps its knob ids, trained models and winner records, so nothing trained or
 stored is invalidated. Adding, removing, renaming or reordering slots is a breaking engine revision,
-because knob ids and record keys change.
+because knob ids and record keys change. For a slotted engine, winner records carry the slot name,
+the cache shard path uses the UED id and the hash of the slot rankers' model hashes in slot order,
+and a slot ranker with a model but no hash disables persistence, as for an unslotted engine
+(RFC 0019 § 4.1, § 9.2). Winner-record lines move to format v3 for slotted engines only; v2 lines
+remain readable.
 
 ## 10. Amendments to Other RFCs
 
@@ -239,11 +268,11 @@ statements about an engine's kernel selection apply per slot. The edit list:
 
 | RFC | Change |
 |---|---|
-| 0017 | Kernel slots replace the multi-launch pack (§ 15.1) and its intermediate buffers (§ 15.3) for multi-kernel engines; the UCD (§ 15.2) is unaffected. KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 10). |
+| 0017 | Kernel slots replace the multi-launch pack (§ 15.1) and its intermediate buffers (§ 15.3) for multi-kernel engines; the UCD (§ 15.2) is unaffected. KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers that read offset tokens (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 10). |
 | 0018 | Kernel-scoped matchers check against the KMD of the pack's slot (§ 8, § A.5). |
 | 0019 | KMD, ranker, catalog, winner records, caches and contract checks are per slot; slot rankers are metric-less and train on whole-program times; a slotted engine has no model-based configuration estimate; its benchmark cost is the product of slot catalogs (§ 3, § 4.1, § 5, § 6.3, § 8.1, § 9.2, § 11, § 13.2). |
 | 0019.13 | Slot rankers train per slot (§ 3.5, § 7.3, § 8.3). |
-| 0020 | UED gains `slots` and `shared_workspace`; `metadata` is required only without `slots` (§ 4.2, § 10). Selection members and knobs move to slots, with knob ids `<slot>.<field>` (§ 4.2, § 4.6, § 8). A native graph match may publish `$ws.*` tokens (§ 6.1). Load checks run per slot (§ 13). |
+| 0020 | UED gains `slots` and `shared_workspace`; `metadata` is required only without `slots` (§ 4.2, § 10). Selection members and knobs move to slots, with knob ids `<slot>.<field>` (§ 4.2, § 4.6, § 8). A native graph match may publish `ws.*` tokens (§ 6.1). Load checks run per slot (§ 13). |
 
 ## 11. Deferred Work and Open Questions
 
@@ -255,7 +284,7 @@ statements about an engine's kernel selection apply per slot. The edit list:
 | Per-slot timing | Per-kernel timing inside the program would allow calibrated slot rankers and model-based configuration estimates. |
 | Cheaper training collection | Collect from benchmarking mode instead of the full product, once winner records carry the benchmark tool's per-run statistics. |
 | `predict_applicable_kernels` per slot | `slots[].predict_applicable_kernels`. |
-| Shared-region tokens from declarative graph matches | A reserved `ws` token root in RFC 0020 § 6.1. |
+| Shared-region tokens from declarative graph matches | Declarative publication of the `ws` token root, which this RFC reserves for slotted engines, in RFC 0020 § 6.1. |
 
 **Open questions.**
 
