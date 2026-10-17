@@ -174,11 +174,12 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr auto LdsPaddingConfigA = Base::template GetLdsPaddingConfig<Problem, true>();
             constexpr auto IsNeedPadding     = LdsPaddingConfigA[Base::I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
-            constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigA[Base::I1] : -1;
-            using ADataType              = LdsADataType<Problem>;
-            constexpr index_t PackedSize = numeric_traits<ADataType>::PackedSize;
-            constexpr auto DataTypeSize  = sizeof(ADataType);
-            constexpr index_t AVectorLen = VecByteSize / DataTypeSize * PackedSize;
+            constexpr auto PaddingAmount   = IsNeedPadding ? LdsPaddingConfigA[Base::I1] : -1;
+            constexpr auto PaddingInterval = LdsPaddingConfigA[Base::I2];
+            using ADataType                = LdsADataType<Problem>;
+            constexpr index_t PackedSize   = numeric_traits<ADataType>::PackedSize;
+            constexpr auto DataTypeSize    = sizeof(ADataType);
+            constexpr index_t AVectorLen   = VecByteSize / DataTypeSize * PackedSize;
             constexpr index_t MLdsLayerRequired =
                 get_n_lds_banks() * get_n_dwords_per_128b() / KPerBlock / DataTypeSize * PackedSize;
             constexpr auto MLdsLayer = max(1, MLdsLayerRequired);
@@ -186,7 +187,42 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t BytesPerDword = sizeof(int32_t);
             constexpr auto PaddingDataAmount =
                 (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
+            constexpr index_t PaddingStride =
+                (1 << (PaddingInterval + 1)) * BytesPerDword / DataTypeSize * PackedSize;
 
+            // The legacy interval equals one stacked K row. A row such as K=192
+            // is padded every 64 elements, so describe each of those chunks.
+            if constexpr(IsNeedPadding && (KPerBlock * MLdsLayer != PaddingStride))
+            {
+                static_assert(KPerBlock % PaddingStride == 0,
+                              "TDM K pad interval must divide the K tile");
+                static_assert(PaddingStride % AVectorLen == 0,
+                              "TDM K pad interval must be a multiple of the LDS vector length");
+                constexpr auto KChunks               = KPerBlock / PaddingStride;
+                constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
+                    make_tuple(number<MPerBlock>{},
+                               number<KChunks>{},
+                               number<PaddingStride / AVectorLen>{},
+                               number<AVectorLen>{}),
+                    make_tuple(number<KChunks*(PaddingStride + PaddingDataAmount)>{},
+                               number<PaddingStride + PaddingDataAmount>{},
+                               number<AVectorLen>{},
+                               number<1>{}),
+                    number<AVectorLen>{},
+                    number<1>{});
+                constexpr auto a_lds_block_desc = transform_tensor_descriptor(
+                    a_lds_block_desc_0,
+                    make_tuple(make_pass_through_transform(number<MPerBlock>{}),
+                               make_merge_transform_v3_division_mod(
+                                   make_tuple(number<KChunks>{},
+                                              number<PaddingStride / AVectorLen>{},
+                                              number<AVectorLen>{}))),
+                    make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+                return a_lds_block_desc;
+            }
+            else
+            {
             constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor(
                 make_tuple(number<MPerBlock / MLdsLayer>{},
                            number<KPerBlock / AVectorLen * MLdsLayer>{},
@@ -216,6 +252,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
                 make_tuple(sequence<0>{}, sequence<1>{}));
 
             return a_lds_block_desc;
+            }
         }
     }
 
@@ -234,10 +271,11 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr auto LdsPaddingConfigB = Base::template GetLdsPaddingConfig<Problem, false>();
             constexpr auto IsNeedPadding     = LdsPaddingConfigB[Base::I0];
             // set to -1 to make sure PaddingDataAmount = 0 when IsNeedPadding = false
-            constexpr auto PaddingAmount = IsNeedPadding ? LdsPaddingConfigB[Base::I1] : -1;
-            using BDataType              = LdsBDataType<Problem>;
-            constexpr index_t PackedSize = numeric_traits<BDataType>::PackedSize;
-            constexpr auto DataTypeSize  = sizeof(BDataType);
+            constexpr auto PaddingAmount   = IsNeedPadding ? LdsPaddingConfigB[Base::I1] : -1;
+            constexpr auto PaddingInterval = LdsPaddingConfigB[Base::I2];
+            using BDataType                = LdsBDataType<Problem>;
+            constexpr index_t PackedSize   = numeric_traits<BDataType>::PackedSize;
+            constexpr auto DataTypeSize    = sizeof(BDataType);
 
             constexpr index_t BVectorLen = VecByteSize / DataTypeSize * PackedSize;
             constexpr index_t NLdsLayerRequired =
@@ -247,7 +285,40 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
             constexpr index_t BytesPerDword = sizeof(int32_t);
             constexpr auto PaddingDataAmount =
                 (PaddingAmount + 1) * BytesPerDword / DataTypeSize * PackedSize;
+            constexpr index_t PaddingStride =
+                (1 << (PaddingInterval + 1)) * BytesPerDword / DataTypeSize * PackedSize;
 
+            if constexpr(IsNeedPadding && (KPerBlock * NLdsLayer != PaddingStride))
+            {
+                static_assert(KPerBlock % PaddingStride == 0,
+                              "TDM K pad interval must divide the K tile");
+                static_assert(PaddingStride % BVectorLen == 0,
+                              "TDM K pad interval must be a multiple of the LDS vector length");
+                constexpr auto KChunks               = KPerBlock / PaddingStride;
+                constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
+                    make_tuple(number<NPerBlock>{},
+                               number<KChunks>{},
+                               number<PaddingStride / BVectorLen>{},
+                               number<BVectorLen>{}),
+                    make_tuple(number<KChunks*(PaddingStride + PaddingDataAmount)>{},
+                               number<PaddingStride + PaddingDataAmount>{},
+                               number<BVectorLen>{},
+                               number<1>{}),
+                    number<BVectorLen>{},
+                    number<1>{});
+                constexpr auto b_lds_block_desc = transform_tensor_descriptor(
+                    b_lds_block_desc_0,
+                    make_tuple(make_pass_through_transform(number<NPerBlock>{}),
+                               make_merge_transform_v3_division_mod(
+                                   make_tuple(number<KChunks>{},
+                                              number<PaddingStride / BVectorLen>{},
+                                              number<BVectorLen>{}))),
+                    make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+                return b_lds_block_desc;
+            }
+            else
+            {
             constexpr auto b_lds_block_desc_0 = make_naive_tensor_descriptor(
                 make_tuple(number<NPerBlock / NLdsLayer>{},
                            number<KPerBlock / BVectorLen * NLdsLayer>{},
@@ -277,6 +348,7 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
                 make_tuple(sequence<0>{}, sequence<1>{}));
 
             return b_lds_block_desc;
+            }
         }
     }
 
@@ -372,12 +444,17 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
 
         constexpr index_t vgpr_capacity = get_max_vgpr_count();
         // sub tile number; have 1, 2, 4 choices
-        constexpr index_t sub_tile_num = ((input_vgpr_num + acc_vgpr_num) <= vgpr_capacity) ? 1
-                                         : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_capacity)
-                                             ? 2
-                                             : 4;
+        constexpr index_t preferred = ((input_vgpr_num + acc_vgpr_num) <= vgpr_capacity) ? 1
+                                      : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_capacity) ? 2
+                                                                                               : 4;
+        constexpr index_t capped    = min(preferred, max_sub_tile_num);
+        // KPerSubTile is KIter / sub_tile_num. A 192 tile has 6 warp-K iterations,
+        // and 4 does not divide 6, so the last 64 K elements were never accumulated.
+        constexpr index_t sub_tile_num = (max_sub_tile_num % capped == 0)             ? capped
+                                         : (capped >= 2 && max_sub_tile_num % 2 == 0) ? 2
+                                                                                      : 1;
 
-        return number<min(sub_tile_num, max_sub_tile_num)>{};
+        return number<sub_tile_num>{};
     }
 
     template <typename Problem>
