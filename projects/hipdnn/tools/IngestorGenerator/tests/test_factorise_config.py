@@ -108,6 +108,17 @@ class TestRoundTrip:
             k.kernel_source.spec for k in want
         ]
 
+    def test_a_vocabulary_field_outside_the_spec_round_trips(self, tmp_path):
+        """A vocabulary field the spec does not carry reaches the compact form as a
+        matcher-spelling `resolved` value, which the expansion must accept."""
+        long_form = copy.deepcopy(SAMPLE)
+        for kernel in long_form["packs"][0]["kernels"]:
+            del kernel["kernel_source"]["spec"]["dtype"]
+        got = _expand(tmp_path, _compact(long_form))
+        want = _enumerate(tmp_path, long_form)
+        assert [k.name for k in got] == [k.name for k in want]
+        assert [k.metadata for k in got] == [k.metadata for k in want]
+
     def test_spec_key_order_survives(self, tmp_path):
         """Key order reaches the emitted descriptor, so it is part of the bytes."""
         got = _expand(tmp_path, _compact())

@@ -874,14 +874,21 @@ def _expand_one_arm(
         if field_name in vocabulary and isinstance(value, str):
             # The matcher compares the hipDNN spelling; the spec carries the
             # builder's. Copying one over the other declines every graph while
-            # the engine still loads and every count reconciles.
-            if value not in vocabulary[field_name]:
+            # the engine still loads and every count reconciles. Either spelling
+            # is accepted: a builder spelling is mapped, a matcher spelling is
+            # kept, since an arm's `metadata` and a shape's `resolved` state
+            # matcher-visible values directly.
+            mapping = vocabulary[field_name]
+            if value in mapping:
+                value = mapping[value]
+            elif value not in mapping.values():
                 raise ConfigError(
                     f"{shape_where}: metadata field '{field_name}' has value "
-                    f"{value!r}, which this group's vocabulary does not map. Mapped: "
-                    f"{sorted(map(str, vocabulary[field_name]))}."
+                    f"{value!r}, which this group's vocabulary neither maps nor "
+                    f"lists as a matcher spelling. Mapped: "
+                    f"{sorted(map(str, mapping))}; matcher spellings: "
+                    f"{sorted(map(str, mapping.values()))}."
                 )
-            value = vocabulary[field_name][value]
         metadata[field_name] = value
 
     # A bool renders as `True`/`False` under str.format, but every shipped
