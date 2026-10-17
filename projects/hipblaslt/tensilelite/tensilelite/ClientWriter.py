@@ -171,7 +171,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
         logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
-    problemSizes = ProblemSizesMock(exactLogic) if exactLogic else ProblemSizesMockDummy()
+    problemSizes = ProblemSizesMock(exactLogic, problemType["FusedGemmA2A"]) if exactLogic else ProblemSizesMockDummy()
     if len(problemType["BiasDataTypeList"]) > 0:
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
@@ -323,6 +323,10 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if globalParameters["DisableAsmComments"]:
     callCreateLibraryCmd += " --disable-asm-comments"
+
+  if any((LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4] or {}).get("FusedGemmA2A", False)
+         for f in glob(os.path.join(libraryLogicPath, "*.yaml"))):
+    callCreateLibraryCmd += " --enable-gemm-a2a-fusion"
 
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
@@ -561,6 +565,10 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
+    if problemType.fusedGemmA2A:
+      rv.append(('world', problem.world))
+      rv.append(('fused-a2a-extent', problem.a2aExtent))
+
     return rv
 
 def dataInitParams(problemType):
@@ -794,6 +802,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
+        if problemType.fusedGemmA2A:
+            for world in globalParameters["WorldFilter"]:
+                param("world-filter", world)
         if globalParameters["RocProfCounter"]:
             for counter in globalParameters["RocProfCounter"]:
                 param("rocprof-counter", counter)

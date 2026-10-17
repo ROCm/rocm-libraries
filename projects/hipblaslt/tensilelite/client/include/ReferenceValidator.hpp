@@ -46,8 +46,7 @@ namespace TensileLite
         class ReferenceValidator : public RunListener
         {
         public:
-            ReferenceValidator(po::variables_map const&                    args,
-                               std::vector<std::shared_ptr<DeviceContext>> devices);
+            ReferenceValidator(po::variables_map const& args);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -133,7 +132,6 @@ namespace TensileLite
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
 
             size_t                   m_cpuResultBufferSize = 0;

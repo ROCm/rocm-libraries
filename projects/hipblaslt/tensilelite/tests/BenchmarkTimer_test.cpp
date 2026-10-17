@@ -133,7 +133,7 @@ namespace
 
 TEST_F(BenchmarkTimerTest, ReportsMeanAndPercentilesOfEnqueueTimes)
 {
-    ScriptedTimer timer(makeTimerArgs(10, 1), device, 0.0f, {});
+    ScriptedTimer timer(makeTimerArgs(10, 1), device, 0.0f);
     start(timer);
     runSolution(timer, {10, 1, 9, 2, 8, 3, 7, 4, 6, 5});
     EXPECT_NEAR(reported(ResultKey::TimeUS), 5.5, 1e-9);
@@ -143,7 +143,7 @@ TEST_F(BenchmarkTimerTest, ReportsMeanAndPercentilesOfEnqueueTimes)
 
 TEST_F(BenchmarkTimerTest, SingleSampleEqualsTimeUSAfterFlush)
 {
-    ScriptedTimer timer(makeTimerArgs(1, 1), device, 0.5f, {});
+    ScriptedTimer timer(makeTimerArgs(1, 1), device, 0.5f);
     start(timer);
     runSolution(timer, {4.0});
     EXPECT_NEAR(reported(ResultKey::TimeUS), 3.5, 1e-9);
@@ -153,7 +153,7 @@ TEST_F(BenchmarkTimerTest, SingleSampleEqualsTimeUSAfterFlush)
 
 TEST_F(BenchmarkTimerTest, SamplesDoNotLeakAcrossSolutions)
 {
-    ScriptedTimer timer(makeTimerArgs(3, 1), device, 0.0f, {});
+    ScriptedTimer timer(makeTimerArgs(3, 1), device, 0.0f);
     start(timer);
     runSolution(timer, {100.0, 100.0, 100.0});
     runSolution(timer, {1.0, 2.0, 3.0});
@@ -164,7 +164,7 @@ TEST_F(BenchmarkTimerTest, SamplesDoNotLeakAcrossSolutions)
 
 TEST_F(BenchmarkTimerTest, EnqueueTimesCountTowardRunsInSolution)
 {
-    ScriptedTimer timer(makeTimerArgs(2, 2), device, 0.0f, {});
+    ScriptedTimer timer(makeTimerArgs(2, 2), device, 0.0f);
     start(timer);
     timer.preSolution(&solution);
     for(int i = 0; i < 3; i++)
