@@ -37,6 +37,7 @@ Documentation for rocSPARSE is available at
 * Fixed an integer overflow in the binary search that maps nonzeros to rows in the nnz-split algorithms of `rocsparse_spmv` (CSR) and `rocsparse_spmm` (CSR and CSC). With 32-bit indices and matrices with more than `2^30` rows, the search midpoint `(left + right) / 2` could overflow, causing out-of-bounds reads or incorrect row assignments. The midpoint is now computed as `left + (right - left) / 2`.
 * Fixed an invalid kernel launch in legacy `rocsparse_Xbsr2csr` and the 64-bit BSR-to-CSR conversion, where the 1024-thread kernels overflowed the 32-bit work-item grid limit at about 4.2 million block rows because the grid was not clamped.
 * Fixed an overflow issue in the COO atomic SpMV kernels used by `rocsparse_spmv` and `rocsparse_v2_spmv` for COO and COO AoS matrices. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-ID calculation could overflow and prevent some nonzeros from being accumulated. The kernels now compute element IDs in 64-bit arithmetic.
+* Fixed `rocsparse_Xcsr2hyb` leaving dangling ELL and COO pointers in a reused HYB matrix when the new conversion had no ELL or COO part (including `m == 0` or `n == 0`). A later `rocsparse_destroy_hyb_mat` or `rocsparse_Xcsr2hyb` freed them a second time.
 
 ## rocSPARSE 5.1.0 for ROCm 10.1
 
