@@ -426,16 +426,22 @@ class Registry:
             (
                 fields,
                 [
-                    tuple(self.coerce(f, v, strict=True) for f, v in zip(fields, row))
+                    tuple(
+                        self.coerce(f, v, strict=True, by_name=True)
+                        for f, v in zip(fields, row)
+                    )
                     for row in rows
                 ],
             )
             for fields, rows in cell_groups(raw)
         ]
 
-    def coerce(self, field: str, value, strict: bool = False):
+    def coerce(self, field: str, value, strict: bool = False, by_name: bool = False):
         """``value`` as the request's own type: a member, by name or value, of the
-        first enum in the field's type that has one."""
+        first enum in the field's type that has one. ``strict`` refuses an unknown
+        string for an enum field; ``by_name`` also refuses a value that matches a
+        member only by value, since the README asks for member names and
+        ``ground_truth graphs`` reads them as such."""
         hint = self.hints.get(field)
         args = typing.get_args(hint) or (hint,)
         enums = [a for a in args if isinstance(a, type) and issubclass(a, enum.Enum)]
@@ -445,9 +451,16 @@ class Registry:
             if isinstance(value, str) and value in arg.__members__:
                 return arg[value]
             try:
-                return arg(value)
+                member = arg(value)
             except (ValueError, TypeError):
-                pass
+                continue
+            if by_name:
+                raise EnumerationError(
+                    f"{value!r} is the value of {arg.__name__}.{member.name}, not a "
+                    f"member name (request field '{field}'); enumerate.cells takes "
+                    f"member names. Members: {[m.name for m in arg]}."
+                )
+            return member
         if strict and enums and isinstance(value, str) and str not in args:
             raise EnumerationError(
                 f"'{value}' is not a member of {' or '.join(a.__name__ for a in enums)} "

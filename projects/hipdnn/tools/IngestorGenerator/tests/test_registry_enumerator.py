@@ -89,6 +89,11 @@ def _bad_enum(m):
     m["enumerate"]["fixed"]["mask_type"] = "NO_SUCH_MASK"
 
 
+def _enum_cells_by_value(m):
+    group = next(g for g in m["enumerate"]["cells"] if g["fields"] == ["mask_type"])
+    group["values"] = [1, 0]
+
+
 def _max_kernels(m):
     m["enumerate"]["max_kernels"] = 1
 
@@ -112,6 +117,7 @@ def _free(*fields):
             "matches 2 registry candidates",
         ),
         (_bad_enum, "'NO_SUCH_MASK' is not a member"),
+        (_enum_cells_by_value, "mask_type"),
         (_max_kernels, "over the manifest's max_kernels 1"),
         (_bad_template, "cannot be rendered"),
         (_free("block_m", "blok_k"), r"free_fields names \['blok_k'\]"),
