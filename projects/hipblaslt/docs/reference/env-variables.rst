@@ -243,6 +243,60 @@ even if its value is invalid; it does not fall back to the legacy value.
         | 1: Force dynamic work-queue assignment
         | Malformed or out-of-range values are ignored.
 
+Adaptive compute-unit target
+============================
+
+The adaptive ``sm_count_target`` environment variables for hipBLASLt are collected in the following table.
+They are read once per process. Boolean values accept ``1``, ``on``, ``true``, ``0``, ``off``, and ``false``
+(case-insensitive). Invalid or out-of-range values keep the default and log a warning.
+For requirements and behavior, see :ref:`Adapting to the available compute units <adaptive-sm-count>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT``
+        | Measures the compute units available to GEMMs and uses the count as an implicit ``sm_count_target``.
+        | Applies to C API calls with Stream-K tile scheduling ``AUTO`` or ``ON`` and no explicit ``sm_count_target``.
+        | The hint only moves when the launched kernels carry the occupancy probe (a probe-built device library and gfx950 Stream-K Hybrid kernels); otherwise it stays 0.
+      - | 0: Off (default)
+        | 1: On
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_EVERY``
+        | Launches per stream between probes.
+      - | Integer, 1 or greater
+        | Default: 8
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_TINY_MFLOPS``
+        | GEMMs below this many MFLOPs (``2*M*N*K*batch / 10^6``) never probe.
+      - | Non-negative integer
+        | Default: 256
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_PROBE_WINDOW``
+        | Number of latest probe readings that decide the hint. The hint changes only when all of them are below it or all are above it, and then takes the smallest reading. No hint counts as the device's CU count. A single reading of the device's CU count clears the hint at once, and a new hint then needs a full set of readings below that count.
+      - | Integer from 1 to 16
+        | Default: 3
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_LOG``
+        | Logs adaptive mode activity to ``HIPBLASLT_LOG_FILE``, or stderr if unset.
+      - | 0: Off (default)
+        | 1: Configuration, hint changes, and failed probe events
+        | 2: Also every probe reading
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``
+        | Uses a fixed CU count as the hint instead of measuring it. A positive value enables adaptive mode on its own.
+      - | Integer from 0 to 65535
+        | Default: 0 (measure)
+
+    * - | ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE``
+        | With ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``, still runs the probes and discards their readings, so timing includes the probe cost.
+        | Ignored with a warning without ``HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE``.
+      - | 0: Off (default)
+        | 1: On
+
 .. _env-type_overrides:
 
 Type overrides
