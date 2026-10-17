@@ -24,9 +24,7 @@
 ################################################################################
 """Unit tests for Tensile.LibraryIO.writeMsgPack."""
 
-import gzip
 import zlib
-from pathlib import Path
 
 import msgpack
 import pytest
@@ -34,15 +32,20 @@ import pytest
 from Tensile.LibraryIO import writeMsgPack, writeMsgPackIndexed
 
 
-def _kernels_lite_state():
-    fixture = (
-        Path(__file__).resolve().parents[3]
-        / "tests"
-        / "configs"
-        / "SolutionLibraries"
-        / "KernelsLite.dat.gz"
-    )
-    return msgpack.unpackb(gzip.decompress(fixture.read_bytes()), raw=False, strict_map_key=False)
+def _indexed_library_state():
+    """A master library small enough to live in the test.
+
+    The installed tree copies this file to share/hipblaslt/tensilelite and does
+    not ship tests/configs, so the indexed writer cannot read KernelsLite.
+    """
+    return {
+        "version": "test",
+        "solutions": [
+            {"index": 2, "kernelName": "second"},
+            {"index": 1, "kernelName": "first", "sizeMapping": {"macroTile": 16}},
+        ],
+        "library": {"rows": [{"index": 1}, {"index": 2}]},
+    }
 
 
 def _mapping():
@@ -146,7 +149,7 @@ def _read_indexed(path):
 
 def test_writeMsgPackIndexed_table_matches_blob_and_is_reproducible(tmp_path):
     """Offsets tile the blob, indices are sorted, and two runs write the same bytes."""
-    state = _kernels_lite_state()
+    state = _indexed_library_state()
     dest = tmp_path / "library.dat"
 
     writeMsgPackIndexed(str(dest), state)
