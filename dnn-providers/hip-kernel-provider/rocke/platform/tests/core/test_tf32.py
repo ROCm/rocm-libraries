@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Logical TF32 contracts and strict native parity, independent of GPU access."""
+
 import os
 import subprocess
 from pathlib import Path
@@ -377,7 +378,11 @@ def tf32_recipe_replay_cli():
     path = Path(executable).resolve()
     if not path.is_file():
         pytest.skip(f"TF32 native replay CLI not found: {path}")
-    return path
+    from rocke.portable_ir.src import online
+
+    resolved = online.resolve_replay_cli_path(build=False)
+    assert resolved is not None
+    return Path(resolved)
 
 
 @pytest.mark.parametrize("m", [16, 32])
