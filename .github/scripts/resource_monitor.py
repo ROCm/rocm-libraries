@@ -113,6 +113,13 @@ class ProcessTreeCounters:
         self.cpu_seconds = 0.0
         self.ticks_per_second = os.sysconf("SC_CLK_TCK")
         self.page_size = os.sysconf("SC_PAGE_SIZE")
+        self.current_pids = {root_pid}
+        self.thread_ticks = {}
+        self.thread_cpu_seconds = {}
+        self.thread_names = {}
+        self.peak_active_threads = 0
+        self.peak_thread_cpu_cores = 0.0
+        self.peak_thread_count = 0
 
     def read(self):
         processes = read_processes()
@@ -126,6 +133,7 @@ class ProcessTreeCounters:
             if not new:
                 break
             descendants.update(new)
+        self.current_pids = descendants
 
         ticks = {}
         rss_pages = 0
@@ -140,6 +148,68 @@ class ProcessTreeCounters:
             ) / self.ticks_per_second
         self.last_ticks = ticks
         return self.cpu_seconds, rss_pages * self.page_size, len(ticks)
+
+    def read_threads(self, interval_seconds):
+        """Return per-TID CPU deltas for the current process tree."""
+        current = {}
+        for pid in self.current_pids:
+            task_dir = PROC_ROOT / str(pid) / "task"
+            try:
+                tasks = tuple(task_dir.iterdir())
+            except OSError:
+                continue
+            for task in tasks:
+                if not task.name.isdecimal():
+                    continue
+                try:
+                    stat = (task / "stat").read_text(encoding="ascii")
+                    comm = stat[stat.find("(") + 1 : stat.rfind(")")]
+                    fields = stat[stat.rfind(")") + 2 :].split()
+                    identity = (pid, int(task.name), int(fields[19]))
+                    ticks = int(fields[11]) + int(fields[12])
+                except (OSError, ValueError, IndexError):
+                    continue
+                current[identity] = ticks
+                self.thread_names[identity] = comm
+                delta = max(0, ticks - self.thread_ticks.get(identity, ticks))
+                cpu_seconds = delta / self.ticks_per_second
+                self.thread_cpu_seconds[identity] = (
+                    self.thread_cpu_seconds.get(identity, 0.0) + cpu_seconds
+                )
+
+        active = []
+        total_cpu_seconds = 0.0
+        for identity, ticks in current.items():
+            delta = max(0, ticks - self.thread_ticks.get(identity, ticks))
+            cpu_seconds = delta / self.ticks_per_second
+            total_cpu_seconds += cpu_seconds
+            if cpu_seconds >= 0.05:
+                pid, tid, _start = identity
+                active.append(
+                    {
+                        "pid": pid,
+                        "tid": tid,
+                        "name": self.thread_names[identity],
+                        "cpu_seconds": round(cpu_seconds, 3),
+                    }
+                )
+        self.thread_ticks = current
+        thread_cpu_cores = total_cpu_seconds / interval_seconds if interval_seconds else 0.0
+        active.sort(key=lambda row: row["cpu_seconds"], reverse=True)
+        self.peak_active_threads = max(self.peak_active_threads, len(active))
+        self.peak_thread_cpu_cores = max(self.peak_thread_cpu_cores, thread_cpu_cores)
+        self.peak_thread_count = max(self.peak_thread_count, len(current))
+        return active, thread_cpu_cores, len(current)
+
+    def write_thread_summary(self, path):
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(("pid", "tid", "thread_name", "cpu_seconds"))
+            for identity, seconds in sorted(
+                self.thread_cpu_seconds.items(), key=lambda item: item[1], reverse=True
+            ):
+                pid, tid, _start = identity
+                writer.writerow((pid, tid, self.thread_names[identity], round(seconds, 3)))
 
 
 def sample(now, started, cpu_seconds, memory_bytes, process_rss_bytes, process_count, previous):
@@ -174,6 +244,15 @@ def write_summary(path, summary):
             f"{summary['peak_process_rss_bytes'] / GIB:.2f} GiB | "
             f"{summary['exit_code']} |\n\n"
         )
+        if "peak_active_threads" in summary:
+            handle.write(
+                "Per-thread `/proc` sampling (threads with >=0.05 CPU seconds per "
+                "sample count as active):\n\n"
+                f"- Peak active TIDs in one sample: {summary['peak_active_threads']}\n"
+                f"- Peak aggregate thread CPU: {summary['peak_thread_cpu_cores']:.2f} cores\n"
+                f"- Peak observed TIDs: {summary['peak_thread_count']}\n"
+                f"- TIDs with CPU time: {summary['threads_with_cpu_time']}\n\n"
+            )
 
 
 def run(args):
@@ -202,6 +281,8 @@ def run(args):
     child_usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     child = subprocess.Popen(command, start_new_session=True)
     processes = ProcessTreeCounters(child.pid)
+    thread_activity_path = output.with_name(f"{output.stem}-threads.csv")
+    thread_summary_path = output.with_name(f"{output.stem}-thread-summary.csv")
 
     def forward_signal(signum, _frame):
         if child.poll() is None:
@@ -210,7 +291,10 @@ def run(args):
     old_term = signal.signal(signal.SIGTERM, forward_signal)
     old_int = signal.signal(signal.SIGINT, forward_signal)
     try:
-        with output.with_suffix(".csv").open("w", encoding="utf-8", newline="") as csv_file:
+        with (
+            output.with_suffix(".csv").open("w", encoding="utf-8", newline="") as csv_file,
+            thread_activity_path.open("w", encoding="utf-8", newline="") as thread_csv_file,
+        ):
             writer = csv.DictWriter(
                 csv_file,
                 fieldnames=(
@@ -223,10 +307,29 @@ def run(args):
                 ),
             )
             writer.writeheader()
+            thread_writer = csv.DictWriter(
+                thread_csv_file,
+                fieldnames=(
+                    "timestamp",
+                    "elapsed_seconds",
+                    "active_thread_count",
+                    "thread_cpu_cores",
+                    "observed_thread_count",
+                    "active_threads",
+                ),
+            )
+            thread_writer.writeheader()
             previous = None
+            previous_sample_time = None
             while True:
                 now = time.monotonic()
                 process_cpu, process_rss, count = processes.read()
+                thread_interval = (
+                    now - previous_sample_time if previous_sample_time else args.interval
+                )
+                active_threads, thread_cpu_cores, thread_count = processes.read_threads(
+                    thread_interval
+                )
                 if cgroup:
                     cgroup_cpu, memory = cgroup.read()
                     cpu_seconds = max(0.0, cgroup_cpu - cgroup_start_cpu)
@@ -235,8 +338,20 @@ def run(args):
                 row = sample(now, started, cpu_seconds, memory, process_rss, count, previous)
                 writer.writerow(row)
                 csv_file.flush()  # Keep samples if CI cancels the job.
+                thread_writer.writerow(
+                    {
+                        "timestamp": row["timestamp"],
+                        "elapsed_seconds": row["elapsed_seconds"],
+                        "active_thread_count": len(active_threads),
+                        "thread_cpu_cores": round(thread_cpu_cores, 3),
+                        "observed_thread_count": thread_count,
+                        "active_threads": json.dumps(active_threads[:16], separators=(",", ":")),
+                    }
+                )
+                thread_csv_file.flush()
                 samples.append(row)
                 previous = (now, cpu_seconds)
+                previous_sample_time = now
                 print(
                     f"[{args.phase}] CPU {row['cpu_cores']:.2f} cores, "
                     f"RAM {memory / GIB:.2f} GiB, process RSS {process_rss / GIB:.2f} GiB",
@@ -259,6 +374,20 @@ def run(args):
             row = sample(now, started, cpu_seconds, memory, process_rss, count, previous)
             writer.writerow(row)
             samples.append(row)
+            active_threads, thread_cpu_cores, thread_count = processes.read_threads(
+                now - previous_sample_time if previous_sample_time else args.interval
+            )
+            thread_writer.writerow(
+                {
+                    "timestamp": row["timestamp"],
+                    "elapsed_seconds": row["elapsed_seconds"],
+                    "active_thread_count": len(active_threads),
+                    "thread_cpu_cores": round(thread_cpu_cores, 3),
+                    "observed_thread_count": thread_count,
+                    "active_threads": json.dumps(active_threads[:16], separators=(",", ":")),
+                }
+            )
+            thread_csv_file.flush()
     finally:
         if child.poll() is None:
             os.killpg(child.pid, signal.SIGTERM)
@@ -286,7 +415,16 @@ def run(args):
         "peak_memory_bytes": max(row["memory_bytes"] for row in samples),
         "peak_process_rss_bytes": max(row["process_rss_bytes"] for row in samples),
         "sample_count": len(samples),
+        "thread_trace_csv": str(thread_activity_path),
+        "thread_summary_csv": str(thread_summary_path),
+        "peak_active_threads": processes.peak_active_threads,
+        "peak_thread_cpu_cores": round(processes.peak_thread_cpu_cores, 3),
+        "peak_thread_count": processes.peak_thread_count,
+        "threads_with_cpu_time": sum(
+            seconds > 0 for seconds in processes.thread_cpu_seconds.values()
+        ),
     }
+    processes.write_thread_summary(thread_summary_path)
     output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     write_summary(os.environ.get("GITHUB_STEP_SUMMARY"), summary)
     print(

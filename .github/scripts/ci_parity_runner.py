@@ -326,6 +326,7 @@ def run_labeled_ctest(
     daemon: bool,
     out_dir: Path,
     extra_args: list[str] | None = None,
+    parallel: int = 1,
 ) -> dict:
     """Run `ctest -L <label> -V` with rocJITsu in front of each test command.
 
@@ -396,7 +397,7 @@ def run_labeled_ctest(
         "ex_gpu",
         "--output-on-failure",
         "--parallel",
-        "1",
+        str(parallel),
         "--timeout",
         str(timeout_seconds),
         "-V",
@@ -481,6 +482,12 @@ def main() -> int:
         help="Run install-tree tests whose labels match this regex, via ctest -L -V.",
     )
     parser.add_argument("--gtest-filter", default="")
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="Number of CTest binaries to run concurrently.",
+    )
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument(
         "--daemon",
@@ -519,6 +526,7 @@ def main() -> int:
             args.daemon,
             out.parent,
             args.rocjitsu_arg,
+            parallel=args.parallel,
         )
         cases.extend(result["cases"])
         binaries.extend(result["binaries"])

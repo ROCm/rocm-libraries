@@ -1,4 +1,5 @@
 name: hipRAND rocJITsu Parity PoC
+run-name: hipRAND rocJITsu ${{ github.event.inputs.rocjitsu_arg || 'default budget' }} (CTest parallel ${{ github.event.inputs.ctest_parallel || '1' }})
 
 # Standalone hipRAND parity check. It does not call TheRock reusable workflows
 # and it does not change therock-multi-arch-ci.yml.
@@ -42,6 +43,10 @@ on:
         description: "CTest label regex. Default ^quick$ runs all five binaries. ^ffm-quick$ runs kernel and linkage only."
         type: string
         default: "^quick$"
+      ctest_parallel:
+        description: "Number of quick-filter CTest binaries to run concurrently (for example 5)."
+        type: string
+        default: "1"
       sweep:
         description: "Set to all to run every installed ffm-quick suite instead of the hipRAND selection."
         type: string
@@ -134,6 +139,7 @@ jobs:
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
       ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
       CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
+      CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || '1' }}
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       # develop on 2026-10-01, after the VM dispatch-overhead fix
       # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
@@ -209,13 +215,25 @@ jobs:
             --runner-label "$BUILD_RUNS_ON"
             --out parity/emu.json
           )
+          config_args=(--config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json")
           if [ -n "$ROCJITSU_ARG" ]; then
             common+=(--rocjitsu-arg="$ROCJITSU_ARG")
+            case "$ROCJITSU_ARG" in
+              --cpu-thread-budget=*)
+                config_args+=(--cpu-thread-budget="${ROCJITSU_ARG#--cpu-thread-budget=}")
+                ;;
+              *)
+                echo "thread-budget table uses the config default; rocJITsu_arg is not a CPU budget override"
+                ;;
+            esac
           fi
+          "$PWD/rj-build/tools/rocjitsu/rocjitsu" "${config_args[@]}" --thread-budget-table \
+            | tee parity/thread-budget-table.txt
           monitor=(
             python3 .github/scripts/resource_monitor.py
             --phase "hipRAND under rocJITsu"
             --output parity/resources-test.json
+            --interval 1
             --
           )
           echo "ctest label: $CTEST_LABEL"
@@ -227,6 +245,7 @@ jobs:
           else
             "${monitor[@]}" "${common[@]}" \
               --ctest-label "$CTEST_LABEL" \
+              --parallel "$CTEST_PARALLEL" \
               --timeout-seconds 7200
           fi
 
