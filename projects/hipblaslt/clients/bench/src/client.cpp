@@ -821,6 +821,9 @@ try
         return 0;
     }
 
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
