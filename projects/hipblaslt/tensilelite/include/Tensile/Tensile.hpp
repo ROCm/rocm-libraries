@@ -192,6 +192,10 @@ namespace TensileLite
 
     TENSILELITEHOST_EXPORT std::map<int, std::string> LoadLibraryMapping(std::string const& filename);
 
+    /// Parser diagnostic from the most recent failed LoadLibraryFile call on
+    /// this thread. Empty after a successful load.
+    TENSILELITEHOST_EXPORT std::string LastLibraryLoadError();
+
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     TENSILELITEHOST_EXPORT std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
                 LoadLibraryFile(std::string const& filename);

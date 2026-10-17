@@ -828,7 +828,12 @@ int main(int argc, const char* argv[])
         ScopedTimer timer("library_loading");
         library = LoadSolutionLibrary(args);
         if(!library)
-            throw std::runtime_error("Failed to load solution library");
+        {
+            std::string detail = LastLibraryLoadError();
+            if(detail.empty())
+                detail = "the host library returned no solution library and no parser diagnostic";
+            throw std::runtime_error("Failed to load solution library: " + detail);
+        }
     }
 
     auto filename = args["library-file"].as<std::string>();

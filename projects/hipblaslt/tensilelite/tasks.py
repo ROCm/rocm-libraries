@@ -263,6 +263,11 @@ def build_client(
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
+            # The development client must contain its own host library. An
+            # installed ROCm also ships libtensilelite-host.so.1, and rocprofv3
+            # puts that directory on LD_LIBRARY_PATH, which the loader searches
+            # before DT_RUNPATH. Packaged hipBLASLt keeps the shared default.
+            "-DTENSILELITE_BUILD_SHARED_LIBS=OFF",
         ]
 
         if cxx_flags_release is not None:

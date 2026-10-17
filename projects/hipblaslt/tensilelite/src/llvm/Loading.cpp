@@ -26,6 +26,8 @@
 
 #include <Tensile/llvm/Loading.hpp>
 
+#include "../LibraryLoadError.hpp"
+
 #include <fstream>
 
 #include <Tensile/Debug.hpp>
@@ -48,6 +50,8 @@ namespace TensileLite
             auto inputFile = llvm::MemoryBuffer::getFileAsStream(filename);
             if(!inputFile)
             {
+                NoteLibraryLoadError("Error loading " + filename + ": "
+                                     + inputFile.getError().message());
                 if(Debug::Instance().printDataInit())
                     std::cout << "Error loading " << filename
                               << ": " << inputFile.getError().message() << std::endl;
@@ -61,11 +65,13 @@ namespace TensileLite
 
             if(yin.error())
             {
+                NoteLibraryLoadError(yin.error().message());
                 return nullptr;
             }
         }
         catch(std::runtime_error const& exc)
         {
+            NoteLibraryLoadError(exc.what());
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading " << filename << " (YAML):" << std::endl
                           << exc.what() << std::endl;
