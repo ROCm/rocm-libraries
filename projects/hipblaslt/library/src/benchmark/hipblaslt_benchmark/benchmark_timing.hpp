@@ -5,9 +5,8 @@
 
 #include "benchmark_collective.hpp" // CollectiveAgreement, MaxOp, MinOp
 #include "benchmark_stats.hpp" // TimingConfig, TimingResult
-#include "hipblaslt_test.hpp" // CHECK_HIP_ERROR
-#include "utility.hpp" // get_time_us_sync
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -16,8 +15,21 @@
 #include <numeric>
 #include <vector>
 
+// The measurement code checks HIP calls and reads the CPU clock through a hooks
+// policy given as a template argument, so callers with different needs, such as the
+// library and its clients, get separate instantiations rather than two definitions of
+// one function. A policy provides:
+//   static bool check(hipError_t status, const char* expr, const char* file, int line)
+//     The result of the HIP call `expr` made at file:line. Returning false ends the
+//     measurement, which then reports failure.
+//   static bool time_us_sync(hipStream_t stream, double& us)
+//     Synchronizes `stream`, then sets `us` to the wall time in microseconds.
+//     Returning false is a failure, as for check.
+// DefaultHooks, below, fails on any error.
+#define HIPBLASLT_BENCHMARK_CHECK(Hooks, expr) Hooks::check((expr), #expr, __FILE__, __LINE__)
+
 // ============================================================================
-// Adaptive, distribution-based timing for the hipBLASLt benchmark clients.
+// Adaptive, distribution-based timing for hipBLASLt and its benchmark clients.
 //
 // A *sample* is one event span over `batch` back-to-back enqueues, yielding one
 // per-iteration throughput number. The batch is sized from a warmup so each sample
@@ -128,12 +140,12 @@ namespace hipblaslt_bench
             hipStream_t stream = nullptr;
         };
 
-        // Run `batch` back-to-back enqueues as one timed sample; returns elapsed
-        // microseconds via `elapsed_us`. `global_index` advances per enqueue so rotating
-        // buffers keep cycling across samples. Void (not value-returning) so CHECK_HIP_ERROR,
-        // which can expand to `return;` under gtest, stays valid here.
-        template <typename Launch>
-        inline void time_batch(Launch&              launch,
+        // Run `batch` back-to-back enqueues as one timed sample, setting `elapsed_us` to
+        // its length in microseconds; returns false, leaving `elapsed_us` alone, when the
+        // hooks report a failure. `global_index` advances per enqueue so rotating buffers
+        // keep cycling across samples.
+        template <typename Hooks, typename Launch>
+        inline bool time_batch(Launch&              launch,
                                int32_t              batch,
                                int64_t&             global_index,
                                bool                 use_gpu_timer,
@@ -142,25 +154,34 @@ namespace hipblaslt_bench
         {
             double cpu_start = 0.0;
             if(use_gpu_timer)
-                CHECK_HIP_ERROR(hipEventRecord(events.start, events.stream));
-            else
-                cpu_start = get_time_us_sync(events.stream);
+            {
+                if(!HIPBLASLT_BENCHMARK_CHECK(Hooks, hipEventRecord(events.start, events.stream)))
+                    return false;
+            }
+            else if(!Hooks::time_us_sync(events.stream, cpu_start))
+                return false;
 
             for(int32_t k = 0; k < batch; ++k)
                 launch(global_index++);
 
             if(use_gpu_timer)
             {
-                CHECK_HIP_ERROR(hipEventRecord(events.stop, events.stream));
-                CHECK_HIP_ERROR(hipEventSynchronize(events.stop));
+                if(!HIPBLASLT_BENCHMARK_CHECK(Hooks, hipEventRecord(events.stop, events.stream))
+                   || !HIPBLASLT_BENCHMARK_CHECK(Hooks, hipEventSynchronize(events.stop)))
+                    return false;
                 float ms = 0.0f;
-                CHECK_HIP_ERROR(hipEventElapsedTime(&ms, events.start, events.stop));
+                if(!HIPBLASLT_BENCHMARK_CHECK(Hooks,
+                                              hipEventElapsedTime(&ms, events.start, events.stop)))
+                    return false;
                 elapsed_us = static_cast<double>(ms) * 1000.0;
+                return true;
             }
-            else
-            {
-                elapsed_us = get_time_us_sync(events.stream) - cpu_start;
-            }
+
+            double cpu_stop = 0.0;
+            if(!Hooks::time_us_sync(events.stream, cpu_stop))
+                return false;
+            elapsed_us = cpu_stop - cpu_start;
+            return true;
         }
 
         // Largest per-sample batch allowed: keep room for at least two samples within
@@ -252,20 +273,45 @@ namespace hipblaslt_bench
 
     } // namespace detail
 
+    // The hooks policy a caller gets unless it passes its own: any HIP error is a
+    // failure, and the CPU clock is read in whole microseconds, as the clients'
+    // get_time_us_sync reads it.
+    struct DefaultHooks
+    {
+        static bool check(hipError_t status, const char*, const char*, int)
+        {
+            return status == hipSuccess;
+        }
+
+        static bool time_us_sync(hipStream_t stream, double& us)
+        {
+            if(hipStreamSynchronize(stream) != hipSuccess)
+                return false;
+            const auto now = std::chrono::steady_clock::now();
+            us             = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch())
+                    .count());
+            return true;
+        }
+    };
+
     // Run `launch(i)` and fill `out` with timing statistics. `launch` performs exactly one
     // enqueue for a monotonically increasing global index `i` (the callee handles any
     // `i % block_count` rotation and per-iteration icache flush). Fixed-count mode times one
     // batch of cfg.iters; adaptive mode self-sizes the batch and collects samples until the
     // mean converges, the robust spread plateaus, or a ceiling is hit.
-    template <typename Launch>
-    inline void run_measurement(Launch&&                     launch,
-                                const TimingConfig&          cfg,
-                                hipEvent_t                   event_start,
-                                hipEvent_t                   event_stop,
-                                hipStream_t                  stream,
-                                TimingResult&                out,
-                                const std::function<bool()>& should_abort = {},
-                                const CollectiveAgreement&   agreement    = {})
+    // Returns whether `out` now holds a measurement. It is left untouched for an invalid
+    // adaptive configuration, a failure the hooks report, or should_abort ending the run
+    // before its first sample.
+    template <typename Hooks = DefaultHooks, typename Launch>
+    [[nodiscard]] inline bool run_measurement(Launch&&                     launch,
+                                              const TimingConfig&          cfg,
+                                              hipEvent_t                   event_start,
+                                              hipEvent_t                   event_stop,
+                                              hipStream_t                  stream,
+                                              TimingResult&                out,
+                                              const std::function<bool()>& should_abort = {},
+                                              const CollectiveAgreement&   agreement    = {})
     {
         const detail::event_context events{event_start, event_stop, stream};
         int64_t                     global_index = 0;
@@ -276,7 +322,9 @@ namespace hipblaslt_bench
         {
             const int32_t iters    = cfg.iters > 0 ? cfg.iters : 1;
             double        batch_us = 0.0;
-            detail::time_batch(launch, iters, global_index, cfg.use_gpu_timer, events, batch_us);
+            if(!detail::time_batch<Hooks>(
+                   launch, iters, global_index, cfg.use_gpu_timer, events, batch_us))
+                return false;
             const double per_iter = batch_us / iters - cfg.flush_us;
             out.mean_us = out.median_us = out.min_us = per_iter;
             out.cv = out.rel_iqr = 0.0;
@@ -286,15 +334,13 @@ namespace hipblaslt_bench
             out.adaptive         = false;
             out.noise_active     = false;
             out.converged        = false;
-            return;
+            return true;
         }
 
-        // Reject invalid configs before touching the GPU.
-        if(const auto err = validate_adaptive_config(cfg); !err.empty())
-        {
-            hipblaslt_cerr << "hipblaslt adaptive timing: invalid config: " << err << "\n";
-            return;
-        }
+        // Reject invalid configs before touching the GPU. Reporting one is the caller's
+        // job: validate_adaptive_config gives the reason.
+        if(!validate_adaptive_config(cfg).empty())
+            return false;
 
         // ---- Warmup: one cold probe seeds the batch size, then warm up in self-sized
         //      chunks until warmup_time, refining the per-iteration estimate. ----
@@ -302,12 +348,13 @@ namespace hipblaslt_bench
         double        per_iter_est = 0.0;
         {
             double probe_us = 0.0;
-            detail::time_batch(launch,
-                               1,
-                               global_index,
-                               cfg.use_gpu_timer,
-                               events,
-                               probe_us); // cold probe, discarded
+            if(!detail::time_batch<Hooks>(launch,
+                                          1,
+                                          global_index,
+                                          cfg.use_gpu_timer,
+                                          events,
+                                          probe_us)) // cold probe, discarded
+                return false;
             per_iter_est             = agreement.agree(probe_us, MaxOp{});
             const double warm_min_us = static_cast<double>(cfg.warmup_time) * 1000.0;
             double       warm_us     = 0.0; // exclude the cold probe from the warmup budget
@@ -316,8 +363,9 @@ namespace hipblaslt_bench
                   && !agreement.agree(detail::aborted(should_abort), std::logical_or<>{}))
             {
                 double chunk_us = 0.0;
-                detail::time_batch(
-                    launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us);
+                if(!detail::time_batch<Hooks>(
+                       launch, chunk, global_index, cfg.use_gpu_timer, events, chunk_us))
+                    return false;
                 warm_us += chunk_us;
                 // Refine the estimate from each chunk. A chunk below timer resolution
                 // (chunk_us == 0) can't advance warm_us, so grow the batch instead; give up if
@@ -335,7 +383,7 @@ namespace hipblaslt_bench
             }
         }
         if(agreement.agree(detail::aborted(should_abort), std::logical_or<>{}))
-            return; // out left default-zeroed; caller (e.g. gtest) already failed
+            return false; // caller (e.g. gtest) already failed
 
         const int32_t batch = detail::batch_size(cfg, per_iter_est, cap);
 
@@ -357,26 +405,29 @@ namespace hipblaslt_bench
         while(!agreement.agree(detail::aborted(should_abort), std::logical_or<>{}))
         {
             double batch_us = 0.0;
-            detail::time_batch(launch, batch, global_index, cfg.use_gpu_timer, events, batch_us);
+            if(!detail::time_batch<Hooks>(
+                   launch, batch, global_index, cfg.use_gpu_timer, events, batch_us))
+                return false;
             const double per_iter = batch_us / batch - cfg.flush_us;
             samples.push_back(per_iter);
             stats.add(per_iter);
             total_us += batch_us;
             total_iters += batch;
             if(agreement.agree(detail::reached_target(cfg,
-                                                            samples,
-                                                            stats,
-                                                            iqr_history,
-                                                            total_iters,
-                                                            total_us,
-                                                            bounds,
-                                                            converged,
-                                                            stable), std::logical_and<>{}))
+                                                      samples,
+                                                      stats,
+                                                      iqr_history,
+                                                      total_iters,
+                                                      total_us,
+                                                      bounds,
+                                                      converged,
+                                                      stable),
+                               std::logical_and<>{}))
                 break;
         }
 
         if(samples.empty())
-            return; // aborted before any sample completed; out left default-zeroed
+            return false; // aborted before any sample completed
 
         detail::fill_distribution(samples, out);
         out.batch        = batch;
@@ -385,5 +436,6 @@ namespace hipblaslt_bench
         out.noise_active = cfg.noise_threshold > 0.0f;
         out.converged    = converged;
         out.stable       = stable;
+        return true;
     }
 } // namespace hipblaslt_bench
