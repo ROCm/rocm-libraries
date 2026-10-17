@@ -556,6 +556,11 @@ def main():
         "--job-name", default="", help="Job/test name (optional, for test failures)"
     )
     parser.add_argument(
+        "--platform",
+        default="",
+        help="Platform of the failed job (e.g., linux, windows). Defaults to the current host's platform.",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Print the message instead of sending it"
     )
 
@@ -624,8 +629,8 @@ def main():
         logger.error("Either --webhook-urls or --webhook-url must be provided")
         sys.exit(1)
 
-    # Detect platform automatically
-    detected_platform = platform.system().lower()
+    # Use the failed job's platform when reported from a different host
+    detected_platform = args.platform or platform.system().lower()
 
     # Construct GitHub Actions run URL from environment variables
     # Use defaults for local testing when environment variables are not set
