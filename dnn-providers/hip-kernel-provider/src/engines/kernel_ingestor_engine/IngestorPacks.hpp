@@ -62,21 +62,6 @@ void resetGfx950AttentionDenseModuleCache();
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionModuleCache();
 
-/// The engine name gfx950_attention_unified2_d.ued.json declares, read here for the same
-/// three consumers as the dense name above.
-///
-/// Note the asymmetry with this engine's SYMBOL strings
-/// (`hipkernel.gfx950_attention_unified2_d.*`): the generator derives those by splitting
-/// the local name on capitals, which puts a separator between the `2` and the `D`. The
-/// engine name itself is not derived and keeps its readable spelling.
-inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
-    = "hipkernel:Gfx950AttentionUnified2D";
-
-/// @see packs/Gfx950AttentionUnified2DNative.cpp
-void registerGfx950AttentionUnified2DSymbols(
-    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
-void resetGfx950AttentionUnified2DModuleCache();
-
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.
