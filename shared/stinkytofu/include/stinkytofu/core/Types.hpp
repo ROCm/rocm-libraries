@@ -149,26 +149,6 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
-        /// ds_load slots per barrier / tensor_load section; false = one region pace.
-        bool dsSections = true;
-        /// Cap DsReadCyclesPerLoad at the even spread of the region's loads over its WMMAs.
-        bool dsEvenSpreadCap = true;
-        /// A ds_load that waits for no credit issues while the WMMA queue refill is active.
-        bool dsFreeBypassRefill = false;
-        /// The ds_load offered to the picker is the best one the pacer releases.
-        bool dsReleasedFirst = true;
-        /// Longest run of WMMAs with nothing else between; 0 = no limit.
-        int wmmaRunMax = 8;
-        /// Refill the WMMA queue only when an unissued barrier is within wmmaQueueDepth WMMAs of
-        /// its threshold (the queue cover is for hiding that barrier's stall).
-        bool wmmaRefillNearBarrier = false;
-        /// Hold a stage prefetch until its stage barrier is ready (its predecessors, the feeding
-        /// ds_loads, have issued), so the prefetch lands next to its tensor_load even when the
-        /// barrier slips past its planned window.
-        bool prefetchAfterBarrierReady = false;
-        /// With prefetchAfterBarrierReady: also hold the prefetch while the barrier would still
-        /// wait for WMMA queue cover, so the prefetch issues in the pick before the barrier.
-        bool prefetchHoldForCover = false;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).

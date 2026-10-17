@@ -109,11 +109,6 @@ class DsSpreadPacer {
         return it == slot_.end() ? -1 : it->second;
     }
 
-    // Back to the one region pace: no section slots.
-    void dropSlots() {
-        slot_.clear();
-    }
-
     // Whether the ds_load may issue at region clock `clock`.
     bool released(unsigned nodeId, int clock) const {
         if (!active_) return true;

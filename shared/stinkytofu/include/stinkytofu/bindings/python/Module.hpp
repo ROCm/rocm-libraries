@@ -132,19 +132,10 @@
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */        \
-    X(DsSections, bool, true)             /* ds slots per barrier / tensor_load section */         \
-    X(DsEvenSpreadCap, bool, true)        /* cap cycles per load at the even spread */             \
-    X(DsFreeBypassRefill, bool, false)    /* a free ds_load is not held by the WMMA refill */      \
-    X(DsReleasedFirst, bool, true)        /* a held ds_load does not stand in for released ones */ \
-    X(WmmaRunMax, int, 8)                 /* longest WMMA-only run; 0 = off */                     \
-    X(WmmaRefillNearBarrier, bool, false) /* queue refill only close to a barrier threshold */     \
-    X(PrefetchAfterBarrierReady, bool,                                                             \
-      false)                             /* hold a prefetch until its stage barrier is ready */    \
-    X(PrefetchHoldForCover, bool, false) /* ... and until the queue has the barrier cover */       \
-    X(DsPaceCycles, int, -1)             /* X: cycles between ds_load groups; < 0 = model */       \
-    X(DsPaceCount, int, -1)              /* Y: ds_loads per group; <= 0 = model */                 \
-    X(DsPaceSeparators, int, -1)         /* real instrs between groups; < 0 = model */             \
-    X(WmmaQueueDepth, int, 8)            /* WMMAs the matrix pipe buffers; 1 = queue model off */  \
+    X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */      \
+    X(DsPaceCount, int, -1)               /* Y: ds_loads per group; <= 0 = model */                \
+    X(DsPaceSeparators, int, -1)          /* real instrs between groups; < 0 = model */            \
+    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
     X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
     X(TensorLoadLandCycles, int, 0)  /* TDM landing cycles of a tensor_load; 0 = off */            \
