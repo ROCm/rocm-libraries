@@ -1184,6 +1184,53 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_VN_F16, ops, 3, rty, &attrs, hint);
 }
 
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 take n in {2, 4, 8}, f32/i32 take n in {1, 2, 4}; the
+ * <dwords x i32> payload is typed <n x dtype>. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n)
+{
+    rocke_value_t* ops[3];
+    rocke_attr_map_t attrs;
+    int elem_bytes;
+    int dwords;
+    char hint[16];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset || !dtype)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_load_vN: NULL operand");
+    if(dtype == rocke_f16() || dtype == rocke_bf16())
+        elem_bytes = 2;
+    else if(dtype == rocke_f32() || dtype == rocke_i32())
+        elem_bytes = 4;
+    else
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_vN: unsupported dtype '%s'", dtype->name);
+    dwords = (n * elem_bytes) / 4;
+    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "buffer_load_vN: n=%d dtype=%s -> dwords=%d "
+                                               "must be 1, 2, or 4",
+                                               n,
+                                               dtype->name,
+                                               dwords);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    rocke_attr_set_str(b, &attrs, "elem_type", dtype->name);
+    /* result_name_hint = f"bl{n}" */
+    snprintf(hint, sizeof(hint), "bl%d", n);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_BUFFER_LOAD_VN, ops, 3, rocke_vector_type(b, dtype, n), &attrs, hint);
+}
+
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,

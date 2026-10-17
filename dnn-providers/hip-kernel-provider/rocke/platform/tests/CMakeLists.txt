@@ -377,6 +377,28 @@ if(BUILD_TESTING)
                  rocke_wgrad_streamk_host)
   endif()
 
+  # RDNA split-KV WMMA decode host helpers (split count, pack groups, row
+  # tiles, grids, workspace layout, spec resolution, kernel names, LDS budget):
+  # the C API mirrors the Python launch plan for C callers, and the
+  # byte-identity gate never sees them, so the C port is pinned to Python
+  # reference vectors here.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/wmma_fmha_decode_host.cpp")
+    add_executable(rocke_wmma_fmha_decode_host instances/wmma_fmha_decode_host.cpp)
+    target_link_libraries(rocke_wmma_fmha_decode_host PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_wmma_fmha_decode_host PRIVATE m)
+    endif()
+    add_test(NAME rocke_wmma_fmha_decode_host COMMAND rocke_wmma_fmha_decode_host)
+    set_tests_properties(rocke_wmma_fmha_decode_host PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_wmma_fmha_decode_host)
+    set_target_properties(rocke_wmma_fmha_decode_host
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_wmma_fmha_decode_host
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_wmma_fmha_decode_host)
+  endif()
+
   # Apply YAML-driven quick/standard/comprehensive/full tier labels to the
   # tests above. Must run in THIS directory scope: CMake (pre-3.28,
   # which this project's cmake_minimum_required predates) only allows
