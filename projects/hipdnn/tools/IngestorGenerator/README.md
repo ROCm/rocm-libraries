@@ -72,9 +72,9 @@ a request to run the class. See the
 Exit codes: `0` success; `1` a gate refusal or internal failure: with `--strict`, a pack
 arch over `reduction.aot_budget_per_arch` (checked before anything is written),
 `--check-placeholders` findings, an emitted file that cannot be read back, or a template
-error; `2` unusable input: a missing or invalid config, a missing `--emitted-root`, a
-non-empty output directory without `--force`, a config the renderer rejects, or a bad
-flag (argparse).
+error; `2` unusable input: a missing or invalid config, a missing `--emitted-root`, an
+`--output-dir` that is not a directory, a non-empty output directory without `--force`,
+a config the renderer rejects, or a bad flag (argparse).
 
 ## Output
 

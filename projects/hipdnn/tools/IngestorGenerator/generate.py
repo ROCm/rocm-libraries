@@ -7,8 +7,9 @@
 Exit 0 on success. Exit 1 is a gate refusal or an internal failure: a ``--strict``
 budget overrun, ``--check-placeholders`` findings, an emitted file that cannot be
 read back, or a template error. Exit 2 is unusable input: a missing or invalid
-config, a non-existent ``--emitted-root``, a non-empty output directory without
-``--force``, or a ``ValueError`` from rendering (and argparse's code for a bad flag).
+config, a non-existent ``--emitted-root``, an ``--output-dir`` that is not a directory,
+a non-empty output directory without ``--force``, or a ``ValueError`` from
+rendering (and argparse's code for a bad flag).
 """
 
 import argparse
@@ -208,6 +209,14 @@ def main() -> None:
             sys.exit(EXIT_REFUSED)
         print(f"No unfilled placeholders across all {total_shippable} located files.")
         return
+
+    if args.output_dir.exists() and not args.output_dir.is_dir():
+        print(
+            f"Error: Output directory '{args.output_dir}' exists and is not a "
+            f"directory.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_BAD_INPUT)
 
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.force:
         print(

@@ -6,8 +6,8 @@
 Exit-code contract: exit 0 success; exit 1 a gate refusal or internal failure (a
 strict budget overrun, --check-placeholders findings, an unreadable emitted file, a
 template error); exit 2 unusable input (a missing or invalid config, a missing
---emitted-root, a non-empty output directory without --force, a render ValueError),
-which is also argparse's code for a bad flag. --dry-run must not create the output dir.
+--emitted-root, an --output-dir that is a file, a non-empty output directory without
+--force, a render ValueError), which is also argparse's code for a bad flag. --dry-run must not create the output dir.
 --force is required to overwrite an existing non-empty output directory.
 """
 
@@ -64,6 +64,16 @@ class TestExitCodes:
             str(tmp_path / "no_such_root"),
         )
         assert result.returncode == 2
+
+    def test_an_output_dir_that_is_a_file_exits_two(self, tmp_path):
+        target = tmp_path / "out"
+        target.write_text("not a directory")
+        result = run_cli(
+            "--config", str(SCALE_ADD_CONFIG), "--output-dir", str(target)
+        )
+        assert result.returncode == 2
+        assert "Traceback" not in result.stderr
+        assert str(target) in result.stderr
 
     def test_bad_flag_exits_two(self, tmp_path):
         result = run_cli("--nonexistent-flag", "value")
