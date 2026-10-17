@@ -194,8 +194,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
-               be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+               be computed using raw c code. must stay a multiple of the loop's per-pass increment
+               (24) to avoid overshooting past the ROI right edge */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
 
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -268,8 +269,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
                    (dstDescPtr->layout == RpptLayout::NCHW)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                 since (padLength * 3) number of columns from the beginning and end of each row will
-               be computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 32) * 32;
+               be computed using raw c code. must stay a multiple of the loop's per-pass increment
+               (24) to avoid overshooting past the ROI right edge */
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength) * 3) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;
@@ -436,7 +438,9 @@ static inline RppStatus gaussian_filter_host_impl(T* srcPtrImage, RpptDescPtr sr
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                 since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
-            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+            // must stay a multiple of the loop's per-pass increment (12) to avoid overshooting past
+            // the ROI right edge
+            Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
                 srcPtrRow[0] = srcPtrChannel;
                 for (int k = 1; k < 5; k++)
