@@ -254,6 +254,9 @@ namespace TensileLite
                 // Optional so older logic files that omit the field deserialize
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
+                // Optional: older logic files deserialize as false (no
+                // arrival fixup, so dynamic StreamK keeps every tile whole).
+                iot::mapOptional(io, "arrivalFixup", s.arrivalFixup);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }
