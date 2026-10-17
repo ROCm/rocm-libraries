@@ -20,6 +20,13 @@ add_custom_command(
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/smoke_gtest.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/rocroller_gtest.yaml
                                         ${CMAKE_CURRENT_SOURCE_DIR}/data/known_bugs.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_smoke.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_all_kernels.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_mixed_precision.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_batched.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_large_matrices.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_transpose.yaml
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/data/stress_test_alpha_beta.yaml
 
 )
 
