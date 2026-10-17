@@ -524,7 +524,8 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{1, 2, 1, 1024, 256, -1, "2"},
                                         std::tuple{2, 1, -1, 3, 99, -1, "2"},
                                         std::tuple{1, 2, 1, 33, 0, -1, "2"},
-                                        std::tuple{1, 2, 1, 1, 10, 32, "2"})));
+                                        std::tuple{1, 2, 1, 1, 10, 32, "2"},
+                                        std::tuple{1, 2, 1, 64, 1024, -1, "0"})));
 
 TEST_P(General, DataTypeConfig)
 {
