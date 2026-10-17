@@ -1,5 +1,7 @@
 # WMMA batch refill and even ds_load spread: plan
 
+> **Superseded.** This plan describes the earlier slot/section pacer (per-load slots, group timer, consumer deadlines, `DsSpreadToleranceCycles`, gap-CV metric). All of that was replaced by the per-stage even share per WMMA batch (`DsSpreadPacer.hpp`, options `DsBatchWmmas` and `DsCatchUpPace`); see the `DsSpread` row of `docs/user/scheduler-tuning-parameters.md`. Kept for history.
+
 Status: phases 2-5 are implemented. The legacy ds pacing (cap, throttle, slot-first, hide-budget
 prescan) is removed; the ds credit queue and `DsSpreadPacer` are the only ds pacing, and
 `DsSpread` is on by default (its own commit, easy to revert). The perf A/B

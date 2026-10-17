@@ -37,10 +37,13 @@ prefetch forward to the segment end, the barrier right before the tensor_load.
    `s_barrier_wait`. Not held when it is the last pending predecessor of real work, or when
    it feeds a prefetch's address.
 3. **ds_load pacing** (`DsSpread`, `DsReadQueueDepth`). The ds credit queue bounds the
-   ds_loads in flight, and with `DsSpread` the k-th ds_load of a region is released at WMMA
-   window `k * WMMAs / ds_loads` (less the tolerance), so the stream stays even and the
+   ds_loads in flight, and with `DsSpread` each batch of `DsBatchWmmas` WMMAs takes the even
+   share of its stage's ds_loads (`ceil(stage loads / stage batches)`, a stage running between
+   the two barriers a load sits behind and feeds), so the stream stays even and the
    tensor_load is not pushed a window late. A held ds_load is released early only when no WMMA
-   is ready in its place. See the [spread plan](wmma-batch-ds-spread-plan.md).
+   is ready in its place. See `DsSpreadPacer.hpp` and `DsSpread` in
+   [scheduler-tuning-parameters](../user/scheduler-tuning-parameters.md); the
+   [spread plan](wmma-batch-ds-spread-plan.md) is the earlier slot design.
 4. **Critical chains.** A filler whose consumer (prefetch, tensor_load, ds_load) is planned
    within 20 windows skips the filler quota and takes the earliest window with a free
    co-issue slot, or issues as soon as it is ready once every remaining window is full.

@@ -2413,8 +2413,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " blockAtLeastOneNonWmmaInterleaving=" << blockWmmaForAtLeastOneNonWmmaInterleaving
             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
             << " hasPickable=" << hasPickableNonWmma << " pickKind=" << pickKind
-            << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1) << " dsAllow="
-            << (pickedDS ? dsSpread_.allowance(pickedDS->id) : -1) << " clock=" << clock_
+            << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1) << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " run=" << wmmaRun_ << " credFull=" << dsReadInflight_.full()
             << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
@@ -3492,6 +3491,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             return th == barrierWmmaThresholds_.end() ? -1 : th->second;
         };
         const auto& predsRef = preds;
+        // A barrier more than kStageHops dependency hops away (through non-WMMA, non-ds nodes) is
+        // not a stage edge of the load.
         constexpr int kStageHops = 3;
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id : dsOrder) {

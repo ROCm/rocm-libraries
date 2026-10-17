@@ -140,7 +140,7 @@ struct PassFeatureConfig {
         /// "Y ds_loads every X cycles", dsPaceCount (Y) and dsPaceCycles (X). < 0 = searched.
         int dsPaceCycles = -1;
         int dsPaceCount = -1;
-        /// ds_loads a WMMA batch (wmmaBatchSize WMMAs) may take above the region's even share when
+        /// ds_loads a WMMA batch (dsBatchWmmas WMMAs) may take above the region's even share when
         /// the batch began behind the even line (a dependency delayed its loads), so the region
         /// closes the gap gradually. 0 = no catching up.
         int dsCatchUpPace = 2;

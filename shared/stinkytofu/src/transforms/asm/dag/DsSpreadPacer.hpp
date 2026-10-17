@@ -4,7 +4,6 @@
 #pragma once
 
 #include <algorithm>
-#include <climits>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -20,8 +19,10 @@ namespace stinkytofu {
 // batches: X = ceil(loads / batches). A sparse stage gets a small X, so its loads leave room for
 // stalls; a dense one an X above what one batch holds at the LDS rate (the LDS credits then
 // throttle it). A batch that began behind the stage's even line (a dependency delayed its loads)
-// may take `catchUp` more, so the stage closes the gap gradually. Once the region's last WMMA has
-// issued nothing is held.
+// may take `catchUp` more, so the stage closes the gap gradually. A stage the drain leaves no room
+// for (its end falls at or before its start) has one batch: all its loads are released at once,
+// as early as the graph lets them. Stages are paced independently: two stages open at the same
+// time each take their own share. Once the region's last WMMA has issued nothing is held.
 class DsSpreadPacer {
    public:
     struct Load {
@@ -77,27 +78,13 @@ class DsSpreadPacer {
         return active_;
     }
 
-    // ds_loads the load's stage may still take in the current batch.
-    int allowance(unsigned nodeId) const {
-        auto it = stageOf_.find(nodeId);
-        if (!active_ || it == stageOf_.end()) return 0;
-        const Stage& st = stages_[it->second];
-        return std::max(0, st.allow - st.inBatch);
-    }
-
-    // The stage's share per batch (for logs).
-    int share(unsigned nodeId) const {
-        auto it = stageOf_.find(nodeId);
-        return !active_ || it == stageOf_.end() ? 0 : stages_[it->second].share;
-    }
-
-    // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far.
+    // Whether the ds_load may issue with `wmmaIssued` WMMAs of the region issued so far. The first
+    // load of a batch always may (a stage's share is at least 1).
     bool released(unsigned nodeId, int wmmaIssued) const {
         auto it = stageOf_.find(nodeId);
         if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return true;
-        Stage& st = stages_[it->second];
-        openBatch(st, wmmaIssued);
-        return st.inBatch < st.allow;
+        const Stage& st = stages_[it->second];
+        return st.batchIdx != wmmaIssued / batch_ || st.inBatch < st.allow;
     }
 
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
@@ -105,7 +92,14 @@ class DsSpreadPacer {
         auto it = stageOf_.find(nodeId);
         if (!active_ || it == stageOf_.end()) return;
         Stage& st = stages_[it->second];
-        openBatch(st, wmmaIssued);
+        const int idx = wmmaIssued / batch_;
+        if (idx != st.batchIdx) {  // the allowance is set when a batch gets its first load
+            st.batchIdx = idx;
+            st.inBatch = 0;
+            const bool behind =
+                st.issued < std::min(st.total, st.share * std::max(0, idx - st.firstBatch));
+            st.allow = st.share + (behind ? catchUp_ : 0);
+        }
         ++st.inBatch;
         ++st.issued;
     }
@@ -122,19 +116,8 @@ class DsSpreadPacer {
         int allow = 0;
     };
 
-    // The allowance is set once, when the first ds_load decision of a batch is made.
-    void openBatch(Stage& st, int wmmaIssued) const {
-        const int idx = wmmaIssued / batch_;
-        if (idx == st.batchIdx) return;
-        st.batchIdx = idx;
-        st.inBatch = 0;
-        const bool behind =
-            st.issued < std::min(st.total, st.share * std::max(0, idx - st.firstBatch));
-        st.allow = st.share + (behind ? catchUp_ : 0);
-    }
-
     std::unordered_map<unsigned, int> stageOf_;
-    mutable std::vector<Stage> stages_;
+    std::vector<Stage> stages_;
     int batch_ = 1;
     int catchUp_ = 0;
     int wmmaTotal_ = 0;

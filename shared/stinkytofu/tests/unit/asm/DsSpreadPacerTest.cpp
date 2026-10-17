@@ -66,7 +66,7 @@ TEST(DsSpreadPacer, TheShareDoesNotGrowWhileOnTheEvenLine) {
     for (int w = 0; w < 40; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 6) << "w=" << w;
 }
 
-TEST(DsSpreadPacer, ABatchThatBeganBehindTakesTheCatchUpStep) {
+TEST(DsSpreadPacer, ABatchThatBeganBehindTakesExactlyTheShareAndTheCatchUpStep) {
     // 16 loads over 32 WMMAs: 2 per batch. Nothing was ready in the first 4 batches (a
     // dependency): every batch from the fifth on begins behind the even line and takes 2 + 2.
     Loads v;
@@ -74,7 +74,23 @@ TEST(DsSpreadPacer, ABatchThatBeganBehindTakesTheCatchUpStep) {
     DsSpreadPacer p;
     p.plan(v, 32, 4, 2, 0);
     auto pending = ids(v);
-    for (int w = 16; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, pending, 4), 4) << "w=" << w;
+    EXPECT_EQ(issueBatch(p, 16, pending), 4);
+    EXPECT_EQ(issueBatch(p, 20, pending), 4);
+    EXPECT_EQ(issueBatch(p, 24, pending), 4);
+    EXPECT_EQ(issueBatch(p, 28, pending), 4);
+    EXPECT_TRUE(pending.empty());
+}
+
+TEST(DsSpreadPacer, CatchingUpStopsOnceTheStageIsOnItsLine) {
+    // 8 loads, 2 per batch over 16 WMMAs; the first batch is skipped, the second takes 4 and
+    // is back on the line (4 of 4 expected), so the third takes the plain share again.
+    Loads v;
+    add(v, 8, 0);
+    DsSpreadPacer p;
+    p.plan(v, 16, 4, 2, 0);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 4, pending), 4);
+    EXPECT_EQ(issueBatch(p, 8, pending), 2);
 }
 
 TEST(DsSpreadPacer, EachStageHasItsOwnWindowAndShare) {
@@ -92,14 +108,41 @@ TEST(DsSpreadPacer, EachStageHasItsOwnWindowAndShare) {
     EXPECT_EQ(issueBatch(p, 44, b), 2);
 }
 
+TEST(DsSpreadPacer, StagesOpenAtTheSameTimeEachTakeTheirOwnShare) {
+    // Documented behaviour: stages are paced independently, so two stages open in one batch add
+    // their shares (1 + 1 here).
+    Loads v;
+    add(v, 8, 0, 0, 40);
+    add(v, 8, 100, 0, 40 + 1);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0, 0);
+    std::deque<unsigned> a, b;
+    for (const auto& l : v) (l.nodeId < 100 ? a : b).push_back(l.nodeId);
+    EXPECT_EQ(issueBatch(p, 0, a), 1);
+    EXPECT_EQ(issueBatch(p, 0, b), 1);
+}
+
 TEST(DsSpreadPacer, TheDrainEndsAStageEarlier) {
-    // 12 loads, 32 WMMAs, 8 of them kept free before the region end: 24 WMMAs = 6 batches.
+    // 12 loads, 32 WMMAs, 8 of them kept free before the region end: 24 WMMAs = 6 batches, so
+    // 2 per batch in every one of them.
     Loads v;
     add(v, 12, 0);
     DsSpreadPacer p;
-    p.plan(v, 32, 4, 2, /*drain=*/8);
+    p.plan(v, 32, 4, 0, /*drain=*/8);
     auto pending = ids(v);
-    EXPECT_EQ(issueBatch(p, 0, pending), 2);
+    for (int w = 0; w < 24; w += 4) EXPECT_EQ(issueBatch(p, w, pending), 2) << "w=" << w;
+    EXPECT_TRUE(pending.empty());
+}
+
+TEST(DsSpreadPacer, AStageTheDrainLeavesNoRoomForIsReleasedInOneBatch) {
+    // The stage starts at WMMA 115 of 128 with 17 kept free: its end (111) falls before its
+    // start, so it has one batch and all 35 loads are due in it.
+    Loads v;
+    add(v, 35, 0, 115, INT_MAX);
+    DsSpreadPacer p;
+    p.plan(v, 128, 4, 2, 17);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 116, pending), 35);
 }
 
 TEST(DsSpreadPacer, NothingIsHeldOnceTheRegionsWmmasHaveIssued) {
@@ -112,7 +155,47 @@ TEST(DsSpreadPacer, NothingIsHeldOnceTheRegionsWmmasHaveIssued) {
     EXPECT_TRUE(p.released(pending.front(), 32));
 }
 
-TEST(DsSpreadPacer, InactiveWithoutLoadsOrWmmas) {
+TEST(DsSpreadPacer, ALoadOutsideThePlanIsAlwaysReleased) {
+    Loads v;
+    add(v, 4, 0);
+    DsSpreadPacer p;
+    p.plan(v, 16, 4, 2, 0);
+    EXPECT_TRUE(p.released(999, 0));
+    p.noteIssue(999, 0);  // harmless
+    EXPECT_TRUE(p.released(999, 0));
+}
+
+TEST(DsSpreadPacer, NonPositiveBatchAndNegativeCatchUpAreClamped) {
+    Loads v;
+    add(v, 4, 0);
+    DsSpreadPacer p;
+    p.plan(v, 4, /*batch=*/0, /*catchUp=*/-3, 0);  // batch 1, catch-up 0: 1 load per WMMA
+    auto pending = ids(v);
+    for (int w = 0; w < 4; ++w) EXPECT_EQ(issueBatch(p, w, pending), 1) << "w=" << w;
+}
+
+TEST(DsSpreadPacer, ARegionWithoutWmmasIsInactive) {
+    Loads v;
+    add(v, 4, 0);
+    DsSpreadPacer p;
+    p.plan(v, 0, 4, 2, 0);
+    EXPECT_FALSE(p.active());
+    EXPECT_TRUE(p.released(0, 0));
+}
+
+TEST(DsSpreadPacer, PlanningAgainStartsFresh) {
+    Loads v;
+    add(v, 8, 0);
+    DsSpreadPacer p;
+    p.plan(v, 32, 4, 2, 0);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 0, pending), 1);
+    p.plan(v, 32, 4, 2, 0);
+    pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 0, pending), 1);  // the previous region's counts are gone
+}
+
+TEST(DsSpreadPacer, InactiveWithoutLoads) {
     DsSpreadPacer p;
     p.plan({}, 32, 4, 2, 0);
     EXPECT_FALSE(p.active());

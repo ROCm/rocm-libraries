@@ -102,7 +102,7 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 | `DsReadOrder` | -1 → `Ascending` (1) | `--ds-read-order=Name` | ds_load priority: 0 `ProgramOrder` (AABB), 1 `Ascending` (A0 B0 A1 B1), 2 `AscendingCache` (A0 B0 B1 A1). |
 | `LockDsReadOrder` | true | – | ds_loads on the same memory token issue strictly in `DsReadOrder` priority. false = a ready lower-priority load may go first. |
 
-A held ds_load is released early only when no WMMA is ready to issue in its place, or at its consumer deadline.
+A held ds_load is released early only when no WMMA is ready to issue in its place.
 
 **Barrier sizing:** the ds_loads in front of a barrier are given `WMMAs / ds_loads` windows each,
 the same density the spread plans with, so the barrier thresholds and the pacer agree.
