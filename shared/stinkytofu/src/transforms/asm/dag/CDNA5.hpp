@@ -868,10 +868,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return wmmaTotalThisRegion_ > 0 && dsTotalThisRegion_ >= 2 * wmmaTotalThisRegion_;
     }
     // Single-stage loop body (tensilelite: no HalfPLR), signalled by a short prefetch lead.
-    static constexpr int kSingleStageLeadBelow = 8;
     bool singleStageLoop() const {
         const int lead = blockPrefetchLead_;
-        return lead > 0 && lead < kSingleStageLeadBelow;
+        return lead > 0 && lead < StageWmmaCounter::kSingleStageLeadBelow;
     }
     bool prefetchHeldForLead(const DAGNode* node) const {
         auto it = prefetchEarliestWmma_.find(node->inst);
@@ -907,7 +906,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // Multi-stage loops: any vm_vsrc wait drains older LDS reads, so it is strict at any
         // count. Single-stage loops run ds_loads up to the barrier and keep the count rule.
         const int lead = blockPrefetchLead_;
-        const bool vsrcAlways = lead >= kSingleStageLeadBelow;
+        const bool vsrcAlways = lead >= StageWmmaCounter::kSingleStageLeadBelow;
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
