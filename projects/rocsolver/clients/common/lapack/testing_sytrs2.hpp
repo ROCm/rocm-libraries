@@ -193,8 +193,10 @@ void sytrs2_initData(const rocblas_handle handle,
         for(I b = 0; b < bc; ++b)
         {
             int info = 0;
-            // (the workspace of SYTRF does not depend on lda)
-            int lwork = 64 * n;
+            // (workspace query of SYTRF, as in LAPACK: lwork = -1 returns the optimal size)
+            T wquery;
+            cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], &wquery, -1, &info);
+            int lwork = int(std::real(wquery));
             std::vector<T> work(lwork);
 
             cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], work.data(), lwork, &info);
