@@ -395,6 +395,9 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
         args.rand_val_ptr = ptr_offset<RandValOutputDataType>(
             base_args.rand_val_ptr, head_start * base_args.nhead_stride_randval);
 
+        args.max_logits_ptr = ptr_offset<LSEDataType>(base_args.max_logits_ptr,
+                                                      head_start * base_args.nhead_stride_lse);
+
         if(descale_varies_by_head)
         {
             args.q_descale_ptr = ptr_offset<float>(base_args.q_descale_ptr,

@@ -14,6 +14,7 @@
 #include "quant.hpp"
 #include "rotary.hpp"
 
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -361,6 +362,11 @@ struct fmha_fwd_args
 
     ck_tile::index_t block_scale_size_q;
     ck_tile::index_t block_scale_size_kv;
+
+    // Optional fp32 per-row max logits: the max of scale_s * q.k over the unmasked keys, excluding
+    // the sink; -inf for fully masked rows. Same layout and strides as lse_ptr. Setting it selects
+    // the instances that store them (kStoreMaxLogits); fmha_fwd returns -1 if none matches.
+    void* max_logits_ptr = nullptr;
 };
 
 struct fmha_fwd_pagedkv_args
@@ -881,6 +887,15 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.head_start);
         }
     }();
+    if constexpr(FmhaKernel::kStoreMaxLogits)
+    {
+        kargs.max_logits_ptr = args.max_logits_ptr;
+    }
+    else if(args.max_logits_ptr != nullptr)
+    {
+        throw std::runtime_error(
+            "fmha_fwd: max_logits_ptr is not supported by this kernel instance");
+    }
 
     if constexpr(FmhaKernel::kIsGroupMode)
     {
@@ -899,6 +914,11 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 template <typename FmhaKernel>
 auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
 {
+    if(args.max_logits_ptr != nullptr)
+    {
+        throw std::runtime_error(
+            "fmha_fwd: max_logits_ptr is not supported by this kernel instance");
+    }
     /// NOTICE: This was borrowed from Aiter. Make sure the selected remap_opt setting truly
     /// maximizes the kernel's performance.
     int remap_opt = 2;
@@ -1478,7 +1498,8 @@ template <ck_tile::index_t HDim_,
           bool kUseTrLoad_,
           bool kSkipMinSeqlenQ_ = false,
           bool kHasSink_        = false,
-          int kOccupancy_       = -1>
+          int kOccupancy_       = -1,
+          bool kStoreMaxLogits_ = false>
 struct fmha_fwd_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1505,6 +1526,7 @@ struct fmha_fwd_traits_
     static constexpr bool kUseTrLoad                 = kUseTrLoad_;
     static constexpr bool kSkipMinSeqlenQ            = kSkipMinSeqlenQ_;
     static constexpr bool kHasSink                   = kHasSink_;
+    static constexpr bool kStoreMaxLogits            = kStoreMaxLogits_;
     // Purely a policy hint (currently maps to make_kernel<kBlockPerCu>). Kept
     // as a non-defaulted-away metadata field so tiles sharing all other
     // traits but different occupancy still produce DISTINCT instantiations of
