@@ -65,6 +65,116 @@ environmental variables to control logging. Both variables are disabled by defau
     export MIOPEN_ENABLE_LOGGING_CMD=1
     export MIOPEN_LOG_LEVEL=6
 
+  If hipDNN forwarding is on, also include the values of ``MIOPEN_HIPDNN_FORWARDING`` and
+  ``MIOPEN_DISABLE_HIPDNN_FOR``.
+
+.. _logging-hipdnn-forwarding:
+
+Logging hipDNN forwarding
+===================================================
+
+In builds configured with ``MIOPEN_ENABLE_HIPDNN_WRAPPER=ON``, ``MIOPEN_HIPDNN_FORWARDING`` can
+send some MIOpen entry points to hipDNN instead of running them in MIOpen. For the variables that
+control this, see :doc:`MIOpen environment variables <../reference/env_variables>`. The
+forwarding code prints the following lines to ``stderr``:
+
+* ``[MIOpen] MIOPEN_HIPDNN_FORWARDING=<value>: entry points in the forwarding set are redirected to hipDNN, all others dispatch to the MIOpen implementation.``
+
+  Printed once, when forwarding is turned on.
+
+* ``[MIOpen] hipDNN routing: <entry point> mode=<mode> route=<route> reason=<reason>``
+
+  Printed when ``MIOPEN_LOG_LEVEL`` is ``6`` or higher, once per entry point at its first call.
+  The route is decided at the first call and reused for every later call, so one line covers the
+  whole run. ``mode`` is ``enabled`` or ``disabled``, ``route`` is ``hipdnn`` or ``miopen``, and
+  ``reason`` is one of the following:
+
+  .. list-table::
+      :header-rows: 1
+      :widths: 30,70
+
+      * - **Reason**
+        - **Meaning**
+
+      * - ``forwarding-off``
+        - ``MIOPEN_HIPDNN_FORWARDING`` is not enabled.
+
+      * - ``not-in-forwarding-set``
+        - This build does not forward this entry point.
+
+      * - ``disabled-by-env``
+        - ``MIOPEN_DISABLE_HIPDNN_FOR`` names this entry point, or is ``*``.
+
+      * - ``hipdnn-unavailable``
+        - hipDNN is missing, was refused, or could not create a handle. The route stays
+          ``hipdnn``, so each call fails instead of quietly running in MIOpen.
+
+      * - ``in-forwarding-set``
+        - The entry point is forwarded to hipDNN.
+
+* ``[MIOpen] hipDNN forwarded: <entry point>``
+
+  Printed when ``MIOPEN_ENABLE_LOGGING`` is enabled, once per forwarded call. Forwarded calls skip
+  the code that prints MIOpen's API call log, so this line is how they show up in it. It does not
+  list the arguments, and ``MIOPEN_ENABLE_LOGGING_CMD`` prints no ``MIOpenDriver`` command for a
+  forwarded call. To get both, rerun with ``MIOPEN_DISABLE_HIPDNN_FOR=<entry point>`` so that the
+  call runs in MIOpen.
+
+* ``[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set HIPDNN_LOG_LEVEL=error): <message>``
+
+  Printed once per process when hipDNN could not be loaded or refused to run, unless
+  ``MIOPEN_LOG_LEVEL`` is ``1`` or ``2``. A common cause is a hipDNN whose major version differs
+  from the one MIOpen was built against. Every call routed to hipDNN then fails with
+  ``miopenStatusInternalError``, whatever the log level.
+
+* ``[MIOpen] [hipDNN-forwarded] <status>: <reason>``
+
+  Printed once per failed forwarded call, unless ``MIOPEN_LOG_LEVEL`` is ``1`` or ``2``.
+  ``<status>`` is MIOpen's description of the returned status, and ``<reason>`` says what failed.
+
+Telling forwarded failures apart
+--------------------------------------------------------------------------------------------------------------
+
+A forwarded call that fails returns an ordinary ``miopenStatus_t``, so the status alone does not
+say whether MIOpen or hipDNN failed. Two functions tell the cases apart:
+
+* ``miopenGetLastForwardedError``, declared in ``<miopen/hipdnn_forwarding.h>``, writes the status
+  of the calling thread's last MIOpen call if that call was forwarded to hipDNN and failed, and
+  ``miopenStatusSuccess`` otherwise. Given a null pointer, it returns ``miopenStatusBadParm``. It
+  is a beta API, so define ``MIOPEN_BETA_API`` before including the header.
+* ``miopenGetErrorString`` adds the prefix ``[hipDNN-forwarded]`` when it is given the status that
+  the calling thread's last call failed with in hipDNN.
+
+Calling either function leaves the result unchanged, so you can call both, in either order. The
+next call to any other MIOpen function on the same thread replaces the result.
+
+The header and the function exist only in builds configured with
+``MIOPEN_ENABLE_HIPDNN_WRAPPER=ON``. Code that must build against both kinds of installation can
+test for the header:
+
+.. code:: cpp
+
+  #define MIOPEN_BETA_API
+  #include <miopen/miopen.h>
+  #if __has_include(<miopen/hipdnn_forwarding.h>)
+  #include <miopen/hipdnn_forwarding.h>
+  #define HAVE_MIOPEN_FORWARDED_ERROR 1
+  #endif
+
+  miopenStatus_t status = miopenConvolutionForward(/* ... */);
+  #ifdef HAVE_MIOPEN_FORWARDED_ERROR
+  miopenStatus_t forwarded = miopenStatusSuccess;
+  if(status != miopenStatusSuccess && miopenGetLastForwardedError(&forwarded) == miopenStatusSuccess &&
+     forwarded != miopenStatusSuccess)
+  {
+      // The call was forwarded to hipDNN and failed there.
+  }
+  #endif
+
+A program built this way against a ``MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`` installation does not load
+with a ``libMIOpen.so`` built without it. To run against either library without rebuilding, look
+the function up at run time with ``dlsym`` instead.
+
 Layer filtering
 ===================================================
 

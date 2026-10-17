@@ -1195,6 +1195,10 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
+set(MIOPEN_WRAPPER_HEADER_PATH)
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)
+endif()
 
 rocm_install_targets(
   TARGETS ${_MIOPEN_INSTALL_TARGETS}
@@ -1202,6 +1206,7 @@ rocm_install_targets(
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
     ${MIOPEN_CXX_HEADER_PATH}
+    ${MIOPEN_WRAPPER_HEADER_PATH}
 )
 
 rocm_export_targets(

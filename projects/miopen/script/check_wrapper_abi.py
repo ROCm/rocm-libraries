@@ -37,6 +37,9 @@ def main():
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
     )
     parser.add_argument(
+        "--wrapper-only", default=SCRIPT_DIR / "wrapper_only_symbols.txt"
+    )
+    parser.add_argument(
         "--needed-baseline",
         help="committed DT_NEEDED list the wrapper must match exactly. Off by "
         "default because the list names ROCm soversions and the platform's "
@@ -47,7 +50,7 @@ def main():
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
-        "no excluded symbol is declared there",
+        "no excluded or wrapper-only symbol is declared there",
     )
     args = parser.parse_args()
 
@@ -73,6 +76,8 @@ def main():
         args.baseline,
         "--excluded",
         args.excluded,
+        "--wrapper-only",
+        args.wrapper_only,
         "--private-lib",
         private_lib,
     ]

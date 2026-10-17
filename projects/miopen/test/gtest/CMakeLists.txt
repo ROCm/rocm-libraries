@@ -463,11 +463,39 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
       --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+      --wrapper-only ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
   )
   set_tests_properties(wrapper_abi_check PROPERTIES
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
     TIMEOUT 300)
+
+  # A backend that hipDNN loads and then refuses. It has the real backend's file name, so it
+  # gets its own directory. MODULE, not SHARED: on Windows a SHARED library's DLL ignores the
+  # LIBRARY output and install directories and lands next to MIOpen.dll. hipDNN looks there
+  # before anywhere but HIPDNN_BACKEND_LIBRARY_PATH, so every other test would load the fake.
+  add_library(fake_hipdnn_backend MODULE forwarding_failure/fake_hipdnn_backend.cpp)
+  set_target_properties(fake_hipdnn_backend PROPERTIES
+    OUTPUT_NAME hipdnn_backend
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
+  add_dependencies(miopen-tests fake_hipdnn_backend)
+  add_dependencies(miopen-check fake_hipdnn_backend)
+
+  add_executable(forwarding_failure_probe forwarding_failure/forwarding_failure_probe.cpp)
+  target_link_libraries(forwarding_failure_probe PRIVATE MIOpen)
+  add_dependencies(miopen-tests forwarding_failure_probe)
+  add_dependencies(miopen-check forwarding_failure_probe)
+
+  add_test(NAME forwarding_failure_modes
+    COMMAND ${Python3_EXECUTABLE} -m unittest -v test_forwarding_failure_modes
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+  set_tests_properties(forwarding_failure_modes PROPERTIES
+    LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
+    TIMEOUT 300
+    ENVIRONMENT
+      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+    ENVIRONMENT_MODIFICATION
+      "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -549,8 +577,16 @@ endif()
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")
+"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\" \"--wrapper-only\" \"../wrapper_only_symbols.txt\")
 set_tests_properties(wrapper_abi_check PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\")
+
+")
+endif()
+
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+  file(APPEND "${INSTALL_TEST_FILE}"
+"add_test(forwarding_failure_modes python3 \"../test_forwarding_failure_modes.py\" \"-v\")
+set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../fake_hipdnn_backend\")
 
 ")
 endif()
@@ -574,6 +610,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
           "${PROJECT_SOURCE_DIR}/script/miopen_wrapper_libs.py"
           "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
           "${PROJECT_SOURCE_DIR}/script/compare_forwarding_runs.py"
+          "${PROJECT_SOURCE_DIR}/script/test_forwarding_failure_modes.py"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
@@ -581,8 +618,17 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt"
           "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tests
+    )
+    install(TARGETS forwarding_failure_probe
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tests
+    )
+    install(TARGETS fake_hipdnn_backend
+        LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/fake_hipdnn_backend
         COMPONENT tests
     )
   endif()
