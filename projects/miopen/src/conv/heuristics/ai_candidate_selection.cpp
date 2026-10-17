@@ -79,6 +79,9 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
 
     input_params_  = metadata.value("input_params", std::vector<std::string>{});
     output_params_ = metadata.value("output_params", std::vector<std::string>{});
+    // Ordered engineered-feature names (present for models exported with named engineered features;
+    // absent for older models, which keep the fixed positional engineered block).
+    derived_feature_names_ = metadata.value("derived_features", std::vector<std::string>{});
 
     for(size_t i = 0; i < input_params_.size(); ++i)
         input_param_indices_[input_params_[i]] = i;
@@ -587,28 +590,62 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     // Derived feature block (shared with the TunaNet path). Dimensions above are normalized to the
     // forward (driver) convention; the GEMM assignment is selected by the actual direction. The
     // direction feature is encoded as 0=Forward, 1=BackwardData, 2=BackwardWeights.
-    const auto gemm_dir = direction_code == 0.0f   ? common::ConvDirection::Forward
-                          : direction_code == 1.0f ? common::ConvDirection::BackwardData
-                                                   : common::ConvDirection::BackwardWeights;
-    const auto derived =
-        is_3d ? common::EngineeredConvFeatures(N,
-                                               C_in,
-                                               C_out,
-                                               H_in,
-                                               W_in,
-                                               H_out,
-                                               W_out,
-                                               K_h,
-                                               K_w,
-                                               groups,
-                                               num_cu,
-                                               gemm_dir,
-                                               3,
-                                               D_in,
-                                               D_out,
-                                               K_d)
-              : common::EngineeredConvFeatures(
-                    N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto gemm_dir       = direction_code == 0.0f   ? common::ConvDirection::Forward
+                                : direction_code == 1.0f ? common::ConvDirection::BackwardData
+                                                         : common::ConvDirection::BackwardWeights;
+    const auto& derived_names = metadata.derived_feature_names();
+    std::vector<float> derived;
+    if(!derived_names.empty())
+    {
+        // Named engineered features: emit exactly what the model's metadata lists, in order. This
+        // transparently covers the optional divfeat features - a model opts in by listing them.
+        // raw in_channels (un-normalized) is required for the cpg_in/is_depthwise divfeat terms.
+        const auto raw_in_channels =
+            static_cast<std::size_t>(FeatureAt(features_by_name, "in_channels"));
+        derived = common::EngineeredConvFeaturesByName(N,
+                                                       C_in,
+                                                       C_out,
+                                                       H_in,
+                                                       W_in,
+                                                       H_out,
+                                                       W_out,
+                                                       K_h,
+                                                       K_w,
+                                                       groups,
+                                                       num_cu,
+                                                       gemm_dir,
+                                                       is_3d ? 3 : 2,
+                                                       D_in,
+                                                       D_out,
+                                                       K_d,
+                                                       raw_in_channels,
+                                                       data_type,
+                                                       derived_names);
+    }
+    else
+    {
+        // Older model without named engineered features: keep the fixed positional block.
+        derived =
+            is_3d
+                ? common::EngineeredConvFeatures(N,
+                                                 C_in,
+                                                 C_out,
+                                                 H_in,
+                                                 W_in,
+                                                 H_out,
+                                                 W_out,
+                                                 K_h,
+                                                 K_w,
+                                                 groups,
+                                                 num_cu,
+                                                 gemm_dir,
+                                                 3,
+                                                 D_in,
+                                                 D_out,
+                                                 K_d)
+                : common::EngineeredConvFeatures(
+                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    }
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +

@@ -42,6 +42,9 @@
 #include <miopen/env.hpp>
 
 #include <any>
+#include <array>
+#include <cmath>
+#include <map>
 #include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
@@ -220,6 +223,141 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
                                   /*D_out=*/1,
                                   /*K_d=*/1)
         .size();
+}
+
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineeredConvFeaturesByName(std::size_t N,
+                             std::size_t C_in,
+                             std::size_t C_out,
+                             std::size_t H_in,
+                             std::size_t W_in,
+                             std::size_t H_out,
+                             std::size_t W_out,
+                             std::size_t K_h,
+                             std::size_t K_w,
+                             std::size_t groups,
+                             std::size_t num_cu,
+                             ConvDirection direction,
+                             int spatial_dim,
+                             std::size_t D_in,
+                             std::size_t D_out,
+                             std::size_t K_d,
+                             std::size_t raw_in_channels,
+                             miopenDataType_t data_type,
+                             const std::vector<std::string>& names)
+{
+    // Self-describing engineered features: compute the standard engineered block plus the optional
+    // GEMM-dim tile-divisibility (divfeat) features into a name->value map, then emit them in the
+    // order the model's metadata ``derived_features`` list requests. A model opts into extra
+    // engineered features purely by listing their names in its metadata - no code flags. Must stay
+    // in sync with ConvInputPreprocessor.derived_feature_names()/compute_derived_features() in the
+    // MIOpenFF training repo (feature-parity gtest).
+
+    // Base engineered block, in canonical order (identical math/order to EngineeredConvFeatures).
+    const auto base                                     = EngineeredConvFeatures(N,
+                                             C_in,
+                                             C_out,
+                                             H_in,
+                                             W_in,
+                                             H_out,
+                                             W_out,
+                                             K_h,
+                                             K_w,
+                                             groups,
+                                             num_cu,
+                                             direction,
+                                             spatial_dim,
+                                             D_in,
+                                             D_out,
+                                             K_d);
+    static const std::array<const char*, 18> kBaseNames = {"log_flops",
+                                                           "log_gemm_m",
+                                                           "log_gemm_n",
+                                                           "log_gemm_k",
+                                                           "gemm_m_over_n",
+                                                           "gemm_m_over_k",
+                                                           "gemm_n_over_k",
+                                                           "log_gemm_size",
+                                                           "log_work_per_cu",
+                                                           "spatial_reduction",
+                                                           "filter_coverage",
+                                                           "channel_ratio",
+                                                           "group_density",
+                                                           "log_h_in",
+                                                           "log_w_in",
+                                                           "log_c_in",
+                                                           "log_c_out",
+                                                           "log_batch"};
+    std::map<std::string, float> by_name;
+    for(std::size_t i = 0; i < kBaseNames.size(); ++i)
+        by_name[kBaseNames[i]] = base[i];
+    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
+        by_name["log_d_in"] = base[kBaseNames.size()];
+
+    // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
+    // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
+    // rounding. cpg_in/is_depthwise use the RAW in_channels (matching the training preprocessor).
+    std::size_t g               = groups < 1 ? 1 : groups;
+    const double v_out          = static_cast<double>(D_out) * H_out * W_out;
+    const double v_filt         = static_cast<double>(K_d) * K_h * K_w;
+    const double n_v_out_over_g = static_cast<double>(N) * v_out / static_cast<double>(g);
+    const double cin_over_g     = static_cast<double>(C_in) / static_cast<double>(g);
+    const double cout_over_g    = static_cast<double>(C_out) / static_cast<double>(g);
+    const double cin_filter     = static_cast<double>(C_in) * v_filt;
+    const double cout_filter    = static_cast<double>(C_out) * v_filt;
+    double gemm_m = 0.0, gemm_n = 0.0, gemm_k = 0.0;
+    switch(direction)
+    {
+    case ConvDirection::Forward:
+        gemm_m = n_v_out_over_g;
+        gemm_n = cin_over_g;
+        gemm_k = cout_filter;
+        break;
+    case ConvDirection::BackwardData:
+        gemm_m = cout_over_g;
+        gemm_n = cin_filter;
+        gemm_k = n_v_out_over_g;
+        break;
+    case ConvDirection::BackwardWeights:
+        gemm_m = n_v_out_over_g;
+        gemm_n = cin_filter;
+        gemm_k = cout_over_g;
+        break;
+    }
+    const auto tile_waste = [](double x, double tile) -> float {
+        const double v  = x < 1.0 ? 1.0 : x;
+        const double up = std::ceil(v / tile) * tile;
+        return static_cast<float>((up - v) / up);
+    };
+    // dtype-aware K-pack: INT8 needs K % 4, FP16/BF16 K % 2, FP32 K % 1.
+    const double kpack    = data_type == miopenInt8 ? 4.0 : (data_type == miopenFloat ? 1.0 : 2.0);
+    const double cpg_in   = static_cast<double>(raw_in_channels) / static_cast<double>(g);
+    by_name["waste_m16"]  = tile_waste(gemm_m, 16);
+    by_name["waste_m32"]  = tile_waste(gemm_m, 32);
+    by_name["waste_m64"]  = tile_waste(gemm_m, 64);
+    by_name["waste_m128"] = tile_waste(gemm_m, 128);
+    by_name["waste_n16"]  = tile_waste(gemm_n, 16);
+    by_name["waste_n32"]  = tile_waste(gemm_n, 32);
+    by_name["waste_n64"]  = tile_waste(gemm_n, 64);
+    by_name["waste_n128"] = tile_waste(gemm_n, 128);
+    by_name["waste_k8"]   = tile_waste(gemm_k, 8);
+    by_name["waste_k16"]  = tile_waste(gemm_k, 16);
+    by_name["waste_k32"]  = tile_waste(gemm_k, 32);
+    by_name["kpack_ok"]   = (std::fmod(std::round(gemm_k), kpack) < 0.5) ? 1.0f : 0.0f;
+    by_name["log_cpg_in"] = static_cast<float>(std::log1p(cpg_in));
+    by_name["is_depthwise"] = (cpg_in <= 1.0) ? 1.0f : 0.0f;
+    by_name["k_small"]      = (gemm_k < 32.0) ? 1.0f : 0.0f;
+
+    std::vector<float> out;
+    out.reserve(names.size());
+    for(const auto& name : names)
+    {
+        const auto it = by_name.find(name);
+        if(it == by_name.end())
+            MIOPEN_THROW("EngineeredConvFeaturesByName: unknown derived feature '" + name + "'");
+        out.push_back(it->second);
+    }
+    return out;
 }
 
 bool IsTunaNetCategoricalFeature(const std::string& name)
@@ -1160,31 +1298,60 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
         features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
     }
 
-    const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
-                              ? common::ConvDirection::Forward
-                          : problem.GetDirection() == conv::Direction::BackwardData
-                              ? common::ConvDirection::BackwardData
-                              : common::ConvDirection::BackwardWeights;
-    const auto derived =
-        (spatial_dim == 3)
-            ? common::EngineeredConvFeatures(N,
-                                             C_in,
-                                             C_out,
-                                             H_in,
-                                             W_in,
-                                             H_out,
-                                             W_out,
-                                             K_h,
-                                             K_w,
-                                             groups,
-                                             num_cu,
-                                             gemm_dir,
-                                             3,
-                                             D_in,
-                                             D_out,
-                                             K_d)
-            : common::EngineeredConvFeatures(
-                  N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto gemm_dir       = problem.GetDirection() == conv::Direction::Forward
+                                    ? common::ConvDirection::Forward
+                                : problem.GetDirection() == conv::Direction::BackwardData
+                                    ? common::ConvDirection::BackwardData
+                                    : common::ConvDirection::BackwardWeights;
+    const auto& derived_names = metadata.GetDerivedFeatureNames();
+    std::vector<float> derived;
+    if(!derived_names.empty())
+    {
+        // Named engineered features: emit what the model's metadata lists, in order (covers the
+        // optional divfeat features). raw in_channels (un-normalized) is needed for cpg_in.
+        derived = common::EngineeredConvFeaturesByName(N,
+                                                       C_in,
+                                                       C_out,
+                                                       H_in,
+                                                       W_in,
+                                                       H_out,
+                                                       W_out,
+                                                       K_h,
+                                                       K_w,
+                                                       groups,
+                                                       num_cu,
+                                                       gemm_dir,
+                                                       (spatial_dim == 3) ? 3 : 2,
+                                                       D_in,
+                                                       D_out,
+                                                       K_d,
+                                                       /*raw_in_channels=*/problem.GetInChannels(),
+                                                       problem.GetInDataType(),
+                                                       derived_names);
+    }
+    else
+    {
+        derived =
+            (spatial_dim == 3)
+                ? common::EngineeredConvFeatures(N,
+                                                 C_in,
+                                                 C_out,
+                                                 H_in,
+                                                 W_in,
+                                                 H_out,
+                                                 W_out,
+                                                 K_h,
+                                                 K_w,
+                                                 groups,
+                                                 num_cu,
+                                                 gemm_dir,
+                                                 3,
+                                                 D_in,
+                                                 D_out,
+                                                 K_d)
+                : common::EngineeredConvFeatures(
+                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    }
     features.insert(features.end(), derived.begin(), derived.end());
     return features;
 }
