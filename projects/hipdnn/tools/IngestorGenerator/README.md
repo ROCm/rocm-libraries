@@ -500,7 +500,7 @@ carry four arms and 63 carry six.
 with each shape first axis outermost (`shape_axes: {dtype: [fp16, bf16], head_size: [64,
 128]}` with one shape `{knobs: rt}` expands to four shapes). An axis must name a spec field
 of the group, and a shape may not restate an axis field.
-`configs/gfx1151_wmma_attention.yaml` keeps its head-size bucket list there.
+`configs/gfx1151_wmma_attention.yaml` keeps its dtype list there.
 
 **The tri-state.** An omitted or null policy knob retains the builder's policy intent, not
 an explicit false. `resolved` supplies an authored metadata projection, not compiler
@@ -516,8 +516,16 @@ each arm shifts it with `ordinal_offset:`.
 **Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
 UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
 absent one inherits the pack's. Use it for kernels only some of the pack's architectures
-can run -- `configs/gfx1151_wmma_attention.yaml` restricts its transposed-QK group to the
-gfx11 shards of a gfx11+gfx12 pack.
+can run, or that differ per architecture -- `configs/gfx1151_wmma_attention.yaml` gives its
+gfx11 and gfx12 shards their own wide-Q prefill and D256 decode geometries.
+
+**Several builders.** A group may carry its own `kernel_source`, merged over the pack's
+`kernel_defaults` for every kernel it expands to, exactly as a hand-authored kernel's own
+`kernel_source` is: one engine then ships kernels of more than one builder (or with
+`companion_kernels` on some of them). It holds the kind's keys other than `spec`, which
+stays the group's `spec_defaults`, shapes and arms. `configs/gfx1151_wmma_attention.yaml`
+ships its decode groups this way beside the pack's prefill builder; every builder's spec
+must then answer the engine's `specialization.bindings`.
 
 Expansion runs at load time (`codegen/config_loader.py`), so `generate.py`, the emitters and
 the dedup pass see ordinary kernel dicts. `tools/registry_enumerator.py` emits the enumerated form;
@@ -642,6 +650,22 @@ processor (`gfx11-generic`, `gfx12-generic`), so one kernel set serves the whole
 Any other value is a `ConfigError`; the key is rejected for every other kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 
+A packaged `rocke` `kernel_source` (or `kernel_defaults`) may also set
+`companion_kernels: [merge, ...]` when its builder returns a `rocke.helpers.KernelModule`:
+further kernels linked into the primary's code object, by role. `hkp_pack` writes each
+role's `<role>_symbol` and `<role>_signature` into the shipped metadata from the compiled
+object, so the config declares both as `type: string` `kmd_fields`, lists them under
+`specialization.matcher_only_fields` (never `metadata_fields`), and never states them in a
+kernel's `metadata`; check 3 below exempts them from the omission rule and refuses an
+undeclared or non-string field, an authored value, or a `metadata_fields` listing. Declared
+without a `default_value`, a field the packer did not complete fails the descriptor at
+load. An engine mixing kernels with and without the companion (as
+`configs/gfx1151_wmma_attention.yaml` does) gives both fields `default_value: ""`
+instead, which moves that failure to plan build: `companionKernelDefinition` rejects an
+empty value.
+Roles are distinct lowercase identifiers. A native reads them with
+`companionKernelDefinition` (`kernel_ingestor_engine/CompanionKernel.hpp`).
+
 ## The five pre-mint config-loader checks
 
 Run, in this order, **before any UUID is minted**:
@@ -651,7 +675,9 @@ Run, in this order, **before any UUID is minted**:
    real loader takes a non-int knob and silently yields no usable knob, visible only at
    plan-build time against a real device.
 3. Every kernel's `metadata` type-checks against the KMD, with no mandatory field (one with
-   no `default_value`) omitted; the real loader drops the whole pack instead.
+   no `default_value`) omitted; the real loader drops the whole pack instead. A
+   `companion_kernels` field is the packer's to write: exempt from the omission rule and
+   refused if authored.
 4. Every kernel's `arch` is a subset of its pack's `arch`.
 5. Every `arch` entry is a plausible `gfx`-prefixed base id (lowercase, no feature suffix):
    an error if malformed, a **warning** if well-formed but unrecognized (e.g. `gfx94` for

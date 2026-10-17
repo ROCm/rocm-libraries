@@ -489,7 +489,7 @@ if(ROCKE_INSTALL_TESTS)
     # Library attention dispatch and RDNA WMMA CPU tests: dispatcher selection,
     # signature guards, spec validation and the tuned-candidate contract. Pointed at the
     # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
-    # automatically; test_wmma_fmha_fwd_spec.py sits outside it and is named beside it.
+    # automatically; the RDNA WMMA spec tests sit outside it and are named beside it.
     # The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
@@ -499,7 +499,8 @@ if(ROCKE_INSTALL_TESTS)
     # (checked by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
-           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_v2_spec.py\""
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_decode_spec.py\""
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
            " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
            " -v -rs --timeout=60)\n")
@@ -579,7 +580,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_chunkwise_gfx942_numeric.py"
         "tests/library/tests/test_kda_chunkwise_gfx950_numeric.py"
         "tests/library/tests/test_kda_gdn_gfx950_numeric.py"
-        "tests/library/tests/test_wmma_fmha_fwd_numeric.py"
+        "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
+        "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
+        "tests/library/tests/test_wmma_fmha_decode_numeric.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
         "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")

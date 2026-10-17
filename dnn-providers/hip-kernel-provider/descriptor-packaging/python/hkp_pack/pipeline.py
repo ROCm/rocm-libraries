@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import agreement, provenance_sidecar, toolchain
+from . import agreement, companions, provenance_sidecar, toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
@@ -320,9 +320,23 @@ def _compile_ukd_variant(
         # Empty only for a UKD whose pack authors no engine, which `_agreement_inputs`
         # has already established carries no catalog to disagree with.
         consumers = consumer_records.get(ukd["id"], [])
+        metadata = ukd["metadata"]
+        observed_companions = companions.check_observed(ukd, observations, where)
+        if observed_companions:
+            # Completed here, before agreement: the consumer records bind the
+            # metadata that ships, which is what a reader rebuilds them from.
+            metadata = {
+                **metadata,
+                **companions.companion_metadata(
+                    Path(variant_co[vk]).read_bytes(), observed_companions, where
+                ),
+            }
+            consumers = agreement.canonical_records(
+                [{**record, "metadata": metadata} for record in consumers]
+            )
         for record in consumers:
             agreement.compare(
-                record["declaration"], record["kmd"], ukd["metadata"], observations
+                record["declaration"], record["kmd"], metadata, observations
             )
         fields = {
             "origin_kind": "rocke",
@@ -334,6 +348,7 @@ def _compile_ukd_variant(
             "observations": observations,
             "compile_target": compile_target,
             "consumers": consumers,
+            "metadata": metadata,
         }
     elif kind == "hsaco":
         # The packer never reads the object's target processor; hsaco kernels declare
@@ -364,6 +379,7 @@ def _compile_ukd_variant(
     else:
         raise HkpPackError(f"{where} kernel_source has unsupported kind '{kind}'")
     fields["provenance"] = copy.deepcopy(ukd.get("provenance", {}))
+    fields.setdefault("metadata", ukd["metadata"])
     return vk, symbol, fields
 
 
@@ -552,7 +568,13 @@ def _agreement_inputs(flat, arch):
         ):
             # Completion is checked against the KMD the chain actually resolved to,
             # so a mis-typed or missing mandatory value fails before a compile.
-            agreement.complete_metadata(ukd["metadata"], kmd)
+            # Companion fields are the producer's to write, so they are checked
+            # for declaration here and for presence once compiled.
+            where = f"UKD {ukd['id']} in {kdp.path.name}"
+            produced = companions.check_authored(ukd, kmd, where)
+            agreement.complete_metadata(
+                {**ukd["metadata"], **{name: "" for name in produced}}, kmd
+            )
             kind = ukd["kernel_source"]["kind"]
             # A passthrough kind runs no producer, so there is no producing compiler
             # whose specialization a contract could state.
@@ -564,6 +586,13 @@ def _agreement_inputs(flat, arch):
             declaration = agreement.select_declaration(
                 ukd, engine, kmd, schemas, enclosing
             )
+            bound = sorted(set(produced) & set(declaration["metadata_fields"]))
+            if bound:
+                raise HkpPackError(
+                    f"{where}: companion field(s) {bound} are written from the "
+                    "compiled object, not read off the builder spec; declare them "
+                    "matcher-only"
+                )
             if kind != "rocke" and declaration["metadata_fields"]:
                 raise HkpPackError(
                     f"UKD {ukd['id']}: a '{kind}' source cannot fulfil compiled "
@@ -1036,7 +1065,6 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 standalone_ukds[sid] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
-                    metadata=sukd.get("metadata"),
                     priority=sukd.get("priority"),
                     symbol=symbol,
                     variant_key=vk,
@@ -1078,11 +1106,11 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 }
             if fields["build"] is not None:
                 ukd["build"] = fields["build"]
+            ukd["metadata"] = fields["metadata"]
             new_kds.append(ukd)
             record = InlineUKD(
                 id=ukd.get("id"),
                 name=ukd.get("name"),
-                metadata=ukd.get("metadata"),
                 priority=ukd.get("priority"),
                 symbol=symbol,
                 variant_key=vk,

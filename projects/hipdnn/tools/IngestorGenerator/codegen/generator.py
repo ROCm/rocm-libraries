@@ -15,6 +15,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
+from .config_loader import companion_metadata_fields
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -238,10 +239,16 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # hkp_pack writes a companion's fields from the compiled object; no authored
+    # metadata or spec may decide them.
+    produced = set(companion_metadata_fields(kernel))
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and f.name not in metadata
+        and f.name not in produced
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (

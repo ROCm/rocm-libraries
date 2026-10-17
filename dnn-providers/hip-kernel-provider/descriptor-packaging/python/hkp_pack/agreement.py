@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 
+from .companions import companion_metadata
 from .errors import HkpPackError
 
 
@@ -416,6 +417,15 @@ def verify(ukd, records, payload):
         raise HkpPackError("effective_spec symbol binding mismatch")
     if [observations.get("arch")] != ukd.get("arch"):
         raise HkpPackError("effective_spec architecture binding mismatch")
+    # A module's companions were recorded by the compiler; the metadata naming
+    # them must be what the payload actually exports under those symbols.
+    companions = observations.get("companions", {})
+    if companions:
+        if not isinstance(companions, dict):
+            raise HkpPackError("effective_spec companions are not a role map")
+        expected = companion_metadata(payload, companions, f"UKD {ukd.get('id')}")
+        if any(ukd["metadata"].get(k) != v for k, v in expected.items()):
+            raise HkpPackError("effective_spec companion binding mismatch")
     # The processor the object was compiled for (the shard arch, or its generic
     # family) is what provenance tells a reader; the compiler's own record of it
     # must agree, so a generic object cannot be relabelled native or vice versa.

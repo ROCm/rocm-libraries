@@ -149,7 +149,8 @@ as described in the notes.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `gfx1151/wmma_gemm` | ❌ | ❌ | ✅ | native WMMA GEMM (GPU-verified) |
-| `gfx1151/wmma_fmha_fwd` | ❌ | ❌ | ✅ | native WMMA FMHA fwd (GPU-verified) |
+| `gfx1151/wmma_fmha_fwd_v2` | ❌ | ❌ | ✅ | native WMMA FMHA prefill, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1201; not run on gfx1151) |
+| `gfx1151/wmma_fmha_decode` | ❌ | ❌ | ✅ | native split-KV WMMA FMHA decode, gfx11/gfx12 (GPU-verified on gfx1100/gfx1101/gfx1201; not run on gfx1151) |
 
 ---
 
@@ -201,7 +202,7 @@ as described in the notes.
   `add_rmsnorm2d_rdquant` (i8 out only on RDNA), `smoothquant`,
   `moe_smoothquant`, `topk_softmax`, `moe_sorting` (all 4 phases),
   `fmha_fwd_mfma`, `fmha_appendkv`, `unified_attention_2d/3d/reduce`,
-  `gfx1151/wmma_gemm`, `gfx1151/wmma_fmha_fwd`.
+  `gfx1151/wmma_gemm`.
   **Marginal PASS** (a few elements over a strict 2e-2 but 0 bad at 3e-2;
   their scalar bodies hardcode `WARP_SIZE=64`/`block=(64,1,1)`, i.e. 2 waves
   on wave32, but resolve correctly): `fmha_paged_prefill` (2.43e-2),

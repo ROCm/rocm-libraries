@@ -201,6 +201,22 @@ generic processor -- and the compiler evidence binds the same value beside the s
 `arch`, so a reader can tell a generic object from a native one and a relabelled one fails
 the agreement check.
 
+**Companion kernels.** A builder may return a `rocke.helpers.KernelModule` -- a primary
+kernel plus role-keyed companions (a split-KV decode and its merge) -- which rocKE's
+`compile_module` links at bitcode level into ONE code object with one AMDGPU metadata
+note. The UKD names the roles in `kernel_source.companion_kernels` (a non-empty list of
+distinct lowercase identifiers), and the declared roles must equal the compiled ones.
+`kernel_source.symbol` stays the primary's; each role is written into the shipped
+`metadata` as `<role>_symbol` (the companion's symbol in the same object) and
+`<role>_signature` (its argument list read out of the object, as compact JSON in
+`kernel_source.signature`'s shape). The engine's KMD must declare both as `string` and
+the contract must call them matcher-only; authored metadata may not state them. The
+compiler evidence records `companions: {role: symbol}`, and verification re-reads each
+companion's signature from the payload. A native turns the fields back into a launchable
+descriptor with `companionKernelDefinition` in
+`src/engines/kernel_ingestor_engine/CompanionKernel.hpp`. A single-kernel builder's
+artifacts, metadata and evidence are unchanged.
+
 ## Compiler-bound specialization agreement
 
 Packaging consumes UKD `provenance.specialization_contract` as data. It binds no

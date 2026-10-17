@@ -171,7 +171,7 @@ amd_comgr_action_data_get_data(EXECUTABLE)           # extract bytes
 Libraries are loaded from the default ROCm library locations or the dynamic
 linker search path. The HSACO bytes returned are ready for `hipModuleLoadData`.
 
-`ComgrTimings(bc, relocatable, executable)` returns per-stage seconds; `compile_kernel` converts to ms in the artifact.
+`ComgrTimings(bc, link, relocatable, executable)` returns per-stage seconds (`link` is 0.0 for a single module); `compile_kernel` converts to ms in the artifact.
 
 ## HIP Debug Lowering
 

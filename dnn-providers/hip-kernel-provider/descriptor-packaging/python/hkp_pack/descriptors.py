@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
 from . import generic_targets as gtmod
+from .companions import validate_roles as validate_companion_roles
 from .errors import HkpPackError
 from .rocke_compile import ROCKE_TARGETS
 
@@ -374,6 +375,8 @@ def _validate_ukd_fields(ukd, where, log=print):
         _require(ks, ["source", "builder", "spec"], where)
         validate_rocke_spec(ks["spec"], where)
         validate_rocke_target(ks, where)
+        if "companion_kernels" in ks:
+            validate_companion_roles(ks["companion_kernels"], where)
     elif kind == "hsaco":
         _require(ks, ["file", "symbol"], where)
         for field_name in ("file", "symbol"):
