@@ -244,7 +244,11 @@ runs no heuristics and needs no GPU.
 - Fixed upstream bugs: `Knob::getMaxValue` and `RngDesc_v8::getUniformDistMin` return the wrong field;
   `VariantPackBuilder_v8::build` passes the data-pointer count as the `UNIQUE_IDS` count, which over-reads
   the caller's UIDs when fewer UIDs than pointers are given. It now passes the UID count, and the shim
-  reports the mismatch as `BAD_PARAM`. The misspelled alias `EngineHeuristicsBuilde` is kept.
+  reports the mismatch as `BAD_PARAM`. `OperationGraphBuilder_v8::addOperation` on a builder with no
+  operations yet stores the descriptor at `ops[-1]` (the count starts at -1); it now starts from 0.
+  `OperationBuilder_v8::setcDesc` copies `CUDNN_DIM_MAX + 1` padding, dilation and stride entries into
+  arrays of `CUDNN_DIM_MAX`; the arrays now hold `CUDNN_DIM_MAX + 1`. The misspelled alias
+  `EngineHeuristicsBuilde` is kept.
 - FE-enum JSON rendering goes through a shim name table. `describe()` output matches upstream, but the
   shim defines no nlohmann serializer for hipDNN's enums, so serializing a frontend enum directly yields
   an integer.

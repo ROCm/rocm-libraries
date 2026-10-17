@@ -225,8 +225,9 @@ These differ from cuDNN:
 ### Builders
 
 The v0.x builders (`TensorBuilder`, `ConvDescBuilder`, `PointWiseDescBuilder`, `MatMulDescBuilder`,
-`ReductionDescBuilder`, `ResampleDescBuilder`, `RngDescBuilder`, `VariantPackBuilder`) are upstream's,
-running on the C API above, so every C API row applies to their `build()`. These differ as well:
+`ReductionDescBuilder`, `ResampleDescBuilder`, `RngDescBuilder`, `OperationBuilder`,
+`OperationGraphBuilder`, `VariantPackBuilder`) are upstream's, running on the C API above, so every
+C API row applies to their `build()`. These differ as well:
 
 | Case | Shim behavior |
 |---|---|
@@ -236,3 +237,6 @@ running on the C API above, so every C API row applies to their `build()`. These
 | `getStream()` / `getLogger()` | no shim code calls them. A consumer call opens `CUDNN_FRONTEND_LOG_FILE` for writing, truncating it as upstream does; the `cudnnCreate()` logging bridge may also route hipDNN's log to that file, so the two writers can overwrite each other |
 | `NV_CUDNN_FRONTEND_USE_DYNAMIC_LOADING` | ignored: the shim never loads cuDNN at run time, and `NV_CUDNN_FE_DYNAMIC_CHECK_*` expand to nothing, so the run-time cuDNN version checks they guard are skipped |
 | `get_environment()`, `getLogLevel()` | `get_environment` returns a pointer into a per-thread buffer that the next call on the same thread overwrites (upstream returns `getenv`'s pointer), and returns null for a variable that is set but empty. `getLogLevel` returns 0 when the `NV_CUDNN_FRONTEND_DISABLE_LOGGING` environment variable is set to anything but `0`; upstream honors only the macro |
+| Operation and operation-graph `build()` errors | an operation the C API rejects at finalize fails `OperationBuilder::build()` with that row's status, and a graph rejection fails `OperationGraphBuilder::build()` the same way: see [Operations](#operations) and [Operation graphs](#operation-graphs). `GenStats`, `BNFinalize`, `Dgrad_Drelu_BN_Bwd`, `Rng`, paged-cache-load and `Reshape` operations always fail with `NOT_SUPPORTED` |
+| `OperationGraphBuilder` without `setHandle` | `build()` fails with `BAD_PARAM`. cuDNN 9.8 and later build the graph without a handle |
+| PyTorch fused convolutions | `cudnn_convolution_relu` passes `alpha2 = 0` to the pointwise add, so it always gets `NOT_SUPPORTED`; `cudnn_convolution_add_relu` does whenever its alpha is not 1 (see the scaling row under [Operations](#operations)) |
