@@ -105,6 +105,9 @@ def _load(path: str, label: str) -> dict:
             raise CatalogDiffError(f"{where} 'kernel_source.spec' must be an object")
         if "name" in entry and not isinstance(entry["name"], str):
             raise CatalogDiffError(f"{where} 'name' must be a string")
+        for scalar in ("priority", "version"):
+            if not isinstance(entry.get(scalar), (str, int, float, bool, type(None))):
+                raise CatalogDiffError(f"{where} '{scalar}' must be a scalar")
     _check_provenance(kdp.get("provenance"), f"the {label} KDP")
     return kdp
 
@@ -345,6 +348,11 @@ def _load_kmd(path: str, label: str) -> dict:
         isinstance(field, dict) for field in kmd["fields"]
     ):
         raise CatalogDiffError(f"the {label} KMD 'fields' must be an array of objects")
+    for index, field in enumerate(kmd["fields"]):
+        if "name" in field and not isinstance(field["name"], str):
+            raise CatalogDiffError(
+                f"the {label} KMD fields[{index}] 'name' must be a string"
+            )
     return kmd
 
 

@@ -539,6 +539,8 @@ def _write(path: Path, document) -> str:
         {"name": "k0", "kernel_source": {"spec": ["block_n", 64]}},
         {"name": 5, "kernel_source": {"spec": {}}},
         {"name": None, "kernel_source": {"spec": {}}},
+        {"name": "k0", "priority": [1]},
+        {"name": "k0", "version": {"major": 1}},
     ],
     ids=[
         "string-entry",
@@ -546,6 +548,8 @@ def _write(path: Path, document) -> str:
         "list-spec",
         "numeric-name",
         "null-name",
+        "list-priority",
+        "object-version",
     ],
 )
 def test_a_malformed_catalog_entry_exits_2(tmp_path, capsys, entry):
@@ -589,6 +593,22 @@ def test_a_malformed_kmd_exits_2(tmp_path, capsys, fields):
         catalog_diff.main(argv + ["--shipped-kmd", good, "--regenerated-kmd", bad]) == 2
     )
     assert "KMD 'fields' must be an array of objects" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "name", [5, ["dtype"], None], ids=["numeric", "list", "null"]
+)
+def test_a_kmd_field_with_a_non_string_name_exits_2(tmp_path, capsys, name):
+    kdp = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
+    good = _write(tmp_path / "a.kmd.json", _kmd([_field("dtype")]))
+    bad = _write(tmp_path / "b.kmd.json", _kmd([_field("dtype"), {"name": name}]))
+    argv = ["--shipped", kdp, "--regenerated", kdp]
+    assert (
+        catalog_diff.main(argv + ["--shipped-kmd", good, "--regenerated-kmd", bad]) == 2
+    )
+    err = capsys.readouterr().err
+    assert "fields[1]" in err
+    assert "Traceback" not in err
 
 
 def test_a_json_array_is_not_a_kdp(tmp_path, capsys):
