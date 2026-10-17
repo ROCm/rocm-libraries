@@ -312,6 +312,10 @@ output buffers are provided, and the results are written into the output buffer.
 
    rocFFT can often overwrite the input buffers on real inverse (complex-to-real) transforms,
    even if they are requested as not in-place. By doing this, rocFFT is better able to optimize the FFT.
+   Where the input layout is described by a :ref:`field<input_output_fields>`, this applies to the
+   buffers of the individual bricks.
+
+   Transforms of all other types leave the input buffers of a not in-place transform unmodified.
 
 .. _stridesdistances:
 
@@ -364,7 +368,8 @@ input/output buffers are :math:`2N` elements long, even if only :math:`N` even-i
 elements are being transformed. No more than :math:`2N` elements of temporary data are written
 to the buffers during the transform.
 
-These policies apply to both input and output buffers, because not in-place transforms might overwrite input data.
+These policies apply to output buffers, and to input buffers wherever the transform is permitted to
+write to them at all - that is, in-place transforms and not in-place complex-to-real transforms.
 See :ref:`resultplacement` for more information.
 
 .. _input_output_fields:
