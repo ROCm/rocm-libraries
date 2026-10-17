@@ -131,10 +131,9 @@
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
-    X(DsSpreadToleranceCycles, int, -1)   /* extra lead for the last ds_load; < 0 = none */        \
     X(DsPaceCycles, int, -1)              /* X: cycles between ds_load groups; < 0 = model */      \
     X(DsPaceCount, int, -1)               /* Y: ds_loads per group; <= 0 = model */                \
-    X(DsPaceSeparators, int, -1)          /* real instrs between groups; < 0 = model */            \
+    X(DsCatchUpPace, int, 2)              /* ds_loads per batch above the LDS rate when behind */  \
     X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
     X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \

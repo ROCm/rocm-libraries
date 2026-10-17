@@ -204,9 +204,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
                 arg == "--ds-spread" || arg.starts_with("--wmma-barrier-cover-cycles=") ||
-                arg.starts_with("--ds-spread-tolerance-cycles=") ||
                 arg.starts_with("--ds-pace-cycles=") || arg.starts_with("--ds-pace-count=") ||
-                arg.starts_with("--ds-pace-separators=") ||
+                arg.starts_with("--ds-catch-up-pace=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
                 arg.starts_with("--tensor-load-land-cycles=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
@@ -571,18 +570,15 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsSpread = true;
         } else if (a == "--no-ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = false;
-        } else if (a.starts_with("--ds-spread-tolerance-cycles=")) {
-            passFeatureConfig.dagFeatures.dsSpreadToleranceCycles =
-                std::stoi(a.substr(std::string("--ds-spread-tolerance-cycles=").size()));
         } else if (a.starts_with("--ds-pace-cycles=")) {
             passFeatureConfig.dagFeatures.dsPaceCycles =
                 std::stoi(a.substr(std::string("--ds-pace-cycles=").size()));
         } else if (a.starts_with("--ds-pace-count=")) {
             passFeatureConfig.dagFeatures.dsPaceCount =
                 std::stoi(a.substr(std::string("--ds-pace-count=").size()));
-        } else if (a.starts_with("--ds-pace-separators=")) {
-            passFeatureConfig.dagFeatures.dsPaceSeparators =
-                std::stoi(a.substr(std::string("--ds-pace-separators=").size()));
+        } else if (a.starts_with("--ds-catch-up-pace=")) {
+            passFeatureConfig.dagFeatures.dsCatchUpPace =
+                std::stoi(a.substr(std::string("--ds-catch-up-pace=").size()));
         } else if (a.starts_with("--ds-read-cycles-per-load=")) {
             passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
                 std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));

@@ -1004,16 +1004,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
                       IRList::iterator blockBegin, const RegionDependencies& deps) override;
 
     void onFinishBB() override;
-    // PASS_DEBUG: how even the last region's ds_loads came out (CV of their issue gaps).
-    void logDsSpreadEvenness() const {
-        PASS_DEBUG({
-            if (dsSpreadOn() && dsSpread_.active())
-                std::cerr << "[CDNA5 dsSpread] bb=" << (currentBB_ ? currentBB_->getLabel() : "?")
-                          << " paceCycles=" << dsSpread_.pace().cycles
-                          << " paceCount=" << dsSpread_.pace().count
-                          << " gapCv=" << dsSpread_.gapCv() << "\n";
-        });
-    }
     void onScheduled(const StinkyInstruction& inst) override {
         PASS_DEBUG({
             if (isBarrier(inst))
@@ -1021,13 +1011,6 @@ class CDNA5ReadyQueue : public ReadyQueue {
                           << " queuedCover=" << queuedCoverCycles() << "\n";
         });
         if (waitAlu_) waitAlu_->commit(inst);
-        // Real instructions between ds_load groups: they move the hardware timeline on, which a
-        // clock advance with nothing emitted does not.
-        if (isDsSpreadSeparator(inst)) dsSpread_.noteSeparator();
-    }
-    static bool isDsSpreadSeparator(const StinkyInstruction& inst) {
-        return isMatrixInstruction(inst) || isVectorALU(inst) || isTranscendental(inst) ||
-               isScalarALU(inst);
     }
 };
 
@@ -1230,7 +1213,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         localReadQueue.erase(node);
         ++dsIssuedThisRegion_;
         dsReadInflight_.push(dsReadCreditLifetime());
-        dsSpread_.noteIssue(clock_);
+        dsSpread_.noteIssue(node->id, wmmaIssuedCountThisRegion_);
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
     } else if (pickKind == kPrefetch) {
@@ -1673,7 +1656,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             (schedulingPos < activeWmmaLatency_ &&
              dsCreditWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
         if (fitsSchedulingBudget || (spread && dsOverflow_)) {
-            if (!spread || wmmaRunAtLimit_ || dsSpread_.released(pickedDS->id, clock_)) {
+            if (!spread || wmmaRunAtLimit_ ||
+                dsSpread_.released(pickedDS->id, wmmaIssuedCountThisRegion_)) {
                 consider(pickedDS, kLocalRead, dsCreditWait);
                 memWorkFitsWindow_ = true;
             } else {
@@ -2369,7 +2353,8 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     const bool spreadOn = dsSpreadOn();
     for (int pass = 0; pass < 2 && !pickedDS; ++pass) {
         for (DAGNode* n : localReadQueue) {
-            if (pass == 0 && spreadOn && !wmmaRunAtLimit_ && !dsSpread_.released(n->id, clock_))
+            if (pass == 0 && spreadOn && !wmmaRunAtLimit_ &&
+                !dsSpread_.released(n->id, wmmaIssuedCountThisRegion_))
                 continue;
             if (!pickedDS || n->dsReadPriority < pickedDS->dsReadPriority) pickedDS = n;
         }
@@ -2436,7 +2421,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             << " blockCoexecSpacing=" << blockWmmaForCoexecSpacing
             << " hasPickable=" << hasPickableNonWmma << " pickKind=" << pickKind
             << " pickedDS=" << (pickedDS ? int(pickedDS->id) : -1)
-            << " slot=" << (pickedDS ? dsSpread_.slotOf(pickedDS->id) : -2) << " clock=" << clock_
+            << " dsAllow=" << dsSpread_.allowance() << " clock=" << clock_
             << " smallest=" << (smallestPickable ? int(smallestPickable->id) : -1)
             << " run=" << wmmaRun_ << " credFull=" << dsReadInflight_.full()
             << " preempt=" << preemptForQueue << " outstanding=" << outstandingWmmas()
@@ -2773,7 +2758,6 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
 }
 
 void CDNA5ReadyQueue::onFinishBB() {
-    logDsSpreadEvenness();
     if (!currentBB_ || !getAnalysisCache()) return;
     getAnalysisCache()->store(currentBB_,
                               {0, regDataReadyCounters, globalReadInflight_.size(),
@@ -3489,7 +3473,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             planned[id] = dsOrdinal++ * wmmaTotalThisRegion_ / dsTotalThisRegion_;
         }
     }
-    logDsSpreadEvenness();
     dsSpread_.reset();
     dsOverflow_ = false;
     if (dagFeatures.dsSpread) {
@@ -3521,45 +3504,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             return best;
         };
-        // The section of a ds_load: opened by the barrier whose data it reads (the latest cut it
-        // depends on), closed by the barrier it feeds (the earliest cut it must be drained
-        // before). Tensor_loads and workgroup barriers are the cuts; WMMA dependencies are not.
-        auto preds = deps.dag.graph;
-        for (auto& edges : preds) edges.clear();
-        for (unsigned n = 0; n < deps.dag.nodes.size(); ++n)
-            for (unsigned succ : deps.dag.graph[n]) preds[succ].insert(n);
-        const auto& predsRef = preds;
+        // The barrier a ds_load feeds (the earliest cut it must be drained before), minus the
+        // reserve for the drain. Tensor_loads and workgroup barriers are the cuts; WMMA
+        // dependencies are not.
         auto cutWindow = [&](unsigned n) {
             auto th =
                 barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
             return th == barrierWmmaThresholds_.end() ? -1 : th->second;
         };
-        auto sectionOf = [&](unsigned id) {
-            int start = 0;
+        auto feedDeadline = [&](unsigned id) {
             int end = INT_MAX;
-            for (const auto* edges : {&deps.dag.graph, &predsRef}) {
-                const bool forward = edges == &deps.dag.graph;
-                std::vector<unsigned> frontier{id};
-                for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
-                    std::vector<unsigned> next;
-                    for (unsigned n : frontier) {
-                        for (unsigned m : (*edges)[n]) {
-                            const int w = cutWindow(m);
-                            if (w >= 0) {
-                                if (forward)
-                                    end = std::min(end, std::max(0, w - barrierReserve));
-                                else
-                                    start = std::max(start, w);
-                            } else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
-                                       !isDSRead(*deps.dag.nodes[m].inst)) {
-                                next.push_back(m);
-                            }
-                        }
+            std::vector<unsigned> frontier{id};
+            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
+                std::vector<unsigned> next;
+                for (unsigned n : frontier) {
+                    for (unsigned m : deps.dag.graph[n]) {
+                        const int w = cutWindow(m);
+                        if (w >= 0)
+                            end = std::min(end, std::max(0, w - barrierReserve));
+                        else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
+                                 !isDSRead(*deps.dag.nodes[m].inst))
+                            next.push_back(m);
                     }
-                    frontier = std::move(next);
                 }
+                frontier = std::move(next);
             }
-            return std::make_pair(start, end);
+            return end;
         };
         // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
         // hard constraints are merged into the DAG only after this runs), not by node id.
@@ -3569,57 +3539,32 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
         std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
             return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
         });
+        constexpr int kDsLeadWindows = 2;
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id : dsOrder) {
-            const auto [secStart, secEnd] = sectionOf(id);
-            loads.push_back({id, consumerWindow(id), secStart, secEnd});
+            const int cw = consumerWindow(id);
+            loads.push_back(
+                {id, std::min(feedDeadline(id), cw == INT_MAX ? INT_MAX : cw - kDsLeadWindows)});
         }
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
-        constexpr int kDsLeadWindows = 2;
-        // The pace: Y ds_loads every X cycles. Each field comes from the options when set, else
-        // from the analysis model (dsPaceModel) when one is plugged in, else the default pace.
-        PassFeatureConfig::DsPaceRegion region;
-        region.wmmaTotal = wmmaTotalThisRegion_;
-        region.windowCycles = windowCycles;
-        region.dsTotal = static_cast<int>(loads.size());
-        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
-            region.separatorTotal += isDsSpreadSeparator(*deps.dag.nodes[id].inst);
-        region.tailReserveCycles = dsReadCreditLifetime();
-        region.toleranceCycles = std::max(0, dagFeatures.dsSpreadToleranceCycles);
-        PassFeatureConfig::DsPace pace = dagFeatures.dsPaceModel
-                                             ? dagFeatures.dsPaceModel(region)
-                                             : defaultDsPace(region, dagFeatures.dsPaceSeparators);
-        if (dagFeatures.dsPaceCycles >= 0) pace.cycles = dagFeatures.dsPaceCycles;
-        if (dagFeatures.dsPaceCount > 0) pace.count = dagFeatures.dsPaceCount;
-        if (dagFeatures.dsPaceSeparators >= 0) pace.separators = dagFeatures.dsPaceSeparators;
-        // Issue at the LDS return rate: Y ds_loads per Y * cycles-per-load cycles.
-        if (dsReadCyclesPerLoad() > 0 && dagFeatures.dsPaceCount <= 0 &&
-            dagFeatures.dsPaceCycles < 0) {
-            const int cpl = effectiveDsCyclesPerLoad(static_cast<int>(loads.size()));
-            pace.count = std::max(1, (windowCycles + cpl - 1) / cpl);
-            pace.cycles = pace.count * cpl;
-        }
-        if (tensorLoadLandCycles() > 0) {
-            pace.count = std::max(pace.count, dsDensityY_);
-            pace.cycles = std::max(pace.cycles,
-                                   dsDensityXWindows_ > 1 ? dsDensityXWindows_ * windowCycles : 0);
-        }
-        dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_,
-                       wmmaTotalThisRegion_);
+        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
+        const int cpl = effectiveDsCyclesPerLoad(static_cast<int>(loads.size()));
+        // What one batch of WMMAs can hold: its cycles at the LDS return rate.
+        const int perBatch =
+            cpl > 0
+                ? std::max(1, batch * windowCycles / cpl)
+                : std::max(1, static_cast<int>((loads.size() * batch + wmmaTotalThisRegion_ - 1) /
+                                               std::max(1, wmmaTotalThisRegion_)));
+        dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, perBatch, dagFeatures.dsCatchUpPace,
+                       barrierReserve);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >
                                   static_cast<long long>(wmmaTotalThisRegion_) * windowCycles;
-        std::map<std::pair<int, int>, int> secCount;
-        for (const auto& l : loads) ++secCount[{l.startWindow, l.endWindow}];
-        for (const auto& kv : secCount)
-            PASS_DEBUG(std::cerr << "[CDNA5 dsSection] start=" << kv.first.first
-                                 << " end=" << kv.first.second << " loads=" << kv.second << "\n");
-        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size() << " wmmas="
-                             << wmmaTotalThisRegion_ << " separators=" << region.separatorTotal
-                             << " paceCycles=" << dsSpread_.pace().cycles
-                             << " paceCount=" << dsSpread_.pace().count
-                             << " paceSeparators=" << dsSpread_.pace().separators << "\n");
+        PASS_DEBUG(std::cerr << "[CDNA5 dsSpread] loads=" << loads.size()
+                             << " wmmas=" << wmmaTotalThisRegion_ << " batch=" << batch
+                             << " perBatch=" << perBatch << " catchUp=" << dagFeatures.dsCatchUpPace
+                             << "\n");
     }
     auto isFillerInst = [](const StinkyInstruction& i) {
         return isVectorALU(i) || isTranscendental(i) || isScalarALU(i);

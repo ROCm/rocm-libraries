@@ -2576,7 +2576,6 @@ TEST_F(DAGSchedulerPassTest, DsSpread_SpreadsLoadsOverTheWmmas) {
         pfc.dagFeatures.wmmaQueueDepth = 8;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
         pfc.dagFeatures.dsSpread = v == 1;
-        pfc.dagFeatures.dsSpreadToleranceCycles = 0;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
         shapes[v] = wdShape(mnemonicSequence(*bb));

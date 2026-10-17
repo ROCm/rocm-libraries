@@ -86,26 +86,6 @@ struct PassFeatureConfig {
         Dynamic = 1,  ///< A refill issues WMMAs until the queued cover reaches wmmaRefillToCycles
     };
 
-    /// What a region looks like to the ds_load pace model.
-    struct DsPaceRegion {
-        int wmmaTotal = 0;       ///< WMMAs in the region
-        int windowCycles = 1;    ///< cycles one WMMA occupies the matrix pipe
-        int dsTotal = 0;         ///< ds_loads to issue
-        int separatorTotal = 0;  ///< WMMA / VALU / SALU instructions that can sit between groups
-        int tailReserveCycles =
-            0;  ///< cycles the last ds_load needs to return before the region ends
-        int toleranceCycles = 0;  ///< extra lead (DsSpreadToleranceCycles)
-    };
-    /// A ds_load pace: groups of `count` ds_loads, one group every `cycles` cycles, at least
-    /// `separators` real instructions (WMMA / VALU / SALU) between two groups.
-    struct DsPace {
-        int cycles = 0;
-        int count = 1;
-        int separators = 1;
-    };
-    /// Maps a region to a ds_load pace; an analysis model plugs in here (C++ only).
-    using DsPaceModelFn = std::function<DsPace(const DsPaceRegion&)>;
-
     struct DagFeatures {
         bool distributeGlobalRead = false;                 ///< Enable global read distribution
         DsReadOrder dsReadOrder = DsReadOrder::Ascending;  ///< DS read reorder strategy
@@ -136,9 +116,9 @@ struct PassFeatureConfig {
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
         /// (wmmaQueueDepth * the WMMA latency).
         int wmmaRefillToCycles = 0;
-        /// Spread ds_loads evenly over the region's WMMAs: a ds_load is released at its planned
-        /// WMMA window (minus the tolerance) and issues only while the ds queue has a free
-        /// credit. Off = ds_loads issue as soon as they are ready and a credit is free.
+        /// Spread ds_loads over the region's WMMA batches: each batch takes its even share of the
+        /// loads still due (see DsSpreadPacer), and a load issues only while the ds queue has a
+        /// free credit. Off = ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
         /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
         /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
@@ -146,9 +126,6 @@ struct PassFeatureConfig {
         /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
         /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
         int wmmaBarrierCoverCycles = -1;
-        /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
-        /// and the options do not use it. < 0 = none.
-        int dsSpreadToleranceCycles = -1;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
@@ -159,17 +136,14 @@ struct PassFeatureConfig {
         /// apart. The barrier windows follow the ds_load density, and the density is raised, in
         /// steps of Y ds_loads per X windows, until the gap fits. 0 = off.
         int tensorLoadLandCycles = 0;
-        /// The ds_load pace, "Y ds_loads every X cycles": dsPaceCount (Y) and dsPaceCycles (X).
-        /// < 0 (count: <= 0) = taken from dsPaceModel if set, else the default: no cycle rate,
-        /// only separators between groups.
+        /// A fixed ds_load density for the tensor_load landing-time search (tensorLoadLandCycles):
+        /// "Y ds_loads every X cycles", dsPaceCount (Y) and dsPaceCycles (X). < 0 = searched.
         int dsPaceCycles = -1;
         int dsPaceCount = -1;
-        /// Real instructions (WMMA / VALU / SALU) required between two ds_load groups, so the
-        /// timeline moves on the hardware and not only in the model. < 0 = the model's choice.
-        int dsPaceSeparators = -1;
-        /// Analysis model that sets the pace per region (the socket for one; C++ only). Empty = the
-        /// default pace.
-        DsPaceModelFn dsPaceModel;
+        /// ds_loads a WMMA batch (wmmaBatchSize WMMAs) may take above what the LDS return rate
+        /// (dsReadCyclesPerLoad) fits, when the region fell behind its even share (a dependency
+        /// delayed the loads). 0 = never above the rate.
+        int dsCatchUpPace = 2;
         /// Extra cycles kept between an after-barrier and the before-side
         /// ds_loads when exclusive overlap uses gap placement. Converted to
         /// WMMA windows by the region's matrix latency. 0 disables the extra

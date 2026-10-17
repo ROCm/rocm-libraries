@@ -2,173 +2,95 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <climits>
-#include <map>
 
 #include "transforms/asm/dag/DsSpreadPacer.hpp"
 
 using namespace stinkytofu;
 
 namespace {
-constexpr int kWindow = 8;  // cycles per WMMA window
-
-std::vector<DsSpreadPacer::Load> loadsWithoutConsumers(int n) {
-    std::vector<DsSpreadPacer::Load> loads;
-    for (int i = 0; i < n; ++i) loads.push_back({static_cast<unsigned>(i), INT_MAX});
-    return loads;
+std::vector<DsSpreadPacer::Load> loads(int n, int deadline = INT_MAX) {
+    std::vector<DsSpreadPacer::Load> v;
+    for (int i = 0; i < n; ++i) v.push_back({static_cast<unsigned>(i), deadline});
+    return v;
 }
 
-PassFeatureConfig::DsPace pace(int cycles, int count, int separators) {
-    PassFeatureConfig::DsPace p;
-    p.cycles = cycles;
-    p.count = count;
-    p.separators = separators;
-    return p;
+// Issues released loads from `next` on until the batch is full; returns how many.
+int issueBatch(DsSpreadPacer& p, int wmmaIssued, unsigned& next, unsigned total) {
+    int n = 0;
+    while (next < total && p.released(next, wmmaIssued)) {
+        p.noteIssue(next, wmmaIssued);
+        ++next;
+        ++n;
+    }
+    return n;
 }
 }  // namespace
 
-TEST(DsSpreadPacer, DefaultPaceIsSeparatorsOnly) {
-    PassFeatureConfig::DsPaceRegion r;
-    r.dsTotal = 4;
-    r.separatorTotal = 10;
-    const auto p = defaultDsPace(r, /*requestedSeparators=*/-1);
-    EXPECT_EQ(p.cycles, 0);
-    EXPECT_EQ(p.count, 1);
-    EXPECT_EQ(p.separators, 1);
+TEST(DsSpreadPacer, SparseRegionTakesItsEvenShare) {
+    // 8 loads over 32 WMMAs in batches of 4: 1 per batch, well under what a batch can hold.
+    DsSpreadPacer p;
+    p.plan(loads(8), /*wmmaTotal=*/32, /*batch=*/4, /*perBatch=*/5, /*catchUp=*/2, /*drain=*/0);
+    unsigned next = 0;
+    for (int w = 0; w < 32; w += 4) EXPECT_EQ(issueBatch(p, w, next, 8), 1) << "w=" << w;
 }
 
-TEST(DsSpreadPacer, DefaultPaceGroupsLoadsWhenSeparatorsAreScarce) {
-    PassFeatureConfig::DsPaceRegion r;
-    r.dsTotal = 30;
-    r.separatorTotal = 9;  // 10 groups at most with one separator between them
-    EXPECT_EQ(defaultDsPace(r, 1).count, 3);
-    // Two separators between groups: 5 groups at most.
-    EXPECT_EQ(defaultDsPace(r, 2).count, 6);
-    // No separators required: nothing limits the groups.
-    EXPECT_EQ(defaultDsPace(r, 0).count, 1);
-    EXPECT_EQ(defaultDsPace(r, 0).separators, 0);
+TEST(DsSpreadPacer, DenseRegionIsCappedAtWhatABatchHoldsPlusCatchUp) {
+    // 60 loads over 32 WMMAs would need 8 per batch: capped at perBatch + catchUp = 7.
+    DsSpreadPacer p;
+    p.plan(loads(60), 32, 4, 5, 2, 0);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 0, next, 60), 7);
 }
 
-TEST(DsSpreadPacer, AGroupHoldsCountLoadsBackToBack) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(6), pace(10, 2, 1), kWindow, 16);
-    EXPECT_TRUE(pacer.released(0, 0));
-    pacer.noteIssue(0);
-    EXPECT_TRUE(pacer.released(1, 0));  // joins the group, nothing emitted in between
-    pacer.noteIssue(0);
-    EXPECT_FALSE(pacer.released(2, 0));  // the group is full
+TEST(DsSpreadPacer, ABatchThatMissedItsLoadsIsFollowedByAFasterOne) {
+    // 16 loads over 32 WMMAs: 2 per batch. Nothing is ready in the first 4 batches (a
+    // dependency); the share then grows to catch up, within perBatch + catchUp.
+    DsSpreadPacer p;
+    p.plan(loads(16), 32, 4, 3, 2, 0);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 16, next, 16), 4);  // 16 left over 4 batches
+    EXPECT_EQ(issueBatch(p, 20, next, 16), 4);
 }
 
-TEST(DsSpreadPacer, TheNextGroupWaitsForTheCyclesAndForASeparator) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(6), pace(10, 2, 1), kWindow, 16);
-    pacer.noteIssue(0);
-    pacer.noteIssue(0);
-    // Time alone is not enough: a ds_load right after a full group would stall on the hardware.
-    EXPECT_FALSE(pacer.released(2, 1000));
-    pacer.noteSeparator();
-    EXPECT_FALSE(pacer.released(2, 9));  // a separator, but too early
-    EXPECT_TRUE(pacer.released(2, 10));
+TEST(DsSpreadPacer, TheDrainMovesTheRegionEndEarlier) {
+    // 12 loads, 32 WMMAs, 8 of them kept free at the end: 24 usable WMMAs = 6 batches, 2 each.
+    DsSpreadPacer p;
+    p.plan(loads(12), 32, 4, 5, 2, /*drain=*/8);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 0, next, 12), 2);
 }
 
-TEST(DsSpreadPacer, SeparatorsBetweenGroupsAreCounted) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(4), pace(0, 1, 2), kWindow, 16);
-    pacer.noteIssue(0);
-    pacer.noteSeparator();
-    EXPECT_FALSE(pacer.released(1, 100));  // one of the two required
-    pacer.noteSeparator();
-    EXPECT_TRUE(pacer.released(1, 100));
+TEST(DsSpreadPacer, ALoadWithAnEarlierDeadlineRaisesTheShare) {
+    // 4 of 10 loads are due by WMMA 8 (2 batches): 2 per batch from the start, although the
+    // region as a whole would only ask for 1.
+    std::vector<DsSpreadPacer::Load> v;
+    for (int i = 0; i < 4; ++i) v.push_back({static_cast<unsigned>(i), 8});
+    for (int i = 4; i < 10; ++i) v.push_back({static_cast<unsigned>(i), INT_MAX});
+    DsSpreadPacer p;
+    p.plan(v, 40, 4, 5, 2, 0);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 0, next, 10), 2);
 }
 
-TEST(DsSpreadPacer, NoSeparatorsRequiredPacesByCyclesOnly) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(4), pace(10, 1, 0), kWindow, 16);
-    pacer.noteIssue(0);
-    EXPECT_FALSE(pacer.released(1, 9));
-    EXPECT_TRUE(pacer.released(1, 10));
+TEST(DsSpreadPacer, ALoadPastItsDeadlineIsAlwaysReleased) {
+    DsSpreadPacer p;
+    p.plan(loads(8, /*deadline=*/4), 32, 4, 1, 0, 0);
+    unsigned next = 0;
+    EXPECT_EQ(issueBatch(p, 0, next, 8), 1);
+    EXPECT_FALSE(p.released(next, 0));
+    EXPECT_TRUE(p.released(next, 4));  // the deadline: no allowance applies
 }
 
-TEST(DsSpreadPacer, AGroupBrokenBySeparatorsIsANewGroup) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(4), pace(10, 3, 1), kWindow, 16);
-    pacer.noteIssue(0);
-    pacer.noteSeparator();  // something is emitted: the group is over, though it had room
-    EXPECT_FALSE(pacer.released(1, 5));
-    EXPECT_TRUE(pacer.released(1, 10));
+TEST(DsSpreadPacer, InactiveWithoutLoadsOrWmmas) {
+    DsSpreadPacer p;
+    p.plan({}, 32, 4, 5, 2, 0);
+    EXPECT_FALSE(p.active());
+    EXPECT_TRUE(p.released(0, 0));
 }
 
-TEST(DsSpreadPacer, APeriodShorterThanAWindowDoesNotDriftIntoATailBurst) {
-    // One group every 7 cycles with a separator between groups, decided once per 8-cycle window.
-    // Counted from the issue every period would round up to a window; counted from the allowed
-    // time the 1-cycle surplus per window accumulates.
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(64), pace(7, 1, 1), kWindow, 16);
-    int issued = 0;
-    for (int w = 0; w < 58; ++w) {
-        const int clock = w * kWindow;
-        while (issued < 64 && pacer.released(static_cast<unsigned>(issued), clock)) {
-            pacer.noteIssue(clock);
-            ++issued;
-            pacer.noteSeparator();  // a VALU between two groups in the same window
-        }
-        pacer.noteSeparator();  // the WMMA
-    }
-    // 64 periods of 7 cycles fit in 448 cycles, 56 windows of 8.
-    EXPECT_EQ(issued, 64);
-}
-
-TEST(DsSpreadPacer, AStallReleasesOneGroupNotABurst) {
-    DsSpreadPacer pacer;
-    pacer.plan(loadsWithoutConsumers(12), pace(10, 1, 1), kWindow, 16);
-    pacer.noteIssue(0);
-    pacer.noteSeparator();
-    pacer.noteIssue(100);  // nothing issued for 100 cycles
-    pacer.noteSeparator();
-    EXPECT_TRUE(pacer.released(2, 100));  // one period behind: this group goes
-    pacer.noteIssue(100);
-    pacer.noteSeparator();
-    EXPECT_FALSE(pacer.released(3, 100));  // the one after waits its period
-}
-
-TEST(DsSpreadPacer, ATightConsumerReleasesOnlyItsOwnLoad) {
-    // Load 2's consumer is WMMA 3: with a lead of 16 cycles it must go by 3 * 8 - 16 = 8, whatever
-    // the pace says. The other loads keep it.
-    std::vector<DsSpreadPacer::Load> loads = {{0, INT_MAX}, {1, INT_MAX}, {2, 3}, {3, INT_MAX}};
-    DsSpreadPacer pacer;
-    pacer.plan(loads, pace(14, 1, 1), kWindow, 16);
-    pacer.noteIssue(7);  // next group at 21
-    pacer.noteSeparator();
-    EXPECT_FALSE(pacer.released(2, 7));
-    EXPECT_TRUE(pacer.released(2, 8));
-    EXPECT_FALSE(pacer.released(1, 8));
-    EXPECT_FALSE(pacer.released(3, 8));
-}
-
-TEST(DsSpreadPacer, DeadlinesStartAtTheRegionClock) {
-    std::vector<DsSpreadPacer::Load> loads = {{0, INT_MAX}, {1, 3}};
-    DsSpreadPacer pacer;
-    pacer.plan(loads, pace(50, 1, 1), kWindow, 16, /*startClock=*/100);
-    pacer.noteIssue(100);
-    pacer.noteSeparator();
-    EXPECT_FALSE(pacer.released(1, 107));
-    EXPECT_TRUE(pacer.released(1, 108));
-}
-
-TEST(DsSpreadPacer, NoLoadsMeansNoHold) {
-    DsSpreadPacer pacer;
-    pacer.plan({}, pace(10, 1, 1), kWindow, 16);
-    EXPECT_FALSE(pacer.active());
-    EXPECT_TRUE(pacer.released(2, 0));
-}
-
-TEST(DsSpreadPacer, GapCvIsZeroForEvenIssueAndGrowsWithBursts) {
-    DsSpreadPacer even;
-    for (int c : {0, 8, 16, 24, 32}) even.noteIssue(c);
-    EXPECT_DOUBLE_EQ(even.gapCv(), 0.0);
-
-    DsSpreadPacer burst;
-    for (int c : {0, 1, 2, 3, 32}) burst.noteIssue(c);
-    EXPECT_GT(burst.gapCv(), 1.0);
+TEST(DsSpreadPacer, WindowsForIsTheEvenSpreadRoundedUp) {
+    EXPECT_EQ(DsSpreadPacer::windowsFor(3, 128, 140), 3);
+    EXPECT_EQ(DsSpreadPacer::windowsFor(0, 128, 140), 0);
+    EXPECT_EQ(DsSpreadPacer::windowsFor(10, 100, 0), 0);
 }
