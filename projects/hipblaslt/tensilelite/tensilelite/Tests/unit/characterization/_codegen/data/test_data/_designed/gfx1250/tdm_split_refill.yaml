@@ -1,0 +1,123 @@
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  #######################################
+  # TN - MXF8F4SS Block32, E8, TDMFuse=1: B leads (HalfPLR 1) and A leads (HalfPLR 2)
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
+
+    - # BenchmarkProblemSizeGroup - split TDM refill, NumWaves=4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # ClusterDim [2, 4] multicasts both sets, so each refill also needs its cluster handshake.
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  4,  2, 2]   # 64x128, waves [2,2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMSplit: [False]
+        - PrefetchGlobalRead: [2]
+        - TDMFuse: [1]
+        - ScheduleIterAlg: [4]
+        - HalfPLR: [1, 2]
+        - StaggerU: [0]
+        - InitCIterWmma: [0]
+        - TransposeLDS: [-1]
+        - PrefetchLocalRead: [1]
+        - GlobalSplitU: [1]
+        - 1LDSBuffer: [0]
+        - WavefrontSize: [32]
+        - ClusterDim: [[2, 4]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 512, 1, 1024]
+        - ActivationArgs:
+          - [Enum: none]
+  #######################################
+  # TN - F8 without MX, TDMFuse=2: {A} + {B}, B leads (HalfPLR 0)
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - split TDM refill, NumWaves=4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2,  4,  2, 2]   # 64x128, waves [2,2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMSplit: [False]
+        - PrefetchGlobalRead: [2]
+        - TDMFuse: [2]
+        - ScheduleIterAlg: [4]
+        - HalfPLR: [0]
+        - StaggerU: [0]
+        - InitCIterWmma: [0]
+        - TransposeLDS: [-1]
+        - PrefetchLocalRead: [1]
+        - GlobalSplitU: [1]
+        - 1LDSBuffer: [0]
+        - WavefrontSize: [32]
+        - ClusterDim: [[2, 4]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 512, 1, 1024]
+        - ActivationArgs:
+          - [Enum: none]

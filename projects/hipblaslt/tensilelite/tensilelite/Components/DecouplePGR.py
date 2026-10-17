@@ -21,7 +21,7 @@ from typing import NamedTuple
 
 from ..Common.DataType import DataType
 from ..Common.Utilities import effectiveMatrixInstMN
-from .TDMFuse import liveGroups, tdmGroupingSeparatesAB, tdmSeparateABDescriptors
+from .TDMFuse import liveGroups, tdmGroupingSeparatesAB, tdmSeparateABDescriptors, tdmSetOwner
 
 PGR_SPECIAL_AUTO = -1
 PGR_AUTO_DEFAULT_LEVEL = 2
@@ -454,6 +454,72 @@ def tdmWaveIssueOrder(ks, itemA, itemB):
     """Return A/B items in descending per-tensor LDS-block order."""
     _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(ks)
     return dcpThickThinIssueOrder(((numLdsBlkA, itemA), (numLdsBlkB, itemB)))
+
+
+_SPLIT_REFILL_UNSUPPORTED_KEYS = (
+    "TDMPlusLdsBuf", "1LDSBuffer", "TDMSplit", "UseSubtileImpl", "ForceUnrollSubIter",
+    "UseCustomMainLoopSchedule", "UnrollLoopSwapGlobalReadOrder", "PrefetchAcrossPersistent",
+    "ReuseAcrossPersistent", "StreamK", "DirectToVgprA", "DirectToVgprB", "DirectToVgprMXSA",
+    "DirectToVgprMXSB")
+
+
+def tdmSplitRefillUnsupportedReason(ks, numItersPLR=1, coalescedReads=(1,)):
+    """Why the two descriptor sets cannot read and refill in turn, or None.
+
+    The split halves the sub-iteration that reads a buffer for the last time: the lead
+    set's reads ride the first half of its WMMAs and the set refills at the midpoint,
+    then the other set reads and refills at the end. The next sub-iteration reads the
+    other buffer in the same order. `numItersPLR` is the writer's local-read prefetch
+    depth in sub-iterations; `coalescedReads` holds how many sub-iterations each
+    tensor's local read covers.
+    """
+    if ks.get("TDMFuse", 0) not in (1, 2, 3):
+        return "TDMFuse %s does not give A and B their own descriptor sets" % ks.get("TDMFuse", 0)
+    if ks.get("NumWaves", 1) < 2:
+        return "one wave issues every set back to back"
+    if not (ks.get("enableTDMA") and ks.get("enableTDMB")) or not tdmSeparateABDescriptors(ks):
+        return "A and B are not both loaded by their own TDM descriptor sets"
+    if ks.get("PrefetchGlobalRead") != 2:
+        return "PrefetchGlobalRead=%s does not refill the buffer it reads" % ks.get("PrefetchGlobalRead")
+    if decouplePGRBlocks(ks)[1:] != (2, 2):
+        return "a decoupled pair re-slots its single-buffered fill itself"
+    if ks.get("_ScheduleIterAlg") != 0 or ks.get("_StinkyTofuOptLevel") != 3:
+        return "the per-set barriers come from the token barrier planner; use ScheduleIterAlg=4"
+    for key in _SPLIT_REFILL_UNSUPPORTED_KEYS:
+        if ks.get(key):
+            return "%s is not supported" % key
+    if ks.get("InnerUnroll", 1) != 1:
+        return "InnerUnroll=%s is not supported" % ks.get("InnerUnroll")
+    if ks["ProblemType"]["Sparse"]:
+        return "sparse metadata is not supported"
+    if not ks.get("EnableMatrixInstruction", True):
+        return "the split needs matrix instructions to halve"
+    if ks.get("HalfPLR", 0) == 3:
+        return "HalfPLR=3 halves both tensors, so neither set finishes reading in the first half"
+    if (ks["MIWaveTile"][0] * ks["MIWaveTile"][1]) % 2:
+        return "an odd number of WMMAs per sub-iteration has no midpoint"
+    if numItersPLR != 1:
+        return "local reads prefetched %s sub-iterations ahead are not supported" % numItersPLR
+    if any(n != 1 for n in coalescedReads):
+        return "a local read that covers several sub-iterations is not supported"
+    return None
+
+
+def tdmSplitRefillOrder(ks, numItersPLR=1, coalescedReads=(1,)):
+    """(lead, trail): the tensors whose sets read and refill in that order, or None.
+
+    B leads, as in Henry's schedule, unless HalfPLR halves B: a halved tensor's second
+    half waits for the WMMAs that free its VGPR group, so it cannot finish in the first
+    half of the sub-iteration.
+    """
+    if tdmSplitRefillUnsupportedReason(ks, numItersPLR, coalescedReads) is not None:
+        return None
+    return ("A", "B") if ks.get("HalfPLR", 0) & 0x2 else ("B", "A")
+
+
+def tdmSplitRefillTokenSides(ks):
+    """LDS token side of each tensor: the data tensor whose descriptor set it rides."""
+    return {tc: tdmSetOwner(ks, tc) for tc in ("A", "MXSA", "MXSB", "B")}
 
 
 DCP_THICK_GATE_TOKENS = "tokens"

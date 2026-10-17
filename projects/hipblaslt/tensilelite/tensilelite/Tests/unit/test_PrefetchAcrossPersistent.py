@@ -185,6 +185,7 @@ class _SetupNewTilePapTdmWriter:
             kernel={"TDMInst": 3, "TDMPlusLdsBuf": 0},
             waveIdxReleasedAfterStagger=False,
             tdmParityPackedInArgType=False,
+            tdmSplitRefill=(),
         )
         self.do = {"executeToInitEnd": False}
         self.dontAppendCode = False

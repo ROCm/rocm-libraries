@@ -510,7 +510,8 @@ def test_last_iter_disable_without_wave_separated_sets(monkeypatch, over):
 def _tokenWriter():
     """A writer carrying the per-side tensor tokens decoupled PGR installs."""
     return Stub(states=types.SimpleNamespace(ldsTensorTokenIdxA=7,
-                                             ldsTensorTokenIdxB=9))
+                                             ldsTensorTokenIdxB=9,
+                                             tdmSplitTokenSides={}))
 
 
 def test_an_issue_declares_every_lds_side_its_set_fills():

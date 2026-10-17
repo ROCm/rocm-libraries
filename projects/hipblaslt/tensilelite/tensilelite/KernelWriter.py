@@ -58,6 +58,7 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide
+from .Components.DecouplePGR import tdmSplitRefillOrder, tdmSplitRefillTokenSides
 from .Components.DecouplePGR import tdmWaveIssueOrder, decoupledThickGateRelaxation, dcpThickGateFromTokenPasses, dcpThickGateUncoveredSites, dcpIsFillLabel, DCP_TENSORCNT_RE, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS
 from .Components.TDMFuse import tdmWavePartition
 from .SolutionStructs import Solution, isPackedIndex
@@ -455,6 +456,9 @@ class StateValues:
   # releasing WaveIdx; named ArgType comparisons must mask 0xFF.
   tdmParityPackedInArgType: bool         = False
   dcpTokenGate: bool                     = False
+  # (lead, trail) when each descriptor set refills right after its own reads; () if not.
+  tdmSplitRefill: Tuple[str, ...]        = ()
+  tdmSplitTokenSides: Dict[str, str]     = field(default_factory=dict)
   # Number of WaveIdx bits packed from ArgType bit 8.
   tdmWaveIdBitsInArgType: int            = 0
   scheduleGROverBarrier: bool            = False
@@ -570,6 +574,9 @@ class CodeModules:
   perIterGlobalRead: Optional[List[Module]]                           = None
   perIterLocalWrite: Optional[List[Tuple[List[int], Module]]]         = None
   perIterLocalWriteCodeNGLL: Optional[List[Tuple[List[int], Module]]] = None
+  # Split refill: each set's refill by owner, and the code that must precede the lead's.
+  tdmRefill: Optional[Dict[str, Module]]                              = None
+  tdmRefillHead: Optional[Module]                                     = None
 
 @dataclass
 class ExternClasses:
@@ -751,6 +758,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False, isNGLL=False):
 
     self.codes.unrollLoopHeader = Module()
+    self.codes.tdmRefill = {"A": Module(), "B": Module()}
+    self.codes.tdmRefillHead = Module()
     # schedule of work for each local_read iteration:
     self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
     self.codes.perIterLocalWrite = [ [[], Module()] for i in range (kernel["LoopIters"]) ]
@@ -861,7 +870,87 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.codes.perIterGlobalRead[lateIter].add(late)
 
   def _dcpTokenSide(self, tc):
-    return dcpLdsSide(tc)
+    return self.states.tdmSplitTokenSides.get(tc) or dcpLdsSide(tc)
+
+  def _tdmSplitRefillActive(self):
+    """True when this loop body refills each set right after its own reads."""
+    return bool(self.states.tdmSplitRefill) and self.codes.tdmRefill is not None \
+      and all(self.codes.tdmRefill[tc].itemsSize() for tc in self.states.tdmSplitRefill)
+
+  def _tdmSplitRefillModules(self, kernel, tPA, tPB):
+    """(lead refill, trail refill); the lead's also carries the code its refill must follow."""
+    lead, trail = self.states.tdmSplitRefill
+    leadRefill = Module("tdmRefill%s" % lead)
+    leadRefill.add(self.codes.tdmRefillHead)
+    leadRefill.addComment1("tdm swap offsets %s" % lead.lower())
+    leadRefill.add(self.tdmSwapLdsOffset(kernel, tPA if lead == "A" else tPB))
+    leadRefill.add(self.codes.tdmRefill[lead])
+    trailRefill = Module("tdmRefill%s" % trail)
+    trailRefill.add(self.codes.tdmRefill[trail])
+    return leadRefill, trailRefill
+
+  def _makeSplitRefillSubIterSchedule(self, kernel, setReads, iteration, pointerLWCode, pointerLRCode,
+                                      waitCode, macIterCode, waitLWCode, syncCode, packCode, packPreCode,
+                                      localReadCodeSecondHalf, refills=()):
+    """A split-refill sub-iteration: the lead set's reads ride the first half of the WMMAs
+    and the trail set's reads the second half.
+
+    `refills` is (lead refill, trail refill) on the sub-iteration that reads its buffer
+    for the last time: the lead refills at the midpoint, the trail at the end. The barrier
+    planner puts each set's WAR or RAW barrier in front of that set's first conflicting
+    access; the fences keep reads, refills and those barriers in their half. A halved
+    trail tensor's second half needs the first half's WMMAs done, and it reads after them.
+    On the next sub-iteration each set's first read sits alone between fences: the
+    scheduler otherwise sinks the RAW barrier, and every read behind it, to the end of
+    the half.
+    """
+    lead, trail = self.states.tdmSplitRefill
+    iterCode = Module()
+    globalReadCode = deepcopy(self.codes.perIterGlobalRead[iteration])
+    localWriteCode = self.codes.perIterLocalWrite[iteration][1]
+    numMfma = countMFMA(macIterCode)
+    assert numMfma % 2 == 0, "the split refill halves the matrix instructions of a sub-iteration"
+    macItems = macIterCode.flatitems()
+    firstHalf = []
+    macToSchedule = numMfma // 2
+    while macItems and macToSchedule:
+      item = macItems.pop(0)
+      firstHalf.append(item)
+      macToSchedule -= countMFMA(item)
+
+    def addReads(tc, reads):
+      items = reads.flatitems()
+      first = next((i for i, item in enumerate(items) if countLocalRead(item)), None)
+      if refills or first is None:
+        iterCode.add(reads)
+        return
+      iterCode.addItems(items[:first + 1])
+      iterCode.add(SSchedulingFence(comment="hold the %s RAW barrier at the start of its half" % tc))
+      iterCode.addItems(items[first + 1:])
+
+    iterCode.add(waitLWCode)
+    iterCode.add(syncCode)
+    addReads(lead, setReads[lead])
+    iterCode.add(localWriteCode)
+    iterCode.add(waitCode)
+    iterCode.add(packPreCode)
+    iterCode.add(packCode)
+    iterCode.addItems(firstHalf)
+    iterCode.add(SSchedulingFence(comment="%s reads stay in the first half" % lead))
+    if refills:
+      iterCode.add(refills[0])
+      iterCode.add(SSchedulingFence(comment="pin the %s refill at the midpoint" % lead))
+    addReads(trail, setReads[trail])
+    iterCode.add(localReadCodeSecondHalf)
+    iterCode.add(pointerLWCode)
+    iterCode.add(pointerLRCode)
+    iterCode.add(globalReadCode)
+    iterCode.addItems(macItems)
+    if refills:
+      iterCode.add(SSchedulingFence(comment="%s reads and WMMAs precede its refill" % trail))
+      iterCode.add(refills[1])
+      iterCode.add(SSchedulingFence(comment="pin the %s refill at the end of the sub-iteration" % trail))
+    return iterCode
 
   def _dcpCurrentToken(self, kind, tc):
     side = self._dcpTokenSide(tc)
@@ -3371,6 +3460,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         elif self.isSwapGlobalReadOrderForDtvOrDtl(kernel, prefetch1=True):
           tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
           tdm1st, tdm2nd = tdm2nd, tdm1st
+        elif self.states.tdmSplitRefill[:1] == ("B",):
+          # The split-refill loop issues the lead set first. The same order here makes each
+          # s_wait_tensorcnt count hold on loop entry as well as on the back edge.
+          tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
+          tdm1st, tdm2nd = tdm2nd, tdm1st
         pfi = 1 if kernel["PrefetchGlobalRead"] < 3 else kernel["PrefetchGlobalRead"] - 1
         module.addComment1("prefetch: global -> local")
         module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
@@ -4858,6 +4952,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           self._dcpAdvanceTokens("Read")
       if kernel["HalfPLR"]:
         self.states.halfPLRGroups = self.getHalfPLRGroups(kernel, lc, (u+pflr))
+      # Split refill: the last reads of a buffer and the first reads of the next one
+      # go to their set's half of the sub-iteration.
+      setReads = None
+      if self._tdmSplitRefillActive() and u in (localWriteEndIter, localWriteEndIter + 1):
+        setReads = {"A": Module(), "B": Module()}
+      splitLead = self.states.tdmSplitRefill[0] if setReads is not None else ""
       for iui in range(0,kernel["InnerUnroll"]):
         reverseLocalReadSides = self.states.localReadSideOrder[0] == "B"
         emittedReadsA = Module() if reverseLocalReadSides else localReads
@@ -4866,6 +4966,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         emittedReadIncsA = Module() if reverseLocalReadSides else localReads
         emittedReadIncsB = Module() if reverseLocalReadSides else localReads
         emittedReadIncsM = Module() if reverseLocalReadSides else localReads
+        emittedReadsMXSA, emittedReadIncsMXSA = emittedReadsA, emittedReadIncsA
+        emittedReadsMXSB, emittedReadIncsMXSB = emittedReadsB, emittedReadIncsB
+        if setReads is not None:
+          side = self.states.tdmSplitTokenSides
+          emittedReadsA = emittedReadIncsA = setReads[side["A"]]
+          emittedReadsMXSA = emittedReadIncsMXSA = setReads[side["MXSA"]]
+          emittedReadsMXSB = emittedReadIncsMXSB = setReads[side["MXSB"]]
+          emittedReadsB = emittedReadIncsB = setReads[side["B"]]
         # use full prefetch only for next loop
         usePLRPackA = self.states.doFullPackCodePrefetch and (doNext or u == 0)
         usePLRPackB = self.states.doFullPackCodePrefetch and (doNext or kernel["ForceUnrollSubIter"])
@@ -4918,13 +5026,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             PackCodeAAllIters[uIdx].add(packPreA)
             PackCodeAAllIters[uIdx].add(packCodeA)
         if doReadMXSA:
-          emittedReadsA.addComment1("local read maxa")
+          emittedReadsMXSA.addComment1("local read maxa")
           bufferIdx = rapIdxMXSA*self.states.numIterPerCoalescedReadMXSA
           if self.states.packDTVA or self.states.convDTVA:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSA + vregSetIdxLR * kernel["LoopIters"]
           localReadCodeMXSA, packCodeMXSA, packPreMXSA = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSA, 0, tensorParametersA["MX"])
-          emittedReadsA.add(localReadCodeMXSA)
+          emittedReadsMXSA.add(localReadCodeMXSA)
           localReadsMXSA.add(localReadCodeMXSA)
           pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSA].add(packPreMXSA)
           pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSA].add(packCodeMXSA)
@@ -4933,13 +5041,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             PackCodeAAllIters[uIdx].add(packPreMXSA)
             PackCodeAAllIters[uIdx].add(packCodeMXSA)
         if doReadMXSB:
-          emittedReadsB.addComment1("local read mxsb")
+          emittedReadsMXSB.addComment1("local read mxsb")
           bufferIdx = plrIdx*self.states.numIterPerCoalescedReadMXSB
           if self.states.packDTVB or self.states.convDTVB:
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadMXSB + vregSetIdxLR * kernel["LoopIters"]
           localReadCodeMXSB, packCodeMXSB, packPreMXSB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedMXSB, 0, tensorParametersB["MX"])
-          emittedReadsB.add(localReadCodeMXSB)
+          emittedReadsMXSB.add(localReadCodeMXSB)
           localReadsMXSB.add(localReadCodeMXSB)
           pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSB].add(packPreMXSB)
           pack[packStoreIdx*self.states.numIterPerCoalescedReadMXSB].add(packCodeMXSB)
@@ -5008,18 +5116,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             emittedReadIncsA.addComment1("local read increment a")
             emittedReadIncsA.add(self.localReadInc(kernel, iui, tensorParametersA))
           if doReadMXSA:
-            emittedReadIncsA.addComment1("local read increment mxsa")
-            emittedReadIncsA.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
+            emittedReadIncsMXSA.addComment1("local read increment mxsa")
+            emittedReadIncsMXSA.add(self.localReadInc(kernel, iui, tensorParametersA["MX"]))
           if doReadMXSB:
-            emittedReadIncsB.addComment1("local read increment mxsb")
-            emittedReadIncsB.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
+            emittedReadIncsMXSB.addComment1("local read increment mxsb")
+            emittedReadIncsMXSB.add(self.localReadInc(kernel, iui, tensorParametersB["MX"]))
           if doReadM:
             emittedReadIncsM.addComment1("local read increment metadata")
             emittedReadIncsM.add(self.localReadInc(kernel, iui, tPM))
           if doReadB:
             emittedReadIncsB.addComment1("local read increment b")
             emittedReadIncsB.add(self.localReadInc(kernel, iui, tensorParametersB))
-        if reverseLocalReadSides:
+        if reverseLocalReadSides and setReads is None:
           localReads.add(emittedReadsB)
           localReads.add(emittedReadsM)
           localReads.add(emittedReadsA)
@@ -5088,8 +5196,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
-            pointerLWCode.addComment1("tdm swap offsets a")
-            pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA))
+            # A split-refill lead swaps inside its refill (_tdmSplitRefillModules).
+            if splitLead != "A":
+              pointerLWCode.addComment1("tdm swap offsets a")
+              pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA))
           else:
             pointerLWCode.addComment1("local write swap offsets a")
             pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
@@ -5107,7 +5217,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["enableTDMB"]:
             #TODO: TDM refactor
-            if kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel):
+            if (kernel["NumWaves"] == 1 or self.tdmSeparateABDescriptors(kernel)) and splitLead != "B":
               pointerLWCode.addComment1("tdm swap offsets b")
               pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
           else:
@@ -5197,8 +5307,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # after removing the global variable it is always false...
       # if self.states.numItersPLR:
       if not kernel["UseCustomMainLoopSchedule"]:
-        subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
-                      u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
+        if setReads is not None:
+          refills = self._tdmSplitRefillModules(kernel, tensorParametersA, tensorParametersB) \
+            if u == localWriteEndIter else ()
+          subIterCode = self._makeSplitRefillSubIterSchedule(kernel, setReads, u, pointerLWCode, pointerLRCode, \
+                        waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
+                        localReadsSecondHalf, refills)
+        else:
+          subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
+                        u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], module, localReadsSecondHalf)
         module.add(subIterCode) # add scheduled "other", local reads, local writes
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
@@ -5784,6 +5901,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if (not self._dcpDivergent(kernel)
               and (kernel["UnrollLoopSwapGlobalReadOrder"] == 1
                    or self.isSwapGlobalReadOrderForDtvOrDtl(kernel))):
+            tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
+            tc1, tc2 = tc2, tc1
+          if self.states.tdmSplitRefill[:1] == (tc2,):
+            # The split-refill lead issues first, as in the first prefetch.
             tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
             tc1, tc2 = tc2, tc1
           # skip second PGR if DTV is true
@@ -7772,7 +7893,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         [[blk, half1Tokens[blk]] for blk in range(self.states.numLDSBlk)]
     # Separate A/B tokens let wait-count insertion relax the thick gate independently.
     _dcpGate = decoupledThickGateRelaxation(kernel)
-    if _dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS:
+    # Split refill: per-set tokens give each set its own WAR and RAW barrier.
+    splitRefill = tdmSplitRefillOrder(kernel, self.states.numItersPLR,
+                                      (self.states.numIterPerCoalescedReadA,
+                                       self.states.numIterPerCoalescedReadB))
+    self.states.tdmSplitRefill = splitRefill or ()
+    self.states.tdmSplitTokenSides = tdmSplitRefillTokenSides(kernel) if splitRefill else {}
+    if (_dcpGate is not None and _dcpGate.mechanism == DCP_THICK_GATE_TOKENS) or splitRefill:
       _, numLdsBlkA, numLdsBlkB = decouplePGRBlocks(kernel)
       self.states.memTokenLdsDcp = {
         "A": [0, 1 if numLdsBlkA > 1 else 0],
