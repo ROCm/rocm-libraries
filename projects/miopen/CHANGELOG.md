@@ -70,7 +70,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
   files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
   in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
-  `MIOPEN_SYSTEM_DB_PATH` still overrides the location.
+  `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
+  files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
+  from the build tree without an install.
 
 ### Optimized
 * [Conv] Optimized the `ConvDirectNaiveConv` solver with per-direction kernel files, float

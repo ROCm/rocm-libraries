@@ -619,11 +619,13 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     message(STATUS "Build with Eigen3 ${Eigen3_VERSION} ${Eigen3_DIR}")
 endif()
 
-if(WIN32)
-    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
-else()
-    set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${DATABASE_INSTALL_DIR})
-endif()
+# Stage the databases, the AI model files and the test-only golden vectors where a
+# BUILD_DEV=OFF library looks for them in the build tree: GetLibPath().parent_path() /
+# share/miopen/db (src/db_path.cpp.in). MIOpen.dll goes to <build>/bin and libMIOpen.so to
+# <build>/lib (CMAKE_RUNTIME_OUTPUT_DIRECTORY / CMAKE_LIBRARY_OUTPUT_DIRECTORY below), so both
+# resolve to <build>/${DATABASE_INSTALL_DIR}. BUILD_DEV builds bake this same path into
+# MIOPEN_SYSTEM_DB_PATH, so one value serves both.
+set(KERNELS_BINARY_DIR ${CMAKE_BINARY_DIR}/${DATABASE_INSTALL_DIR})
 
 set(MIOPEN_GPU_SYNC Off CACHE BOOL "")
 if(BUILD_DEV)
