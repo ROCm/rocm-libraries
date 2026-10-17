@@ -146,7 +146,7 @@ def read_yaml(path: Path) -> Any:
     parser's ``yaml.YAMLError`` carrying the source marks.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt") as f:
+    with opener(path, "rt", encoding="utf-8") as f:
         # _DuplicateKeySafeLoader subclasses yaml.SafeLoader; safe_load takes no Loader.
         return yaml.load(f, Loader=_DuplicateKeySafeLoader)  # nosec B506
 
