@@ -3475,11 +3475,65 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (isMatrixInstruction(*deps.dag.nodes[id].inst)) wmmaIndex[id] = wmmaOrdinal++;
         }
         constexpr int kConsumerHops = 3;
+        const int windowCycles = std::max(1, wmmaIssueConfig.latency);
+        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
+        // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
+        // hard constraints are merged into the DAG only after this runs), not by node id.
+        std::vector<unsigned> dsOrder;
+        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
+            if (isDSRead(*deps.dag.nodes[id].inst)) dsOrder.push_back(id);
+        std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
+            return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
+        });
+        // The barriers (cuts) and their WMMA windows. Tensor_loads and workgroup barriers are the
+        // cuts; WMMA dependencies are not.
+        auto cutWindow = [&](unsigned n) {
+            auto th =
+                barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
+            return th == barrierWmmaThresholds_.end() ? -1 : th->second;
+        };
+        // The window of the earliest barrier a ds_load feeds (INT_MAX = none within the hops).
+        auto feedCut = [&](unsigned id) {
+            int end = INT_MAX;
+            std::vector<unsigned> frontier{id};
+            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
+                std::vector<unsigned> next;
+                for (unsigned n : frontier) {
+                    for (unsigned m : deps.dag.graph[n]) {
+                        const int w = cutWindow(m);
+                        if (w >= 0)
+                            end = std::min(end, w);
+                        else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
+                                 !isDSRead(*deps.dag.nodes[m].inst))
+                            next.push_back(m);
+                    }
+                }
+                frontier = std::move(next);
+            }
+            return end;
+        };
+        std::vector<int> cuts;
+        for (const auto& kv : barrierWmmaThresholds_) cuts.push_back(kv.second);
+        std::sort(cuts.begin(), cuts.end());
+        cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+        std::map<int, int> feedCount;
+        for (unsigned id : dsOrder) {
+            const int w = feedCut(id);
+            if (w != INT_MAX) ++feedCount[w];
+        }
         // WMMAs kept free in front of a barrier (and the region end) for the last ds_load feeding
-        // it to return.
-        const int barrierReserve =
-            (dsReadCreditLifetime() + std::max(1, wmmaIssueConfig.latency) - 1) /
-            std::max(1, wmmaIssueConfig.latency);
+        // it to return: the LDS return time, but never more than the barrier's stage can spare
+        // after issuing its own loads at the LDS rate (down to one batch).
+        const int drainWindows = (dsReadCreditLifetime() + windowCycles - 1) / windowCycles;
+        const int stageCpl = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
+        auto reserveFor = [&](int w) {
+            auto prev = std::lower_bound(cuts.begin(), cuts.end(), w);
+            const int start = prev == cuts.begin() ? 0 : *(prev - 1);
+            const int need =
+                stageCpl > 0 ? (feedCount[w] * stageCpl + windowCycles - 1) / windowCycles : 0;
+            return std::clamp(w - start - need, std::min(batch, drainWindows), drainWindows);
+        };
+        const int barrierReserve = drainWindows;
         auto consumerWindow = [&](unsigned id) {
             int best = INT_MAX;
             std::vector<unsigned> frontier{id};
@@ -3490,7 +3544,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                         auto th = barrierWmmaThresholds_.find(
                             const_cast<StinkyInstruction*>(deps.dag.nodes[succ].inst));
                         if (th != barrierWmmaThresholds_.end())
-                            best = std::min(best, th->second - barrierReserve);
+                            best = std::min(best, th->second - reserveFor(th->second));
                         if (wmmaIndex[succ] != INT_MAX)
                             best = std::min(best, wmmaIndex[succ]);
                         else
@@ -3501,41 +3555,10 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             return best;
         };
-        // The barrier a ds_load feeds (the earliest cut it must be drained before), minus the
-        // reserve for the drain. Tensor_loads and workgroup barriers are the cuts; WMMA
-        // dependencies are not.
-        auto cutWindow = [&](unsigned n) {
-            auto th =
-                barrierWmmaThresholds_.find(const_cast<StinkyInstruction*>(deps.dag.nodes[n].inst));
-            return th == barrierWmmaThresholds_.end() ? -1 : th->second;
-        };
         auto feedDeadline = [&](unsigned id) {
-            int end = INT_MAX;
-            std::vector<unsigned> frontier{id};
-            for (int hop = 0; hop < kConsumerHops && !frontier.empty(); ++hop) {
-                std::vector<unsigned> next;
-                for (unsigned n : frontier) {
-                    for (unsigned m : deps.dag.graph[n]) {
-                        const int w = cutWindow(m);
-                        if (w >= 0)
-                            end = std::min(end, std::max(0, w - barrierReserve));
-                        else if (!isMatrixInstruction(*deps.dag.nodes[m].inst) &&
-                                 !isDSRead(*deps.dag.nodes[m].inst))
-                            next.push_back(m);
-                    }
-                }
-                frontier = std::move(next);
-            }
-            return end;
+            const int w = feedCut(id);
+            return w == INT_MAX ? INT_MAX : std::max(0, w - reserveFor(w));
         };
-        // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
-        // hard constraints are merged into the DAG only after this runs), not by node id.
-        std::vector<unsigned> dsOrder;
-        for (unsigned id = 0; id < deps.dag.nodes.size(); ++id)
-            if (isDSRead(*deps.dag.nodes[id].inst)) dsOrder.push_back(id);
-        std::stable_sort(dsOrder.begin(), dsOrder.end(), [&](unsigned a, unsigned b) {
-            return deps.dag.nodes[a].dsReadPriority < deps.dag.nodes[b].dsReadPriority;
-        });
         constexpr int kDsLeadWindows = 2;
         std::vector<DsSpreadPacer::Load> loads;
         for (unsigned id : dsOrder) {
@@ -3543,8 +3566,6 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             loads.push_back(
                 {id, std::min(feedDeadline(id), cw == INT_MAX ? INT_MAX : cw - kDsLeadWindows)});
         }
-        const int windowCycles = std::max(1, wmmaIssueConfig.latency);
-        const int batch = std::max(1, dagFeatures.wmmaBatchSize);
         const int cpl = effectiveDsCyclesPerLoad(static_cast<int>(loads.size()));
         // What one batch of WMMAs can hold: its cycles at the LDS return rate.
         const int perBatch =
