@@ -1040,7 +1040,7 @@ class StaticGrid(WorkAssignment):
         if not partition.tile_units:
             return self.activateStaticRange(writer, kernel, processing, tPA, tPB)
         module = Module("StaticGrid activate tile")
-        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB))
+        module.add(processing.materializeTile(writer, kernel, partition.cursor, tPA, tPB, preparedEntry=True))
         if kernel["ReuseAcrossPersistent"]:
             module.add(self.rapPhaseWalkAdvance(writer, kernel, partition))
             return module
