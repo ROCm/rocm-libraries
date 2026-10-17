@@ -343,6 +343,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
+  papNextTileVgpr: int                   = -1
   startVgprPersistentConsts: int                 = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
@@ -4273,6 +4274,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
+      if isNGLL and u == 0 and getattr(self.states, "papAddressCarrier", None) is not None:
+        # Keep the branchless address leaf in the same native scheduling region
+        # as current NGLL WMMA; the carrier stays live through the later PAP join.
+        mapper, address = self.papNextTileAddressModules(kernel, tensorParametersA, tensorParametersB)
+        # Mapping uses the vector divider's temporary EXEC mask. This is a real
+        # execution-mask phase: no current compute may enter it. Only the pure
+        # address leaf below participates in native WMMA scheduling.
+        module.add(SSchedulingFence(comment="PAP coordinate mapping begins EXEC scratch phase"))
+        module.add(mapper)
+        module.add(SSchedulingFence(comment="PAP coordinate mapping restored current EXEC"))
+        preparedMac = Module("PAP address preparation and NGLL compute")
+        preparedMac.add(address)
+        preparedMac.add(macIterCode)
+        macIterCode = preparedMac
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True)
@@ -6052,6 +6067,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                      preLoopLocalReadDrainEmitted):
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                             comment="complete one-time pre-loop local reads"))
+      self.states.papAddressRoutingReset = Module("PAP address NGLL routing reset")
+      module.add(self.states.papAddressRoutingReset)
       module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False, nta=nta, ntb=ntb))
 
       loop = Module("loopBody")
@@ -6286,61 +6303,49 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # to it to skip that prefetch on its last iteration. Keep that order.
       module.add(Label(self.rapLabel("PrefetchGlobalLastIterEnd"), ""))
 
-    for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) \
-        if not kernel["SuppressNoLoadLoop"] else []:
-      # NGLL code generation for PGR>=2
-      NGLLindex = 0
-      NGLLnum = 2 if needSecondNGLL else 1
-      if needSecondNGLL:
-        # generate extra NGLL for second GR buffer
+    with self.allocPapAddressCarrier(kernel, tensorParametersA, tensorParametersB,
+                                     enabled=not needSecondNGLL and not isDTV) as papCarrier:
+      if papCarrier is not None:
+        # NGLL reuses increments emitted by the main loop, before these carrier
+        # registers were reserved. Rebuild their temporary operands while the
+        # carrier is held so current-tile wrap selection cannot overwrite the
+        # next coordinates between the mapper and prepared-address consumer.
+        self.codes.globalReadIncrements = self.globalReadIncrementAB(
+            kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, 0)
+      for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) \
+          if not kernel["SuppressNoLoadLoop"] else []:
+        # NGLL code generation for PGR>=2
+        NGLLindex = 0
+        NGLLnum = 2 if needSecondNGLL else 1
+        if needSecondNGLL:
+          # generate extra NGLL for second GR buffer
+          module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
+                                     NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
+          module.add(loopLabelToNoGRloopAfterABLoop)
+          if kernel["ExpertSchedulingMode"] > 0:
+            module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
+          NGLLindex += 1
+        elif isULSGRO and not isULSGROForNGLL and remainPgr == kernel["PrefetchGlobalRead"]-1:
+          # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
+          # This is to jump to the same NGLL from even and odd main loop
+          module.add(loopLabelToNoGRloopAfterABLoop)
         module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
                                    NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
-        module.add(loopLabelToNoGRloopAfterABLoop)
-        if kernel["ExpertSchedulingMode"] > 0:
-          module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
-        NGLLindex += 1
-      elif isULSGRO and not isULSGROForNGLL and remainPgr == kernel["PrefetchGlobalRead"]-1:
-        # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
-        # This is to jump to the same NGLL from even and odd main loop
-        module.add(loopLabelToNoGRloopAfterABLoop)
-      module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
-                                 NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
 
-    # This "NoLoad" loop is a copy of the unroll loop but with global loads + LDS writes removed
-    # doShadowInit is required since this pushes up the store SRD initialization before the NLL
-    # OptNLL only allowed for single summation index  - for multiple summation we (currently)
-    # execute the NLL inside each unroll iteration not just once at the end.
-    if kernel["PrefetchGlobalRead"]:
-      if not kernel["SuppressNoLoadLoop"]:
-        if self.states.tailloopInNll:
-          # deepCopy packCode for tailloopInNll
-          backupPack = deepcopy(pack)
-          backupPackPre = deepcopy(packPre)
-        NeedNLLOddEven  = isDTV # need odd+even NLL for 2 buffers (PGR1/2)
-        NLLnum = 2 if NeedNLLOddEven else 1
-        gsuComponent = Component.GSU.find(self)
-        module.add(gsuComponent.noLoadLoop(self, kernel, tensorParametersA, tensorParametersB, pack, packPre))
-        for NLLindex in range(0, NLLnum):
-          self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
-          # copy pack
-          if NLLindex == NLLnum - 1 or (self.states.packDTVA or self.states.packDTVB or self.states.convDTVA or self.states.convDTVB):
-            # last NLL or  pack DTV case, no deep copy for pack
-            # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
-            deepCopyPack = pack
-            deepCopyPackPre = packPre
-          else:
-            # deepCopy packCode for OptNLL noLoadLoop
-            deepCopyPack = deepcopy(pack)
-            deepCopyPackPre = deepcopy(packPre)
-          module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, \
-                                     NLLindex=NLLindex, NLLnum=NLLnum, useTailloopInNll=self.states.tailloopInNll))
-          self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
-
-        if self.states.tailloopInNll:
-          # tailloopInNll case, generate another set of NoLoadLoop for tailloopInNll not applicable case
-          # restore backup for pack code
-          pack = backupPack
-          packPre = backupPackPre
+      # This "NoLoad" loop is a copy of the unroll loop but with global loads + LDS writes removed
+      # doShadowInit is required since this pushes up the store SRD initialization before the NLL
+      # OptNLL only allowed for single summation index  - for multiple summation we (currently)
+      # execute the NLL inside each unroll iteration not just once at the end.
+      if kernel["PrefetchGlobalRead"]:
+        if not kernel["SuppressNoLoadLoop"]:
+          if self.states.tailloopInNll:
+            # deepCopy packCode for tailloopInNll
+            backupPack = deepcopy(pack)
+            backupPackPre = deepcopy(packPre)
+          NeedNLLOddEven  = isDTV # need odd+even NLL for 2 buffers (PGR1/2)
+          NLLnum = 2 if NeedNLLOddEven else 1
+          gsuComponent = Component.GSU.find(self)
+          module.add(gsuComponent.noLoadLoop(self, kernel, tensorParametersA, tensorParametersB, pack, packPre))
           for NLLindex in range(0, NLLnum):
             self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
             # copy pack
@@ -6353,8 +6358,31 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               # deepCopy packCode for OptNLL noLoadLoop
               deepCopyPack = deepcopy(pack)
               deepCopyPackPre = deepcopy(packPre)
-            module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
+            module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, \
+                                       NLLindex=NLLindex, NLLnum=NLLnum, useTailloopInNll=self.states.tailloopInNll))
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
+
+          if self.states.tailloopInNll:
+            # tailloopInNll case, generate another set of NoLoadLoop for tailloopInNll not applicable case
+            # restore backup for pack code
+            pack = backupPack
+            packPre = backupPackPre
+            for NLLindex in range(0, NLLnum):
+              self.saveLocalPointers(kernel, tensorParametersA, tensorParametersB)
+              # copy pack
+              if NLLindex == NLLnum - 1 or (self.states.packDTVA or self.states.packDTVB or self.states.convDTVA or self.states.convDTVB):
+                # last NLL or  pack DTV case, no deep copy for pack
+                # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
+                deepCopyPack = pack
+                deepCopyPackPre = packPre
+              else:
+                # deepCopy packCode for OptNLL noLoadLoop
+                deepCopyPack = deepcopy(pack)
+                deepCopyPackPre = deepcopy(packPre)
+              module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
+              self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
+      if papCarrier is not None:
+        module.add(self.papClearPreparedAddress("PAP: discard preparation at common NLL exit"))
     return pack
 
   ##############################################################################
@@ -9610,6 +9638,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
           self.states.m.startVgprGL2PrefetchAddr = vgprIdx
           vgprIdx += tPM["gl2nl"] * self.states.rpga
+
+      # One lane-packed VGPR carries StreamK identity and prepared addresses.
+      # Keep it outside every reclaimable operand/address range, beside Serial.
+      # Leave sixteen scratch registers after the payload and Serial, matching
+      # the conservative local-address scratch margin.
+      if (self.papTdmSupportsShadowAddressPair(kernel, tensorParametersA, tensorParametersB)
+          and isStreamK(kernel) and kernel["NoTailLoop"] and not kernel["HalfPLR"]
+          and max(vgprIdx, self.states.c.numVgprValu) + 18 <= self.states.regCaps["MaxVgpr"]):
+        vgprIdx = max(vgprIdx, self.states.c.numVgprValu)
+        self.states.papNextTileVgpr = vgprIdx
+        vgprIdx += 1
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation

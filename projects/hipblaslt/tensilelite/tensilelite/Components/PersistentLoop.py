@@ -6,16 +6,324 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, vgpr, MemTokenData
+from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC, MemTokenData
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
-from ..ExecutionPolicy import isPersistent
+from ..ExecutionPolicy import isPersistent, isStreamK
 from math import ceil, log2
 from ..Component import Component
 from ..Common import persistentSpatialCluster
 import abc
+from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32
+from rocisa.instruction import VReadlaneB32, VWritelaneB32
+from rocisa.functions import scalarUInt32DivideAndRemainder
 
 class PersistentKernelState:
     """Emitter state and borrowed registers for the persistent loop lifecycle."""
+
+    @staticmethod
+    def papClearPreparedAddress(comment):
+        # Bit 0 (issued), bit 1 (bank), and bit 31 (reserved) remain untouched.
+        return SAndB32(dst=sgpr("PersistentPrefetchState"),
+                       src0=sgpr("PersistentPrefetchState"), src1=hex(0xfffffffb),
+                       comment=comment)
+
+    def papAddressCarrierPlan(self, kernel, tPA, tPB, *, enabled=True):
+        """Check every simultaneous scratch shape on copies of the real pools."""
+        if (not enabled or self.states.tailloopInNll or kernel.get("AdaptiveGemmNTAB", 0)
+                or not self.papTdmSupportsShadowAddressPair(kernel, tPA, tPB)):
+            return None
+        scales = bool(kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"])
+        if scales and not self.papTdmSupportsShadowAddressPair(kernel, tPA["MX"], tPB["MX"]):
+            return None
+        streamK = isStreamK(kernel)
+        if streamK and getattr(self.states, "papNextTileVgpr", -1) < 0:
+            return None
+        if streamK:
+            # The packed path borrows only temporary scalars. Keep its complete
+            # preparation/consumer scratch within the existing scalar budget;
+            # fragmentation must not turn this optimization into pool growth.
+            scalarLimit = min(self.sgprPool.size(), self.states.regCaps["MaxSgpr"])
+            shapes = (((2, 2), (4, 2)),                   # address preparation
+                      ((2, 2), (1, 1), (3, 2), (1, 1)), # descriptor consumer
+                      ((4, 2), (1, 1)))                 # rebuilt increments
+            if streamK:
+                shapes = (((2, 2), (3, 2)), *shapes[1:],
+                          ((4, 2), (1, 1), (1, 1)))  # SK mapper and magic constants
+            try:
+                for shape in shapes:
+                    scratch = deepcopy(self.sgprPool)
+                    for count, alignment in shape:
+                        scratch.checkOutAligned(count, alignment, "PAP packed preflight", preventOverflow=False)
+                    if scratch.size() > scalarLimit:
+                        return None
+                # The unchanged ordinary fallback has its own scratch lifetime
+                # after preparation has returned every temporary to the pool.
+                fallback = deepcopy(self.sgprPool)
+                fallback.checkOutAligned(3, 2, "PAP mapping fallback", preventOverflow=False)
+                if persistentSpatialCluster(kernel):
+                    fallback.checkOutAligned(4, 2, "PAP cluster fallback", preventOverflow=False)
+                if fallback.size() > self.states.regCaps["MaxSgpr"]:
+                    return None
+                vectors = deepcopy(self.vgprPool)
+                vectors.checkOutAligned(4, 2, "PAP packed mapper preflight", preventOverflow=False)
+                if vectors.size() > self.states.regCaps["MaxVgpr"]:
+                    return None
+            except RuntimeError:
+                return None
+            return {"packed": True}
+        limit = self.states.regCaps["MaxSgpr"]
+        # A kernel already at the architectural budget retains its old path.
+        if self.sgprPool.size() >= limit:
+            return None
+        # Producer, swap, ordinary mapper/WGM, descriptor refresh/full tail,
+        # counter and elected-handoff scratch lifetimes. These are nested
+        # checkouts, so alignment gaps and fragmentation matter as well as sum.
+        # Rebuilt NGLL increments nest a parity temporary under four wrap words.
+        shapes = (((4, 2),), ((1, 1),),
+                  ((4, 2), (1, 1)),
+                  ((1, 1), (2, 2), (1, 1), (1, 1)),
+                  ((1, 1), (1, 1), (1, 1), (1, 1)),
+                  ((1, 1), (3, 2), (1, 1)), ((1, 1), (1, 1), (2, 2)),
+                  ((4, 2),))
+        needsNestedDivide = (persistentSpatialCluster(kernel)
+                             or (not kernel["NoTailLoop"] and kernel["DepthU"] & (kernel["DepthU"] - 1)))
+        shapes += (((3, 2), (4, 2)),) if needsNestedDivide else (((3, 2),),)
+        try:
+            vectors = deepcopy(self.vgprPool)
+            # DefaultWGM's ordinary fallback borrows four aligned VGPRs;
+            # producer division and descriptor arithmetic need only two.
+            vectors.checkOutAligned(4, 2, "PAP mapper preflight", preventOverflow=False)
+            if vectors.size() > self.states.regCaps["MaxVgpr"]:
+                return None
+        except RuntimeError:
+            return None
+        for size in ((7, 5) if scales else (5,)):
+            pool = deepcopy(self.sgprPool)
+            try:
+                base = pool.checkOutAligned(size, 2, "PAP address carrier preflight", preventOverflow=False)
+                fits = True
+                for shape in shapes:
+                    scratch = deepcopy(pool)
+                    for count, alignment in shape:
+                        scratch.checkOutAligned(count, alignment, "PAP scratch preflight", preventOverflow=False)
+                    if scratch.size() > limit:
+                        fits = False
+                        break
+                if fits:
+                    return dict(base=base, size=size, data=base, mx=base + 2 if size == 7 else None,
+                                coordinates={i: base + size - 3 + i for i in range(3)})
+            except RuntimeError:
+                continue
+        return None
+
+    @contextmanager
+    def allocPapAddressCarrier(self, kernel, tPA, tPB, *, enabled=True):
+        plan = self.papAddressCarrierPlan(kernel, tPA, tPB, enabled=enabled)
+        self.states.papAddressCarrier = plan
+        if plan is None:
+            yield None
+            return
+        base = None
+        if not plan.get("packed"):
+            base = self.sgprPool.checkOutAligned(plan["size"], 2, "PAP address carrier", preventOverflow=False)
+            assert base == plan["base"]
+        # These placeholders were emitted before any tile activation or NGLL
+        # bypass can run. Fill them only after the bounded allocation succeeds.
+        self.states.papAddressActivationReset.add(self.papClearPreparedAddress(
+            "PAP: invalidate prepared address at tile activation"))
+        self.states.papAddressRoutingReset.add(self.papClearPreparedAddress(
+            "PAP: invalidate prepared address before NGLL entry or bypass"))
+        try:
+            yield plan
+        finally:
+            if base is not None:
+                self.sgprPool.checkIn(base)
+            self.states.papAddressCarrier = None
+
+    def papPrepareNextTileAddresses(self, kernel, tPA, tPB):
+        """Return mapping and pure addresses together for standalone callers."""
+        mapper, address = self.papNextTileAddressModules(kernel, tPA, tPB)
+        module = Module("PAP NGLL address preparation")
+        module.add(mapper)
+        module.add(address)
+        return module
+
+    def papNextTileAddressModules(self, kernel, tPA, tPB):
+        """Prepare StreamK addresses in packed lanes; keep the scalar DP path."""
+        plan = getattr(self.states, "papAddressCarrier", None)
+        if plan is not None and plan.get("packed") and isStreamK(kernel):
+            return self.papStreamKNextTileAddressModules(kernel, tPA, tPB)
+        return self._papNextTileAddressModules(kernel, tPA, tPB)
+
+    def _papNextTileAddressModules(self, kernel, tPA, tPB):
+        """Separate EXEC-changing mapping from schedulable scalar addresses."""
+        mapper = Module("PAP next coordinate mapping")
+        address = Module("PAP pure next addresses")
+        module = mapper
+        plan = getattr(self.states, "papAddressCarrier", None)
+        if plan is None:
+            return mapper, address
+        c = plan["coordinates"]
+        # The data-address output does not become live until mapping finishes.
+        # Borrow it to save EXEC, and restore the exact incoming mask before the
+        # pure leaf overwrites that word. Full EXEC makes the divider's readlane
+        # independent of whichever lanes the current computation has active.
+        module.add(SMovB32(dst=sgpr(plan["data"]), src=EXEC(), comment="PAP mapper save current EXEC"))
+        module.add(SMovB32(dst=EXEC(), src=-1, comment="PAP mapper scratch uses full EXEC"))
+        with self.allocTmpSgpr(4, alignment=2, tag="PAP address preparation scratch") as scratch:
+            a, b, d, rem = (scratch.idx + i for i in range(4))
+            vectors = self.vgprPool.checkOut(2, "PAP next tile divide")
+            try:
+                vr = ContinuousRegister(vectors, 2)
+                module.add(SMovB32(dst=sgpr(a), src=sgpr("NextTile"), comment="PAP speculative next tile"))
+                if persistentSpatialCluster(kernel):
+                    cs, ck = kernel["ClusterDim"]
+                    module.add(SLShiftRightB32(dst=sgpr(a), shiftHex=int(log2(cs * ck)), src=sgpr(a)))
+                    module.add(SAddU32(dst=sgpr(b), src0=sgpr("NumWorkGroups0"), src1=cs - 1))
+                    module.add(SLShiftRightB32(dst=sgpr(b), shiftHex=int(log2(cs)), src=sgpr(b)))
+                    module.add(SAddU32(dst=sgpr(d), src0=sgpr("NumWorkGroups1"), src1=ck - 1))
+                    module.add(SLShiftRightB32(dst=sgpr(d), shiftHex=int(log2(ck)), src=sgpr(d)))
+                    module.add(SMulI32(dst=sgpr(d), src0=sgpr(d), src1=sgpr(b)))
+                    divisor = b
+                else:
+                    module.add(SMulI32(dst=sgpr(d), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1")))
+                    divisor = "NumWorkGroups0"
+                module.add(scalarUInt32DivideAndRemainder(qReg=c[2], dReg=a, divReg=d, rReg=rem,
+                    tmpVgprRes=vr, wavewidth=32, doRemainder=True, comment="PAP next tile batch"))
+                module.add(scalarUInt32DivideAndRemainder(qReg=c[1], dReg=rem, divReg=divisor, rReg=c[0],
+                    tmpVgprRes=vr, wavewidth=32, doRemainder=True, comment="PAP next tile coordinates"))
+                if persistentSpatialCluster(kernel):
+                    module.add(SAndB32(dst=sgpr(a), src0=sgpr("NextTile"), src1=cs * ck - 1))
+                    module.add(SLShiftLeftB32(dst=sgpr(c[0]), shiftHex=int(log2(cs)), src=sgpr(c[0])))
+                    module.add(SAndB32(dst=sgpr(rem), src0=sgpr(a), src1=cs - 1))
+                    module.add(SAddU32(dst=sgpr(c[0]), src0=sgpr(c[0]), src1=sgpr(rem)))
+                    module.add(SLShiftLeftB32(dst=sgpr(c[1]), shiftHex=int(log2(ck)), src=sgpr(c[1])))
+                    module.add(SLShiftRightB32(dst=sgpr(a), shiftHex=int(log2(cs)), src=sgpr(a)))
+                    module.add(SAddU32(dst=sgpr(c[1]), src0=sgpr(c[1]), src1=sgpr(a)))
+                    for i in (0, 1):
+                        module.add(SSubU32(dst=sgpr(rem), src0=sgpr("NumWorkGroups%u" % i), src1=1))
+                        module.add(SMinU32(dst=sgpr(c[i]), src0=sgpr(c[i]), src1=sgpr(rem), comment="PAP clamp phantom coordinate"))
+            finally:
+                self.vgprPool.checkIn(vectors)
+            module.add(SMovB32(dst=EXEC(), src=sgpr(plan["data"]), comment="PAP mapper restore exact current EXEC"))
+            module = address
+            module.add(self.papTdmPrepareAddressPair(kernel, tPA, tPB, c, plan["data"], scratch))
+            if plan["mx"] is not None:
+                module.add(self.papTdmPrepareAddressPair(kernel, tPA["MX"], tPB["MX"], c, plan["mx"], scratch))
+            module.add(SMovB32(dst=sgpr(b), src=hex(0x80000004)))
+            if not persistentSpatialCluster(kernel):
+                # Equality to +1 needs only the encoded low field; sign extension
+                # cannot turn any other low value into +1. No branch or join label
+                # separates the useful address leaf from NGLL WMMA scheduling.
+                mask = 0x3ff if kernel["WorkGroupMappingXCC"] == -1 else 0xffff
+                module.add(SAndB32(dst=sgpr(a), src0=sgpr("WGM"), src1=hex(mask)))
+                module.add(SCmpEQU32(src0=sgpr(a), src1=1, comment="PAP prepared mapping requires runtime WGM +1"))
+                module.add(SCSelectB32(dst=sgpr(b), src0=sgpr(b), src1=0))
+            if kernel["ProblemType"].get("SupportUserArgs"):
+                module.add(SAndB32(dst=sgpr(a), src0=sgpr("ArgType"), src1=0xff))
+                module.add(SCmpEQU32(src0=sgpr(a), src1=0, comment="PAP prepared address requires direct ArgType 0"))
+                module.add(SCSelectB32(dst=sgpr(b), src0=sgpr(b), src1=0))
+            module.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"), src1=sgpr(b),
+                              comment="PAP record branchless address preparation validity"))
+        return mapper, address
+
+    @staticmethod
+    def papPackedIdentityNames(kernel):
+        names = ["WorkGroup0", "WorkGroup1", "WorkGroup2"]
+        if isStreamK(kernel):
+            names += ["StreamKLocalStart", "StreamKLocalEnd"]
+        elif persistentSpatialCluster(kernel):
+            names += ["PersistentPhantomTile"]
+        return names
+
+    def papStreamKNextTileAddressModules(self, kernel, tPA, tPB):
+        """Prepare a static K range without scalar carriers across compute.
+
+        Lanes 0..4 hold next coordinates and bounds; 5..8 hold addresses until
+        issue. Lanes 9..13 save current identity and 14..15 save EXEC/VCC while
+        mapping. All borrowed lanes are free before the descriptor snapshot.
+        """
+        mapper = Module("PAP StreamK next range mapping")
+        address = Module("PAP pure next addresses")
+        payload = vgpr(self.states.papNextTileVgpr)
+        mapper.add(self.papPackedSaveIdentity(kernel))
+        with self.allocTmpSgpr(1, tag="PAP StreamK save masks") as mask:
+            for lane, register in ((14, EXEC()), (15, VCC())):
+                mapper.add(SMovB32(dst=sgpr(mask.idx), src=register))
+                mapper.add(VWritelaneB32(dst=payload, src0=sgpr(mask.idx), src1=lane))
+        mapper.add(SMovB32(dst=EXEC(), src=-1, comment="PAP mapper scratch uses full EXEC"))
+        processing = Component.TileProcessingStrategy.find(self)
+        mapper.add(processing.prefetchAcrossPersistentSetupNextTile(self, kernel, tPA, tPB, skipLroReset=True))
+        for lane, name in enumerate(self.papPackedIdentityNames(kernel)):
+            mapper.add(VWritelaneB32(dst=payload, src0=sgpr(name), src1=lane,
+                                     comment="PAP retain next " + name))
+        with self.allocTmpSgpr(1, tag="PAP StreamK restore masks") as mask:
+            for lane, register in ((14, EXEC()), (15, VCC())):
+                mapper.add(VReadlaneB32(dst=sgpr(mask.idx), src0=payload, src1=lane))
+                mapper.add(SMovB32(dst=register, src=sgpr(mask.idx), comment="PAP mapper restore exact mask"))
+        with self.allocTmpSgpr(2, alignment=2, tag="PAP StreamK address scratch") as output:
+            with self.allocTmpSgpr(3, alignment=2, tag="PAP StreamK pure address scratch") as scratch:
+                coordinates = {i: self.sgprs["WorkGroup%u" % i] for i in range(3)}
+                pairs = [(tPA, tPB, 5)]
+                if kernel["ProblemType"]["MXBlockA"]:
+                    pairs += [(tPA["MX"], tPB["MX"], 7)]
+                for a, b, lane in pairs:
+                    address.add(self.papTdmPrepareAddressPair(kernel, a, b, coordinates, output.idx, scratch))
+                    for i in range(2):
+                        address.add(VWritelaneB32(dst=payload, src0=sgpr(output.idx + i), src1=lane + i,
+                                                  comment="PAP retain prepared StreamK address"))
+                address.add(self.papPackedRestoreIdentity(kernel))
+                a, b = scratch.idx, scratch.idx + 1
+                mask = 0x3ff if kernel["WorkGroupMappingXCC"] == -1 else 0xffff
+                address.add(SAndB32(dst=sgpr(a), src0=sgpr("WGM"), src1=hex(mask)))
+                address.add(SCmpEQU32(src0=sgpr(a), src1=1, comment="PAP prepared mapping requires runtime WGM +1"))
+                address.add(SCSelectB32(dst=sgpr(b), src0=hex(0x80000004), src1=0))
+                if kernel["ProblemType"].get("SupportUserArgs"):
+                    address.add(SAndB32(dst=sgpr(a), src0=sgpr("ArgType"), src1=0xff))
+                    address.add(SCmpEQU32(src0=sgpr(a), src1=0, comment="PAP prepared address requires direct ArgType 0"))
+                    address.add(SCSelectB32(dst=sgpr(b), src0=sgpr(b), src1=0))
+                address.add(SOrB32(dst=sgpr("PersistentPrefetchState"), src0=sgpr("PersistentPrefetchState"),
+                                  src1=sgpr(b), comment="PAP record StreamK address preparation validity"))
+        return mapper, address
+
+    def papPackedSaveIdentity(self, kernel):
+        """Borrow lanes that become free before the descriptor snapshot."""
+        module = Module("PAP packed save current identity")
+        first = 9 if isStreamK(kernel) else 8
+        for lane, name in enumerate(self.papPackedIdentityNames(kernel), first):
+            module.add(VWritelaneB32(dst=vgpr(self.states.papNextTileVgpr),
+                src0=sgpr(name), src1=lane, comment="PAP pack current " + name))
+        return module
+
+    def papPackedRestoreIdentity(self, kernel):
+        module = Module("PAP packed restore current identity")
+        first = 9 if isStreamK(kernel) else 8
+        for lane, name in enumerate(self.papPackedIdentityNames(kernel), first):
+            module.add(VReadlaneB32(dst=sgpr(name), src0=vgpr(self.states.papNextTileVgpr),
+                src1=lane, comment="PAP unpack current " + name))
+        return module
+
+    def papPackedUpdateDescriptors(self, kernel, tPA, tPB):
+        """Consume both encoded addresses through one temporary scalar pair."""
+        module = Module("PAP consume packed addresses")
+        payload = vgpr(self.states.papNextTileVgpr)
+        names = self.papPackedIdentityNames(kernel)
+        # Multicast handoff still belongs to the current phantom peer. Only
+        # StreamK also activates the next range bounds for descriptor setup.
+        for i, name in enumerate(names if isStreamK(kernel) else names[:3]):
+            module.add(VReadlaneB32(dst=sgpr(name), src0=payload,
+                src1=i, comment="PAP unpack next " + name))
+        with self.allocTmpSgpr(2, alignment=2, tag="PAP unpack address") as tmp:
+            first = 5 if isStreamK(kernel) else 4
+            pairs = [(tPA, tPB, first)]
+            if kernel["ProblemType"]["MXBlockA"]:
+                pairs += [(tPA["MX"], tPB["MX"], first + 2)]
+            for a, b, lane in pairs:
+                for i in range(2):
+                    module.add(VReadlaneB32(dst=sgpr(tmp.idx + i), src0=payload,
+                        src1=lane + i, comment="PAP unpack prepared address"))
+                module.add(self.papTdmUpdateDescriptor(kernel, a, b, preparedGlobalAddr=tmp.idx))
+        return module
 
     def papTileIdentityNames(self, kernel):
         return self.states.currentTileWork.borrowedIdentity(kernel)
@@ -413,7 +721,11 @@ class PersistentLoop(Component):
 
     def activateReservedOrAcquire(self, writer, kernel, tPA, tPB):
         processing = Component.TileProcessingStrategy.find(writer)
-        return Component.WorkAssignment.find(writer).activateReservedOrAcquire(writer, kernel, processing, tPA, tPB)
+        module = Module("Persistent activation")
+        writer.states.papAddressActivationReset = Module("PAP address activation reset")
+        module.add(writer.states.papAddressActivationReset)
+        module.add(Component.WorkAssignment.find(writer).activateReservedOrAcquire(writer, kernel, processing, tPA, tPB))
+        return module
 
     def compute(self, writer, kernel, tensorParametersA, tensorParametersB, module, expand, tPM):
         if kernel["ReuseAcrossPersistent"]:
@@ -506,10 +818,38 @@ class PersistentLoop(Component):
         module.add(assignment.reserveNext(writer, kernel, skip))
         module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="Next assignment data already issued?"))
         module.add(SCBranchSCC1(labelName=skip.getLabelName(), comment="Do not prefetch a reservation twice"))
-        if persistentSpatialCluster(kernel):
-            module.add(assignment.persistentClusterPrefetchHandoff(writer, kernel))
-        elif not skipBarrier:
-            module.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
+        def handoff():
+            if persistentSpatialCluster(kernel):
+                return assignment.persistentClusterPrefetchHandoff(writer, kernel)
+            handoffModule = Module("Persistent PAP local handoff")
+            if not skipBarrier:
+                handoffModule.add(SBarrier(comment="Subtile PAP: sync before next-tile prefetch" if subtile else "PAP: sync before next-tile prefetch"))
+            return handoffModule
+
+        # This path only prepares scalar descriptors and loop state. Let it run
+        # while the previous bank's reads finish, then release the bank just
+        # before issuing the same first-PGR group. Keep other paths unchanged.
+        lateHandoff = (not subtile and kernel.get("ScheduleIterAlg") == 4
+                       and writer.papTdmSupportsIncrementalUpdate(kernel))
+        if not lateHandoff:
+            module.add(handoff())
+        carrier = getattr(writer.states, "papAddressCarrier", None)
+        if carrier is not None and not subtile:
+            module.add(self.prefetchPreparedClassic(writer, kernel, tPA, tPB, processing, carrier,
+                                                   beforeIssue=handoff if lateHandoff else None))
+        else:
+            module.add(self.prefetchBorrowedIdentity(writer, kernel, tPA, tPB, processing,
+                subtile=subtile, preloopGrModule=preloopGrModule, beforeIssue=handoff if lateHandoff else None))
+        if (not subtile and kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"] and not kernel["HalfPLR"]):
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preservePapBank=False))
+            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preservePapBank=False))
+        module.add(skip)
+        return module
+
+    def prefetchBorrowedIdentity(self, writer, kernel, tPA, tPB, processing, *,
+                                 subtile=False, preloopGrModule=None, beforeIssue=None):
+        module = Module("Persistent PAP borrowed identity")
         with writer.allocPapTileIdentity(kernel, subtile=subtile) as previous:
             module.add(writer.papCheckpointCurrentTileIdentity(kernel, previous, subtile=subtile))
             module.add(processing.prefetchAcrossPersistentSetupNextTile(writer, kernel, tPA, tPB, skipLroReset=True))
@@ -519,20 +859,75 @@ class PersistentLoop(Component):
                 if subtile:
                     module.add(writer.setupPrefetchAcrossPersistentSubtileLoads(kernel, tPA, tPB, preloopGrModule))
                 else:
-                    module.add(self.prefetchClassicLoads(writer, kernel, tPA, tPB))
+                    module.add(self.prefetchClassicLoads(
+                        writer, kernel, tPA, tPB,
+                        beforeIssue=beforeIssue))
             finally:
                 writer.states.rapInPapNextTilePrefetch = rapOuter
             module.add(writer.papRestoreCurrentTileIdentity(kernel, previous, subtile=subtile))
-        if (not subtile and kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"] and not kernel["HalfPLR"]):
-            module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preservePapBank=False))
-            if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-                module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preservePapBank=False))
-        module.add(skip)
         return module
 
-    def prefetchClassicLoads(self, writer, kernel, tPA, tPB):
+    def prefetchPreparedClassic(self, writer, kernel, tPA, tPB, processing, carrier, *, beforeIssue=None):
+        if carrier.get("packed"):
+            return self.prefetchPackedClassic(writer, kernel, tPA, tPB, processing, beforeIssue=beforeIssue)
+        module = Module("Persistent PAP prepared address consumer")
+        fallback = Label(writer.labels.getNameInc("PapAddressFallback"), "")
+        ready = Label(writer.labels.getNameInc("PapAddressReady"), "")
+        coordinates = carrier["coordinates"]
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=2, comment="PAP next addresses prepared by NGLL?"))
+        module.add(SCBranchSCC0(labelName=fallback.getLabelName(), comment="PAP use ordinary mapping on preparation bypass"))
+        with writer.allocTmpSgpr(1, tag="PAP swap coordinates") as tmp:
+            for i in range(3):
+                module.add(SMovB32(dst=sgpr(tmp.idx), src=sgpr("WorkGroup%u" % i)))
+                module.add(SMovB32(dst=sgpr("WorkGroup%u" % i), src=sgpr(coordinates[i]), comment="PAP borrow prepared next coordinate"))
+                module.add(SMovB32(dst=sgpr(coordinates[i]), src=sgpr(tmp.idx), comment="PAP retain current coordinate for common restore"))
+        module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB, preparedGlobalAddr=carrier["data"]))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"], preparedGlobalAddr=carrier["mx"]))
+        module.add(SBranch(labelName=ready.getLabelName()))
+        module.add(fallback)
+        for i in range(3):
+            module.add(SMovB32(dst=sgpr(coordinates[i]), src=sgpr("WorkGroup%u" % i), comment="checkpoint current coordinate on PAP fallback"))
+        if persistentSpatialCluster(kernel):
+            module.add(SMovB32(dst=sgpr(carrier["data"]), src=sgpr("PersistentPhantomTile"), comment="PAP fallback checkpoint phantom locally"))
+        module.add(processing.prefetchAcrossPersistentSetupNextTile(writer, kernel, tPA, tPB, skipLroReset=True))
+        if persistentSpatialCluster(kernel):
+            module.add(SMovB32(dst=sgpr("PersistentPhantomTile"), src=sgpr(carrier["data"]), comment="PAP fallback restore current phantom before issue"))
+        module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
+        module.add(ready)
+        module.add(self.prefetchClassicLoads(writer, kernel, tPA, tPB, beforeIssue=beforeIssue, updateDescriptors=False))
+        for i in range(3):
+            module.add(SMovB32(dst=sgpr("WorkGroup%u" % i), src=sgpr(coordinates[i]), comment="restore current WorkGroup%u after PAP" % i))
+        return module
+
+    def prefetchPackedClassic(self, writer, kernel, tPA, tPB, processing, *, beforeIssue=None):
+        module = Module("PAP packed ordinary consumer")
+        fallback = Label(writer.labels.getNameInc("PapPackedFallback"), "")
+        ready = Label(writer.labels.getNameInc("PapPackedReady"), "")
+        module.add(writer.papPackedSaveIdentity(kernel))
+        module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=2))
+        module.add(SCBranchSCC0(labelName=fallback.getLabelName()))
+        module.add(writer.papPackedUpdateDescriptors(kernel, tPA, tPB))
+        module.add(SBranch(labelName=ready.getLabelName()))
+        module.add(fallback)
+        module.add(processing.prefetchAcrossPersistentSetupNextTile(writer, kernel, tPA, tPB, skipLroReset=True))
+        if persistentSpatialCluster(kernel):
+            module.add(VReadlaneB32(dst=sgpr("PersistentPhantomTile"),
+                src0=vgpr(writer.states.papNextTileVgpr), src1=11))
+        module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
+        if kernel["ProblemType"]["MXBlockA"]:
+            module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
+        module.add(ready)
+        module.add(self.prefetchClassicLoads(writer, kernel, tPA, tPB,
+            beforeIssue=beforeIssue, updateDescriptors=False))
+        module.add(writer.papPackedRestoreIdentity(kernel))
+        return module
+
+    def prefetchClassicLoads(self, writer, kernel, tPA, tPB, *, beforeIssue=None, updateDescriptors=True):
         module = Module("Persistent classic PAP load handoff")
-        if kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if updateDescriptors and kernel["enableTDMA"] and kernel["enableTDMB"]:
             module.add(writer.papTdmUpdateDescriptor(kernel, tPA, tPB))
             if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
                 module.add(writer.papTdmUpdateDescriptor(kernel, tPA["MX"], tPB["MX"]))
@@ -543,6 +938,13 @@ class PersistentLoop(Component):
             module.add(VMovB32(dst=vgpr(previous), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
             module.add(VMovB32(dst=vgpr(previous + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
         module.add(writer.calculateLoopNumIter(kernel, tPA, tPB, writer.states.unrollIdx))
+        if beforeIssue is not None:
+            # Build this here, while the identity checkpoint remains allocated,
+            # so the elected-wave temporary cannot alias the saved identity.
+            # Descriptor parity branches have joined. Keep any predicate
+            # created or consumed by the issue helper after this handoff;
+            # the current OptNLL PAP path does not need an issue predicate.
+            module.add(beforeIssue())
         module.add(writer.setupPrefetchAcrossPersistentLoads(kernel, tPA, tPB, isOptNLL=True))
         if snapshotLoopCounter:
             module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(previous), comment="restore LoopCounter after PAP"))
