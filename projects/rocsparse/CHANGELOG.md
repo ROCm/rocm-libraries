@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed intermittently wrong results in `rocsparse_spmm` with `_Float16` or `rocsparse_bfloat16` output, for example with the COO atomic algorithms. The 16-bit atomic add updates the last element of an odd-sized output array under a spinlock, and the read after taking the lock could return a stale cached value, so one concurrent update was occasionally lost. The lock acquisition is now followed by an acquire fence.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
