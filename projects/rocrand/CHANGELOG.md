@@ -5,6 +5,31 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
+### Added
+
+* Generated Fortran bindings, as a single `rocrand` module: `use rocrand`, link
+  `roc::rocrand_fortran`. Controlled by `BUILD_FORTRAN_BINDINGS` (`ON` on Linux, `OFF` on Windows,
+  where ROCm ships no Fortran compiler), `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES`
+  (`assumed-shape` by default; `none` or `assumed-rank`). Found with
+  `find_package(rocrand-fortran)`; the archive and the `.mod` files install per compiler, under
+  `<libdir>/fortran/<compiler>` and `<includedir>/fortran/<compiler>`.
+
+### Changed
+
+* The FRUIT Fortran test suite moved from `test/fortran/` to `fortran/test/`, was ported to the
+  generated bindings, and now registers as the CTest test `rocrand_fortran_fruit`.
+
+### Removed
+
+* The hand-written Fortran wrapper `library/src/fortran/rocrand_m.f90` and its
+  `BUILD_FORTRAN_WRAPPER` option, deprecated in favour of hipfort in rocRAND 4.0.0 and never
+  shipped enabled. Builds passing `-DBUILD_FORTRAN_WRAPPER=ON` should switch to `use rocrand`.
+* The hand-written HIP Fortran modules under `library/src/fortran/hip/` (`hip_nvcc_m.f90`,
+  `hip_rocm_m.f90`), which lived alongside that wrapper.
+* `find_package(rocrand)` no longer sets `rocrand_FORTRAN_FOUND`, `rocrand_FORTRAN_SRC_DIR` or
+  `rocrand_FORTRAN_SRC_DIRS`; use `find_package(rocrand-fortran)`, which sets
+  `rocrand_FORTRAN_FOUND`.
+
 ### Optimized
 
 * Added `__restrict__` qualifiers to the device API benchmark, enabling better compiler optimization.
