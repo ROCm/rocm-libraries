@@ -89,7 +89,11 @@ DESCRIPTOR_VERSION = "1.0"
 # Ops whose engines read a runtime pass-by-value scalar (the softmax scale), and the
 # graph schema that introduced such tensors (PluginVersionConstants.hpp,
 # K_PASS_BY_VALUE_MIN_API_VERSION).
-SDPA_OPS: tuple[str, ...] = ()
+SDPA_OPS = (
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+)
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 
 MANIFEST_NAME = "manifest.json"
