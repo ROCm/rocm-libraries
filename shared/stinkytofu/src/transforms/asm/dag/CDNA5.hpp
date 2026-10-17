@@ -3522,9 +3522,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             if (w != INT_MAX) ++feedCount[w];
         }
         // WMMAs kept free in front of a barrier (and the region end) for the last ds_load feeding
-        // it to return: the LDS return time, but never more than the barrier's stage can spare
-        // after issuing its own loads at the LDS rate (down to one batch).
-        const int drainWindows = (dsReadCreditLifetime() + windowCycles - 1) / windowCycles;
+        // it to return. The wave runs up to a full WMMA queue ahead of the matrix pipe, so the
+        // WMMAs behind the last load cover its return only after the queue: the LDS return time
+        // plus the queue depth, but never more than the barrier's stage can spare after issuing
+        // its own loads at the LDS rate (down to one batch).
+        const int drainWindows =
+            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + wmmaQueueDepth();
         const int stageCpl = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
         auto reserveFor = [&](int w) {
             auto prev = std::lower_bound(cuts.begin(), cuts.end(), w);
