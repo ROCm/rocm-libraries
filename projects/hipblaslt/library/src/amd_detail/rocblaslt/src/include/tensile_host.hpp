@@ -138,6 +138,10 @@ std::string getKernelNameFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_
 std::string getSolutionNameFromAlgoIndex(rocblaslt_handle             handle,
                                          const rocblaslt_matmul_algo& algo);
 
+// In-device MX scale layout the algo's kernel expects (0 = canonical, 1 = gfx950 host
+// pre-swizzled, 2 = in-memory swizzled), or -1 if the algo is not a Tensile solution.
+int getMXScaleFormatFromAlgoIndex(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
+
 /***********************************************************************************
  * Whether Tensile has been initialized for at least one device (used for
  *testing) *
@@ -287,3 +291,8 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 bool                   value);
+
+// MX scale tensor padding on the current device. When true (gfx950) the K blocks are
+// padded to a multiple of 8 and the free dimension to a multiple of 32; otherwise only the
+// K blocks are padded, to a multiple of 128 / block size.
+bool mxScaleTensorPadsFreeDim();
