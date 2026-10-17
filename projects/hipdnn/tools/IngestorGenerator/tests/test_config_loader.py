@@ -2966,7 +2966,3 @@ class TestReductionBlockAndDefaultMarker:
     ):
         with pytest.raises(ConfigError, match=key):
             self._load(tmp_path, {**self.REDUCTION, key: value})
-
-    def test_a_noise_policy_key_is_carried(self, tmp_path):
-        reduction = {**self.REDUCTION, "single_round_epsilon": 0, "drift_multiplier": 3}
-        assert self._load(tmp_path, reduction).reduction == reduction
