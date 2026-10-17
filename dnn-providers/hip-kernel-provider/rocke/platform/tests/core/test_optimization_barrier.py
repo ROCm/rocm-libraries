@@ -21,6 +21,7 @@ from rocke.core.ir import (
     VectorType,
 )
 from rocke.core.ir_serialize import parse, serialize
+from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
@@ -87,3 +88,71 @@ def test_predicate_producer(arch):
     llvm = lower_kernel_to_llvm(b.kernel, arch=arch, llvm_flavor="llvm23")
     assert llvm == lower_kernel_to_llvm(copy, arch=arch, llvm_flavor="llvm23")
     assert 'asm "", "=v,0"' in llvm
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+@pytest.mark.parametrize("roundtrip", [False, True])
+@pytest.mark.parametrize("clobber", [None, ""])
+def test_hip_barrier_valid_clobber(arch, roundtrip, clobber):
+    b = IRBuilder("barrier_clobber")
+    result = b.optimization_barrier(b.param("value", F32))
+    baseline = lower_kernel_to_hip(b.kernel, arch=arch)
+    if clobber is not None:
+        result.op.attrs["clobber"] = clobber
+    kernel = parse(serialize(b.kernel)) if roundtrip else b.kernel
+    assert lower_kernel_to_hip(kernel, arch=arch) == baseline
+    assert 'asm ("" : "=v"' in baseline
+    assert "asm volatile" not in baseline
+
+
+@pytest.mark.parametrize("roundtrip", [False, True])
+@pytest.mark.parametrize("clobber", [False, True, 0, 1, 0.0, 1.0, "memory"])
+def test_hip_barrier_rejects_invalid_clobber(roundtrip, clobber):
+    b = IRBuilder("invalid_barrier_clobber")
+    result = b.optimization_barrier(b.param("value", F32))
+    result.op.attrs["clobber"] = clobber
+    kernel = parse(serialize(b.kernel)) if roundtrip else b.kernel
+    with pytest.raises(ValueError, match="clobber must be an empty string"):
+        lower_kernel_to_hip(kernel, arch="gfx1250")
+
+
+@pytest.mark.parametrize("roundtrip", [False, True])
+@pytest.mark.parametrize("sideeffect", [0, 1, 0.0, 1.0, "", "false"])
+def test_hip_inline_asm_rejects_non_bool_sideeffect(roundtrip, sideeffect):
+    b = IRBuilder("invalid_asm_sideeffect")
+    result = b.optimization_barrier(b.param("value", F32))
+    result.op.attrs["sideeffect"] = sideeffect
+    kernel = parse(serialize(b.kernel)) if roundtrip else b.kernel
+    with pytest.raises(ValueError, match="sideeffect must be a boolean"):
+        lower_kernel_to_hip(kernel, arch="gfx1250")
+
+
+@pytest.mark.parametrize("roundtrip", [False, True])
+@pytest.mark.parametrize("sideeffect", [None, False, True])
+@pytest.mark.parametrize("template", ["", "v_mov_b32 $0, $1"])
+def test_hip_inline_asm_preserves_bool_and_default_sideeffect(
+    roundtrip, sideeffect, template
+):
+    b = IRBuilder("asm_sideeffect")
+    result = b.inline_asm(template, "=v,0", [b.param("value", F32)], F32)
+    if sideeffect is None:
+        del result.op.attrs["sideeffect"]
+    else:
+        result.op.attrs["sideeffect"] = sideeffect
+    kernel = parse(serialize(b.kernel)) if roundtrip else b.kernel
+    hip = lower_kernel_to_hip(kernel, arch="gfx1250")
+    assert ("asm volatile" in hip) == (sideeffect is not False)
+    assert ('"memory"' in hip) == (sideeffect is not False)
+    if template:
+        assert "v_mov_b32 %0, %1" in hip
+
+
+def test_hip_general_pure_asm_preserves_explicit_memory_clobber():
+    b = IRBuilder("asm_clobber")
+    result = b.inline_asm(
+        "v_mov_b32 $0, $1", "=v,0", [b.param("value", F32)], F32, sideeffect=False
+    )
+    result.op.attrs["clobber"] = "memory"
+    hip = lower_kernel_to_hip(parse(serialize(b.kernel)), arch="gfx1250")
+    assert 'asm ("v_mov_b32 %0, %1"' in hip
+    assert '"memory"' in hip

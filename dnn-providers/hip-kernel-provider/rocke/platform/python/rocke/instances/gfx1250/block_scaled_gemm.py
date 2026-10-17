@@ -110,6 +110,8 @@ class BlockScaledGemmSpec:
     prefetch: bool = False
     scale_dtype_a: str | None = None
     scale_dtype_b: str | None = None
+    # Runtime tensor factors are supported for FP4/E4M3/SCALE16 (NVFP4) only.
+    tensor_scale: bool = False
 
     def resolved_scale_dtypes(self) -> tuple[str, str]:
         aliases = {"i8": "e8m0", "fp8e4m3": "e4m3"}
@@ -140,6 +142,7 @@ class BlockScaledGemmSpec:
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
             flags={
                 self.resolved_matrix_path(): True,
+                "tensor_scale": self.tensor_scale,
                 **{
                     f"s{operand}_{dtype}": True
                     for operand, dtype in zip("ab", self.resolved_scale_dtypes())
@@ -229,6 +232,16 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         return False, f"accumulator dtype must be fp32 (got {spec.dtype_acc!r})"
     if spec.layout != "RCR":
         return False, f"block_scaled_gemm supports RCR only (got {spec.layout!r})"
+    if spec.tensor_scale and not native_scale:
+        return False, "tensor scales require native scaled WMMA"
+    if spec.tensor_scale and (
+        spec.dtype_a != normalize_dtype("fp4")
+        or spec.dtype_b != normalize_dtype("fp4")
+        or matrix_path != "wmma_scale16"
+        or spec.block_k != 16
+        or spec.resolved_scale_dtypes() != ("e4m3", "e4m3")
+    ):
+        return False, "tensor scales require the FP4/E4M3/SCALE16 NVFP4 contract"
     if native_scale:
         required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
@@ -280,7 +293,7 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
         if spec.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
         else _wire_scale_dtype(spec.scale_dtype)
     )
-    return (
+    signature = (
         SignatureBuilder()
         .ptr(
             "A",
@@ -304,8 +317,10 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
-        .build()
     )
+    if spec.tensor_scale:
+        signature.scalar("A_tensor_scale", "f32").scalar("B_tensor_scale", "f32")
+    return signature.build()
 
 
 def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
@@ -388,6 +403,11 @@ def build_block_scaled_gemm(
     M = ir.param("M", I32)  # noqa: F841 - ABI mirror; grid defines bounds
     N = ir.param("N", I32)  # noqa: F841
     K = ir.param("K", I32)  # noqa: F841
+
+    if spec.tensor_scale:
+        a_tensor_scale = ir.param("A_tensor_scale", F32)
+        b_tensor_scale = ir.param("B_tensor_scale", F32)
+        tensor_scale = ir.fmul(a_tensor_scale, b_tensor_scale)
 
     cK = ir.const_i32(spec.K)
     cN = ir.const_i32(spec.N)
@@ -509,9 +529,13 @@ def build_block_scaled_gemm(
         for i in range(_ACC):
             out_row = ir.add(row_base, ir.const_i32(i))
             idx = ir.add(ir.mul(out_row, cN), out_col)
-            ir.global_store(
-                C, idx, ir.cast_f32_to(ir.vec_extract(acc, i), c_ty), align=2
-            )
+            value = ir.vec_extract(acc, i)
+            if spec.tensor_scale:
+                value = ir.fmul(value, tensor_scale)
+                if c_ty == F16:
+                    # Preserve FP32 rounding before the final FP16 conversion.
+                    value = ir.optimization_barrier(value)
+            ir.global_store(C, idx, ir.cast_f32_to(value, c_ty), align=2)
         return ir.kernel
 
     # Per-lane f32 output accumulators (8 column-distributed slots).

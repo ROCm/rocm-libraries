@@ -8,6 +8,7 @@
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 
 #define CHECK(x)                                                       \
@@ -135,10 +136,159 @@ static int test_predicate()
     return 0;
 }
 
+static int test_tensor_epilogue_hip()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "tensor_epilogue") == ROCKE_OK);
+    auto* output = rocke_b_param(&b, "output", rocke_ptr_type(&b, rocke_f16(), "global"), nullptr);
+    auto* acc = rocke_b_param(&b, "acc", rocke_f32(), nullptr);
+    auto* factor_a = rocke_b_param(&b, "factor_a", rocke_f32(), nullptr);
+    auto* factor_b = rocke_b_param(&b, "factor_b", rocke_f32(), nullptr);
+    auto* factors = rocke_b_fmul(&b, factor_a, factor_b);
+    auto* scaled = rocke_b_fmul(&b, acc, factors);
+    auto* opaque = rocke_b_optimization_barrier(&b, scaled);
+    rocke_b_global_store(
+        &b, output, rocke_b_thread_id_x(&b), rocke_b_cast_f32_to(&b, opaque, rocke_f16()), 2);
+    rocke_b_ret(&b);
+    char* serialized = nullptr;
+    CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+    rocke_ir_builder_t copy;
+    CHECK(rocke_ir_builder_init(&copy, "imported_epilogue") == ROCKE_OK);
+    rocke_kernel_def_t* kernel = nullptr;
+    CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+    free(serialized);
+    rocke_lower_hip_opts_t opts = {};
+    opts.arch = "gfx1250";
+    rocke_strbuf_t original = {}, imported = {};
+    CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == ROCKE_OK);
+    CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == ROCKE_OK);
+    CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+    CHECK(strstr(imported.cstr(), "factor_a * factor_b") != nullptr);
+    CHECK(strstr(imported.cstr(), "asm (\"\" : \"=v\"") != nullptr);
+    CHECK(strstr(imported.cstr(), "asm volatile") == nullptr);
+    original.free_buffer();
+    imported.free_buffer();
+    rocke_ir_builder_free(&copy);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+static int test_hip_clobber_admission()
+{
+    for(int kind = 0; kind < 8; ++kind)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "barrier_clobber") == ROCKE_OK);
+        auto* value = rocke_b_param(&b, "value", rocke_f32(), nullptr);
+        auto* result = rocke_b_optimization_barrier(&b, value);
+        CHECK(result);
+        if(kind == 1)
+            rocke_attr_set_str(&b, &result->op->attrs, "clobber", "");
+        else if(kind == 2)
+            rocke_attr_set_int(&b, &result->op->attrs, "clobber", 1);
+        else if(kind == 3)
+            rocke_attr_set_bool(&b, &result->op->attrs, "clobber", false);
+        else if(kind == 4)
+            rocke_attr_set_str(&b, &result->op->attrs, "clobber", "memory");
+        else if(kind == 5)
+            rocke_attr_set_int(&b, &result->op->attrs, "clobber", 0);
+        else if(kind == 6)
+            rocke_attr_set_float(&b, &result->op->attrs, "clobber", 0.0);
+        else if(kind == 7)
+            rocke_attr_set_bool(&b, &result->op->attrs, "clobber", true);
+        rocke_b_ret(&b);
+
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_clobber") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        rocke_strbuf_t original = {}, imported = {};
+        auto expected = kind < 2 ? ROCKE_OK : ROCKE_ERR_NOTIMPL;
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == expected);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == expected);
+        if(expected == ROCKE_OK)
+        {
+            CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+            CHECK(strstr(imported.cstr(), "asm (\"\" : \"=v\"") != nullptr);
+        }
+        else
+        {
+            CHECK(!original.cstr() || !strstr(original.cstr(), "asm (\"\""));
+            CHECK(!imported.cstr() || !strstr(imported.cstr(), "asm (\"\""));
+        }
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
+static int test_hip_sideeffect_admission()
+{
+    for(int kind = 0; kind < 8; ++kind)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "barrier_sideeffect") == ROCKE_OK);
+        auto* result
+            = rocke_b_optimization_barrier(&b, rocke_b_param(&b, "value", rocke_f32(), nullptr));
+        CHECK(result);
+        if(kind == 1)
+            rocke_attr_set_bool(&b, &result->op->attrs, "sideeffect", true);
+        else if(kind == 2 || kind == 3)
+            rocke_attr_set_int(&b, &result->op->attrs, "sideeffect", kind - 2);
+        else if(kind == 4 || kind == 5)
+            rocke_attr_set_float(&b, &result->op->attrs, "sideeffect", kind - 4);
+        else if(kind == 6 || kind == 7)
+            rocke_attr_set_str(&b, &result->op->attrs, "sideeffect", kind == 6 ? "" : "false");
+        rocke_b_ret(&b);
+
+        char* serialized = nullptr;
+        CHECK(rocke_ir_serialize(b.kernel, &serialized) == ROCKE_OK);
+        rocke_ir_builder_t copy;
+        CHECK(rocke_ir_builder_init(&copy, "imported_sideeffect") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = nullptr;
+        CHECK(rocke_ir_parse(serialized, &copy, &kernel) == ROCKE_OK);
+        free(serialized);
+
+        rocke_lower_hip_opts_t opts = {};
+        opts.arch = "gfx1250";
+        rocke_strbuf_t original = {}, imported = {};
+        auto expected = kind == 0 ? ROCKE_OK : ROCKE_ERR_NOTIMPL;
+        CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &original) == expected);
+        CHECK(rocke_lower_kernel_to_hip(&copy, kernel, &opts, &imported) == expected);
+        if(expected == ROCKE_OK)
+        {
+            CHECK(strcmp(original.cstr(), imported.cstr()) == 0);
+            CHECK(strstr(imported.cstr(), "asm (\"\" : \"=v\"") != nullptr);
+            CHECK(strstr(imported.cstr(), "asm volatile") == nullptr);
+        }
+        else
+        {
+            CHECK(!original.cstr() || !strstr(original.cstr(), "asm (\"\""));
+            CHECK(!imported.cstr() || !strstr(imported.cstr(), "asm (\"\""));
+        }
+        original.free_buffer();
+        imported.free_buffer();
+        rocke_ir_builder_free(&copy);
+        rocke_ir_builder_free(&b);
+    }
+    return 0;
+}
+
 int main()
 {
     int admission = test_admission();
     int scalars = test_scalars();
     int predicate = test_predicate();
-    return admission || scalars || predicate;
+    int hip = test_tensor_epilogue_hip();
+    int clobber = test_hip_clobber_admission();
+    int sideeffect = test_hip_sideeffect_admission();
+    return admission || scalars || predicate || hip || clobber || sideeffect;
 }

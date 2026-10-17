@@ -240,3 +240,8 @@ as described in the notes.
   `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
   gfx950 against an fp32 reference, covering both the output and the in-place
   recurrent-state update.
+
+The gfx1250 `NvFp4GemmSpec` builder consumes packed E2M1 with K=16 E4M3
+block scales and runtime FP32 tensor factors, producing BF16 or FP16 output.
+It is a packed-input example; numerical validation uses bounded exact fixtures.
+See [the NVFP4 input contract](../examples/gfx1250/gemm/NVFP4.md).
