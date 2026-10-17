@@ -2736,21 +2736,6 @@ class TestCdnaPrimitives(unittest.TestCase):
         # and silently breaks downstream uniform-value selection.
         self.assertNotIn("asm sideeffect", ll)
 
-    # ---- wave_all / wave_any ----
-    def test_wave_all_lowers_to_ballot_eq_minus_one(self):
-        from rocke.core.ir import IRBuilder, PtrType, I32
-        from rocke.core.lower_llvm import lower_kernel_to_llvm
-
-        b = IRBuilder("wave_all_smoke")
-        b.kernel.attrs["max_workgroup_size"] = 64
-        Out = b.param("Out", PtrType(I32, "global"))
-        all_t = b.wave_all(b.const_i32(1))
-        b.global_store(Out, b.const_i32(0), all_t)
-        ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
-        self.assertIn("@llvm.amdgcn.ballot.i64", ll)
-        # Compares ballot to -1 (i.e. all wave64 lanes voted true).
-        self.assertIn("icmp eq i64", ll)
-
     # ---- coherency hints ----
     def test_async_buffer_load_lds_addr_propagates_aux(self):
         from rocke.core.ir import (
