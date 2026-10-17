@@ -320,6 +320,42 @@ namespace TensileLite
                    || (sizeMapping.hasHybridAssignment() && effectiveDynamic);
         }
 
+        // Work item i sits in queue i % numQueues, and a workgroup only pops
+        // its home queue (rank % numQueues) or, with stealing, the next one.
+        // Every non-empty queue therefore needs at least one home workgroup,
+        // or its items are never processed (and a tile whose parts are spread
+        // over queues never completes its fixup). The queue counters' auto-
+        // reset bound assumes the same. Only debug overrides
+        // (TENSILE_STREAMK_FIXED_GRID / _TILES / _SPLIT) can break it today.
+        inline void assertStreamKDynamicGridCoversQueues(Hardware const& hardware,
+                                                         size_t          grid,
+                                                         size_t          totalItems)
+        {
+            const size_t numQueues = streamKBakedQueueCount(hardware);
+            TENSILE_ASSERT_EXC(grid >= std::min(totalItems, numQueues)
+                               && "dynamic StreamK grid leaves a non-empty work queue "
+                                  "without a home workgroup");
+        }
+
+        // Work items of a dynamic StreamK launch: whole tiles, plus SKSplit
+        // parts for each of the SKTiles split tiles. Same arithmetic as the
+        // dynamic arg packers; tiles stay whole unless the debug overrides
+        // (TENSILE_STREAMK_TILES / _SPLIT) ask for a split.
+        inline size_t streamKDynamicTotalItems(Hardware const& hardware,
+                                               size_t          tiles,
+                                               size_t          itersPerTile)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            const int overrideTiles = pAMDGPU ? pAMDGPU->skTiles : -1;
+            const int overrideSplit = pAMDGPU ? pAMDGPU->skSplit : -1;
+            const size_t skTiles = overrideTiles > -1 ? static_cast<size_t>(overrideTiles) : 0;
+            uint32_t     skSplit = overrideSplit > -1 ? static_cast<uint32_t>(overrideSplit) : 2;
+            const uint32_t iters = static_cast<uint32_t>(std::max(size_t{1}, itersPerTile));
+            const uint32_t skItersPerWI = CeilDivide(iters, skSplit);
+            skSplit                     = CeilDivide(iters, skItersPerWI);
+            return (tiles - skTiles) + skTiles * skSplit;
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
@@ -1392,6 +1428,7 @@ namespace TensileLite
                 args.template append<uint32_t>("SKSplit", skSplit);
                 args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
                 args.template append<uint32_t>("SKGrid", launch.grid);
+                assertStreamKDynamicGridCoversQueues(*hardware, launch.grid, totalItems);
             }
             else if(sizeMapping.hasHybridAssignment())
             {
@@ -1451,6 +1488,8 @@ namespace TensileLite
                     args.template append<uint32_t>("SKItersPerWI",
                                                    sk4_skItersPerWI);
                     args.template append<uint32_t>("SKGrid", launch.grid);
+                    assertStreamKDynamicGridCoversQueues(
+                        *hardware, launch.grid, sk4_totalItems);
                 }
                 else
                 {
@@ -7125,6 +7164,30 @@ namespace TensileLite
                     {
                         warnStreamKUniformityGridSnapOnce(g0, grid);
                     }
+                }
+            }
+
+            // The dynamic work queues need a home workgroup for every
+            // non-empty queue (see assertStreamKDynamicGridCoversQueues, which
+            // stays as the final guard in the arg packers). Only a grid
+            // override or a tiny persistentMaxCUs can land below that, so
+            // raise the grid instead of failing the launch. Part of grid
+            // selection, so it runs before outSelectedGrid is captured.
+            if(grid > 0 && streamKUsesDynamicQueue(self.sizeMapping, sk5DynamicSubMode()))
+            {
+                const size_t totalItems = streamKDynamicTotalItems(
+                    hardware, tiles, problem.getItersPerTile(self.sizeMapping));
+                const size_t minGrid = std::min(totalItems, streamKBakedQueueCount(hardware));
+                if(grid < minGrid)
+                {
+                    if(Debug::Instance().printPropertyEvaluation())
+                    {
+                        std::cerr << "TensileLite::DEBUG: kernel '" << self.kernelName
+                                  << "' dynamic StreamK grid " << grid << " leaves work queues "
+                                  << "without a home workgroup; raising it to " << minGrid
+                                  << ".\n";
+                    }
+                    grid = minGrid;
                 }
             }
 

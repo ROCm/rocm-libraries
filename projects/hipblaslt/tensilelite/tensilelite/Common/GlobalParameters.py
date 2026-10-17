@@ -223,6 +223,10 @@ globalParameters["BatchMode"] = 0
 # corrupting a later launch rather than the one that left it. Only StreamK,
 # GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
 globalParameters["CheckSynchronizer"] = True
+# Validate final output and (when enabled) synchronizer state after each enqueue
+# group. Keeps consecutive launches uninterrupted; adds readback between groups.
+# Requires CEqualD=False so repeated launches preserve the reference inputs.
+globalParameters["ValidateAfterEnqueues"] = False
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
