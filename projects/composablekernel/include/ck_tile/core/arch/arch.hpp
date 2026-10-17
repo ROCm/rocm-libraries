@@ -1224,6 +1224,7 @@ CK_TILE_DEVICE index_t get_block_id() { return blockIdx.x; }
 
 CK_TILE_DEVICE void block_sync_load_raw(index_t cnt = 0)
 {
+    // Note: this doesn't force LDS to complete.
 #ifdef __gfx12__
     asm volatile("s_wait_loadcnt %0 \n"
                  "s_barrier_signal -1 \n"
@@ -1451,7 +1452,10 @@ CK_TILE_DEVICE void s_wait_dscnt()
 template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
-#if defined(__gfx125__)
+#if CK_TILE_HAS_ASYNCMARK
+    // We consistently asyncmark DMAs, so this will have the same effect on gfx12+.
+    __builtin_amdgcn_wait_asyncmark(N);
+#elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(N);
 #else
     (void)N;
@@ -1487,7 +1491,55 @@ CK_TILE_DEVICE void s_waitcnt_barrier()
 template <index_t lgkmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds()
 {
-    s_waitcnt_barrier<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
+    // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make the
+    // barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses across
+    // it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
+    // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's wait
+    // could be elided when it was the first memory op in a loop (loop-carried counts mishandled);
+    // see ac4f0dc9 / ck::block_sync_lds.
+    s_waitcnt_lgkm<lgkmcnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+#if defined(__gfx12__)
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+#else
+    __builtin_amdgcn_s_barrier();
+#endif
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+}
+
+// Pre-asyncmark gfx9 FALLBACK for publishing direct/async global->LDS data across a barrier. The
+// explicit vmcnt(0) is load-bearing -- a workgroup-scope fence does not emit a vmem wait (verified
+// in ISA) -- and the "global" fence stops the optimizer from moving the VMEM loads across the
+// barrier; block_sync_lds() then does the LDS-side wait + "local" fence + barrier. Prefer
+// block_sync_lds_async_load() below; do not call directly from pipelines.
+template <index_t vmcnt = 0>
+CK_TILE_DEVICE void block_sync_lds_after_global_load()
+{
+    s_waitcnt<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
+    block_sync_lds();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
+}
+
+// Completes the outstanding asynchronous global->LDS DMA loads (down to `vmcnt` still in flight)
+// and publishes the LDS to the workgroup with a barrier. On the asyncmark path this is arch-
+// agnostic: wait_asyncmark(vmcnt) drains the async loads and is visible to the LLVM memory model
+// (no manual fence), then block_sync_lds() barriers. Otherwise it falls back per arch (gfx125
+// asynccnt, gfx9 via block_sync_lds_after_global_load). Pipelines should call this rather than
+// block_sync_lds_after_global_load() directly.
+template <index_t vmcnt = 0>
+CK_TILE_DEVICE void block_sync_lds_async_load()
+{
+#if CK_TILE_HAS_ASYNCMARK
+    __builtin_amdgcn_wait_asyncmark(vmcnt);
+    block_sync_lds();
+#elif defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    block_sync_lds();
+#else
+    block_sync_lds_after_global_load<vmcnt>();
+#endif
 }
 
 template <index_t tensorcnt = 0>
@@ -1508,12 +1560,25 @@ CK_TILE_DEVICE void s_wait_tensorcnt_barrier()
 template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_direct_load()
 {
-#if defined(__gfx125__)
+    // Publishes direct-to-LDS loaded data to a workgroup, keeping a partial `vmcnt`
+    // worth of async loads in flight (the partial count must be preserved).
+#if CK_TILE_HAS_ASYNCMARK
+    // The loads were issued as async-form DMAs with an asyncmark() each; wait_asyncmark(vmcnt)
+    // drains to `vmcnt` outstanding (memory-model-visible, no manual fence) and block_sync_lds()
+    // supplies the LDS "local" fence + barrier.
+    s_wait_asynccnt<vmcnt>();
+    block_sync_lds();
+#elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
-    s_waitcnt_barrier<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    s_waitcnt<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #endif
 }
 
