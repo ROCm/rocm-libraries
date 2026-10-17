@@ -6596,7 +6596,9 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     if self.states.IncLdsBufSwitch:
       # initialize inc register for LocalReadAddress
-      if initSreg:
+      # (papDtlRestoreLdsBank owns it with DTL PAP; resetting here would drop
+      # the restored PAP bank before the first local-read swap)
+      if initSreg and not self.papDtlOwnsLdsBufferReadInc(kernel):
         module.add(SMovB32(
           dst=sgpr("LDSBufferReadInc"), \
           src=0, \
@@ -18477,7 +18479,8 @@ class KernelWriterAssembly(KernelWriter):
       barrier = SBarrier(comment="reuse vector epilogue LDS scratch")
       barrier.setMemToken(MemTokenData([self.states.memTokenEpilogue]))
       module.add(barrier)
-    elif kernel["LdsOffsetBias"] == 0:
+    # Persistent PAP tiles reuse this area from the previous tile's epilogue.
+    elif kernel["LdsOffsetBias"] == 0 or self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SBarrier(comment="wait for all global loads."))
 
     # rearrange them and add waitcnt
@@ -21091,9 +21094,26 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(skipLbl)
     return mod
 
+  def papDtlOwnsLdsBufferReadInc(self, kernel: Mapping) -> bool:
+    # Same gate as the papDtlRestoreLdsBank call in setupNewTile.
+    return (self.states.IncLdsBufSwitch and kernel["LdsOffsetA_Blk"] != 0
+            and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
+            and self.isPrefetchAcrossPersistentEnabled(kernel))
+
+  def papDtlLdsBankMask(self, kernel: Mapping) -> int:
+    # Bits of PersistentPrefetchState that hold the PAP DTL LDS bank offset.
+    # With 3+ rotating buffers the bank is a multiple of LdsOffsetA_Blk, not a
+    # single bit. Bit 0 (primed) and bit 31 (reserved) must stay clear.
+    blk: int = kernel["LdsOffsetA_Blk"]
+    if not self.states.IncLdsBufSwitch:
+      return blk
+    mask: int = ((1 << ((self.states.numLDSBlk - 1) * blk).bit_length()) - 1) & ~1
+    assert blk % 2 == 0 and mask < 0x80000000
+    return mask
+
   def papDtlSaveLdsBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     # DTL PAP uses the same PersistentPrefetchState side channel as TDM. Bit 0 marks
-    # primed; LDS bank bits are ORed in when the prefetch lands in the high bank.
+    # primed; the LDS bank offset is ORed in when the prefetch lands outside bank 0.
     mod = Module("DTL save PAP LDS bank in PersistentPrefetchState")
     blkMask: int = kernel["LdsOffsetA_Blk"]
     if blkMask == 0:
@@ -21104,8 +21124,8 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
       if self.states.IncLdsBufSwitch:
-        mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("LDSBufferWriteInc"), src1=hex(blkMask),
-                comment="PAP DTL bank = LDSBufferWriteInc & LdsOffsetA_Blk"))
+        mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("LDSBufferWriteInc"), src1=hex(self.papDtlLdsBankMask(kernel)),
+                comment="PAP DTL bank = rotating LDSBufferWriteInc offset"))
       elif self.states.useCommonSgprSwap:
         mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("SwapCommon"), src1=hex(blkMask),
                 comment="PAP DTL bank = SwapCommon & LdsOffsetA_Blk"))
@@ -21127,12 +21147,14 @@ class KernelWriterAssembly(KernelWriter):
     if blkMask == 0:
       return mod
 
+    if self.states.IncLdsBufSwitch:
+      mod.add(SMovB32(dst=sgpr("LDSBufferReadInc"), src=0, comment="init LRAddr inc Sgpr"))
     mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="primed?"))
     mod.add(SCBranchSCC0(labelName=skipLbl.getLabelName(), comment="not primed, skip DTL bank restore"))
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       papBankSgpr = tmpSgprRes.idx
-      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("PersistentPrefetchState"), src1=hex(blkMask),
+      mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr("PersistentPrefetchState"), src1=hex(self.papDtlLdsBankMask(kernel)),
               comment="extract PAP DTL LDS bank from PersistentPrefetchState"))
       mod.add(SCmpEQU32(src0=sgpr(papBankSgpr), src1=0, comment="PAP DTL wrote to bank 0?"))
       mod.add(SCBranchSCC1(labelName=skipLbl.getLabelName(), comment="bank 0, no adjustment needed"))
@@ -21167,6 +21189,65 @@ class KernelWriterAssembly(KernelWriter):
                 src1=sgpr(papBankSgpr), comment=f"shift LocalReadAddr{tcMX} to PAP DTL bank"))
 
     mod.add(skipLbl)
+    return mod
+
+  def _papDtlTailTensors(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> list:
+    # Non-DTL tensors are held in G2L VGPRs by PAP, so their tail data can stay
+    # in bank 0.
+    tensors = []
+    for tP in (tPA, tPB):
+      if kernel["DirectToLds%s" % tP["tensorChar"]]:
+        tensors.append(tP)
+      if "MX" in tP and kernel["DirectToLds%s" % tP["MX"]["tensorChar"]]:
+        tensors.append(tP["MX"])
+    return tensors
+
+  def papDtlSelectTailLdsBank(self, kernel: Mapping, dstSgpr: int) -> Module:
+    mod = Module("DTL select tail LDS bank")
+    blkOffset: int = kernel["LdsOffsetA_Blk"]
+    mod.add(SAndB32(dst=sgpr(dstSgpr), src0=sgpr("PersistentPrefetchState"), src1=hex(self.papDtlLdsBankMask(kernel)),
+                    comment="extract PAP DTL LDS bank"))
+    mod.add(SCmpEQU32(src0=sgpr(dstSgpr), src1=0, comment="PAP DTL wrote bank 0?"))
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=blkOffset, src1=0,
+                        comment="tail uses the bank PAP did not write"))
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP data ready?"))
+    mod.add(SCSelectB32(dst=sgpr(dstSgpr), src0=sgpr(dstSgpr), src1=0, comment="no primed PAP, keep tail in bank 0"))
+    return mod
+
+  def papDtlShiftTailLdsWriteBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    # The tail resets its DTL writes to bank 0. When PAP has already put the
+    # next tile's first PGR group there, those writes would overwrite it.
+    mod = Module("DTL shift tail local-write LDS bank")
+    if kernel["LdsOffsetA_Blk"] == 0:
+      return mod
+    # m0 is LocalWriteAddr + LDSBufferWriteInc (0 after the reset) with 3+
+    # buffers, so shifting the per-tile LocalWriteAddr base covers both modes.
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      tailBankSgpr = tmpSgprRes.idx
+      mod.add(self.papDtlSelectTailLdsBank(kernel, tailBankSgpr))
+      if self.states.useCommonSgprSwap:
+        mod.add(SMovB32(dst=sgpr("SwapCommon"), src=sgpr(tailBankSgpr),
+                        comment="tail DTL writes avoid the PAP bank"))
+      for tP in self._papDtlTailTensors(kernel, tPA, tPB):
+        tc = tP["tensorChar"]
+        # m0 adds SwapCommon, but the non-DTL tail write address does not.
+        if self.states.useCommonSgprSwap and not kernel.get(f"NonDTLTailLoop{tc}", False):
+          continue
+        mod.add(SAddU32(dst=sgpr(f"LocalWriteAddr{tc}"), src0=sgpr(f"LocalWriteAddr{tc}"),
+                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalWriteAddr{tc} off the PAP bank"))
+    return mod
+
+  def papDtlShiftTailLdsReadBank(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    mod = Module("DTL shift tail local-read LDS bank")
+    if kernel["LdsOffsetA_Blk"] == 0:
+      return mod
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      tailBankSgpr = tmpSgprRes.idx
+      mod.add(self.papDtlSelectTailLdsBank(kernel, tailBankSgpr))
+      for tP in self._papDtlTailTensors(kernel, tPA, tPB):
+        tc = tP["tensorChar"]
+        mod.add(VAddU32(dst=vgpr(f"LocalReadAddr{tc}"), src0=vgpr(f"LocalReadAddr{tc}"),
+                        src1=sgpr(tailBankSgpr), comment=f"shift tail LocalReadAddr{tc} to tail DTL bank"))
     return mod
 
   def papTdmSelectTailLdsBank(self, kernel: Mapping, dstSgpr: int) -> Module:
