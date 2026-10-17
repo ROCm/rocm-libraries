@@ -158,8 +158,7 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         if (complexAccumulator)
             return {.reason = "Complex reference GEMM does not support block scaling."};
     }
-    const auto outputCount = tryElementCount(problem.d.shape().dimensions());
-    if (!outputCount) return {.reason = "Tensor shape element count exceeds size_t."};
+    const size_t outputCount = problem.d.shape().elementCount();
     if (!hasProvablyDistinctElementOffsets(problem.d.layout()))
         return {.reason = "Reference GEMM requires distinct logical destination elements."};
 
@@ -180,7 +179,7 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         return {.reason = "Reference GEMM destination must not overlap the B block scale."};
     if (!isValidIndexOrder(problem.d.shape().rank(), problem.outputSelection.indexOrder()))
         return {.reason = "Tensor index order must contain each dimension once."};
-    if (auto error = outputSelectionError(problem.outputSelection, *outputCount))
+    if (auto error = outputSelectionError(problem.outputSelection, outputCount))
         return {.reason = std::string(message(*error))};
     return {.supported = true};
 }
