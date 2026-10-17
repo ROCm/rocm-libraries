@@ -99,7 +99,9 @@ jobs:
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/ROCm.gpg.key
           EOF
-          dnf -y install cmake git git-lfs gzip tar unzip wget which \
+          # gcc, g++, and make are needed to build GTest below; the slim AlmaLinux
+          # image has no host compiler.
+          dnf -y install cmake gcc gcc-c++ git git-lfs gzip make tar unzip wget which \
             python3.11 python3.11-pip python3.11-devel
           # These are base SDK prerequisites that invoke --install-deps
           # expects the build image to provide.
@@ -339,6 +341,20 @@ jobs:
             exit 1
           fi
           dnf -y install "${rpms[@]}"
+
+      - name: Check ${{ matrix.binary }} shared-library dependencies
+        env:
+          TEST_BINARY: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          # The RPMs do not declare library dependencies automatically, so list any
+          # shared library the test binary needs that this container lacks.
+          missing="$(ldd "/opt/rocm/bin/$TEST_BINARY" | grep 'not found' || true)"
+          if [[ -n "$missing" ]]; then
+            echo "::error::$TEST_BINARY has unresolved shared libraries:"
+            echo "$missing"
+            exit 1
+          fi
 
       - name: Run ${{ matrix.binary }}
         env:
