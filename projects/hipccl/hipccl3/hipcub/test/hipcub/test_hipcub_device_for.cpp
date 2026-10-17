@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // required hipcub headers
 #include <hipcub/device/device_for.hpp>
@@ -42,13 +43,16 @@ struct DeviceForParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceForTests : public ::testing::Test
+class HipcubDeviceForTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                        = typename Params::input_type;
     static constexpr bool use_graphs        = Params::use_graphs;
     static constexpr bool debug_synchronous = false;
 };
+
+class HipcubDeviceForNonTypedTests : public test_controller::ControlledTest<>
+{};
 
 using custom_short2  = test_utils::custom_test_type<short>;
 using custom_int2    = test_utils::custom_test_type<int>;
@@ -100,7 +104,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -177,7 +181,7 @@ struct count_host_t
     }
 };
 
-TEST(HipcubDeviceForTests, ForEachTempStore)
+TEST_F(HipcubDeviceForNonTypedTests, ForEachTempStore)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -191,7 +195,7 @@ TEST(HipcubDeviceForTests, ForEachTempStore)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -278,7 +282,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -340,7 +344,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
     }
 }
 
-TEST(HipcubDeviceForTests, ForEachNTempStore)
+TEST_F(HipcubDeviceForNonTypedTests, ForEachNTempStore)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -354,7 +358,7 @@ TEST(HipcubDeviceForTests, ForEachNTempStore)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -440,7 +444,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -503,7 +507,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopy)
     }
 }
 
-TEST(HipcubDeviceForTests, ForEachCopyTempStore)
+TEST_F(HipcubDeviceForNonTypedTests, ForEachCopyTempStore)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -517,7 +521,7 @@ TEST(HipcubDeviceForTests, ForEachCopyTempStore)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -604,7 +608,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -665,7 +669,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachCopyN)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceForTests, ForCountingIterator)
+TEST_F(HipcubDeviceForNonTypedTests, ForCountingIterator)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -679,7 +683,7 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -718,7 +722,7 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
     }
 }
 
-TEST(HipcubDeviceForTests, ForCopyCountingIterator)
+TEST_F(HipcubDeviceForNonTypedTests, ForCopyCountingIterator)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -732,7 +736,7 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -772,7 +776,7 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
     }
 }
 
-TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
+TEST_F(HipcubDeviceForNonTypedTests, ForEachCopyNTempStore)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -786,7 +790,7 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 
@@ -887,12 +891,15 @@ struct DeviceForEachInExtentsParams
 };
 
 template<class Params>
-struct HipcubDeviceForEachInExtentsTests : public ::testing::Test
+struct HipcubDeviceForEachInExtentsTests : public test_controller::ControlledTest<>
 {
     using extents_type                      = typename Params::extents_type;
     static constexpr bool use_graphs        = Params::use_graphs;
     static constexpr bool debug_synchronous = false;
 };
+
+class HipcubDeviceForEachInExtentsNonTypedTests : public test_controller::ControlledTest<>
+{};
 
 template<class IndexType>
 using HipcubDeviceForEachInExtentsParamGenerator
@@ -982,7 +989,7 @@ struct ForEachInExtentsOp
 
 TYPED_TEST_SUITE(HipcubDeviceForEachInExtentsTests, HipcubDeviceForEachInExtentsTestsParams);
 
-TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
+TEST_F(HipcubDeviceForEachInExtentsNonTypedTests, ForEachInExtentsAPI)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -1073,6 +1080,9 @@ template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
 {};
 
+class HipcubDeviceForBulkNonTypedTests: public test_controller::ControlledTest<>
+{};
+
 using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<int32_t>,
                                                         DeviceForParams<uint32_t>,
                                                         DeviceForParams<_HIPCUB_STD::int64_t>,
@@ -1109,7 +1119,7 @@ TYPED_TEST(HipcubDeviceForBulkTests, Bulk)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -1141,7 +1151,7 @@ TYPED_TEST(HipcubDeviceForBulkTests, Bulk)
     }
 }
 
-TEST(HipcubDeviceForBulkTests, BulkTempStore)
+TEST_F(HipcubDeviceForBulkNonTypedTests, BulkTempStore)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -1155,7 +1165,7 @@ TEST(HipcubDeviceForBulkTests, BulkTempStore)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             hipStream_t stream = 0; // default
 

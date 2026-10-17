@@ -27,6 +27,7 @@
 #endif
 
 #include "common_test_header.hpp"
+#include "test_utils_controller.hpp"
 
 // hipcub API
 #include <hipcub/device/device_histogram.hpp>
@@ -126,8 +127,21 @@ struct params1
     static constexpr bool use_graphs          = UseGraphs;
 };
 
+struct TupleTransformer
+{
+    using size_type = std::tuple<size_t, size_t, size_t>;
+    size_t operator()(const size_type& size) const
+    {
+        const size_t rows = std::get<0>(size);
+        const size_t columns = std::get<1>(size);
+        const size_t row_stride = columns + std::get<2>(size);
+        const size_t input_size = std::max<size_t>(1, rows * row_stride);
+        return input_size;
+    }
+};
+
 template<class Params>
-class HipcubDeviceHistogramEven : public ::testing::Test {
+class HipcubDeviceHistogramEven : public test_controller::ControlledTest<TupleTransformer> {
 public:
     using params = Params;
 };
@@ -186,7 +200,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -339,7 +353,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
 // Test HistogramEven overflow
 template<class Params>
-class HipcubDeviceHistogramEvenOverflow : public ::testing::Test
+class HipcubDeviceHistogramEvenOverflow : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -382,6 +396,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
     hipStream_t stream = 0; // default
 
     const size_t size = 1000;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -461,7 +476,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceHistogramRange : public ::testing::Test {
+class HipcubDeviceHistogramRange : public test_controller::ControlledTest<TupleTransformer> {
 public:
     using params = Params;
 };
@@ -515,7 +530,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
         TestFixture::params::max_bin_length
     );
 
-    for(auto dim : get_dims())
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -705,8 +720,24 @@ struct params3
     static constexpr bool use_graphs              = UseGraphs;
 };
 
+struct TupleTransformerWithChannels
+{
+    using size_type = std::tuple<size_t, size_t, size_t>;
+    size_t operator()(const size_type& size) const
+    {
+        const size_t rows = std::get<0>(size);
+        const size_t columns = std::get<1>(size);
+        const size_t row_stride = columns * TupleTransformerWithChannels::channels + std::get<2>(size);
+        const size_t input_size = std::max<size_t>(1, rows * row_stride);
+        return input_size;
+    }
+
+    inline static unsigned int channels = 1;
+};
+
 template<class Params>
-class HipcubDeviceHistogramMultiEven : public ::testing::Test {
+class HipcubDeviceHistogramMultiEven : public test_controller::ControlledTest<TupleTransformerWithChannels>
+{
 public:
     using params = Params;
 };
@@ -788,7 +819,8 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+    TupleTransformerWithChannels::channels = channels;
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -1028,7 +1060,8 @@ struct params4
 };
 
 template<class Params>
-class HipcubDeviceHistogramMultiRange : public ::testing::Test {
+class HipcubDeviceHistogramMultiRange : public test_controller::ControlledTest<TupleTransformerWithChannels>
+{
 public:
     using params = Params;
 };
@@ -1093,7 +1126,8 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+    TupleTransformerWithChannels::channels = channels;
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<

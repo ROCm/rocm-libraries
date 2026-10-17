@@ -27,6 +27,7 @@
 
 #include "single_index_iterator.hpp"
 #include "test_utils_bfloat16.hpp"
+#include "test_utils_controller.hpp"
 #include "test_utils_data_generation.hpp"
 
 // Params for tests
@@ -51,7 +52,7 @@ struct DeviceScanParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceScanTests : public ::testing::Test
+class HipcubDeviceScanTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                 = typename Params::input_type;
@@ -60,6 +61,9 @@ public:
     using key_type                   = typename Params::key_type;
     static constexpr bool use_graphs = Params::use_graphs;
 };
+
+class HipcubDeviceScanNonTypedTests : public test_controller::ControlledTest<>
+{};
 
 using HipcubDeviceScanTestsParams = ::testing::Types<
     DeviceScanParams<int, long>,
@@ -161,7 +165,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)
@@ -353,7 +357,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)
@@ -536,7 +540,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)
@@ -722,7 +726,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)
@@ -926,7 +930,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)
@@ -1086,7 +1090,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
+TEST_F(HipcubDeviceScanNonTypedTests, LargeIndicesInclusiveScan)
 {
     using T              = unsigned int;
     using InputIterator  = test_utils::counting_iterator<T>;
@@ -1156,7 +1160,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
+TEST_F(HipcubDeviceScanNonTypedTests, LargeIndicesExclusiveScan)
 {
     using T              = unsigned int;
     using InputIterator  = test_utils::counting_iterator<T>;
@@ -1278,7 +1282,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_utils::get_sizes(seed_value))
+        for(size_t size : CHECK_SIZE_FILTERS(test_utils::get_sizes(seed_value)))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
             if(single_op_precision * size > 0.5)

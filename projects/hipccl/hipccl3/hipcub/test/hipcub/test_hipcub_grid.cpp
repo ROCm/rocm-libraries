@@ -34,6 +34,11 @@
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>
 
+#include "test_utils_controller.hpp"
+
+class HipcubGridTests : public test_controller::ControlledTest<>
+{};
+
 template<
     int32_t BlockSize,
     class T,
@@ -64,7 +69,7 @@ __global__ void KernelGridEvenShare(
     }
 }
 
-TEST(HipcubGridTests, GridEvenShare)
+TEST_F(HipcubGridTests, GridEvenShare)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -75,6 +80,7 @@ TEST(HipcubGridTests, GridEvenShare)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -187,7 +193,7 @@ __global__ void KernelGridQueue(
     }
 }
 
-TEST(HipcubGridTests, GridQueue)
+TEST_F(HipcubGridTests, GridQueue)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -198,6 +204,7 @@ TEST(HipcubGridTests, GridQueue)
     constexpr size_t block_size = 256;
     constexpr size_t size = block_size * 113;
     constexpr size_t grid_size = size / block_size;
+    CHECK_SIZE_ENABLEMENT(size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
