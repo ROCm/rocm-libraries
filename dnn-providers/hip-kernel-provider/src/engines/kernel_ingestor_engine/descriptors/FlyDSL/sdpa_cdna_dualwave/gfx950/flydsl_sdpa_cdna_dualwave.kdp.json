@@ -1,0 +1,540 @@
+{
+  "version": "1.0",
+  "id": "5ee48f4c-9ed9-5347-9a87-a43f88273e9d",
+  "name": "flydsl sdpa_cdna_dualwave kernels (gfx950)",
+  "arch": [
+    "gfx950"
+  ],
+  "matchers": [
+    "13c21633-2a68-5dbb-951f-7fc9e7c730a2"
+  ],
+  "engine": "28b2f769-e3c4-57cd-91c8-3327594a0760",
+  "dispatch": "7dfb2580-44c9-5aef-90d6-0c5cc31a75b5",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "28b2f769-e3c4-57cd-91c8-3327594a0760",
+          "kmd_id": "798ed3e1-93e3-5c95-8bab-c8c767225601",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "head_dim",
+            "causal",
+            "block_m",
+            "any_diagonal",
+            "waves_per_eu",
+            "has_bias",
+            "setprio",
+            "head_dim_v"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "05f38792-3548-5e36-9799-a3286e621d69",
+      "name": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_prio0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_prio0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 0,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "124172bb-cf94-5355-9f7c-d44d99483311",
+      "name": "sdpa_cdna_dualwave_bf16_d64_causal1_bm256",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d64_causal1_bm256.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "60f0d094-5cd1-5aaa-89dd-07b381217dd3",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal0_bm256_prio0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal0_bm256_prio0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 0,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "156a5b21-304b-5da4-8e28-6195ee7ff4b0",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d5e19778-d8bf-57e8-a4c9-b2bead11e7f9",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_anydiag0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_anydiag0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "f21f346b-c0c4-5cc8-9bf6-a75fccdd8b6f",
+      "name": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d64_causal0_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f0363e4c-15c8-5f1c-8b08-5996e5030125",
+      "name": "sdpa_cdna_dualwave_bf16_d64_causal1_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d64_causal1_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f7ded015-7a63-56f7-a27b-65890ccd02e1",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal0_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal0_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a0cebef4-537e-5c0a-817b-512a32e13093",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "fc4ee019-7dc3-5e0c-b9a9-7f53b75853be",
+      "name": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_anydiag0_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_bf16_d128_causal1_bm256_anydiag0_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "1e660d86-81e5-5c83-8706-be0b62c671d8",
+      "name": "sdpa_cdna_dualwave_f16_d64_causal0_bm256_prio0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d64_causal0_bm256_prio0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 0,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "555e534d-7aac-5027-894b-243f53ad716c",
+      "name": "sdpa_cdna_dualwave_f16_d64_causal1_bm256",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d64_causal1_bm256.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e04353b8-2f7c-508a-93ff-eca27177ee3b",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal0_bm256_prio0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal0_bm256_prio0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 0,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "e541ed45-d38f-59a8-b17d-40bcd70f5fd3",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal1_bm256",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal1_bm256.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4f3d1f8e-eacf-5c4d-b133-a9f5a7d98afb",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_anydiag0",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_anydiag0.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 0,
+        "waves_per_eu": 0,
+        "has_bias": 0,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "107d7efd-fd32-58cc-af90-be7923288661",
+      "name": "sdpa_cdna_dualwave_f16_d64_causal0_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d64_causal0_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "ee234ef1-bdfb-5c85-8756-9720f665ae23",
+      "name": "sdpa_cdna_dualwave_f16_d64_causal1_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d64_causal1_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 64,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 64
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "73d11e86-f46e-52a9-a3e8-c3b80da1f775",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal0_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal0_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 0,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "2a312141-3365-5a2b-bed4-c5d605584de7",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 1,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "618f9edc-9039-58c8-b993-1a75355967c9",
+      "name": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_anydiag0_bias1",
+      "arch": [
+        "gfx950"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "sdpa_cdna_dualwave_f16_d128_causal1_bm256_anydiag0_bias1.hsaco",
+        "symbol": "flash_attn_dualwave_swp_gfx950_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "head_dim": 128,
+        "causal": 1,
+        "block_m": 256,
+        "any_diagonal": 0,
+        "waves_per_eu": 0,
+        "has_bias": 1,
+        "setprio": 1,
+        "head_dim_v": 128
+      },
+      "priority": 110
+    }
+  ]
+}

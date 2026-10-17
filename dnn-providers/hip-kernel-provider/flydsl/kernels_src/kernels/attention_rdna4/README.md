@@ -104,6 +104,29 @@ Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** b
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and
 under GQA, O is at bf16 precision and the LSE within 2e-6.
 
+## Checked against the CDNA kernels' defects
+
+Of the three defects found in the CDNA kernels (`../attention_cdna/README.md`,
+modifications 21-23), two cannot occur here: the softmax scale multiplies the f32 scores
+after the QK product rather than a bf16 Q before it, and the running max's finite floor
+is already in the scaled domain, so no scale can overflow it.
+
+The third, fast math licensing an -inf away as poison, does not occur here either.
+The softmax operations carry explicit no-NaNs, not no-infinities, flags
+(`fp_mode="noninf"`). Two broader settings stay on, as upstream ships them: the
+ambient `fast_fp_math` hint, which includes no-infinities, and the backend's
+`unsafe_fp_math`. They cannot reach the -inf because of how it is chosen. A row no
+key reaches is detected by an *integer* test on the bit pattern of its sum `l`, and
+the -inf is a literal in a select on that test. There is no float comparison against
+infinity for a no-infinities flag to fold, and a poisoned value in the select's
+other arm is never chosen. Checked on gfx1201, idle and under a concurrent GPU load
+(the condition that exposed the CDNA defect):
+- bottom-right causal with Sq > Skv, and windows that leave rows empty
+- f16 and bf16, d64 and d128, with and without a sink
+
+Across 6,192 empty rows per pass, every LSE is exactly -inf (the sink's value with a
+sink) and O is 0.
+
 ## Preconditions (not modifications)
 
 - **Head dims.** A build's head_dim is rounded up to a tile on the ladder
