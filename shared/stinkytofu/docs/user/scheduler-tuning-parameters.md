@@ -107,11 +107,20 @@ A held ds_load is released early only when no WMMA is ready to issue in its plac
 **Barrier sizing:** the ds_loads in front of a barrier are given `WMMAs / ds_loads` windows each,
 the same density the spread plans with, so the barrier thresholds and the pacer agree.
 
-**Removed options:** `DsReadPerCap`, `DsReadPerWmma`, `DsIssueCapSpanCycles`, `DsIssueCapMode`,
-`DsReadThrottleLatency`, `DsReadThrottleTransitionFactor`, `DsReadThrottleTransitionEntries` and
-`DsSlotFirst` (and the matching `stinkytofu-opt` flags and `--enable-wmma-hide-budget-prescan`)
-are still accepted but ignored, with a warning. TensileLite's `StinkyTofuDsIssueCapMode` and
-`StinkyTofuDsIssueCapSpanCycles` global parameters are gone.
+**Removed options and their replacements.** The old keys are still accepted by TensileLite
+(`StinkyTofuParameters`, `StinkyTofuModuleOptions`) but ignored, with a warning, so a tuned yaml
+loses its tuning unless it is translated:
+
+| Old option | What it did | Now |
+|---|---|---|
+| `DsReadThrottleLatency` T | lifetime of one LDS queue credit: a saturated queue gives one ds_load per `T / DsReadQueueDepth` cycles | `DsReadCyclesPerLoad = T / DsReadQueueDepth` (16 on gfx1250): 96 -> 6, 112 -> 7 |
+| `DsReadPerCap` A, `DsIssueCapSpanCycles` X, `DsIssueCapMode` | burst cap: at most A ds_loads per span X (default one WMMA window) | no equivalent: the per-batch share (`DsBatchWmmas`, `DsCatchUpPace`) replaces it |
+| `DsReadPerWmma`, `DsReadThrottleTransitionFactor`, `DsReadThrottleTransitionEntries`, `DsSlotFirst` | per-WMMA ds count, loads past the queue depth, ds before fillers | removed |
+| `DsReadDrainLatency` | barrier timing only | unchanged |
+
+The matching `stinkytofu-opt` flags and `--enable-wmma-hide-budget-prescan` are gone too.
+TensileLite's `StinkyTofuDsIssueCapMode` and `StinkyTofuDsIssueCapSpanCycles` global parameters are
+gone.
 
 **Shared ds issue pipe:** when `HWModel::lds.wavesPerDsIssuePipe > 1`,
 the issue cost of each ds_load is multiplied by `min(NumWaves, wavesPerDsIssuePipe)`.
