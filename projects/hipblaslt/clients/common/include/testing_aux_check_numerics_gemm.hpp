@@ -423,5 +423,166 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             << captured_log;
     }
 
+    // Pointer-array batched matmul (HIPBLASLT_BATCH_MODE_POINTER_ARRAY): D is a
+    // device array holding one matrix pointer per batch, so the scanner has to
+    // read each pointer instead of striding from D. Reading it as a strided
+    // buffer runs past the pointer array and faults the GPU. The NaN goes in
+    // the last batch so a scanner that only looks at batch 0 also fails.
+    // 128x128x128 fp32 matches matmul_pointer_array_distinct_c_d_layout_smoke,
+    // which has pointer-array solutions on every architecture that runs it.
+    constexpr int kNoNanBatch = -1;
+    auto run_pointer_array_scenario = [&](int nan_batch, uint32_t* out_reported) {
+        ASSERT_NE(out_reported, nullptr);
+        *out_reported = ~uint32_t(0);
+
+        constexpr int     M = 128, N = 128, K = 128;
+        constexpr int32_t kBatch = 3;
+        ASSERT_LT(nan_batch, kBatch);
+
+        hipblasLtHandle_t handle = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        hipStream_t stream = nullptr;
+        CHECK_HIP_ERROR(hipStreamCreate(&stream));
+
+        std::vector<float> A_clean(M * K, 1.0f);
+        std::vector<float> A_dirty = A_clean;
+        A_dirty[0]                 = std::numeric_limits<float>::quiet_NaN();
+        std::vector<float> B_h(K * N, 1.0f);
+
+        std::vector<float*> hA(kBatch, nullptr), hB(kBatch, nullptr), hC(kBatch, nullptr),
+            hD(kBatch, nullptr);
+        for(int32_t b = 0; b < kBatch; ++b)
+        {
+            CHECK_HIP_ERROR(hipMalloc(&hA[b], sizeof(float) * M * K));
+            CHECK_HIP_ERROR(hipMalloc(&hB[b], sizeof(float) * K * N));
+            CHECK_HIP_ERROR(hipMalloc(&hC[b], sizeof(float) * M * N));
+            CHECK_HIP_ERROR(hipMalloc(&hD[b], sizeof(float) * M * N));
+            const float* srcA = (b == nan_batch) ? A_dirty.data() : A_clean.data();
+            CHECK_HIP_ERROR(
+                hipMemcpy(hA[b], srcA, sizeof(float) * M * K, hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(
+                hipMemcpy(hB[b], B_h.data(), sizeof(float) * K * N, hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemset(hC[b], 0, sizeof(float) * M * N));
+        }
+
+        float **dA = nullptr, **dB = nullptr, **dC = nullptr, **dD = nullptr;
+        CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float*) * kBatch));
+        CHECK_HIP_ERROR(hipMalloc(&dB, sizeof(float*) * kBatch));
+        CHECK_HIP_ERROR(hipMalloc(&dC, sizeof(float*) * kBatch));
+        CHECK_HIP_ERROR(hipMalloc(&dD, sizeof(float*) * kBatch));
+        CHECK_HIP_ERROR(hipMemcpy(dA, hA.data(), sizeof(float*) * kBatch, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dB, hB.data(), sizeof(float*) * kBatch, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dC, hC.data(), sizeof(float*) * kBatch, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(dD, hD.data(), sizeof(float*) * kBatch, hipMemcpyHostToDevice));
+
+        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lC = nullptr, lD = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(&lA, HIP_R_32F, M, K, M),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(&lB, HIP_R_32F, K, N, K),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(&lC, HIP_R_32F, M, N, M),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(&lD, HIP_R_32F, M, N, M),
+                              HIPBLAS_STATUS_SUCCESS);
+        const int32_t batch_count = kBatch;
+        const int32_t batch_mode  = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        for(hipblasLtMatrixLayout_t l : {lA, lB, lC, lD})
+        {
+            EXPECT_HIPBLAS_STATUS(
+                hipblasLtMatrixLayoutSetAttribute(
+                    l, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_count, sizeof(batch_count)),
+                HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS(
+                hipblasLtMatrixLayoutSetAttribute(
+                    l, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batch_mode, sizeof(batch_mode)),
+                HIPBLAS_STATUS_SUCCESS);
+        }
+
+        hipblasLtMatmulDesc_t md = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescCreate(&md, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+                              HIPBLAS_STATUS_SUCCESS);
+        int32_t op = HIPBLAS_OP_N;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSB, &op, sizeof(op)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtMatmulPreference_t pref = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        uint64_t ws_size = 32ull * 1024ull * 1024ull;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                  &ws_size,
+                                                  sizeof(ws_size)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        hipblasLtMatmulHeuristicResult_t heur[1]{};
+        int                              got = 0;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulAlgoGetHeuristic(handle, md, lA, lB, lC, lD, pref, 1, heur, &got),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(got, 0);
+
+        void* dW = nullptr;
+        if(heur[0].workspaceSize > 0)
+            CHECK_HIP_ERROR(hipMalloc(&dW, heur[0].workspaceSize));
+
+        float alpha = 1.0f, beta = 0.0f;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                              md,
+                                              &alpha,
+                                              dA,
+                                              lA,
+                                              dB,
+                                              lB,
+                                              &beta,
+                                              dC,
+                                              lC,
+                                              dD,
+                                              lD,
+                                              &heur[0].algo,
+                                              dW,
+                                              heur[0].workspaceSize,
+                                              stream),
+                              HIPBLAS_STATUS_SUCCESS);
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(handle, out_reported),
+                              HIPBLAS_STATUS_SUCCESS);
+
+        if(dW)
+            CHECK_HIP_ERROR(hipFree(dW));
+        for(float** p : {dA, dB, dC, dD})
+            CHECK_HIP_ERROR(hipFree(p));
+        for(int32_t b = 0; b < kBatch; ++b)
+        {
+            CHECK_HIP_ERROR(hipFree(hA[b]));
+            CHECK_HIP_ERROR(hipFree(hB[b]));
+            CHECK_HIP_ERROR(hipFree(hC[b]));
+            CHECK_HIP_ERROR(hipFree(hD[b]));
+        }
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(md));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(lD));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(lC));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(lB));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(lA));
+        CHECK_HIP_ERROR(hipStreamDestroy(stream));
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+    };
+
+    reset_env();
+    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    run_pointer_array_scenario(/*nan_batch=*/2, &reported);
+    EXPECT_EQ(reported, 1u) << "NaN in the last pointer-array batch must be reported";
+
+    reset_env();
+    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    run_pointer_array_scenario(kNoNanBatch, &reported);
+    EXPECT_EQ(reported, 0u) << "clean pointer-array matmul must not be flagged";
+
     reset_env();
 }

@@ -583,6 +583,8 @@ namespace
         // Tensile builds column-major strides; row-major D has strides()[0] != 1.
         const bool        row_major = (prob.d().strides()[0] != 1);
         const hipDataType type_d    = tensile2HipType(prob.d().dataType());
+        const bool        ptr_array
+            = (prob.batchMode() == TensileLite::ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
 
         return hipblaslt_check_numerics_scan_D(handle,
                                                stream,
@@ -592,7 +594,8 @@ namespace
                                                D,
                                                ldd,
                                                stride_d,
-                                               row_major);
+                                               row_major,
+                                               ptr_array);
     }
 
     // Post-launch hook shared by single- and grouped-GEMM. Acquires one
