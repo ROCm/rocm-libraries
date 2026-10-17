@@ -109,6 +109,12 @@ For debugging, `TENSILE_PERSISTENT_HYBRID_FORCE_MODE` overrides the policy: `-1`
 The legacy environment alias `TENSILE_STREAMK5_FORCE_MODE` remains supported;
 the preferred environment name takes precedence when present.
 
+`hipblaslt-bench`, `hipblaslt-sequence`, and `hipblaslt-api-overhead` exit with an error when
+`HIPBLASLT_ADAPTIVE_SM_COUNT` is enabled without `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE`, because the
+adaptive hint can change the timed solution during a run. Set `HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE=<cus>`
+to time the solution adaptive mode picks at that CU count, and add
+`HIPBLASLT_ADAPTIVE_SM_COUNT_FORCE_PROBE=1` to include the probe cost.
+
 # demo
 Run fp32 GEMM with validation
 ```
