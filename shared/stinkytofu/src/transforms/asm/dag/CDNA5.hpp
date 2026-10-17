@@ -481,15 +481,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
     // WMMAs, Dynamic once the queued cover reaches the refill target. Returns whether a refill
     // is under way. wmmaLatency is the next WMMA's latency (sizes the auto target).
+    // A barrier is preceded by a tail of kBarrierTailWmmas WMMAs issued back to back: the wave
+    // waits for the stage's last ds_loads while the tail runs, so the tail hides that much of the
+    // drain. 4 is the best batch size measured on gfx1250 (never above 8, the useful queue depth).
+    // No ds_load is planned inside the tail: the sections and the consumer deadlines of the loads
+    // feeding a barrier end `wmmaBarrierReserve()` (= the tail) WMMAs before its threshold.
+    static constexpr int kBarrierTailWmmas = 4;
     // Queued cover to hold for a barrier (0 = off); see DagFeatures::wmmaBarrierCoverCycles.
     int wmmaBarrierCover(int wmmaLatency) const {
         const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
         if (wmmaQueueCover() <= 0 || f.wmmaBarrierCoverCycles == 0) return 0;
         if (f.wmmaBarrierCoverCycles < 0 && !f.dsSpread) return 0;
         const int fullQueue = wmmaQueueDepth() * std::max(1, wmmaLatency);
-        constexpr int kAutoBarrierCover = 72;
-        const int want =
-            f.wmmaBarrierCoverCycles < 0 ? kAutoBarrierCover : f.wmmaBarrierCoverCycles;
+        const int want = f.wmmaBarrierCoverCycles < 0 ? kBarrierTailWmmas * std::max(1, wmmaLatency)
+                                                      : f.wmmaBarrierCoverCycles;
         return std::min(want, fullQueue);
     }
     // WMMAs held back in front of a barrier's threshold to hide its stall.
@@ -2015,9 +2020,12 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             configuredDrainLatency > 0
                 ? configuredDrainLatency
                 : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
-        // The drain is not hidden by queued WMMA work: SQTT shows an empty WMMA queue at the stage
-        // barrier wait, so the whole drain latency needs WMMAs in front of the barrier.
-        const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
+        // Only the tail of WMMAs right before the barrier hides part of the drain; the rest needs
+        // WMMAs in front of it. (SQTT: a queue assumed to be full at the wait was empty.)
+        const int latencyWmmaBudget =
+            (std::max(0, latencyForAfterThreshold - wmmaBarrierCover(wmmaIssueConfig.latency)) /
+             wmmaIssueConfig.latency) +
+            1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
