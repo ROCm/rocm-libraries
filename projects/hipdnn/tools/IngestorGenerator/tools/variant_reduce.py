@@ -686,6 +686,10 @@ def _missing_pairs(attempts, arm) -> list:
     return [(n, c) for n in numbers for c in corpora if (n, c) not in present]
 
 
+#: The keys every ``expected_phases`` item of ``summary.json`` carries.
+_PHASE_KEYS = frozenset({"kind", "arm", "corpus", "round"})
+
+
 def _require_complete_arm(sweep_dir, attempts, arm) -> None:
     """Raise `IncompleteSweep` unless ``sweep.py`` finished every timing and
     correctness phase of ``arm`` and each timing phase ranked something. The
@@ -698,11 +702,23 @@ def _require_complete_arm(sweep_dir, attempts, arm) -> None:
         ]
         if not isinstance(expected, list):
             raise TypeError("expected_phases is not a list")
+        for index, phase in enumerate(expected):
+            if not isinstance(phase, dict) or not _PHASE_KEYS <= phase.keys():
+                raise TypeError(
+                    f"expected_phases[{index}] is not a mapping with "
+                    f"{', '.join(sorted(_PHASE_KEYS))}"
+                )
+            hash((phase["corpus"], phase["round"]))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise IncompleteSweep(
-            f"{summary_path}: missing or without 'expected_phases' ({exc}): the sweep "
-            "did not finish, so which phases it owed is unknown"
+            f"{summary_path}: missing, or its 'expected_phases' is unusable ({exc}): "
+            "the sweep did not finish, so which phases it owed is unknown"
         ) from exc
+    if not any(p["kind"] == "timing" and p["arm"] == arm for p in expected):
+        raise IncompleteSweep(
+            f"{summary_path}: lists no timing phase for arm {arm}, so the sweep's "
+            "claim to have finished it cannot be checked"
+        )
     found = {
         (r["phase"]["kind"], r["phase"]["corpus"], r["phase"]["round"]): attempt
         for attempt, r in attempts
@@ -710,7 +726,7 @@ def _require_complete_arm(sweep_dir, attempts, arm) -> None:
     }
     problems = []
     for phase in expected:
-        if phase.get("arm") != arm or phase.get("kind") not in (
+        if phase["arm"] != arm or phase["kind"] not in (
             "timing",
             "correctness",
         ):

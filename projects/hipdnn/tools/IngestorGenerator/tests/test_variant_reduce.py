@@ -346,6 +346,34 @@ def test_another_arms_missing_phase_does_not_refuse_this_arm(tmp_path):
     assert variant_reduce.main(args + ["--arm", "full"]) == 0
 
 
+@pytest.mark.parametrize(
+    "expected",
+    [
+        [1],
+        [{"kind": "timing", "arm": "full", "round": 1}],
+        [{"kind": "timing", "arm": "full", "corpus": ["c"], "round": 1}],
+        {"kind": "timing"},
+        [],
+        [{"kind": "timing", "corpus": "c", "arm": "other", "round": 1}],
+    ],
+    ids=[
+        "non-mapping-item",
+        "item-without-corpus",
+        "unhashable-corpus",
+        "not-a-list",
+        "no-expected-phases",
+        "phases-only-for-another-arm",
+    ],
+)
+def test_an_unusable_expected_phase_list_is_incomplete(tmp_path, capsys, expected):
+    args = build(tmp_path)
+    _summary(tmp_path).write_text(json.dumps({"expected_phases": expected}))
+    assert variant_reduce.main(args) == 3
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert not (tmp_path / "reduced.yaml").exists()
+
+
 def test_a_zero_time_entry_is_a_ranking(tmp_path):
     edit = lambda d: d["entries"][0].update(time_ms=0)  # noqa: E731
     assert variant_reduce.main(build(tmp_path, edit)) == 0
