@@ -37,6 +37,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LaunchDimGuard_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PersistentArgumentLayout_test.cpp"
