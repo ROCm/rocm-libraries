@@ -3,10 +3,13 @@
 
 """The C++ ``Gfx950AttentionDenseGeometry.hpp`` restates the Python LDS model.
 
-The header's constants and its ``isSupportedGfx950AttentionDenseTile`` rule are
-compared here with ``kernels.gfx950.attention_dense``, so a change to one side
-without the other fails. The header is a source file of this tree, so the check
-runs in the source-tree lane and fails when the header is absent.
+The header's constants are compared here with ``kernels.gfx950.attention_dense``,
+and the legal tile set is recomputed from those constants, so a change to a constant
+on one side without the other fails. The C++ tile rule
+``isSupportedGfx950AttentionDenseTile`` and its LDS formula are covered by the C++
+gtest ``TestGfx950AttentionDenseTile``, not here. The header is a source file of
+this tree, so the check runs in the source-tree lane and fails when the header is
+absent.
 """
 
 import re
