@@ -806,7 +806,8 @@ namespace rocsparse
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgeam_block_per_row_multipass_device2(rocsparse_direction dir,
+        bsrgeam_block_per_row_multipass_device2(rocsparse_int       row,
+                                                rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,
                                                 rocsparse_int       block_dim,
@@ -828,13 +829,13 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
         rocsparse_int lid = tid & (BLOCKSIZE / BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKSIZE / BLOCKDIM);
 
-        // Each block processes a row
-        rocsparse_int row = bid;
+        // Each block processes a row. `row` is supplied by the kernel wrapper from a
+        // grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers every
+        // block row.
 
         // Row entry marker and value accumulator
         __shared__ int table;
