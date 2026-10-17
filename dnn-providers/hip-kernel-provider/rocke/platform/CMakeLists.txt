@@ -494,9 +494,9 @@ if(ROCKE_INSTALL_TESTS)
     # ignored here. Same PYTHONPATH rule as the conv entry.
     #
     # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
-    # because pytest runs in importlib import mode (library/tests/pytest.ini), which
-    # does not put the test directory on sys.path, whatever the CWD
-    # (confirmed by tests/dispatch/attention/test_import_resolution.py).
+    # because library/tests/conftest.py puts the library root ahead of the test
+    # root on sys.path; importlib import mode alone does not prevent it
+    # (checked by tests/dispatch/attention/test_import_resolution.py).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_library_attention_pytest python -m pytest"
            " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_wmma_fmha_fwd_spec.py\""
