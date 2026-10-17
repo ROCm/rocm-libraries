@@ -408,11 +408,7 @@ def _id_index(kdp: dict) -> tuple[dict, list[str]]:
     ambiguous: list[str] = []
     for e in entries:
         name = e.get("name")
-        key = (
-            name
-            if name_counts[name] == 1
-            else (name, *binary_identity(e))
-        )
+        key = name if name_counts[name] == 1 else (name, *binary_identity(e))
         if key in index:
             ambiguous.append(str(name))
         index[key] = e.get("id")

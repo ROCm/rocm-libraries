@@ -595,9 +595,7 @@ def test_a_malformed_kmd_exits_2(tmp_path, capsys, fields):
     assert "KMD 'fields' must be an array of objects" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "name", [5, ["dtype"], None], ids=["numeric", "list", "null"]
-)
+@pytest.mark.parametrize("name", [5, ["dtype"], None], ids=["numeric", "list", "null"])
 def test_a_kmd_field_with_a_non_string_name_exits_2(tmp_path, capsys, name):
     kdp = _write(tmp_path / "a.kdp.json", _kdp([_entry("k0")]))
     good = _write(tmp_path / "a.kmd.json", _kmd([_field("dtype")]))

@@ -69,9 +69,7 @@ class TestExitCodes:
     def test_an_output_dir_that_is_a_file_exits_two(self, tmp_path):
         target = tmp_path / "out"
         target.write_text("not a directory")
-        result = run_cli(
-            "--config", str(SCALE_ADD_CONFIG), "--output-dir", str(target)
-        )
+        result = run_cli("--config", str(SCALE_ADD_CONFIG), "--output-dir", str(target))
         assert result.returncode == 2
         assert "Traceback" not in result.stderr
         assert str(target) in result.stderr

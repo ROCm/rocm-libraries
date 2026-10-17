@@ -161,7 +161,8 @@ class TestExpansion:
         """An arm's `metadata` states the matcher-visible value directly, so it is
         written in the vocabulary's values, not its builder keys."""
         kernels = _kernels(
-            tmp_path, knob_sets={"pair": [{"block_m": 128, "metadata": {"dtype": "BF16"}}]}
+            tmp_path,
+            knob_sets={"pair": [{"block_m": 128, "metadata": {"dtype": "BF16"}}]},
         )
         assert [k.metadata["dtype"] for k in kernels] == ["BF16"]
 
