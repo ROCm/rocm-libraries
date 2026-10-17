@@ -34,7 +34,9 @@ Run:  PYTHONPATH=python python3 tests/core/test_amdgpu_lowering_ops.py
 
 from __future__ import annotations
 
+import re
 import unittest
+from typing import ClassVar
 
 from rocke.core.ir import BF16, F64, I32, IRBuilder, PtrType
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -182,24 +184,47 @@ class TestHipF64Rejection(unittest.TestCase):
         b.ret()
         return b.kernel
 
+    # Each op's exact rejection message: (HIP lowerer, LLVM lowerer).
+    _REJECTIONS: ClassVar[dict[str, tuple[str, str]]] = {
+        "exp2": ("math.exp2 does not support f64", "math.exp2 currently supports f32"),
+        "log2": ("math.log2 does not support f64", "math.log2 currently supports f32"),
+        "sqrt": ("math.sqrt does not support f64", "math.sqrt currently supports f32"),
+        "rsqrt": (
+            "math.rsqrt does not support f64",
+            "math.rsqrt currently supports f32",
+        ),
+        "rcp_fast": (
+            "math.rcp_fast does not support f64",
+            "math.rcp_fast currently supports f32",
+        ),
+        "fma": ("arith.fma does not support f64", "fma: unsupported FP type 'f64'"),
+        "fmax3": (
+            "arith.fmax3 does not support f64",
+            "fmax3: unsupported FP type 'f64'",
+        ),
+        "fmin3": (
+            "arith.fmin3 does not support f64",
+            "fmin3: unsupported FP type 'f64'",
+        ),
+        "vector_fma": (
+            "vector.fma does not support f64",
+            "vector_fma: unsupported element type 'f64'",
+        ),
+    }
+
     def test_unsupported_ops_raise(self):
-        for op_name in (
-            "exp2",
-            "log2",
-            "sqrt",
-            "rsqrt",
-            "rcp_fast",
-            "fma",
-            "fmax3",
-            "fmin3",
-            "vector_fma",
-        ):
+        # The whole message is pinned, not just the exception type, so a
+        # rejection raised for an unrelated reason cannot pass.
+        for op_name, (hip_msg, llvm_msg) in self._REJECTIONS.items():
             with self.subTest(op=op_name):
                 kernel = self._kernel(op_name)
-                with self.assertRaises(NotImplementedError) as cm:
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(hip_msg)}$"
+                ):
                     lower_kernel_to_hip(kernel, arch="gfx942")
-                self.assertIn("does not support f64", str(cm.exception))
-                with self.assertRaises(NotImplementedError):
+                with self.assertRaisesRegex(
+                    NotImplementedError, rf"^{re.escape(llvm_msg)}$"
+                ):
                     lower_kernel_to_llvm(kernel, arch="gfx942")
 
     def test_fabs_stays_in_double(self):

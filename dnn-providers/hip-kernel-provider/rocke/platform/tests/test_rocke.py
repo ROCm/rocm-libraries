@@ -1084,11 +1084,15 @@ class TestElementwiseInstance(unittest.TestCase):
     def test_f64_rejects_transcendental_ops_and_wide_vec(self):
         from rocke.instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
+        # The reason names the rejected op or vector width, so a spec refused
+        # for some other reason cannot pass.
         for op in ("exp2", "tanh", "silu", "gelu_tanh"):
-            ok, _ = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
+            ok, reason = is_valid_spec(ElementwiseSpec(op=op, dtype="f64", vec=2))
             self.assertFalse(ok, op)
-        ok, _ = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
+            self.assertEqual(reason, f"op '{op}' not supported for f64")
+        ok, reason = is_valid_spec(ElementwiseSpec(op="add", dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2} for f64")
 
 
 class TestLayerNormInstance(unittest.TestCase):
@@ -1183,8 +1187,10 @@ class TestReduceInstance(unittest.TestCase):
     def test_f64_rejects_wide_vec(self):
         from rocke.instances.common.reduce import Reduce2DSpec, is_valid_spec
 
-        ok, _ = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
+        # f64 allows only vec=2 (one 16-byte access); the reason says so.
+        ok, reason = is_valid_spec(Reduce2DSpec(n_per_block=4096, dtype="f64", vec=4))
         self.assertFalse(ok)
+        self.assertEqual(reason, "vec 4 not in {2}")
 
 
 class TestTransposeInstance(unittest.TestCase):
