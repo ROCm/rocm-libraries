@@ -35,7 +35,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 namespace
@@ -48,6 +50,248 @@ namespace
     constexpr const char* kEnvStopOnFirst   = "HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST";
     constexpr const char* kEnvCheckSynchronizer = "HIPBLASLT_CHECK_SYNCHRONIZER";
 } // namespace
+
+// Gated by HIPBLASLT_ADAPTIVE_SM_COUNT_LOG rather than the log mask, written
+// where the library log goes.
+void rocblaslt_adaptive_sm_log(const std::string& line)
+{
+    std::lock_guard<std::mutex> lk(log_mutex);
+    std::ostream*               sink = get_logger_os();
+    if(!sink)
+        sink = &std::cerr;
+    *sink << "[hipBLASLt ADAPTIVE_SM] " << line << std::endl;
+}
+
+const rocblaslt::adaptive_sm::Config& rocblaslt_adaptive_sm_config()
+{
+    static const rocblaslt::adaptive_sm::Config cfg = [] {
+        std::vector<std::string> warnings;
+        const auto               c = rocblaslt::adaptive_sm::Config::fromEnv(&warnings);
+        for(auto const& w : warnings)
+            rocblaslt_adaptive_sm_log(w);
+        if(c.log)
+            rocblaslt_adaptive_sm_log(c.describe());
+        return c;
+    }();
+    return cfg;
+}
+
+namespace
+{
+    bool streamCapturing(hipStream_t stream)
+    {
+        hipStreamCaptureStatus cap = hipStreamCaptureStatusNone;
+        return hipStreamIsCapturing(stream, &cap) == hipSuccess
+               && cap != hipStreamCaptureStatusNone;
+    }
+
+    // Creates `ev` on `device` unless it exists. Returns whether it exists.
+    bool ensureProbeEvent(hipEvent_t& ev, int device)
+    {
+        if(ev)
+            return true;
+        int prev = -1;
+        static_cast<void>(hipGetDevice(&prev));
+        const bool switchDevice = prev != device;
+        if(switchDevice)
+            static_cast<void>(hipSetDevice(device));
+        if(hipEventCreateWithFlags(&ev, hipEventDisableTiming) != hipSuccess)
+        {
+            ev = nullptr;
+            static_cast<void>(hipGetLastError());
+        }
+        if(switchDevice && prev >= 0)
+            static_cast<void>(hipSetDevice(prev));
+        return ev != nullptr;
+    }
+
+    // Records `ev` on `stream`, creating it first if needed. A failed record
+    // destroys it, to be created again on next use.
+    bool recordProbeEvent(hipEvent_t& ev, hipStream_t stream, int device)
+    {
+        if(!ensureProbeEvent(ev, device))
+            return false;
+        if(hipEventRecord(ev, stream) == hipSuccess)
+            return true;
+        static_cast<void>(hipEventDestroy(ev));
+        ev = nullptr;
+        static_cast<void>(hipGetLastError());
+        return false;
+    }
+
+    void logAdaptiveHint(hipStream_t                              stream,
+                         int                                      slot,
+                         uint32_t                                 old,
+                         const rocblaslt::adaptive_sm::Estimator& est)
+    {
+        std::ostringstream msg;
+        msg << "hint stream=" << static_cast<const void*>(stream) << " slot=" << slot
+            << " hint=" << old << "->" << est.hint();
+        if(est.readingCount() == 0)
+            msg << " missed=" << est.missed();
+        else
+            msg << " readings=";
+        for(uint32_t i = 0; i < est.readingCount(); ++i)
+            msg << (i ? "," : "") << est.readings()[i];
+        rocblaslt_adaptive_sm_log(msg.str());
+    }
+} // namespace
+
+void _rocblaslt_handle::publishAdaptiveSmCount(hipStream_t stream, int slot, uint32_t old)
+{
+    AdaptiveSmStream& st   = adaptive_streams[slot];
+    const uint32_t    hint = st.estimator.hint();
+    st.cus.store(hint, std::memory_order_relaxed);
+    adaptive_query_cus.store(hint, std::memory_order_relaxed);
+    if(rocblaslt_adaptive_sm_config().log && old != hint)
+        logAdaptiveHint(stream, slot, old, st.estimator);
+}
+
+void _rocblaslt_handle::adaptiveSmCountForLaunch(hipStream_t       stream,
+                                                 bool              tiny,
+                                                 AdaptiveSmLaunch* launch)
+{
+    using namespace rocblaslt::adaptive_sm;
+
+    *launch = {};
+    if(!adaptive_streams)
+        return;
+    const Config& cfg  = rocblaslt_adaptive_sm_config();
+    const int     slot = streamSlot(stream);
+    if(slot < 0)
+    {
+        // A stream without a slot has no published hint; a forced one still holds.
+        launch->hint = launchHint(cfg, /*capturing=*/false, /*published=*/0);
+        return;
+    }
+
+    AdaptiveSmStream& st        = adaptive_streams[slot];
+    const bool        capturing = streamCapturing(stream);
+    launch->hint = launchHint(cfg, capturing, st.cus.load(std::memory_order_relaxed));
+    if(!tracksLaunch(cfg, capturing))
+        return;
+    // Another thread on this stream holds the state: launch without it.
+    std::unique_lock<std::mutex> guard(st.lock, std::try_to_lock);
+    if(!guard.owns_lock())
+        return;
+
+    Estimator&      est   = st.estimator;
+    const uint32_t  nCu   = uint32_t(properties.multiProcessorCount);
+    const uint32_t* slots = adaptive_probe_host + size_t(slot) * c_probeSlots;
+    launch->slot          = slot;
+    launch->plan          = est.startLaunch(
+        cfg,
+        !tiny,
+        [&](unsigned long long* id) { return hipStreamGetId(stream, id) == hipSuccess; },
+        slots,
+        nCu,
+        [&](uint32_t i) {
+            // hipErrorNotReady does not set the last error; other failures do.
+            const hipError_t q = hipEventQuery(st.events[i]);
+            if(q == hipSuccess)
+                return ProbeState::Done;
+            if(q == hipErrorNotReady)
+                return ProbeState::Pending;
+            static_cast<void>(hipGetLastError());
+            return ProbeState::Failed;
+        });
+
+    if(cfg.log >= 2 && launch->plan.read)
+    {
+        std::ostringstream msg;
+        msg << "reading stream=" << static_cast<const void*>(stream) << " slot=" << slot
+            << " count=" << est.lastCount() << (cfg.force ? " (discarded)" : "");
+        rocblaslt_adaptive_sm_log(msg.str());
+    }
+    if(!cfg.force)
+    {
+        if(est.hint() != launch->hint)
+            publishAdaptiveSmCount(stream, slot, launch->plan.oldHint);
+        launch->hint = est.hint();
+    }
+
+    if(launch->plan.probe)
+    {
+        // Zeroed only with no probe unread. A late mark from a dropped,
+        // rebound or captured probe carries an older epoch and reads as older.
+        if(st.epoch.advance(est.outstanding()))
+            clearSlots(adaptive_probe_host + size_t(slot) * c_probeSlots);
+        launch->probeAddr = static_cast<char*>(adaptive_probe_dev)
+                            + size_t(slot) * c_probeSlots * sizeof(uint32_t);
+        launch->probeEpoch = st.epoch.epoch;
+        launch->probeLock  = std::move(guard);
+    }
+}
+
+void _rocblaslt_handle::adaptiveSmCountAfterLaunch(hipStream_t stream, AdaptiveSmLaunch& launch)
+{
+    using namespace rocblaslt::adaptive_sm;
+
+    std::unique_lock<std::mutex> guard = std::move(launch.probeLock);
+    if(launch.slot < 0 || (!launch.plan.cadence && !launch.probed))
+        return;
+    AdaptiveSmStream& st = adaptive_streams[launch.slot];
+    if(!guard.owns_lock())
+        guard = std::unique_lock<std::mutex>(st.lock);
+    Estimator& est = st.estimator;
+
+    // A capture begun since the first phase would take the record into its
+    // graph: the probe then stays due.
+    const bool     recordable = launch.probed && !streamCapturing(stream);
+    const uint32_t old        = est.hint();
+    const bool     changed
+        = est.finishLaunch(launch.plan, recordable, launch.probeEpoch, [&](uint32_t i) {
+              return recordProbeEvent(st.events[i], stream, device);
+          });
+    if(changed && !rocblaslt_adaptive_sm_config().force)
+        publishAdaptiveSmCount(stream, launch.slot, old);
+}
+
+bool _rocblaslt_handle::adaptiveSmCountStateForTest(hipStream_t stream,
+                                                    rocblaslt::adaptive_sm::StreamStateForTest* out)
+{
+    if(!adaptive_streams)
+        return false;
+    const int slot = streamSlot(stream);
+    if(slot < 0)
+        return false;
+    AdaptiveSmStream&           st = adaptive_streams[slot];
+    std::lock_guard<std::mutex> guard(st.lock);
+    const auto&                 est   = st.estimator;
+    const uint32_t              force = rocblaslt_adaptive_sm_config().force;
+
+    out->hint          = force ? force : st.cus.load(std::memory_order_relaxed);
+    out->epoch         = st.epoch.epoch;
+    out->outstanding   = est.outstanding();
+    out->missed        = est.missed();
+    out->sinceCadence  = est.sinceCadence();
+    out->due           = est.due();
+    out->readingsTaken = est.readingsTaken();
+    out->probesRead    = est.probesRead();
+    out->lastCount     = est.lastCount();
+    return true;
+}
+
+bool _rocblaslt_handle::adaptiveSmCountLaunchLockForTest(
+    hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter)
+{
+    if(!adaptive_streams)
+        return false;
+    const int slot = streamSlot(stream);
+    if(slot < 0)
+        return false;
+    AdaptiveSmLaunch launch;
+    adaptiveSmCountForLaunch(stream, tiny, &launch);
+    *probe       = launch.plan.probe;
+    *heldBetween = launch.probeLock.owns_lock();
+    adaptiveSmCountAfterLaunch(stream, launch);
+    // This thread no longer owns the lock, so try_lock is well defined.
+    std::mutex& lock = adaptive_streams[slot].lock;
+    *heldAfter       = !lock.try_lock();
+    if(!*heldAfter)
+        lock.unlock();
+    return true;
+}
 
 /*******************************************************************************
  * constructor
@@ -139,6 +383,41 @@ _rocblaslt_handle::_rocblaslt_handle()
         check_numerics_stop_on_first = (s == "1" || s == "on" || s == "true");
     }
 
+    // Adaptive sm_count_target: one probe slot array per stream slot, written
+    // by the GPU with plain stores and read by the host without a sync.
+    if(rocblaslt_adaptive_sm_config().enabled)
+    {
+        constexpr size_t bytes
+            = c_syncSkStreamSlots * rocblaslt::adaptive_sm::c_probeSlots * sizeof(uint32_t);
+        void*      host = nullptr;
+        hipError_t err  = hipHostMalloc(&host, bytes, hipHostMallocCoherent | hipHostMallocMapped);
+        if(err == hipSuccess)
+        {
+            std::memset(host, 0, bytes);
+            err = hipHostGetDevicePointer(&adaptive_probe_dev, host, 0);
+        }
+        if(err == hipSuccess)
+        {
+            adaptive_probe_host = static_cast<uint32_t*>(host);
+            adaptive_streams    = std::make_unique<AdaptiveSmStream[]>(c_syncSkStreamSlots);
+        }
+        else
+        {
+            if(host)
+                static_cast<void>(hipHostFree(host));
+            adaptive_probe_dev = nullptr;
+            rocblaslt_adaptive_sm_log("disabled: probe allocation failed (hipError="
+                                      + std::to_string(static_cast<int>(err)) + ")");
+        }
+        // Warns once per process, for the first device it exceeds.
+        const uint32_t           force = rocblaslt_adaptive_sm_config().force;
+        static std::atomic<bool> warnedForce{false};
+        if(force > uint32_t(properties.multiProcessorCount) && !warnedForce.exchange(true))
+            rocblaslt_adaptive_sm_log(std::string(rocblaslt::adaptive_sm::kEnvForce) + "="
+                                      + std::to_string(force) + " exceeds the device's "
+                                      + std::to_string(properties.multiProcessorCount) + " CUs");
+    }
+
     // Allocate the device flag. STOP_ON_FIRST uses hipHostMalloc(MAPPED) so
     // scan_D can poll without sync; on any failure we fall back to hipMalloc
     // (the cross-call short-circuit then only trips on drains). If hipMalloc
@@ -219,6 +498,16 @@ _rocblaslt_handle::_rocblaslt_handle()
 
 _rocblaslt_handle::~_rocblaslt_handle()
 {
+    if(adaptive_streams)
+        for(size_t i = 0; i < c_syncSkStreamSlots; ++i)
+            for(hipEvent_t ev : adaptive_streams[i].events)
+                if(ev)
+                    static_cast<void>(hipEventDestroy(ev));
+    if(adaptive_probe_host)
+        static_cast<void>(hipHostFree(adaptive_probe_host));
+    adaptive_probe_host = nullptr;
+    adaptive_probe_dev  = nullptr;
+
     if(!check_numerics_flag)
         return;
 

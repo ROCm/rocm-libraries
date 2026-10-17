@@ -266,7 +266,29 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         return rocblaslt_status_invalid_value;
 #endif
 
+    // Nothing may return between adaptiveSmCountForLaunch and
+    // adaptiveSmCountAfterLaunch: each first phase needs its second. A probe
+    // launch holds the stream's adaptive lock in between.
+    const bool                          adaptive = adaptive_sm_count_applies(handle, matmul_descr);
+    _rocblaslt_handle::AdaptiveSmLaunch adaptiveLaunch;
+    if(adaptive)
+    {
+        problem.adaptive_sm_count = true;
+        handle->adaptiveSmCountForLaunch(
+            stream,
+            rocblaslt::adaptive_sm::tinyProblem(
+                m, n, k, matD->batch_count, rocblaslt_adaptive_sm_config()),
+            &adaptiveLaunch);
+        problem.sm_count_target          = int32_t(adaptiveLaunch.hint);
+        problem.occupancy_probe_addr     = adaptiveLaunch.probeAddr;
+        problem.occupancy_probe_epoch    = adaptiveLaunch.probeEpoch;
+        problem.occupancy_probe_min_grid = uint32_t(handle->properties.multiProcessorCount);
+        problem.occupancy_probed         = &adaptiveLaunch.probed;
+    }
+
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+    if(adaptive)
+        handle->adaptiveSmCountAfterLaunch(stream, adaptiveLaunch);
 
     if(st == rocblaslt_status_success)
     {
