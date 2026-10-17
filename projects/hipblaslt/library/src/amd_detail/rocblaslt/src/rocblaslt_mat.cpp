@@ -32,6 +32,7 @@
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 #include <array>
+#include <optional>
 
 #include <hip/hip_runtime_api.h>
 
@@ -267,7 +268,22 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
         return rocblaslt_status_invalid_value;
 #endif
 
+    // Ends right after the launch, recording the completion of a probe it ran.
+    std::optional<rocblaslt::adaptive_sm::Launch> adaptive;
+    if(adaptive_sm_count_applies(handle, matmul_descr)
+       && !rocblaslt::adaptive_sm::streamCapturing(stream))
+    {
+        const bool tiny = rocblaslt::adaptive_sm::tinyProblem(
+            m, n, k, matD->batch_count, rocblaslt_adaptive_sm_config());
+        problem.adaptive_launch = &adaptive.emplace(
+            handle->adaptive_sm->begin(stream, handle->streamSlot(stream), tiny));
+        problem.sm_count_target   = int32_t(adaptive->hint);
+        problem.adaptive_sm_count = true;
+    }
+
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+    adaptive.reset();
+    problem.adaptive_launch = nullptr;
 
     if(st == rocblaslt_status_success)
     {
