@@ -58,6 +58,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
+* [Conv] `ConvDepthwiseFwd2D` now covers every packed NCHW fp16/bf16 depthwise forward shape
+  on gfx950 (filters up to 15x15, stride and dilation up to 8) with a general HIP kernel.
+  Shapes with a matching CK instance keep using it by default.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors
