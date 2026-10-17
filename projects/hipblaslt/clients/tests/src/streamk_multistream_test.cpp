@@ -18,19 +18,32 @@
 // is what raises the concurrency enough to hit the hazard. Against an
 // unpatched library on gfx950 the queue stops draining on the first iteration.
 //
-// Two things are deliberate here:
+// Four things are deliberate here:
 //
-//   * Progress is checked with hipStreamQuery against a deadline rather than
-//     hipStreamSynchronize. Once the deadlock happens the queue never drains,
-//     so a blocking wait would turn a failure into a CI timeout with no
-//     message. Polling lets the test say what went wrong.
+//   * Progress is checked with hipStreamQuery against a stall budget rather
+//     than hipStreamSynchronize. Once the deadlock happens the queue never
+//     drains, so a blocking wait would turn a failure into a CI timeout with
+//     no message. Polling lets the test say what went wrong.
 //
-//   * On timeout the process exits immediately instead of unwinding. The GPU
-//     queue is wedged at that point, so hipFree and hipStreamDestroy would
-//     block too and the failure would never be printed.
+//   * That budget is re-armed every iteration and measures a single iteration
+//     failing to drain, not the runtime of the whole loop. A slow device takes
+//     many budgets in a row and is never accused of deadlocking. Getting this
+//     wrong is not harmless: the first version armed one budget for all 500
+//     iterations, and on a 12-CU APU progressing normally at ~0.9 s an
+//     iteration it fired mid-run and killed the process with 33 streams of
+//     live work, which cost the machine a GPU reset (ROCM-30855).
 //
-// The test skips rather than fails when Stream-K is not what the heuristic
-// picks for this device, since the hazard is unreachable then.
+//   * The budget only starts once the iteration is fully enqueued. The first
+//     matmul on a solution loads its code object on the host, which can take
+//     minutes (HotSwap translation on gfx1250 A0 parts does), and none of that
+//     is the queue failing to drain.
+//
+//   * Once the budget really does expire the process exits immediately instead
+//     of unwinding, because the queue is wedged and hipFree and
+//     hipStreamDestroy would block too.
+//
+// The case skips on any device with fewer CUs than the grid it has to force,
+// since the hazard is unreachable there and a pass would be meaningless.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -70,9 +83,14 @@ namespace
     // per stream is the workspace the chosen solution reports needing.
     constexpr size_t kWsBudgetBytes = 128ull << 20;
 
-    // A healthy run of this size takes a couple of seconds. The margin is for
-    // a loaded CI machine, not for the kernel.
-    constexpr int kDeadlineSeconds = 120;
+    // How long the queue may go without draining a single iteration, counted
+    // from when that iteration is fully enqueued, before the run is called
+    // deadlocked. This is a no-progress budget, not a budget for
+    // the whole loop: a slow device just takes many of these in a row and is
+    // never killed for being slow. An earlier version armed one absolute
+    // deadline for all iterations, which fired on a 12-CU APU that was
+    // progressing normally at ~0.9 s an iteration (ROCM-30855).
+    constexpr int kStallSeconds = 60;
 
     bool gpuAvailable()
     {
@@ -121,6 +139,21 @@ namespace
     {
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
+
+        // The hazard is only reachable if the grid can actually be sized at
+        // kSmCountTarget against a larger tile count. A device with fewer CUs
+        // than that cannot get there, so the case would run the full 32-stream
+        // stress and pass without exercising the remainder path at all, which
+        // is worse than not running: it reports a green result for a library
+        // that was never tested. Skip instead, and say why.
+        hipDeviceProp_t props{};
+        int             device = 0;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(props.multiProcessorCount < kSmCountTarget)
+            GTEST_SKIP() << "Device has " << props.multiProcessorCount << " CUs, fewer than the "
+                         << kSmCountTarget
+                         << "-CU grid this case needs to reach the Stream-K remainder path";
 
         Resources r;
         ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
@@ -203,9 +236,6 @@ namespace
         ASSERT_EQ(hipStreamCreate(&main), hipSuccess);
         r.streams.push_back(main);
 
-        const auto deadline
-            = std::chrono::steady_clock::now() + std::chrono::seconds(kDeadlineSeconds);
-
         for(int iter = 0; iter < kIterations; ++iter)
         {
             // Fan out from one stream and join back, so the side streams run
@@ -245,23 +275,30 @@ namespace
             for(auto e : joins)
                 ASSERT_EQ(hipStreamWaitEvent(main, e, 0), hipSuccess);
 
+            // Re-armed every iteration, and only after everything is enqueued,
+            // so the budget is "this iteration never drained" rather than "the
+            // whole loop took too long" or "the host took long to enqueue".
+            const auto stallAt
+                = std::chrono::steady_clock::now() + std::chrono::seconds(kStallSeconds);
+
             // Poll rather than block: a deadlocked queue never drains, and a
             // blocking wait here would hang the job instead of failing it.
             while(hipStreamQuery(main) == hipErrorNotReady)
             {
-                if(std::chrono::steady_clock::now() > deadline)
+                if(std::chrono::steady_clock::now() > stallAt)
                 {
                     std::fprintf(stderr,
                                  "\n[  FAILED  ] StreamKMultiStream.ConcurrentStreamsDoNotDeadlock\n"
-                                 "  %d streams stopped making progress at iteration %d of %d.\n"
-                                 "  The Stream-K flag region is being shared across streams;\n"
+                                 "  Iteration %d of %d has not drained in %d s across %d streams.\n"
+                                 "  The Stream-K flag region may be shared across streams;\n"
                                  "  see ROCM-29670. Exiting without cleanup because the queue\n"
                                  "  is wedged and hipFree would block as well.\n\n",
-                                 kStreams,
                                  iter,
-                                 kIterations);
+                                 kIterations,
+                                 kStallSeconds,
+                                 kStreams);
                     std::fflush(stderr);
-                    ADD_FAILURE() << kStreams << " concurrent streams deadlocked at iteration "
+                    ADD_FAILURE() << kStreams << " concurrent streams stopped draining at iteration "
                                   << iter;
                     std::_Exit(1);
                 }
