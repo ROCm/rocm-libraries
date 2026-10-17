@@ -796,13 +796,20 @@ struct buffer_store_if<1>
 };
 #endif
 
+// NOTE: despite the "_fence" name these are SAME-WAVE completion waits, not cross-wave
+// memory-model fences. The "memory" clobber only orders memory ops within this wave; it carries
+// no release/acquire semantics. For cross-wave visibility (publishing data to the workgroup) use
+// block_sync_lds() / block_sync_lds_async_load() (see arch.hpp). This should be used as a
+// performance optimization, not for correctness.
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0)
 {
+    // Ensure that only the `cnt` most recent operations on global memory are outstanding.
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
 CK_TILE_DEVICE void lds_load_fence(index_t cnt = 0)
 {
+    // Ensure only the `cnt` most recent operations on LDS are outstanding.
     asm volatile("s_waitcnt lgkmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
@@ -1040,6 +1047,9 @@ CK_TILE_DEVICE void insert_dummy_dep(Tx& bx, Ty&... by)
 }
 }
 // clang-format on
+// Same-wave completion wait (see note on buffer_load_fence above): drains buffer/global loads
+// to `cnt` outstanding, then pins the loaded VGPRs via insert_dummy_dep so the compiler cannot
+// hoist their uses. Not a cross-wave fence.
 template <typename... T>
 CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
 {
@@ -1047,11 +1057,15 @@ CK_TILE_DEVICE void buffer_load_fence(index_t cnt = 0, T&... o)
     impl::insert_dummy_dep(o...);
 }
 
+// Same-wave wait for buffer/global store completion. Not a cross-wave fence.
 CK_TILE_DEVICE void buffer_store_fence(index_t cnt = 0)
 {
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
 }
 
+// Same-wave wait for async (global->LDS) load completion on gfx9. Not a cross-wave fence; a
+// consumer reading the LDS cross-wave must additionally go through block_sync_lds()/the barrier.
+// DO NOT USE IN NEW CODE, THIS IS AN UGLY APPROXIMATION.
 CK_TILE_DEVICE auto async_load_fence_raw(index_t cnt = 0)
 {
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
@@ -1391,6 +1405,8 @@ CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
 #undef CK_TILE_ASYNC_LOAD_WITH_INSTR
 }
 
+// Same-wave wait for async buffer-load completion. Not a cross-wave fence (see
+// buffer_load_fence). Only works on gfx9, should be avoided.
 CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
 {
     asm volatile("s_waitcnt vmcnt(%0)" : : "n"(cnt) : "memory");
