@@ -882,6 +882,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
                 auto id = regionDag_->instToId.find(const_cast<StinkyInstruction*>(b->second));
                 if (id != regionDag_->instToId.end() && regionDag_->nodes[id->second].inDegree != 0)
                     return true;
+                const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+                if (f.prefetchHoldForCover && !wmmaQueue.empty() &&
+                    outstandingWmmas() < wmmaQueueDepth() &&
+                    queuedCoverCycles() < wmmaBarrierCover(wmmaQueue.top()->inst->latencyCycles))
+                    return true;
             }
         }
         return false;

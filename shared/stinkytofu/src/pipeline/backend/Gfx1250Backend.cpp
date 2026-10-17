@@ -211,6 +211,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.WmmaRefillNearBarrier;
                 passFeatureConfig.dagFeatures.prefetchAfterBarrierReady =
                     moduleOptions.PrefetchAfterBarrierReady;
+                passFeatureConfig.dagFeatures.prefetchHoldForCover =
+                    moduleOptions.PrefetchHoldForCover;
                 passFeatureConfig.dagFeatures.dsPaceCycles = moduleOptions.DsPaceCycles;
                 passFeatureConfig.dagFeatures.dsPaceCount = moduleOptions.DsPaceCount;
                 passFeatureConfig.dagFeatures.dsPaceSeparators = moduleOptions.DsPaceSeparators;
