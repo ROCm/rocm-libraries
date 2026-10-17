@@ -73,7 +73,8 @@ class DsSpreadPacer {
 
     // loads: the region's ds_loads in program order. startClock is the region clock at the plan.
     void plan(const std::vector<Load>& loads, const PassFeatureConfig::DsPace& pace,
-              int windowCycles, int leadCycles, int startClock = 0, int regionWindows = INT_MAX) {
+              int windowCycles, int leadCycles, int startClock = 0, int regionWindows = INT_MAX,
+              bool evenSpread = false) {
         reset();
         if (loads.empty() || windowCycles <= 0) return;
         active_ = true;
@@ -84,7 +85,7 @@ class DsSpreadPacer {
             if (l.consumerWindow != INT_MAX)
                 deadline_[l.nodeId] = startClock + l.consumerWindow * windowCycles - leadCycles;
         }
-        planSections(loads, windowCycles, startClock, regionWindows);
+        planSections(loads, windowCycles, startClock, regionWindows, evenSpread);
     }
 
     // WMMA windows the even spread gives `count` ds_loads of a region: wmmaTotal / dsTotal per
@@ -171,7 +172,7 @@ class DsSpreadPacer {
     // A section too dense for the pace rate therefore finishes by its end cut instead of
     // being held to the region-wide rate until the cut has to wait for it.
     void planSections(const std::vector<Load>& loads, int windowCycles, int startClock,
-                      int regionWindows) {
+                      int regionWindows, bool evenSpread) {
         std::map<std::pair<int, int>, std::vector<unsigned>> sections;
         for (const Load& l : loads) {
             const int end = std::min(l.endWindow, regionWindows);
@@ -184,7 +185,10 @@ class DsSpreadPacer {
             double period = pace_.cycles;
             if (key.second != INT_MAX && key.second > key.first) {
                 const double span = static_cast<double>(key.second - key.first) * windowCycles;
-                period = pace_.cycles > 0 ? std::min<double>(pace_.cycles, span / groups) : 0.0;
+                period =
+                    evenSpread
+                        ? span / groups
+                        : (pace_.cycles > 0 ? std::min<double>(pace_.cycles, span / groups) : 0.0);
             }
             for (int k = 0; k < n; ++k)
                 slot_[ids[k]] = static_cast<int>(first + (k / pace_.count) * period);

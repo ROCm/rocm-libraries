@@ -3599,7 +3599,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                    dsDensityXWindows_ > 1 ? dsDensityXWindows_ * windowCycles : 0);
         }
         dsSpread_.plan(loads, pace, windowCycles, kDsLeadWindows * windowCycles, clock_,
-                       wmmaTotalThisRegion_);
+                       wmmaTotalThisRegion_, dagFeatures.dsEvenSections);
         dsOverflow_ =
             !loads.empty() && static_cast<long long>(loads.size()) *
                                       dsIssueCost(*deps.dag.nodes[loads.front().nodeId].inst) >

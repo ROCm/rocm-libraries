@@ -202,6 +202,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.WmmaBarrierCoverCycles;
                 passFeatureConfig.dagFeatures.dsSpreadToleranceCycles =
                     moduleOptions.DsSpreadToleranceCycles;
+                passFeatureConfig.dagFeatures.dsEvenSections = moduleOptions.DsEvenSections;
                 passFeatureConfig.dagFeatures.dsPaceCycles = moduleOptions.DsPaceCycles;
                 passFeatureConfig.dagFeatures.dsPaceCount = moduleOptions.DsPaceCount;
                 passFeatureConfig.dagFeatures.dsPaceSeparators = moduleOptions.DsPaceSeparators;

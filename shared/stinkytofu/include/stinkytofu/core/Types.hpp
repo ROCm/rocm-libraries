@@ -149,6 +149,9 @@ struct PassFeatureConfig {
         /// Extra lead handed to the pace model (DsPaceRegion::toleranceCycles); the default pace
         /// and the options do not use it. < 0 = none.
         int dsSpreadToleranceCycles = -1;
+        /// Spread the ds_loads of a section evenly over the section (one group every
+        /// span / groups cycles) instead of at the LDS return rate from the section start.
+        bool dsEvenSections = false;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
