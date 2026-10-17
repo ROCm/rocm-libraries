@@ -292,6 +292,67 @@ jobs:
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
+  # The tensilelite sidecar only consumes this run's artifacts, but a caller
+  # cannot depend on one job inside TheRock's reusable Linux workflow. This
+  # gate polls the artifact store instead, so the sidecar starts once its
+  # family is uploaded rather than after every family's build and tests.
+  rocjitsu_artifacts_gfx125x:
+    name: rocjitsu artifacts ready (gfx125X-dcgpu)
+    needs: [ci-env, configure, setup]
+    if: >-
+      ${{
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+        ) &&
+        needs.setup.outputs.enable_build_jobs == 'true' &&
+        needs.configure.outputs.skip_tests != 'true' &&
+        contains(needs.setup.outputs.linux_build_config, '"gfx125X-dcgpu"')
+      }}
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ready: ${{ steps.wait.outputs.ready }}
+    steps:
+      - name: Checkout TheRock build tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ needs.ci-env.outputs.therock-ref }}
+          path: TheRock
+          sparse-checkout: build_tools
+      - name: Checkout rocm-libraries scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+          sparse-checkout: .github/scripts
+      - name: Wait for gfx125X-dcgpu artifacts
+        id: wait
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 rocm-libraries/.github/scripts/rocjitsu_wait_for_artifacts.py \
+            --family gfx125X-dcgpu --target gfx1250 --therock-dir TheRock
+          echo "ready=true" >> "${GITHUB_OUTPUT}"
+
+  rocjitsu_tensilelite_gfx125x:
+    name: rocjitsu tensilelite (gfx125X-dcgpu)
+    # Advisory sidecar, not part of the required summary.
+    # gfx125X is the emulation-only target (rocjitsu CPU emulation, no HW).
+    needs: [ci-env, rocjitsu_artifacts_gfx125x]
+    if: ${{ !cancelled() && needs.rocjitsu_artifacts_gfx125x.outputs.ready == 'true' }}
+    uses: ./.github/workflows/therock-rocjitsu-tensilelite-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      amdgpu_families: gfx125X-dcgpu
+
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
     if: always()
