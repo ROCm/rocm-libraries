@@ -22,9 +22,17 @@ target_sources(hipblaslt
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 # hipblaslt itself is compiled as HIP. The rocRoller ranker includes C++20
 # headers, so it is a separate C++ library and hipblaslt only calls it.
-add_library(hipblaslt-rocroller-selection STATIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_selected.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/rocroller/solution_selection.cpp")
+if(WIN32)
+    # rocRoller's data-type headers assume the Itanium bitfield layout and do
+    # not compile under the MSVC one. No Windows GPU target has checked-in
+    # rocRoller kernels, so build a ranker that returns no tiles.
+    add_library(hipblaslt-rocroller-selection STATIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_selected_windows.cpp")
+else()
+    add_library(hipblaslt-rocroller-selection STATIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocroller_selected.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocroller/solution_selection.cpp")
+endif()
 target_compile_features(hipblaslt-rocroller-selection PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller-selection PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(hipblaslt-rocroller-selection
