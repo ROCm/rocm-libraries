@@ -7,23 +7,23 @@ than failures because the output looks fine.
 """
 
 import dataclasses
-import importlib
-import inspect
-import pkgutil
+import json
 import textwrap
 import typing
+from importlib import import_module
 from pathlib import Path
 
 import pytest
 
 from hkp_pack.errors import HkpPackError
 from hkp_pack.rocke_compile import (
-    _PREDICATE_ALIASES,
+    ROCKE_TARGET_NATIVE,
     _check_support_predicate,
+    _module_from_source,
     _require_spec_arch_signature,
     _resolve_spec_class,
-    _resolve_support_predicate,
     build_spec,
+    rocke_compile_arch,
 )
 
 
@@ -286,92 +286,55 @@ _HAS_ROCKE_LIBRARY = (
 ).is_dir()
 
 
-def _library_builders():
-    """``(module, builder, spec class)`` for every ``build_*`` the kernel library
-    defines whose spec class resolves."""
-    import kernels
+_DESCRIPTOR_TREE = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "engines"
+    / "kernel_ingestor_engine"
+    / "descriptors"
+)
 
-    for info in pkgutil.walk_packages(kernels.__path__, "kernels."):
-        module = importlib.import_module(info.name)
-        for builder, fn in vars(module).items():
-            if (
-                not builder.startswith("build_")
-                or not inspect.isfunction(fn)
-                or fn.__module__ != module.__name__
-            ):
+
+def _shipped_rocke_checks():
+    """``(source, builder, target, arch, spec)`` for one spec of every distinct rocKE
+    ``(source, builder, target, arch)`` the shipped descriptors pack.
+
+    ``arch`` is each shard architecture the kernel is packed for: its own ``arch``
+    list when it narrows one, otherwise its pack's.
+    """
+    seen = {}
+    for path in sorted(_DESCRIPTOR_TREE.rglob("*.kdp.json")):
+        pack = json.loads(path.read_text())
+        for kernel in pack.get("kernelDescriptors", []):
+            source = kernel["kernel_source"]
+            if source.get("kind") != "rocke":
                 continue
-            try:
-                yield module, builder, _resolve_spec_class(module, fn)
-            except HkpPackError:
-                continue
+            target = source.get("target", ROCKE_TARGET_NATIVE)
+            for arch in kernel.get("arch") or pack.get("arch", []):
+                key = (source["source"], source["builder"], target, arch)
+                seen.setdefault(key, source["spec"])
+    return [(*key, spec) for key, spec in seen.items()]
 
 
 @pytest.mark.skipif(not _HAS_ROCKE_LIBRARY, reason="rocke/library not in this tree")
-def test_every_rocke_builder_resolves_a_predicate_for_its_own_spec():
-    """Over the real kernel library: a resolved predicate takes the builder's spec."""
-    checked = 0
-    for module, builder, spec_cls in _library_builders():
-        name, predicate = _resolve_support_predicate(module, builder)
-        if predicate is None:
-            continue
-        checked += 1
-        first = next(iter(inspect.signature(predicate).parameters.values()))
-        hint = typing.get_type_hints(predicate).get(first.name)
-        assert isinstance(hint, type) and issubclass(spec_cls, hint), (
-            f"{module.__name__}.{builder} ({spec_cls.__name__}) resolved {name} "
-            f"for {hint!r}"
+def test_every_shipped_rocke_builder_passes_the_pack_time_predicate_check():
+    """Each rocKE builder the shipped descriptors pack resolves a support predicate
+    and the predicate accepts that builder's shipped spec, through the same
+    resolution and check the packer runs before it builds the kernel."""
+    assert _DESCRIPTOR_TREE.is_dir(), f"no descriptor tree at {_DESCRIPTOR_TREE}"
+    checks = _shipped_rocke_checks()
+    assert checks, f"no rocKE kernels found under {_DESCRIPTOR_TREE}"
+    for source, builder, target, arch, spec in checks:
+        module = import_module(_module_from_source(source))
+        spec_obj = build_spec(
+            _resolve_spec_class(module, getattr(module, builder)), spec
         )
-    assert checked
-
-
-@pytest.mark.skipif(
-    not (Path(__file__).resolve().parents[3] / "rocke" / "library").is_dir(),
-    reason="rocke/library not in this tree",
-)
-def test_predicate_aliases_resolve_to_real_predicates():
-    """Each _PREDICATE_ALIASES entry must name a callable in the real library.
-
-    The alias map exists so builders whose predicates don't follow the naming
-    convention still get pre-flight validation.  If a predicate is renamed, the
-    alias becomes stale and hkp_pack fails the pack of that builder.
-    This test makes stale aliases a test failure rather than a silent regression.
-    """
-    import kernels.gfx942.attention_tiled_2d as gfx942_2d
-    import kernels.gfx942.attention_tiled_3d as gfx942_3d
-    import kernels.gfx950.attention_tiled_2d as gfx950_2d
-    import kernels.gfx950.attention_tiled_3d as gfx950_3d
-
-    # Each entry: alias_key -> (predicate_name, list of modules that must have it)
-    expected = {
-        "build_unified_attention_2d_tiled": (
-            "supports_tiled_2d_spec",
-            [gfx942_2d, gfx950_2d],
-        ),
-        "build_gfx942_4warp_gqa": (
-            "supports_gfx942_4warp_gqa_spec",
-            [gfx942_2d],
-        ),
-        "build_unified_attention_3d_tiled": (
-            "supports_tiled_3d_spec",
-            [gfx942_3d, gfx950_3d],
-        ),
-    }
-    for builder, (predicate_name, modules) in expected.items():
-        # Alias must be present in the map
-        assert (
-            builder in _PREDICATE_ALIASES
-        ), f"_PREDICATE_ALIASES is missing the entry for {builder!r}"
-        assert _PREDICATE_ALIASES[builder] == predicate_name, (
-            f"_PREDICATE_ALIASES[{builder!r}] = {_PREDICATE_ALIASES[builder]!r}, "
-            f"expected {predicate_name!r}"
-        )
-        # Predicate must be a callable in every expected module
-        for mod in modules:
-            fn = getattr(mod, predicate_name, None)
-            assert callable(fn), (
-                f"_PREDICATE_ALIASES[{builder!r}] = {predicate_name!r} "
-                f"but {predicate_name!r} is not callable in {mod.__name__}"
+        try:
+            _check_support_predicate(
+                module, builder, spec_obj, rocke_compile_arch(arch, target)
             )
+        except HkpPackError as exc:
+            pytest.fail(f"{source}:{builder} @ {arch} ({target}): {exc}")
 
 
 # --- C. Literal validation --------------------------------------------------
