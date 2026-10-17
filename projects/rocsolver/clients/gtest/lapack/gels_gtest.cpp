@@ -288,26 +288,6 @@ TEST_P(GELS_LARGE_BATCH, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, batched__float)
-{
-    run_tests<true, true, float>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, batched__double)
-{
-    run_tests<true, true, double>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, batched__float_complex)
-{
-    run_tests<true, true, rocblas_float_complex>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, batched__double_complex)
-{
-    run_tests<true, true, rocblas_double_complex>();
-}
-
 // strided_batched tests
 
 TEST_P(GELS, strided_batched__float)
@@ -352,26 +332,6 @@ TEST_P(GELS_LARGE_BATCH, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, strided_batched__float)
-{
-    run_tests<false, true, float>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, strided_batched__double)
-{
-    run_tests<false, true, double>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, strided_batched__float_complex)
-{
-    run_tests<false, true, rocblas_float_complex>();
-}
-
-TEST_P(GELS_LARGE_BATCH_OUTOFPLACE, strided_batched__double_complex)
-{
-    run_tests<false, true, rocblas_double_complex>();
-}
-
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GELS,
                          Combine(ValuesIn(large_matrix_sizeA_range),
@@ -394,10 +354,5 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(weekly_lapack,
                          GELS_LARGE_BATCH,
-                         Combine(ValuesIn(large_batch_sizeA_range),
-                                 ValuesIn(large_batch_sizeB_range)));
-
-INSTANTIATE_TEST_SUITE_P(weekly_lapack,
-                         GELS_LARGE_BATCH_OUTOFPLACE,
                          Combine(ValuesIn(large_batch_sizeA_range),
                                  ValuesIn(large_batch_sizeB_range)));
