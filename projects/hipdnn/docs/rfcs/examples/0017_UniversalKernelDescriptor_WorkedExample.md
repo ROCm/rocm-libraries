@@ -592,8 +592,8 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "version": "1.0",
   "id":     "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
   "name":   "attention_dense forward selector",
-  "kind":   "model",
-  "model":  {"framework": "lightgbm", "artifact": "attention_dense/gfx950_fwd.bin"},
+  "adapter":   "tree_data",   // a GBDT tree table exported as data (RFC 0019 §4.2)
+  "tree_data": {"artifact": "attention_dense/gfx950_fwd.bin"},
   // $q dims: 0 = batch, 1 = num_heads, 2 = query sequence length, 3 = head size.
   "features_signature": [
     "$device.cu_count",
@@ -606,6 +606,14 @@ adapter invocation: the builder, plus the exact build values for that instance.
     // the work term the host rule thresholded on, as an ordinary derived feature
     {"*": [{"ceil_div": ["$q.dims[2]", 256]}, {"*": ["$q.dims[1]", "$q.dims[0]"]}]}
   ],
+  "features_hash": "sha256:…",   // fingerprint of the feature contract (RFC 0019 §6.3)
+  // the descriptor content revisions the model was trained on (RFC 0019 §8.1): the UED below, the
+  // KMD above, and §2's criteria UMD
+  "trained_against": {
+    "ued": {"id": "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14", "revision": "1.0"},
+    "kmd": {"id": "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40", "revision": "1.0"},
+    "umd": [{"id": "9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11", "revision": "1.0"}]
+  },
   "objective": "max"
 }
 
@@ -617,7 +625,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "id":          "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
   "name":        "rocke:attention_dense_fwd",   // scoped namespace:local, per RFC 0020 § 4.2
   "sdk_version": "1.0",   // the hipDNN graph schema version this pattern was authored against
-  "heuristic":   "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
+  "sort_kernel_catalog": {"gfx950": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93"},  // arch -> the UHD above (RFC 0020 § 4.6)
   "metadata":    "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
 
   // Stage one (RFC 0020 § 4.2). The declarative arm: this engine's shape is expressible as a
