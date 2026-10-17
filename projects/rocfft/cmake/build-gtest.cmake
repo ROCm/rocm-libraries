@@ -1,4 +1,4 @@
-# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,31 +18,56 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+# Build GTest from source as a fallback when no installed GTest is found.
+#
+# Callers must set GTEST_TARGET to the CMake target that needs gtest.
+# Set GTEST_LINK_MAIN to ON to also link gtest_main (for targets that
+# do not provide their own main).
+
 include( ExternalProject )
 
-option( BUILD_GTEST "Download and build GoogleTest" OFF )
+# Set the external project's prefix relative to the root build directory to avoid building in each
+# subdirectory where we need gtest.
+set( _gtest_prefix ${PROJECT_BINARY_DIR}/googletest )
+set( _gtest_lib
+  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
+set( _gtest_main_lib
+  ${_gtest_prefix}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX} )
 
-if( NOT BUILD_GTEST )
-    find_package( GTest 1.11.0 )
+if( NOT TARGET googletest )
+
+  if(NOT ALLOW_FETCH_DEPS AND NOT DEFINED GTEST_SRC_URL)
+    # If fetching external dependencies isn't allowed, the user must specify a (presumably internal)
+    # URL.  Otherwise, fail configuration.
+    message(FATAL_ERROR "ALLOW_FETCH_DEPS is set, but GTEST_SRC_URL was not provided")
+  endif()
+  
+  set(GTEST_SRC_URL
+    https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+    CACHE STRING
+    "Location of GTest source code"
+  )
+  set(GTEST_SRC_SHA256
+    65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+    CACHE
+    STRING
+    "SHA256 hash of GTest source code"
+  )
+
+  ExternalProject_Add( googletest
+    PREFIX ${_gtest_prefix}
+    URL ${GTEST_SRC_URL}
+    URL_HASH SHA256=${GTEST_SRC_SHA256}
+    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${_gtest_prefix} -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
+    BUILD_BYPRODUCTS ${_gtest_lib} ${_gtest_main_lib}
+    DOWNLOAD_NO_PROGRESS YES
+    DOWNLOAD_EXTRACT_TIMESTAMP YES
+  )
 endif()
 
-if( (BUILD_GTEST OR NOT GTEST_FOUND) AND (NOT TARGET gtest) )
-  set(GTEST_INCLUDE_DIRS
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest/googletest/include)
-  set(GTEST_LIBRARIES
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX})
-  
-  set(GTEST_SRC_URL https://github.com/google/googletest/archive/release-1.11.0.tar.gz CACHE STRING "Location of GTest source code")
-  set(GTEST_SRC_SHA256 b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5 CACHE STRING "SHA256 hash of GTest source code")
-  
-  ExternalProject_Add(gtest
-                      URL ${GTEST_SRC_URL}
-                      URL_HASH SHA256=${GTEST_SRC_SHA256}
-                      PREFIX ${CMAKE_CURRENT_BINARY_DIR}
-                      CMAKE_ARGS -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
-                      INSTALL_COMMAND ""
-                      BUILD_BYPRODUCTS ${GTEST_LIBRARIES})
-  ExternalProject_Get_Property( gtest source_dir binary_dir )  
+target_include_directories( ${GTEST_TARGET} PRIVATE ${_gtest_prefix}/include )
+target_link_libraries( ${GTEST_TARGET} PRIVATE ${_gtest_lib} )
+if( GTEST_LINK_MAIN )
+  target_link_libraries( ${GTEST_TARGET} PRIVATE ${_gtest_main_lib} )
 endif()
-
+add_dependencies( ${GTEST_TARGET} googletest )
