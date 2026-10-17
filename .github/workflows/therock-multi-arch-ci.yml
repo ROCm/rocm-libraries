@@ -15,6 +15,9 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: pinned to ROCm/TheRock commit c01e3a3f3f67966dd35612cf363b49964f33cd47.
+# TEMP (testing only, do not merge): when the PR has a `test_filter:*` label, the
+# Linux/Windows test jobs take test_type from setup (TheRock honors the label there)
+# instead of configure (quick/standard only), so comprehensive/full can be exercised.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -230,7 +233,7 @@ jobs:
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ contains(join(github.event.pull_request.labels.*.name, ','), 'test_filter:') && needs.setup.outputs.test_type || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
@@ -255,7 +258,7 @@ jobs:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ contains(join(github.event.pull_request.labels.*.name, ','), 'test_filter:') && needs.setup.outputs.test_type || needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
