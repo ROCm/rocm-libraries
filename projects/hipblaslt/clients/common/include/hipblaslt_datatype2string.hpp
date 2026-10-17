@@ -45,15 +45,15 @@ enum class hipblaslt_initialization
     integer_exact = 888, // A,C in [0,1,2], B ±[0,1,2]; alpha=2, beta 0 or -2; exact when K bounded
     // Near-FP16-max A, paired ±2 along K in B; FP32-math reference is 0 (rocBLAS-style accum probe)
     fp16_accumulator_probe = 889,
-    inf                     = 890,
-    neg_zero                = 891,
-    neg_inf                 = 892,
-    nan                     = 893,
+    inf                    = 890,
+    neg_zero               = 891,
+    neg_inf                = 892,
+    nan                    = 893,
     // norm_dist with one element overwritten by +inf, -inf, or quiet NaN; index and special kind are
     // deterministic from the fixed seed (NaN uses canonical quiet_NaN, not RNG).
     norm_dist_one_special = 894,
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
-    uniform_low_precision  = 999,
+    uniform_low_precision = 999,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -125,50 +125,6 @@ inline int blockSize(hipblaslt_scaling_format s)
     default:
         return 1;
     }
-}
-
-// Compute scale buffer size with padding for block-scaled MX formats.
-// dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
-// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
-// or 256-element (K) blocks always have valid scale entries:
-//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
-//   scaleCols = dataCol rounded up to multiple of 32
-// When pre-swizzle is active, additional layout requirements may apply but are
-// already satisfied by the rounding above.
-inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
-{
-    auto   bs        = blockSize(s);
-    size_t scaleRows = ((dataRow + bs - 1) / bs + 7) / 8 * 8;
-    size_t scaleCols = ((dataCol + 31) / 32) * 32;
-
-    return scaleRows * scaleCols;
-}
-
-// Scale entries per batch, before multiplying by the batch count. kAlongRows
-// identifies the reduction dimension in the raw matrix (transposed A or normal B).
-// Dimensions must be nonnegative and s must be a block-scaling format. The
-// rocRoller and preswizzled paths require the TN layout: kAlongRows must be true
-// (transA=T or transB=N). The alternate layout supports either orientation.
-// The explicit preswizzled format requires gfx950 padding even without rocRoller.
-inline size_t blockScaleBufferSize(int64_t                  dataRow,
-                                   int64_t                  dataCol,
-                                   hipblaslt_scaling_format s,
-                                   bool                     kAlongRows,
-                                   bool                     mxUseRocroller)
-{
-    if(mxUseRocroller || s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-    {
-        assert(kAlongRows && "rocRoller and preswizzled scales require K along the rows");
-        return scaleBufferSize(dataRow, dataCol, s);
-    }
-
-    size_t const bs        = blockSize(s);
-    size_t const dimk      = 128 / bs;
-    size_t const kDim      = (kAlongRows ? dataRow : dataCol) / bs;
-    size_t const mnDim     = kAlongRows ? dataCol : dataRow;
-    size_t const padDim    = kAlongRows ? kDim : mnDim;
-    size_t const paddedDim = (padDim + dimk - 1) / dimk * dimk;
-    return kAlongRows ? mnDim * paddedDim : kDim * paddedDim;
 }
 
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
@@ -336,4 +292,48 @@ inline const char* hipblaslt_bias_source_to_string(hipblaslt_bias_source type)
     default:
         return "invalid";
     }
+}
+
+// Compute scale buffer size with padding for block-scaled MX formats.
+// dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
+// Scale dimensions are padded to ensure kernels that process data in 32-element (M/N)
+// or 256-element (K) blocks always have valid scale entries:
+//   scaleRows = ceil(dataRow / blockSize) rounded up to multiple of 8
+//   scaleCols = dataCol rounded up to multiple of 32
+// When pre-swizzle is active, additional layout requirements may apply but are
+// already satisfied by the rounding above.
+inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
+{
+    auto   bs        = blockSize(s);
+    size_t scaleRows = ((dataRow + bs - 1) / bs + 7) / 8 * 8;
+    size_t scaleCols = ((dataCol + 31) / 32) * 32;
+
+    return scaleRows * scaleCols;
+}
+
+// Scale entries per batch, before multiplying by the batch count. kAlongRows
+// identifies the reduction dimension in the raw matrix (transposed A or normal B).
+// Dimensions must be nonnegative and s must be a block-scaling format. The
+// rocRoller and preswizzled paths require the TN layout: kAlongRows must be true
+// (transA=T or transB=N). The alternate layout supports either orientation.
+// The explicit preswizzled format requires gfx950 padding even without rocRoller.
+inline size_t blockScaleBufferSize(int64_t                  dataRow,
+                                   int64_t                  dataCol,
+                                   hipblaslt_scaling_format s,
+                                   bool                     kAlongRows,
+                                   bool                     mxUseRocroller)
+{
+    if(mxUseRocroller || s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+    {
+        assert(kAlongRows && "rocRoller and preswizzled scales require K along the rows");
+        return scaleBufferSize(dataRow, dataCol, s);
+    }
+
+    size_t const bs        = blockSize(s);
+    size_t const dimk      = 128 / bs;
+    size_t const kDim      = (kAlongRows ? dataRow : dataCol) / bs;
+    size_t const mnDim     = kAlongRows ? dataCol : dataRow;
+    size_t const padDim    = kAlongRows ? kDim : mnDim;
+    size_t const paddedDim = (padDim + dimk - 1) / dimk * dimk;
+    return kAlongRows ? mnDim * paddedDim : kDim * paddedDim;
 }

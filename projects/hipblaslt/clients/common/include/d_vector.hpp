@@ -28,9 +28,9 @@
 
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 
@@ -89,7 +89,7 @@ public:
         }
 #elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
+        memStatus.dwLength       = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
         {
             // In the windows system, the host memory's capacity is the half of the physical memory
@@ -117,9 +117,9 @@ protected:
     }
     virtual ~hip_memory() = default;
 
-    size_t m_size     = 0;
-    size_t m_capacity = 0;
-    bool   m_managed  = false;
+    size_t m_size               = 0;
+    size_t m_capacity           = 0;
+    bool   m_managed            = false;
     size_t m_allocated_capacity = 0;
 };
 
@@ -145,7 +145,8 @@ public:
             // and will cause the gtest get aborted
             if(available_host_memory < capacity || hipMallocManaged(&d, capacity) != hipSuccess)
             {
-                hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) unified memory, m_size is (" << (m_size >> 30) << " GB)"
+                hipblaslt_cerr << "Error allocating (" << (capacity >> 30)
+                               << " GB) unified memory, m_size is (" << (m_size >> 30) << " GB)"
                                << std::endl;
                 d      = nullptr;
                 m_size = m_capacity = 0;
@@ -155,8 +156,9 @@ public:
         {
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
-            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30) << " GB) as the available device memory is (" << (free_device_mem >> 30) << " GB) "
-                           << std::endl;
+            hipblaslt_cerr << "Insufficient device memory to allocate (" << (m_size >> 30)
+                           << " GB) as the available device memory is (" << (free_device_mem >> 30)
+                           << " GB) " << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
         }
@@ -196,7 +198,8 @@ public:
         // and will cause the gtest get aborted
         if(available_host_memory < capacity || hipHostMalloc(&d, capacity) != hipSuccess)
         {
-            hipblaslt_cerr << "Error allocating (" << (capacity >> 30) << " GB) host memory, m_size is (" << (m_size >> 30) << " GB)"
+            hipblaslt_cerr << "Error allocating (" << (capacity >> 30)
+                           << " GB) host memory, m_size is (" << (m_size >> 30) << " GB)"
                            << std::endl;
             d      = nullptr;
             m_size = m_capacity = 0;
@@ -245,7 +248,7 @@ public:
 
 private:
     std::vector<M> m_pool, m_pool_managed;
-    std::mutex m_mutex;
+    std::mutex     m_mutex;
 
     static memory_pool& Instance()
     {
@@ -256,12 +259,12 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
-        
-        // For Windows system with not enough system memory, 
-        // not suitable for memory pool management when it needs another allocation
-        #ifdef _WIN32
+
+// For Windows system with not enough system memory,
+// not suitable for memory pool management when it needs another allocation
+#ifdef _WIN32
         MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
+        memStatus.dwLength       = sizeof(memStatus);
         if(GlobalMemoryStatusEx(&memStatus))
         {
             // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
@@ -270,9 +273,9 @@ private:
                 pool.clear();
             }
         }
-        #endif
+#endif
 
-        auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
+        auto it = std::lower_bound(pool.begin(), pool.end(), bytes);
         if(it != pool.end() && // found a buffer that is large enough ..
            it->capacity() < 2 * bytes) // but not way too large
         {
@@ -287,8 +290,8 @@ private:
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
             // Threshold for "huge" allocations — skip 20% extra allocation
-            const size_t big_thresh = total_device_mem / 4;
-            bool huge_request = (bytes >= big_thresh);
+            const size_t big_thresh   = total_device_mem / 4;
+            bool         huge_request = (bytes >= big_thresh);
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
@@ -306,7 +309,7 @@ private:
 
             // reset the error code from previous hipMalloc failure and try again to allocate memory
             hipError_t err = hipPeekAtLastError();
-            if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation )
+            if(err == hipErrorOutOfMemory || err == hipErrorMemoryAllocation)
                 (void)hipGetLastError();
 
             return M(bytes, bytes, use_HMM);
@@ -356,10 +359,11 @@ public:
         , m_bytes((s + m_pad * 2) * sizeof(T))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // A nonzero byte pattern makes writes into either guard observable by
+        // the byte-for-byte checks in device_vector_check().
         if(!m_init_guard)
         {
-            hipblaslt_init_nan(m_guard, MEM_MAX_GUARD_PAD);
+            std::fill_n(reinterpret_cast<unsigned char*>(m_guard), sizeof(m_guard), 0xa5);
             m_init_guard = true;
         }
     }
@@ -397,7 +401,6 @@ public:
 #endif
         return d;
     }
-
 
     void device_vector_teardown(T* d)
     {
@@ -451,6 +454,15 @@ protected:
         return m_size;
     }
 
+    void reset_after_move() noexcept
+    {
+        m_size      = 0;
+        m_pad       = 0;
+        m_guard_len = 0;
+        m_bytes     = 0;
+        use_HMM     = false;
+    }
+
 public:
     bool use_HMM = false;
 
@@ -466,10 +478,11 @@ public:
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // Initialize every byte: the runtime-typed guard can be as wide as a
+        // double, rather than the one-byte char used for its backing array.
         if(!m_init_guard_type)
         {
-            hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD);
+            std::fill_n(reinterpret_cast<unsigned char*>(m_guard_type), sizeof(m_guard_type), 0xa5);
             m_init_guard_type = true;
         }
     }
@@ -512,7 +525,6 @@ public:
 #endif
         return d;
     }
-
 
     void device_vector_teardown(char* d)
     {

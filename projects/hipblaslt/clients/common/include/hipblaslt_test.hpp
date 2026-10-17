@@ -186,18 +186,18 @@ bool match_test_category(const Arguments& arg, const char* category);
 // field is set to "known_bug" either at gentest time (unconditional matches in
 // known_bugs.yaml) or at registration time by match_test_category() when the current
 // GPU arch matches an entry's known_bug_platforms list.
-#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                            \
-    do                                                                              \
-    {                                                                               \
-        const auto& _kb_arg = GetParam();                                           \
-        if(!strcmp(_kb_arg.category, "known_bug"))                                  \
-        {                                                                           \
-            GTEST_SKIP() << KNOWN_BUG_STRING                                        \
-                         << " (platforms=" << _kb_arg.known_bug_platforms << ")";   \
-        }                                                                           \
+#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                                      \
+    do                                                                                        \
+    {                                                                                         \
+        const auto& _kb_arg = GetParam();                                                     \
+        if(!strcmp(_kb_arg.category, "known_bug"))                                            \
+        {                                                                                     \
+            GTEST_SKIP() << KNOWN_BUG_STRING << " (platforms=" << _kb_arg.known_bug_platforms \
+                         << ")";                                                              \
+        }                                                                                     \
     } while(0)
 
-// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// GEMM cases in the stress and sdc_hunt categories can need tens of GiB or run for many
 // minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
 // filter that selects them, such as the ctest tier patterns, runs them.
 inline bool hipblaslt_category_needs_a_filter(const char* category)
@@ -212,16 +212,15 @@ inline bool hipblaslt_gtest_filter_given()
     return !positive.empty() && positive != "*";
 }
 
-#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
-    do                                                                                      \
-    {                                                                                       \
-        const auto& _sf_arg = GetParam();                                                   \
-        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
-           && !hipblaslt_gtest_filter_given())                                              \
-            GTEST_SKIP() << "the " << _sf_arg.category                                      \
-                         << " fast_check cases run only when a gtest filter selects them, " \
-                            "for example --gtest_filter=*"                                  \
-                         << _sf_arg.category << "*";                                        \
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                           \
+    do                                                                                             \
+    {                                                                                              \
+        const auto& _sf_arg = GetParam();                                                          \
+        if(hipblaslt_category_needs_a_filter(_sf_arg.category) && !hipblaslt_gtest_filter_given()) \
+            GTEST_SKIP() << "the " << _sf_arg.category                                             \
+                         << " cases run only when a gtest filter selects them, "                   \
+                            "for example --gtest_filter=*"                                         \
+                         << _sf_arg.category << "*";                                               \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
@@ -286,40 +285,40 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
     launch_test_on_streams([&] { test; }, streams, devices)
 
 // Macro to run test across threads
-#define RUN_TEST_ON_THREADS_STREAMS(test)                                                    \
-    do                                                                                       \
-    {                                                                                        \
-        const auto& arg          = GetParam();                                               \
-        size_t      threads      = arg.threads;                                              \
-        size_t      streams      = arg.streams;                                              \
-        size_t      devices      = arg.devices;                                              \
-        int         availDevices = 0;                                                        \
-        bool        HMM          = arg.HMM;                                                  \
-        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                                   \
-        if(devices > availDevices)                                                           \
-        {                                                                                    \
-            SUCCEED() << TOO_MANY_DEVICES_STRING;                                            \
-            return;                                                                          \
-        }                                                                                    \
-        else if(HMM)                                                                         \
-        {                                                                                    \
-            for(int i = 0; i < devices; i++)                                                 \
-            {                                                                                \
-                int flag = 0;                                                                \
-                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
+#define RUN_TEST_ON_THREADS_STREAMS(test)                                              \
+    do                                                                                 \
+    {                                                                                  \
+        const auto& arg          = GetParam();                                         \
+        size_t      threads      = arg.threads;                                        \
+        size_t      streams      = arg.streams;                                        \
+        size_t      devices      = arg.devices;                                        \
+        int         availDevices = 0;                                                  \
+        bool        HMM          = arg.HMM;                                            \
+        CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                             \
+        if(devices > availDevices)                                                     \
+        {                                                                              \
+            SUCCEED() << TOO_MANY_DEVICES_STRING;                                      \
+            return;                                                                    \
+        }                                                                              \
+        else if(HMM)                                                                   \
+        {                                                                              \
+            for(int i = 0; i < devices; i++)                                           \
+            {                                                                          \
+                int flag = 0;                                                          \
+                CHECK_HIP_ERROR(hipDeviceGetAttribute(                                 \
                     &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
-                if(!flag)                                                                    \
-                {                                                                            \
-                    SUCCEED() << HMM_NOT_SUPPORTED;                                          \
-                    return;                                                                  \
-                }                                                                            \
-            }                                                                                \
-        }                                                                                    \
-        g_stream_pool.reset(devices, streams);                                               \
-        if(threads)                                                                          \
-            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
-        else                                                                                 \
-            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                                  \
+                if(!flag)                                                              \
+                {                                                                      \
+                    SUCCEED() << HMM_NOT_SUPPORTED;                                    \
+                    return;                                                            \
+                }                                                                      \
+            }                                                                          \
+        }                                                                              \
+        g_stream_pool.reset(devices, streams);                                         \
+        if(threads)                                                                    \
+            LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                   \
+        else                                                                           \
+            LAUNCH_TEST_ON_STREAMS(test, streams, devices);                            \
     } while(0)
 
 // Thread worker class
@@ -406,8 +405,8 @@ public:
         return std::move(name);
     }
 
-    RocBlasLt_TestName()                                     = default;
-    RocBlasLt_TestName(const RocBlasLt_TestName&)            = delete;
+    RocBlasLt_TestName()                          = default;
+    RocBlasLt_TestName(const RocBlasLt_TestName&) = delete;
     RocBlasLt_TestName& operator=(const RocBlasLt_TestName&) = delete;
 };
 

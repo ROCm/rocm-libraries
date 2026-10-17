@@ -8,8 +8,12 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
+#include <roc/hostnumerics/scalar_conversion_options.hpp>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace roc::hostnumerics {
 enum class ScalarCategory : uint8_t {
@@ -174,6 +178,11 @@ inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
 }
 
+inline constexpr size_t scalarElementGroupSize(ScalarType type) {
+    const size_t bits = scalarTypeInfo(type).storageBits;
+    return 8 / std::gcd(bits, size_t{8});
+}
+
 namespace detail {
 // Implementation of the native mapping, not a customization point.
 template <typename T>
@@ -247,4 +256,145 @@ template <NativeScalar T>
 inline constexpr ScalarType nativeScalarType =
     detail::NativeScalarType<std::remove_cvref_t<T>>::value;
 
+namespace detail {
+// The C++ type that holds one encoded value of Type. Signed integers, float,
+// double and complex values use their native type. Every other whole-byte
+// encoding, including bool, half, bfloat16 and the 8-bit floating-point and
+// scale formats, uses an unsigned integer of the same width. Sub-byte encodings
+// use void because one element cannot occupy a C++ object.
+template <ScalarType Type>
+constexpr auto scalarStorageIdentity() {
+    constexpr uint16_t bits = scalarTypeInfo(Type).storageBits;
+    if constexpr (bits % 8 != 0) {
+        return std::type_identity<void>{};
+    } else if constexpr (Type == ScalarType::Int8) {
+        return std::type_identity<int8_t>{};
+    } else if constexpr (Type == ScalarType::Int16) {
+        return std::type_identity<int16_t>{};
+    } else if constexpr (Type == ScalarType::Int32) {
+        return std::type_identity<int32_t>{};
+    } else if constexpr (Type == ScalarType::Int64) {
+        return std::type_identity<int64_t>{};
+    } else if constexpr (Type == ScalarType::Float32) {
+        return std::type_identity<float>{};
+    } else if constexpr (Type == ScalarType::Float64) {
+        return std::type_identity<double>{};
+    } else if constexpr (Type == ScalarType::ComplexFloat32) {
+        return std::type_identity<std::complex<float>>{};
+    } else if constexpr (Type == ScalarType::ComplexFloat64) {
+        return std::type_identity<std::complex<double>>{};
+    } else if constexpr (bits == 8) {
+        return std::type_identity<uint8_t>{};
+    } else if constexpr (bits == 16) {
+        return std::type_identity<uint16_t>{};
+    } else if constexpr (bits == 32) {
+        return std::type_identity<uint32_t>{};
+    } else {
+        static_assert(bits == 64);
+        return std::type_identity<uint64_t>{};
+    }
+}
+
+// Compile-time description of one encoding, not a customization point.
+// visitScalarType passes ScalarTag<type>; HostNumerics code that knows its
+// encoding at compile time names the same type, such as ScalarTag<ScalarType::UInt8>.
+template <ScalarType TypeValue>
+struct ScalarTag {
+    static_assert(isConcreteScalarType(TypeValue));
+    static constexpr ScalarType type = TypeValue;
+    static constexpr uint16_t storageBits = scalarTypeInfo(TypeValue).storageBits;
+    typedef typename decltype(scalarStorageIdentity<TypeValue>())::type Storage;
+};
+}  // namespace detail
+
+// Calls visitor.template operator()<Tag>(args...) with the tag for a runtime
+// ScalarType. Tag::type is the encoding, Tag::storageBits its width in bits, and
+// Tag::Storage the C++ type holding its encoded bits (void for sub-byte encodings).
+// Encodings that share Storage, such as Float16 and BFloat16, have distinct tags.
+//
+// Tag cannot be deduced from the arguments, so the visitor names it explicitly,
+// as in a lambda written []<typename Tag>(). Every tag must produce the same
+// return type; an explicit return type on the visitor gives clearer errors.
+// The visitor and arguments keep their value categories, and reference and void
+// returns are preserved. ScalarType::Count and values outside the enum throw
+// std::runtime_error before the visitor is called.
+//
+// Dispatch once per operation and run the element loop inside the typed code:
+//
+//   visitScalarType(type, [&]<typename Tag>() {
+//       if constexpr (std::is_void_v<typename Tag::Storage>) {
+//           // Sub-byte encoding: read and write packed bits.
+//       } else {
+//           // Whole-byte encoding: access elements as typename Tag::Storage.
+//       }
+//   });
+//
+// To prepare an operation and run it later, return a pointer to a function
+// template specialized for the tag instead, such as `return &copyElements<Tag>;`.
+template <typename Visitor, typename... Args>
+decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
+    auto dispatch = [&]<ScalarType TypeValue>() -> decltype(auto) {
+        return std::forward<Visitor>(visitor).template operator()<detail::ScalarTag<TypeValue>>(
+            std::forward<Args>(args)...);
+    };
+    switch (type) {
+        case ScalarType::Boolean:
+            return dispatch.template operator()<ScalarType::Boolean>();
+        case ScalarType::Int4:
+            return dispatch.template operator()<ScalarType::Int4>();
+        case ScalarType::Int8:
+            return dispatch.template operator()<ScalarType::Int8>();
+        case ScalarType::Int16:
+            return dispatch.template operator()<ScalarType::Int16>();
+        case ScalarType::Int32:
+            return dispatch.template operator()<ScalarType::Int32>();
+        case ScalarType::Int64:
+            return dispatch.template operator()<ScalarType::Int64>();
+        case ScalarType::UInt8:
+            return dispatch.template operator()<ScalarType::UInt8>();
+        case ScalarType::UInt16:
+            return dispatch.template operator()<ScalarType::UInt16>();
+        case ScalarType::UInt32:
+            return dispatch.template operator()<ScalarType::UInt32>();
+        case ScalarType::UInt64:
+            return dispatch.template operator()<ScalarType::UInt64>();
+        case ScalarType::Float4E2M1:
+            return dispatch.template operator()<ScalarType::Float4E2M1>();
+        case ScalarType::Float6E2M3:
+            return dispatch.template operator()<ScalarType::Float6E2M3>();
+        case ScalarType::Float6E3M2:
+            return dispatch.template operator()<ScalarType::Float6E3M2>();
+        case ScalarType::Float8E4M3:
+            return dispatch.template operator()<ScalarType::Float8E4M3>();
+        case ScalarType::Float8E5M2:
+            return dispatch.template operator()<ScalarType::Float8E5M2>();
+        case ScalarType::Float8E4M3Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E4M3Fnuz>();
+        case ScalarType::Float8E5M2Fnuz:
+            return dispatch.template operator()<ScalarType::Float8E5M2Fnuz>();
+        case ScalarType::E4M3:
+            return dispatch.template operator()<ScalarType::E4M3>();
+        case ScalarType::E5M3:
+            return dispatch.template operator()<ScalarType::E5M3>();
+        case ScalarType::E8M0:
+            return dispatch.template operator()<ScalarType::E8M0>();
+        case ScalarType::E8M0Zero:
+            return dispatch.template operator()<ScalarType::E8M0Zero>();
+        case ScalarType::Float16:
+            return dispatch.template operator()<ScalarType::Float16>();
+        case ScalarType::BFloat16:
+            return dispatch.template operator()<ScalarType::BFloat16>();
+        case ScalarType::Float32:
+            return dispatch.template operator()<ScalarType::Float32>();
+        case ScalarType::Float64:
+            return dispatch.template operator()<ScalarType::Float64>();
+        case ScalarType::ComplexFloat32:
+            return dispatch.template operator()<ScalarType::ComplexFloat32>();
+        case ScalarType::ComplexFloat64:
+            return dispatch.template operator()<ScalarType::ComplexFloat64>();
+        case ScalarType::Count:
+            break;
+    }
+    throw std::runtime_error("Invalid ScalarType.");
+}
 }  // namespace roc::hostnumerics
