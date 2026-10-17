@@ -1,6 +1,6 @@
 # hipDNN Feature Release Test Plan
 
-This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md) and its [Development Workflow](../TESTING.md#development-workflow).
+This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md).
 
 > [!IMPORTANT]
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
@@ -9,21 +9,17 @@ This document is the **hipDNN milestone / release verification** plan: the proce
 
 ## Objective
 
-The objective of a verification run is to produce **defensible evidence** that a specific hipDNN build is correct and ready to ship. Executing this plan should answer three questions without ambiguity:
+A verification run produces evidence that a specific hipDNN build is correct and ready to ship. The record must show:
 
-- **What was validated?** The exact build (OS, GPU family, ROCm version, source commit) that was exercised.
-- **What was checked?** The prerequisites, test suites, and behaviors that were confirmed to pass.
-- **Can it be trusted?** Whether an independent reader can reproduce the same result from the recorded steps.
+- **What was validated:** the exact build (OS, GPU family, ROCm version, source commit).
+- **What was checked:** the prerequisites, test suites and benchmarks that passed.
+- **How to reproduce it:** the commands and their observed output, so a reader can re-run the validation later, for example when investigating a regression.
 
-### Why the details must be recorded
+Record the run in a copy of the [Feature Release Run Template](./TestRunTemplate.md).
 
-A verification run only has value if its outcome can be tied back to a specific build and reproduced later. Record the identifiers and evidence as you go, because:
+### When and where to run it
 
-- **Traceability** - a passing result is meaningless unless it is pinned to the exact artifact and source commit it came from. Recording the build identifier and source SHA proves the tested code is the code being shipped.
-- **Reproducibility** - the exact commands and observed output let someone re-run the validation and get the same result, rather than trusting a summary.
-- **Auditability** - a release sign-off may be revisited weeks later (for a regression, a hotfix, or a compliance check). The record is the durable proof of what was done.
-
-Capture the run in a [Feature Release Run Template](./TestRunTemplate.md) document, which provides the structure for the identifiers, evidence, and reproducible commands described below.
+Run this plan manually ahead of release branching. Run it on every GPU family the release supports: PR CI tests only a few GPUs, so each provider must be validated on the devices it targets ([Known Testing Gaps](../testing/KNOWN_TESTING_GAPS.md#hardware-coverage)). Release ownership and priorities are in [Release Testing](../testing/RELEASE_TESTING.md).
 
 ---
 
@@ -35,10 +31,11 @@ Existing checks run automatically on all PRs pre-merge and on the `develop` bran
 
 | CI Check | Description |
 |----------|-------------|
-| hipDNN Superbuild CI | Builds hipDNN and the providers via the superbuild on Linux and Windows (includes clang-tidy) |
-| TheRock multi-arch CI | Builds and tests across GPU families (e.g. gfx94X, gfx950, gfx1151), with per-component test shards for `hipdnn`, `hipdnn-integration-tests`, `hipdnn-samples`, `hipdnn_install`, and each provider |
+| hipDNN Superbuild CI | Builds hipDNN and the providers via the superbuild on Linux and Windows (clang-tidy on Linux only) |
+| TheRock multi-arch CI | Builds the GPU families and runs the `standard` tier for the affected components |
 | pre-commit | Runs formatting and linting checks on changed files |
-| codecov | Checks code coverage requirements |
+
+What each check runs: [What gates a pull request](../TESTING.md#what-gates-a-pull-request).
 
 ### Test Case 2: Documentation is Current 🕒
 
@@ -46,7 +43,7 @@ Verify that all documentation is up to date:
 
 1. Check version numbers throughout the documentation
 2. Review instructions, explanations, and wording for clarity and accuracy
-4. Verify changelog is complete and correct
+3. Verify changelog is complete and correct
 
 > See the documentation listed in the [README](../../README.md#documentation) to identify relevant areas.
 
@@ -54,7 +51,7 @@ Verify that all documentation is up to date:
 
 ## Running Tests From TheRock Builds
 
-The hipDNN library is included in ROCm development and release builds produced by [TheRock](https://github.com/ROCm/TheRock). These builds ship the hipDNN test executables, so you can validate a release without building from source. The same download also provides a complete ROCm tree, which the [source build](#running-tests-from-source-build) section below reuses as its build dependency, so a single download serves both flows.
+The hipDNN library is included in ROCm development and release builds produced by [TheRock](https://github.com/ROCm/TheRock). These builds ship the hipDNN test executables, so you can validate a release without building from source. The same download is a complete ROCm tree, which the [source build](#running-tests-from-source-build) below can reuse.
 
 ### Obtain a ROCm Build with the hipDNN Tests
 
@@ -79,59 +76,26 @@ Use ctest to list the hipDNN test executables:
 ```
 ctest --test-dir rocm-artifacts/bin/hipdnn --show-only
 ```
-Sample output:
-```
-Internal ctest changing into directory: /workspace/rocm-artifacts/bin/hipdnn
-Test project /workspace/rocm-artifacts/bin/hipdnn
-  Test #1: hipdnn_data_sdk_tests
-  Test #2: hipdnn_backend_tests
-  Test #3: hipdnn_frontend_tests
-  Test #4: hipdnn_test_sdk_tests
-  Test #5: hipdnn_plugin_sdk_tests
-  Test #6: hipdnn_public_backend_tests
-  Test #7: hipdnn_public_frontend_tests
+Run the `full` tier in every hipDNN test directory of the artifacts. Each component (core, integration tests, samples and each provider) has its own directory, so the `hipdnn` directory alone is not enough:
 
-Total Tests: 7
+```bash
+for dir in hipdnn hipdnn_integration_tests_ctest hipdnn_samples miopen_plugin hipblaslt_plugin hip_kernel_provider; do
+  ctest --test-dir rocm-artifacts/bin/$dir -L '^full$' -LE ex_gpu --output-on-failure --parallel 8
+done
 ```
 
-Run all hipDNN tests in parallel:
-```
-ctest --test-dir rocm-artifacts/bin/hipdnn --output-on-failure --parallel 8 --timeout 30
-```
-Sample output:
-```
-Internal ctest changing into directory: /workspace/rocm-artifacts/bin/hipdnn
-Test project /workspace/rocm-artifacts/bin/hipdnn
-    Start 1: hipdnn_data_sdk_tests
-    Start 2: hipdnn_backend_tests
-    Start 6: hipdnn_public_backend_tests
-    Start 7: hipdnn_public_frontend_tests
-    Start 3: hipdnn_frontend_tests
-    Start 4: hipdnn_test_sdk_tests
-    Start 5: hipdnn_plugin_sdk_tests
-1/7 Test #4: hipdnn_test_sdk_tests ............   Passed    0.02 sec
-2/7 Test #5: hipdnn_plugin_sdk_tests ..........   Passed    0.02 sec
-3/7 Test #3: hipdnn_frontend_tests ............   Passed    0.02 sec
-4/7 Test #7: hipdnn_public_frontend_tests .....   Passed    0.27 sec
-5/7 Test #6: hipdnn_public_backend_tests ......   Passed    0.84 sec
-6/7 Test #2: hipdnn_backend_tests .............   Passed    1.33 sec
-7/7 Test #1: hipdnn_data_sdk_tests ............   Passed    2.64 sec
+Where a directory has suites labelled for the GPU under test, replace `-LE ex_gpu` with `-L '^ex_gpu_<arch>$'`, as CI does ([Building and running tests](../TESTING.md#building-and-running-tests)). Add `--verbose` for each test's full output.
 
-100% tests passed, 0 tests failed out of 7
+#### Expected Results
 
-Total Test time (real) =   2.64 sec
-```
-
-Use the --verbose option for more detailed output:
-```
-ctest --test-dir rocm-artifacts/bin/hipdnn --parallel 8 --timeout 60 --verbose
-```
+- Every test passes.
+- A test that cannot run on this GPU skips with a message, and the skip has a tracked issue ([Flaky tests and skips](../testing/TESTING_STRATEGY.md#flaky-tests-and-skips)). Record skip counts.
 
 ---
 
 ## Running Tests From Source Build
 
-This section builds hipDNN from source and runs the tests it produces. It can reuse the ROCm tree from the [TheRock build](#running-tests-from-therock-builds) above, so a single download serves both flows.
+This section builds hipDNN from source and runs the tests it produces.
 
 ### Obtain ROCm (Build Dependency)
 
@@ -150,7 +114,7 @@ Record the ROCm version you built against in your test record (for example the o
 Build the standalone tests following the [Quick Start Guide](../Building.md#quick-start-guide); for the superbuild, see [Superbuild](../Building.md#superbuild). Then run them with ctest (the same command on Linux and Windows):
 
 ```bash
-ctest --test-dir build/release
+ctest --test-dir build/release -L '^full$' -LE ex_gpu
 ```
 
 > On Windows, ensure the ROCm `bin` folder is on your `PATH` before running so the test executables can load the ROCm DLLs.
@@ -171,17 +135,42 @@ ctest --test-dir build/release
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
 > [!NOTE]
-> Standalone ASAN tests are run manually. Pull-request ASAN jobs build but do not test. Manual workflow runs and the scheduled nightly can run ASAN tests where matching GPU runners are available.
+> - **Linux**: full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows**: ASAN instruments code built in this project, not installed ROCm libraries.
 >
-> - **Linux**: standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
-> - **Windows**: standalone ASAN instruments code built in this project, not installed ROCm libraries.
->
-> See [Testing § ASAN/TSAN/sanitizer coverage](../TESTING.md#asantsansanitizer-coverage) and [Known Testing Gaps](../testing/KNOWN_TESTING_GAPS.md#sanitizers-and-platforms) for current automation and platform details.
+> How ASAN runs today: [Testing Strategy: Sanitizers](../testing/TESTING_STRATEGY.md#sanitizers).
 
-Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
+Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L '^standard$'`).
 
 #### Expected Results
 
-- **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration). A known upstream-library error is instead suppressed by `__asan_default_suppressions()` in `test_sdk/src/AsanDefaultSuppressions.cpp`, so the affected tests run rather than being skipped; audit that list alongside `SKIP_IF_ASAN()`.
+- **Test Status**: Record the pass, skip and fail counts. A skipped test was not checked under ASAN; tests skip on architectures that do not support ASAN.
 - **Memory Safety**: No memory leaks or violations should be detected.
-- **Platform**: On Linux the suite is expected to complete cleanly. On Windows a fully clean ASAN run is not yet available (known issues being resolved); do not treat the remaining Windows failures as a release blocker until that work lands.
+
+---
+
+## Performance Testing
+
+### Test Case 1: Benchmark the Release Build 📈
+
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) times hipDNN graphs on each engine. Set it up by following its [setup guide](https://github.com/ROCm/dnn-benchmarking/blob/main/docs/setup.md), passing `--rocm-libraries-ref <pin_sha>` with the `pin_sha` recorded from the manifest, so it builds hipDNN and the providers from the release's source commit. Run it on each GPU family you validate.
+
+Run the headline workloads, the curated regression set described in its [README](https://github.com/ROCm/dnn-benchmarking#workload-files), and write one results file. The set takes about an hour on one GPU:
+
+```bash
+dnn-benchmark -g Workloads/headline/*.tar.gz -o headline-<version>-<arch>.json
+```
+
+Compare it with the previous release's results file for the same GPU family ([how `compare` reports changes](https://github.com/ROCm/dnn-benchmarking/blob/main/docs/usage.md#compare)):
+
+```bash
+dnn-benchmark compare headline-<previous-version>-<arch>.json headline-<version>-<arch>.json
+```
+
+Ahead of release branching, also run the larger `Workloads/microbench/` and `Workloads/models/` sets as time allows, ordered by op importance and by risk from changes since the last release ([Release Testing](../testing/RELEASE_TESTING.md#performance-corpus-manual)).
+
+#### Expected Results
+
+- `dnn-benchmark` exits 0.
+- Every regression that `compare` flags is explained or has a tracked issue.
+- The results file is kept with the run record, as the baseline for the next release.
