@@ -1,0 +1,97 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+GlobalParameters: {Architecture: gfx1250, NumElementsToValidate: -1, DataInitTypeA: 3,
+  DataInitTypeB: 3, DataInitTypeC: 3, DataInitTypeAlpha: 1, DataInitTypeBeta: 1}
+BenchmarkProblems:
+- - OperationType: GEMM
+    Batched: true
+    ComputeDataType: 0
+    DataType: 15
+    DataTypeA: 15
+    DataTypeB: 15
+    DataTypeE: 7
+    DataTypeMXSA: 22
+    DataTypeMXSB: 22
+    DestDataType: 7
+    HighPrecisionAccumulate: true
+    IndexAssignmentsA: [3, 0, 2]
+    IndexAssignmentsB: [3, 1, 2]
+    IndexAssignmentsLD: [4, 5, 6, 7]
+    MXBlockA: 32
+    MXBlockB: 32
+    MacDataTypeA: 15
+    MacDataTypeB: 15
+    NumIndicesC: 3
+    TransposeA: true
+    TransposeB: false
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [false]
+    - AssertFree0ElementMultiple: [8]
+    - AssertFree1ElementMultiple: [8]
+    - AssertSummationElementMultiple: [32]
+    - ClusterDim:
+      - [2, 4]
+    - TileProcessingStrategy: [DataParallel]
+    - PrefetchAcrossPersistent: [1]
+    - ClusterLocalRead: [0]
+    - DepthU: [256]
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - ForceDisableShadowInit: [true]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
+    - GlobalSplitUCoalesced: [true]
+    - GlobalSplitUWorkGroupMappingRoundRobin: [true]
+    - HalfPLR: [1]
+    - InitCIterWmma: [1]
+    - LDSSegmentInterleave: [1]
+    - LdsBlockSizePerPadA: [2048]
+    - LdsBlockSizePerPadB: [2048]
+    - LdsBlockSizePerPadMXSA: [256]
+    - LdsBlockSizePerPadMXSB: [256]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadA: [16]
+    - LdsPadB: [16]
+    - LdsPadMXSA: [16]
+    - LdsPadMXSB: [16]
+    - LocalReadVectorWidthA: [16]
+    - LocalReadVectorWidthB: [16]
+    - MIArchVgpr: [true]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [1]
+    - MinGRIncPerMfma: [1]
+    - NumElementsPerBatchStore: [8]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - StoreVectorWidth: [8]
+    - SuppressNoLoadLoop: [true]
+    - TDMInst: [3]
+    - TDMIterateMode: [3]
+    - ThreadTile:
+      - [1, 1]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - UseSgprForGRO: [0]
+    - VectorWidthA: [8]
+    - VectorWidthB: [8]
+    - WavefrontSize: [32]
+    - WorkGroupMapping: [1]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          WorkGroup: [32, 4, 1]
+          MIArchVgpr: true
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [768, 3072, 1, 1536]
