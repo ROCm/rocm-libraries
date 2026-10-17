@@ -341,9 +341,26 @@ def test_a_timing_phase_with_no_winners_is_incomplete(tmp_path):
 
 
 def test_another_arms_missing_phase_does_not_refuse_this_arm(tmp_path):
+    """Round 2 is owed by `other` only; `full` has no round 2 to be missing."""
     args = build(tmp_path)
-    _expect(tmp_path, {"kind": "timing", "corpus": "c", "arm": "other", "round": 1})
+    _expect(tmp_path, {"kind": "timing", "corpus": "c", "arm": "other", "round": 2})
     assert variant_reduce.main(args + ["--arm", "full"]) == 0
+    assert (tmp_path / "reduced.yaml").exists()
+
+
+def test_another_arms_record_does_not_satisfy_this_arms_phase(tmp_path):
+    """`full` owes round 2 and has no record for it; `other` has one, with winners,
+    for exactly that (kind, corpus, round)."""
+    args = build(tmp_path)
+    attempts = tmp_path / "sweep" / "attempts"
+    other = attempts / "timing__c__other__r2-0001"
+    shutil.copytree(attempts / "timing__c__full__r1-0001", other)
+    record = json.loads((other / "phase.json").read_text())
+    record["phase"].update(arm="other", round=2)
+    (other / "phase.json").write_text(json.dumps(record))
+    _expect(tmp_path, {"kind": "timing", "corpus": "c", "arm": "full", "round": 2})
+    assert variant_reduce.main(args + ["--arm", "full"]) == 3
+    assert not (tmp_path / "reduced.yaml").exists()
 
 
 @pytest.mark.parametrize(
