@@ -360,8 +360,13 @@ void testing_spsm_coo(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
 
-        I struct_pivot  = -1;
-        I numeric_pivot = -1;
+        I               struct_pivot  = -1;
+        I               numeric_pivot = -1;
+        int             device_id;
+        hipDeviceProp_t device_prop{};
+        CHECK_HIP_ERROR(hipGetDevice(&device_id));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
+
         host_coosm(m,
                    k,
                    nnz,
@@ -381,7 +386,8 @@ void testing_spsm_coo(Arguments argus)
                    uplo,
                    idx_base,
                    &struct_pivot,
-                   &numeric_pivot);
+                   &numeric_pivot,
+                   device_prop.warpSize);
 
         if(struct_pivot == -1 && numeric_pivot == -1)
         {
