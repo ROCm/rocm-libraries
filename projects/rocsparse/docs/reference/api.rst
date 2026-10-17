@@ -136,6 +136,10 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_copy_hyb_mat`                   |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_hyb_mat_get_info`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_hyb_mat_set_info`               |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_mat_info`                |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_copy_mat_info`                  |

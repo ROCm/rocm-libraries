@@ -438,20 +438,42 @@ public:
     }
 };
 
-/*! \brief  hyb matrix structure helper to access data for tests  */
-struct test_hyb
+/*! \brief  snapshot of the fields of a hyb matrix, read with rocsparse_hyb_mat_get_info  */
+struct rocsparse_hyb_fields
 {
-    rocsparse_int           m;
-    rocsparse_int           n;
-    rocsparse_hyb_partition partition;
-    rocsparse_int           ell_nnz;
-    rocsparse_int           ell_width;
-    rocsparse_int*          ell_col_ind;
-    void*                   ell_val;
-    rocsparse_int           coo_nnz;
-    rocsparse_int*          coo_row_ind;
-    rocsparse_int*          coo_col_ind;
-    void*                   coo_val;
+    rocsparse_int           m{};
+    rocsparse_int           n{};
+    rocsparse_hyb_partition partition{};
+    int64_t                 ell_nnz{};
+    rocsparse_int           ell_width{};
+    const rocsparse_int*    ell_col_ind{};
+    const void*             ell_val{};
+    rocsparse_int           coo_nnz{};
+    const rocsparse_int*    coo_row_ind{};
+    const rocsparse_int*    coo_col_ind{};
+    const void*             coo_val{};
+    rocsparse_datatype      data_type{};
+
+    explicit rocsparse_hyb_fields(const rocsparse_hyb_mat hyb)
+    {
+        const rocsparse_status status = rocsparse_hyb_mat_get_info(hyb,
+                                                                   &this->m,
+                                                                   &this->n,
+                                                                   &this->partition,
+                                                                   &this->ell_nnz,
+                                                                   &this->ell_width,
+                                                                   &this->ell_col_ind,
+                                                                   &this->ell_val,
+                                                                   &this->coo_nnz,
+                                                                   &this->coo_row_ind,
+                                                                   &this->coo_col_ind,
+                                                                   &this->coo_val,
+                                                                   &this->data_type);
+        if(status != rocsparse_status_success)
+        {
+            throw(status);
+        }
+    }
 };
 
 /*! \brief  local hyb matrix structure which is automatically created and destroyed  */

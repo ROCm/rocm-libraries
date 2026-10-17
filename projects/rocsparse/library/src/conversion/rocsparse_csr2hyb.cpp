@@ -67,26 +67,38 @@ namespace rocsparse
             hyb->data_type_T = rocsparse_datatype_f64_c;
         }
 
-        if(hyb->ell_col_ind)
+        // Arrays set with rocsparse_hyb_mat_set_info belong to the caller and
+        // are only dropped here.
+        if(hyb->allocated_ell_col_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_col_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_ell_col_ind, handle->stream));
         }
-        if(hyb->ell_val)
+        if(hyb->allocated_ell_val)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->ell_val, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_ell_val, handle->stream));
         }
-        if(hyb->coo_row_ind)
+        if(hyb->allocated_coo_row_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_row_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_row_ind, handle->stream));
         }
-        if(hyb->coo_col_ind)
+        if(hyb->allocated_coo_col_ind)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_col_ind, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_col_ind, handle->stream));
         }
-        if(hyb->coo_val)
+        if(hyb->allocated_coo_val)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->coo_val, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(hyb->allocated_coo_val, handle->stream));
         }
+        hyb->allocated_ell_col_ind = nullptr;
+        hyb->allocated_ell_val     = nullptr;
+        hyb->allocated_coo_row_ind = nullptr;
+        hyb->allocated_coo_col_ind = nullptr;
+        hyb->allocated_coo_val     = nullptr;
+        hyb->ell_col_ind           = nullptr;
+        hyb->ell_val               = nullptr;
+        hyb->coo_row_ind           = nullptr;
+        hyb->coo_col_ind           = nullptr;
+        hyb->coo_val               = nullptr;
 
         return rocsparse_status_success;
     }
@@ -255,6 +267,8 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->ell_val, sizeof(T) * hyb->ell_nnz, handle->stream));
+        hyb->allocated_ell_col_ind = hyb->ell_col_ind;
+        hyb->allocated_ell_val     = hyb->ell_val;
     }
 
     // Allocate workspace
@@ -331,6 +345,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             &hyb->coo_col_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->coo_val, sizeof(T) * hyb->coo_nnz, handle->stream));
+        hyb->allocated_coo_row_ind = hyb->coo_row_ind;
+        hyb->allocated_coo_col_ind = hyb->coo_col_ind;
+        hyb->allocated_coo_val     = hyb->coo_val;
     }
 
     dim3 csr2ell_blocks((m - 1) / CSR2ELL_DIM + 1);
