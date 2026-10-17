@@ -871,7 +871,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     bool prefetchHeldForLead(const DAGNode* node) const {
         auto it = prefetchEarliestWmma_.find(node->inst);
-        return it != prefetchEarliestWmma_.end() && wmmaIssuedCountThisRegion_ < it->second;
+        if (it == prefetchEarliestWmma_.end()) return false;
+        if (wmmaIssuedCountThisRegion_ < it->second) return true;
+        // The barrier may slip past its planned window; the prefetch then waits for it to be
+        // ready instead of landing far ahead of its tensor_load.
+        if (getPassContext().getPassFeatureConfig().dagFeatures.prefetchAfterBarrierReady &&
+            regionDag_ != nullptr) {
+            auto b = prefetchStageBarrier_.find(node->inst);
+            if (b != prefetchStageBarrier_.end()) {
+                auto id = regionDag_->instToId.find(const_cast<StinkyInstruction*>(b->second));
+                if (id != regionDag_->instToId.end() && regionDag_->nodes[id->second].inDegree != 0)
+                    return true;
+            }
+        }
+        return false;
     }
     // A filler feeding a prefetch's address; never strict-held, or it lands right in
     // front of the prefetch and turns into a va_vdst stall.

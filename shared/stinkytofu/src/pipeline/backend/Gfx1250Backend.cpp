@@ -209,6 +209,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.wmmaRunMax = moduleOptions.WmmaRunMax;
                 passFeatureConfig.dagFeatures.wmmaRefillNearBarrier =
                     moduleOptions.WmmaRefillNearBarrier;
+                passFeatureConfig.dagFeatures.prefetchAfterBarrierReady =
+                    moduleOptions.PrefetchAfterBarrierReady;
                 passFeatureConfig.dagFeatures.dsPaceCycles = moduleOptions.DsPaceCycles;
                 passFeatureConfig.dagFeatures.dsPaceCount = moduleOptions.DsPaceCount;
                 passFeatureConfig.dagFeatures.dsPaceSeparators = moduleOptions.DsPaceSeparators;
