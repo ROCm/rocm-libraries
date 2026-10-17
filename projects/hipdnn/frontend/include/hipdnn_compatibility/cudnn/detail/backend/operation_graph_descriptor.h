@@ -19,13 +19,13 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/attribute_table.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/c_types.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/descriptor.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/operation_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/parameter_descriptors.h>
 #include <hipdnn_compatibility/cudnn/detail/backend/tensor_descriptor.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>

@@ -66,6 +66,10 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8OperationGraph.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8EngineSelection.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8ExecutionPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Utils.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8DescriptorBuilders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8AuxBuilders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV8Tu.cpp>
     # SDPA node coverage additionally needs the SDPA build.
     $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
@@ -209,4 +213,54 @@ if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
 else()
     message(STATUS "hipDNN: this C++ compiler advertises no cxx_std_20; the C++20 runtime-load "
                    "header compile target is not created")
+endif()
+
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    # build() bodies depend on NV_CUDNN_DISABLE_EXCEPTION, so the status-return path needs its
+    # own binary: mixing TUs with and without the macro in one binary is an ODR violation.
+    add_executable(hipdnn_frontend_cudnn_v8_noexcept_tests main.cpp TestCudnnShimV8NoExcept.cpp)
+    target_compile_definitions(
+        hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE NV_CUDNN_DISABLE_EXCEPTION
+    )
+    target_compile_options(
+        hipdnn_frontend_cudnn_v8_noexcept_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    )
+    target_link_libraries(
+        hipdnn_frontend_cudnn_v8_noexcept_tests
+        GTest::gtest GTest::gmock hip::host Threads::Threads hipdnn_test_sdk
+    )
+    clang_tidy_check(hipdnn_frontend_cudnn_v8_noexcept_tests)
+    add_hipdnn_test(hipdnn_frontend_cudnn_v8_noexcept_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+    # Compile-only: the umbrella with each JSON opt-out.
+    add_library(hipdnn_frontend_cudnn_v8_skip_cudnn_json OBJECT TestCudnnShimV8SkipCudnnJson.cpp)
+    target_compile_definitions(
+        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE CUDNN_FRONTEND_SKIP_JSON_LIB
+    )
+    target_compile_options(
+        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    )
+    target_link_libraries(
+        hipdnn_frontend_cudnn_v8_skip_cudnn_json PRIVATE hipdnn_frontend hip::host
+    )
+
+    add_library(
+        hipdnn_frontend_cudnn_v8_skip_hipdnn_json OBJECT TestCudnnShimV8SkipHipdnnJson.cpp
+    )
+    target_compile_definitions(
+        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE HIPDNN_FRONTEND_SKIP_JSON_LIB
+    )
+    target_compile_options(
+        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+    )
+    target_link_libraries(
+        hipdnn_frontend_cudnn_v8_skip_hipdnn_json PRIVATE hipdnn_frontend hip::host
+    )
+
+    # Attached to the unit binary so targeted builds cannot skip the gates.
+    add_dependencies(
+        hipdnn_frontend_tests
+        hipdnn_frontend_cudnn_v8_skip_cudnn_json
+        hipdnn_frontend_cudnn_v8_skip_hipdnn_json
+    )
 endif()

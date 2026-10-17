@@ -150,6 +150,7 @@ protected:
                 }
                 _lastError.clear();
             });
+        ON_CALL(*_mockBackend, getErrorString(_)).WillByDefault(::testing::Return("mock status"));
     }
 
     // ENGINEHEUR RESULTS yields one ENGINECFG per ID, in this (rank) order.

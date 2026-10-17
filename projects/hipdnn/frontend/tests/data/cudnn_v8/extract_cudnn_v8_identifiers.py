@@ -53,7 +53,10 @@ EXCLUDED = {
     "CUDNN_FIND_SAMPLE_ONCE": "cudnn-frontend scoped enumerator",
     "CUDNN_FIND_SAMPLE_TILL_STABLE": "cudnn-frontend scoped enumerator",
     "CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE": "cudnn-frontend scoped enumerator",
-    "CUDNN_FRONTEND_SKIP_JSON_LIB": "cudnn-frontend configuration macro, tested but never defined",
+    "CUDNN_FRONTEND_SKIP_JSON_LIB": (
+        "cudnn-frontend configuration macro; defined by the shim when "
+        "HIPDNN_FRONTEND_SKIP_JSON_LIB is"
+    ),
     "cudnnFilterDescriptor_t": "v7 filter API, out of scope",
     "cudnnCreateFilterDescriptor": "v7 filter API, out of scope",
     "cudnnSetFilterNdDescriptor": "v7 filter API, out of scope",
