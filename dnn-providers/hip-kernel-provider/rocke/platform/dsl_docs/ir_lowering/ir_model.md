@@ -99,10 +99,12 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
+add_nuw                                    # integer add, no unsigned wrap (i32/i64)
 fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
 fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
+cmp_ult                                    # unsigned compare (i32/i64 -> i1)
 land, lor, lnot                            # bitwise + i1 logic
 zext(v, target_int_type)
 sext(v, target_int_type)

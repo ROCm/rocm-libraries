@@ -17,6 +17,7 @@
  * rocke_ll_need, rocke_ll_fresh, rocke_ll_fp32_hex, rocke_ll_binop, rocke_ll_fail, ...)
  * lives in BUCKET 0; this file only calls them through the internal header.
  */
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <stdio.h>
@@ -169,7 +170,24 @@ static void _op_arith_constant_vec(rocke_lower_t* L, const rocke_op_t* op)
  * (Python self._binop(op, llvm_op)). */
 static void _op_arith_add(rocke_lower_t* L, const rocke_op_t* op)
 {
-    rocke_ll_binop(L, op, "add nsw");
+    /* Python: the wrap (absent means nsw) is "add nsw" or "add nuw". */
+    char wrap_buf[128];
+    const char* wrap_error
+        = rocke_i_add_wrap_error(&op->attrs, op->operands[0]->type, wrap_buf, sizeof wrap_buf);
+    if(wrap_error)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", wrap_error);
+        return;
+    }
+    const char* wrap = rocke_attr_get_str(&op->attrs, "wrap");
+    rocke_ll_binop(L, op, wrap && strcmp(wrap, "nuw") == 0 ? "add nuw" : "add nsw");
+}
+/* Python _op_arith_assume_range: emits nothing; rocke_ll_operand prints the
+ * marked value (operand 0) at every use of the marker's result. */
+static void _op_arith_assume_range(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)L;
+    (void)op;
 }
 static void _op_arith_sub(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -378,6 +396,10 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
     else if(strcmp(pred, "ne") == 0)
     {
         llvm_pred = "ne";
+    }
+    else if(strcmp(pred, "ult") == 0)
+    {
+        llvm_pred = "ult";
     }
     else
     {
@@ -868,6 +890,7 @@ void rocke_ll_register_arith(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT, _op_arith_constant);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CONSTANT_VEC, _op_arith_constant_vec);
     rocke_ll_set_handler(ROCKE_OP_ARITH_ADD, _op_arith_add);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_ASSUME_RANGE, _op_arith_assume_range);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SUB, _op_arith_sub);
     rocke_ll_set_handler(ROCKE_OP_ARITH_MUL, _op_arith_mul);
     rocke_ll_set_handler(ROCKE_OP_ARITH_DIV, _op_arith_div);

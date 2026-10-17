@@ -1365,7 +1365,7 @@ static void _magic_divmod(rocke_ir_builder_t* b,
                           rocke_value_t** r_out)
 {
     rocke_value_t* tmp = rocke_b_umul_hi_i32(b, n, d->mult);
-    rocke_value_t* summed = rocke_b_add(b, tmp, n);
+    rocke_value_t* summed = rocke_b_add_nuw(b, tmp, n);
     rocke_value_t* q = rocke_b_lshr(b, summed, d->shift);
     rocke_value_t* qd = rocke_b_mul(b, q, d->value);
     *q_out = q;

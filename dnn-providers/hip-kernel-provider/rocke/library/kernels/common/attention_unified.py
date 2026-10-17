@@ -53,10 +53,9 @@ from rocke.helpers.attention import (
     use_2d_kernel,
 )
 
+from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.transforms import (
     TensorDescriptor,
-    calculate_magic_numbers,
-    do_magic_division,
 )
 
 # Alias the promoted log2-domain softcap helper under the local name used by
@@ -244,7 +243,7 @@ def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
     (a grid axis or a KV position), well inside the documented 31-bit
     unsigned range of the magic sequence -- so the unsigned magic quotient
     equals the signed ``b.div`` it replaces. This is the device lowering of
-    ``merge_v2_magic_division`` (``transforms.do_magic_division``).
+    ``merge_v2_magic_division`` (``magic_division.do_magic_division``).
     """
     mult, shift = calculate_magic_numbers(divisor)
     return do_magic_division(b, dividend, mult, shift)

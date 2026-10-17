@@ -172,6 +172,23 @@ if(BUILD_TESTING)
                  rocke_xf32_bf16x3_lowering)
   endif()
 
+  # Unsigned compare, no-unsigned-wrap add and range marker: C API builders,
+  # both C++ lowerers, the verifier and the constant folder.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_unsigned_int_ops.cpp")
+    add_executable(rocke_unsigned_int_ops core/test_unsigned_int_ops.cpp)
+    target_link_libraries(rocke_unsigned_int_ops PRIVATE rocke_core)
+    add_test(NAME rocke_unsigned_int_ops COMMAND rocke_unsigned_int_ops)
+    set_tests_properties(rocke_unsigned_int_ops
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_unsigned_int_ops)
+    set_target_properties(rocke_unsigned_int_ops
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unsigned_int_ops
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unsigned_int_ops)
+  endif()
+
   # f64 op rejection and f64 vector arithmetic in both C++ lowerers.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_f64_lowering.cpp")
     add_executable(rocke_f64_lowering core/test_f64_lowering.cpp)
