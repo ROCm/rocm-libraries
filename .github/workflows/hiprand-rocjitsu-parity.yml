@@ -47,6 +47,10 @@ on:
         description: "Number of quick-filter CTest binaries to run concurrently (for example 5)."
         type: string
         default: "1"
+      dispatch_threads:
+        description: "Optional explicit rocJITsu cpu_dispatch_threads override (for example 80). Empty uses the gfx942 allocation table."
+        type: string
+        default: ""
       sweep:
         description: "Set to all to run every installed ffm-quick suite instead of the hipRAND selection."
         type: string
@@ -140,6 +144,7 @@ jobs:
       ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
       CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
       CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || '1' }}
+      DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       # develop on 2026-10-01, after the VM dispatch-overhead fix
       # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
@@ -209,13 +214,27 @@ jobs:
           common=(
             python3 .github/scripts/ci_parity_runner.py
             --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
-            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
+            --config "$config_path"
             --rocm-root "$ROCM_ROOT"
             --rocm-version "$ROCM_VERSION"
             --runner-label "$BUILD_RUNS_ON"
             --out parity/emu.json
           )
           config_args=(--config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json")
+          config_path="$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
+          if [ -n "$DISPATCH_THREADS" ]; then
+            python3 - "$config_path" "$PWD/parity/gfx942_cdna3-dispatch.json" "$DISPATCH_THREADS" <<'PY'
+          import json, pathlib, sys
+          source, destination, dispatch = sys.argv[1:]
+          config = json.loads(pathlib.Path(source).read_text())
+          config["num_threads"] = 8
+          config["cpu_dispatch_threads"] = int(dispatch)
+          config["async_helper_threads"] = 0
+          pathlib.Path(destination).write_text(json.dumps(config, indent=2) + "\n")
+          PY
+            config_path="$PWD/parity/gfx942_cdna3-dispatch.json"
+            config_args=(--config "$config_path")
+          fi
           if [ -n "$ROCJITSU_ARG" ]; then
             common+=(--rocjitsu-arg="$ROCJITSU_ARG")
             case "$ROCJITSU_ARG" in
