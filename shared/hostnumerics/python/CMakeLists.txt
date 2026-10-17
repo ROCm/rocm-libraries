@@ -19,7 +19,7 @@ if(NOT nanobind_FOUND)
     find_package(nanobind CONFIG REQUIRED)
 endif()
 
-nanobind_add_module(hostnumerics-python NB_STATIC src/bindings.cpp)
+nanobind_add_module(hostnumerics-python NB_STATIC src/bindings.cpp src/shape_bindings.cpp)
 target_link_libraries(hostnumerics-python PRIVATE roc::hostnumerics)
 set_target_properties(hostnumerics-python
     PROPERTIES

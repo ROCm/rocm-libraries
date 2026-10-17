@@ -70,18 +70,84 @@ removing an old accelerated path.
 
 C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics.
 
+Test numerical behavior primarily through the Python API, using independent
+expected results. Keep native core tests in `tests/core_test.cpp` for contracts
+that Python cannot exercise, such as C++ construction and ownership rules.
+
+## Error handling
+
+HostNumerics-owned terminal errors throw `std::runtime_error` with a useful
+message. Expected compatibility and support failures should use explicit checks
+or results; callers must not select recovery from exception types or messages.
+Allocation, system, dependency and user-callback errors retain their original
+types. Python tuple operations retain their native errors, while named
+HostNumerics operations report `RuntimeError`. This policy does not promise an
+exceptions-disabled build.
+
+## Python Shape
+
+`Shape` behaves like an immutable Python tuple of nonnegative extents. Integer
+indexing returns an extent, including negative positions; slicing selects axes
+and returns a new `Shape`. Length, iteration, membership, `count`, `index`, and
+hashing follow tuple semantics. Shape values compare equal to other Shape values
+with the same extents. They do not compare equal to tuples or lists. Mutation,
+concatenation, repetition, and ordering comparisons are not supported.
+
+```python
+shape = Shape([2, 3, 5])
+shape[-1]       # 5
+shape[1:]       # Shape((3, 5))
+shape[::-1]     # Shape((5, 3, 2))
+tuple(shape)    # (2, 3, 5)
+len(shape)      # 3
+Shape(range(20))[0:16:5]  # Shape((0, 5, 10, 15))
+```
+
+Slicing a Shape selects dimensions, rather than positions within each dimension.
+An empty Shape has length zero and represents a rank-zero scalar with one
+element. Shape-specific operations such as `element_count`, `project`, and
+coordinate conversion retain their logical shape semantics.
+
+Named methods use nonnegative dimension numbers, coordinates, and range bounds:
+`extent`, `project`, `element_count_in_range`, and the `order` arguments do not
+normalize negative axes. Construction requires the product of all nonzero extents
+to fit in `size_t`, so both `Shape([SIZE_MAX, 2])` and
+`Shape([SIZE_MAX, 2, 0])` fail immediately. Here `SIZE_MAX` is the maximum value
+of `size_t`. Zero extents still describe empty shapes: `Shape([SIZE_MAX, 1, 0])`
+has zero elements. This invariant guarantees that every dimension subrange,
+projection, and slice has a representable element count. Counts and index
+conversions need no further overflow checks; their arguments are validated
+before computing the result.
+
+Axes are numbered by their positions in `dimensions`. For `[2, 3, 5]`, axis 0
+has extent 2, axis 1 has extent 3, and axis 2 has extent 5. `order` lists axes
+from outermost to innermost loop, so its last entry changes fastest. Empty order
+selects `[0, 1, 2]`, the row-major convention with the last axis fastest.
+
+| Order | Fastest axis | Logical strides for axes 0, 1, 2 | Index of `[1, 2, 3]` |
+| --- | --- | --- | --- |
+| `[0, 1, 2]` (default) | 2 | `[15, 5, 1]` | 28 |
+| `[2, 1, 0]` | 0 | `[1, 2, 6]` | 23 |
+| `[1, 2, 0]` | 0 | `[1, 10, 2]` | 27 |
+
+Thus `[1, 2, 0]` means a loop over axis 1 containing a loop over axis 2
+containing a loop over axis 0. Both `linear_index` and `coordinates` use this
+same order; it is independent of physical storage strides.
+
+
 ## Build and test
 
 The standalone build requires CMake 3.25.2 or newer, a C++20 compiler, and Ninja.
 The Python module also needs Python 3.10 or newer with development headers and
-nanobind. From the repository root, the following creates a virtual environment
-and build directory outside the source tree:
+nanobind. The Python test suite also requires NumPy. From the repository root,
+the following creates a virtual environment and build directory outside the
+source tree:
 
 ```shell
 hostnumerics_venv="$PWD/../venvs/hostnumerics"
 hostnumerics_build="$PWD/../builds/hostnumerics"
 python3 -m venv "$hostnumerics_venv"
-"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1
+"$hostnumerics_venv/bin/python" -m pip install nanobind==3.0.1 numpy
 
 cmake -S shared/hostnumerics -B "$hostnumerics_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
