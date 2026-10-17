@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
+### Resolved issues
+* Fixed a GPU memory access fault in `rocsparse_bsrilu0`, `rocsparse_bsric0`, and the BSR paths of `rocsparse_spilu0` and `rocsparse_spic0` with 32-bit indices, when the number of stored values `nnzb * block_dim * block_dim` exceeded `INT32_MAX` (~2.1 billion) even though `nnzb` itself fits in 32 bits. The block value offsets were computed in 32-bit arithmetic and overflowed. They are now computed in 64-bit arithmetic, which also applies to the shared BSR/GEBSR indexing used by `rocsparse_bsrsv`, `rocsparse_bsrsm`, `rocsparse_bsrxmv`, and `rocsparse_gebsrmv`.
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
