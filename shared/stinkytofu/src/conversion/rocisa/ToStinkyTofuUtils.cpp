@@ -214,9 +214,15 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
-stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod,
+                                                   const std::map<std::string, int>& asmCaps) {
+    bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+    bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+    bool hasDLCModifier = asmCaps.count("HasDLCModifier") && asmCaps.at("HasDLCModifier");
     return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
-                                       convertMUBUFScope(rocMod.scope));
+                                       convertMUBUFScope(rocMod.scope), rocMod.glc, rocMod.slc,
+                                       rocMod.dlc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+                                       hasSC0Modifier, hasDLCModifier);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -356,6 +362,9 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
 
         case GFX::ds_store_b192:
             return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
+
+        case GFX::ds_store_b256:
+            return legalizeDSStoreB256(inst, irBuilder, archId, hasVgprMsb);
 
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
@@ -728,7 +737,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
-        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers,
+            [&](const auto& mod) { return convertGLOBALModifiers(mod, asmCaps); })
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -745,8 +755,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             // whose modifier handling must not change here.
             if (typed->modifier.has_value()) {
                 const auto& gm = typed->modifier.value();
-                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(stinkytofu::GLOBALModifiers(
-                    gm.offset, convertTemporalHint(gm.th), convertMUBUFScope(gm.scope)));
+                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+                    convertGLOBALModifiers(gm, asmCaps));
             }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
@@ -1028,16 +1038,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // instead -- but only to disambiguate *within the same triple*. In a multi-arch build (e.g.
     // gfx942;gfx1250v0) ArchName is set build-wide, so we must not retag a kernel of a different
     // arch: honor the name only when the named arch's triple matches this kernel's triple.
-    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
-    if (!moduleOptions.ArchName.empty()) {
-        const GfxArchID named = getGfxArchID(moduleOptions.ArchName);
-        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(named);
-        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
-            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
-            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
-            archId = named;
-        }
-    }
+    // resolveArchId() is shared with the logical-IR path (ToStinkyAsmPass) so both select the same
+    // per-arch cost table.
+    GfxArchID archId = resolveArchId(arch, moduleOptions.ArchName);
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
@@ -1491,8 +1494,24 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getFunction(name) != nullptr;
         }
 
-        // Override emitAssembly to include signature
+        // Override emitAssembly to include signature.
+        // KeepSignatureOnEmit: a pre-pipeline dump also calls this. refreshSgprCount
+        // only ever lowers the declared count, so that dump would drop SGPRs the
+        // later pipeline still needs. The plugin flag emits the same text, then
+        // puts the declaration back.
         std::string emitAssembly() const {
+            const bool keepSignature = module_->getPluginDataI64("KeepSignatureOnEmit", 0) != 0;
+            int savedVgprs = 0;
+            int savedAgprs = 0;
+            int savedSgprs = 0;
+            int64_t savedBytes = -1;
+            if (keepSignature && signature_) {
+                const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+                savedVgprs = kd.originalTotalVgprs;
+                savedAgprs = kd.totalAgprs;
+                savedSgprs = kd.totalSgprs;
+                savedBytes = kd.totalInstructionBytes;
+            }
             std::string result;
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
@@ -1501,6 +1520,10 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
+            if (keepSignature && signature_) {
+                signature_->setGprs(savedVgprs, savedAgprs, savedSgprs);
+                signature_->setTotalInstructionBytes(savedBytes);
+            }
             return result;
         }
 

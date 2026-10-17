@@ -938,6 +938,11 @@ class HolderContainer(RegisterContainer):
         c.isAbs = self.isAbs
         c.isMacro = self.isMacro
         c.isOff = self.isOff
+        # Parent true16 half-select slot: RegisterContainer._shallow_clone copies
+        # it, and getCopiedRC reads it, so a cloned holder must carry it too --
+        # otherwise the __slots__ slot stays unset and getCopiedRC raises
+        # AttributeError (e.g. accvgpr replaceHolder in globalWriteBatch).
+        c.halfSelect = self.halfSelect
         # Subclass fields.
         c.holderName = self.holderName
         c.holderIdx = self.holderIdx
@@ -955,7 +960,7 @@ class HolderContainer(RegisterContainer):
 
     def __getstate__(  # type: ignore[override]
         self,
-    ) -> Tuple[str, int, int, str, Optional[RegName], int, int]:
+    ) -> Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]]:
         return (
             self.holderName,
             self.holderIdx,
@@ -964,12 +969,15 @@ class HolderContainer(RegisterContainer):
             deepcopy(self.regName),
             self.regIdx,
             self.regNum,
+            None if self.halfSelect is None else int(self.halfSelect),
         )
 
     def __setstate__(  # type: ignore[override]
         self,
-        state: Tuple[str, int, int, str, Optional[RegName], int, int],
+        state: Tuple[str, int, int, str, Optional[RegName], int, int, Optional[int]],
     ) -> None:
+        from .enum import HighBitSel  # noqa: WPS433
+
         (
             holder_name,
             holder_idx,
@@ -978,7 +986,11 @@ class HolderContainer(RegisterContainer):
             reg_name,
             reg_idx,
             reg_num,
+            half,
         ) = state
+        # A __slots__ slot left unset raises on read, and getCopiedRC reads
+        # this one. Plain int for the same pickle reason as RegisterContainer.
+        self.halfSelect = None if half is None else HighBitSel(half)
         # Restore the snapshot verbatim, skipping ctor's holderType-derived
         # state setup. RC flags default to False (not preserved in state).
         self.regType = reg_type
@@ -1905,7 +1917,7 @@ class SDWAModifiers(Container):
 class DPPModifiers(Container):
     """DPP modifier bundle (``rocisa::DPPModifiers``)."""
 
-    __slots__ = ("row_shr", "row_bcast", "bound_ctrl", "quad_perm")
+    __slots__ = ("row_shr", "row_bcast", "bound_ctrl", "quad_perm", "row_xmask")
 
     def __init__(
         self,
@@ -1913,11 +1925,13 @@ class DPPModifiers(Container):
         row_bcast: int = -1,
         bound_ctrl: int = -1,
         quad_perm: Optional[List[int]] = None,
+        row_xmask: int = -1,
     ) -> None:
         self.row_shr = row_shr
         self.row_bcast = row_bcast
         self.bound_ctrl = bound_ctrl
         self.quad_perm: List[int] = list(quad_perm) if quad_perm else []
+        self.row_xmask = row_xmask
 
     def toString(self) -> str:
         k_str = ""
@@ -1929,29 +1943,35 @@ class DPPModifiers(Container):
             k_str += f" bound_ctrl:{self.bound_ctrl}"
         if self.quad_perm:
             k_str += f" quad_perm:{_int_vector_to_string(self.quad_perm)}"
+        if self.row_xmask != -1:
+            k_str += f" row_xmask:{self.row_xmask}"
         return k_str
 
     def __repr__(self) -> str:
         return (
             f"DPPModifiers(row_shr={self.row_shr!r}, row_bcast={self.row_bcast!r}, "
-            f"bound_ctrl={self.bound_ctrl!r}, quad_perm={self.quad_perm!r})"
+            f"bound_ctrl={self.bound_ctrl!r}, quad_perm={self.quad_perm!r}, "
+            f"row_xmask={self.row_xmask!r})"
         )
 
     def __copy__(self) -> "DPPModifiers":
         return DPPModifiers(
-            self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm,
+            self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm, self.row_xmask,
         )
 
     def __deepcopy__(self, memo: dict) -> "DPPModifiers":
         return DPPModifiers(
-            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm),
+            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm), self.row_xmask,
         )
 
-    def __getstate__(self) -> Tuple[int, int, int, List[int]]:
-        return (self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm))
+    def __getstate__(self) -> Tuple[int, int, int, List[int], int]:
+        return (
+            self.row_shr, self.row_bcast, self.bound_ctrl, list(self.quad_perm), self.row_xmask,
+        )
 
-    def __setstate__(self, state: Tuple[int, int, int, List[int]]) -> None:
-        self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm = state
+    def __setstate__(self, state: Tuple) -> None:
+        self.row_shr, self.row_bcast, self.bound_ctrl, self.quad_perm = state[:4]
+        self.row_xmask = state[4] if len(state) > 4 else -1
         self.quad_perm = list(self.quad_perm)
 
 

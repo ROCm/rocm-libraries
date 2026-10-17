@@ -160,9 +160,8 @@ def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
     assert state["StreamKAtomic"] == 1
 
 
-@pytest.mark.parametrize("use_beta", [False, True])
-@pytest.mark.parametrize("initial_strides", [False, True])
-def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path, record_property, use_beta, initial_strides):
+def _data_parallel_signature_agreement(tmp_path, use_beta, initial_strides):
+    """Emit a gfx942 DataParallel kernel and check the writer state left on that same backend."""
     from config_harness import _emit_one, _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from test_persistent_config_generation import _config
     from Tensile.Common.Types import DebugConfig
@@ -204,8 +203,6 @@ def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path,
     assert names[first + 2:first + 4] == ["alpha", "beta" if use_beta else "betapad"]
     assert names[-4:] == ["batchOffsetD", "batchOffsetC", "batchOffsetA", "batchOffsetB"]
     assert offset == metadata["amdhsa.kernels"][0][".kernarg_segment_size"]
-    record_property("arguments", json.dumps(arguments))
-    record_property("descriptor", json.dumps(generated))
 
     if use_beta and not initial_strides:
         # Exercise a packed C1 group at the signature boundary without asking
@@ -228,9 +225,28 @@ def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path,
         assert [argument[".name"] for argument in magic] == ["MagicNumberSizeJ", "MagicShiftSizeJ"]
         assert magic[1][".offset"] == magic[0][".offset"] + 4
         assert packed_arguments[-4][".offset"] == arguments[-4][".offset"] + 8
+    return arguments, generated
 
 
-def test_codegen_rejects_invalid_data_parallel_descriptor(monkeypatch, tmp_path):
+@pytest.mark.parametrize("use_beta", [False, True])
+@pytest.mark.parametrize("initial_strides", [False, True])
+def test_data_parallel_generated_signature_descriptor_and_reader_agree(tmp_path, record_property, use_beta, initial_strides):
+    from codegen_harness import run_where_backend_matches_isa
+
+    # gfx942 inspects the KernelWriter, so the whole check runs on native rocisa.
+    arguments, generated = run_where_backend_matches_isa(
+        (9, 4, 2),
+        _data_parallel_signature_agreement,
+        tmp_path,
+        use_beta,
+        initial_strides,
+    )
+    record_property("arguments", json.dumps(arguments))
+    record_property("descriptor", json.dumps(generated))
+
+
+def _reject_invalid_data_parallel_descriptor(tmp_path):
+    """gfx942 reject path, executed on native rocisa by the caller."""
     from config_harness import _isolated_globals_with_isa, _toolchain_for, _solutions_from_config_unguarded
     from test_persistent_config_generation import _config
     from Tensile.Common.Types import DebugConfig
@@ -247,12 +263,21 @@ def test_codegen_rejects_invalid_data_parallel_descriptor(monkeypatch, tmp_path)
         writer.kernelArgDefs = [arg for arg in writer.kernelArgDefs
                                 if arg["semantic"] != "PersistentGrid"]
 
-    monkeypatch.setattr(KernelWriterAssembly, "_registerKernelArgs", omit_grid)
-    assembler, isa = _toolchain_for("gfx942")
-    with _isolated_globals_with_isa(isa):
-        solutions = _solutions_from_config_unguarded(path, assembler, isa, limit_solutions=1)
-        assert len(solutions) == 1
-        kernel = generateKernelObjectsFromSolutions(solutions)[0]
-        writer = KernelWriterAssembly(assembler, DebugConfig())
-        with pytest.raises(ValueError, match="scheduling arguments"):
-            writer._getKernelSource(kernel)
+    KernelWriterAssembly._registerKernelArgs = omit_grid
+    try:
+        assembler, isa = _toolchain_for("gfx942")
+        with _isolated_globals_with_isa(isa):
+            solutions = _solutions_from_config_unguarded(path, assembler, isa, limit_solutions=1)
+            assert len(solutions) == 1
+            kernel = generateKernelObjectsFromSolutions(solutions)[0]
+            writer = KernelWriterAssembly(assembler, DebugConfig())
+            with pytest.raises(ValueError, match="scheduling arguments"):
+                writer._getKernelSource(kernel)
+    finally:
+        KernelWriterAssembly._registerKernelArgs = register
+
+
+def test_codegen_rejects_invalid_data_parallel_descriptor(tmp_path):
+    from codegen_harness import run_where_backend_matches_isa
+
+    run_where_backend_matches_isa((9, 4, 2), _reject_invalid_data_parallel_descriptor, tmp_path)

@@ -18,6 +18,8 @@ operand, with the suffix placed *inside* the closing paren of ``abs(...)``::
 This is a pure host-side codegen assertion: it renders the generator's module to
 a string and checks the emitted text. No GPU and no assembler are required. The
 target arch is forced from a gfx string, so no real device has to be present.
+When this process imported stinkytofu, a non-gfx1250 target is rendered in a
+native-rocisa worker; gfx1250 stays here.
 """
 
 import os
@@ -32,6 +34,7 @@ TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 if TENSILE_ROOT not in sys.path:
     sys.path.insert(0, TENSILE_ROOT)
 
+from codegen_harness import run_where_backend_matches_isa  # noqa: E402
 from gpu_test_helpers import init_rocisa  # noqa: E402
 
 from Tensile.Common.Architectures import gfxToIsa  # noqa: E402
@@ -113,12 +116,19 @@ def _vmax_lines(text: str):
     return [ln.strip() for ln in text.splitlines() if "v_max_f16" in ln]
 
 
+def _activation_clamp_text(target: str) -> str:
+    return str(_make_generator(target).max_per_data(0))
+
+
+def _merge_sum_text(target: str) -> str:
+    return str(_make_generator(target).merge_sum())
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("target", TRUE16_TARGETS)
 def test_amax_activation_clamp_is_true16(target):
     """max_per_data must emit the true16 v_max_f16 (with abs source)."""
-    gen = _make_generator(target)
-    text = str(gen.max_per_data(0))
+    text = run_where_backend_matches_isa(gfxToIsa(target), _activation_clamp_text, target)
 
     lines = _vmax_lines(text)
     assert lines, f"[{target}] expected at least one v_max_f16 in max_per_data:\n{text}"
@@ -146,8 +156,7 @@ def test_amax_activation_clamp_is_true16(target):
 @pytest.mark.parametrize("target", TRUE16_TARGETS)
 def test_amax_merge_sum_is_true16(target):
     """merge_sum must emit the true16 v_max_f16 (plain register sources)."""
-    gen = _make_generator(target)
-    text = str(gen.merge_sum())
+    text = run_where_backend_matches_isa(gfxToIsa(target), _merge_sum_text, target)
 
     lines = _vmax_lines(text)
     assert lines, f"[{target}] expected at least one v_max_f16 in merge_sum:\n{text}"

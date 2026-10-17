@@ -209,6 +209,10 @@ std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) 
     return getFunction().getMetaData(key);
 }
 
+void StinkyAsmModule::setMetaDataU64(const std::string& key, uint64_t value) {
+    getFunction().setMetaData(key, value);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -262,6 +266,29 @@ void StinkyAsmModule::setGroupRange(const std::string& groupName,
     auto& groupRange = pImpl->instructionGroups.at(groupName);
     groupRange.first = first;
     groupRange.last = last;
+}
+
+void StinkyAsmModule::retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast) {
+    if (!from) return;
+    for (auto& entry : pImpl->instructionGroups) {
+        auto& range = entry.second;
+        const bool firstMatch = range.first.getNodePtr() == from;
+        const bool lastMatch = range.last.getNodePtr() == from;
+        if (!firstMatch && !lastMatch) continue;
+        if (firstMatch && lastMatch) {
+            IRBase* repl = ifFirst ? ifFirst : ifLast;
+            if (!repl) continue;
+            range.first = IntrusiveListIterator<IRBase>(repl);
+            range.last = IntrusiveListIterator<IRBase>(repl);
+            continue;
+        }
+        if (firstMatch && ifFirst) {
+            range.first = IntrusiveListIterator<IRBase>(ifFirst);
+        }
+        if (lastMatch && ifLast) {
+            range.last = IntrusiveListIterator<IRBase>(ifLast);
+        }
+    }
 }
 
 const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const {
