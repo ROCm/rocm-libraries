@@ -88,11 +88,6 @@ struct ResolvedSchedulingKnobs {
     SchedulingKnobSource dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     SchedulingKnobSource clusterBarrierRule3SignalLeadCyclesSource =
         SchedulingKnobSource::StaticDefault;
-
-    /// Latency-budget throttle estimate. Diagnostic only: `applyResolvedSchedulingKnobs`
-    /// does not copy it, and it is not combined with `dsReadThrottleLatency`.
-    /// -1 = not computed (degenerate main loop).
-    int optimisticDsReadThrottleLatency = -1;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
