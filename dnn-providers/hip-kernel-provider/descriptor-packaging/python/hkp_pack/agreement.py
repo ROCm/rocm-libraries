@@ -54,6 +54,30 @@ def complete_metadata(metadata, kmd):
     return result
 
 
+def pack_kmd_reference(engine, kdp, where):
+    """The KMD id a pack's kernels complete against (RFC 0021 §4).
+
+    An unslotted engine names one KMD; a slotted engine's packs each name a slot
+    through `KDP.slot`, and the slot names the KMD. @p where labels the pack in
+    a refusal.
+    """
+    slots = engine.get("slots")
+    if slots is None:
+        return engine.get("metadata")
+    name = kdp.get("slot")
+    if name is None:
+        raise HkpPackError(
+            f"{where} declares no slot, which every pack of slotted engine "
+            f"'{engine.get('id')}' must"
+        )
+    for slot in slots:
+        if slot.get("name") == name:
+            return slot.get("metadata")
+    raise HkpPackError(
+        f"{where} names slot {name!r}, which engine '{engine.get('id')}' does not declare"
+    )
+
+
 def validate_consumer(consumer, kmd):
     required = {
         "engine_id",

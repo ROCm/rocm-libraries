@@ -1,0 +1,52 @@
+{
+  "version": "1.1",
+  "id": "d5c00000-0000-4000-8000-000000000013",
+  "name": "hipkernel:slotted_hsaco_dq_generic",
+  "arch": [
+    "gfx11-generic"
+  ],
+  "matchers": [
+    "d5c00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "d5c00000-0000-4000-8000-000000000001",
+  "dispatch": "d5c00000-0000-4000-8000-00000000000a",
+  "slot": "dq",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d5c00000-0000-4000-8000-000000000023",
+      "name": "dq_generic.hsaco",
+      "arch": [
+        "gfx11-generic"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "objects/gfx942/HsacoFixture.co",
+        "symbol": "HsacoFixtureAdd"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "reduce_symbol": "HsacoFixtureScale"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "d5c00000-0000-4000-8000-000000000001",
+              "kmd_id": "d5c00000-0000-4000-8000-000000000004",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "dtype",
+                "reduce_symbol"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

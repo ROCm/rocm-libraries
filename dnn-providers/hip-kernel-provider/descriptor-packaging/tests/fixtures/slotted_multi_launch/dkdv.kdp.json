@@ -1,0 +1,66 @@
+{
+  "version": "1.1",
+  "id": "d5b00000-0000-4000-8000-00000000000c",
+  "name": "hipkernel:slotted_multi_launch_dkdv",
+  "arch": [
+    "gfx1151"
+  ],
+  "matchers": [
+    "d5b00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "d5b00000-0000-4000-8000-000000000001",
+  "dispatch": "d5b00000-0000-4000-8000-000000000009",
+  "slot": "dkdv",
+  "kernelDescriptors": [
+    {
+      "version": "1.1",
+      "id": "d5b00000-0000-4000-8000-00000000000f",
+      "name": "dkdv.wmma_decode",
+      "arch": [
+        "gfx1151"
+      ],
+      "sources": {
+        "decode": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          },
+          "compile_target": "gfx1151"
+        },
+        "merge": {
+          "kind": "rocke",
+          "source": "kernels/gfx1151/wmma_fmha_decode.py",
+          "builder": "build_wmma_fmha_decode_module",
+          "spec": {
+            "head_size": 128
+          },
+          "compile_target": "gfx1151",
+          "role": "merge"
+        }
+      },
+      "metadata": {
+        "family": "dkdv"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "d5b00000-0000-4000-8000-000000000001",
+              "kmd_id": "d5b00000-0000-4000-8000-000000000003",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

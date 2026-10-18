@@ -70,14 +70,24 @@ A root, or an arch, left with nothing to pack is skipped, not failed. Only produ
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires eight roots: production, plus seven over the five authored test sets.
+The provider wires eleven roots: production, plus seven over the five authored test sets and
+three slotted fixture roots packed from `tests/fixtures/` (`slotted`, `slotted_hsaco`, and
+`slotted_multi_launch`, which exists only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`).
 `shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
-twice, once for each test binary, so each binary reads its own archive.
+twice, once for each test binary, so each binary reads its own archive. `slotted_hsaco` and
+`slotted_multi_launch` are fixed-arch roots, authored for gfx950 and gfx1151: each packs for
+its arch only when the build selects it (`GPU_TARGETS`) and is dormant otherwise, so a
+build ships a device-specific fixture shard only for its own arch. The packed-load test
+decides from the staged shards: with the unit tree's `<arch>` shard present the fixture's
+`<arch>` shard is required, else the case skips naming the arch. The packaging probes
+`slotted-hsaco-gfx950` and `slotted-multi-launch-gfx1151` (see Packaging probes) pack these
+roots in a build that does not select the arch.
 
 | Root | Source | Ships |
 |---|---|---|
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
 | Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture,multi_launch}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+| Slotted fixtures | `descriptor-packaging/tests/fixtures/{slotted,slotted_hsaco,slotted_multi_launch}/`; `slotted_hsaco` for gfx950 and `slotted_multi_launch` for gfx1151, each only when the build selects that arch | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
 Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
 `pipeline.offered_engines`, under the base interpreter, with the same filters) which
@@ -590,8 +600,9 @@ A new architecture, or a new pack under one, is therefore probed with no edit an
 lane whose `GPU_TARGETS` cover every named architecture declares no probe; that is valid,
 and only `hkp-probe-tools` is registered. A lane that must always have a probe configures
 with `-DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=N`, which fails configure when fewer than N
-probes are declared, so broken probe discovery cannot pass as a lane with nothing to probe;
-the default, 0, accepts no probe.
+automatic probes are found, so broken probe discovery cannot pass as a lane with nothing to
+probe; the named probes in `probes/probes.cmake` do not count. The default, 0, accepts no
+probe.
 
 **Wildcards are excluded.** A descriptor with no `arch` (absent or empty) names no
 architecture and gets no automatic probe. That is safe: a wildcard ships for whatever the
@@ -629,11 +640,21 @@ too. Concrete names with a distinct-target word (`gfx1250-strict`) are
 probed like any other arch. The rule is `hkp_is_concrete_arch()` in
 `cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
 
+### Fixed-arch fixture probes
+
+`probes/probes.cmake` declares two probes over the fixed-arch slotted fixture roots, each
+only when its arch is not in `hkp_selected_arches()`: `slotted-hsaco-gfx950` over
+`tests/fixtures/slotted_hsaco`, and, with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`,
+`slotted-multi-launch-gfx1151` over `tests/fixtures/slotted_multi_launch`. A lane that
+selects the arch packs the real root and runs the packed-load gtest instead. A probe checks
+packaging, not engine load. Output stays under `<build>/hkp-probes/` and is not installed.
+
 ### How to use
 
-`probes/probes.cmake` is for **named `UKDS` probes** only. Add a line when an integration
-needs specific UKDs packed on every PR, beyond the default sample: a combination of spec
-values the sweep does not guarantee, or a variant with its own known risk.
+`probes/probes.cmake` is for **named probes**: a `UKDS` subset, or another `ROOT` (the
+fixed-arch slotted fixtures above). Add a `UKDS` line when an integration needs specific
+UKDs packed on every PR, beyond the default sample: a combination of spec values the sweep
+does not guarantee, or a variant with its own known risk.
 
 ```cmake
 # One integration, a chosen representative set.
@@ -937,8 +958,9 @@ tools/hkp_desk_check.py --mode {full,structural} --generic-targets-json J
 
 The desk check resolves KDP engine → UED metadata → KMD UUID within the selected
 descriptor tree/shards, completing defaults and canonicalizing metadata through that
-schema. Tuple identity is engine-wide, including cross-pack overlap in effective
-architectures: equal metadata on disjoint architectures is legal, conflicting overlapping
+schema. Tuple identity is engine-wide (per slot for a slotted engine, whose packs each name a
+slot through `KDP.slot` and resolve to that slot's KMD), including cross-pack overlap in
+effective architectures: equal metadata on disjoint architectures is legal, conflicting overlapping
 candidates are not. A KDP filename is not a KMD reference. An authored tree without
 compiler evidence can receive only a structural result.
 
