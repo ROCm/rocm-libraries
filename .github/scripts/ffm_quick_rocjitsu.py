@@ -265,6 +265,7 @@ def main() -> int:
     parser.add_argument("--component", help="Exact component name; omit with --list-components")
     parser.add_argument("--rocjitsu-arg", action="append", default=[], help="Extra rocJITsu argument; repeat for multiple flags")
     parser.add_argument("--direct", action="store_true", help="Run test commands directly on hardware without rocJITsu")
+    parser.add_argument("--component-filter", help="Comma-separated exact component paths to include")
     parser.add_argument("--list-components", action="store_true")
     parser.add_argument("--list-only", action="store_true")
     args = parser.parse_args()
@@ -274,6 +275,9 @@ def main() -> int:
     rocm_root = Path(args.rocm_root)
     label_pattern = re.compile(args.label_regex)
     groups = discover(rocm_root, label_pattern)
+    if args.component_filter:
+        selected = {item.strip() for item in args.component_filter.split(",") if item.strip()}
+        groups = [group for group in groups if group["component"] in selected]
     if args.list_components:
         print(json.dumps([
             {

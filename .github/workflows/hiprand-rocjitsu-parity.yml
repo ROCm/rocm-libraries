@@ -43,6 +43,10 @@ on:
         description: "CTest label regex. Default ^quick$ runs all five binaries. ^ffm-quick$ runs kernel and linkage only."
         type: string
         default: "^quick$"
+      component_filter:
+        description: "Optional comma-separated exact component paths to run"
+        type: string
+        default: ""
       ctest_parallel:
         description: "Number of quick-filter CTest binaries to run concurrently (for example 5)."
         type: string
@@ -163,7 +167,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3
+            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3 python3-yaml
 
       - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -333,6 +337,7 @@ jobs:
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
+      COMPONENT_FILTER: ${{ github.event.inputs.component_filter || '' }}
     steps:
       - name: Install discovery tools
         run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
@@ -352,9 +357,10 @@ jobs:
           curl -fL --retry 3 -o cache/tests.tar.gz \
             "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
           tar -xzf cache/tests.tar.gz -C "$root"
-          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py \
-            --rocjitsu /bin/true --config /dev/null --rocm-root "$root" \
-            --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)"
+          args=(--rocjitsu /bin/true --config /dev/null --rocm-root "$root" \
+            --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)
+          if [ -n "$COMPONENT_FILTER" ]; then args+=(--component-filter "$COMPONENT_FILTER"); fi
+          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py "${args[@]}")"
           echo "components=$components" >> "$GITHUB_OUTPUT"
           echo "Discovered $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$components") component suites for $TEST_LABEL"
 
@@ -386,7 +392,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3
+            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3 python3-yaml
 
       - name: Fetch parity scripts
         run: |
