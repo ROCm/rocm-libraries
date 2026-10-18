@@ -213,6 +213,10 @@ class _CompiledDispatcher:
                 _HOST_CXX,
                 "-std=c++17",
                 "-O0",
+                # As in the CK build: a dispatch condition that compares ck_tile::index_t
+                # with the unsigned num_cus fails there.
+                "-Wsign-compare",
+                "-Werror",
                 "-I",
                 str(root),
                 str(root / "fmha_fwd_api.cpp"),
