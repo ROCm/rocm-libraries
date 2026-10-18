@@ -115,6 +115,28 @@ Mirror the same facts into the C++ SSOT,
 static `rocke_arch_target_t` plus its `k_mma_gfxNNNN[]` catalog. The two SSOTs
 are compared by the byte-identity gate, not by review alone.
 
+The gfx1250 scaled family uses one JSON declaration, `gfx1250_wmma_scaled_v1`,
+instead of individual rows. It expands independent A/B matrix types
+(`fp8`, `bf8`, `fp6`, `bf6`, `fp4`), independent A/B scale types
+(`e8m0`, `e5m3`, `e4m3`), and K-group sizes 32/16 into 86 ordinary
+`wmma_scaled` rows with shape 16×16×128 and fp32 accumulators. The
+[supported-combination filter](https://github.com/llvm/llvm-project/commit/7597c0c938b364306cbee21dd03835ff5b699c74)
+requires E8M0 for non-FP4 operands and matching scales for FP4 × FP4. The loader
+validates the complete declaration before expansion and rejects duplicate IDs.
+Version 1 fixes both these axes and their historical enumeration order; changing
+support requires an explicit loader/native generator update and regression
+baseline review. The first ten native E8M0 entries historically use a different
+order from Python; each API retains its own pre-change order. Other architectures
+retain explicit rows.
+
+Python generates the scaled fragment dictionary from the expanded catalog.
+C++ generates the contiguous catalog at compile time using private POD arrays;
+ID strings live in separate immutable static storage. The native lookup remains
+libc-only at runtime, with no JSON parser, Python dependency, allocation, or
+dynamic initialization. Bare-ID accumulator fragment lookup consults that
+catalog rather than maintaining a second scaled-ID table. Compare every
+expanded row against the pre-change baseline as well as running engine parity.
+
 ### New matrix atoms
 
 An `op_id` that no existing arch lists needs a row in `_MMA_FRAGMENT_INFO`
@@ -127,6 +149,23 @@ A JSON-only `op_id` with no such row still loads — it carries zero frag length
 and no maps — and then raises `NotImplementedError: no verified 'a' layout map for
 MMA op_id ...` the first time a kernel asks for it. Emission for a genuinely new
 atom shape also lands in [`cpp/core/lower_llvm/mma.cpp`](../../cpp/core/lower_llvm/mma.cpp).
+
+### Generic processors
+
+An LLVM generic processor (`gfx11-generic`, `gfx12-generic`) is catalogued like
+any other target: an `arches` row whose facts and `mma` atoms are the common
+subset of its members, plus the two backend rows. Its code objects (code object
+v6) load on every member device, so one build serves the family. The
+`generic_targets` section of `arch_specs.json` lists each catalogued generic
+processor's members, mirrored by `rocke_ati_generic_targets` in
+[`cpp/core/arch/data.cpp`](../../cpp/core/arch/data.cpp).
+`generic_arch_from_target_id()` (C++: `rocke_generic_arch_from_target_id()`)
+maps any device or processor name to that generic target.
+`base_arch_from_target_id()` uses the generic row only for a member without its
+own catalog row (gfx1100 -> `gfx11-generic`, gfx1200 -> `gfx12-generic`), so an
+explicit processor name with a row (`gfx1151`, `gfx1201`) still builds
+processor-specific code. Capability tables (`intrinsic_arch_domain.*.json`) need
+the new column, regenerated per LLVM flavor with `tools/gen_arch_domain.py`.
 
 ## 2 · ISA backend
 

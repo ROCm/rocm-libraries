@@ -154,19 +154,21 @@ non-divisible.
 ### 2.6 The rocKE dispatcher, which is a separate door
 
 Everything above is the **vLLM** path. rocKE has its own dispatcher
-(`rocke/library/dispatch/attention/`), and until recently it had no gfx1151 entry
-at all — the kernel was reachable only through the verify scripts in this
-directory. It is now registered as `attention_gfx1151_swapqk`, which declares its
-coverage as data: fp16 only, `hdim_q % 32 == 0` (dual-gather pairs adjacent
-d-subtiles), `seqlen_q % q_rows_per_cta == 0` (the grid helper refuses a partial
-tile) and the `seqlen_k % block_n == 0` constraint from §2.5 above.
+(`rocke/library/dispatch/attention/`), and swapqk was reachable only through the
+verify scripts in this directory — `dispatch/attention/gfx1151.py` registered the
+`wmma_fmha_fwd` candidates but had no entry for this kernel. It is now registered
+alongside them as `attention_gfx1151_swapqk`, which declares its coverage as
+data: fp16 only, `hdim_q % 32 == 0` (dual-gather pairs adjacent d-subtiles),
+`seqlen_q % q_rows_per_cta == 0` (the grid helper refuses a partial tile) and the
+`seqlen_k % block_n == 0` constraint from §2.5 above.
 
-Registration makes the kernel **reachable, not default**. gfx1151 prefill still
-routes to `attention_unified_2d` unless a caller names
+Registration makes the kernel **reachable, not default**. The gfx1151 auto route
+stays with `attention_gfx1151_wmma`; swapqk is selected only when a caller names
 `algorithm="wmma_fmha_swapqk"` or `spec_id="gfx1151_swapqk"` — the same opt-in
-shape the gfx950 dense and gfx1250 WMMA candidates use. Flipping the default would
-swap a benchmarked path for an unbenchmarked one across the whole shape space on
-the strength of a registration; that is a separate, measured decision.
+shape the gfx950 dense, gfx1250 WMMA and tuned `wmma_fmha_fwd` candidates use.
+Flipping the default would swap a benchmarked path for an unbenchmarked one
+across the whole shape space on the strength of a registration; that is a
+separate, measured decision.
 
 One caller contract comes with it: `select_spec` hands back the kernel's own
 `SwapQKCfg`, whose `v_transposed` default makes V a `[B, Hk, D, Sk]` tensor rather
@@ -949,8 +951,8 @@ unified pool — it has PPID 1 and comm `VLLM::EngineCor`, so it does *not* matc
 |---|---|
 | [`ALGORITHM.md`](ALGORITHM.md) | The math, from the definition of attention through the online-softmax recurrence to the transposed-QK rewrite the production kernel uses |
 
-Everything else here builds, binds, verifies or times one of the two shipping
-kernels. Nothing in this directory *is* a kernel — the kernels live in
+The scripts below build, bind, verify or time one of the two kernels this
+document covers. Nothing in this directory *is* a kernel — the kernels live in
 [`rocke/library/kernels/gfx1151/`](../../../kernels/gfx1151/).
 
 | Script | Role |
@@ -963,13 +965,17 @@ kernels. Nothing in this directory *is* a kernel — the kernels live in
 | [`wmma_fmha_fwd_bench.py`](wmma_fmha_fwd_bench.py) | Kernel-level timing for the same, driven as a subprocess by the sweep below |
 | [`wmma_fmha_fwd_sweep_profile.py`](wmma_fmha_fwd_sweep_profile.py) | `wmma_fmha_fwd` knob sweep; pinned by `library/tests/test_wmma_fmha_fwd_sweep_profile.py` |
 
-The A/B scaffolding the optimization campaign ran on — five superseded kernel
-variants and seven tuning drivers — was deleted once the campaign closed. What
-it found is recorded in [§8](#8-optimizations-that-worked) and
-[§9](#9-optimizations-that-were-expected-to-help-and-did-not); the winners are
-defaults on the shipping specs. Reconstructing a driver from the sections above
-is cheaper than carrying dead sweep code that no longer compiles against the
-current spec fields.
+The directory also holds the A/B scaffolding the optimization campaign ran on —
+superseded kernel variants (`fmha_blockn.py`, `fmha_multiwave.py`,
+`fmha_pipelined.py`, `fmha_regblocked.py`, `fmha_singlewave.py`) and the tuning
+and sweep drivers (`tune.py`, `bn_tune.py`, `mw_tune.py`, `prod_tune.py`,
+`sp_tune.py`, `combo.py`, `survey.py`, `bench_v_staging.py`). Those belong to the
+`wmma_fmha_fwd` workstream and are not on the Qwen3-8B prefill/decode path; what
+*this* campaign found with them is recorded in
+[§8](#8-optimizations-that-worked) and
+[§9](#9-optimizations-that-were-expected-to-help-and-did-not), and the winners
+are defaults on the shipping specs, so none of them need to be run to reproduce
+the numbers here.
 
 ---
 

@@ -249,6 +249,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2wOiaSRId
   KernelNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWB4_LBSPPA1024_LBSPPB256_MIWT1_1_NLCA1_NLCB1_SS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT64x16x32_MI16x16x1_SN_GRVWB4_GSU1_LBSPPA1024_LBSPPB256_MIWT1_1_NLCA1_NLCB1_SS1_SU32_SUM1_SUS256_WG64_2_1_WGM8
   AssignedDerivedParameters: true
@@ -375,6 +376,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 1
+  SolutionUID: 0uR2wOiZkoin
   KernelNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT192x16x32_MI16x16x1_SN_GRVWB4_LBSPPA3072_LBSPPB256_MIWT3_1_NLCA3_NLCB1_SS1_WG64_2_1
   SolutionNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT192x16x32_MI16x16x1_SN_GRVWB4_GSU1_LBSPPA3072_LBSPPB256_MIWT3_1_NLCA3_NLCB1_SS1_SU32_SUM1_SUS256_WG64_2_1_WGM8
   AssignedDerivedParameters: true
@@ -502,6 +504,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 2
+  SolutionUID: 0uR2wOiZSw2f
   KernelNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_GRVWB4_LBSPPA512_LBSPPB512_MIWT1_1_NLCA1_NLCB1_SS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_GRVWB4_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_NLCA1_NLCB1_SS1_SU32_SUM1_SUS256_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -628,6 +631,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 3
+  SolutionUID: 0uR2wOiaKMbi
   KernelNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWB4_LBSPPA1024_LBSPPB1536_MIWT2_3_NLCA1_NLCB3_SS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT64x96x32_MI16x16x1_SN_GRVWB4_GSU1_LBSPPA1024_LBSPPB1536_MIWT2_3_NLCA1_NLCB3_SS1_SU32_SUM1_SUS256_WG32_4_1_WGM8
   AssignedDerivedParameters: true
@@ -755,6 +759,7 @@ Solutions:
   _WorkspaceSizePerElemC: 4
   _staggerStrideShift: 3
 - SolutionIndex: 4
+  SolutionUID: 0uR2wOiaRhR3
   KernelNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWB4_LBSPPA512_LBSPPB512_MIWT1_1_NLCA1_NLCB1_SS1_WG32_4_1
   SolutionNameMin: Cijk_Ailk_Bjlk_I8BH_HAI_SAV_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWB4_GSU1_LBSPPA512_LBSPPB512_MIWT1_1_NLCA1_NLCB1_SS1_SU32_SUM1_SUS256_WG32_4_1_WGM8
   AssignedDerivedParameters: true
