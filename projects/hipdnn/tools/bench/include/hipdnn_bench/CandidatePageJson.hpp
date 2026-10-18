@@ -220,8 +220,8 @@ inline nlohmann::json pageJson(const hipdnn_frontend::EngineCandidatePage& page,
         nlohmann::json entry = {{"id", candidate.id},
                                 {"knob_settings", knobJson(candidate.variant.knobSettings)},
                                 {"kernel_features", candidate.kernelFeatures}};
-        // A slotted candidate also names each slot's kernel, in slot order. An unslotted one
-        // prints exactly what it always has.
+        // A slotted candidate also names each slot's kernel, in slot order; an unslotted one
+        // carries no `slot_kernels`.
         if(const auto kernels = slotKernels(candidate.id); !kernels.empty())
         {
             nlohmann::json named = nlohmann::json::array();

@@ -4,7 +4,7 @@ Each directory is a complete, standalone generic-kernel-ingestor descriptor bund
 (KMD + UHD + UED + UMD + UDD + KDP with two inline kernels), modeled on the shipped
 `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv_fwd/`
 example. `valid/` is the unmutated baseline; every malformed directory below differs by
-exactly one deliberate defect and must make `hipdnn_validate_descriptors <dir>` exit
+exactly one deliberate defect (the `slotted_*` fixtures: see Slotted fixtures) and must make `hipdnn_validate_descriptors <dir>` exit
 non-zero. The role fixtures at the end instead pin which role-bound models the validator
 admits, and must agree with the runtime admission for that role.
 
@@ -97,6 +97,36 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   `native` scorer. Expected: exit 0 -- the symbol resolves through the UHD scorer
   registry the L1 path uses, not the kernel comparator registry. `model_checks`:
   `sort_kernel_catalog` and `predict_engine` both succeed.
+
+## Slotted fixtures
+
+`slotted_valid/` is the RFC 0021 baseline for a slotted engine: a 1.1 UED
+(`hipkernel:ValidateFixture`) with `shared_workspace` `ws.bytes` and three slots, `prep`
+(no ranker), `dkdv` (knob `block_m`) and `dq` (knob `block_n`), each with its own KMD and KDP
+(`"slot"` names it), a metric-less ranker UHD on `dkdv` and `dq`, and an engine-level
+`predict_engine` UHD. Every other `slotted_*` fixture is `slotted_valid/` with the change
+named in the table. The validator runs the per-engine checks per slot: a slot ranker is admitted against its own
+slot's KMD fields, knobs and packs, and `predict_engine` is checked at the engine. In
+`model_checks` a slot ranker carries a `slot` key, spelled `<role>@<slot>` in the expected
+verdicts below, the CTest roleFixture list and `ROLE_FIXTURES` in `tests/test_round_trip.py`
+(for example `sort_kernel_catalog@dq`).
+
+| Fixture | Change | Exit | Failing `model_checks` | Diagnostic contains |
+|---|---|---|---|---|
+| `slotted_valid/` | none | 0 | none | |
+| `slotted_empty_slot/` | no `prep.kdp.json`: `prep` has no pack | 0 | none | `has no loadable kernel pack` (a warning: the engine stays registered and declines every graph) |
+| `slotted_ranker_undeclared_field/` | the `dq` ranker reads `$kernel.block_m`, a field of the `dkdv` KMD | 1 | `sort_kernel_catalog@dq` | `Feature references an undeclared KMD field` |
+| `slotted_ranker_unexposed_axis/` | the `dq` slot drops `knobs`, so its ranker reads an axis the slot does not expose | 1 | `sort_kernel_catalog@dq` | `which its UED does not expose as knobs` |
+| `slotted_ranker_reads_workspace_token/` | the `dq` ranker reads `$ws.bytes`; `ws.*` is reserved for a slotted engine | 1 | `sort_kernel_catalog@dq` | `a shared-workspace token a slotted engine reserves` |
+| `slotted_ranker_names_other_slot/` | the `dkdv` ranker's `trained_against.slot` is `dq` | 1 | `sort_kernel_catalog@dkdv` | `but the ranker serves slot` |
+| `slotted_estimate_missing_slot_kmd/` | `predict_engine`'s `trained_against.kmds` omits `dq` | 1 | `predict_engine` | `does not name slot` |
+| `slotted_kernel_in_two_slots/` | the `prep` pack's kernel id is a `dkdv` kernel's id | 1 | `sort_kernel_catalog@dkdv` | `a kernel serves at most one slot` (the loader drops the `dkdv` pack because the `prep` pack's descriptor id sorts before it; the `dkdv` ranker then fails as a cascade) |
+| `slotted_ranker_declares_metric/` | the `dq` ranker declares `score.metric` and its objective is `min` (the loader rejects a `time` metric with objective `max` earlier, with another message) | non-zero | the loader drops the engine, so no check runs | `a slot ranker must be metric-less` |
+
+`slotted_ranker_declares_metric/` is asserted with the malformed fixtures
+(`MALFORMED_FIXTURES` in `tests/test_round_trip.py`: exit non-zero, the engine missing); every
+other `slotted_*` fixture is a role fixture, an `<fixture>:<exit>:<checks>[:<diagnostic>]` entry
+in the CTest roleFixture list in `tools/CMakeLists.txt`.
 
 `tests/test_round_trip.py` and the `hipdnn_validate_descriptors_<fixture>` CTest cases
 (`tools/CMakeLists.txt`; `multi_launch/` is `hipdnn_validate_descriptors_smoke_multi_launch`) assert these exit statuses and `model_checks` verdicts.
