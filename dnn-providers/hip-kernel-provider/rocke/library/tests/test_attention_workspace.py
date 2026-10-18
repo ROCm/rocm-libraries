@@ -44,7 +44,7 @@ def runtime(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
-    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda problem: False)
+    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda problem, arch: False)
     # Emulate the old prepared workspace cache as well: the regression must
     # catch callers consulting it, rather than merely checking a new helper.
     shared = tuple(empty((1,), dtype="float32", device="cuda:0") for _ in range(3))
@@ -64,7 +64,6 @@ def _arguments():
         max_seqlen_q=1,
         max_seqlen_k=65,
         dtype="fp16",
-        clamp_arch="gfx942",
         target_ctas=8,
     )
     return {
@@ -243,7 +242,7 @@ def test_graph_churn_bounds_resources_and_waits_before_eviction(
     graphs = OrderedDict()
     monkeypatch.setattr(au, "_3D_GRAPHS", graphs)
     monkeypatch.setattr(au, "_3D_GRAPH_CAPACITY", 2)
-    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda p: True)
+    monkeypatch.setattr(au, "_enable_3d_graph_replay", lambda p, arch: True)
     monkeypatch.setattr(au, "_launch_3d_pipeline", lambda *a, **kw: None)
 
     def wait(stream):
