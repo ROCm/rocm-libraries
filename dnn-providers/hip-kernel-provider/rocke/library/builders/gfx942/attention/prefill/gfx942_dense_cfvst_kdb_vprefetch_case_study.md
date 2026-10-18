@@ -102,104 +102,167 @@ Analysis of stalls using threadtrace found a large number of waiting at sync poi
 
 **Hardware:** gfx942, 304 CUs
 
-| dtype | B  | S     | Hq | Hkv | D   | baseline vs new | latency reduction |
-|------:|---:|------:|---:|----:|----:|----------------:|------------------:|
-| bf16  | 1  | 1024  | 32 | 8   | 128 | 1.1342x         | 11.83%            |
-| bf16  | 1  | 1024  | 32 | 16  | 128 | 1.1406x         | 12.32%            |
-| bf16  | 1  | 2048  | 32 | 8   | 128 | 1.1150x         | 10.31%            |
-| bf16  | 1  | 2048  | 32 | 16  | 128 | 1.1125x         | 10.11%            |
-| bf16  | 1  | 4096  | 32 | 8   | 128 | 1.1787x         | 15.16%            |
-| bf16  | 1  | 4096  | 32 | 16  | 128 | 1.1771x         | 15.04%            |
-| bf16  | 1  | 8192  | 32 | 8   | 128 | 1.1940x         | 16.25%            |
-| bf16  | 1  | 8192  | 32 | 16  | 128 | 1.1827x         | 15.45%            |
-| bf16  | 1  | 16384 | 32 | 8   | 128 | 1.1832x         | 15.48%            |
-| bf16  | 16 | 4096  | 32 | 8   | 128 | 1.1579x         | 13.63%            |
-| bf16  | 16 | 4096  | 32 | 16  | 128 | 1.1347x         | 11.87%            |
-| bf16  | 16 | 8192  | 32 | 8   | 128 | 1.1638x         | 14.07%            |
+| dtype | B | S | Hq | Hkv | D | baseline vs CFVST+KDB+VPF | latency reduction | min | max |
+|------:|---:|------:|---:|----:|----:|----------------:|------------------:|----:|----:|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 1.1203x | 10.74% | 10.61% | 10.88% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 1.1362x | 11.99% | 11.02% | 12.06% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 1.1258x | 11.18% | **-361.37% | 12.38% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 1.1227x | 10.93% | 9.75% | 11.26% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 1.1692x | 14.47% | 14.15% | 15.12% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 1.1796x | 15.23% | 14.47% | 15.69% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 1.1845x | 15.58% | 15.14% | 16.05% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 1.1836x | 15.51% | 14.86% | 15.82% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 1.1834x | 15.50% | 14.61% | 15.59% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 1.1591x | 13.72% | 13.32% | 14.08% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 1.1279x | 11.34% | 10.87% | 11.66% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 1.1598x | 13.78% | 12.75% | 14.02% |
+
+** Not a numerical error. A repeated 1st measurement anomaly. 
 
 #### Ablation studies of optimizations
 We performed ablation study to isolate the optimizations and understand its individual contributions. Results of 1st shape is provided.
 
-| Variant | Incremental effect |
-|---|---:|
-| CFVST  | 10.35% lower latency vs baseline |
-| CFVST + KDB | 3.22% lower latency vs CFVST |
-| CFVST + VPF  | 2.46% lower latency vs CFVST |
-| CFVST + KDB + VPF | 5.94% lower latency vs CFVST |
-| full vs baseline | 15.67% lower latency |
+| dtype | B | S | Hq | Hkv | D | CFVST vs base |  CFVST +KDB vs CFVST | CFVST +VPF vs CFVST | CFSVT +KDB +VPF vs CFVST | CFSVT +KDB +VPF vs base |
+|------:|---:|------:|---:|----:|----:|----------------:|----------------:|----------------:|----------------:|----------------:|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | 3.57% | -0.16% | 2.13% | 7.44% | 10.74% |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | 4.55% | 0.12% | 3.19% | 7.79% | 11.99% |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | 5.02% | 0.06% | 1.90% | 6.48% | 11.18% |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | 4.47% | 0.77% | 2.49% | 6.76% | 10.93% |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | 9.86% | 1.70% | 1.23% | 5.12% | 14.47% |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | 10.02% | 2.06% | 2.04% | 5.79% | 15.23% |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | 10.05% | 2.27% | 1.60% | 6.15% | 15.58% |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | 10.78% | 1.89% | 1.01% | 5.30% | 15.51% |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | 11.16% | 1.47% | 1.37% | 4.89% | 15.50% |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | 10.09% | 0.76% | 0.03% | 4.04% | 13.72% |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | 9.05% | 0.86% | -0.24% | 2.52% | 11.34% |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | 10.18% | 0.53% | 0.00% | 4.01% | 13.78% |
 
 ## Results and Ablation Methodology
 The complete experiment can be summarized as follows:
 
-```text
-1. Start one ROCKE/PyTorch process using one ROCm stack.
-2. Obtain one current HIP stream.
-3. Construct five compile-time specs:
-      baseline
-      cfvst
-      cfvst_klds
-      cfvst_vpf
-      cfvst_klds_vpf
-4. Run the Python emitter five times.
-5. Compile five independent KernelDefs/LLVM modules/HSACOs. No runtime variant-selection branch exists in the GPU kernels.
-6. Verify all five kernel names are unique.
-7. Allocate one shared Q/K/V input set.
-8. Construct one direct KernelLauncher per compiled kernel.
-9. Build one chunked FP32 reference.
-10. Validate all five kernels against that same reference.
-11. Abort if correctness fails.
-12. Warm all five kernels round-robin.
-13. Synchronize.
-14. Perform five measurement rounds.
-15. Randomize the order of the five kernels in every round.
-16. For each kernel in that round:
-       record start event
-       issue 50 direct KernelLauncher calls
-       record end event
-       synchronize end event
-       divide elapsed GPU time by 50
-17. Collect five round-level samples per kernel.
-18. Take the median of those samples.
-19. Compute same-session pairwise A/B ratios:
-       baseline / cfvst
-       cfvst / klds
-       cfvst / vpf
-       klds / full
-       vpf / full
-       baseline / full
 
-20. Use those ratios to attribute the contribution of CFVST,
-    KDB, VPF, and their interaction.
-```
+For each of the 12 BF16 D128 causal attention shapes:
+
+1. Start one ROCKE/PyTorch process using a single ROCm software stack.
+2. Obtain the current HIP stream and use it for all kernel executions.
+3. Resolve the production baseline using `attention_tuning_spec(req, "gfx942_dense").kernel_spec`.
+4. Construct five compile-time configurations, preserving all non-ablation knobs from production dispatch:
+
+   | Variant | `use_cfvst` | `lds_num_buffers` (K) | `v_reg_prefetch` |
+   |---|---:|---:|---:|
+   | `baseline` | `False` | 1 | `False` |
+   | `cfvst` | `True` | 1 | `False` |
+   | `cfvst_klds` | `True` | 2 | `False` |
+   | `cfvst_vpf` | `True` | 1 | `True` |
+   | `cfvst_klds_vpf` | `True` | 2 | `True` |
+
+5. Run the Python kernel emitter separately for each configuration.
+6. Compile five independent kernels into separate HSACO artifacts. Each kernel has its own compile-time configuration; there is no runtime variant-selection branch in the GPU kernel.
+7. Verify that the five compiled kernel names are unique.
+8. Allocate one shared Q/K/V input set and separate output tensors for each variant.
+9. Construct one direct `KernelLauncher` per compiled kernel.
+
+10. Compute one independent chunked FP32 causal GQA SDPA reference for the shared inputs.
+11. Before timing, initialize each output with NaNs, execute its kernel, synchronize, and validate against the FP32 reference using `torch.testing.assert_close` with `atol=1e-2` and `rtol=1e-2`.
+12. Record the maximum absolute and relative errors. Abort immediately if any validation fails.
+
+13. Perform 10 round-robin warmup launches per kernel.
+14. Synchronize the GPU before measurement.
+15. Perform five measurement rounds, randomizing the order of the five variants in each round.
+16. For each variant in each round:
+    - Record a start GPU event.
+    - Execute 50 direct `KernelLauncher` calls.
+    - Record an end GPU event.
+    - Synchronize the end event.
+    - Divide elapsed GPU time by 50 to obtain average latency per launch.
+17. After each timed batch, validate its output against the same FP32 reference using `atol=1e-2` and `rtol=1e-2`.
+18. Perform post-batch validation outside the GPU-event timing interval, so correctness comparisons do not directly contribute to the reported GPU timing.
+19. Record the validation result, maximum errors, shape, variant, and measurement round. Abort if any post-batch validation fails.
+
+**Correctness coverage:** Each shape undergoes five initial correctness checks and 25 post-batch checks. Across 12 shapes, this gives **360 checks**. Post-batch validation checks the final output of each 50-launch batch, not every individual launch.
+
+
+20. Collect five round-level latency samples for each variant.
+21. Compute the median latency independently for each variant:
+
+    `T_variant = median(t_variant,1, ..., t_variant,5)`
+
+22. Compute same-session pairwise speedup ratios using these median latencies:
+    - `baseline / cfvst`
+    - `cfvst / cfvst_klds`
+    - `cfvst / cfvst_vpf`
+    - `cfvst_klds / cfvst_klds_vpf`
+    - `cfvst_vpf / cfvst_klds_vpf`
+    - `baseline / cfvst_klds_vpf`
+23. Calculate percentage latency reduction for each comparison:
+
+    `Reduction (%) = 100 × (1 - T_after / T_before)`
+
+24. For the full-vs-baseline table, calculate the reduction separately for each matched measurement round:
+
+    `R_r = 100 × (1 - T_full,r / T_baseline,r)`
+
+25. Report the minimum and maximum observed round-level reductions:
+
+    `Min = min(R_1, R_2, R_3, R_4, R_5)`
+
+    `Max = max(R_1, R_2, R_3, R_4, R_5)`
+
+26. Report the main full-vs-baseline latency reduction using the ratio of the two median latencies, rather than the median of round-level reductions.
+27. Use the five configurations and pairwise comparisons to quantify the contributions of CFVST, K LDS double buffering (KDB), V register prefetching (VPF), and their combined effect.```
 To obtain results on 8 shapes, we run the ablation on 8 shapes and pick necessary fields.
 
 #### Benchmark Environment and Provenance
 
+The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 causal prefill configurations. The baseline for each shape was resolved from production dispatch. All five configurations were compiled and measured in the same process using identical inputs and the same HIP stream.
+
 | Component | Configuration |
-|---|---|
+| :--- | :--- |
 | Hardware target | gfx942, 304 CUs |
-| Benchmarked source commit | `39416d4e229e4c70daf52f4902cd0cc8df72751d` |
-| ROCm wheel stack | 10.0.0 |
-| HIP version | 7.15.26333 |
+| Benchmarked source commit | `51832d8c8078267a8e5274478c3289f3096106ff` |
+| ROCm stack | 10.0.0 (public release) |
+| HIP | 7.15.26333 |
 | Python | 3.12.3 |
-| PyTorch | 2.13.0+rocm10.0.0 |
-| Triton | 3.8.0+git4cff872c.rocm10.0.0 |
+| PyTorch | `2.13.0+rocm10.0.0` (public AMD wheel) |
+| Triton | `3.8.0+git4cff872c.rocm10.0.0` (public AMD wheel) |
+| ROCKE compiler backend | Python |
+| LLVM flavor | `llvm23` |
 
-#### Test configuration
+**Benchmark harness:** `library/benchmarks/gfx942/attention/prefill/bench_rocke_5way_specs.py`
 
-The default benchmark configuration used by the harness is:
+**Kernel source:** `library/kernels/gfx942/attention_dense.py`
 
-```text
-B       = 1
-S_q     = 4096
-S_kv    = 4096
-H_q     = 32
-H_kv    = 8
-D       = 128
-dtype   = BF16
-causal  = true
+**Replay invocation:** Run from the ROCKE root (`dnn-providers/hip-kernel-provider/rocke`) in an equivalent ROCm environment, with the repository's Python import paths and ROCm runtime library paths configured:
 
-block_m = 256
-block_n = 64
+```bash
+export ROCKE_BACKEND=python
+export ROCKE_LLVM_FLAVOR=llvm23
+
+python library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/bench_rocke_5way_specs.py \
+  --rocke-root . \
+  --out-dir library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/results/5way_specs
 ```
+
+This is the repository-relative equivalent of the recorded Python invocation; the original run used absolute paths in the benchmark environment. The replay requires the same compatible SDK/comgr and HIP runtime libraries, and appropriately configured `PYTHONPATH` and `LD_LIBRARY_PATH`.
+
+
+**Correctness:** Each variant was validated against the same FP32 reference before measurement and after every timed batch. All validations passed. Post-batch checks cover the final output after 50 launches, not each individual launch.
+
+#### Shape-by-shape default kernel identity built by `attention_tuning_spec(req, "gfx942_dense").kernel_spec`
+
+| dtype | B | S | Hq | Hkv | D | Exact baseline kernel name | persistent | exp2_fast (resolved) | decode (resolved) | grid | block |
+|---|---:|---:|---:|---:|---:|---|---|---|---|---|---|
+| bf16 | 1 | 1024 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `false` | `false` | `qb_major` | `[4, 32, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 1024 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `false` | `false` | `qb_major` | `[4, 32, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 2048 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `false` | `false` | `qb_major` | `[8, 32, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 2048 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_gfx942_wpe2` | `false` | `false` | `qb_major` | `[8, 32, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 4096 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 4096 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 8192 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 1 | 16384 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 4096 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 4096 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+| bf16 | 16 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
 ---
+
