@@ -31,8 +31,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved the accuracy of BDSQR (and GESVD), STEQR and the Jacobi eigensolvers and SVD (SYEVJ/HEEVJ, GESVDJ): the plane rotations were slightly biased, which reduced the accuracy of the singular values and eigenvalues by up to one or two orders of magnitude for large matrices.
 * Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ and HEEVDJ, when two nearly equal
   eigenvalues of the merged blocks were not deflated: the deflation criterion is now that of LAPACK.
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
-
 * Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues

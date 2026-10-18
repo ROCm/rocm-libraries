@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Mapping, Tuple
 
+from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
+
 from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rules)
     KnobAxis,
     Knobs,
@@ -23,7 +25,6 @@ from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rul
     sorted_items as _items,
     values as _values,
 )
-
 
 # AMDGPU ``sched_barrier`` ABI: 0 is a full fence, and each bit lets one
 # instruction class cross it (ALU, VALU, SALU, MFMA, VMEM, VMEM rd, VMEM wr,
@@ -147,6 +148,11 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "causal_bottom_right",
     }
 )
+# Problem fields only some arches' dense specs declare (the band's right bound).
+DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"right_bound"}),
+    "gfx942": frozenset(),
+}
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
     "gfx942": frozenset(),
@@ -188,10 +194,19 @@ _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
 _GFX942_BLOCK_M = (32, 64, 128, 256, 512)
 _GFX942_BLOCK_N = (32, 64, 128, 256)
-# The gfx950 bodies implement 128- and 256-row query tiles (see
-# supports_attention_dense); the validator prunes block_n the tile cannot take.
-_GFX950_BLOCK_M = (128, 256)
-_GFX950_BLOCK_N = (32, 64, 128)
+# Derive the gfx950 block_m / block_n axes from gfx950_dense_tile_legality so
+# the axis and the LDS predicate are always in sync.  The legality function is
+# the single source of truth: the axes below, the supports_attention_dense gate,
+# and (via this import) the tuning sweep all reference the same budget model.
+_GFX950_LEGAL_TILES: dict = {
+    hs: gfx950_dense_tile_legality(head_size=hs) for hs in (64, 128)
+}
+_GFX950_BLOCK_M: tuple = tuple(
+    sorted({bm for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
+_GFX950_BLOCK_N: tuple = tuple(
+    sorted({bn for tiles in _GFX950_LEGAL_TILES.values() for bm, bn in tiles})
+)
 
 
 def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
@@ -265,6 +280,52 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("causal_diag_split", False, (True,)),
 )
 
+# RDNA WMMA (gfx11/gfx12) forward-kernel spec fields the space never varies.
+# Problem fields come from the request (``runtime_head_dims`` included: a bucket
+# object is a catalog decision, not a tuning point); ``transposed_qk`` is the
+# codepath the policy picks for aligned dense D64/D128 on the gfx11 operand
+# layout, which decides which knobs exist at all.
+WMMA_PROBLEM_FIELDS = frozenset(
+    {
+        "head_size",
+        "v_head_size",
+        "dtype",
+        "mask_mode",
+        "name",
+        "query_tail",
+        "kv_tail",
+        "use_softcap",
+        "use_sinks",
+        "use_alibi",
+        "use_qq_bias",
+        "use_attn_bias",
+        "bias_dtype",
+        "layout",
+        "page_block_size",
+        "kv_dtype",
+        "runtime_head_dims",
+    }
+)
+WMMA_PATH_FIELDS = frozenset({"transposed_qk"})
+# Output-column tile widths; the spec rejects one that does not properly divide
+# the V/O width, and runtime head widths reject tiling altogether.
+_WMMA_VALUE_TILES = (0, 32, 64, 128)
+# Every knob's default is resolved per problem by the selection policy, so each
+# axis offers both settings and the base-equal choice is pruned. The standard
+# body's knobs come first; the transposed body reads only its geometry.
+_RDNA_WMMA_AXES: Tuple[KnobAxis, ...] = (
+    _choices_axis("v_lds_stage", (True, False)),
+    _choices_axis("causal_tile_skip", (True, False)),
+    _choices_axis("value_tile_size", _WMMA_VALUE_TILES),
+    _choices_axis("scheduler_strategy", (None, "max-ilp")),
+)
+# The transposed-QK body needs the gfx11 operand duplication, so only gfx11
+# targets carry its key-tile and wave-count geometry.
+_GFX11_WMMA_AXES: Tuple[KnobAxis, ...] = _RDNA_WMMA_AXES + (
+    _choices_axis("block_n", (32, 64)),
+    _choices_axis("num_waves", (1, 2)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
@@ -273,6 +334,10 @@ _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
     ("gfx942", "dense"): _GFX942_DENSE_AXES,
+    ("gfx11-generic", "wmma"): _GFX11_WMMA_AXES,
+    ("gfx1151", "wmma"): _GFX11_WMMA_AXES,
+    ("gfx12-generic", "wmma"): _RDNA_WMMA_AXES,
+    ("gfx1201", "wmma"): _RDNA_WMMA_AXES,
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.
