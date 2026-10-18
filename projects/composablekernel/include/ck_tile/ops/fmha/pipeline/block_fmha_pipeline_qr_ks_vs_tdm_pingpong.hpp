@@ -146,6 +146,220 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         });
     }
 
+    // The sink, mask/bias and LSE/O-finalization steps of qr_tdm's bodies, as
+    // functions: the main loop below keeps only its own TDM scheduling and softmax
+    // rescaling. qr_tdm keeps its inline copies; moving its bodies onto calls computes
+    // the same values but changes register allocation of its kernels at the VGPR limit.
+
+    template <typename PaddingConfig>
+    CK_TILE_DEVICE static TDMConfig MakeTdmConfig()
+    {
+        using Raw = detail::EncodedTdmPadding<PaddingConfig>;
+        TDMConfig config;
+        config.pad_enable              = Raw::kEnabled;
+        config.pad_config.pad_amount   = Raw::kPadAmount;
+        config.pad_config.pad_interval = Raw::kPadInterval;
+        return config;
+    }
+
+    // Initial row max and row sum: a finite sink pre-seeds them.
+    template <typename RowTile>
+    CK_TILE_DEVICE static void InitRowMaxSum(RowTile& m, RowTile& l, float sink_v, float scale_s)
+    {
+        if(__builtin_isinf_sign(sink_v) >= 0)
+        {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
+                set_tile(m, sink_v * scale_s * C_LOG2E);
+            else
+                set_tile(m, sink_v * C_LOG2E);
+#else
+            ignore = scale_s;
+            set_tile(m, sink_v);
+#endif
+            set_tile(l, SMPLComputeDataType{1.0f});
+        }
+        else
+        {
+            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+            clear_tile(l);
+        }
+    }
+
+    // Sink-aware K tile range of the block's rows: (sink_seq_end, seqlen_k_start,
+    // seqlen_k_end). For non-sink, sink_seq_end is always 0.
+    template <typename QOrigin>
+    CK_TILE_DEVICE static auto GetKTileRange(const FmhaMask& mask, const QOrigin& q_origin)
+    {
+        if constexpr(kHasSink)
+            return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+        else
+        {
+            auto [start, end] =
+                mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+            return ck_tile::make_tuple(0, start, end);
+        }
+    }
+
+    // LSE of a block with no K tile to visit: the sink alone, or -inf.
+    template <typename LSEaccDramBlockWindowTmp, typename RowTile>
+    CK_TILE_DEVICE static void StoreLseOfEmptyRows(LSEaccDramBlockWindowTmp& lse_acc_dram_window,
+                                                   const RowTile& m,
+                                                   float sink_v,
+                                                   float scale_s)
+    {
+        auto lse_acc = make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+        if(__builtin_isinf_sign(sink_v) >= 0)
+            set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+        else
+            set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
+        store_tile(lse_acc_dram_window, lse_acc);
+    }
+
+    // STAGE 2 of the QK result: scale_s and the bias (elementwise or ALiBi) for the
+    // K tile starting at k_start. Without bias, scale_s is applied in the exponent.
+    // position_encoding is taken by value; Alibi::update does not change it.
+    template <typename SaccTile,
+              typename BiasDramWindow,
+              typename QOrigin,
+              typename PositionEncoding>
+    CK_TILE_DEVICE static void ApplyScaleAndBias(SaccTile& s_acc,
+                                                 const BiasDramWindow& bias_dram_window,
+                                                 const QOrigin& q_origin,
+                                                 index_t k_start,
+                                                 float scale_s,
+                                                 PositionEncoding position_encoding)
+    {
+        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+        {
+            // Pre-scale s_acc by scale_s before adding bias
+            tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+            const auto bias_tile = load_tile(bias_dram_window);
+            tile_elementwise_inout(
+                [](auto& x, const auto& y) {
+#if !CK_TILE_FMHA_FWD_FAST_EXP2
+                    x += type_convert<SaccDataType>(y);
+#else
+                    x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
+#endif
+                },
+                s_acc,
+                bias_tile);
+        }
+        else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+        {
+            constexpr auto s_spans = SaccTile::get_distributed_spans();
+            sweep_tile_span(s_spans[I0], [&](auto idx0) {
+                sweep_tile_span(s_spans[I1], [&](auto idx1) {
+                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                        s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+                    const auto row         = q_origin.at(I0) + tile_idx.at(I0);
+                    const auto col         = k_start + tile_idx.at(I1);
+                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                    s_acc(i_j_idx) *= scale_s;
+                    position_encoding.update(s_acc(i_j_idx), row, col);
+                });
+            });
+        }
+        else
+        {
+            ignore = bias_dram_window;
+            ignore = q_origin;
+            ignore = k_start;
+            ignore = scale_s;
+            ignore = position_encoding;
+        }
+    }
+
+    // -inf on the scores the K tile at k_start must not see: past seqlen_k_end on
+    // the last tile (uneven splits; kClampTail lets a body drop the check when its
+    // tile range already guarantees it) and outside the mask on edge tiles.
+    template <typename SaccTile, typename QOrigin, bool kClampTail = true>
+    CK_TILE_DEVICE static void MaskScores(SaccTile& s_acc,
+                                          const FmhaMask& mask,
+                                          const QOrigin& q_origin,
+                                          index_t k_start,
+                                          bool is_last_tile,
+                                          index_t seqlen_k_end,
+                                          bool_constant<kClampTail> = {})
+    {
+        if constexpr(kHasUnevenSplits && kClampTail)
+        {
+            if(is_last_tile)
+            {
+                set_tile_if(s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                    return seqlen_k_end <= k_start + tile_idx.at(I1);
+                });
+            }
+        }
+        else
+        {
+            ignore = is_last_tile;
+            ignore = seqlen_k_end;
+        }
+
+        if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+        {
+            if(mask.IsEdgeTile(q_origin.at(I0), k_start, number<kM0>{}, number<kN0>{}))
+            {
+                set_tile_if(s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                    const auto col = k_start + tile_idx.at(I1);
+                    if constexpr(kHasSink)
+                        return mask.IsOutOfSinkBound(row, col);
+                    else
+                        return mask.IsOutOfBound(row, col);
+                });
+            }
+        }
+    }
+
+    // LSE from the final row max m (log2 domain) and row sum l.
+    template <typename LSEaccDramBlockWindowTmp, typename RowTile>
+    CK_TILE_DEVICE static void StoreLse(LSEaccDramBlockWindowTmp& lse_acc_dram_window,
+                                        const RowTile& m,
+                                        const RowTile& l,
+                                        float scale_s)
+    {
+        auto lse_acc = make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+
+        constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
+        sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
+                lse_acc(i_idx) = m[i_idx] / C_LOG2E + log(l[i_idx]);
+            else
+                lse_acc(i_idx) = m[i_idx] * scale_s / C_LOG2E + log(l[i_idx]);
+        });
+
+        store_tile(lse_acc_dram_window, lse_acc);
+    }
+
+    // O / l (a fully masked row, l == 0, gives 0).
+    template <typename OaccTile, typename RowTile>
+    CK_TILE_DEVICE static void NormalizeO(OaccTile& o_acc, const RowTile& l)
+    {
+        constexpr auto o_spans = OaccTile::get_distributed_spans();
+        sweep_tile_span(o_spans[I0], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            const auto tmp       = [&]() {
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             FmhaMask::IsMasking)
+                {
+                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
+                }
+                else
+                    return 1 / l[i_idx];
+            }();
+            sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                o_acc(i_j_idx) *= tmp;
+            });
+        });
+    }
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -212,44 +426,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         auto m_base = MLBlockTileType{};
 
         clear_tile(o_acc);
-        if(__builtin_isinf_sign(sink_v) >= 0)
-        {
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
-                set_tile(m, sink_v * scale_s * C_LOG2E);
-            else
-                set_tile(m, sink_v * C_LOG2E);
-#else
-            set_tile(m, sink_v);
-#endif
-            set_tile(l, SMPLComputeDataType{1.0f});
-        }
-        else
-        {
-            set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-            clear_tile(l);
-        }
+        InitRowMaxSum(m, l, sink_v, scale_s);
         m_base = m;
         if constexpr(kStoreLSE)
             l_lse = l;
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
-        // Sink-aware tile range: GetSinkTileRangeAlongX returns
-        // (sink_seq_end, seqlen_k_start, seqlen_k_end). For non-sink,
-        // sink_seq_end is always 0.
-        const auto tile_range_result = [&mask, &q_origin]() {
-            if constexpr(kHasSink)
-                return mask.GetSinkTileRangeAlongX(
-                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
-            else
-            {
-                auto [start, end] =
-                    mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
-                return ck_tile::make_tuple(0, start, end);
-            }
-        }();
+        const auto tile_range_result      = GetKTileRange(mask, q_origin);
         const auto sink_seq_end           = tile_range_result.get(ck_tile::number<0>{});
         const auto logical_seqlen_k_start = tile_range_result.get(ck_tile::number<1>{});
         const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
@@ -265,21 +449,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             if(logical_num_total_loop <= 0)
             {
                 if constexpr(kStoreLSE)
-                {
-                    auto lse_acc =
-                        make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-
-                    if(__builtin_isinf_sign(sink_v) >= 0)
-                    {
-                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
-                    }
-                    else
-                    {
-                        set_tile(lse_acc, -numeric<SMPLComputeDataType>::infinity());
-                    }
-
-                    store_tile(lse_acc_dram_window_tmp, lse_acc);
-                }
+                    StoreLseOfEmptyRows(lse_acc_dram_window_tmp, m, sink_v, scale_s);
 
                 // Note: here occ are all cleard, return it
                 // Note: q loaded but no fence, ignore it.
@@ -288,28 +458,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         }
 
         // TDM configs for Q / K / V; the LDS padding comes from the policy.
-        TDMConfig tdm_config_q;
-        TDMConfig tdm_config_k;
-        TDMConfig tdm_config_v;
-        {
-            using QRaw =
-                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigQ<Problem>>;
-            tdm_config_q.pad_enable              = QRaw::kEnabled;
-            tdm_config_q.pad_config.pad_amount   = QRaw::kPadAmount;
-            tdm_config_q.pad_config.pad_interval = QRaw::kPadInterval;
-
-            using KRaw =
-                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigK<Problem>>;
-            tdm_config_k.pad_enable              = KRaw::kEnabled;
-            tdm_config_k.pad_config.pad_amount   = KRaw::kPadAmount;
-            tdm_config_k.pad_config.pad_interval = KRaw::kPadInterval;
-
-            using VRaw =
-                detail::EncodedTdmPadding<typename Policy::template LdsPaddingConfigV<Problem>>;
-            tdm_config_v.pad_enable              = VRaw::kEnabled;
-            tdm_config_v.pad_config.pad_amount   = VRaw::kPadAmount;
-            tdm_config_v.pad_config.pad_interval = VRaw::kPadInterval;
-        }
+        TDMConfig tdm_config_q =
+            MakeTdmConfig<typename Policy::template LdsPaddingConfigQ<Problem>>();
+        TDMConfig tdm_config_k =
+            MakeTdmConfig<typename Policy::template LdsPaddingConfigK<Problem>>();
+        TDMConfig tdm_config_v =
+            MakeTdmConfig<typename Policy::template LdsPaddingConfigV<Problem>>();
 
         // Q tile in LDS
         auto q_dram_window = make_tile_window(
@@ -470,91 +624,22 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 __builtin_amdgcn_sched_group_barrier(0x008, 1, 0); // WMMA
             });
 
-            // STAGE 2: scale_s, add bias (as in qr_tdm's run_single_kv_lds_buffer)
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-            {
-                // Pre-scale s_acc by scale_s before adding bias
-                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                const auto bias_tile = load_tile(bias_dram_window);
-                tile_elementwise_inout(
-                    [](auto& x, const auto& y) {
-#if !CK_TILE_FMHA_FWD_FAST_EXP2
-                        x += type_convert<SaccDataType>(y);
-#else
-                        x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
-#endif
-                    },
-                    s_acc,
-                    bias_tile);
-            }
-            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
-            {
-                const auto current_k_origin = [&]() {
-                    const bool in_sink = (num_sink_loop > i_total_loops);
-                    if(in_sink)
-                        return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                    else
-                        return make_tuple(
-                            kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-                }();
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
-                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
-                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
-                        const auto tile_idx = get_x_indices_from_distributed_indices(
-                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
-                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                        const auto col = current_k_origin.at(I0) + tile_idx.at(number<1>{});
-                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        s_acc(i_j_idx) *= scale_s;
-                        position_encoding.update(s_acc(i_j_idx), row, col);
-                    });
-                });
-            }
+            // Sink-aware: in the sink phase tiles start at 0, in the normal phase at
+            // physical_seqlen_k_start.
+            const index_t kv_tile_start =
+                (num_sink_loop > i_total_loops)
+                    ? kv_load_start + i_total_loops * kN0
+                    : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
 
-            // Sink-aware k_origin: in sink phase, tiles start at 0;
-            // in normal phase, tiles start at physical_seqlen_k_start.
-            const auto k_origin = [&]() {
-                const bool in_sink_phase = (num_sink_loop > i_total_loops);
-                if(in_sink_phase)
-                    return make_tuple(kN0 * i_total_loops + kv_load_start, 0);
-                else
-                    return make_tuple(
-                        kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
-            }();
-
-            if constexpr(kHasUnevenSplits)
-            {
-                if(i_total_loops == (num_total_loop - 1))
-                {
-                    set_tile_if(s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&, physical_seqlen_k_end_ = physical_seqlen_k_end](auto tile_idx) {
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-
-                                    {
-                                        return physical_seqlen_k_end_ <= col;
-                                    }
-                                });
-                }
-            }
-
-            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
-            {
-                bool need_perpixel_check =
-                    mask.IsEdgeTile(q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
-                if(need_perpixel_check)
-                {
-                    set_tile_if(
-                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                            if constexpr(kHasSink)
-                                return mask.IsOutOfSinkBound(row, col);
-                            else
-                                return mask.IsOutOfBound(row, col);
-                        });
-                }
-            }
+            // STAGE 2: scale_s, add bias, mask
+            ApplyScaleAndBias(
+                s_acc, bias_dram_window, q_origin, kv_tile_start, scale_s, position_encoding);
+            MaskScores(s_acc,
+                       mask,
+                       q_origin,
+                       kv_tile_start,
+                       i_total_loops == num_total_loop - 1,
+                       physical_seqlen_k_end);
 
             // Sink->normal window jump: at the boundary between sink region
             // and normal region, jump K/V/bias dram windows forward.
@@ -741,62 +826,23 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
         if constexpr(kStoreLSE)
         {
-            // store lse acc
-            auto lse_acc = make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-
-            constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
             // l_lse is normalised to m_base, validated as in the loop (a fully
             // masked row keeps m_base at -inf)
-            sweep_tile_span(lse_acc_spans[I0], [&, m_ = m_base, l_ = l_lse](auto idx0) {
-                constexpr auto i_idx = make_tuple(idx0);
-                auto m_row           = m_[i_idx];
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             FmhaMask::IsMasking)
-                {
-                    if(m_row == -numeric<SMPLComputeDataType>::infinity())
-                        m_row = type_convert<SMPLComputeDataType>(0.f);
-                }
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                {
-                    lse_acc(i_idx) = m_row / C_LOG2E + log(l_[i_idx]);
-                }
-                else
-                {
-                    if constexpr(kHasLogitsSoftCap)
-                    {
-                        lse_acc(i_idx) = m_row / C_LOG2E + log(l_[i_idx]);
-                    }
-                    else
-                    {
-                        lse_acc(i_idx) = m_row * scale_s / C_LOG2E + log(l_[i_idx]);
-                    }
-                }
-            });
-
-            store_tile(lse_acc_dram_window_tmp, lse_acc);
+            auto m_lse = m_base;
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         FmhaMask::IsMasking)
+            {
+                tile_elementwise_inout(
+                    [](auto& x) {
+                        if(x == -numeric<SMPLComputeDataType>::infinity())
+                            x = type_convert<SMPLComputeDataType>(0.f);
+                    },
+                    m_lse);
+            }
+            StoreLse(lse_acc_dram_window_tmp, m_lse, l_lse, scale_s);
         }
 
-        // finally, O
-        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
-
-        sweep_tile_span(o_spans[I0], [&](auto idx0) {
-            constexpr auto i_idx = make_tuple(idx0);
-            const auto tmp       = [&]() {
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             FmhaMask::IsMasking)
-                {
-                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
-                }
-                else
-                    return 1 / l[i_idx];
-            }();
-            sweep_tile_span(o_spans[I1], [&](auto idx1) {
-                constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                o_acc(i_j_idx) *= tmp;
-            });
-        });
-
+        NormalizeO(o_acc, l);
         return o_acc;
     }
 
