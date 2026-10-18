@@ -84,7 +84,7 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu, kPrefetch };
 // PassFeatureConfig overrides still win over these per-arch defaults.
 //
 // Only the scheduling *ratios* live here. The physical facts this queue also
-// needs - LDS queue depth, drain/throttle latency, and the hazard-rule table -
+// needs - LDS queue depth, drain latency and credit lifetime, and the hazard-rule table -
 // are hardware, not policy, and live in HWModel
 // (stinkytofu/hardware/HWModel.hpp), reached through passCtx.getHWModel().
 // Keeping them there is what lets other passes see the same numbers instead of
@@ -597,10 +597,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // the span between two consecutive WMMA issues.
     //
     // Problem: by default an open window is held until its full co-issue
-    // length (popcount(coIssueWindow)+1, i.e. 7+1 on gfx1250) is consumed and
-    // the hide budget's non-WMMA count is met. A loop body only supplies ~2
-    // ds_loads per window, so the scheduler pulls 3-6 fillers into each early
-    // window just to pad it, and the later windows end up with none.
+    // length (popcount(coIssueWindow)+1, i.e. 7+1 on gfx1250) is consumed. A
+    // loop body only supplies ~2 ds_loads per window, so the scheduler pulls
+    // 3-6 fillers into each early window just to pad it, and the later windows
+    // end up with none.
     //
     // Fix: each window is owed fillQuotaPerWindow_ fillers, computed once per
     // region in onInitRegion as ceil(fillers / WMMAs). Once the quota is met,
@@ -608,14 +608,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // (2) further fillers are deferred unless nothing else can issue without
     // stalling (findSmallestPickableNonWmma). The quota only ever shortens a
     // window: when it cannot be met (fillers exhausted late in the region),
-    // the original cycle limit and hide budget still close the window. A window
-    // can get more than the quota when a hazard or dependency forces it, e.g.
-    // an s_cmp/s_cmov SCC chain.
+    // the original cycle limit still closes the window. A window can get more
+    // than the quota when a hazard or dependency forces it, e.g. an
+    // s_cmp/s_cmov SCC chain.
     //
-    // Invariants: ds_load selection and the ds_load half of the hide budget are
-    // untouched. fillsThisWindow_ is separate from nonWmmaFillsSinceActiveWmma_,
-    // which counts VALU only and pads the WMMA->WMMA / WMMA->VALU coexec
-    // hazards; those pads keep their full 7+1 length. 0 = feature off.
+    // Invariant: ds_load selection is untouched. fillsThisWindow_ is separate
+    // from nonWmmaFillsSinceActiveWmma_, which counts VALU only and pads the
+    // WMMA->WMMA / WMMA->VALU coexec hazards; those pads keep their full 7+1
+    // length. 0 = feature off.
     int fillQuotaPerWindow_ = 0;
     int fillsThisWindow_ = 0;
     // Critical fillers: a SALU/VALU becomes critical kCriticalSlackWmmas windows before the
@@ -1902,23 +1902,21 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     return DsSpreadPacer::windowsFor(dsLoadCount, wmmaTotalThisRegion_, dsTotalThisRegion_);
 }
 
-// Compute forceBarrierAfterNthWmma_ for this region from register dependencies.
+// Compute the "after" threshold of each barrier (barrierWmmaThresholds_) for this region from
+// register dependencies.
 //
-//  Step 1a — collect all movable barriers with their PSEUDO src token sets.
-//  Step 1b — for each barrier, find the latest ds_read whose dest PSEUDO token
-//  matches. Step 2 & 3 — find the last WMMA in [regionStart, that ds_read]
-//  whose src VGPRs
-//               overlap the ds_read's dest VGPRs; record its 1-based index
-//               (wmmaIdx).
-//  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) +
-//  latencyWmmaBudget;
-//            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
-//            wmmaWindowsNeeded is the matching ds_read count at the even-spread
-//            density (wmmaTotal / dsTotal windows per ds_load). latency = dsReadDrainLatency when
-//            it is configured
-//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
-//            numWaves) over every matching ds_read (last-load latency,
-//            count-weighted average throughput, max maxDrain over the burst).
+//  Step 1a - collect all movable barriers with their PSEUDO src token sets.
+//  Step 1b - for each barrier, find the latest ds_read whose dest PSEUDO token matches.
+//  Step 2 & 3 - find the last WMMA in [regionStart, that ds_read] whose src VGPRs overlap the
+//            ds_read's dest VGPRs; record its 1-based index (wmmaIdx).
+//  Step 4 - threshold N = max(lastOverlap, wmmaWindowsNeeded) + latencyWmmaBudget;
+//            latencyWmmaBudget = (max(0, latency - wmmaBarrierCover) / WMMA latency) + 1.
+//            wmmaWindowsNeeded is the WMMA windows the matching ds_reads need at the LDS return
+//            rate (computeWmmaWindowsNeeded: DsReadCyclesPerLoad, capped at the even spread).
+//            latency = dsReadDrainLatency when it is configured (> 0), else
+//            computeDynamicDrainLatencyForLoads(hw, matchingLoads, numWaves) over every matching
+//            ds_read (last-load latency, count-weighted average throughput, max maxDrain over the
+//            burst).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -2340,7 +2338,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
-    // A load the spread gate holds does not stand in for the ones it releases: its section may
+    // A load the spread gate holds does not stand in for the ones it releases: its stage may
     // open later than another's.
     DAGNode* pickedDS = nullptr;
     const bool spreadOn = dsSpreadOn();
@@ -3449,7 +3447,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
 
     // Deadline per filler: the planned window of the nearest consumer it feeds, minus the
-    // chain hops still to go. ds_loads are planned at the region's ds pace.
+    // chain hops still to go. A ds_load is planned at its ordinal's even-spread window; it only
+    // dates the fillers feeding it (the pacer, not this plan, decides when a ds_load issues).
     needWindow_.assign(deps.dag.nodes.size(), INT_MAX);
     std::vector<int> planned(deps.dag.nodes.size(), INT_MAX);
     int dsOrdinal = 0;
