@@ -90,6 +90,38 @@ class TestAttentionTuningContract(unittest.TestCase):
             refused_knobs=[{"use_k_hbm_direct": True}],
         )
 
+    def test_rdna_wmma_candidates(self):
+        # Transposed wide launch (gfx11), causal with tails, output-column tiles,
+        # and a runtime-head-width bucket object.
+        def rdna(arch, **kw):
+            shape = dict(arch=arch, dtype="fp16", nhead_q=16, nhead_k=4, num_cus=40)
+            shape.update(mask_type=0)
+            shape.update(kw)
+            return _req(**shape)
+
+        for arch, refused in (
+            ("gfx11-generic", [{"not_a_knob": True}]),
+            ("gfx1151", [{"not_a_knob": True}]),
+            ("gfx12-generic", [{"block_n": 64}, {"num_waves": 2}]),
+            ("gfx1201", [{"block_n": 64}]),
+        ):
+            tag = arch.replace("-", "_")
+            _check(
+                self,
+                [f"attention_{tag}_wmma_fwd"],
+                [
+                    rdna(arch),
+                    rdna(arch, seqlen_q=100, seqlen_k=100, mask_type=1),
+                    rdna(arch, hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4),
+                    rdna(arch, seqlen_q=17, seqlen_k=17, runtime_head_dims=True),
+                ],
+                other_requests=[
+                    rdna(arch, seqlen_q=37, seqlen_k=53, mask_type=1),
+                    rdna(arch, hdim_q=96, hdim_v=96, seqlen_q=2048, seqlen_k=2048),
+                ],
+                refused_knobs=refused,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
