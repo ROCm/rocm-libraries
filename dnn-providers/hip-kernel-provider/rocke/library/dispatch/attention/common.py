@@ -198,11 +198,12 @@ class AttentionRequest(OperatorRequest):
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
-    # candidates whose kernels implement it (dense, gfx1151 WMMA) admit it.
+    # candidates whose kernels implement it (dense, RDNA WMMA) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
-    # are the bucket maxima, and any multiple-of-16 widths up to them run at
-    # launch. Reported as the ``runtime_head_dims`` feature, so only candidates
+    # are the bucket maxima, and any widths the kernel takes up to them (RDNA
+    # WMMA: multiples of 8) run at launch, as does the ``v`` tensor's head
+    # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
 
@@ -900,14 +901,18 @@ class AttentionTuningSpec:
     builder choice, compile backend, and optional 3D reduce spec are
     serializable and therefore participate in dispatch/cache identity. ``path``
     is ``"2d"`` / ``"3d"`` for the unified tiled kernels, ``"dense"`` for the
-    standalone dense kernel and ``"wmma"`` for the RDNA WMMA forward kernel.
+    standalone dense kernel, ``"wmma"`` for the RDNA WMMA prefill and
+    ``"wmma_decode"`` for the RDNA split-KV decode (decode + merge kernels).
 
-    It is also the whole launch contract the runtime needs:
-    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
-    under :meth:`cache_key` and launches with :meth:`launch_grid` /
-    :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
-    dense runner reads ``kernel_spec`` directly. ``allow_unsupported`` skips the
-    unified runtime's problem-shape support check.
+    For the unified and dense paths it is also the whole launch contract the
+    runtime needs: ``run_unified_attention_torch(tuning_spec=...)`` compiles
+    :meth:`build` under :meth:`cache_key` and launches with :meth:`launch_grid`
+    / :meth:`launch_block`, so the runtime never decodes ``builder_kind``. The
+    RDNA ``"wmma"`` / ``"wmma_decode"`` specs launch through their candidate's
+    grid (``gfx1151.py``), which depends on the live device, so
+    :meth:`launch_grid` refuses them. The dense runner reads ``kernel_spec``
+    directly. ``allow_unsupported`` skips the unified runtime's problem-shape
+    support check.
 
     Two identities, for two consumers. ``tuning_id`` / ``config_key`` name the
     configuration -- ``variant_id`` plus the canonical ``knobs`` -- and are the
@@ -964,7 +969,8 @@ class AttentionTuningSpec:
         )
 
     def build(self, arch: str | None = None):
-        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        """IR for this spec: one kernel for 2D, dense and RDNA prefill;
+        ``(segment, reduce)`` for 3D; ``(decode, merge)`` for RDNA decode."""
         from .tuning_specs import (
             build_explicit_attention_2d,
             build_explicit_attention_3d,
@@ -976,9 +982,13 @@ class AttentionTuningSpec:
                 self.kernel_spec, arch=arch
             )
         if self.path == "wmma":
-            from kernels.gfx1151.wmma_fmha_fwd import build_wmma_fmha_fwd
+            from kernels.gfx1151.wmma_fmha_fwd_v2 import build_wmma_fmha_fwd_v2
 
-            return build_wmma_fmha_fwd(self.kernel_spec, arch=arch)
+            return build_wmma_fmha_fwd_v2(self.kernel_spec, arch=arch)
+        if self.path == "wmma_decode":
+            from .gfx1151 import build_decode_kernels
+
+            return build_decode_kernels(self.kernel_spec, arch)
         if self.path == "3d":
             return build_explicit_attention_3d(
                 self.kernel_spec, self.reduce_spec, arch=arch
@@ -996,17 +1006,10 @@ class AttentionTuningSpec:
         if self.path == "dense":
             # The dense spec bakes (or declares) its whole problem shape.
             return tuple(_dense_kernel_module(self.arch).attention_dense_grid(ks))
-        if self.path == "wmma":
-            # Runtime-shape kernel: the problem supplies rows, heads and batch.
-            from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid
-
-            return tuple(
-                wmma_fmha_fwd_grid(
-                    ks,
-                    seqlen_q=int(problem.max_seqlen_q),
-                    num_query_heads=int(problem.num_query_heads),
-                    batch=int(problem.num_seqs),
-                )
+        if self.path in ("wmma", "wmma_decode"):
+            # The RDNA candidates own their launch grid (gfx1151.py).
+            raise ValueError(
+                f"{self.path!r} specs launch through their candidate's grid"
             )
         if self.path == "3d":
             block_q = max(1, 16 // problem.num_queries_per_kv)
@@ -1033,6 +1036,8 @@ class AttentionTuningSpec:
                 _dense_kernel_module(self.arch).attention_dense_block(self.kernel_spec)
             )
         if self.path == "wmma":
+            return (int(self.kernel_spec.threads), 1, 1)
+        if self.path == "wmma_decode":
             return (int(self.kernel_spec.block_size), 1, 1)
         if self.path == "3d":
             return (64, 1, 1)
