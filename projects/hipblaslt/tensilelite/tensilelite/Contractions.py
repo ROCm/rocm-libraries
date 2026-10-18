@@ -39,6 +39,39 @@ from .Toolchain.Component import Assembler
 from math import ceil
 
 MIN_K_FOR_GSU = 32
+
+def _operandIsPerInputMxType(dtype):
+    """True for FP8, BF8 (including fnuz), FP6, BF6, and FP4."""
+    return dtype.isAnyFloat8() or dtype.isAnyBFloat8() or dtype.is6bitFloat() or dtype.isFloat4()
+
+def _computeInputsFromOperandTypes(d, srcType, computeA, computeB):
+    """Use DataTypeA/B as compute inputs for mixed MX operands.
+
+    rocRoller custom kernels set DataTypeA and DataTypeB and leave MacDataType
+    unset. Tensile then copies DataType onto both MAC inputs, so TypesEqual
+    advertises operand A's type as computeInputTypeB. hipBLASLt queries each
+    compute input as that operand for FP8/BF8/FP6/BF6/FP4.
+
+    Follow DataTypeA and DataTypeB when both are those types, they differ, and
+    both compute inputs are still the DataType default. An explicit MAC type
+    that already differs from DataType is kept. A same-type problem is unchanged.
+    A memory/compute conversion (for example DataType half with DataTypeA FP8)
+    is unchanged because its other operand is not an MX type.
+    """
+    if "DataTypeA" not in d or "DataTypeB" not in d:
+        return computeA, computeB
+    operandA = DataType(d["DataTypeA"])
+    operandB = DataType(d["DataTypeB"])
+    if operandA == operandB:
+        return computeA, computeB
+    if not (_operandIsPerInputMxType(operandA) and _operandIsPerInputMxType(operandB)):
+        return computeA, computeB
+    if computeA != srcType or computeB != srcType:
+        return computeA, computeB
+    if srcType != operandA and srcType != operandB:
+        return computeA, computeB
+    return operandA, operandB
+
 @state_key_ordering
 class FreeIndex:
     StateKeys = ['isA', 'i', 'c', 'd']
@@ -166,6 +199,9 @@ class ProblemType:
         elif rv.aType.isBFloat8Float8_fnuz() or rv.bType.isBFloat8Float8_fnuz():
             rv.aType = DataType("B8N")
             rv.bType = DataType("F8N")
+
+        rv.computeInputTypeA, rv.computeInputTypeB = _computeInputsFromOperandTypes(
+            d, srcType, rv.computeInputTypeA, rv.computeInputTypeB)
 
         if 'DataTypeE' in d:
             rv.eType = DataType(d['DataTypeE'])

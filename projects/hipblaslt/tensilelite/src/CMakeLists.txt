@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     add_subdirectory(llvm)
 else()
     add_subdirectory(msgpack)
