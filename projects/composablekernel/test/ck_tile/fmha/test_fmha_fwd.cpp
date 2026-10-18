@@ -718,6 +718,127 @@ TEST_P(QrTdmPingPongEdges, DataTypeConfig)
     }
 }
 
+// A named API and pipeline (the example's -api/-pipeline) run that pipeline whatever the
+// heuristics that choose between pipelines say -- qr_tdm_pingpong on a small grid,
+// qr_tdm_sched or qr_tdm on a big one -- with the pipeline's own tile choice (16 rows up
+// to s_q 16), and no other API or pipeline when it has no kernel for the args. "small" is
+// 2 x 4 heads; otherwise the grid is sized as for QrTdmPingPong. One K/V head; splitkv runs
+// 2 splits. tile: a part of the kernel name, nullptr where the API does not report it
+// (splitkv, pagedkv), "" for no kernel at all.
+// api, pipeline, mode, small grid, seqlen_q, seqlen_k, page_block_size, tile
+using ForcedPipelineCase =
+    std::tuple<const char*, const char*, mode_enum, bool, int, int, int, const char*>;
+
+class ForcedPipeline : public TestWithParam<ForcedPipelineCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    ForcedPipeline,
+    Values(
+        ForcedPipelineCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, true, 532, 532, 0, "_b64x"},
+        ForcedPipelineCase{"fwd", "qr_tdm_pingpong", mode_enum::batch, true, 8, 532, 0, "_b16x"},
+        ForcedPipelineCase{"fwd", "qr_tdm_sched", mode_enum::batch, false, 100, 300, 0, "_b128x"},
+        ForcedPipelineCase{"fwd", "qr_tdm", mode_enum::batch, false, 532, 532, 0, "_b128x"},
+        ForcedPipelineCase{"auto", "qr_tdm", mode_enum::group, true, 100, 300, 0, "_qr_tdm_v"},
+        ForcedPipelineCase{"fwd", "no_such_pipeline", mode_enum::batch, true, 100, 300, 0, ""}));
+
+TEST_P(ForcedPipeline, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "the qr_tdm pipelines are only supported on gfx1250";
+
+        const auto [api, pipeline, mode, small, seqlen_q, seqlen_k, page_block_size, tile] =
+            GetParam();
+        const auto [batch, nhead] = small ? std::pair{2, 4} : PingPongGrid(mode, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                                   batch,
+                                                   nhead,
+                                                   1,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   false,
+                                                   false,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   false, // lse: pagedkv has none
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   "0",
+                                                   qscale_str,
+                                                   true,
+                                                   std::string(api) == "splitkv" ? 2 : 1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "linear",
+                                                   "vllm",
+                                                   api,
+                                                   pipeline);
+        if(tile != nullptr && *tile == '\0')
+        {
+            EXPECT_EQ(result, fwd_result::no_instance);
+            return;
+        }
+        ASSERT_EQ(result, fwd_result::success);
+        if(tile != nullptr)
+        {
+            EXPECT_NE(selected_kernel.find(std::string("_") + pipeline + "_v"), std::string::npos)
+                << selected_kernel;
+            EXPECT_NE(selected_kernel.find(tile), std::string::npos) << selected_kernel;
+        }
+    }
+}
+
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+INSTANTIATE_TEST_SUITE_P(SplitKV,
+                         ForcedPipeline,
+                         Values(ForcedPipelineCase{
+                             "splitkv", "qr", mode_enum::batch, true, 100, 300, 0, nullptr}));
+#endif
+
+#if CK_TILE_FMHA_FWD_PAGEDKV_API
+INSTANTIATE_TEST_SUITE_P(
+    PagedKV,
+    ForcedPipeline,
+    Values(ForcedPipelineCase{
+        "pagedkv", "qr_pagedkv", mode_enum::batch, true, 100, 300, 128, nullptr}));
+#endif
+
+#if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
+INSTANTIATE_TEST_SUITE_P(
+    BatchPrefill,
+    ForcedPipeline,
+    Values(
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_pingpong", mode_enum::group, true, 100, 500, 16, "_b64x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_pingpong", mode_enum::group, true, 8, 532, 1, "_b16x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm_sched", mode_enum::group, false, 100, 500, 16, "_b128x"},
+        ForcedPipelineCase{
+            "batch_prefill", "qr_tdm", mode_enum::group, false, 100, 500, 1024, "_qr_tdm_v"}));
+#endif
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts

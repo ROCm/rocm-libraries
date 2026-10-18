@@ -256,7 +256,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
         }}
 """
 
-FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
                         ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ({F_kv_load_check})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
@@ -267,15 +267,28 @@ FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}
 @dataclass
 class CppConstraint:
     bool_expr: str = None
+    # Only chooses between pipelines: skipped when the caller names the pipeline in
+    # fmha_batch_prefill_traits::pipeline (see fmha_fwd.py's CppConstraint).
+    select_expr: str = None
 
     def __str__(self):
-        if self.bool_expr is None:
-            return "true"
-        else:
-            return f"{self.bool_expr}"
+        expr = "true" if self.bool_expr is None else f"{self.bool_expr}"
+        if self.select_expr is None:
+            return expr
+        return f"({expr}) && (!t.pipeline.empty() || ({self.select_expr}))"
 
     def __and__(self, other):
-        return CppConstraint(f"({str(self)}) && ({str(other)})")
+        def both(a, b):
+            if a is None:
+                return b
+            if b is None:
+                return a
+            return f"({a}) && ({b})"
+
+        return CppConstraint(
+            both(self.bool_expr, other.bool_expr),
+            both(self.select_expr, other.select_expr),
+        )
 
 
 @dataclass
@@ -371,7 +384,12 @@ class FmhaFwdApiTrait:
 
     @property
     def dcheck(self) -> str:
-        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"):
+        if self.pipeline_tag in (
+            "qr_async",
+            "qr_tdm",
+            "qr_tdm_sched",
+            "qr_tdm_pingpong",
+        ):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dpad == "t":
                 return f"a.hdim_q % {vec} == 0"
@@ -389,7 +407,12 @@ class FmhaFwdApiTrait:
 
     @property
     def dvcheck(self) -> str:
-        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"):
+        if self.pipeline_tag in (
+            "qr_async",
+            "qr_tdm",
+            "qr_tdm_sched",
+            "qr_tdm_pingpong",
+        ):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dvpad == "t":
                 return f"a.hdim_v % {vec} == 0"
@@ -523,6 +546,7 @@ class FmhaFwdApiPool:
                         F_mode=MODE_MAP[trait.mode],
                         F_vlayout=LAYOUT_MAP[trait.vlayout],
                         F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
+                        F_pipeline_tag=trait.pipeline_tag,
                         F_logits=BOOL_MAP[trait.logits],
                         F_mask=get_mask_map(self.mask_impl)[trait.mask],
                         F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
@@ -908,8 +932,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
     # to 16 rows. In batch_prefill `batch` is the number of sequences, as in group-mode
     # fmha_fwd.
     _QR_TDM_PINGPONG_TILES = {
-        128 : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), F_arch=GFX125_ARCH),
-               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), F_arch=GFX125_ARCH)],
+        128 : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16", GFX125_QR_TDM_PINGPONG_RANGE), F_arch=GFX125_ARCH),
+               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(select_expr=GFX125_QR_TDM_PINGPONG_RANGE), F_arch=GFX125_ARCH)],
     }  # fmt: skip
 
     # fmha_fwd's fp8 qr_tdm tile: the scaled gemm1 needs warp K 128 (kK1).
@@ -926,7 +950,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         # The d256 qr_tdm tile has the async tile's geometry, so pair by identity.
         if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
             return pipeline.tag == "qr_tdm_sched"
-        if any(tile is t for tiles in cls._QR_TDM_PINGPONG_TILES.values() for t in tiles):
+        if any(
+            tile is t for tiles in cls._QR_TDM_PINGPONG_TILES.values() for t in tiles
+        ):
             return pipeline.tag == "qr_tdm_pingpong"
         if any(
             tile is t
@@ -961,7 +987,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
             sched_seqlen_q = "a.max_seqlen_q >= 128"
             if hdim in cls._QR_TDM_PINGPONG_TILES:
                 sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
-            sched_constraint = CppConstraint(sched_seqlen_q)
+            sched_constraint = CppConstraint(select_expr=sched_seqlen_q)
             for mask, lse, kv_lookup_table in itertools.product(
                 get_mask_map(mask_impl).keys(), ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
             ):

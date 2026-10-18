@@ -113,6 +113,15 @@ auto create_args(int argc, char* argv[])
         .insert("kv_lookup",
                 "vllm",
                 "batch_prefill page table: vllm (2D block table) or sglang (1D indptr/indices)")
+        .insert("api",
+                "auto",
+                "attention API to run: auto (batch_prefill, pagedkv, splitkv, then fwd, as the "
+                "args allow), fwd, splitkv, pagedkv or batch_prefill; no fallback when named")
+        .insert("pipeline",
+                "",
+                "run only this pipeline of the API, by the tag in the kernel name (e.g. qr, "
+                "qr_async, qr_tdm, qr_tdm_sched, qr_tdm_pingpong), skipping the dispatch "
+                "heuristics that choose between pipelines; empty: let the dispatch choose")
         .insert("cache_batch_idx", "0", "whether to use index map to the kvcache")
         .insert("warmup", "5", "number of iterations before benchmark the kernel")
         .insert("repeat", "20", "number of iterations to benchmark the kernel")
@@ -225,7 +234,9 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         json,
                                         nullptr,
                                         arg_parser.get_str("kv_layout"),
-                                        arg_parser.get_str("kv_lookup"));
+                                        arg_parser.get_str("kv_lookup"),
+                                        arg_parser.get_str("api"),
+                                        arg_parser.get_str("pipeline"));
 }
 
 int main(int argc, char* argv[])

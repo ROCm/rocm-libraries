@@ -1798,6 +1798,10 @@ struct fmha_fwd_traits
     quant_scale_enum qscale_type;
     bool skip_min_seqlen_q = false;
     bool has_sink          = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 float fmha_fwd(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
@@ -1823,6 +1827,10 @@ struct fmha_fwd_pagedkv_traits
     bool do_fp8_static_quant = false;
     bool skip_min_seqlen_q   = false;
     bool has_sink            = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 
@@ -1843,6 +1851,10 @@ struct fmha_fwd_splitkv_traits
     bool has_lse;
     bool do_fp8_static_quant = false;
     bool has_sink            = false;
+    // Run only the pipeline with this tag (as in the kernel name, e.g. "qr_tdm"), whatever
+    // the dispatch heuristics that choose between pipelines say; the constraints a kernel
+    // needs to be correct still apply. Empty: let the dispatch choose.
+    std::string pipeline;
     // TODO: padding check is inside this api
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,

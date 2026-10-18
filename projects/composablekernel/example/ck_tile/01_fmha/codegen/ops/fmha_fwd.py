@@ -277,7 +277,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
 
 FMHA_FWD_TRAIT_TYPE = """fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_occupancy}>"""
 
-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
+FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.pipeline.empty() || t.pipeline == "{F_pipeline_tag}") && (t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using trait_ = {F_trait_type};
     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
@@ -307,15 +307,29 @@ FMHA_FWD_API_KVSCALE_ROW = """        {{"{F_arch.name}", "{F_dtype_name}", {F_hd
 @dataclass
 class CppConstraint:
     bool_expr: str = None
+    # Only chooses between pipelines (e.g. a grid or length threshold): skipped when the
+    # caller names the pipeline in fmha_fwd_traits::pipeline. bool_expr must hold for the
+    # kernel to be correct, or picks a tile within the pipeline, and always applies.
+    select_expr: str = None
 
     def __str__(self):
-        if self.bool_expr is None:
-            return "true"
-        else:
-            return f"{self.bool_expr}"
+        expr = "true" if self.bool_expr is None else f"{self.bool_expr}"
+        if self.select_expr is None:
+            return expr
+        return f"({expr}) && (!t.pipeline.empty() || ({self.select_expr}))"
 
     def __and__(self, other):
-        return CppConstraint(f"({str(self)}) && ({str(other)})")
+        def both(a, b):
+            if a is None:
+                return b
+            if b is None:
+                return a
+            return f"({a}) && ({b})"
+
+        return CppConstraint(
+            both(self.bool_expr, other.bool_expr),
+            both(self.select_expr, other.select_expr),
+        )
 
 
 @dataclass
@@ -602,6 +616,7 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
         F_mode=MODE_MAP[trait.mode],
         F_vlayout=LAYOUT_MAP[trait.vlayout],
         F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
+        F_pipeline_tag=trait.pipeline_tag,
         F_logits=BOOL_MAP[trait.logits],
         F_mask=get_mask_cpp_type(trait.mask),
         F_mask_check=get_mask_cpp_check_expr(trait.mask),
@@ -1600,7 +1615,12 @@ def _validate_qr_tdm_bm0_crossover_pairs(tile_dict):
     # other factories legitimately gate non-final tiles by CU count instead of seqlen.
     for (hdim, hdim_v), tiles in tile_dict.items():
         for tile, next_tile in zip(tiles, tiles[1:]):
-            assert tile.F_constraint.bool_expr is not None, (
+            # A select_expr is skipped when the caller names the pipeline, so only
+            # bool_expr keeps a tile from shadowing the next tile of its own pipeline.
+            assert (
+                tile.F_constraint.bool_expr is not None
+                or tile.F_pipeline_tag != next_tile.F_pipeline_tag
+            ), (
                 f"({hdim},{hdim_v}): bm0={tile.F_bm0} has no CppConstraint but is "
                 f"followed by bm0={next_tile.F_bm0} -- it would shadow every tile "
                 "after it in dispatch order"
@@ -1778,8 +1798,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                               FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 # qr_tdm_pingpong's tiles. Up to 16 rows the 64-row tile would idle 3/4 of
                 # its M rows, so this one spends its four warps on N instead.
-                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), "qr_tdm_pingpong"),
-                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                (128, 128) : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint("a.max_seqlen_q <= 16", GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
+                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(select_expr=GFX125_QR_TDM_PINGPONG_RANGE), "qr_tdm_pingpong"),
                               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (160, 160) : [FmhaFwdTileSize( 64,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((160, 160))),
@@ -1911,8 +1931,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
                     f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "
-                    f"{sched_seqlen_q} && "
-                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
+                    f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}",
+                    sched_seqlen_q,
                 )
                 for mask, lse in itertools.product(
                     get_mask_map(mask_impl).keys(), ["t", "f"]

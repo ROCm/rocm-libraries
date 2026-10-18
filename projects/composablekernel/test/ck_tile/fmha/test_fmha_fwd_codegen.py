@@ -57,8 +57,10 @@ _D192_BATCH_N128_FILENAME = _D192_BATCH_NMASK_FILENAME.replace(
 ).replace("_o2_", "_o1_")
 _D192_SELECTOR = (
     "a.hdim_q == 192 && a.hdim_v == 128 && a.sink_ptr == nullptr && "
-    "a.max_seqlen_q >= 128"
+    "t.hdim_q == 192 && t.hdim_v == 128"
 )
+# Chooses qr_tdm_sched over qr_tdm, so skipped when the caller names a pipeline.
+_D192_SELECT = "(!t.pipeline.empty() || (a.max_seqlen_q >= 128))"
 
 
 def _generate(receipt, optdim_list=None):
@@ -128,6 +130,7 @@ struct fmha_fwd_traits {
     bool has_lse = false, has_dropout = false;
     quant_scale_enum qscale_type = quant_scale_enum::no_scale;
     bool skip_min_seqlen_q = false, has_sink = false;
+    std::string pipeline;
 };
 struct fmha_fwd_args {
     int hdim_q = 192, hdim_v = 128, seqlen_q = 128, max_seqlen_q = 128, seqlen_k = 128;
@@ -166,6 +169,8 @@ int main() {
     a.cu_seqlen_k_ptr = has_cu_sk ? &a : nullptr;
     a.seqlen_k_ptr = has_sk_ptr ? &a : nullptr;
     a.sink_ptr = has_sink_ptr ? &a : nullptr;
+    if(const char* pipeline = std::getenv("FMHA_TEST_PIPELINE"))
+        t.pipeline = pipeline;
     std::cout << fmha_fwd(t, a, {}) << '\\n';
 }
 """
@@ -250,7 +255,7 @@ class _CompiledDispatcher:
             )
         return matches.pop()
 
-    def run(self, device="gfx1250", num_cus=256, **changes):
+    def run(self, device="gfx1250", num_cus=256, pipeline="", **changes):
         case = dict(
             hdim_q=192,
             hdim_v=128,
@@ -290,6 +295,7 @@ class _CompiledDispatcher:
             ROCR_VISIBLE_DEVICES="",
             FMHA_TEST_DEVICE=device,
             FMHA_TEST_NUM_CUS=str(num_cus),
+            FMHA_TEST_PIPELINE=pipeline,
         )
         result = subprocess.run(
             [str(self.binary)],
@@ -450,6 +456,7 @@ endforeach()
 
                 self.assertIn("QRKSVS_TDM_SCHED", api)
                 self.assertIn(_D192_SELECTOR, api)
+                self.assertIn(_D192_SELECT, api)
                 if receipt != 200:
                     self.assertIn(
                         "a.seqlen_k >= 512LL * (t.is_group_mode ? a.batch : 1)",
@@ -1969,6 +1976,33 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+
+        # A named pipeline runs whatever the heuristics that choose between pipelines
+        # say (the grid rule, qr_tdm_sched's row ranges), keeps its own tile choice,
+        # and still needs a kernel that applies.
+        def ids(tag):
+            return {
+                index for k, index in dispatch.kernel_ids if k.F_pipeline.tag == tag
+            }
+
+        self.assertEqual(
+            run(**square, pipeline="qr_tdm_pingpong"), [kernel("qr_tdm_pingpong", 64)]
+        )
+        self.assertEqual(
+            run(seqlen_q=8, seqlen_k=532, pipeline="qr_tdm_pingpong"),
+            [kernel("qr_tdm_pingpong", 16)],
+        )
+        self.assertIn(run(**square, **big, pipeline="qr_tdm_sched")[0], sched_ids)
+        self.assertIn(
+            run(seqlen_q=8, seqlen_k=532, pipeline="qr_tdm_sched")[0], sched_ids
+        )
+        self.assertIn(run(**square, **big, pipeline="qr_tdm")[0], ids("qr_tdm"))
+        self.assertIn(run(**square, pipeline="qr_tdm")[0], ids("qr_tdm"))
+        # qr_tdm_sched has no sink instances; no such pipeline at all.
+        self.assertEqual(
+            run(**square, **causal, has_sink_ptr=1, pipeline="qr_tdm_sched"), [-1]
+        )
+        self.assertEqual(run(**square, pipeline="qr_nope"), [-1])
 
 
 if __name__ == "__main__":

@@ -275,7 +275,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         std::optional<std::string> json   = std::nullopt,
                         std::string* selected_kernel_name = nullptr,
                         std::string kv_layout_str         = "linear",
-                        std::string kv_lookup_str         = "vllm")
+                        std::string kv_lookup_str         = "vllm",
+                        std::string api                   = "auto",
+                        std::string pipeline              = "")
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -425,8 +427,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
     // batch_prefill supports flexible page sizes (not just multiples of 128)
     const bool need_128_aligned_page =
-        (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
-         CK_TILE_FMHA_FWD_PAGEDKV_API);
+        api != "batch_prefill" && (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
+                                   CK_TILE_FMHA_FWD_PAGEDKV_API);
     if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
     {
         std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
@@ -752,6 +754,27 @@ fwd_result fmha_fwd_run(mode_enum mode,
         p_drop = 0.0f;
     }
 #endif
+
+    // -api picks the attention API instead of the order below (batch_prefill, pagedkv_prefill,
+    // splitkv, fwd), with no fallback; -pipeline then runs only that pipeline of it.
+    if(!(api == "auto" || api == "fwd" || api == "splitkv" || api == "pagedkv" ||
+         api == "batch_prefill"))
+    {
+        std::cerr << "api must be auto/fwd/splitkv/pagedkv/batch_prefill" << std::endl;
+        return fwd_result::invalid_args;
+    }
+    if((api == "fwd" && use_kvcache) || (api == "splitkv" && !(1 < num_splits || use_kvcache)) ||
+       (api == "batch_prefill" && !(mode == mode_enum::group && 0 < page_block_size)) ||
+       (api == "pagedkv" && !(0 < page_block_size)) ||
+       ((api == "batch_prefill" || api == "pagedkv") && num_splits != 1))
+    {
+        std::cerr << "api=" << api
+                  << " does not take these args (fwd: no KV cache; splitkv: num_splits > 1 or a "
+                     "KV cache; batch_prefill: group mode and page_block_size > 0; pagedkv: "
+                     "page_block_size > 0; both: num_splits = 1)"
+                  << std::endl;
+        return fwd_result::invalid_args;
+    }
 
     static const auto get_lengths = [](bool permute,
                                        ck_tile::index_t b /*batch*/,
@@ -1405,6 +1428,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
         else // fmha_fwd_traits or fmha_splitkv_traits
         {
+            traits.pipeline            = pipeline;
             traits.is_group_mode       = (mode == mode_enum::group);
             traits.has_logits_soft_cap = 0.f < logits_soft_cap;
             traits.mask_type           = mask.type;
@@ -1934,10 +1958,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
         return fwd_result::no_instance;
     }
 
-    auto run_fwd = [&](const ck_tile::stream_config& sc) {
+    const bool api_auto = (api == "auto");
+    auto run_fwd        = [&](const ck_tile::stream_config& sc) {
 #if CK_TILE_FMHA_FWD_BATCH_PREFILL_API
         // batch_prefill: group mode + paged KV, tested against the same CPU reference
-        if(1 == num_splits && use_kvcache && mode == mode_enum::group)
+        if(api_auto ? (1 == num_splits && use_kvcache && mode == mode_enum::group)
+                    : api == "batch_prefill")
         {
             fmha_batch_prefill_traits bp_traits;
             init_traits(bp_traits);
@@ -1946,12 +1972,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
             init_args(bp_args);
 
             const float ave_time = fmha_batch_prefill(bp_traits, bp_args, sc);
-            if(ave_time >= 0.0f)
+            if(ave_time >= 0.0f || !api_auto)
                 return ave_time;
         }
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 #if CK_TILE_FMHA_FWD_PAGEDKV_API
-        if(1 == num_splits && use_kvcache)
+        if(api_auto ? (1 == num_splits && use_kvcache) : api == "pagedkv")
         {
             fmha_fwd_pagedkv_traits fmha_pagedkv_traits;
             init_traits(fmha_pagedkv_traits);
@@ -1962,7 +1988,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             const float ave_time = fmha_fwd_pagedkv(fmha_pagedkv_traits, fmha_pagedkv_args, sc);
 #if CK_TILE_FMHA_FWD_SPLITKV_API
             // If there is no instance for these args, fallback to fmha_fwd_splitkv
-            if(ave_time >= 0.0f)
+            if(ave_time >= 0.0f || !api_auto)
                 return ave_time;
 #else
             return ave_time;
@@ -1970,7 +1996,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
 #endif // CK_TILE_FMHA_FWD_PAGEDKV_API
 #if CK_TILE_FMHA_FWD_SPLITKV_API
-        if(1 < num_splits || use_kvcache)
+        if(api_auto ? (1 < num_splits || use_kvcache) : api == "splitkv")
         {
             fmha_fwd_splitkv_traits fmha_splitkv_traits;
             init_traits(fmha_splitkv_traits);
@@ -1981,6 +2007,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
             return fmha_fwd_splitkv(fmha_splitkv_traits, fmha_splitkv_args, sc);
         }
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
+        if(!(api_auto || api == "fwd"))
+            return -1.0f; // the named API is not built in
         fmha_fwd_traits fmha_traits;
         init_traits(fmha_traits);
 
