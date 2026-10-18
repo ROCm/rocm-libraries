@@ -59,7 +59,7 @@ target_sources(tensilelite-tests
 # which is only defined when MSGPACK is the active serialization format
 # (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
 # files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
-if(NOT HIPBLASLT_ENABLE_YAML)
+if(NOT TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-tests
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
@@ -70,7 +70,7 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     )
 endif()
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
     target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
@@ -99,6 +99,11 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
+
+if(HIPBLASLT_ENABLE_YAML)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+endif()
 
 # LaunchDimGuard_test asserts different outcomes for a cluster launch depending
 # on whether SolutionAdapter::launchKernel was compiled with the cluster path,

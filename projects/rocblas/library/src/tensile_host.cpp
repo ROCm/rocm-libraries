@@ -1300,25 +1300,40 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
                 return false;
         }
 
-        // gfx942: hipBLASLt is used for fp64 on all gfx942 devices, and for fp16/bf16
-        // only on MI300X (304 CUs); MI300A (228 CUs) stays on Tensile for fp16/bf16.
-        // TODO remove after all types are supported
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64
+        //   228-CU MI300A only:                     complex-fp64, fp32, complex-fp32
+        //   every other gfx942 configuration:       nothing, Tensile remains the default
+        // The CU count is the one reported for the visible device, so a partitioned
+        // MI300A or MI300X does not match 228 or 304 and keeps the Tensile default.
+        // TODO expand once more gfx942 configs are validated
         if(arch == 942)
         {
-            if constexpr(sizeof(Ti) == 2)
+            constexpr bool MI300A_or_MI300X = sizeof(Ti) == 2 || std::is_same<Ti, double>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, float>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
             {
-                if(prob.handle->device_properties.multiProcessorCount != 304)
+                if(prob.handle->device_properties.multiProcessorCount != 228)
                     return false;
             }
-            else if constexpr(!std::is_same<Ti, double>::value)
+            else if constexpr(MI300A_or_MI300X)
+            {
+                const int cu_count = prob.handle->device_properties.multiProcessorCount;
+                if(cu_count != 228 && cu_count != 304)
+                    return false;
+            }
+            else
             {
                 return false;
             }
         }
     }
 
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
+    return prob.handle->tryHipBLASLt();
 #else
     return false;
 #endif
