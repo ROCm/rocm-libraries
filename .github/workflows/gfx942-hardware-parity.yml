@@ -74,14 +74,25 @@ jobs:
       run:
         shell: bash
     container:
-      image: ubuntu:24.04
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES
+        -e KUBE_CPU_REQUEST
     env:
       ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
       TEST_LABEL: ${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }}
       COMPONENT: ${{ matrix.test.component }}
     steps:
       - name: Install runtime tools
-        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgfortran5 python3
       - name: Fetch parity and resource scripts
         run: |
           mkdir -p .github/scripts
