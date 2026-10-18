@@ -83,6 +83,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   speedups on representative model shapes.
 * Optimized the kernel cache by reusing cached database connections instead of opening and
   closing SQLite on every binary load or store.
+* [Conv] Restored gfx1200 backward-weights performance that #13697 gave up when it removed the
+  Composable Kernel entries invalidated by #13373 from 838 find-db keys. 835 of those problems were
+  re-tuned on gfx1200, and the 475 whose config verifies on a fresh-process replay and beats the
+  post-#13697 pick by at least 5 percent are back in the system database, for a geomean 2.64x and
+  up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
+  split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
+  between builds.
 
 ### Removed
 * [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
