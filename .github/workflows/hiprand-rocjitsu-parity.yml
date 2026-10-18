@@ -155,10 +155,9 @@ jobs:
       DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
       FUNCTIONAL_QUANTUM: ${{ github.event.inputs.functional_quantum || '' }}
       BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
-      # develop on 2026-10-01, after the VM dispatch-overhead fix
-      # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
-      # (ROCm/rocm-systems#12618, merge 15d2613e87). One-shot pin, not a floating branch.
-      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
+      # Pinned to a rocJITsu revision that supports --wait-checking for the
+      # wait-diagnostic overhead comparison. Keep this pin fixed for both jobs.
+      ROCM_SYSTEMS_REF: fce2b166c86bda55df802978577cc6eebcbce991
     steps:
       - name: Install build tools
         run: |
@@ -332,7 +331,7 @@ jobs:
       image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
+      ROCM_SYSTEMS_REF: fce2b166c86bda55df802978577cc6eebcbce991
     steps:
       - name: Install build tools
         run: |
