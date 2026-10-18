@@ -1,5 +1,5 @@
 name: hipRAND rocJITsu Parity PoC
-run-name: hipRAND rocJITsu ${{ github.event.inputs.rocjitsu_arg || 'default budget' }} (CTest parallel ${{ github.event.inputs.ctest_parallel || '1' }})
+run-name: hipRAND rocJITsu ${{ github.event.inputs.rocjitsu_arg || 'default budget' }} (dispatch ${{ github.event.inputs.dispatch_threads || 'config' }}, ${{ github.event.inputs.runner_label || 'default runner' }})
 
 # Standalone hipRAND parity check. It does not call TheRock reusable workflows
 # and it does not change therock-multi-arch-ci.yml.
@@ -49,6 +49,10 @@ on:
         default: "1"
       dispatch_threads:
         description: "Optional explicit rocJITsu cpu_dispatch_threads override (for example 80). Empty uses the gfx942 allocation table."
+        type: string
+        default: ""
+      runner_label:
+        description: "Optional self-hosted runner label override (for example aws-linux-scale-rocm-large). Empty uses the selected default runner."
         type: string
         default: ""
       sweep:
@@ -126,7 +130,7 @@ jobs:
     name: hipRAND parity on CPU build runner
     needs: gate
     if: needs.gate.outputs.enabled == 'true' && github.event.inputs.sweep != 'all'
-    runs-on: ${{ needs.gate.outputs.build_runs_on }}
+    runs-on: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
     timeout-minutes: 360
     # The build-runner process has CapEff 0 and no docker socket, and a nested
     # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
@@ -145,7 +149,7 @@ jobs:
       CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
       CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || '1' }}
       DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
-      BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
+      BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
       # develop on 2026-10-01, after the VM dispatch-overhead fix
       # (ROCm/rocm-systems#12515, merge bbd1525f37) and the lane-read fix
       # (ROCm/rocm-systems#12618, merge 15d2613e87). One-shot pin, not a floating branch.
