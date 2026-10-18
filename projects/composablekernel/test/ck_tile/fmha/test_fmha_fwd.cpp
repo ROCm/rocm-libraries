@@ -505,6 +505,78 @@ TEST_P(QrTdmPingPong, DataTypeConfig)
     }
 }
 
+// qr_tdm_pingpong with a sink, and below d128: the dpad/dvpad instances, whose O goes
+// through the LDS-shuffle epilogue with a padded N. Same grids as QrTdmPingPong.
+class QrTdmPingPongEdges
+    : public TestWithParam<std::tuple<int, int, const char*, const char*, int, const char*>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         QrTdmPingPongEdges,
+                         // hdim_q, hdim_v, mask, bias, init_sink, name part
+                         Values(std::tuple{128, 128, "0", "n", 1, "_sink"},
+                                std::tuple{128, 128, "t:50,64", "n", 1, "_sink"},
+                                std::tuple{120, 120, "2", "n", 0, "_pddv_"},
+                                std::tuple{128, 120, "0", "e", 0, "_psskddv_"}));
+
+TEST_P(QrTdmPingPongEdges, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        auto [hdim_q, hdim_v, mask_str, bias_str, init_sink, tag] = GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode_enum::batch, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(
+            mode_enum::batch,
+            batch,
+            nhead,
+            -1,
+            {100},
+            {300},
+            hdim_q,
+            hdim_v,
+            0,
+            {-1},
+            {-1},
+            {},
+            {},
+            0,
+            false,
+            false,
+            0,
+            0,
+            true,
+            true, // lse
+            0,
+            false,
+            bias_str,
+            0.0f,
+            0,
+            0,
+            false,
+            mask_str,
+            qscale_str,
+            true,
+            1,
+            init_method,
+            static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+            1, // do_validation
+            init_sink,
+            1, // pack_gqa
+            stream_config,
+            std::nullopt,
+            &selected_kernel);
+        ASSERT_EQ(result, fwd_result::success);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
+    }
+}
+
 // gfx125x-only: qr_tdm correctness at the head dims this PR added but that the
 // generic General sweep does not cover -- (160,160) and (96,96). The generic
 // suite already exercises 32/64/128/192-128 through qr_tdm but never asserts
