@@ -15,11 +15,6 @@ run-name: hipRAND rocJITsu (dispatch ${{ github.event.inputs.dispatch_threads ||
 # ctest_label to select another installed label such as ^ffm-quick$.
 
 on:
-  push:
-    branches:
-      - users/sa-faizal/rocjitsu-wait-checking-ab
-    paths:
-      - ".github/workflows/hiprand-rocjitsu-parity.yml"
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     paths:
@@ -138,8 +133,8 @@ jobs:
   hiprand-parity:
     name: hipRAND parity on CPU build runner
     needs: gate
-    if: needs.gate.outputs.enabled == 'true' && github.event.inputs.sweep != 'all' && (github.event_name != 'push' || contains(github.event.head_commit.message, '[run-best-config]'))
-    runs-on: ${{ github.event.inputs.runner_label || (github.event_name == 'push' && 'aws-linux-scale-rocm-large') || needs.gate.outputs.build_runs_on }}
+    if: needs.gate.outputs.enabled == 'true' && github.event.inputs.sweep != 'all'
+    runs-on: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
     timeout-minutes: 360
     # The build-runner process has CapEff 0 and no docker socket, and a nested
     # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
@@ -154,12 +149,12 @@ jobs:
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
-      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || (github.event_name == 'push' && '--wait-checking=off') || '' }}
+      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
       CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
-      CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || (github.event_name == 'push' && '5') || '1' }}
-      DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || (github.event_name == 'push' && '170') || '' }}
-      FUNCTIONAL_QUANTUM: ${{ github.event.inputs.functional_quantum || (github.event_name == 'push' && '4096') || '' }}
-      BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || (github.event_name == 'push' && 'aws-linux-scale-rocm-large') || needs.gate.outputs.build_runs_on }}
+      CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || '1' }}
+      DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
+      FUNCTIONAL_QUANTUM: ${{ github.event.inputs.functional_quantum || '' }}
+      BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
       # Pinned to a rocJITsu revision that supports --wait-checking for the
       # wait-diagnostic overhead comparison. Keep this pin fixed for both jobs.
       ROCM_SYSTEMS_REF: fce2b166c86bda55df802978577cc6eebcbce991
