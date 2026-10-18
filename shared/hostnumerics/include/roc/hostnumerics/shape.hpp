@@ -16,35 +16,6 @@
 #include <vector>
 
 namespace roc::hostnumerics {
-namespace detail {
-// Validate raw extents against Shape's invariant before constructing a Shape.
-inline std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
-    size_t count = 1;
-    bool empty = false;
-    for (size_t extent : dimensions) {
-        if (extent == 0) {
-            empty = true;
-            continue;
-        }
-        if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
-        count *= extent;
-    }
-    return empty ? 0 : count;
-}
-
-inline bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
-    if (order.empty()) return true;
-    if (order.size() != rank) return false;
-    std::vector<bool> seen(rank, false);
-    for (size_t axis : order) {
-        if (axis >= rank || seen[axis]) return false;
-        seen[axis] = true;
-    }
-    return true;
-}
-
-}  // namespace detail
-
 // Owns logical extents independently of a datatype, strides, or storage. A
 // rank-zero shape describes one scalar; any zero extent describes an empty shape.
 // Construction requires the product of nonzero extents to fit in size_t;
@@ -165,6 +136,32 @@ class Shape {
     friend bool operator==(const Shape&, const Shape&) = default;
 
    private:
+    // Validate raw extents against Shape's invariant before constructing a Shape.
+    static std::optional<size_t> tryElementCount(std::span<const size_t> dimensions) noexcept {
+        size_t count = 1;
+        bool empty = false;
+        for (size_t extent : dimensions) {
+            if (extent == 0) {
+                empty = true;
+                continue;
+            }
+            if (count > std::numeric_limits<size_t>::max() / extent) return std::nullopt;
+            count *= extent;
+        }
+        return empty ? 0 : count;
+    }
+
+    static bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
+        if (order.empty()) return true;
+        if (order.size() != rank) return false;
+        std::vector<bool> seen(rank, false);
+        for (size_t axis : order) {
+            if (axis >= rank || seen[axis]) return false;
+            seen[axis] = true;
+        }
+        return true;
+    }
+
     void validateDimension(size_t dimension) const {
         if (dimension >= rank())
             throw std::runtime_error("Tensor shape dimension " + std::to_string(dimension) +
@@ -229,7 +226,7 @@ class Shape {
     }
 
     static void validateDimensions(std::span<const size_t> extents) {
-        if (!detail::tryElementCount(extents))
+        if (!tryElementCount(extents))
             throw std::runtime_error("Tensor shape product of nonzero extents exceeds size_t.");
     }
 
@@ -243,7 +240,7 @@ class Shape {
         if (order.size() != rank())
             throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
-        if (!detail::isValidIndexOrder(rank(), order))
+        if (!isValidIndexOrder(rank(), order))
             throw std::runtime_error("Tensor index order must be a permutation of [0, " +
                                      std::to_string(rank()) + ").");
     }
