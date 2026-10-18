@@ -860,6 +860,8 @@ def _wgrad_jobs(
                 vector_size_c=1,
                 streamk=mode,
                 streamk_reduction=reduction,
+                lds_k_outer=lds_k_outer,
+                **_pad_cfg,
             )
             if reduction == "workspace":
                 cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS

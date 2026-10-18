@@ -1204,9 +1204,8 @@ _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
 # is deliberately absent: it is wave64 CDNA like gfx942, but doubles both the
 # bank count and the period to 64, so the same congruence yields a stride that
 # is not conflict-free there. Per dsl_docs/optimization/arch/{gfx942,gfx950}.md.
-# gfx90a carries the same documented 32-bank/32-dword geometry as gfx942; the
-# pad ordering itself was swept on gfx942.
-_LDS_B64_CONFLICT_PERIOD_32 = frozenset({"gfx942", "gfx90a"})
+# Restrict the derived pad policy to gfx942, where the pad ordering was swept.
+_LDS_B64_CONFLICT_PERIOD_32 = frozenset({"gfx942"})
 
 
 def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:

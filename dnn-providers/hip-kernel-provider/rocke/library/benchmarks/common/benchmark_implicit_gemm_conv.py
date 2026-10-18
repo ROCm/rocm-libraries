@@ -5282,6 +5282,11 @@ def _runtime_split_ks(problem, ident, requested: int = 0) -> tuple:
         from kernels.common.conv_args import ConvArgs
         from rocke.helpers.split_k import select_split_k_wgrad
 
+        if ident.group_merge > 1:
+            from dataclasses import replace as dc_replace
+
+            # Resolve and validate against the geometry the cached kernel launches.
+            problem = dc_replace(problem, groups=problem.groups // ident.group_merge)
         args_ = ConvArgs.from_problem(
             problem,
             direction="wgrad",
