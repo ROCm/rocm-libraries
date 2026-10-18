@@ -9,6 +9,7 @@ on:
     paths:
       - ".github/workflows/gfx942-hardware-parity.yml"
       - ".github/scripts/ffm_quick_rocjitsu.py"
+      - ".github/parity-rerun-components.txt"
   workflow_dispatch:
     inputs:
       ctest_label:
@@ -23,6 +24,10 @@ on:
         description: "GFX942 hardware runner label"
         type: string
         default: "linux-gfx942-1gpu-ccs-csp-ossci-rocm"
+      component_filter:
+        description: "Comma-separated exact component paths to run"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ concurrency:
 
 jobs:
   discover:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[parity-rerun]')
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -53,12 +59,20 @@ jobs:
         env:
           ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
           TEST_LABEL: ${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }}
+          COMPONENT_FILTER: ${{ inputs.component_filter || '' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           mkdir -p test-root cache
           curl -fL --retry 3 -o cache/tests.tar.gz "https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
           tar -xzf cache/tests.tar.gz -C test-root
-          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py --direct --rocm-root test-root --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)"
+          if [ -z "$COMPONENT_FILTER" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            curl -fL --retry 3 "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/parity-rerun-components.txt" -o /tmp/component-filter.txt
+            COMPONENT_FILTER="$(paste -sd, /tmp/component-filter.txt)"
+          fi
+          args=(--direct --rocm-root test-root --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)
+          if [ -n "$COMPONENT_FILTER" ]; then args+=(--component-filter "$COMPONENT_FILTER"); fi
+          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py "${args[@]}")"
           echo "components=$components" >> "$GITHUB_OUTPUT"
 
   hardware-suites:
@@ -96,7 +110,7 @@ jobs:
       COMPONENT: ${{ matrix.test.component }}
     steps:
       - name: Install runtime tools
-        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgfortran5 python3
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgfortran5 python3 python3-yaml
       - name: Fetch parity and resource scripts
         run: |
           mkdir -p .github/scripts
