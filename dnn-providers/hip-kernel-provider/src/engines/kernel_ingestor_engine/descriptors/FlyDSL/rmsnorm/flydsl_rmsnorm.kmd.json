@@ -19,6 +19,10 @@
     {
       "name": "scale_f32",
       "type": "int"
+    },
+    {
+      "name": "store_rstd",
+      "type": "int"
     }
   ]
 }

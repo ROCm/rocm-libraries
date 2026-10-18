@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -42,6 +43,7 @@ inline constexpr PackSymbols FLYDSL_RMSNORM{"hipkernel:flydsl_rmsnorm",
 constexpr const char* FLYDSL_ROWS_TOKEN = "flydsl_rmsnorm.rows";
 constexpr const char* FLYDSL_COLUMNS_TOKEN = "flydsl_rmsnorm.columns";
 constexpr const char* FLYDSL_EPSILON_TOKEN = "flydsl_rmsnorm.epsilon.uid";
+constexpr const char* FLYDSL_INV_RMS_TOKEN = "flydsl_rmsnorm.inv_rms.uid";
 
 /// The kernel-metadata fields the flydsl KMD declares. Distinct from the pointwise pack's
 /// BLOCK_SIZE/DTYPE/OPERATION triple, so the shared makeKernel() cannot serve this pack.
@@ -50,6 +52,8 @@ constexpr const char* FLYDSL_N_FIELD = "N";
 constexpr const char* FLYDSL_BLOCK_THREADS_FIELD = "block_threads";
 /// 1 for an object that reads gamma as f32 beside bf16/f16 x, else 0.
 constexpr const char* FLYDSL_SCALE_F32_FIELD = "scale_f32";
+/// 1 for an object that also writes inv_rms (the training forward), else 0.
+constexpr const char* FLYDSL_STORE_RSTD_FIELD = "store_rstd";
 
 /// `N: 0` in a UKD means "takes the width as a kernarg". Mirrored from the pack's own
 /// GENERIC_N_SENTINEL rather than shared, so a change there has to be made twice and is
@@ -133,6 +137,11 @@ struct RmsNormGraphExtras
     /// Gamma's strides; unset means packed for its shape.
     std::optional<std::vector<int64_t>> scaleStrides;
     bool overrideShapeEnabled = false;
+    /// inv_rms's shape, strides and dtype; unset means the frontend's: x's extent on every
+    /// row axis and 1 on every normalised one, packed, FLOAT.
+    std::optional<std::vector<int64_t>> invRmsDims;
+    std::optional<std::vector<int64_t>> invRmsStrides;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> invRmsDataType;
 };
 
 inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
@@ -229,16 +238,23 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     }
     if(withInvRms)
     {
-        // One stat per row, so gamma's shape does not describe it -- build it from the
-        // leading axes of x with a trailing 1.
-        static const std::vector<int64_t> s_invRmsDims{1};
-        static const std::vector<int64_t> s_invRmsStrides{1};
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                     FLYDSL_INV_RMS_UID,
-                                                                     "inv_rms",
-                                                                     data_objects::DataType::FLOAT,
-                                                                     &s_invRmsStrides,
-                                                                     &s_invRmsDims));
+        // One stat per row, shaped as the frontend shapes it (RMSNormNode): x's extent where
+        // gamma, aligned at the innermost axis, is 1, and 1 where gamma spans the axis.
+        std::vector<int64_t> defaultDims(xDims.size(), 1);
+        const auto offset = xDims.size() - std::min(xDims.size(), resolvedScaleDims.size());
+        for(size_t axis = 0; axis < xDims.size(); ++axis)
+        {
+            const int64_t scaleExtent = axis < offset ? 1 : resolvedScaleDims[axis - offset];
+            defaultDims[axis] = scaleExtent == 1 ? xDims[axis] : 1;
+        }
+        const auto invRmsDims = extras.invRmsDims.value_or(defaultDims);
+        const auto invRmsStrides = extras.invRmsStrides.value_or(flydslPackedStrides(invRmsDims));
+        tensors.push_back(tensor(builder,
+                                 FLYDSL_INV_RMS_UID,
+                                 "inv_rms",
+                                 extras.invRmsDataType.value_or(data_objects::DataType::FLOAT),
+                                 &invRmsStrides,
+                                 &invRmsDims));
     }
 
     auto attributes = data_objects::CreateRMSNormAttributes(

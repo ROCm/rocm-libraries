@@ -38,6 +38,7 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslRmsNormCommon.hpp"
 
 /**
  * @file FlydslRmsNormNative.cpp
@@ -74,6 +75,8 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
+using namespace flydsl_norm;
+
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.flydsl_rmsnorm.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.flydsl_rmsnorm.kernel_match";
@@ -86,44 +89,17 @@ constexpr std::string_view N_FIELD = "N";
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 /// 1 when the object reads gamma as f32 beside bf16/f16 x and y, else 0 (gamma in x's type).
 constexpr std::string_view SCALE_F32_FIELD = "scale_f32";
+/// 1 when the object also writes inv_rms (the training forward), else 0.
+constexpr std::string_view STORE_RSTD_FIELD = "store_rstd";
 
 constexpr std::string_view X_TOKEN = "flydsl_rmsnorm.x.uid";
 constexpr std::string_view SCALE_TOKEN = "flydsl_rmsnorm.scale.uid";
 constexpr std::string_view EPSILON_TOKEN = "flydsl_rmsnorm.epsilon.uid";
 constexpr std::string_view Y_TOKEN = "flydsl_rmsnorm.y.uid";
+/// Bound only for a training graph, which saves inv_rms.
+constexpr std::string_view INV_RMS_TOKEN = "flydsl_rmsnorm.inv_rms.uid";
 constexpr std::string_view ROWS_TOKEN = "flydsl_rmsnorm.rows";
 constexpr std::string_view COLUMNS_TOKEN = "flydsl_rmsnorm.columns";
-
-/// `N: 0` in a UKD's metadata means "this kernel takes N at runtime". A real graph never
-/// has a zero-width normalised axis, so the value is free to carry the sentinel; see
-/// `GENERIC_N` in `flydsl/gen_descriptors.py` for why null could not be used instead.
-constexpr int64_t GENERIC_N_SENTINEL = 0;
-
-/// A row-major 2-D operand as the kernel reads it: `fly.make_layout((M, N), (stride, 1))`
-/// lowered to a packed LLVM struct. The innermost stride is a compile-time 1 and so has no
-/// slot here -- the reason `isPackedRowMajor` below is an applicability condition and not a
-/// convenience.
-struct Desc2D
-{
-    int32_t shape0 = 0; ///< M, the number of rows.
-    int32_t shape1 = 0; ///< N, the normalised axis.
-    int64_t stride0 = 0; ///< Row stride in elements.
-};
-
-/// A 1-D operand (the gamma vector): length only, unit stride implied.
-struct Desc1D
-{
-    int32_t shape0 = 0;
-};
-
-// The descriptors fill the first 80 bytes of the kernarg segment, packed, and epsilon
-// (an f32) follows at 80 for a segment of 84; natural C++
-// alignment happens to reproduce that layout exactly, which is worth asserting rather
-// than assuming, since a mismatch would corrupt every launch silently.
-static_assert(sizeof(Desc2D) == 16, "Desc2D must occupy the kernel's 16-byte 2-D layout");
-static_assert(offsetof(Desc2D, shape1) == 4, "Desc2D.shape1 must sit at +4");
-static_assert(offsetof(Desc2D, stride0) == 8, "Desc2D.stride0 must sit at +8");
-static_assert(sizeof(Desc1D) == 4, "Desc1D must occupy the kernel's 4-byte 1-D layout");
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -136,14 +112,9 @@ struct FlydslRmsNormBinding
     int64_t scale = 0;
     int64_t epsilon = 0;
     int64_t y = 0;
+    /// The training forward's saved statistic; absent for inference.
+    std::optional<int64_t> invRms;
 };
-
-const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
 
 /// The node this pack's matchers read, or nullptr if the graph isn't a single RMS-norm
 /// node. `RMSNormAttributes` is its own union arm, so matching it is the whole node-type
@@ -165,186 +136,6 @@ const data_objects::RMSNormAttributes* rmsNormNode(const MatchContext& context)
     }
 
     return &node.attributesAs<data_objects::RMSNormAttributes>();
-}
-
-/// Runs on an unvalidated graph, so must be total: a caller can present a tensor the
-/// frontend would have rejected, with null or mismatched dims/strides.
-bool hasUsableShape(const data_objects::TensorAttributes& tensor, uint32_t minimumRank)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    return dims != nullptr && strides != nullptr && strides->size() == dims->size()
-           && dims->size() >= minimumRank;
-}
-
-/// Dense row-major: innermost stride 1 and every outer stride the product of the extents
-/// inside it. Stronger than the descriptor strictly needs -- it could carry a padded row
-/// stride -- but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride
-/// has to describe all of the leading axes at once.
-///
-/// An axis of extent 1 is never stepped along, so its stride is not checked: frameworks
-/// write anything there (hipdnn_torch gives an `F.rms_norm` weight stride 0 on its unit
-/// axes), and the data SDK's own packed test exempts it the same way.
-bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    int64_t expected = 1;
-    for(auto axis = static_cast<int64_t>(dims->size()) - 1; axis >= 0; --axis)
-    {
-        const auto index = static_cast<flatbuffers::uoffset_t>(axis);
-        const int64_t extent = dims->Get(index);
-        // A non-positive extent, or one whose product would overflow, describes no tensor
-        // the kernel can address.
-        if((extent != 1 && strides->Get(index) != expected) || extent <= 0
-           || expected > std::numeric_limits<int64_t>::max() / extent)
-        {
-            return false;
-        }
-        expected *= extent;
-    }
-    return true;
-}
-
-/// The largest operand the kernel addresses: it views each of x, y and gamma as one
-/// buffer whose offsets are 32-bit bytes, and takes M and N as int32.
-constexpr int64_t MAX_OPERAND_BYTES = 2147483647LL;
-
-/// Product of x's extents over [begin, end). -1 for a non-positive extent or a product
-/// past MAX_OPERAND_BYTES, which no launch could address anyway.
-int64_t extentProduct(const flatbuffers::Vector<int64_t>& dims,
-                      flatbuffers::uoffset_t begin,
-                      flatbuffers::uoffset_t end)
-{
-    int64_t product = 1;
-    for(auto axis = begin; axis < end; ++axis)
-    {
-        const int64_t extent = dims.Get(axis);
-        if(extent <= 0 || product > MAX_OPERAND_BYTES / extent)
-        {
-            return -1;
-        }
-        product *= extent;
-    }
-    return product;
-}
-
-/// x as the kernel sees it: `rows` independent rows of `columns` normalised elements.
-struct RowSplit
-{
-    int64_t rows = 0;
-    int64_t columns = 0;
-};
-
-/// The frontend's normalised shape (`validateScaleNormalizedShape`): the longest trailing
-/// run of axes where gamma's extent equals x's, never including the batch axis 0, with
-/// gamma 1 on every axis before it. So cuDNN's `x {B*S, D, 1, 1}` with
-/// `gamma {1, D, 1, 1}` normalises over D. A gamma of lower rank -- which the frontend
-/// rejects, but the matcher must be total -- is aligned at the innermost axis, its missing
-/// leading axes read as 1. Packed x then makes the axes before the run the rows and the
-/// run itself one contiguous row of `columns` elements; packed gamma makes it one vector.
-std::optional<RowSplit> normalisedSplit(const data_objects::TensorAttributes& x,
-                                        const data_objects::TensorAttributes& scale)
-{
-    const auto& xDims = *x.dims();
-    const auto& scaleDims = *scale.dims();
-    const auto rank = xDims.size();
-    if(scaleDims.size() > rank)
-    {
-        return std::nullopt;
-    }
-    const auto offset = rank - scaleDims.size();
-    const auto scaleExtent = [&](flatbuffers::uoffset_t axis) -> int64_t {
-        return axis < offset ? 1 : scaleDims.Get(axis - offset);
-    };
-
-    auto start = rank;
-    while(start > 1 && scaleExtent(start - 1) == xDims.Get(start - 1))
-    {
-        --start;
-    }
-    if(start == rank)
-    {
-        return std::nullopt;
-    }
-    for(flatbuffers::uoffset_t axis = 0; axis < start; ++axis)
-    {
-        if(scaleExtent(axis) != 1)
-        {
-            return std::nullopt;
-        }
-    }
-
-    const RowSplit split{extentProduct(xDims, 0, start), extentProduct(xDims, start, rank)};
-    if(split.rows <= 0 || split.columns <= 0)
-    {
-        return std::nullopt;
-    }
-    return split;
-}
-
-bool sameShape(const data_objects::TensorAttributes& lhs, const data_objects::TensorAttributes& rhs)
-{
-    const auto* lhsDims = lhs.dims();
-    const auto* rhsDims = rhs.dims();
-    if(lhsDims->size() != rhsDims->size())
-    {
-        return false;
-    }
-    for(flatbuffers::uoffset_t axis = 0; axis < lhsDims->size(); ++axis)
-    {
-        if(lhsDims->Get(axis) != rhsDims->Get(axis))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-/// A regular device operand: real storage, readable by the kernel through a pointer, and not
-/// a ragged view the kernel would read as dense.
-bool isDeviceOperand(const data_objects::TensorAttributes& tensor)
-{
-    return !tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor)
-           && !tensor.ragged_offset_tensor_uid().has_value();
-}
-
-/// Whether @p tensor promises the 16-byte base alignment the kernels' vector copies assume.
-bool declaresVectorAlignment(const data_objects::TensorAttributes& tensor)
-{
-    constexpr int64_t VECTOR_BYTES = 16;
-    return tensor.alignment() >= VECTOR_BYTES && tensor.alignment() % VECTOR_BYTES == 0;
-}
-
-/// The dtypes the shipped instances were built for; see the `dtype` values in the UKDs.
-bool isSupportedDataType(data_objects::DataType dataType)
-{
-    return dataType == data_objects::DataType::BFLOAT16 || dataType == data_objects::DataType::HALF
-           || dataType == data_objects::DataType::FLOAT;
-}
-
-/// Bytes per element of a supported dtype, for the 32-bit addressing bound.
-int64_t elementBytes(data_objects::DataType dataType)
-{
-    return dataType == data_objects::DataType::FLOAT ? 4 : 2;
-}
-
-/// The kernel metadata spelling of a graph dtype. Deliberately not `EnumNameDataType`: the
-/// descriptors say `bf16`/`f16`/`f32`, the flatbuffer enum says `BFLOAT16`/`HALF`/`FLOAT`,
-/// and this is the one place the two vocabularies meet.
-std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)
-{
-    switch(dataType)
-    {
-    case data_objects::DataType::BFLOAT16:
-        return std::string("bf16");
-    case data_objects::DataType::HALF:
-        return std::string("f16");
-    case data_objects::DataType::FLOAT:
-        return std::string("f32");
-    default:
-        return std::nullopt;
-    }
 }
 
 /// The epsilon operand, or nullopt when it cannot be classified at all -- an unknown dtype,
@@ -388,15 +179,18 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     }
     const auto& attributes = *attributesPtr;
 
-    // No bias term and no saved reciprocal-RMS: every shipped instance was compiled with
-    // `store_rstd=False` and adds nothing after scaling. A TRAINING graph wants the stat
-    // even when it forgot to name the tensor, so it is refused on the phase as well.
-    // The phase is an allow-list, so a value added to the schema later declines rather than
-    // being taken for inference. The kernels accumulate in f32: at least the precision a
-    // FLOAT, HALF or BFLOAT16 compute type asks for; DOUBLE or any other type declines.
+    // No bias term: no instance adds anything after scaling. inv_rms goes with TRAINING
+    // and only with it: a training graph without the tensor still wants the statistic, and
+    // one that names it outside training asks for an output cuDNN's semantics do not
+    // produce, so both decline. The phase is an allow-list, so a value added to the schema
+    // later declines rather than being taken for inference. The kernels accumulate in f32:
+    // at least the precision a FLOAT, HALF or BFLOAT16 compute type asks for; DOUBLE or any
+    // other type declines.
     const auto phase = attributes.forward_phase();
-    if(attributes.bias_tensor_uid().has_value() || attributes.inv_rms_tensor_uid().has_value()
-       || (phase != data_objects::NormFwdPhase::NOT_SET
+    const bool training = phase == data_objects::NormFwdPhase::TRAINING;
+    if(attributes.bias_tensor_uid().has_value()
+       || attributes.inv_rms_tensor_uid().has_value() != training
+       || (!training && phase != data_objects::NormFwdPhase::NOT_SET
            && phase != data_objects::NormFwdPhase::INFERENCE))
     {
         return std::nullopt;
@@ -493,7 +287,21 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
 
+    if(training)
+    {
+        const auto* invRms = findTensor(context, *attributes.inv_rms_tensor_uid());
+        if(invRms == nullptr || !isDeviceOperand(*invRms) || !hasUsableShape(*invRms, 2)
+           || !isPerRowStatistic(*invRms, *x, *split))
+        {
+            return std::nullopt;
+        }
+    }
+
     BoundTokens bound;
+    if(training)
+    {
+        bound[std::string(INV_RMS_TOKEN)] = *attributes.inv_rms_tensor_uid();
+    }
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
     bound[std::string(SCALE_TOKEN)] = attributes.scale_tensor_uid();
     bound[std::string(EPSILON_TOKEN)] = attributes.epsilon_tensor_uid();
@@ -548,6 +356,14 @@ bool flydslRmsNormKernelMatches(const MatchContext& context,
         return false;
     }
 
+    // A training graph needs an object that writes inv_rms; an inference one must not get
+    // one, which would store through the gamma pointer launch() fills the slots with.
+    const int64_t storeRstd = attributes->inv_rms_tensor_uid().has_value() ? 1 : 0;
+    if(kernel.getIntMetadata(std::string(STORE_RSTD_FIELD)) != storeRstd)
+    {
+        return false;
+    }
+
     const auto bakedN = kernel.getIntMetadata(std::string(N_FIELD));
     if(bakedN == GENERIC_N_SENTINEL)
     {
@@ -590,7 +406,11 @@ FlydslRmsNormBinding flydslRmsNormBinding(const BoundTokens& bound)
         return *value;
     };
 
-    return {read(X_TOKEN), read(SCALE_TOKEN), read(EPSILON_TOKEN), read(Y_TOKEN)};
+    return {read(X_TOKEN),
+            read(SCALE_TOKEN),
+            read(EPSILON_TOKEN),
+            read(Y_TOKEN),
+            hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, INV_RMS_TOKEN)};
 }
 
 // ---------------------------------------------------------------------------
@@ -652,27 +472,14 @@ private:
     int32_t _columns;
 };
 
-const data_objects::TensorAttributes& requireTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    if(it == tensors.end() || it->second == nullptr)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "matched flydsl_rmsnorm graph has no tensor for uid " + std::to_string(uid));
-    }
-    return *it->second;
-}
-
 /**
  * @brief The argument list this pack launches with, mirroring the launch() below one for
  *        one, and the `signature` block every one of this pack's UKDs carries.
  *
  * Four operands, each a pointer followed by its descriptor struct: x (2-D), gamma (1-D),
- * rstd (1-D), y (2-D); then epsilon, an f32. The rstd pair is vestigial -- the kernels were built with
- * `store_rstd=False` and never store through it -- but the entry point still takes the
- * slots, so launch() fills them with gamma rather than leaving them undefined.
+ * rstd (1-D), y (2-D); then epsilon, an f32. A training object (`store_rstd: 1`) writes
+ * inv_rms through the rstd pair; an inference one never touches it, so launch() fills it
+ * with gamma rather than leaving it undefined.
  *
  * Names are empty and offsets zero because neither is compared for this producer; see
  * requireSignatureMatch.
@@ -807,17 +614,27 @@ public:
         const Desc2D yDesc = xDesc;
         const Desc1D scaleDesc{preparedRmsNorm.columns()};
 
-        // The rstd slots are never stored through; they are given gamma's pointer and
-        // descriptor so the kernarg segment holds a valid mapping rather than a null.
-        // Changing this argument list means changing flydslRmsNormKernelSignature() with it.
+        // A training object writes one f32 per row through the rstd slots. An inference
+        // object never stores through them, so they are given gamma's pointer and descriptor
+        // and the kernarg segment holds a valid mapping rather than a null. Changing this
+        // argument list means changing flydslRmsNormKernelSignature() with it.
+        void* rstdPointer = scale.ptr;
+        Desc1D rstdDesc = scaleDesc;
+        if(binding.invRms.has_value())
+        {
+            rstdPointer = hipdnn_plugin_sdk::findDeviceBuffer(
+                              *binding.invRms, deviceBuffers, numDeviceBuffers)
+                              .ptr;
+            rstdDesc = Desc1D{preparedRmsNorm.rows()};
+        }
         preparedRmsNorm.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
                     x.ptr,
                     xDesc,
                     scale.ptr,
                     scaleDesc,
-                    scale.ptr,
-                    scaleDesc,
+                    rstdPointer,
+                    rstdDesc,
                     y.ptr,
                     yDesc,
                     static_cast<float>(epsilon));

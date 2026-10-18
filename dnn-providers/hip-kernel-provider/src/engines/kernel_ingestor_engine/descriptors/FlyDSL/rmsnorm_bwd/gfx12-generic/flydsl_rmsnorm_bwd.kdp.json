@@ -1,0 +1,807 @@
+{
+  "version": "1.0",
+  "id": "209f3eba-ef4e-50f5-89b1-83706f21847f",
+  "name": "flydsl rmsnorm_bwd kernels (gfx12-generic)",
+  "arch": [
+    "gfx1200",
+    "gfx1201"
+  ],
+  "matchers": [
+    "7f99cb20-8a37-5aab-b9e4-de43a76990f0"
+  ],
+  "engine": "e0f4eda1-e55b-5e1e-8923-27302152522b",
+  "dispatch": "d1c43fe2-8cff-554a-a6dc-50a9bbd41a66",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "e0f4eda1-e55b-5e1e-8923-27302152522b",
+          "kmd_id": "68946940-ac32-5de0-85fe-92a8e85157dc",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "N",
+            "n_max",
+            "scale_f32",
+            "reduce_symbol"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "c84007ef-b46c-55fa-8d2f-8e3f34a307e6",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax1024",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax1024.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "60ce2b7b-55ab-5b87-80b5-fb31d8da4810",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax8192",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax8192.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "8357458d-e1c6-5c30-a0e5-90115c365e87",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax16384",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax16384.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "997fe0a4-21b4-5e60-9868-17627e832224",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax1024",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax1024.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "0a0fc2b6-b655-58ff-a297-26ab957531ef",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax8192",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax8192.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "8657a126-9f8f-591d-b763-9396f59a3fff",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax16384",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax16384.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "a74e941e-81ac-567a-aba1-f1eb854b81ff",
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax1024",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f32_ngeneric_nmax1024.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f32",
+        "N": 0,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "a485614f-626d-50f7-a8bb-4063a2f343c3",
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax8192",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f32_ngeneric_nmax8192.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f32",
+        "N": 0,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "2973fc4d-020a-5344-b23f-a4a7eaa622a1",
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax16384",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f32_ngeneric_nmax16384.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f32",
+        "N": 0,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "d9d19755-bd57-5004-93d9-50e2c90f7c33",
+      "name": "rmsnorm_bwd_bf16_n3072",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n3072.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "412b6bc8-86d0-5c8c-b968-2529f6cd5c04",
+      "name": "rmsnorm_bwd_bf16_n3584",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n3584.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "78a27856-0322-5fee-86ba-855e9823bba9",
+      "name": "rmsnorm_bwd_bf16_n4096",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n4096.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4ae8e09f-c415-5f57-9875-102959667e4f",
+      "name": "rmsnorm_bwd_bf16_n5120",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n5120.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d24077f6-2e9d-5603-9732-e3ad513f9b31",
+      "name": "rmsnorm_bwd_bf16_n8192",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n8192.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f16e3068-b360-54f0-bc3b-a48e23d77445",
+      "name": "rmsnorm_bwd_f16_n3072",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n3072.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "aef16332-3fd6-5c2e-93c8-3ff17a41b5a5",
+      "name": "rmsnorm_bwd_f16_n3584",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n3584.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "85b54604-d8d5-535a-a550-1f75beda425b",
+      "name": "rmsnorm_bwd_f16_n4096",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n4096.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "9a691f84-d2b0-573a-b1d7-d5743e1b322c",
+      "name": "rmsnorm_bwd_f16_n5120",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n5120.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "832ee584-e9e9-5c75-a2f2-e1a90a5d7710",
+      "name": "rmsnorm_bwd_f16_n8192",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n8192.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "9b32ba51-ca10-565e-930f-a0f682809829",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax1024_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax1024_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 1024,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "078d6a84-6d4c-59be-8cbe-6e68036af904",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax8192_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax8192_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "8d3de9bb-965c-5b9d-b871-d7ab0c7b5ea5",
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax16384_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_ngeneric_nmax16384_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "n_max": 16384,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "e8a22706-97df-51f8-8e7b-be9a3993ee04",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax1024_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax1024_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 1024,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 30
+    },
+    {
+      "version": "1.0",
+      "id": "97429c91-b3e7-5979-872b-40d44b0ec241",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax8192_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax8192_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 20
+    },
+    {
+      "version": "1.0",
+      "id": "37664027-4b94-56db-92dc-5e56bd9a9df3",
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax16384_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_ngeneric_nmax16384_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "n_max": 16384,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "fa37a84e-f75b-542b-b020-1062ab70c0bf",
+      "name": "rmsnorm_bwd_bf16_n3072_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n3072_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "eb4335f6-7b7f-595c-ae93-2e5e0ea19dc5",
+      "name": "rmsnorm_bwd_bf16_n3584_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n3584_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "9271b902-0158-5487-b791-d23b94b7e84c",
+      "name": "rmsnorm_bwd_bf16_n4096_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n4096_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "602410a1-ad44-59bd-aa6c-9d846ec380ff",
+      "name": "rmsnorm_bwd_bf16_n5120_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n5120_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "120bf414-aae1-580c-ae57-e11d446c69c7",
+      "name": "rmsnorm_bwd_bf16_n8192_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_bf16_n8192_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "72648714-f530-52db-9d99-de0abcecd714",
+      "name": "rmsnorm_bwd_f16_n3072_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n3072_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "91667a3a-6395-59f7-8bc3-03132da2133c",
+      "name": "rmsnorm_bwd_f16_n3584_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n3584_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "8130c892-1584-53be-b53e-906b9425b8af",
+      "name": "rmsnorm_bwd_f16_n4096_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n4096_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "2386f12f-ed73-5b88-8d0b-403a9f0d4746",
+      "name": "rmsnorm_bwd_f16_n5120_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n5120_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "6c165eb8-95a4-5f17-8fbc-9a8e894fe850",
+      "name": "rmsnorm_bwd_f16_n8192_f32scale1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bwd_f16_n8192_f32scale1.hsaco",
+        "symbol": "rmsnorm_bwd_partial_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "priority": 100
+    }
+  ]
+}

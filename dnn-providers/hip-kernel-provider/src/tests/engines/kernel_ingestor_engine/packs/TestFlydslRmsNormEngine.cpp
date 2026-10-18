@@ -137,7 +137,8 @@ KernelDefinition makeFlydslKernel(const std::string& dtype,
                                   int64_t bakedN,
                                   int64_t blockThreads = 256,
                                   int64_t priority = 100,
-                                  int64_t scaleF32 = 0)
+                                  int64_t scaleF32 = 0,
+                                  int64_t storeRstd = 0)
 {
     KernelDefinition kernel;
     kernel.name = "rmsnorm_" + dtype + "_n" + std::to_string(bakedN);
@@ -145,7 +146,8 @@ KernelDefinition makeFlydslKernel(const std::string& dtype,
     kernel.metadata = {{std::string(FLYDSL_DTYPE_FIELD), dtype},
                        {std::string(FLYDSL_N_FIELD), bakedN},
                        {std::string(FLYDSL_BLOCK_THREADS_FIELD), blockThreads},
-                       {std::string(FLYDSL_SCALE_F32_FIELD), scaleF32}};
+                       {std::string(FLYDSL_SCALE_F32_FIELD), scaleF32},
+                       {std::string(FLYDSL_STORE_RSTD_FIELD), storeRstd}};
     return kernel;
 }
 
@@ -165,7 +167,8 @@ KernelDefinition makeFlydslKernel(const std::string& dtype,
 bool findStagedKernel(const std::string& dtype,
                       int64_t bakedN,
                       KernelDefinition& out,
-                      int64_t scaleF32 = 0)
+                      int64_t scaleF32 = 0,
+                      int64_t storeRstd = 0)
 {
     // A build for CDNA targets only stages no RMSNorm set at all.
     const auto* staged = findLoadedSet(FLYDSL_RMSNORM.engineName);
@@ -190,8 +193,10 @@ bool findStagedKernel(const std::string& dtype,
             const auto* n = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_N_FIELD);
             const auto* f32Scale
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SCALE_F32_FIELD);
-            if(name == nullptr || n == nullptr || f32Scale == nullptr || *name != dtype
-               || *n != bakedN || *f32Scale != scaleF32)
+            const auto* rstd
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_STORE_RSTD_FIELD);
+            if(name == nullptr || n == nullptr || f32Scale == nullptr || rstd == nullptr
+               || *name != dtype || *n != bakedN || *f32Scale != scaleF32 || *rstd != storeRstd)
             {
                 continue;
             }
@@ -259,6 +264,27 @@ flatbuffers::FlatBufferBuilder
                                    false,
                                    false,
                                    NormFwdPhase::NOT_SET,
+                                   extras);
+}
+
+/// A TRAINING graph that saves inv_rms, as the frontend builds one: the statistic is shaped
+/// per row unless @p extras overrides it.
+flatbuffers::FlatBufferBuilder trainingGraph(const std::vector<int64_t>& xDims = {8, 4096},
+                                             const RmsNormGraphExtras& extras = {},
+                                             const std::optional<std::vector<int64_t>>& scaleDims
+                                             = std::nullopt,
+                                             DataType dataType = DataType::BFLOAT16)
+{
+    return buildFlydslRmsNormGraph(dataType,
+                                   xDims,
+                                   FLYDSL_TEST_EPSILON,
+                                   false,
+                                   scaleDims,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   false,
+                                   true,
+                                   NormFwdPhase::TRAINING,
                                    extras);
 }
 
@@ -403,7 +429,19 @@ INSTANTIATE_TEST_SUITE_P(
                                                      false,
                                                      false,
                                                      NormFwdPhase::INFERENCE);
-                  }}),
+                  }},
+        // The training forward: the same graph plus inv_rms, one f32 per row, which the
+        // `store_rstd` objects write.
+        GraphCase{"TrainingSavingTheInverseRms", [] { return trainingGraph(); }},
+        GraphCase{"TrainingAtRank3", [] { return trainingGraph({2, 3, 4096}); }},
+        // cuDNN's layout: inv_rms {B*S, 1, 1, 1}, one per row of the D-wide run.
+        GraphCase{"TrainingInTheCudnnLayout",
+                  [] {
+                      return trainingGraph(
+                          {32, 4096, 1, 1}, {}, std::vector<int64_t>{1, 4096, 1, 1});
+                  }},
+        GraphCase{"TrainingAtFloat",
+                  [] { return trainingGraph({8, 640}, {}, std::nullopt, DataType::FLOAT); }}),
     graphCaseName);
 
 TEST(TestFlydslRmsNormBinding, BindsEveryTokenTheDispatchReads)
@@ -421,6 +459,20 @@ TEST(TestFlydslRmsNormBinding, BindsEveryTokenTheDispatchReads)
     // the product of every axis outside the innermost, so 2x3 here and not 2.
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 6);
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_COLUMNS_TOKEN), 4096);
+}
+
+TEST(TestFlydslRmsNormBinding, BindsInvRmsOnlyForTraining)
+{
+    const GraphFixture training(trainingGraph({2, 3, 4096}));
+    const auto bound = matchesGraph(FLYDSL_RMSNORM, training.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_INV_RMS_TOKEN), FLYDSL_INV_RMS_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 6);
+
+    const GraphFixture inference(buildFlydslRmsNormGraph(DataType::BFLOAT16, {2, 3, 4096}));
+    const auto inferenceBound = matchesGraph(FLYDSL_RMSNORM, inference.context());
+    ASSERT_TRUE(inferenceBound.has_value());
+    EXPECT_FALSE(tryGetBoundInt(*inferenceBound, FLYDSL_INV_RMS_TOKEN).has_value());
 }
 
 TEST(TestFlydslRmsNormBinding, CollapsesRank4UnderABroadcastShapedScale)
@@ -521,8 +573,8 @@ INSTANTIATE_TEST_SUITE_P(
                                                      std::nullopt,
                                                      true);
                   }},
-        // The vendored instances are built with store_rstd=False, so there is nowhere to
-        // put the statistic even though the kernarg slots for it exist.
+        // inv_rms goes with TRAINING only: outside training it is an output cuDNN's
+        // semantics do not produce.
         GraphCase{"SavingTheInverseRms",
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
@@ -537,7 +589,7 @@ INSTANTIATE_TEST_SUITE_P(
                   }},
         // Training needs the saved statistic for the backward pass even when the graph
         // does not name a tensor for it.
-        GraphCase{"TrainingPhase",
+        GraphCase{"TrainingWithoutTheInverseRms",
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
@@ -549,6 +601,43 @@ INSTANTIATE_TEST_SUITE_P(
                                                      false,
                                                      false,
                                                      NormFwdPhase::TRAINING);
+                  }},
+        // The statistic as the kernel writes it: one f32 per row, dense.
+        GraphCase{"InvRmsInHalf",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.invRmsDataType = DataType::HALF;
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"InvRmsPerColumn",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.invRmsDims = std::vector<int64_t>{1, 4096};
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"InvRmsOfLowerRank",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.invRmsDims = std::vector<int64_t>{8};
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"InvRmsStrided",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.invRmsStrides = std::vector<int64_t>{2, 1};
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"VirtualInvRms",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.virtualTensors.insert(FLYDSL_INV_RMS_UID);
+                      return trainingGraph({8, 4096}, extras);
+                  }},
+        GraphCase{"InvRmsAlignedTo2",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_INV_RMS_UID] = 2;
+                      return trainingGraph({8, 4096}, extras);
                   }},
         // x and y are each one buffer view with 32-bit byte offsets: 2^30 elements of bf16
         // (2 GiB) is one byte past it.
@@ -813,6 +902,28 @@ TEST(TestFlydslRmsNormKernelMatcher, PairsAnF32ScaleWithTheObjectsThatReadOne)
         FLYDSL_RMSNORM, plain.context(), makeFlydslKernel("bf16", 4096, 256, 100, 1), plainBound));
 }
 
+TEST(TestFlydslRmsNormKernelMatcher, PairsTrainingWithTheObjectsThatWriteInvRms)
+{
+    const GraphFixture training(trainingGraph());
+    const auto trainingBound = bindingsFor(training.context());
+    EXPECT_TRUE(matchesKernel(FLYDSL_RMSNORM,
+                              training.context(),
+                              makeFlydslKernel("bf16", 4096, 256, 100, 0, 1),
+                              trainingBound));
+    // An inference object would leave inv_rms unwritten.
+    EXPECT_FALSE(matchesKernel(FLYDSL_RMSNORM,
+                               training.context(),
+                               makeFlydslKernel("bf16", 4096, 256, 100, 0, 0),
+                               trainingBound));
+
+    // And a training object on an inference graph would store through gamma's pointer.
+    const GraphFixture inference(buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}));
+    EXPECT_FALSE(matchesKernel(FLYDSL_RMSNORM,
+                               inference.context(),
+                               makeFlydslKernel("bf16", 4096, 256, 100, 0, 1),
+                               bindingsFor(inference.context())));
+}
+
 TEST(TestFlydslRmsNormKernelMatcher, RefusesAKernelOfTheWrongDtype)
 {
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}));
@@ -919,7 +1030,9 @@ template <typename T, typename G = T>
 class RmsNormBuffers
 {
 public:
-    RmsNormBuffers(int64_t rows, int64_t columns)
+    /// @param training Also allocate inv_rms (one f32 per row), pre-filled with NaN so a row
+    /// the kernel does not write fails the comparison.
+    RmsNormBuffers(int64_t rows, int64_t columns, bool training = false)
         : _rows(rows)
         , _columns(columns)
         , _x(static_cast<size_t>(rows * columns))
@@ -949,6 +1062,12 @@ public:
             hipMemcpy(
                 _gammaDevice, _gamma.data(), _gamma.size() * sizeof(G), hipMemcpyHostToDevice));
         EXPECT_EQ(hipSuccess, hipMemset(_yDevice, 0, _x.size() * sizeof(T)));
+        if(training)
+        {
+            const auto bytes = static_cast<size_t>(rows) * sizeof(float);
+            EXPECT_EQ(hipSuccess, hipMalloc(&_invRmsDevice, bytes));
+            EXPECT_EQ(hipSuccess, hipMemset(_invRmsDevice, 0xFF, bytes));
+        }
     }
 
     ~RmsNormBuffers()
@@ -956,16 +1075,53 @@ public:
         static_cast<void>(hipFree(_xDevice));
         static_cast<void>(hipFree(_gammaDevice));
         static_cast<void>(hipFree(_yDevice));
+        static_cast<void>(hipFree(_invRmsDevice));
     }
 
     RmsNormBuffers(const RmsNormBuffers&) = delete;
     RmsNormBuffers& operator=(const RmsNormBuffers&) = delete;
 
-    std::array<hipdnnPluginDeviceBuffer_t, 3> descriptors() const
+    std::vector<hipdnnPluginDeviceBuffer_t> descriptors() const
     {
-        return {hipdnnPluginDeviceBuffer_t{FLYDSL_X_UID, _xDevice},
-                hipdnnPluginDeviceBuffer_t{FLYDSL_SCALE_UID, _gammaDevice},
-                hipdnnPluginDeviceBuffer_t{FLYDSL_Y_UID, _yDevice}};
+        std::vector<hipdnnPluginDeviceBuffer_t> buffers{
+            hipdnnPluginDeviceBuffer_t{FLYDSL_X_UID, _xDevice},
+            hipdnnPluginDeviceBuffer_t{FLYDSL_SCALE_UID, _gammaDevice},
+            hipdnnPluginDeviceBuffer_t{FLYDSL_Y_UID, _yDevice}};
+        if(_invRmsDevice != nullptr)
+        {
+            buffers.push_back(hipdnnPluginDeviceBuffer_t{FLYDSL_INV_RMS_UID, _invRmsDevice});
+        }
+        return buffers;
+    }
+
+    std::vector<float> readInvRms() const
+    {
+        std::vector<float> result(static_cast<size_t>(_rows));
+        EXPECT_EQ(hipSuccess,
+                  hipMemcpy(result.data(),
+                            _invRmsDevice,
+                            result.size() * sizeof(float),
+                            hipMemcpyDeviceToHost));
+        return result;
+    }
+
+    /// inv_rms = 1 / sqrt(mean(x^2) + eps) per row, in double from the quantised inputs.
+    std::vector<double> referenceInvRms(double epsilon) const
+    {
+        std::vector<double> expected(static_cast<size_t>(_rows));
+        for(int64_t row = 0; row < _rows; ++row)
+        {
+            double sumOfSquares = 0.0;
+            for(int64_t column = 0; column < _columns; ++column)
+            {
+                const auto value = static_cast<double>(
+                    static_cast<float>(_x[static_cast<size_t>(row * _columns + column)]));
+                sumOfSquares += value * value;
+            }
+            expected[static_cast<size_t>(row)]
+                = 1.0 / std::sqrt(sumOfSquares / static_cast<double>(_columns) + epsilon);
+        }
+        return expected;
     }
 
     std::vector<T> readOutput() const
@@ -1010,6 +1166,7 @@ private:
     void* _xDevice = nullptr;
     void* _gammaDevice = nullptr;
     void* _yDevice = nullptr;
+    void* _invRmsDevice = nullptr;
 };
 
 /// Runs the staged (@p dtype, @p bakedN) kernel over a @p rows x @p columns graph and
@@ -1030,6 +1187,8 @@ struct RmsNormLaunchCase
     float epsilon = FLYDSL_TEST_EPSILON;
     /// Supply epsilon at execute rather than fixing it in the graph.
     bool runtimeEpsilon = false;
+    /// A TRAINING graph that also saves inv_rms, served by a `store_rstd` object.
+    bool training = false;
 };
 
 template <typename T, typename G = T>
@@ -1043,10 +1202,11 @@ void expectRmsNormMatchesReference(DataType dataType,
 {
     constexpr bool F32_SCALE = std::is_same_v<G, float> && !std::is_same_v<T, float>;
     KernelDefinition kernel;
-    if(!findStagedKernel(dtype, bakedN, kernel, F32_SCALE ? 1 : 0))
+    if(!findStagedKernel(dtype, bakedN, kernel, F32_SCALE ? 1 : 0, launchCase.training ? 1 : 0))
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " N=" << bakedN
-                     << " scale_f32=" << F32_SCALE << " in this build's descriptor root";
+                     << " scale_f32=" << F32_SCALE << " store_rstd=" << launchCase.training
+                     << " in this build's descriptor root";
     }
 
     const GraphFixture fixture(
@@ -1058,8 +1218,9 @@ void expectRmsNormMatchesReference(DataType dataType,
                                 F32_SCALE ? std::optional<DataType>(DataType::FLOAT) : std::nullopt,
                                 std::nullopt,
                                 false,
-                                false,
-                                NormFwdPhase::NOT_SET,
+                                launchCase.training,
+                                launchCase.training ? NormFwdPhase::TRAINING
+                                                    : NormFwdPhase::NOT_SET,
                                 launchCase.extras),
         packedArchDeviceProperties());
     const auto& handler = dispatchHandler(FLYDSL_RMSNORM);
@@ -1068,7 +1229,7 @@ void expectRmsNormMatchesReference(DataType dataType,
         = handler.prepare(fixture.context(), bindingsFor(fixture.context()), kernel);
     ASSERT_NE(prepared, nullptr);
 
-    const RmsNormBuffers<T, G> buffers(rows, columns);
+    const RmsNormBuffers<T, G> buffers(rows, columns, launchCase.training);
     const auto descriptors = buffers.descriptors();
     std::vector<hipdnnPluginDeviceBuffer_t> arguments(descriptors.begin(), descriptors.end());
     // A pass-by-value scalar is read from host memory, so this slot carries a pointer into
@@ -1104,6 +1265,41 @@ void expectRmsNormMatchesReference(DataType dataType,
     EXPECT_LE(worst, relativeTolerance)
         << "at element " << worstIndex << ": got " << static_cast<float>(actual[worstIndex])
         << ", expected " << expected[worstIndex];
+
+    if(launchCase.training)
+    {
+        // f32 out of an f32 reduction and a hardware rsqrt: 1e-4 relative is far above
+        // either's error and far below a wrong row, a wrong epsilon or an unwritten NaN.
+        const auto invRms = buffers.readInvRms();
+        const auto expectedInvRms
+            = buffers.referenceInvRms(static_cast<double>(launchCase.epsilon));
+        for(size_t row = 0; row < invRms.size(); ++row)
+        {
+            const double error = std::abs(static_cast<double>(invRms[row]) - expectedInvRms[row])
+                                 / std::abs(expectedInvRms[row]);
+            ASSERT_LE(error, 1e-4) << "inv_rms of row " << row << ": got " << invRms[row]
+                                   << ", expected " << expectedInvRms[row];
+        }
+    }
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesTheTrainingForward)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // y and inv_rms, at a baked width, through the generic tier, in f32, and with an f32
+    // gamma beside bf16; the last also with an epsilon that moves inv_rms by a fifth.
+    RmsNormLaunchCase launchCase;
+    launchCase.training = true;
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, launchCase);
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::half>(
+        DataType::HALF, "f16", FLYDSL_GENERIC_N, 5, 640, 5e-3, launchCase);
+    expectRmsNormMatchesReference<float>(
+        DataType::FLOAT, "f32", FLYDSL_GENERIC_N, 3, 1000, 1e-4, launchCase);
+    launchCase.epsilon = 0.5F;
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16, float>(
+        DataType::BFLOAT16, "bf16", 8192, 4, 8192, 2e-2, launchCase);
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, ComputesBf16AtABakedWidth)

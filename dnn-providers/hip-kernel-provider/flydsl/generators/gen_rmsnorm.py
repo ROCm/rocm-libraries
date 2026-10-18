@@ -75,9 +75,11 @@ _EXPECTED_SIGNATURE = (
     ("by_value", 16, 64),
     ("by_value", 4, 80),
 )
-# What the slots above mean, in order. `Rstd` aliases `Gamma` whenever
-# `store_rstd=False` -- upstream passes Gamma twice to fill the unused slot -- so
-# slots 4/5 are live kernargs pointing at the weight tensor, not at an output.
+# What the slots above mean, in order. In a `store_rstd=0` object `Rstd` aliases
+# `Gamma` -- upstream passes Gamma twice to fill the unused slot -- so slots 4/5 are
+# live kernargs pointing at the weight tensor, never stored through. A `store_rstd=1`
+# object writes one f32 per row through them: the 1-D `(M,)` tensor below keeps the
+# descriptor at 4 bytes, so both kinds share this layout.
 _SEMANTIC_ARG_NAMES = (
     "Input.ptr",
     "Input.desc",
@@ -154,6 +156,7 @@ def _build_one(kernel_module, torch, instance: Instance, dump_dir: Path) -> byte
         instance.dtype,
         BLOCK_THREADS=instance.knobs["block_threads"],
         weight_dtype_str=weight_dtype,
+        store_rstd=bool(instance.knobs["store_rstd"]),
     )
 
     # CPU tensors on purpose: COMPILE_ONLY never dispatches, and requiring a live
@@ -164,7 +167,11 @@ def _build_one(kernel_module, torch, instance: Instance, dump_dir: Path) -> byte
         (trace_n,), dtype=torch.float32 if instance.knobs["scale_f32"] else torch_dtype
     )
     y = torch.zeros((_TRACE_M, trace_n), dtype=torch_dtype)
-    launch(x, gamma, y, _TRACE_M)
+    if instance.knobs["store_rstd"]:
+        rstd = torch.zeros((_TRACE_M,), dtype=torch.float32)
+        launch(x, gamma, y, rstd, _TRACE_M)
+    else:
+        launch(x, gamma, y, _TRACE_M)
 
     blob, _ = hsaco_from_dump(dump_dir)
     return blob

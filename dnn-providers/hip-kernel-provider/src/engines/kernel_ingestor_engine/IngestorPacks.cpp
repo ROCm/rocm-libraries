@@ -21,6 +21,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
         // CMakeLists.txt.
         {"hipkernel:FlydslRmsNorm", &registerFlydslRmsNormSymbols, &resetFlydslRmsNormModuleCache},
+        {"hipkernel:flydsl_rmsnorm_bwd",
+         &registerFlydslRmsNormBwdSymbols,
+         &resetFlydslRmsNormBwdModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,

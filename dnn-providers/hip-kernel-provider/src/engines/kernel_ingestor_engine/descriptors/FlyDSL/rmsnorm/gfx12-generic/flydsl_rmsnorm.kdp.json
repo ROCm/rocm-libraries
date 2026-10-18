@@ -23,7 +23,8 @@
             "dtype",
             "N",
             "block_threads",
-            "scale_f32"
+            "scale_f32",
+            "store_rstd"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -49,7 +50,8 @@
         "dtype": "bf16",
         "N": 0,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 10
     },
@@ -70,7 +72,8 @@
         "dtype": "f16",
         "N": 0,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 10
     },
@@ -91,7 +94,8 @@
         "dtype": "f32",
         "N": 0,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 10
     },
@@ -112,7 +116,8 @@
         "dtype": "bf16",
         "N": 3072,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -133,7 +138,8 @@
         "dtype": "bf16",
         "N": 3584,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -154,7 +160,8 @@
         "dtype": "bf16",
         "N": 4096,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -175,7 +182,8 @@
         "dtype": "bf16",
         "N": 5120,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -196,7 +204,8 @@
         "dtype": "bf16",
         "N": 8192,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -217,7 +226,8 @@
         "dtype": "f16",
         "N": 3072,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -238,7 +248,8 @@
         "dtype": "f16",
         "N": 3584,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -259,7 +270,8 @@
         "dtype": "f16",
         "N": 4096,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -280,7 +292,8 @@
         "dtype": "f16",
         "N": 5120,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -301,7 +314,8 @@
         "dtype": "f16",
         "N": 8192,
         "block_threads": 256,
-        "scale_f32": 0
+        "scale_f32": 0,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -322,7 +336,8 @@
         "dtype": "bf16",
         "N": 0,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 10
     },
@@ -343,7 +358,8 @@
         "dtype": "f16",
         "N": 0,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 10
     },
@@ -364,7 +380,8 @@
         "dtype": "bf16",
         "N": 3072,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -385,7 +402,8 @@
         "dtype": "bf16",
         "N": 3584,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -406,7 +424,8 @@
         "dtype": "bf16",
         "N": 4096,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -427,7 +446,8 @@
         "dtype": "bf16",
         "N": 5120,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -448,7 +468,8 @@
         "dtype": "bf16",
         "N": 8192,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -469,7 +490,8 @@
         "dtype": "f16",
         "N": 3072,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -490,7 +512,8 @@
         "dtype": "f16",
         "N": 3584,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -511,7 +534,8 @@
         "dtype": "f16",
         "N": 4096,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -532,7 +556,8 @@
         "dtype": "f16",
         "N": 5120,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
       },
       "priority": 100
     },
@@ -553,7 +578,558 @@
         "dtype": "f16",
         "N": 8192,
         "block_threads": 256,
-        "scale_f32": 1
+        "scale_f32": 1,
+        "store_rstd": 0
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f844bd37-16fd-51c9-9054-bef399abe08c",
+      "name": "rmsnorm_bf16_ngeneric_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_ngeneric_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "5e4bc4bd-7678-5c29-8254-0d832539e8ca",
+      "name": "rmsnorm_f16_ngeneric_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_ngeneric_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "eed497cd-c103-522f-802d-d77931362aa2",
+      "name": "rmsnorm_f32_ngeneric_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f32_ngeneric_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f32",
+        "N": 0,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "736dbaa1-bb24-506a-9395-1cba03709ce9",
+      "name": "rmsnorm_bf16_n3072_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n3072_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "f6367e49-6ead-548b-ba04-0c09f23aa975",
+      "name": "rmsnorm_bf16_n3584_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n3584_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "1374a763-7cb0-528f-85de-fd6449b5a0ac",
+      "name": "rmsnorm_bf16_n4096_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n4096_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "5d57daf5-36ca-5ad2-87cb-e70167293b32",
+      "name": "rmsnorm_bf16_n5120_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n5120_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b02834cc-134c-542c-9a1e-20a8da3c150b",
+      "name": "rmsnorm_bf16_n8192_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n8192_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7e924fdb-2d6b-54cd-9c86-d98f31c07a98",
+      "name": "rmsnorm_f16_n3072_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n3072_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b901b7db-f822-5eae-8cdc-fa42bc0b1ca6",
+      "name": "rmsnorm_f16_n3584_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n3584_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "13973c4b-6afd-55ff-9925-b4fe81d3645d",
+      "name": "rmsnorm_f16_n4096_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n4096_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "a7628504-b7cb-5454-b1c3-5d2fcf352a87",
+      "name": "rmsnorm_f16_n5120_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n5120_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "50c6048e-589f-5425-b61b-5fe002077af0",
+      "name": "rmsnorm_f16_n8192_bt256_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n8192_bt256_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 0,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "d647076b-fcc9-5189-a0ba-5e8714919dcb",
+      "name": "rmsnorm_bf16_ngeneric_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_ngeneric_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 0,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "6dbe1825-bc12-5a61-a690-5503734af5f7",
+      "name": "rmsnorm_f16_ngeneric_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_ngeneric_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 0,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
+      "id": "a8bc03be-3f13-5312-882e-ee465c72055c",
+      "name": "rmsnorm_bf16_n3072_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n3072_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4fc4d59a-a933-5326-9ee7-dac2342b8d70",
+      "name": "rmsnorm_bf16_n3584_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n3584_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "6a3d8b1e-e9a3-5363-ab6b-476493f87704",
+      "name": "rmsnorm_bf16_n4096_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n4096_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "96635b93-5318-58c5-9a8e-97a22543110b",
+      "name": "rmsnorm_bf16_n5120_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n5120_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "4d300621-66b5-5d79-9892-11835b131a51",
+      "name": "rmsnorm_bf16_n8192_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_bf16_n8192_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "bf16",
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "43f681bc-c96a-5eb5-9a4e-97a01d4a4272",
+      "name": "rmsnorm_f16_n3072_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n3072_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "5a7d9303-c6b7-5935-a356-e6c2c10f7078",
+      "name": "rmsnorm_f16_n3584_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n3584_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "5a62daec-23a1-5ca8-b8b2-674b6b39048a",
+      "name": "rmsnorm_f16_n4096_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n4096_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "b90b6031-66d6-5177-a3bb-e72ab4c82236",
+      "name": "rmsnorm_f16_n5120_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n5120_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "7419128a-7887-54ff-bbfb-67e83e41bd8a",
+      "name": "rmsnorm_f16_n8192_bt256_f32scale1_rstd1",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f16_n8192_bt256_f32scale1_rstd1.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f16",
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 1,
+        "store_rstd": 1
       },
       "priority": 100
     }

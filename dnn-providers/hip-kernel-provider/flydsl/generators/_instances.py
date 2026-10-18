@@ -106,6 +106,9 @@ _ABBREV = {
     "bias_f32": "f32bias",
     "bias_kstrided": "kstrbias",
     "scale_f32": "f32scale",
+    "store_rstd": "rstd",
+    "n_max": "nmax",
+    "reduce_symbol": "",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -131,6 +134,11 @@ _NAME_OMITTED_WHEN = {
     "bias_f32": lambda knobs: knobs["bias_f32"] == 0,
     "bias_kstrided": lambda knobs: knobs["bias_kstrided"] == 0,
     "scale_f32": lambda knobs: knobs["scale_f32"] == 0,
+    "store_rstd": lambda knobs: knobs["store_rstd"] == 0,
+    # The generic backward tiers' width bound; a baked object's equals its N.
+    "n_max": lambda knobs: knobs["n_max"] == knobs["N"],
+    # A symbol, not a choice: every backward object carries the same reduce kernel.
+    "reduce_symbol": lambda knobs: True,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -189,11 +197,19 @@ RMSNORM_GENERIC_ONLY_DTYPES = ("f32",)
 # are built for it; the 16-bit fast path reads gamma with its own 128-bit copies.
 RMSNORM_SCALE_F32 = (0, 1)
 
+# `store_rstd`: the training forward, which also writes inv_rms (one f32 per row,
+# the kernel's `store_rstd=True`). Every inference object has a training twin,
+# both tiers and both gamma forms: training runs the same widths, and the baked
+# tier's fast path is where they matter most.
+RMSNORM_STORE_RSTD = (0, 1)
+
 
 def rmsnorm_instances() -> list[Instance]:
     """The RMSNorm instance table: generic tier first, then the specialists."""
     instances: list[Instance] = []
-    for scale_f32 in RMSNORM_SCALE_F32:
+    for store_rstd, scale_f32 in (
+        (r, s) for r in RMSNORM_STORE_RSTD for s in RMSNORM_SCALE_F32
+    ):
         dtypes = DTYPES if scale_f32 else DTYPES + RMSNORM_GENERIC_ONLY_DTYPES
         for block_threads in RMSNORM_BLOCK_THREADS:
             for dtype in dtypes:
@@ -206,6 +222,7 @@ def rmsnorm_instances() -> list[Instance]:
                             "N": None,
                             "block_threads": block_threads,
                             "scale_f32": scale_f32,
+                            "store_rstd": store_rstd,
                         },
                     )
                 )
@@ -220,6 +237,7 @@ def rmsnorm_instances() -> list[Instance]:
                                 "N": n,
                                 "block_threads": block_threads,
                                 "scale_f32": scale_f32,
+                                "store_rstd": store_rstd,
                             },
                         )
                     )
@@ -240,8 +258,64 @@ def _assert_unique(instances: list[Instance]) -> None:
         seen[instance.name] = instance
 
 
+# RMSNorm backward (rmsnorm_bwd_kernel.py, the deterministic two-stage builder):
+# a 512-thread partial kernel walks rows, writes dx, and leaves one f32 dgamma row
+# per program in a workspace; a reduce kernel in the same object sums those rows into
+# dgamma, in gamma's dtype. Same forms as the forward: bf16/f16/f32, and bf16/f16
+# with an f32 gamma. Baked widths for the 16-bit types (the vec8 path at N >= 4096).
+#
+# The generic tiers bound the width (`n_max`) instead of taking any: the partial
+# kernel holds each thread's dgamma columns in registers across rows, so the bound
+# sizes them. Measured on gfx942 and gfx11-generic: 1024 -> ~22 VGPRs, 8192 -> ~115,
+# 16384 -> ~240, all without spills; 32768 spills and 65536 spills ~450, so widths past
+# 16384 are declined until a variant that accumulates elsewhere exists. The narrower
+# tier ranks first, so a graph runs on the least masked-off work that serves it.
+RMSNORM_BWD_GENERIC_N_MAX = {1024: 30, 8192: 20, 16384: 10}
+RMSNORM_BWD_REDUCE_SYMBOL = "rmsnorm_bwd_dweight_reduce_kernel_1"
+
+
+def rmsnorm_bwd_instances() -> list[Instance]:
+    """The RMSNorm backward table: generic tiers first, then the baked widths."""
+    instances: list[Instance] = []
+    for scale_f32 in RMSNORM_SCALE_F32:
+        dtypes = DTYPES if scale_f32 else DTYPES + RMSNORM_GENERIC_ONLY_DTYPES
+        for dtype in dtypes:
+            for n_max, priority in RMSNORM_BWD_GENERIC_N_MAX.items():
+                instances.append(
+                    Instance(
+                        op="rmsnorm_bwd",
+                        dtype=dtype,
+                        priority=priority,
+                        knobs={
+                            "N": None,
+                            "n_max": n_max,
+                            "scale_f32": scale_f32,
+                            "reduce_symbol": RMSNORM_BWD_REDUCE_SYMBOL,
+                        },
+                    )
+                )
+        for dtype in DTYPES:
+            for n in RMSNORM_SPECIALIZED_N:
+                instances.append(
+                    Instance(
+                        op="rmsnorm_bwd",
+                        dtype=dtype,
+                        priority=PRIORITY_SPECIALIZED,
+                        knobs={
+                            "N": n,
+                            "n_max": n,
+                            "scale_f32": scale_f32,
+                            "reduce_symbol": RMSNORM_BWD_REDUCE_SYMBOL,
+                        },
+                    )
+                )
+    _assert_unique(instances)
+    return instances
+
+
 OPS = {
     "rmsnorm": rmsnorm_instances,
+    "rmsnorm_bwd": rmsnorm_bwd_instances,
 }
 # Ops whose table differs by target and so takes the arch.
 _PER_TARGET_OPS: set[str] = set()

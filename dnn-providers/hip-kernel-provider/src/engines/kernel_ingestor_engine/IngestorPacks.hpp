@@ -58,6 +58,10 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_ENGINE_NAME
 void registerFlydslRmsNormSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslRmsNormModuleCache();
 
+/// @see packs/FlydslRmsNormBwdNative.cpp
+void registerFlydslRmsNormBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslRmsNormBwdModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();

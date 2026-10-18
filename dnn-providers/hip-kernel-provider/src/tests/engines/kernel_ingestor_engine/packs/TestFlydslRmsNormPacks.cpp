@@ -84,8 +84,13 @@ TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerFormAndBakedTiersFor16Bit)
             const auto* scaleF32
                 = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SCALE_F32_FIELD);
             ASSERT_NE(scaleF32, nullptr) << kernel.name << " declares no integer scale_f32";
-            // The form: x's dtype, and "+f32" when gamma is read as f32 beside it.
-            const auto form = *dtype + (*scaleF32 != 0 ? "+f32" : "");
+            const auto* storeRstd
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_STORE_RSTD_FIELD);
+            ASSERT_NE(storeRstd, nullptr) << kernel.name << " declares no integer store_rstd";
+            // The form: x's dtype, "+f32" when gamma is read as f32 beside it, and "+rstd"
+            // for the training forward that also writes inv_rms.
+            const auto form
+                = *dtype + (*scaleF32 != 0 ? "+f32" : "") + (*storeRstd != 0 ? "+rstd" : "");
             (*n == FLYDSL_GENERIC_N ? generic : baked)[form] += 1;
 
             // Only ever kpack: these are pre-built flyDSL code objects, so there is no
@@ -98,17 +103,24 @@ TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerFormAndBakedTiersFor16Bit)
     }
 
     // One sentinel kernel per form -- bf16, f16 and f32 with gamma in x's type, and bf16
-    // and f16 with an f32 gamma -- and baked instances beside each 16-bit form: a shard
-    // holding only the generic tier would still plan, silently, at the slower tier. f32
-    // has no baked tier: the kernel's fast path is 16-bit only, so it would not be faster.
-    const std::map<std::string, size_t> oneEach{
-        {"bf16", 1}, {"f16", 1}, {"f32", 1}, {"bf16+f32", 1}, {"f16+f32", 1}};
-    EXPECT_EQ(generic, oneEach);
-    for(const char* form : {"bf16", "f16", "bf16+f32", "f16+f32"})
+    // and f16 with an f32 gamma, each for inference and for training -- and baked
+    // instances beside each 16-bit form: a shard holding only the generic tier would still
+    // plan, silently, at the slower tier. f32 has no baked tier: the kernel's fast path is
+    // 16-bit only, so it would not be faster.
+    std::map<std::string, size_t> oneEach;
+    for(const std::string phase : {"", "+rstd"})
     {
-        EXPECT_GT(baked[form], 0U) << form;
+        for(const std::string form : {"bf16", "f16", "f32", "bf16+f32", "f16+f32"})
+        {
+            oneEach[form + phase] = 1;
+            if(form != "f32")
+            {
+                EXPECT_GT(baked[form + phase], 0U) << form + phase;
+            }
+        }
+        EXPECT_EQ(baked.count("f32" + phase), 0U);
     }
-    EXPECT_EQ(baked.count("f32"), 0U);
+    EXPECT_EQ(generic, oneEach);
 }
 
 // GenericPlanBuilder declines a graph whose schema floor is above the engine's, before

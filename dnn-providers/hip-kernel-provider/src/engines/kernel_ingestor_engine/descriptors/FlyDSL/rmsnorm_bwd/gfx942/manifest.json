@@ -1,0 +1,2500 @@
+{
+  "manifest_version": 1,
+  "arch": "gfx942",
+  "op": "rmsnorm_bwd",
+  "toolchain": {
+    "flydsl_version": "0.3.4",
+    "flydsl_kernels_commit": "89ad52fbbb9e252396829a8a44b12e18b7acd970",
+    "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
+    "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
+    "rocm_version": "7.13.0",
+    "inputs_sha256": "ad49678c4da54c8a2387a39225a0fedf311e06506ae2c1bb39372f6c65abc7b4"
+  },
+  "instances": [
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax1024",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 30,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax1024.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7856,
+      "sha256": "623df062bd960f5fa95870f4794c59bc4264878785e98d3a86dee72c59214e72",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 23,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax8192",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 20,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax8192.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 12464,
+      "sha256": "2f557ebbdd14eb968ae3c7236d0e9d241c4f5d512827f25931e5ab429132122b",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 122,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax16384",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax16384.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 17840,
+      "sha256": "94193d39d42c7663e5e5fc351ac74b9a323ddcca39c34501c5b4269b727be59b",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 232,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax1024",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 30,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax1024.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "67efa59fe87f04c88dbf640f49d2f8a6957a2c64561b579f17bbe155def479d9",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 22,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax8192",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 20,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax8192.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 11888,
+      "sha256": "7488b60fb63c7f4a687e747301e3e1dee515af2fc1074448a0d3c2b21eb59134",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 122,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax16384",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax16384.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 16752,
+      "sha256": "ce50adfe1155dda0b47d15bb16cf97a5e2a871d2f6b39c312d414248ae857c58",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 250,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax1024",
+      "op": "rmsnorm_bwd",
+      "dtype": "f32",
+      "priority": 30,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 1024,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f32_ngeneric_nmax1024.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7536,
+      "sha256": "9ab76ac524f6c0bd07e54b7f58adc867f36bc5407a72b49936b59240310faf38",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 22,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax8192",
+      "op": "rmsnorm_bwd",
+      "dtype": "f32",
+      "priority": 20,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f32_ngeneric_nmax8192.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 11376,
+      "sha256": "060c2d470b213c1f806d8ad8a503fe251a321ac7e1ff8b12908e1de6f7347c81",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 122,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f32_ngeneric_nmax16384",
+      "op": "rmsnorm_bwd",
+      "dtype": "f32",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 16384,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f32_ngeneric_nmax16384.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 15728,
+      "sha256": "ae87d062f4a8514992217cd6ba9116e75cd921b3dd97dbfa787db99fb4f2b618",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 250,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n3072",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n3072.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8624,
+      "sha256": "5afa735fd68eca593ec6d2218c59f91359be6c21ece63a5fe94346bdf97f4e33",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 40,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n3584",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n3584.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8880,
+      "sha256": "829067eb94e0419ba20e9590db05d11e11cbdbabbd48dfd4037adcf3c5a28696",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 45,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n4096",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n4096.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7856,
+      "sha256": "ea04d25747f4d431812dc18361d91c4c1ce9a9712487db885502865456cfde6c",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 58,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n5120",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n5120.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 9136,
+      "sha256": "cfd81a585762c8cd8d8924973d3d2eabc61c140e2165afed8fd61b8109bc422f",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 108,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n8192",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n8192.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8624,
+      "sha256": "8192a9bb03cb79664044dd2fb26bab17aff625212afffad0acc9266026513efd",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 102,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n3072",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n3072.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8304,
+      "sha256": "e8e75e01f6142a01e245dc1a718e7cd7a087b9c9b776ba8e18c437eaaef33011",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 41,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n3584",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n3584.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8560,
+      "sha256": "9c7ad65ffbedbaca837e69f7a71e8eb3cfafb2bca59c37ecf62d34a50b90050c",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 47,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n4096",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n4096.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "0bbfc3a2063154216c39026d1d905cfb1a24e04840e0a374b6dbbb07556de5ec",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 58,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n5120",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n5120.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8816,
+      "sha256": "172eb974890dd2d0464a00c76bb2530e65ad9bb952a264a141aea489171f2fe4",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 108,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n8192",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 0,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n8192.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8304,
+      "sha256": "2bf8c3b0726a13349b553486956e49e5a4f0f3ca7893fa3c427dd2e5c51b6f2a",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 102,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax1024_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 30,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 1024,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax1024_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "f0effd6ec75d808466a5797b34e8fa2611e38f235320df909f987ae40ab9980d",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 25,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax8192_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 20,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax8192_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 12400,
+      "sha256": "9f6a066beb3b6e87937b650a71bb23e6f56af0c9528871820efdfe8ccfe4a7b2",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 122,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_ngeneric_nmax16384_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 16384,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_ngeneric_nmax16384_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 17520,
+      "sha256": "99bd0044cf9717b94978fb6b811c471c7ab442c19b2916fc74d860d4b57e57c8",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 236,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax1024_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 30,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 1024,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax1024_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "395a41ad5e70fb0d5101ed71fa20b4963f2a7b1085578446c3b99c9ad28cb1d7",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 24,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax8192_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 20,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax8192_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 11632,
+      "sha256": "fd3a85da57f630a93f5036224bdf8f140ba76cf42b898d2199e54333aaf6c55b",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 122,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_ngeneric_nmax16384_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "n_max": 16384,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_ngeneric_nmax16384_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 16496,
+      "sha256": "6f02301c9ce78fdc69791b013b5bcd96726ab9af0d4e3609902cfda933349fc0",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 250,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n3072_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n3072_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8560,
+      "sha256": "d6dec3070f7d28a483d27e73e508408b6f54db995b14aec99ba79ba642fd3ab0",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 42,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n3584_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n3584_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8816,
+      "sha256": "88d3d22e8cb9f572108a4bf84f7e8bf5b9262450e5160d172a5a8db8aeae6323",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 47,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n4096_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n4096_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "d6d4aa0c77e5929fc8fd80ef97ca35788ce8e2e033a561d297c5e4d914b00707",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 58,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n5120_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n5120_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 9072,
+      "sha256": "84d95bc1282b3cae2c0dee205d1f97e393e1a2452602a6c5460660ff40e954d1",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 108,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_bf16_n8192_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_bf16_n8192_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8560,
+      "sha256": "9df8f2ab8ff8fde7c4e956d3379ea29bd5a10aa7c3933d21856a5fe073fc20dc",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 102,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n3072_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "n_max": 3072,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n3072_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8304,
+      "sha256": "0ada079ca43e3009f4e0295e84aae5a382ff9f7d6e72ae9059fbc953d5738296",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 42,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n3584_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "n_max": 3584,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n3584_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8560,
+      "sha256": "f66b12d6febcd4c59c13fa39eea92aa9244acf3a739eb84c76c5edde13a3593c",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 47,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n4096_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "n_max": 4096,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n4096_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 7792,
+      "sha256": "0733e65f7bdf77199991fcb8455a09aaa7b4610ee26220dd4dd1c6603852f509",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 58,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n5120_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "n_max": 5120,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n5120_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8816,
+      "sha256": "bd5d95b1d434a2193aa0ecf830f41b1e781903052e85cb7d70c2424e1f8b5550",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 108,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    },
+    {
+      "name": "rmsnorm_bwd_f16_n8192_f32scale1",
+      "op": "rmsnorm_bwd",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "n_max": 8192,
+        "scale_f32": 1,
+        "reduce_symbol": "rmsnorm_bwd_dweight_reduce_kernel_1"
+      },
+      "file": "rmsnorm_bwd_f16_n8192_f32scale1.hsaco",
+      "symbol": "rmsnorm_bwd_partial_kernel_0",
+      "bytes": 8304,
+      "sha256": "f9ca0b889ef0552464cc6eab16dfdcdc0530342abc58271c687475ab26057294",
+      "kernarg_segment_size": 156,
+      "lds_bytes": 32,
+      "vgprs": 102,
+      "block": [
+        512,
+        1,
+        1
+      ],
+      "grid_rule": "partial_one_block_per_program_reduce_one_block_per_64_columns",
+      "named_args": 0,
+      "args": [
+        {"name": "Source.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Source.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "DY.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "DY.desc", "kind": "by_value", "size": 16, "offset": 48},
+        {"name": "DResidualOut.ptr", "kind": "global_buffer", "size": 8, "offset": 64},
+        {"name": "DResidualOut.desc", "kind": "by_value", "size": 16, "offset": 72},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 88},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 96},
+        {"name": "DX.ptr", "kind": "global_buffer", "size": 8, "offset": 104},
+        {"name": "DX.desc", "kind": "by_value", "size": 16, "offset": 112},
+        {"name": "DWeightPartial.ptr", "kind": "global_buffer", "size": 8, "offset": 128},
+        {"name": "DWeightPartial.desc", "kind": "by_value", "size": 16, "offset": 136},
+        {"name": "MIn", "kind": "by_value", "size": 4, "offset": 152}
+      ],
+      "reduce_args": [
+        {
+          "name": "DWeightPartial.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 0
+        },
+        {
+          "name": "DWeightPartial.desc",
+          "kind": "by_value",
+          "size": 16,
+          "offset": 8
+        },
+        {
+          "name": "DWeight.ptr",
+          "kind": "global_buffer",
+          "size": 8,
+          "offset": 24
+        },
+        {
+          "name": "DWeight.desc",
+          "kind": "by_value",
+          "size": 4,
+          "offset": 32
+        }
+      ],
+      "reduce_vgprs": 6
+    }
+  ]
+}

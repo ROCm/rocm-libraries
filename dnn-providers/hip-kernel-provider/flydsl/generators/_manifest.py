@@ -40,6 +40,7 @@ FLYDSL_DIR = Path(__file__).resolve().parent.parent
 # error rather than an empty digest.
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
+    "rmsnorm_bwd": ("norm",),
 }
 # Shared by every op: the package root, the kernel helpers every op imports, and
 # the generator machinery -- every module under generators/ but the per-op
