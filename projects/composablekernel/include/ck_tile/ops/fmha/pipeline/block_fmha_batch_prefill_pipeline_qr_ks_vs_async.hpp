@@ -998,13 +998,42 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             prefetch_v_physical_pages(k_loop_start);
         };
 
+        // K global->LDS copy. gfx125 has no M0-based buffer_load...lds: its
+        // global_load_async_to_lds takes a per-lane LDS address, so K is written through the
+        // 2D K LDS view (same memory layout as k_lds_store) and is tracked by ASYNCcnt.
+        // tile_scatter_gather::async_load computes that address per lane and advances it
+        // along the gather (page) dims; async_load_with_offset uses the lane-0 address.
+        constexpr index_t kNumKAccess = decltype(k_dram_window)::load_store_traits::NumAccess;
+        auto async_load_k             = [&](auto i_buf) {
+#if defined(__gfx125__)
+            auto k_lds_write = make_tile_window(
+                k_lds_Load_view, make_tuple(number<kN0>{}, number<kK0>{}), {i_buf * kN0, 0});
+            k_dram_window.async_load(k_lds_write, number<-1>{}, k_oob_ck);
+#else
+            async_load_tile_raw(
+                k_lds_store(i_buf), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
+#endif
+        };
+        // Wait until at most `cnt` K copies are in flight.
+        auto async_load_fence_k = [](auto cnt) {
+#if defined(__gfx125__)
+            s_wait_asynccnt<decltype(cnt)::value>();
+#else
+            async_load_fence(cnt);
+#endif
+        };
+
         // prefetch K tile
-        async_load_tile_raw(
-            k_lds_store(LdsSeq.at(number<0>{})), k_dram_window, number<-1>{}, k_oob_ck, k_pre_np);
+        async_load_k(LdsSeq.at(number<0>{}));
         move_tile_window(k_dram_window, {0, kK0});
         __builtin_amdgcn_sched_barrier(0);
 
-        buffer_load_fence(k_dram_window.get_num_of_access(), q.get_thread_buffer());
+#if defined(__gfx125__)
+        // K is not counted by LOADcnt here, so wait for all of Q.
+        buffer_load_fence(0, q.get_thread_buffer());
+#else
+        buffer_load_fence(kNumKAccess, q.get_thread_buffer());
+#endif
         (void)q_element_func; // ??? rocm-6.x if use q element func will have scratch on hdim=64/32
         // auto q_tile = q;      // tile_elementwise_in(q_element_func, q);
 
@@ -1057,15 +1086,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    async_load_tile_raw(k_lds_store(number<LdsSeq.at(number<i_k0 + 1>{})>{}),
-                                        k_dram_window,
-                                        number<-1>{},
-                                        k_oob_ck,
-                                        k_pre_np);
+                    async_load_k(number<LdsSeq.at(number<i_k0 + 1>{})>{});
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
 
-                    async_load_fence(k_dram_window.get_num_of_access());
+                    async_load_fence_k(number<kNumKAccess>{});
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                     gemm_0(s_acc,
@@ -1082,7 +1107,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             if constexpr(k0_loops <= 2)
                 __builtin_amdgcn_sched_barrier(0);
 
-            async_load_fence();
+            async_load_fence_k(number<0>{});
             __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
@@ -1583,11 +1608,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
-                async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
-                                    k_dram_window,
-                                    number<-1>{},
-                                    k_oob_ck,
-                                    k_pre_np);
+                async_load_k(LdsSeq.at(number<0>{}));
                 move_tile_window(k_dram_window, {0, kK0});
             }
             // tail

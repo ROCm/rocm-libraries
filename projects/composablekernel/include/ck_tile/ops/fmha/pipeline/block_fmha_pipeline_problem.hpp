@@ -142,7 +142,9 @@ template <typename QDataType_,
           typename FmhaMask_,
           bool kUseTrLoad_,
           int kPageBlockSize_,
-          typename Traits_>
+          typename Traits_,
+          bool kUseDoubleKVLdsBuffer_ = false,
+          bool kProgressiveDsLoadK_   = false>
 struct BlockFmhaBatchPrefillPipelineProblem
     : public BlockFmhaPipelineProblem<QDataType_,
                                       KDataType_,
@@ -160,7 +162,9 @@ struct BlockFmhaBatchPrefillPipelineProblem
                                       AttentionVariant_,
                                       FmhaMask_,
                                       kUseTrLoad_,
-                                      Traits_>
+                                      Traits_,
+                                      kUseDoubleKVLdsBuffer_,
+                                      kProgressiveDsLoadK_>
 {
     static constexpr index_t kPageBlockSize = kPageBlockSize_;
     static_assert(kPageBlockSize > 0, "kPageBlockSize must be positive");

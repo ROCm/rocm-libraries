@@ -18,20 +18,29 @@ endif()
 
 # validate user-specified fmha_fwd API list
 set(FMHA_FWD_KNOWN_APIS "fwd;fwd_splitkv;fwd_appendkv;pagedkv_prefill")
+# opt-in only, not part of "all": batch_prefill adds thousands of instances
+set(FMHA_FWD_OPTIONAL_APIS "batch_prefill")
 set(FMHA_FWD_ENABLE_APIS "fwd" CACHE STRING
-  "semicolon-separated list of APIs to generate (${FMHA_FWD_KNOWN_APIS}) & link, or \"all\".")
+  "semicolon-separated list of APIs to generate (${FMHA_FWD_KNOWN_APIS};${FMHA_FWD_OPTIONAL_APIS}) & link, or \"all\".")
+# optional APIs requested explicitly stay enabled with "all" and with testing
+set(FMHA_FWD_REQUESTED_OPTIONAL_APIS)
+foreach(api ${FMHA_FWD_OPTIONAL_APIS})
+  if("${api}" IN_LIST FMHA_FWD_ENABLE_APIS)
+    list(APPEND FMHA_FWD_REQUESTED_OPTIONAL_APIS ${api})
+  endif()
+endforeach()
 if(BUILD_TESTING)
   # Build instances of all APIs for tests
   message(DEBUG "Enabling all FWD APIs of CK Tile FMHA for because testing is enabled")
   set(FMHA_FWD_ENABLE_APIS "all")
 endif()
 if(FMHA_FWD_ENABLE_APIS STREQUAL "all")
-  set(FMHA_FWD_ENABLE_APIS ${FMHA_FWD_KNOWN_APIS})
+  set(FMHA_FWD_ENABLE_APIS ${FMHA_FWD_KNOWN_APIS} ${FMHA_FWD_REQUESTED_OPTIONAL_APIS})
 endif()
 
 foreach(api ${FMHA_FWD_ENABLE_APIS})
-  if(NOT "${api}" IN_LIST FMHA_FWD_KNOWN_APIS)
-    message(FATAL_ERROR "${api} isn't a known api: ${FMHA_FWD_KNOWN_APIS}.")
+  if(NOT "${api}" IN_LIST FMHA_FWD_KNOWN_APIS AND NOT "${api}" IN_LIST FMHA_FWD_OPTIONAL_APIS)
+    message(FATAL_ERROR "${api} isn't a known api: ${FMHA_FWD_KNOWN_APIS};${FMHA_FWD_OPTIONAL_APIS}.")
   endif()
 endforeach()
 

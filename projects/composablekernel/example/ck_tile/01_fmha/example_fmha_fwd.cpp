@@ -107,6 +107,12 @@ auto create_args(int argc, char* argv[])
                 "1",
                 "# of splits for key/value. 0 to determine actual number by heuristic")
         .insert("page_block_size", "0", "paged-kvcache block size. 0 means not use paged-kvcahe")
+        .insert("kv_layout",
+                "linear",
+                "batch_prefill KV cache layout: linear or vectorized (16-byte vectors)")
+        .insert("kv_lookup",
+                "vllm",
+                "batch_prefill page table: vllm (2D block table) or sglang (1D indptr/indices)")
         .insert("cache_batch_idx", "0", "whether to use index map to the kvcache")
         .insert("warmup", "5", "number of iterations before benchmark the kernel")
         .insert("repeat", "20", "number of iterations to benchmark the kernel")
@@ -216,7 +222,10 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         init_sink_value,
                                         pack_gqa,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr,
+                                        arg_parser.get_str("kv_layout"),
+                                        arg_parser.get_str("kv_lookup"));
 }
 
 int main(int argc, char* argv[])
