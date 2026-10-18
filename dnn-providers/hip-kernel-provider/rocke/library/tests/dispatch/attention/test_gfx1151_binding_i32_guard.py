@@ -4,6 +4,7 @@
 (host metadata only), for both the prefill (``WmmaFmhaFwdV2Spec``) and the
 split-KV decode (``WmmaFmhaDecodeSpec``) objects."""
 
+import dataclasses
 import unittest
 from types import SimpleNamespace
 
@@ -121,6 +122,101 @@ class TestRdnaBindingI32Guard(unittest.TestCase):
                 request, spec, tensors = _paged_case(kind, pages=1 << 20)
                 with self.assertRaisesRegex(ValueError, "k spans .* bytes"):
                     _rdna_validate_and_collect(request, spec, tensors)
+
+
+def _dense_case(kind, **spec_kw):
+    batch, seq, heads, dim = 1, 16, 4, 64
+    request = AttentionRequest(
+        batch=batch,
+        nhead_q=heads,
+        nhead_k=heads,
+        seqlen_q=seq,
+        seqlen_k=seq,
+        hdim_q=dim,
+        hdim_v=dim,
+        arch="gfx1151",
+        dtype="fp16",
+        emit_lse=True,
+    )
+    spec = _spec(kind, **spec_kw)
+    full = (batch, seq, heads, dim)
+    tensors = {
+        "q": _FakeTensor(full),
+        "k": _FakeTensor(full),
+        "v": _FakeTensor(full),
+        "out": _FakeTensor(full),
+    }
+    return request, spec, tensors
+
+
+# Strides that keep every operand's element count tiny but whose byte extent
+# exceeds 2 GiB: one head (or row) sits 2**28 floats = 1 GiB apart.
+_FAR = 1 << 28
+
+
+class TestRdnaOperandByteExtent(unittest.TestCase):
+    """Operands with their own call site in the binding (everything but the shared
+    q / k / v / out loop) are rejected when they span more than 2 GiB."""
+
+    def _check(self, tensors, request, spec, name, fits):
+        """``fits`` operands are accepted as built; the oversized one is rejected."""
+        _rdna_validate_and_collect(request, spec, fits)
+        with self.assertRaisesRegex(ValueError, f"{name} spans .* bytes"):
+            _rdna_validate_and_collect(request, spec, tensors)
+
+    def test_dense_lse(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _dense_case(kind)
+                tensors["lse"] = _FakeTensor((1, 4, 16), dtype="torch.float32")
+                fits = dict(tensors)
+                tensors["lse"] = _FakeTensor(
+                    (1, 4, 16), stride=(1, _FAR, 1), dtype="torch.float32"
+                )
+                self._check(tensors, request, spec, "lse", fits)
+
+    def test_packed_lse(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _paged_case(kind, pages=8)
+                request = dataclasses.replace(request, emit_lse=True)
+                tensors["lse"] = _FakeTensor((4, 16), dtype="torch.float32")
+                fits = dict(tensors)
+                tensors["lse"] = _FakeTensor(
+                    (4, 16), stride=(_FAR, 1), dtype="torch.float32"
+                )
+                self._check(tensors, request, spec, "lse", fits)
+
+    def test_qq_bias(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                feature = "use_qq_bias" if kind == "prefill" else "qq_bias"
+                request, spec, tensors = _dense_case(kind, **{feature: True})
+                tensors["lse"] = _FakeTensor((1, 4, 16), dtype="torch.float32")
+                tensors["qq_bias"] = _FakeTensor((2, 16), dtype="torch.float32")
+                fits = dict(tensors)
+                tensors["qq_bias"] = _FakeTensor(
+                    (2, 16), stride=(1 << 30, 1), dtype="torch.float32"
+                )
+                self._check(tensors, request, spec, "qq_bias", fits)
+
+    def test_attn_bias(self):
+        for kind, bias, dtype in (
+            ("prefill", "f32", "torch.float32"),
+            ("prefill", "q", "torch.float16"),
+            ("decode", "f32", "torch.float32"),
+            ("decode", "q", "torch.float16"),
+        ):
+            with self.subTest(kind=kind, bias=bias):
+                request, spec, tensors = _dense_case(kind, bias=bias)
+                tensors["lse"] = _FakeTensor((1, 4, 16), dtype="torch.float32")
+                tensors["attn_bias"] = _FakeTensor((1, 4, 16, 16), dtype=dtype)
+                fits = dict(tensors)
+                # One head 2**29 elements apart: over 2 GiB for 2- and 4-byte elements.
+                tensors["attn_bias"] = _FakeTensor(
+                    (1, 4, 16, 16), stride=(0, 1 << 29, 16, 1), dtype=dtype
+                )
+                self._check(tensors, request, spec, "attn_bias", fits)
 
 
 def _dense_fp8_case(kind, kv_token_stride=None, kv_ptr=0):

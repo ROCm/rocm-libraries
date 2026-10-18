@@ -39,6 +39,7 @@ _NEEDS_RDNA = pytest.mark.skipif(
 _LOG2E = 1.4426950408889634
 _RQ = (1, 0, 3, 1, 2, 1)  # ragged / paged query lengths (an empty sequence included)
 _RK = (1000, 50, 0, 1, 129, 4097)  # key lengths off every tile / page boundary
+_XSPLITS = (8, 9, 13, 16, 33, 64)  # merge-only split counts past one 8-split group
 _WS_POISON = 0xFF  # byte fill of the split partials before every launch (f32 NaN)
 
 
@@ -61,13 +62,13 @@ def _case(B, Hq, Hkv, Hv, Sq, Sk, dq, dv, br=1, wl=-1, wr=0, **opt):
 
 CASES = {
     # GQA packing, buckets, Sq 1 / 4 / 8, masks.
-    "gqa8_d64_sq1": _case(2, 64, 8, 8, 1, 1000, 64, 64),
-    "gqa4_d128_sq4": _case(1, 32, 8, 8, 4, 777, 128, 128),
-    "gqa8_d256_sq8": _case(1, 16, 2, 2, 8, 600, 256, 256),
-    "mha_d128_sq1": _case(2, 8, 8, 8, 1, 1500, 128, 128),
+    "gqa8_d64_sq1": _case(2, 64, 8, 8, 1, 1000, 64, 64, xsplits=_XSPLITS),
+    "gqa4_d128_sq4": _case(1, 32, 8, 8, 4, 777, 128, 128, xsplits=_XSPLITS),
+    "gqa8_d256_sq8": _case(1, 16, 2, 2, 8, 600, 256, 256, xsplits=_XSPLITS),
+    "mha_d128_sq1": _case(2, 8, 8, 8, 1, 1500, 128, 128, xsplits=_XSPLITS),
     "none_d128_sq3": _case(1, 16, 4, 4, 3, 500, 128, 128, br=0, wr=-1),
     "causal_topleft_d64_sq8": _case(1, 8, 2, 2, 8, 300, 64, 64, br=0),
-    "window_d128_sq1": _case(1, 16, 4, 4, 1, 2000, 128, 128, wl=100),
+    "window_d128_sq1": _case(1, 16, 4, 4, 1, 2000, 128, 128, wl=100, xsplits=_XSPLITS),
     "band_topleft_d64_sq4": _case(1, 8, 4, 4, 4, 300, 64, 64, br=0, wl=30, wr=7),
     "fullmask_rows_d64": _case(1, 8, 2, 2, 8, 40, 64, 64, br=1, wl=2, wr=0),
     # V head count different from the K head count; runtime widths.
@@ -76,12 +77,18 @@ CASES = {
     "rtdim_q40_v56": _case(1, 16, 4, 4, 2, 400, 40, 56),
     "rtdim_q112_v128": _case(1, 8, 2, 2, 1, 333, 112, 128),
     "rtdim_q200_v136": _case(1, 8, 4, 4, 3, 450, 200, 136),
+    # Rows without a visible key (bottom-right diagonal): the merge sees only empty
+    # splits for rows 0-3 and must store -inf LSE and zero O for them.
+    "diag_masked_d64": _case(1, 8, 2, 2, 8, 4, 64, 64, br=1),
+    "diag_masked_sinks_d64": _case(1, 8, 2, 2, 8, 4, 64, 64, br=1, sinks=True),
     # Score features.
     "softcap_d128": _case(2, 32, 8, 8, 1, 1200, 128, 128, softcap=30.0),
     "softcap_window_d256_sq3": _case(
         1, 16, 8, 8, 3, 900, 256, 256, wl=400, softcap=50.0
     ),
-    "sinks_window_d64": _case(1, 64, 8, 8, 1, 2000, 64, 64, wl=127, sinks=True),
+    "sinks_window_d64": _case(
+        1, 64, 8, 8, 1, 2000, 64, 64, wl=127, sinks=True, xsplits=_XSPLITS
+    ),
     "sinks_none_d128_sq4": _case(
         1, 16, 4, 4, 4, 300, 128, 128, br=0, wr=-1, sinks=True
     ),
@@ -128,14 +135,18 @@ CASES = {
         bias_tail=True,
     ),
     "fp8_d64": _case(2, 64, 8, 8, 1, 1500, 64, 64, fp8=True),
-    "fp8_d128_sq2": _case(1, 32, 8, 8, 2, 1000, 128, 128, fp8=True),
+    "fp8_d128_sq2": _case(1, 32, 8, 8, 2, 1000, 128, 128, fp8=True, xsplits=_XSPLITS),
     "fp8_d256_sq2": _case(1, 16, 8, 8, 2, 600, 256, 256, fp8=True),
     # Packed layouts.
-    "ragged_d128": _case(6, 32, 8, 8, 0, 0, 128, 128, layout="ragged"),
+    "ragged_d128": _case(
+        6, 32, 8, 8, 0, 0, 128, 128, layout="ragged", xsplits=_XSPLITS
+    ),
     "ragged_window_alibi_qq_d64": _case(
         6, 16, 2, 2, 0, 0, 64, 64, wl=100, layout="ragged", alibi=True, qq=(2, 40)
     ),
-    "paged16_d64": _case(6, 64, 8, 8, 0, 0, 64, 64, layout="paged", ps=16),
+    "paged16_d64": _case(
+        6, 64, 8, 8, 0, 0, 64, 64, layout="paged", ps=16, xsplits=_XSPLITS
+    ),
     "paged8_d128": _case(6, 32, 8, 8, 0, 0, 128, 128, layout="paged", ps=8),
     "paged64_d256": _case(6, 16, 8, 8, 0, 0, 256, 256, layout="paged", ps=64),
     "paged16_sinks_fp8_d64": _case(
@@ -188,7 +199,7 @@ CASES = {
     ),
     # Key ranges shorter than the split count: most splits see no key and must still
     # write their (empty) partials over the poisoned workspace.
-    "empty_splits_sk17_d128": _case(2, 16, 4, 4, 1, 17, 128, 128),
+    "empty_splits_sk17_d128": _case(2, 16, 4, 4, 1, 17, 128, 128, xsplits=_XSPLITS),
     "empty_splits_window3_d64": _case(1, 16, 2, 2, 1, 5000, 64, 64, wl=3),
     "empty_splits_sinks_window_d64": _case(
         1, 16, 4, 4, 2, 3000, 64, 64, wl=5, sinks=True
@@ -439,6 +450,9 @@ def test_decode_matches_reference(case, dtype):
         (7, False),
         (auto, dec.wmma_fmha_decode_fused_merge(auto)),
     ]
+    # Merge kernel beyond its first 8-split group (running-max carry, rescale of l and
+    # acc, partial tail group): the auto split count never gets there.
+    modes += [(n, False) for n in c.get("xsplits", ())]
 
     rt = Runtime()
     bufs = {}
@@ -616,10 +630,15 @@ def test_decode_matches_reference(case, dtype):
             where = f"splits={ns} fused={fused}"
             got = got_o.astype(np.float64)
             assert np.isfinite(got).all(), where
+            # The repository's documented per-dtype output bound for decode
+            # (benchmarks/gfx1151/attention/cases.py): 2e-2 fp16, 4e-2 bf16.
             tol = 4e-2 if dtype == "bf16" else 2e-2
             np.testing.assert_allclose(got, ref_o, rtol=0, atol=tol, err_msg=where)
             fin = np.isfinite(ref_lse)
             assert np.array_equal(np.isfinite(got_lse), fin), where
+            # A row without a visible key must store exactly -inf (not NaN, not left
+            # at the poison).
+            assert np.array_equal(np.isneginf(got_lse), np.isneginf(ref_lse)), where
             if fin.any():
                 lse_tol = 1e-2 + 1e-5 * float(np.abs(ref_lse[fin]).max())
                 np.testing.assert_allclose(

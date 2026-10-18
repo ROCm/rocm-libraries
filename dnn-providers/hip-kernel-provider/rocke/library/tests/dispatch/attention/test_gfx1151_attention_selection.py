@@ -548,6 +548,34 @@ class TestRdnaComputeUnits(unittest.TestCase):
             ):
                 self.assertEqual(_resolve_num_cus(self._unset(arch)), 40)
 
+    def test_route_rule_gets_the_request_cu_count_over_the_live_device(self):
+        # 64 query heads over 8 KV heads, 64 rows against 32K keys: the rule picks the
+        # prefill kernel at 64 CUs and the decode kernel from 96 CUs (a WGP count
+        # instead of a CU count would move each boundary by 2x).
+        shape = dict(arch="gfx11-generic", batch=1, nhead_q=64, nhead_k=8, seqlen_q=64)
+        shape["seqlen_k"] = 32768
+        routed = {}
+        for cus, spec_type in (
+            (64, WmmaFmhaFwdV2Spec),
+            (96, WmmaFmhaDecodeSpec),
+            (128, WmmaFmhaDecodeSpec),
+        ):
+            with self.subTest(num_cus=cus), mock.patch(
+                "rocke.runtime.hip_module.get_device_target_id",
+                return_value="gfx1100",
+            ), mock.patch(
+                "dispatch.attention.gfx1151._device_num_cus", return_value=128
+            ), mock.patch(
+                "dispatch.attention.gfx1151.rdna_attention_use_decode",
+                wraps=rdna_attention_use_decode,
+            ) as rule:
+                request = _decode_request(num_cus=cus, **shape)
+                # A live device of 128 WGPs (256 CUs) would route every case to the
+                # decode kernel; the explicit count wins.
+                self.assertIsInstance(dispatch_attention(request).spec, spec_type)
+                routed[cus] = {call.kwargs["num_cus"] for call in rule.call_args_list}
+        self.assertEqual(routed, {64: {64}, 96: {96}, 128: {128}})
+
     def test_decode_splits_follow_the_multiprocessor_count(self):
         request = _decode_request(batch=1, nhead_q=32, nhead_k=8, seqlen_k=32768)
         spec = dispatch_attention(request).spec
