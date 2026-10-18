@@ -1,0 +1,118 @@
+name: gfx942 hardware parity baseline
+run-name: gfx942 hardware ${{ inputs.ctest_label || '^quick$' }} (ROCm ${{ inputs.rocm_version || '10.2.0a20260928' }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      ctest_label:
+        description: "CTest label regex; use ^quick$ or ^ffm-quick$"
+        type: string
+        default: "^quick$"
+      rocm_version:
+        description: "Pinned nightly gfx94X runtime and tests archive"
+        type: string
+        default: "10.2.0a20260928"
+      runner_label:
+        description: "GFX942 hardware runner label"
+        type: string
+        default: "linux-gfx942-1gpu-ccs-csp-ossci-rocm"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gfx942-hw-parity-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:24.04
+    outputs:
+      components: ${{ steps.discover.outputs.components }}
+    steps:
+      - name: Install discovery tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
+      - name: Fetch parity script
+        run: |
+          mkdir -p .github/scripts
+          curl -fL --retry 3 "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/ffm_quick_rocjitsu.py" -o .github/scripts/ffm_quick_rocjitsu.py
+      - name: Download pinned tests archive and discover suites
+        id: discover
+        env:
+          ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
+          TEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-root cache
+          curl -fL --retry 3 -o cache/tests.tar.gz "https://nightly.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf cache/tests.tar.gz -C test-root
+          components="$(python3 .github/scripts/ffm_quick_rocjitsu.py --direct --rocm-root test-root --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)"
+          echo "components=$components" >> "$GITHUB_OUTPUT"
+
+  hardware-suites:
+    name: "${{ inputs.ctest_label || '^quick$' }} / ${{ matrix.test.component }} on GFX942"
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJSON(needs.discover.outputs.components) }}
+    runs-on: ${{ inputs.runner_label || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+    timeout-minutes: 360
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
+      TEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
+      COMPONENT: ${{ matrix.test.component }}
+    steps:
+      - name: Install runtime tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
+      - name: Fetch parity and resource scripts
+        run: |
+          mkdir -p .github/scripts
+          for script in ffm_quick_rocjitsu.py resource_monitor.py; do
+            curl -fL --retry 3 "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/${script}" -o ".github/scripts/${script}"
+          done
+      - name: Install the same pinned ROCm runtime and tests artifacts
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o cache/rocm.tar.gz "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o cache/tests.tar.gz "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf cache/rocm.tar.gz -C "$root"
+          tar -xzf cache/tests.tar.gz -C "$root"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+      - name: Verify GFX942 hardware is visible
+        run: |
+          set -euo pipefail
+          export ROCM_PATH="$ROCM_ROOT"
+          export PATH="$ROCM_ROOT/bin:$PATH"
+          export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          "$ROCM_ROOT/bin/rocminfo" | tee parity-rocminfo.txt
+          grep -Eiq 'gfx942|gfx94[0-9]' parity-rocminfo.txt
+      - name: Run matching CTest cases directly on GFX942 (no per-test timeout)
+        run: |
+          set +e
+          export ROCM_PATH="$ROCM_ROOT"
+          export PATH="$ROCM_ROOT/bin:$PATH"
+          export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          mkdir -p parity
+          python3 .github/scripts/resource_monitor.py \
+            --phase "$TEST_LABEL / $COMPONENT on GFX942 hardware" \
+            --output parity/resources-test.json -- \
+            python3 .github/scripts/ffm_quick_rocjitsu.py \
+              --direct --rocm-root "$ROCM_ROOT" --out-dir parity \
+              --component "$COMPONENT" --label-regex "$TEST_LABEL"
+          status=$?
+          if [ -f parity/summary.md ]; then cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$status"
+      - name: Upload hardware baseline artifacts
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: gfx942-hw-${{ matrix.test.id }}
+          path: parity/

@@ -190,8 +190,12 @@ def build_env(rocm_root: Path) -> dict:
     return env
 
 
-def run_one(rocjitsu: Path, config: Path, rocjitsu_args: list[str], test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
-    command = [str(rocjitsu), "--config", str(config), *rocjitsu_args, "--", *test["command"]]
+def run_one(rocjitsu: Path | None, config: Path | None, rocjitsu_args: list[str], test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
+    command = (
+        [str(rocjitsu), "--config", str(config), *rocjitsu_args, "--", *test["command"]]
+        if rocjitsu is not None
+        else list(test["command"])
+    )
     work = Path(test["working_directory"]) if test["working_directory"] else cwd
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -253,16 +257,19 @@ def render_summary(rows: list[dict], label: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rocjitsu", required=True)
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--rocjitsu")
+    parser.add_argument("--config")
     parser.add_argument("--rocm-root", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--label-regex", default="^ffm-quick$", help="CTest label regex; for example ^quick$ or ^ffm-quick$")
     parser.add_argument("--component", help="Exact component name; omit with --list-components")
     parser.add_argument("--rocjitsu-arg", action="append", default=[], help="Extra rocJITsu argument; repeat for multiple flags")
+    parser.add_argument("--direct", action="store_true", help="Run test commands directly on hardware without rocJITsu")
     parser.add_argument("--list-components", action="store_true")
     parser.add_argument("--list-only", action="store_true")
     args = parser.parse_args()
+    if not args.direct and (not args.rocjitsu or not args.config):
+        parser.error("--rocjitsu and --config are required unless --direct is set")
 
     rocm_root = Path(args.rocm_root)
     label_pattern = re.compile(args.label_regex)
@@ -292,8 +299,8 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     env = build_env(rocm_root)
-    rocjitsu = Path(args.rocjitsu).resolve()
-    config = Path(args.config).resolve()
+    rocjitsu = None if args.direct else Path(args.rocjitsu).resolve()
+    config = None if args.direct else Path(args.config).resolve()
     rows = []
     any_problem = False
     for group in groups:
