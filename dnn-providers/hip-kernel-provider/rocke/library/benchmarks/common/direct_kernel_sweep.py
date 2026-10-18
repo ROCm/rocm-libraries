@@ -61,9 +61,9 @@ from kernels.common.conv_direct_aot_jobs import (  # noqa: F401 (the grid and bu
     _caps_jobs,
     _caps_of,
     _helper_identity,
-    build_direct_job,
     count_direct_jobs,
     direct_job_for_identity,
+    direct_kernel_for_job,
     probe_problem,
 )
 from kernels.common.conv_direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
@@ -207,7 +207,7 @@ def compile_all_direct(
             jobs=jobs,
             log=log,
         ),
-        build=build_direct_job,
+        build=direct_kernel_for_job,
         arch=arch,
         dtype=dtype,
         directions=[f"direct_{d}" for d in directions],

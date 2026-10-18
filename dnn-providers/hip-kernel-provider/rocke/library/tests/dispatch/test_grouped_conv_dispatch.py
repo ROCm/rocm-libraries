@@ -186,11 +186,13 @@ def test_every_swept_family_builds_the_kernel_compile_all_builds(direction):
     for result in picked.values():
         ident = result.spec.identity
         if ident.is_direct:
-            want = dks.build_direct_job(
+            want = dks.direct_kernel_for_job(
                 dks.direct_job_for_identity(ident), _ARCH, ident.dtype_a
             )[0]
         else:
-            want = ks.build_kernel(ks.job_for_identity(ident), _ARCH, ident.dtype_a)[0]
+            want = ks.kernel_for_job(ks.job_for_identity(ident), _ARCH, ident.dtype_a)[
+                0
+            ]
         assert result.build().name == want.name, result.spec.name
 
 
@@ -242,9 +244,9 @@ def test_dispatch_stays_in_the_requested_direction():
 def test_another_llvm_flavor_admits_nothing():
     """Pin a real, differing flavor via the request -- not the environment.
 
-    An unrecognized env value (e.g. "llvm-other") is silently ignored by
-    flavor detection and falls back to auto-detect, so it would not
-    reliably mismatch. Picking a real flavor other than the instances' own
+    An unrecognized env value (e.g. "llvm-other") now raises immediately
+    (see test_unrecognized_llvm_flavor_env_raises), so it can't be used here
+    to force a mismatch. Picking a real flavor other than the instances' own
     guarantees the mismatch deterministically.
     """
     instance_flavor = next(
@@ -258,6 +260,15 @@ def test_another_llvm_flavor_admits_nothing():
     other_flavor = next(f for f in LLVM_FLAVORS if f != instance_flavor)
     with pytest.raises(ValueError, match="LLVM flavor"):
         gc.dispatch_conv_grouped(_req(llvm_flavor=other_flavor))
+
+
+def test_unrecognized_llvm_flavor_env_raises(monkeypatch):
+    """A typo'd ROCKE_LLVM_FLAVOR must fail loudly, not fall back to auto-detect."""
+    from rocke.core.lower_llvm import _detect_llvm_flavor
+
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm-other")
+    with pytest.raises(ValueError, match="llvm-other"):
+        _detect_llvm_flavor()
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +518,20 @@ def test_default_pick_is_the_first_admitted_instance_in_list_order():
         assert admitted == sorted(admitted, key=order.__getitem__)
         assert gc.dispatch_conv_grouped(req).spec.name == admitted[0]
         assert [s.name for s in gc.conv_grouped_sweep_space(req)] == admitted
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [s for s in _SHAPES if s.startswith("depthwise")],
+)
+def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
+    """A depthwise-shaped request must not fall back to a generic IGEMM tile
+    just because it happens to sort earlier in the list -- direct_depthwise_tiled
+    candidates are admitted only for genuinely depthwise shapes (cpg=kpg=1), so
+    they are listed ahead of implicit_gemm so they win whenever both are admitted.
+    """
+    req = _req(**_SHAPES[shape])
+    assert gc.dispatch_conv_grouped(req).spec.algorithm == "direct_depthwise_tiled"
 
 
 def test_spec_id_pins_one_instance():

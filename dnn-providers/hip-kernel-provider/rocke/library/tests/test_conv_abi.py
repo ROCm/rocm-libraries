@@ -1336,7 +1336,7 @@ def test_compile_jobs_is_incremental(monkeypatch, tmp_path):
     def build(job, arch, dtype):
         # A swapped job stands in for "the emitter now emits other code for
         # this identity".
-        return aj.build_kernel(swap.get(job.identity, job), arch, dtype)
+        return aj.kernel_for_job(swap.get(job.identity, job), arch, dtype)
 
     def run():
         lines = []
@@ -1411,7 +1411,7 @@ def test_compile_jobs_survives_a_dead_worker(monkeypatch, tmp_path):
         ks.compile_jobs(
             cache=cache,
             all_jobs=jobs,
-            build=aj.build_kernel,
+            build=aj.kernel_for_job,
             arch=_ARCH,
             dtype="fp16",
             directions=("fwd",),

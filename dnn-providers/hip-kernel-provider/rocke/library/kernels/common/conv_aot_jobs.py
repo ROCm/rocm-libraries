@@ -6,7 +6,7 @@ how one of them is built.
 A :class:`BuildJob` is one kernel: a :class:`KernelIdentity` plus the spec
 kwargs and capability axes that produce it. The generators below walk the
 grid (``CACHE_*``) and yield jobs; :func:`job_for_identity` inverts them for one
-identity and :func:`build_kernel` turns a job into kernel IR. Nothing here
+identity and :func:`kernel_for_job` turns a job into kernel IR. Nothing here
 compiles, caches or launches -- that is :mod:`benchmarks.common.kernel_sweep`
 -- so the dispatcher (:mod:`dispatch.grouped_convolution`) can build any
 registered instance without reaching above its layer.
@@ -1014,7 +1014,7 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     )
 
 
-def build_kernel(job: BuildJob, arch: str, dtype: str):
+def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     """Build one job's kernel IR. Returns ``(kernel, meta)``; nothing compiled.
 
     Raises on an invalid configuration; the caller counts those as skipped

@@ -67,9 +67,9 @@ from kernels.common.conv_aot_jobs import (  # noqa: F401 (the grid and builder, 
     _direction_jobs,
     _geometry_list,
     _spec_is_valid,
-    build_kernel,
     count_jobs,
     job_for_identity,
+    kernel_for_job,
 )
 
 
@@ -511,7 +511,7 @@ def compile_all(
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
         ),
-        build=build_kernel,
+        build=kernel_for_job,
         arch=arch,
         dtype=dtype,
         directions=directions,

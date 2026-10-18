@@ -584,7 +584,7 @@ def count_direct_jobs(
     )
 
 
-def build_direct_job(job: BuildJob, arch: str, dtype: str):
+def direct_kernel_for_job(job: BuildJob, arch: str, dtype: str):
     """Build one direct job's kernel IR. Returns ``(kernel, meta)``.
 
     Compilation, deduplication and incremental rebuilds are

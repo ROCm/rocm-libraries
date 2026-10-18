@@ -311,7 +311,7 @@ def test_direct_helper_job_builds_with_its_pipeline_caps():
         dil_h=row.dil_h,
         dil_w=row.dil_w,
     )
-    assert dks.build_direct_job(job, _ARCH, "fp16")[0] is not None
+    assert dks.direct_kernel_for_job(job, _ARCH, "fp16")[0] is not None
 
 
 def test_direct_job_for_identity_rejects_what_the_grid_cannot_build():

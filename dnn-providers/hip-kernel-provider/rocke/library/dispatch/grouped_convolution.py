@@ -72,10 +72,10 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.common.conv_aot_jobs import build_kernel, job_for_identity
+from kernels.common.conv_aot_jobs import job_for_identity, kernel_for_job
 from kernels.common.conv_direct_aot_jobs import (
-    build_direct_job,
     direct_job_for_identity,
+    direct_kernel_for_job,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
 from kernels.common.conv_direct_variants import (
@@ -703,8 +703,8 @@ def _build_instance(spec: ConvInstanceSpec, arch: str):
         raise ValueError(f"{spec.name} is a {identity.arch} instance, not {arch}")
     if identity.is_direct:
         job = direct_job_for_identity(identity)
-        return build_direct_job(job, arch, identity.dtype_a)[0]
-    return build_kernel(job_for_identity(identity), arch, identity.dtype_a)[0]
+        return direct_kernel_for_job(job, arch, identity.dtype_a)[0]
+    return kernel_for_job(job_for_identity(identity), arch, identity.dtype_a)[0]
 
 
 def _make_instance_candidate(spec: ConvInstanceSpec, priority: int) -> KernelCandidate:

@@ -304,9 +304,18 @@ def _detect_llvm_flavor() -> str:
     PATH are not evidence about that compiler. If COMGR cannot be loaded or
     queried, raise; offline callers must pin a flavor with ROCKE_LLVM_FLAVOR
     or the lowering API's llvm_flavor argument.
+
+    A set-but-unrecognized ROCKE_LLVM_FLAVOR raises immediately rather than
+    silently falling back to auto-detection -- a typo'd override otherwise
+    looks like it pinned a flavor while actually asking COMGR to guess.
     """
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
-    if env in LLVM_FLAVORS:
+    if env:
+        if env not in LLVM_FLAVORS:
+            raise ValueError(
+                f"ROCKE_LLVM_FLAVOR={env!r} is not a recognized flavor; "
+                f"expected one of {LLVM_FLAVORS}"
+            )
         return env
     from ..runtime.comgr import _require_compiler_info
 

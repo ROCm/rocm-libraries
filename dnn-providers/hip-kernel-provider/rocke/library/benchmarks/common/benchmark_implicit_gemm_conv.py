@@ -1192,6 +1192,10 @@ def main() -> int:
         print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
         return 2
 
+    if args.ckprofiler is not None and args.ckprofiler_script is None:
+        print("error: --ckprofiler requires --ckprofiler-script", file=sys.stderr)
+        return 2
+
     if args.streamk == "off" and (
         args.streamk_reductions != ",".join(_STREAMK_REDUCTIONS)
         or args.streamk_ctas != -1
