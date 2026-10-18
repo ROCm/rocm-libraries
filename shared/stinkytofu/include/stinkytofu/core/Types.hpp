@@ -130,16 +130,6 @@ struct PassFeatureConfig {
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
         int dsReadCyclesPerLoad = 0;
-        /// Cycles the TDM needs to land a tensor_load's data in LDS (tensor_load -> the
-        /// s_wait_tensorcnt that waits for it). The barrier that frees a buffer for the load and
-        /// the barrier carrying the wait are kept at least ceil(cycles / WMMA window) windows
-        /// apart. The barrier windows follow the ds_load density, and the density is raised, in
-        /// steps of Y ds_loads per X windows, until the gap fits. 0 = off.
-        int tensorLoadLandCycles = 0;
-        /// A fixed ds_load density for the tensor_load landing-time search (tensorLoadLandCycles):
-        /// "Y ds_loads every X cycles", dsPaceCount (Y) and dsPaceCycles (X). < 0 = searched.
-        int dsPaceCycles = -1;
-        int dsPaceCount = -1;
         /// ds_loads a WMMA batch (dsBatchWmmas WMMAs) may take above the region's even share when
         /// the batch began behind the even line (a dependency delayed its loads), so the region
         /// closes the gap gradually. 0 = no catching up.
@@ -151,11 +141,6 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
-        /// WMMA windows kept inside one signal/wait pair. separationSlack is
-        /// barrierHalfSlack + barrierHalfSlack + 1 (the extra 1 is the tensor
-        /// load). 0, the default, leaves the pair on one threshold. Mirrors
-        /// ModuleOptions::BarrierHalfSlack.
-        int barrierHalfSlack = 0;
         /// Max cycle-distance between two adjacent barrier groups for
         /// StinkyMergeBarrierPass to merge them into a single multi-token
         /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).

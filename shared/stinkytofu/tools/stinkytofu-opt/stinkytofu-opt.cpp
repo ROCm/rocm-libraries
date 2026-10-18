@@ -199,15 +199,12 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg.starts_with("--ds-issue-cap-mode=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--tensor-load-ds-load-gap-cycles=") ||
-                arg.starts_with("--barrier-half-slack=") ||
                 arg.starts_with("--wmma-queue-depth=") ||
                 arg.starts_with("--wmma-queue-cover-cycles=") ||
                 arg.starts_with("--wmma-refill-mode=") || arg.starts_with("--wmma-batch-size=") ||
                 arg == "--ds-spread" || arg.starts_with("--wmma-barrier-cover-cycles=") ||
-                arg.starts_with("--ds-pace-cycles=") || arg.starts_with("--ds-pace-count=") ||
                 arg.starts_with("--ds-catch-up-pace=") || arg.starts_with("--ds-batch-wmmas=") ||
                 arg.starts_with("--ds-read-cycles-per-load=") ||
-                arg.starts_with("--tensor-load-land-cycles=") ||
                 arg.starts_with("--wmma-refill-to-cycles=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -554,9 +551,6 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
-        } else if (a.starts_with("--barrier-half-slack=")) {
-            passFeatureConfig.dagFeatures.barrierHalfSlack =
-                std::stoi(a.substr(std::string("--barrier-half-slack=").size()));
         } else if (a.starts_with("--wmma-queue-depth=")) {
             passFeatureConfig.dagFeatures.wmmaQueueDepth =
                 std::stoi(a.substr(std::string("--wmma-queue-depth=").size()));
@@ -570,12 +564,6 @@ int main(int argc, char** argv) {
             passFeatureConfig.dagFeatures.dsSpread = true;
         } else if (a == "--no-ds-spread") {
             passFeatureConfig.dagFeatures.dsSpread = false;
-        } else if (a.starts_with("--ds-pace-cycles=")) {
-            passFeatureConfig.dagFeatures.dsPaceCycles =
-                std::stoi(a.substr(std::string("--ds-pace-cycles=").size()));
-        } else if (a.starts_with("--ds-pace-count=")) {
-            passFeatureConfig.dagFeatures.dsPaceCount =
-                std::stoi(a.substr(std::string("--ds-pace-count=").size()));
         } else if (a.starts_with("--ds-batch-wmmas=")) {
             passFeatureConfig.dagFeatures.dsBatchWmmas =
                 std::stoi(a.substr(std::string("--ds-batch-wmmas=").size()));
@@ -585,9 +573,6 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-read-cycles-per-load=")) {
             passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
                 std::stoi(a.substr(std::string("--ds-read-cycles-per-load=").size()));
-        } else if (a.starts_with("--tensor-load-land-cycles=")) {
-            passFeatureConfig.dagFeatures.tensorLoadLandCycles =
-                std::stoi(a.substr(std::string("--tensor-load-land-cycles=").size()));
         } else if (a.starts_with("--wmma-refill-mode=")) {
             const std::string v = a.substr(std::string("--wmma-refill-mode=").size());
             passFeatureConfig.dagFeatures.wmmaRefillMode =

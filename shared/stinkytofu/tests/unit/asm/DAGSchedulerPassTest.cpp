@@ -174,14 +174,12 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // barrierHalfSlack < 0 leaves DagFeatures' default (0).
-    void runPassWithUnrollGemm(int barrierHalfSlack = -1, bool dsSpread = true) {
+    void runPassWithUnrollGemm(bool dsSpread = true) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsSpread = dsSpread;
-        if (barrierHalfSlack >= 0) pfc.dagFeatures.barrierHalfSlack = barrierHalfSlack;
         ctx.setPassFeatureConfig(pfc);
         pass->run(*func, ctx, am);
     }
@@ -785,63 +783,8 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_EQ(waits, 2);
 }
 
-// Windows that miss each other still have the 2+2+1 separation budget free, so
-// each signal/wait pair is spread by 2 WMMA windows. The after pair's wait
-// moves later; the before pair's signal moves earlier. Proportional placement
-// is the case that keeps a pair on one threshold.
-TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairSpreadsSignalAndWait) {
-    bb->addSuccessor(bb);
-
-    // One token-0 ds_load consumed by the first WMMA, then independent WMMAs,
-    // so the after window stays near the front. The token-1 ds_load and its
-    // consumer sit at the end, so the before window stays near the back.
-    // 1 + 22 + 1 = 24 WMMAs: after threshold 9, before threshold 17, and
-    // 17 >= 9 + 5 so Layer 2 reports no overlap.
-    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
-    StinkyInstruction* afterConsumer =
-        createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
-    for (int i = 0; i < 22; ++i)
-        createWmmaF32_16x16x16_bf16(/*destStart=*/400 + i * 16, /*src0Start=*/64 + i * 16);
-    auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
-    createMovableTensorLoad(bb, /*src0Reg=*/220, /*src1Reg=*/224, /*ldsToken=*/0);
-    auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
-    createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
-    StinkyInstruction* beforeConsumer =
-        createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
-    createUnrelatedDsLoads(22);  // 24 ds_loads over 24 WMMAs: one window per ds_load
-
-    runPassWithUnrollGemm(/*barrierHalfSlack=*/2);
-
-    const auto* overlaps = am.getCachedResult<Layer2BarrierOverlapAnalysis>();
-    ASSERT_NE(overlaps, nullptr);
-    EXPECT_FALSE(overlaps->contains(afterSignal, beforeSignal));
-    EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
-
-    auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
-        int count = 0;
-        bool started = false;
-        for (const IRBase& ir : *bb) {
-            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-            if (inst == nullptr) continue;
-            if (inst == to) return started ? count : -1;
-            if (started && isMatrixInstruction(*inst)) ++count;
-            if (inst == from) started = true;
-        }
-        return -1;
-    };
-
-    EXPECT_LT(positionOf(*bb, afterSignal), positionOf(*bb, afterWait)) << scheduleOrder(*bb);
-    EXPECT_EQ(wmmasBetween(afterSignal, afterWait), 2) << scheduleOrder(*bb);
-    EXPECT_LT(positionOf(*bb, beforeSignal), positionOf(*bb, beforeWait)) << scheduleOrder(*bb);
-    EXPECT_EQ(wmmasBetween(beforeSignal, beforeWait), 2) << scheduleOrder(*bb);
-    EXPECT_LT(positionOf(*bb, afterWait), positionOf(*bb, beforeSignal)) << scheduleOrder(*bb);
-    EXPECT_GE(positionOf(*bb, afterConsumer), 0);
-    EXPECT_GE(positionOf(*bb, beforeConsumer), 0);
-}
-
-// BarrierHalfSlack=0 makes separationSlack 1 and does not move either half,
-// so a non-overlapping pair stays on one threshold and issues together.
-TEST_F(DAGSchedulerPassTest, BarrierHalfSlackZeroKeepsNonOverlappingPairTogether) {
+// A non-overlapping pair stays on one threshold and issues together.
+TEST_F(DAGSchedulerPassTest, NonOverlappingBarrierPairStaysTogether) {
     bb->addSuccessor(bb);
 
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
@@ -854,7 +797,7 @@ TEST_F(DAGSchedulerPassTest, BarrierHalfSlackZeroKeepsNonOverlappingPairTogether
     createMovableDsLoad(/*destReg=*/500, /*addrReg=*/204, /*ldsToken=*/1);
     createWmmaF32_16x16x16_bf16(/*destStart=*/800, /*src0Start=*/500);
 
-    runPassWithUnrollGemm(/*barrierHalfSlack=*/0);
+    runPassWithUnrollGemm();
 
     auto wmmasBetween = [&](const StinkyInstruction* from, const StinkyInstruction* to) {
         int count = 0;
@@ -1234,7 +1177,7 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
         createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
 
     int beforeCount = countStinkyInstructions(*bb);
-    runPassWithUnrollGemm(/*barrierHalfSlack=*/-1, /*dsSpread=*/false);
+    runPassWithUnrollGemm(/*dsSpread=*/false);
     EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
         << "hazard deferral must not drop instructions";
 
@@ -2513,18 +2456,39 @@ TEST_F(DAGSchedulerPassTest, WmmaQueue_KeepsTheQueueFed) {
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
+    pfc.dagFeatures.wmmaQueueDepth = 4;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWdddddd");
+}
+
+// A ready ds_load that carries no wait does not wait for the queue to refill: the first WMMA
+// opens the window and the ds_loads follow it at once (free credits), where a refill-first rule
+// would issue WMMAs until the queued cover is met.
+TEST_F(DAGSchedulerPassTest, WmmaRefill_ReadyDsLoadWithoutAWaitIssuesBeforeTheQueueFills) {
+    for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
+    for (int i = 0; i < 8; i++) createWmmaF32_16x16x16_bf16(8 * i, 100 + 8 * i);
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
     pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
     pfc.dagFeatures.dsReadQueueDepth = 16;
     pfc.dagFeatures.wmmaQueueDepth = 4;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
-    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWddddddWddWWWW");
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape.substr(0, 2), "Wd") << shape;
+    EXPECT_EQ(shape, "WdddddddWdWWWWWW");
 }
 
-// Refill modes: with depth 8 and a refill line of 16, a refill that finds the queue low issues
-// a whole batch before the next ds_load (Fixed: wmmaBatchSize of them; Dynamic: up to the
-// refill target in cycles).
+// Refill modes: a refill only hides a stall, so it runs while the next ds_load would wait (here
+// for a credit: a ds queue of 2). Fixed issues wmmaBatchSize WMMAs per refill, Dynamic up to the
+// refill target in cycles; a refill that finds the queue still low starts again.
 TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill) {
     for (int i = 0; i < 8; i++) createMovableDsLoad(200 + i * 4, 80, i + 1);
     for (int i = 0; i < 12; i++) createWmmaF32_16x16x16_bf16(8 * (i % 6), 100 + 8 * i);
@@ -2532,15 +2496,15 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchIssuesBatchSizeWmmasPerRefill)
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
-    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
     pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Fixed;
     pfc.dagFeatures.wmmaBatchSize = 4;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
-    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWWddddddddWWWWWWWW");
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
 }
 
 TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
@@ -2550,15 +2514,15 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_DynamicFillsToTarget) {
     ctx.setGemmTileConfig(config);
     PassFeatureConfig pfc;
     pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
-    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+    pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
     pfc.dagFeatures.wmmaQueueDepth = 8;
     pfc.dagFeatures.wmmaQueueCoverCycles = 16;
     pfc.dagFeatures.wmmaRefillMode = PassFeatureConfig::WmmaRefillMode::Dynamic;
     pfc.dagFeatures.wmmaRefillToCycles = 32;
     ctx.setPassFeatureConfig(pfc);
     pass->run(*func, ctx, am);
-    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WWWWWddddddddWWWWWWW");
+    EXPECT_EQ(wdShape(mnemonicSequence(*bb)), "WddWWWWWWWWWdWdWdddd");
 }
 
 // Even ds_load spread: the ds_loads follow the WMMAs instead of bursting at the start.
@@ -2607,8 +2571,8 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
-        pfc.dagFeatures.dsSpread = false;  // queue / refill mechanics, not the spread
-        pfc.dagFeatures.dsReadQueueDepth = 16;
+        pfc.dagFeatures.dsSpread = false;      // queue / refill mechanics, not the spread
+        pfc.dagFeatures.dsReadQueueDepth = 2;  // a credit wait for the refill to hide
         pfc.dagFeatures.wmmaQueueDepth = 4;
         pfc.dagFeatures.wmmaQueueCoverCycles = 16;
         if (v == 1) pfc.dagFeatures.wmmaBatchSize = 1;
@@ -2617,5 +2581,5 @@ TEST_F(DAGSchedulerPassTest, WmmaRefill_FixedBatchOfOneMatchesTheDefault) {
         shapes[v] = wdShape(mnemonicSequence(*bb));
     }
     EXPECT_EQ(shapes[0], shapes[1]);
-    EXPECT_EQ(shapes[0], "WWWddddddWddWWWW");
+    EXPECT_EQ(shapes[0], "WddWWWWWWWdddddd");
 }

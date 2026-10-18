@@ -93,8 +93,6 @@ the region's WMMAs. This replaces the old cap / throttle / slot-first / hide-bud
 | Module option | Default | CLI | Meaning |
 |---|---|---|---|
 | `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | Pace the region's ds_loads by WMMA batch (`DsBatchWmmas` WMMAs). Each batch takes the region's even share `ceil(ds_loads / usable batches)`, where the last `ceil(LDS return time / WMMA window) + WmmaQueueDepth` WMMAs of the region are kept free for the last load to return. A sparse region therefore spreads its loads, a dense one gets a share above what the LDS rate fits (the credits throttle it), and a batch that began behind the even line takes `DsCatchUpPace` more. Nothing is held once the region's last WMMA has issued; a held ds_load never holds a WMMA. false = a ds_load issues as soon as it is ready and a credit is free (the credit queue is the only pacing). |
-| `DsPaceCycles` | -1 → searched | `--ds-pace-cycles=N` | X of a fixed ds_load density for the `TensorLoadLandCycles` search only: cycles between groups. |
-| `DsPaceCount` | -1 → searched | `--ds-pace-count=N` | Y of a fixed ds_load density for the `TensorLoadLandCycles` search only: ds_loads per group. |
 | `DsBatchWmmas` | 4 | `--ds-batch-wmmas=N` | WMMAs per ds_load pacing batch (independent of the queue refill batch `WmmaBatchSize`). |
 | `DsCatchUpPace` | 2 | `--ds-catch-up-pace=N` | ds_loads a batch may take above the even share when it began behind the even line. 0 = no catching up. |
 | `DsReadQueueDepth` | 0 → HW 16 | `--ds-read-queue-depth=N` | In-flight ds_load credits modeled for the LDS return queue. A credit lives `HWModel::lds.readCreditLifetime` cycles. |

@@ -1,17 +1,17 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --wmma-batch-size=4 --ds-spread --debug-pass StinkyDAGSchedulerPass --print-output 2>&1
 #
 # A ready barrier waits for the WMMA queue to cover its stall (WmmaBarrierCoverCycles, automatic:
-# a full 8-deep queue, 64 cycles) instead of issuing the moment its threshold is met, so the
-# queued WMMAs hide the barrier stall:
+# a tail of 4 WMMAs, 32 cycles) instead of issuing the moment its threshold is met, so the queued
+# WMMAs hide the barrier stall:
 #
 #   wmma wmma ds ds wmma wmma wmma barrier
 #
-# 24 independent WMMAs are available; the barrier threshold is 18. Without the hold the barrier
-# issues after 22 WMMAs with 15 cycles queued; with it, after 24 WMMAs (all that are ready) with
-# 29 queued. The 25th WMMA reads the post-barrier ds_loads, so it cannot be used for cover.
+# 24 independent WMMAs are available and the barrier threshold is 18. The barrier issues after 22
+# WMMAs with 37 cycles queued (36 for the second half of the pair), the cover met. The 25th WMMA
+# reads the post-barrier ds_loads, so it cannot be used for cover.
 #
-# CHECK: [CDNA5 barrierCover] wmmaIssued=24 queuedCover=29
-# CHECK: [CDNA5 barrierCover] wmmaIssued=24 queuedCover=28
+# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=37
+# CHECK: [CDNA5 barrierCover] wmmaIssued=22 queuedCover=36
 #
 # The barrier pair still precedes the ds_loads that read the data it protects.
 # CHECK-LABEL: @barrier_cover

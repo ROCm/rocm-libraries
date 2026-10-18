@@ -131,17 +131,13 @@
     X(PrefetchLeadMinStageWmmas, int, 64) /* shorter stages run with no lead */                    \
     X(WmmaBarrierCoverCycles, int, -1)    /* cover kept for a barrier; < 0 = automatic */          \
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
-    X(DsPaceCycles, int, -1)              /* TensorLoadLand density X (cycles); < 0 = searched */  \
-    X(DsPaceCount, int, -1)          /* TensorLoadLand density Y (ds_loads); <= 0 = searched */    \
-    X(DsBatchWmmas, int, 4)          /* WMMAs per ds_load pacing batch */                          \
-    X(DsCatchUpPace, int, 2)         /* extra ds_loads per batch when behind the even line */      \
-    X(WmmaQueueDepth, int, 8)        /* WMMAs the matrix pipe buffers; 1 = queue model off */      \
+    X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
+    X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
+    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, 56) /* queued WMMA cover kept (8 WMMAs of 8-14 cycles ~ 50-56) */ \
     X(DsReadCyclesPerLoad, int, 6)   /* LDS return rate (cycles per ds_load); 0 = off */           \
-    X(TensorLoadLandCycles, int, 0)  /* TDM landing cycles of a tensor_load; 0 = off */            \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
-    X(TensorLoadDsLoadGapCycles, int, 64)                                                          \
-    X(BarrierHalfSlack, int, 0) /* WMMA windows inside a signal/wait pair; 0 = together */
+    X(TensorLoadDsLoadGapCycles, int, 64)
 
 namespace stinkytofu {
 /**
