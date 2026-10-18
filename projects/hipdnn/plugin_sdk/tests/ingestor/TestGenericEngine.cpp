@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -966,6 +967,230 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
     ASSERT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
     EXPECT_EQ(evaluated.uhd_id, described.uhd_id);
     EXPECT_GT(scoredKernels.load(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Golden pins of the unslotted engine contract.
+// ---------------------------------------------------------------------------
+
+/// getDetails advertises the out-of-band benchmarking knob first, then one knob per UED
+/// knob under its bare KMD field id, in declaration order. The stub catalog holds the one
+/// kernel {block_size 64, dtype FLOAT}.
+TEST(TestIngestorGenericEngine,
+     UnslottedGoldenGetDetailsAdvertisesBareKmdFieldIdsAfterTheBenchmarkingKnob)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubEngine engine(
+        makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), makeStubStateManager(), resolver);
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6E));
+    hipdnnPluginConstData_t details{};
+    engine.getDetails(handle, graph, details);
+
+    ASSERT_NE(details.ptr, nullptr);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
+                                                                                     details.size);
+    ASSERT_TRUE(wrapper.isValid());
+    const auto& knobs = wrapper.knobWrappers();
+    ASSERT_EQ(knobs.size(), 3U);
+
+    EXPECT_EQ(knobs[0]->knobId(), "global.benchmarking");
+    EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
+    EXPECT_EQ(knobs[0]->defaultValueAs<IntValue>().value(), 0);
+    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().min_value(), 0);
+    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().max_value(), 1);
+    EXPECT_EQ(knobs[0]->constraintAs<IntConstraint>().step(), 1);
+
+    EXPECT_EQ(knobs[1]->knobId(), "block_size");
+    EXPECT_EQ(knobs[1]->description(),
+              "Kernel metadata field 'block_size' of engine 'test:engine'");
+    EXPECT_EQ(knobs[1]->defaultValueAs<IntValue>().value(), 64);
+    const auto& blockSize = knobs[1]->constraintAs<IntConstraint>();
+    EXPECT_EQ(blockSize.min_value(), 64);
+    EXPECT_EQ(blockSize.max_value(), 64);
+    EXPECT_EQ(blockSize.step(), 1);
+    ASSERT_NE(blockSize.valid_values(), nullptr);
+    ASSERT_EQ(blockSize.valid_values()->size(), 1U);
+    EXPECT_EQ(blockSize.valid_values()->Get(0), 64);
+
+    EXPECT_EQ(knobs[2]->knobId(), "dtype");
+    EXPECT_EQ(knobs[2]->description(),
+              "Kernel metadata field 'dtype' of engine 'test:engine'"
+              " (ordinal: an index into the field's value set)");
+    EXPECT_EQ(knobs[2]->defaultValueAs<IntValue>().value(), 0);
+    const auto& dtype = knobs[2]->constraintAs<IntConstraint>();
+    EXPECT_EQ(dtype.min_value(), 0);
+    EXPECT_EQ(dtype.max_value(), 0);
+    EXPECT_EQ(dtype.step(), 1);
+    ASSERT_NE(dtype.valid_values(), nullptr);
+    ASSERT_EQ(dtype.valid_values()->size(), 1U);
+    EXPECT_EQ(dtype.valid_values()->Get(0), 0);
+}
+
+/// An unslotted descriptor set with one matcher, one dispatch and one kernel, built the
+/// way the fixtures build them, so the hashes pinned below are over a fully known value.
+DescriptorSet makeUnslottedGoldenSet(bool withRanker)
+{
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({BLOCK_SIZE});
+    set.engine.heuristicId.reset();
+    set.engine.graphMatchNativeSymbol = GRAPH_MATCH_SYMBOL;
+    set.schema.id = SCHEMA_ID;
+    set.schema.name = "test schema";
+    set.schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                         {DTYPE, MetadataType::STRING, std::nullopt}};
+    set.matchers = {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
+    set.dispatches = {{DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.matcherIds = {KERNEL_MATCHER_ID};
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
+    set.packs = {pack};
+
+    if(withRanker)
+    {
+        HeuristicDescriptor ranker;
+        ranker.id = HEURISTIC_ID;
+        ranker.name = "native ranker";
+        ranker.adapter = UhdAdapter::NATIVE;
+        ranker.nativeSymbol = SCORE_SYMBOL;
+        set.engine.heuristicId = HEURISTIC_ID;
+        set.heuristic = ranker;
+    }
+    return set;
+}
+
+/// The selector revision is `generic-untuned-v1/` plus the SHA-256 of the compact,
+/// key-sorted JSON of the set's provenance, graph match, knobs, rankers, matchers,
+/// dispatches and packs. Expected digests were computed over that JSON independently of
+/// the C++ (sorted keys, no whitespace); any change to what an unslotted engine hashes, or
+/// how, changes them and orphans every trained model's `trained_against`.
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionOfAnEngineWithoutARanker)
+{
+    const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+
+    EXPECT_EQ(
+        engineSelectorRevision(set),
+        "generic-untuned-v1/a19484e1d5bf56d1e57c4b26c42f5af909e3f26325591a6c0bf925b06fde09f6");
+}
+
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionOfAnEngineWithARanker)
+{
+    const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+
+    EXPECT_EQ(
+        engineSelectorRevision(set),
+        "generic-untuned-v1/08d0a086e080663548bcda1ae0e01b557cd58734e6d8281839e337ae6de179b2");
+}
+
+/// No ranker: no UHD id, no model hash, and nothing a cached ranking could be invalidated
+/// by, so the disk cache stays enabled.
+TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentityWithoutARanker)
+{
+    const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+    const auto identity = engineIdentity(set);
+
+    EXPECT_EQ(identity.name, "test:engine");
+    EXPECT_EQ(identity.version.str(), "1.0.0");
+    EXPECT_EQ(identity.uhdId, "");
+    EXPECT_EQ(identity.modelHash, "");
+    EXPECT_TRUE(identity.contentIdentified);
+    EXPECT_EQ(engineModelHash(set), "");
+    EXPECT_TRUE(engineContentIdentified(set));
+}
+
+/// With a ranker the model hash is the SHA-256 of the compact JSON `{"<metric>@default":
+/// <ranker identity>}` (here the metric-less ranker, key "@default"), computed
+/// independently of the C++.
+TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentityWithARanker)
+{
+    const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+    const auto identity = engineIdentity(set);
+
+    EXPECT_EQ(identity.name, "test:engine");
+    EXPECT_EQ(identity.version.str(), "1.0.0");
+    EXPECT_EQ(identity.uhdId, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2");
+    EXPECT_EQ(identity.modelHash,
+              "b8da6ea79cf2e67a5ad47173d35c663ab163fba11d23dce8cc193c0d02c164ee");
+    EXPECT_TRUE(identity.contentIdentified);
+}
+
+/// A ranker naming a model artifact with no digest cannot be versioned, so the engine is
+/// not content-identified and the winner cache is declined; a digest restores it.
+TEST(TestIngestorGenericEngine, UnslottedGoldenContentIdentifiedNeedsADigestForANamedArtifact)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+    set.heuristic->modelArtifactPath = "model.bin";
+    EXPECT_FALSE(engineContentIdentified(set));
+    EXPECT_FALSE(engineIdentity(set).contentIdentified);
+
+    set.heuristic->modelHash = std::string(64, 'a');
+    EXPECT_TRUE(engineContentIdentified(set));
+    EXPECT_TRUE(engineIdentity(set).contentIdentified);
+
+    // The per-metric rankers are checked too, not only the default.
+    auto perMetric = makeUnslottedGoldenSet(/*withRanker=*/false);
+    HeuristicDescriptor modelled;
+    modelled.id = HEURISTIC_ID;
+    modelled.adapter = UhdAdapter::TREE_DATA;
+    modelled.modelArtifactPath = "model.bin";
+    perMetric.heuristicsByMetric["tflops"]["default"] = modelled;
+    EXPECT_FALSE(engineContentIdentified(perMetric));
+}
+
+/// An engine built without an explicit selector revision reports
+/// `generic-untuned-v1/<UED id>/<UED revision>`: a model trained against exactly that
+/// string is served, and one trained against anything else is refused naming it.
+TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedIdAndRevision)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.golden_l1";
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const std::vector<nlohmann::json> signature = {"$device.cu_count"};
+    HeuristicDescriptor model;
+    model.id = testId(0xA6);
+    model.name = "engine throughput";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = L1_SYMBOL;
+    model.featuresSignature = signature;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+    model.objective = "max";
+    model.score = {"tflops", true, "identity"};
+    const auto evaluate = [&](const std::string& trainedAgainst) {
+        model.trainedAgainstSelectorRevision = trainedAgainst;
+        model.trainedAgainstJson
+            = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"umd", nlohmann::json::array()},
+               {"selector_revision", trainedAgainst}};
+        const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}),
+                                makeStubStateManager(),
+                                resolver,
+                                {{"tflops", {{"default", model}}}});
+        StubHandle handle;
+        const TestGraph graph(makeGraphId(0x6F));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+        return engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    };
+
+    const std::string expected = "generic-untuned-v1/e0e0e0e0-e0e0-e0e0-e0e0-e0e0e0e0e0e0/1.0.0";
+    const auto current = evaluate(expected);
+    EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
+
+    const auto stale = evaluate("selector-old");
+    EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(stale.reason.find(", engine reports " + expected), std::string::npos) << stale.reason;
+
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
 }
 
 } // namespace

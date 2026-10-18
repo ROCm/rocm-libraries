@@ -424,6 +424,38 @@ TEST(TestKernelIngestorStateManager, RejectsATupleSharedByTwoPacksAtTheSameGener
                  std::invalid_argument);
 }
 
+/// An unslotted engine still refuses, at construction, two kernels sharing one id even when
+/// their metadata tuples differ: an id names one candidate per device. (The duplicate-tuple
+/// counterpart is the RejectsTwoKernelsSharingAMetadataTuple case of
+/// TestKernelIngestorStateManagerConstructionThrows.)
+TEST(TestKernelIngestorStateManager, UnslottedGoldenRejectsTwoKernelsSharingAKernelId)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto pack = makePack({GRAPH_MATCHER_ID});
+    // testId(0x64) is already "kernel_64_float"; this one differs in tuple only.
+    pack.kernels.push_back(makeKernel(testId(0x64), "kernel_same_id", 512, "FLOAT"));
+
+    try
+    {
+        const StateManager manager(makeSchema(),
+                                   makeTestMatchers(),
+                                   makeTestDispatches(),
+                                   {pack},
+                                   std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                   "test.graph");
+        FAIL() << "expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        EXPECT_NE(
+            std::string(ex.what()).find("is declared twice on an arch both declarations reach"),
+            std::string::npos)
+            << ex.what();
+    }
+}
+
 inline bool declineTheExplicitKernel(const MatchContext& context,
                                      const BoundTokens& bound,
                                      const KernelDefinition& kernel)

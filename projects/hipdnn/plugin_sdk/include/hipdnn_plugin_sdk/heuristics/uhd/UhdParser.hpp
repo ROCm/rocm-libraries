@@ -202,12 +202,34 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
     revision(text(value, "revision", where), where);
 }
 
+/// RFC 0021 §4: a slot name is a lowercase identifier. This checks the form only; `global` is
+/// reserved by RFC 0004 for engine-wide knobs, and callers reject it separately.
+inline bool isSlotName(std::string_view name)
+{
+    return !name.empty() && name.front() >= 'a' && name.front() <= 'z'
+           && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+              });
+}
+
 /// Validate `trained_against` (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`, all
 /// three) for UED-bound models, and/or a `selector_revision` for engines without a UED.
 /// `feature_semantics_revision` is optional and does not satisfy either form on its own.
-inline void provenance(const nlohmann::json& value, const std::string& where)
+///
+/// RFC 0021 §9 adds two slot forms, valid only in a 1.1 document (@p slotForms): `slot`
+/// beside `kmd` for one slot's ranker, and `kmds: [{slot, id, revision}]` in place of `kmd`
+/// for a slotted engine's `predict_engine` model. A 1.0 document naming either is rejected
+/// with "uses slot provenance".
+inline void provenance(const nlohmann::json& value, const std::string& where, bool slotForms)
 {
-    keys(value, {"ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"}, where);
+    if(!slotForms && value.is_object() && (value.contains("slot") || value.contains("kmds")))
+    {
+        fail("trained_against uses slot provenance ('slot' or 'kmds') in " + where
+             + ", which requires UHD version 1.1");
+    }
+    keys(value,
+         {"ued", "kmd", "kmds", "slot", "umd", "selector_revision", "feature_semantics_revision"},
+         where);
     if(value.contains("feature_semantics_revision"))
     {
         // Integer only (not 1.0 or a bool), and must fit int64_t. Parsed JSON is unsigned;
@@ -223,8 +245,8 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
             fail("trained_against.feature_semantics_revision must be an integer >= 1 in " + where);
         }
     }
-    const bool namesDescriptorSet
-        = value.contains("ued") || value.contains("kmd") || value.contains("umd");
+    const bool namesDescriptorSet = value.contains("ued") || value.contains("kmd")
+                                    || value.contains("kmds") || value.contains("umd");
     const bool namesSelector = value.contains("selector_revision");
     if(!namesDescriptorSet && !namesSelector)
     {
@@ -235,13 +257,64 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
         // Opaque: only the provider that produced it can interpret it.
         (void)text(value, "selector_revision", where);
     }
+    if(value.contains("slot") && !value.contains("kmd"))
+    {
+        fail("trained_against.slot requires kmd, and excludes kmds, in " + where);
+    }
+    if(value.contains("kmd") && value.contains("kmds"))
+    {
+        fail("trained_against names both kmd and kmds in " + where);
+    }
     if(!namesDescriptorSet)
     {
         return;
     }
-    // All three or none: a partial descriptor set is unverifiable.
+    // All three or none: a partial descriptor set is unverifiable. `kmds` stands in for `kmd`.
     dependency(required(value, "ued", where), where + " ued");
-    dependency(required(value, "kmd", where), where + " kmd");
+    if(value.contains("kmds"))
+    {
+        const auto& slots = value.at("kmds");
+        if(!slots.is_array() || slots.empty())
+        {
+            fail("trained_against.kmds must be a non-empty array in " + where);
+        }
+        std::set<std::string> names;
+        for(const auto& entry : slots)
+        {
+            keys(entry, {"slot", "id", "revision"}, where + " kmds");
+            const auto name = text(entry, "slot", where + " kmds");
+            if(!isSlotName(name) || name == "global")
+            {
+                std::string message = "trained_against.kmds slot '";
+                message += name;
+                message += "' is not a valid slot name in ";
+                message += where;
+                fail(message);
+            }
+            if(!names.insert(name).second)
+            {
+                std::string message = "trained_against.kmds names slot '";
+                message += name;
+                message += "' twice in ";
+                message += where;
+                fail(message);
+            }
+            (void)hipdnn_flatbuffers_sdk::utilities::parseUuid(text(entry, "id", where + " kmds"));
+            revision(text(entry, "revision", where + " kmds"), where + " kmds");
+        }
+    }
+    else
+    {
+        dependency(required(value, "kmd", where), where + " kmd");
+    }
+    if(value.contains("slot"))
+    {
+        const auto name = text(value, "slot", where);
+        if(!isSlotName(name) || name == "global")
+        {
+            fail("trained_against.slot '" + name + "' is not a valid slot name in " + where);
+        }
+    }
     const auto& matchers = required(value, "umd", where);
     if(!matchers.is_array())
     {
@@ -399,10 +472,12 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           // Free-form authoring notes, never read; root only (RFC 0019 §4.1).
           "provenance"},
          where);
-    if(text(root, "version", where) != "1.0")
+    const auto declaredVersion = text(root, "version", where);
+    if(declaredVersion != "1.0" && declaredVersion != "1.1")
     {
         fail("unsupported UHD version in " + where);
     }
+    const bool slotProvenance = declaredVersion == "1.1";
     UhdConfig result;
     result.uhdId = text(root, "id", where);
     (void)hipdnn_flatbuffers_sdk::utilities::parseUuid(result.uhdId);
@@ -537,7 +612,7 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     if(root.contains("trained_against"))
     {
         result.trainedAgainst = root.at("trained_against");
-        provenance(result.trainedAgainst, where + " trained_against");
+        provenance(result.trainedAgainst, where + " trained_against", slotProvenance);
     }
     if(!result.featuresSignature.empty()
        && (result.featuresHash.empty() || result.trainedAgainst.is_null()))

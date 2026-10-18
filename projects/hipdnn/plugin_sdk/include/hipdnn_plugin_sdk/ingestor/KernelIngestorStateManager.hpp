@@ -13,8 +13,10 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
@@ -121,14 +123,60 @@ struct MetadataTupleValuesHash
     }
 };
 
+/// One slot's selection state as a slotted state manager is constructed with it (RFC 0021 §3):
+/// the per-slot counterpart of the schema, packs and ranker an unslotted engine passes directly.
+struct KernelSlotInput
+{
+    /// The slot's name, unique within the engine.
+    std::string name;
+    MetadataSchema schema;
+    /// The packs whose `slot` names this one; may be empty (the engine then declines).
+    std::vector<KernelDescriptorPack> packs;
+    std::shared_ptr<IKernelHeuristic> heuristic;
+};
+
+/// Whether an engine accepts one graph on one device, and why not (RFC 0021 §3 rule 2).
+struct SlotProgramVerdict
+{
+    bool applicable = false;
+    /// Why the engine declined; empty when it is applicable. For an invalid shared-workspace
+    /// token or offset it names the token.
+    std::string declineReason;
+    /// The validated `shared_workspace` token value in bytes; 0 without a token.
+    size_t sharedWorkspaceBytes = 0;
+};
+
+/// The alignment, in bytes, of the shared region of a slotted engine's workspace (RFC 0021 §6).
+inline constexpr size_t SHARED_WORKSPACE_ALIGNMENT = 256;
+
+/// The bytes the shared region occupies: @p sharedBytes rounded up to
+/// SHARED_WORKSPACE_ALIGNMENT, which is the offset at which scratch begins.
+constexpr size_t alignSharedWorkspace(size_t sharedBytes)
+{
+    return (sharedBytes + SHARED_WORKSPACE_ALIGNMENT - 1) / SHARED_WORKSPACE_ALIGNMENT
+           * SHARED_WORKSPACE_ALIGNMENT;
+}
+
+/// The bound token a slotted engine's graph match publishes with the scratch offset: the
+/// shared size rounded up to SHARED_WORKSPACE_ALIGNMENT.
+inline constexpr const char* SCRATCH_OFFSET_TOKEN = "ws.scratch_offset";
+
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
 /// how to launch one. Answers isApplicable (unsortedDefinitions non-empty), getDetails
 /// (sortedDefinitions), getMaxWorkspaceSize (dispatchHandlerFor per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Thread safety. `_catalogCache`, `_calibratedCache`, and `_winnerCache` are `LruCache`s that
-/// synchronize internally; `_winnerCacheMutex` guards the per-shard "loaded" set and the
-/// one-shot failure-log set.
+/// Slots (RFC 0021). The manager holds one SlotState per slot: its schema, definitions,
+/// ordinal domains, ranker and catalogs. An unslotted engine is exactly one implicit slot with
+/// an empty name, and the accessors above and below that take no slot answer for it only. A
+/// slotted engine answers through the overloads that take a slot index; the slot-less ones
+/// throw std::logic_error, because no single catalog answers for several slots. One graph match
+/// serves a catalog build for every slot, and the engine applies only if every slot's catalog is
+/// non-empty and its `shared_workspace` token is valid (slotProgramVerdict).
+///
+/// Thread safety. `_catalogCache`, `_calibratedCache`, `_verdictCache`, `_winnerCache`,
+/// `_programCache` and `_slotCatalogIds` are `LruCache`s that synchronize internally;
+/// `_winnerCacheMutex` guards the per-shard "loaded" set and the one-shot failure-log set.
 ///
 /// `_winnerCacheMutex` may be held across a `_winnerCache` call, never the reverse (an
 /// `LruCache` calls no user code), so they cannot deadlock. Matchers, the heuristic, and the
@@ -152,6 +200,21 @@ struct MetadataTupleValuesHash
 template <typename THandle>
 class KernelIngestorStateManager
 {
+    /// One slot's selection state; an unslotted engine has exactly one, unnamed.
+    struct SlotState
+    {
+        std::string name;
+        MetadataSchema schema;
+        std::vector<KernelDescriptorPack> packs;
+        /// One entry per pack, parallel to `packs`: its kernels' context-independent
+        /// definitions, completed once at construction.
+        std::vector<std::vector<KernelDefinition>> definitions;
+        /// Per non-integer metadata field, its value set in index order, so the field is
+        /// addressable by an int64 knob. Fixed at construction.
+        std::map<std::string, std::vector<MetadataValue>> ordinalDomains;
+        std::shared_ptr<IKernelHeuristic> heuristic;
+    };
+
 public:
     /// How many (graph, device) catalogs to retain; eviction costs a rematch, never a
     /// wrong answer.
@@ -161,6 +224,7 @@ public:
     /// re-read from the on-disk shard, so eviction costs at most one redundant sweep.
     static constexpr size_t DEFAULT_WINNER_CACHE_CAPACITY = 4096;
 
+    /// An unslotted engine: one implicit slot.
     /// @throws std::invalid_argument bad pack reference, or two kernels sharing a metadata tuple
     ///         that compete at the same arch tier on a device.
     /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
@@ -185,64 +249,18 @@ public:
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
                                EngineIdentity engine = {},
                                size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : _schema(std::move(schema))
-        , _packs(std::move(packs))
-        , _heuristic(std::move(heuristic))
-        , _graphMatchFn(graphMatchSymbol.empty()
-                            ? nullptr
-                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
-        , _catalogCache(catalogCacheCapacity)
-        // Same key and capacity as _catalogCache: both answer for (graph, device, engine
-        // version). Kept outside `Catalog` because no matcher, scorer or formula reads it.
-        , _calibratedCache(catalogCacheCapacity)
-        , _engine(std::move(engine))
-        , _winnerCache(winnerCacheCapacity)
+        : KernelIngestorStateManager(
+              false,
+              implicitSlot(std::move(schema), std::move(packs), std::move(heuristic)),
+              {},
+              std::move(matchers),
+              std::move(dispatches),
+              graphMatchSymbol,
+              describedBy,
+              catalogCacheCapacity,
+              std::move(engine),
+              winnerCacheCapacity)
     {
-        if(_heuristic == nullptr)
-        {
-            throw std::invalid_argument("kernel ingestor requires a heuristic");
-        }
-
-        for(auto& matcher : matchers)
-        {
-            const auto id = matcher.id;
-            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
-            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
-            if(resolved.descriptor.scope == MatchScope::GRAPH)
-            {
-                resolved.graphFn
-                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
-            else
-            {
-                resolved.kernelFn
-                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
-            }
-
-            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-        for(auto& dispatch : dispatches)
-        {
-            const auto id = dispatch.id;
-            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
-            resolved.handler = DispatchRegistry<THandle>::resolve(
-                resolved.descriptor.dispatchSymbol,
-                describeDescriptor("dispatch", resolved.descriptor.name, id));
-
-            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
-            {
-                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.descriptor.name
-                                            + "'");
-            }
-        }
-
-        validateAndIndexPacks();
     }
 
     // Pinned in place: catalog pointers into `_definitions` rely on a stable address.
@@ -251,9 +269,74 @@ public:
     KernelIngestorStateManager(KernelIngestorStateManager&&) = delete;
     KernelIngestorStateManager& operator=(KernelIngestorStateManager&&) = delete;
 
+    // PORT(S): C1-07 slotted constructor and slot accessors after develop's deleted copy/move
+    /// A slotted engine: @p slots in launch order. As the unslotted constructor, except that a
+    /// pack breaking a per-slot uniqueness rule (a metadata tuple repeated within a slot, a
+    /// kernel id repeated on overlapping arches within a slot) is dropped with an ERROR instead
+    /// of thrown (RFC 0021 §8). A kernel id shared by two slots is the loader's to refuse.
+    /// @param matchers, dispatches Shared by every slot's packs.
+    /// @param sharedWorkspaceToken The bound token holding the shared region's size (RFC 0021
+    ///        §6); empty when the engine declares none.
+    /// @throws std::invalid_argument as the unslotted constructor, and a slot list that is
+    ///         empty or repeats a name.
+    KernelIngestorStateManager(std::vector<KernelSlotInput> slots,
+                               std::vector<MatchDescriptor> matchers,
+                               std::vector<DispatchDescriptor> dispatches,
+                               const std::string& graphMatchSymbol,
+                               std::string sharedWorkspaceToken = {},
+                               const std::string& describedBy = {},
+                               size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
+                               EngineIdentity engine = {},
+                               size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
+        : KernelIngestorStateManager(true,
+                                     slotStates(std::move(slots)),
+                                     std::move(sharedWorkspaceToken),
+                                     std::move(matchers),
+                                     std::move(dispatches),
+                                     graphMatchSymbol,
+                                     describedBy,
+                                     catalogCacheCapacity,
+                                     std::move(engine),
+                                     winnerCacheCapacity)
+    {
+    }
+
+    /// Whether the engine declares slots (RFC 0021); an unslotted engine has one implicit slot.
+    bool isSlotted() const
+    {
+        return _slotted;
+    }
+
+    /// How many slots select kernels: one for an unslotted engine.
+    size_t slotCount() const
+    {
+        return _slots.size();
+    }
+
+    /// The slot's name; empty for an unslotted engine's implicit slot.
+    const std::string& slotName(size_t slot) const
+    {
+        return slotAt(slot).name;
+    }
+
+    /// The metadata schema slot @p slot's kernels declare.
+    const MetadataSchema& slotSchema(size_t slot) const
+    {
+        return slotAt(slot).schema;
+    }
+
+    /// The `shared_workspace` token; empty when the engine declares none.
+    const std::string& sharedWorkspaceToken() const
+    {
+        return _sharedWorkspaceToken;
+    }
+
+    /// The unslotted engine's schema.
+    /// @throws std::logic_error on a slotted engine; use slotSchema().
     const MetadataSchema& metadataSchema() const
     {
-        return _schema;
+        requireUnslotted("metadataSchema");
+        return _slots.front().schema;
     }
 
     /// Graph bindings only: the L1 path never constructs or ranks a kernel catalog.
@@ -278,6 +361,7 @@ public:
                           const MatchContext& context,
                           std::string& modelId) const
     {
+        requireUnslotted("calibratedRanking");
         const auto key = cacheKey(context);
         if(key.has_value())
         {
@@ -288,7 +372,7 @@ public:
             }
         }
 
-        auto ranking = _heuristic->calibratedRanking(full, context, modelId);
+        auto ranking = _slots.front().heuristic->calibratedRanking(full, context, modelId);
 
         if(key.has_value() && !ranking.empty())
         {
@@ -300,21 +384,74 @@ public:
     }
 
     /// The model calibratedRanking() would use for @p metric on @p arch, from bindings alone.
+    /// Empty for a slotted engine: a slot ranker predicts no time (RFC 0021 §7).
     std::string calibratedModelId(const std::string& metric, const std::string& arch) const
     {
-        return _heuristic->calibratedModelId(metric, arch);
+        return _slotted ? std::string{} : _slots.front().heuristic->calibratedModelId(metric, arch);
+    }
+
+    /// Whether the engine accepts the graph and device @p context names, and why not. For an
+    /// unslotted engine that is whether its catalog is non-empty; for a slotted engine, whether
+    /// every slot's is and the shared-workspace token is valid (RFC 0021 §3 rule 2, §6). A
+    /// slotted engine's graph match runs once per catalog build, however many slots ask.
+    SlotProgramVerdict slotProgramVerdict(const MatchContext& context) const
+    {
+        if(!_slotted)
+        {
+            SlotProgramVerdict verdict;
+            verdict.applicable = !catalogFor(_slots.front(), 0, context).entries.empty();
+            if(!verdict.applicable)
+            {
+                verdict.declineReason = "no kernel applies to the graph";
+            }
+            return verdict;
+        }
+        if(!deviceResolved(context))
+        {
+            return {false, "no device resolved or the device reports no gcnArchName", 0};
+        }
+        const auto key = cacheKey(context, {});
+        if(key.has_value())
+        {
+            if(auto cached = _verdictCache.get(*key); cached.has_value())
+            {
+                return std::move(*cached);
+            }
+        }
+        auto built = buildSlotted(context);
+        auto verdict = built.verdict;
+        storeSlotted(context, std::move(built));
+        return verdict;
+    }
+
+    /// Whether the engine accepts the graph and device @p context names; slotProgramVerdict()
+    /// carries the reason when it does not.
+    bool isApplicable(const MatchContext& context) const
+    {
+        return slotProgramVerdict(context).applicable;
     }
 
     /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<const KernelDefinition*> unsortedDefinitions(const MatchContext& context) const
     {
-        return catalogFor(context).entries;
+        requireUnslotted("unsortedDefinitions");
+        return catalogFor(_slots.front(), 0, context).entries;
     }
 
     /// The unranked catalog and the state matching bound, from one lookup.
     Catalog unsortedCatalog(const MatchContext& context) const
     {
-        return catalogFor(context);
+        requireUnslotted("unsortedCatalog");
+        return catalogFor(_slots.front(), 0, context);
+    }
+
+    /// Slot @p slot's unranked catalog. Every slot's catalog is empty when graph_match declines
+    /// the graph or the `shared_workspace` token is invalid. A slot with no applicable kernel
+    /// leaves the other slots' catalogs populated, so an empty or non-empty catalog does not say
+    /// whether the engine applies: slotProgramVerdict() is the authority.
+    Catalog unsortedCatalog(size_t slot, const MatchContext& context) const
+    {
+        return catalogFor(slotAt(slot), slot, context);
     }
 
     /// nullopt when the graph supplies no usable content key (no or unverifiable
@@ -419,6 +556,16 @@ public:
                       return lhs->kernelId < rhs->kernelId;
                   });
         return catalog;
+        // PORT(S): C1-08 enumerableCatalog: unslotted guard and per-slot overload (body moved to enumerableCatalogOf)
+        requireUnslotted("enumerableCatalog");
+        return enumerableCatalogOf(0, context);
+    }
+
+    /// Slot @p slot's catalog in descriptor-ID order, as enumerableCatalog() for one slot.
+    Catalog enumerableCatalog(size_t slot, const MatchContext& context) const
+    {
+        static_cast<void>(slotAt(slot));
+        return enumerableCatalogOf(slot, context);
     }
 
     /// Every kernel that applies to the graph and device @p context names, best first.
@@ -441,6 +588,10 @@ public:
         {
             return catalogFor(context);
         }
+        // PORT(S): C1-09 sortedCatalog: unslotted guard
+        requireUnslotted("sortedCatalog");
+        return sortedCatalogOf(0, context);
+    }
 
         const auto key = cacheKey(context);
         Catalog catalog = measuredCatalogFor(context, key);
@@ -457,6 +608,13 @@ public:
             _catalogCache.put(*key, catalog);
         }
         return catalog;
+    // PORT(S): C1-10 sortedCatalog(slot) overload beside develop's key-reusing body
+    /// Slot @p slot's catalog ordered by that slot's ranker, or by declared order without one.
+    /// A benchmarked slot record, when one covers the catalog, reorders it (see sortedCatalogOf).
+    Catalog sortedCatalog(size_t slot, const MatchContext& context) const
+    {
+        static_cast<void>(slotAt(slot));
+        return sortedCatalogOf(slot, context);
     }
 
     /// The catalog in measured order, with `measuredRecord` set, when a benchmarked record
@@ -470,6 +628,12 @@ public:
         // Same guard as sortedCatalog: an unresolved device must not cache under a key a
         // later, resolved call for this device reuses.
         if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        // PORT(S): C1-11 measuredCatalog: unslotted guard over catalogFor(slot, 0, context)
+        requireUnslotted("measuredCatalog");
+        Catalog catalog = catalogFor(_slots.front(), 0, context);
+        // A heuristic order is provisional (a sweep can postdate it), so look up a record
+        // even when already sorted. An unresolved device's empty catalog is never covered.
+        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context))
         {
             return catalogFor(context);
         }
@@ -492,6 +656,21 @@ public:
     void
         recordWinner(const WinnerKey& key, const WinnerRecord& record, WinnerWriteCause cause) const
     {
+        // A slot record belongs to a slotted engine, and only slotted engines write v3, so an
+        // unslotted engine's shard bytes cannot change.
+        if(_slotted == key.slot.empty())
+        {
+            throw std::logic_error(
+                _slotted ? "KernelIngestorStateManager::recordWinner needs a slot on a slotted "
+                           "engine; use recordSlotted for a program"
+                         : "KernelIngestorStateManager::recordWinner takes no slot on an "
+                           "unslotted engine");
+        }
+        if(_slotted && !hasSlot(key.slot))
+        {
+            throw std::invalid_argument("recordWinner: unknown slot '" + key.slot + "'");
+        }
+
         if(record.empty())
         {
             // An all-unusable sweep has nothing to record; an empty record would read
@@ -514,8 +693,8 @@ public:
         _winnerCache.put(key, std::move(adopted));
     }
 
-    /// The ranking recorded for @p key, or nullopt, as a copy. A lookup refreshes @p key's
-    /// recency.
+    /// The ranking recorded for @p key (a slot record when `key.slot` is set), or nullopt, as a
+    /// copy. A lookup refreshes @p key's recency.
     ///
     /// Read-through: an in-memory miss loads @p key's on-disk shard once per shard (a
     /// per-shard flag guarded by `_winnerCacheMutex`); it never holds a file lock.
@@ -531,20 +710,147 @@ public:
         return _winnerCache.get(key);
     }
 
-    /// How many rankings are held (at most the winner-cache capacity).
-    size_t winnerCacheSize() const
+    /// The program record for @p baseKey (whose `slot` MUST be empty), or nullopt.
+    ///
+    /// Validated at read time, never trusted as stored. A record is returned only if, for every
+    /// slot in launch order, it names a kernel that is in that slot's catalog as this manager
+    /// last saw it for the graph and device, that slot's record covers every kernel of that
+    /// catalog, and the named kernel is that record's winner (first entry). A rewritten slot
+    /// record with a different winner, a catalog that gained a kernel the record does not
+    /// cover, or a catalog this manager has not seen all yield nullopt. Always nullopt on an
+    /// unslotted engine.
+    std::optional<ProgramRecord> programFor(const WinnerKey& baseKey) const
     {
-        return _winnerCache.size();
+        if(!_slotted || !baseKey.slot.empty() || !baseKey.graph.isUsable())
+        {
+            return std::nullopt;
+        }
+
+        loadShardIfAbsent(baseKey.device.properties().gcnArchName);
+        auto program = _programCache.get(baseKey);
+        if(!program.has_value() || program->picks.size() != _slots.size())
+        {
+            return std::nullopt;
+        }
+
+        for(size_t i = 0; i < _slots.size(); ++i)
+        {
+            const auto& pick = program->picks[i];
+            if(pick.slot != _slots[i].name)
+            {
+                return std::nullopt;
+            }
+            WinnerKey slotKey = baseKey;
+            slotKey.slot = pick.slot;
+            const auto kernels = _slotCatalogIds.get(slotKey);
+            const auto record = winnerFor(slotKey);
+            if(!kernels.has_value() || !record.has_value() || record->empty()
+               || record->front().kernelId != pick.kernelId
+               || std::find(kernels->begin(), kernels->end(), pick.kernelId) == kernels->end())
+            {
+                return std::nullopt;
+            }
+            const bool covered = std::all_of(
+                kernels->begin(), kernels->end(), [&record](const DescriptorId& kernel) {
+                    return std::any_of(
+                        record->begin(), record->end(), [&kernel](const RankedEntry& entry) {
+                            return entry.kernelId == kernel;
+                        });
+                });
+            if(!covered)
+            {
+                return std::nullopt;
+            }
+        }
+        return program;
     }
 
-    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
-    /// holds anything, or this arch's shard has not been attempted yet. Probes the
+    /// Records slotted benchmark results as ONE locked append: each @p slotRecords entry
+    /// (slot name, per-slot ranking) is written under `baseKey` with its slot set, and
+    /// @p program, if present, is written as the program line for @p baseKey (whose
+    /// `slot` MUST be empty). Either part may be absent: a program-line-only call is legal,
+    /// and an empty ranking is skipped as in `recordWinner`. @p slotCause applies to the per-slot
+    /// records and @p programCause to the program line, with the same semantics as
+    /// `recordWinner`'s cause.
+    ///
+    /// A program line is written only if, once this call's slot records are in, every slot's
+    /// record has the program's pick as its winner; otherwise it is dropped (logged) and the
+    /// slot records are still written. Slot lines precede the program line, so a failed append
+    /// never leaves a program line without its slot records.
+    /// @throws std::logic_error on an unslotted engine.
+    /// @throws std::invalid_argument @p baseKey names a slot, a record names an unknown slot,
+    ///         or @p program does not name every slot once, in launch order.
+    void recordSlotted(const WinnerKey& baseKey,
+                       const std::vector<std::pair<std::string, WinnerRecord>>& slotRecords,
+                       const std::optional<ProgramRecord>& program,
+                       WinnerWriteCause slotCause,
+                       WinnerWriteCause programCause) const
+    {
+        requireSlotted("recordSlotted");
+        if(!baseKey.slot.empty())
+        {
+            throw std::invalid_argument("recordSlotted: the base key must not name a slot");
+        }
+        for(const auto& entry : slotRecords)
+        {
+            if(!hasSlot(entry.first))
+            {
+                throw std::invalid_argument("recordSlotted: unknown slot '" + entry.first + "'");
+            }
+        }
+        if(program.has_value())
+        {
+            const bool inLaunchOrder
+                = program->picks.size() == _slots.size()
+                  && std::equal(program->picks.begin(),
+                                program->picks.end(),
+                                _slots.begin(),
+                                [](const ProgramPick& pick, const SlotState& slot) {
+                                    return pick.slot == slot.name;
+                                });
+            if(!inLaunchOrder)
+            {
+                throw std::invalid_argument(
+                    "recordSlotted: the program must name every slot once, in launch order");
+            }
+        }
+
+        if(!baseKey.graph.isUsable())
+        {
+            // As recordWinner: an unkeyable graph's record could never be looked up.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked slotted ranking could not be cached "
+                                   "because its graph yields no key");
+            return;
+        }
+
+        auto plan = writeSlottedToShard(baseKey, slotRecords, program, slotCause, programCause);
+        for(auto& [slot, record] : plan.slotRecords)
+        {
+            WinnerKey key = baseKey;
+            key.slot = slot;
+            _winnerCache.put(key, std::move(record));
+        }
+        if(plan.program.has_value())
+        {
+            _programCache.put(baseKey, std::move(*plan.program));
+        }
+    }
+
+    /// How many rankings are held: slot and whole-graph records, each capped at the winner-cache
+    /// capacity, plus program records, capped at the same capacity separately.
+    size_t winnerCacheSize() const
+    {
+        return _winnerCache.size() + _programCache.size();
+    }
+
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory caches
+    /// hold anything, or this arch's shard has not been attempted yet. Probes the
     /// stripped arch, matching how `loadShardIfAbsent()` latches.
     bool mightHaveWinnerFor(const std::string& gcnArchName) const
     {
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         // size(), not empty(): LruCache exposes no empty().
-        return _winnerCache.size() != 0
+        return _winnerCache.size() != 0 || _programCache.size() != 0
                || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
                       == _loadedWinnerShards.end();
     }
@@ -600,13 +906,22 @@ public:
     /// domain (see buildOrdinalDomains). No fallback index: it would address a wrong kernel.
     std::optional<int64_t> knobOrdinal(const std::string& field, const MetadataValue& value) const
     {
+        requireUnslotted("knobOrdinal");
+        return knobOrdinal(0, field, value);
+    }
+
+    /// As knobOrdinal(field, value), over slot @p slot's ordinal domains.
+    std::optional<int64_t>
+        knobOrdinal(size_t slot, const std::string& field, const MetadataValue& value) const
+    {
         if(const auto* intValue = std::get_if<int64_t>(&value))
         {
             return *intValue;
         }
 
-        const auto domain = _ordinalDomains.find(field);
-        if(domain == _ordinalDomains.end())
+        const auto& ordinalDomains = slotAt(slot).ordinalDomains;
+        const auto domain = ordinalDomains.find(field);
+        if(domain == ordinalDomains.end())
         {
             return std::nullopt;
         }
@@ -622,12 +937,22 @@ public:
     /// does not match.
     bool knobMatches(const KernelDefinition& kernel, const std::string& field, int64_t pinned) const
     {
+        requireUnslotted("knobMatches");
+        return knobMatches(0, kernel, field, pinned);
+    }
+
+    /// As knobMatches(kernel, field, pinned), over slot @p slot's ordinal domains.
+    bool knobMatches(size_t slot,
+                     const KernelDefinition& kernel,
+                     const std::string& field,
+                     int64_t pinned) const
+    {
         const auto value = kernel.tryGetMetadata(field);
         if(!value.has_value())
         {
             return false;
         }
-        const auto ordinal = knobOrdinal(field, *value);
+        const auto ordinal = knobOrdinal(slot, field, *value);
         return ordinal.has_value() && *ordinal == pinned;
     }
 
@@ -635,10 +960,155 @@ public:
     /// non-integer field some kernel carries.
     bool isOrdinalKnob(const std::string& field) const
     {
-        return _ordinalDomains.find(field) != _ordinalDomains.end();
+        requireUnslotted("isOrdinalKnob");
+        return isOrdinalKnob(0, field);
+    }
+
+    /// As isOrdinalKnob(field), over slot @p slot's ordinal domains.
+    bool isOrdinalKnob(size_t slot, const std::string& field) const
+    {
+        const auto& ordinalDomains = slotAt(slot).ordinalDomains;
+        return ordinalDomains.find(field) != ordinalDomains.end();
     }
 
 private:
+    /// @p matchers and @p dispatches resolve here, eagerly, for the unslotted and slotted
+    /// constructors alike.
+    KernelIngestorStateManager(bool slotted,
+                               std::vector<SlotState> slots,
+                               std::string sharedWorkspaceToken,
+                               std::vector<MatchDescriptor> matchers,
+                               std::vector<DispatchDescriptor> dispatches,
+                               const std::string& graphMatchSymbol,
+                               const std::string& describedBy,
+                               size_t catalogCacheCapacity,
+                               EngineIdentity engine,
+                               size_t winnerCacheCapacity)
+        : _slotted(slotted)
+        , _slots(std::move(slots))
+        , _sharedWorkspaceToken(std::move(sharedWorkspaceToken))
+        , _graphMatchFn(graphMatchSymbol.empty()
+                            ? nullptr
+                            : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
+        , _catalogCache(catalogCacheCapacity)
+        // Same key and capacity as _catalogCache: both answer for (graph, device, engine
+        // version). Kept outside `Catalog` because no matcher, scorer or formula reads it.
+        , _calibratedCache(catalogCacheCapacity)
+        , _verdictCache(catalogCacheCapacity)
+        , _engine(std::move(engine))
+        , _winnerCache(winnerCacheCapacity)
+        , _programCache(winnerCacheCapacity)
+        , _slotCatalogIds(catalogCacheCapacity)
+    {
+        if(_slots.empty())
+        {
+            throw std::invalid_argument("kernel ingestor requires at least one slot");
+        }
+        std::unordered_set<std::string> slotNames;
+        for(const auto& slot : _slots)
+        {
+            if(slot.heuristic == nullptr)
+            {
+                throw std::invalid_argument("kernel ingestor requires a heuristic");
+            }
+            if(_slotted && (slot.name.empty() || !slotNames.insert(slot.name).second))
+            {
+                throw std::invalid_argument("slot name '" + slot.name
+                                            + "' is empty or declared twice");
+            }
+        }
+
+        for(auto& matcher : matchers)
+        {
+            const auto id = matcher.id;
+            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
+            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            {
+                resolved.graphFn
+                    = GraphCriterionRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+            else
+            {
+                resolved.kernelFn
+                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+
+            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+        for(auto& dispatch : dispatches)
+        {
+            const auto id = dispatch.id;
+            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
+            resolved.handler = DispatchRegistry<THandle>::resolve(
+                resolved.descriptor.dispatchSymbol,
+                describeDescriptor("dispatch", resolved.descriptor.name, id));
+
+            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
+            {
+                throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
+            }
+        }
+
+        for(auto& slot : _slots)
+        {
+            indexSlot(slot);
+        }
+    }
+
+    static std::vector<SlotState> implicitSlot(MetadataSchema schema,
+                                               std::vector<KernelDescriptorPack> packs,
+                                               std::shared_ptr<IKernelHeuristic> heuristic)
+    {
+        std::vector<SlotState> slots;
+        slots.push_back(
+            SlotState{{}, std::move(schema), std::move(packs), {}, {}, std::move(heuristic)});
+        return slots;
+    }
+
+    static std::vector<SlotState> slotStates(std::vector<KernelSlotInput> inputs)
+    {
+        std::vector<SlotState> slots;
+        slots.reserve(inputs.size());
+        for(auto& input : inputs)
+        {
+            slots.push_back(SlotState{std::move(input.name),
+                                      std::move(input.schema),
+                                      std::move(input.packs),
+                                      {},
+                                      {},
+                                      std::move(input.heuristic)});
+        }
+        return slots;
+    }
+
+    const SlotState& slotAt(size_t slot) const
+    {
+        if(slot >= _slots.size())
+        {
+            throw std::out_of_range("slot index " + std::to_string(slot) + " is out of range for "
+                                    + std::to_string(_slots.size()) + " slot(s)");
+        }
+        return _slots[slot];
+    }
+
+    /// The slot-less accessors answer for one catalog, which only an unslotted engine has.
+    void requireUnslotted(const char* accessor) const
+    {
+        if(_slotted)
+        {
+            throw std::logic_error(std::string("KernelIngestorStateManager::") + accessor
+                                   + " needs a slot: this engine is slotted");
+        }
+    }
+
     /// Orders @p catalog by the record for @p context's graph and device and attaches that
     /// record, when the record fully covers @p catalog; false, leaving @p catalog untouched,
     /// otherwise.
@@ -650,6 +1120,12 @@ private:
     bool adoptCoveringRecord(Catalog& catalog,
                              const MatchContext& context,
                              const std::optional<CatalogKey>& catalogKey) const
+    // PORT(S): C1-12 adoptCoveringRecord signature: slot parameter beside develop's catalogKey parameter
+    /// otherwise. @p slot names the slot record to adopt; empty for the whole-graph record of
+    /// an unslotted engine.
+    bool adoptCoveringRecord(Catalog& catalog,
+                             const MatchContext& context,
+                             std::string_view slot = {}) const
     {
         const auto& entries = catalog.entries;
         // Cheap rejection first: mightHaveWinnerFor() accounts for an on-disk shard this
@@ -661,6 +1137,16 @@ private:
         }
 
         const WinnerKey key{catalogKey->graph, DeviceKey{context.deviceProperties}};
+        // PORT(S): C1-13 adoptCoveringRecord winner key: slot-keyed WinnerKey beside develop's catalogKey->graph
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties},
+            std::string(slot)};
+        if(!key.graph.isUsable())
+        {
+            // No bytes to key on; such graphs never match each other either.
+            return false;
+        }
 
         auto record = winnerFor(key);
         if(!record.has_value())
@@ -698,6 +1184,49 @@ private:
             }
         }
         return catalog;
+    // PORT(S): C1-14 noteSlotCatalog, requireSlotted, hasSlot beside develop's measuredCatalogFor
+    /// Remembers which kernels @p slot's @p catalog holds for @p context's graph and device,
+    /// so programFor() can compare a program record with the catalogs it is asked about without
+    /// a MatchContext. A catalog is a function of (graph, device) for the life of the manager.
+    void noteSlotCatalog(const SlotState& slot,
+                         const MatchContext& context,
+                         const Catalog& catalog) const
+    {
+        if(!deviceResolved(context))
+        {
+            return;
+        }
+        const WinnerKey key{
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{context.graph},
+            DeviceKey{context.deviceProperties},
+            slot.name};
+        if(!key.graph.isUsable())
+        {
+            return;
+        }
+        std::vector<DescriptorId> ids;
+        ids.reserve(catalog.entries.size());
+        for(const auto& entry : catalog.entries)
+        {
+            ids.push_back(entry.kernelId);
+        }
+        _slotCatalogIds.put(key, std::move(ids));
+    }
+
+    void requireSlotted(const char* accessor) const
+    {
+        if(!_slotted)
+        {
+            throw std::logic_error(std::string("KernelIngestorStateManager::") + accessor
+                                   + " needs a slotted engine");
+        }
+    }
+
+    bool hasSlot(const std::string& name) const
+    {
+        return std::any_of(_slots.begin(), _slots.end(), [&name](const SlotState& slot) {
+            return slot.name == name;
+        });
     }
 
     /// One memoized full-catalog calibrated ranking, with the id of the model that produced it.
@@ -733,15 +1262,22 @@ private:
     /// Validates every pack's references and builds the KernelDefinition for each of
     /// its kernels. Every field of a definition is context-independent, so this is the
     /// only place they are ever computed: buildCatalog references them per query rather
+    // PORT(S): C1-15 indexSlot doc comment, per slot
+    /// Indexes every pack of @p slot: validates its references and builds the KernelDefinition
+    /// for each of its kernels. Every field of a definition is context-independent, so this is
+    /// the only place they are ever computed: buildCatalog copies them per query rather
     /// than completing each kernel's metadata again on every graph.
-    void validateAndIndexPacks()
+    ///
+    /// Uniqueness is per slot. A pack that breaks it is dropped whole, with an ERROR, in a
+    /// slotted engine (RFC 0021 §8) and throws in an unslotted one.
+    void indexSlot(SlotState& slot) const
     {
         // Two kernels may share a tuple when no single device sees both at the same arch
         // tier (per-arch shards, or a more specific kernel that buildCatalog shadows
         // per device). Uniqueness is per competing-arch group, keyed by the tuple's values
         // in a hash map rather than scanned, which would be quadratic.
         size_t kernelCount = 0;
-        for(const auto& pack : _packs)
+        for(const auto& pack : slot.packs)
         {
             kernelCount += pack.kernels.size();
         }
@@ -774,6 +1310,9 @@ private:
         _definitions.reserve(_packs.size());
         _kernelsByArch.reserve(_packs.size());
         for(const auto& pack : _packs)
+        // PORT(S): C1-16 indexSlot: loop over slot.packs/definitions beside develop's _definitions/_kernelsByArch reserve
+        slot.definitions.reserve(slot.packs.size());
+        for(const auto& pack : slot.packs)
         {
             for(const auto& matcherId : pack.matcherIds)
             {
@@ -797,6 +1336,23 @@ private:
             // a single-launch handler, which reads `kernel_source`.
             const std::set<std::string> handlerLaunches
                 = _dispatches.find(pack.dispatchId)->second.handler->launchNames();
+            // PORT(S): C1-17 indexSlot: claim/refusal bookkeeping beside develop's handlerLaunches
+            // What this pack has claimed so far, so a slotted engine can release it when a
+            // later kernel of the pack is refused. Left empty for an unslotted engine, which
+            // throws instead.
+            std::vector<DescriptorId> claimedIds;
+            std::vector<MetadataTupleValues> claimedTuples;
+            std::string refusal;
+            // A violation throws for an unslotted engine; a slotted engine records it and
+            // drops the pack.
+            const auto refuse = [this, &refusal](std::string message) {
+                if(!_slotted)
+                {
+                    throw std::invalid_argument(message);
+                }
+                refusal = std::move(message);
+            };
+
             for(const auto& kernel : pack.kernels)
             {
                 const auto isAdaptable = [](const KernelSource& source) {
@@ -857,6 +1413,8 @@ private:
                 }
 
                 auto key = completeMetadata(kernel);
+                // PORT(S): C1-18 indexSlot: completeMetadata(slot.schema, kernel) beside develop's launch-set check
+                auto key = completeMetadata(slot.schema, kernel);
                 // A kernel that declared no arch of its own runs wherever its pack does;
                 // one that declared a narrower list claims only that. Claiming by the
                 // kernel rather than the pack is what lets two kernels of ONE pack share a
@@ -876,21 +1434,34 @@ private:
                           kernelArch,
                           archOverlaps))
                 {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' is declared twice on an arch both declarations reach; a kernel id "
-                        + "names one candidate and must be unique per device");
+                    refuse("kernel '" + toString(kernel.id)
+                           + "' is declared twice on an arch both declarations reach; a kernel id "
+                           + "names one candidate and must be unique per device");
+                    break;
+                }
+                if(_slotted)
+                {
+                    claimedIds.push_back(kernel.id);
+                }
+                MetadataTupleValues claimedTuple;
+                if(_slotted)
+                {
+                    claimedTuple = tuple;
                 }
                 if(!claim(archesClaimingTuple.try_emplace(std::move(tuple)).first->second,
                           kernelArch,
                           archesCompete))
                 {
-                    throw std::invalid_argument(
-                        "kernel '" + toString(kernel.id)
-                        + "' duplicates the metadata tuple of another kernel under schema '"
-                        + _schema.name
-                        + "' at the same arch tier on a device both reach; a better tier "
-                        + "shadows a worse one, so equal tiers cannot be told apart");
+                    refuse("kernel '" + toString(kernel.id)
+                           + "' duplicates the metadata tuple of another kernel under schema '"
+                           + slot.schema.name
+                           + "' at the same arch tier on a device both reach; a better tier "
+                           + "shadows a worse one, so equal tiers cannot be told apart");
+                    break;
+                }
+                if(_slotted)
+                {
+                    claimedTuples.push_back(std::move(claimedTuple));
                 }
 
                 packDefinitions.push_back(KernelDefinition{kernel.id,
@@ -905,7 +1476,24 @@ private:
                                                            kernel.treeRoot,
                                                            kernel.sources});
             }
-            // Pushed even when every kernel was dropped: _definitions is indexed by pack
+
+            if(!refusal.empty())
+            {
+                // Newest claim first: a key claimed twice by this pack holds both entries, and
+                // the later one is last.
+                for(auto it = claimedIds.rbegin(); it != claimedIds.rend(); ++it)
+                {
+                    archesClaimingId.at(*it).pop_back();
+                }
+                for(auto it = claimedTuples.rbegin(); it != claimedTuples.rend(); ++it)
+                {
+                    archesClaimingTuple.at(*it).pop_back();
+                }
+                packDefinitions.clear();
+                HIPDNN_PLUGIN_LOG_ERROR("ingestor: slot '" << slot.name << "' drops pack "
+                                                           << toString(pack.id) << ": " << refusal);
+            }
+            // Pushed even when every kernel was dropped: `definitions` is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to
             // the wrong pack and run the last index out of range.
             _definitions.push_back(std::move(packDefinitions));
@@ -927,20 +1515,22 @@ private:
                 }
             }
             _kernelsByArch.push_back(std::move(counts));
+            // PORT(S): C1-19 indexSlot: slot.definitions.push_back beside develop's _definitions push and _kernelsByArch counts
+            slot.definitions.push_back(std::move(packDefinitions));
         }
 
-        buildOrdinalDomains();
+        buildOrdinalDomains(slot);
     }
 
-    /// The value set of every non-integer metadata field, in the order that numbers it
-    /// (RFC 0019 §13.2: a knob is an int64, so non-`INT` fields are addressed by index).
+    /// The value set of every non-integer metadata field of @p slot, in the order that numbers
+    /// it (RFC 0019 §13.2: a knob is an int64, so non-`INT` fields are addressed by index).
     ///
-    /// Spans every pack, not one device's catalog, so an index means the same kernel on every
-    /// graph. Ordered by `std::variant`'s `<`; `uhd_gen/addressing.py` must derive the same
-    /// indices.
-    void buildOrdinalDomains()
+    /// Spans every pack of the slot, not one device's catalog, so an index means the same
+    /// kernel on every graph. Ordered by `std::variant`'s `<`; `uhd_gen/addressing.py` must
+    /// derive the same indices.
+    static void buildOrdinalDomains(SlotState& slot)
     {
-        for(const auto& field : _schema.fields)
+        for(const auto& field : slot.schema.fields)
         {
             if(field.type == MetadataType::INT)
             {
@@ -948,7 +1538,7 @@ private:
             }
 
             std::set<MetadataValue> observed;
-            for(const auto& packDefinitions : _definitions)
+            for(const auto& packDefinitions : slot.definitions)
             {
                 for(const auto& definition : packDefinitions)
                 {
@@ -961,19 +1551,20 @@ private:
             }
             if(!observed.empty())
             {
-                _ordinalDomains.emplace(
+                slot.ordinalDomains.emplace(
                     field.name, std::vector<MetadataValue>(observed.begin(), observed.end()));
             }
         }
     }
 
-    /// A kernel's metadata values with the KMD's defaults filled in; the completed
+    /// A kernel's metadata values with @p schema's defaults filled in; the completed
     /// tuple, not the descriptor id, is the catalog key.
-    MetadataValues completeMetadata(const KernelDescriptor& kernel) const
+    static MetadataValues completeMetadata(const MetadataSchema& schema,
+                                           const KernelDescriptor& kernel)
     {
         MetadataValues complete;
 
-        for(const auto& field : _schema.fields)
+        for(const auto& field : schema.fields)
         {
             auto it = kernel.metadata.find(field.name);
 
@@ -1013,11 +1604,40 @@ private:
     }
 
     Catalog catalogFor(const MatchContext& context) const
+    // PORT(S): C1-20 cacheKey with slot parameter and deviceResolved beside develop's catalogFor(context) signature
+    /// Device comes from the context, not a separate argument, so one device's catalog
+    /// never caches under another's key. The engine version comes from this manager. The
+    /// ranking metric is part of the key because both orders depend on it (RFC 0019 §11.4);
+    /// the registry's own name is stored because the key outlives the request. @p slot names
+    /// the slot a catalog belongs to; empty for an unslotted engine and for a slotted engine's
+    /// engine-wide entries.
+    std::optional<CatalogKey> cacheKey(const MatchContext& context,
+                                       std::string_view slot = {}) const
     {
-        // Pack pruning and matchers both read the device, so nothing below can be
-        // answered without one. Checked here rather than in every provider's matchers,
-        // where an omission is invisible.
-        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        // PORT(S): C1-28 semantic: tryGetGraphId no longer exists; develop keys the catalog on graph content, not Graph.id
+        const auto graphId = tryGetGraphId(context.graph);
+        const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
+        if(!graphId.has_value() || metric == nullptr)
+        {
+            return std::nullopt;
+        }
+        return CatalogKey{
+            *graphId, context.deviceId, _engine.version, metric->name, std::string(slot)};
+    }
+
+    /// Pack pruning and matchers both read the device, so nothing can be answered without one.
+    /// Checked once here rather than in every provider's matchers, where an omission is
+    /// invisible.
+    static bool deviceResolved(const MatchContext& context)
+    {
+        return context.deviceId != NO_DEVICE && !context.deviceProperties.gcnArchName.empty();
+    }
+
+    /// Slot @p slotIndex's catalog for @p context, cached. A slotted engine builds every slot's
+    /// catalog on a miss, with one graph match, and caches them together.
+    Catalog catalogFor(const SlotState& slot, size_t slotIndex, const MatchContext& context) const
+    {
+        if(!deviceResolved(context))
         {
             const auto* reason = context.deviceId == NO_DEVICE
                                      ? "no device resolved"
@@ -1033,6 +1653,8 @@ private:
     /// device guard and built @p key from the same @p context.
     Catalog catalogFor(const MatchContext& context, const std::optional<CatalogKey>& key) const
     {
+        // PORT(S): C1-21 catalogFor(slot...): slot-keyed lookup beside develop's key-taking catalogFor split
+        const auto key = cacheKey(context, slot.name);
         if(key.has_value())
         {
             if(auto cached = _catalogCache.get(*key); cached.has_value())
@@ -1050,7 +1672,20 @@ private:
                 "ingestor: graph supplies no content key, so its catalog cannot be cached");
         }
 
-        Catalog catalog = buildCatalog(context);
+        if(_slotted)
+        {
+            auto built = buildSlotted(context);
+            auto catalog = built.catalogs[slotIndex];
+            storeSlotted(context, std::move(built));
+            return catalog;
+        }
+
+        GraphMatchState match;
+        Catalog catalog = buildCatalog(slot, context, match);
+        if(match.bound.has_value())
+        {
+            catalog.bound = std::move(*match.bound);
+        }
 
         if(key.has_value())
         {
@@ -1059,6 +1694,68 @@ private:
             _catalogCache.putIfAbsent(*key, catalog);
         }
 
+        return catalog;
+    }
+
+    Catalog enumerableCatalogOf(size_t slot, const MatchContext& context) const
+    {
+        auto catalog = catalogFor(_slots[slot], slot, context);
+        if(_slotted)
+        {
+            noteSlotCatalog(_slots[slot], context, catalog);
+        }
+        std::sort(catalog.entries.begin(),
+                  catalog.entries.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.kernelId < rhs.kernelId; });
+        return catalog;
+    }
+
+    /// Slot @p slotIndex's catalog with its slot record adopted when one covers it. A
+    /// benchmarked record outranks the slot's ranker, and may postdate a cached ranker order,
+    /// so it is looked up even when the cached catalog is already sorted.
+    Catalog measuredSlotCatalog(size_t slotIndex, const MatchContext& context) const
+    {
+        const auto& slot = _slots[slotIndex];
+        Catalog catalog = catalogFor(slot, slotIndex, context);
+        noteSlotCatalog(slot, context, catalog);
+        if(catalog.measuredRecord == nullptr && adoptCoveringRecord(catalog, context, slot.name))
+        {
+            if(const auto key = cacheKey(context, slot.name); key.has_value())
+            {
+                // put, not putIfAbsent: a measured order replaces a provisional one.
+                _catalogCache.put(*key, catalog);
+            }
+        }
+        return catalog;
+    }
+
+    Catalog sortedCatalogOf(size_t slotIndex, const MatchContext& context) const
+    {
+        const auto& slot = _slots[slotIndex];
+        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
+        // device ordinal, not arch, so without this an unresolved-arch context would
+        // cache an empty catalog under the SAME key a later, resolved call for this
+        // device reuses -- permanently hiding that device's real catalog.
+        if(!deviceResolved(context))
+        {
+            return catalogFor(slot, slotIndex, context);
+        }
+
+        // A benchmarked record (whole-graph, or the slot's own) outranks the ranker.
+        Catalog catalog
+            = _slotted ? measuredSlotCatalog(slotIndex, context) : measuredCatalog(context);
+        if(catalog.isSorted)
+        {
+            return catalog;
+        }
+
+        catalog.entries = slot.heuristic->rank(catalog, context);
+        catalog.isSorted = true;
+        if(const auto key = cacheKey(context, slot.name); key.has_value())
+        {
+            // put, not putIfAbsent: sorted is strictly better than whatever is cached.
+            _catalogCache.put(*key, catalog);
+        }
         return catalog;
     }
 
@@ -1076,6 +1773,203 @@ private:
     /// (memoized across packs), then kernel-scoped ones. The two stages it composes are
     /// one pass over the packs, split where graph_match has run.
     Catalog buildCatalog(const MatchContext& context) const
+    // PORT(S): C1-22 buildCatalog(slot, context, GraphMatchState) beside develop's buildCatalog
+    /// What one catalog build shares across its slots: the engine's graph match, run lazily
+    /// and at most once, and the graph-scoped criteria's verdicts.
+    struct GraphMatchState
+    {
+        /// Whether the graph match has run.
+        bool ran = false;
+        /// What it bound; nullopt until it runs, and after it declines the graph.
+        std::optional<BoundTokens> bound;
+        GraphMatcherMemo verdicts;
+    };
+
+    /// Runs the engine's graph match, once per @p match. Absent means the engine binds nothing
+    /// and always proceeds with an empty map.
+    void runGraphMatch(const MatchContext& context, GraphMatchState& match) const
+    {
+        if(match.ran)
+        {
+            return;
+        }
+        match.ran = true;
+        match.bound = _graphMatchFn == nullptr ? std::optional<BoundTokens>(BoundTokens{})
+                                               : _graphMatchFn(context);
+    }
+
+    /// The catalogs of every slot and whether the engine accepts the graph.
+    struct SlottedBuild
+    {
+        std::vector<Catalog> catalogs;
+        SlotProgramVerdict verdict;
+    };
+
+    /// Builds every slot's catalog from one graph match, then decides the engine's verdict. A
+    /// graph_match decline or an invalid shared-workspace token empties every catalog. A slot
+    /// with no applicable kernel only sets the decline reason and leaves the other slots'
+    /// catalogs populated, so the verdict, not a catalog, says whether the engine applies.
+    SlottedBuild buildSlotted(const MatchContext& context) const
+    {
+        SlottedBuild built;
+        built.catalogs.reserve(_slots.size());
+        GraphMatchState match;
+        for(const auto& slot : _slots)
+        {
+            built.catalogs.push_back(buildCatalog(slot, context, match));
+        }
+
+        auto& verdict = built.verdict;
+        if(match.ran && !match.bound.has_value())
+        {
+            verdict.declineReason = "graph_match declined the graph";
+        }
+        else if(match.ran && !_sharedWorkspaceToken.empty())
+        {
+            verdict.declineReason
+                = checkSharedWorkspace(*match.bound, verdict.sharedWorkspaceBytes);
+            if(!verdict.declineReason.empty())
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine declined the graph on device "
+                                        << context.deviceId << ": " << verdict.declineReason);
+                for(auto& catalog : built.catalogs)
+                {
+                    catalog.entries.clear();
+                }
+            }
+        }
+        if(verdict.declineReason.empty())
+        {
+            for(size_t i = 0; i < _slots.size(); ++i)
+            {
+                if(built.catalogs[i].entries.empty())
+                {
+                    verdict.declineReason
+                        = "slot '" + _slots[i].name + "' has no applicable kernel";
+                    HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined the graph on device "
+                                           << context.deviceId << ": " << verdict.declineReason);
+                    break;
+                }
+            }
+        }
+        verdict.applicable = verdict.declineReason.empty();
+        if(!verdict.applicable)
+        {
+            verdict.sharedWorkspaceBytes = 0;
+        }
+
+        if(match.bound.has_value())
+        {
+            // The slots share one binding; the last takes it, the others copy.
+            for(size_t i = 0; i + 1 < built.catalogs.size(); ++i)
+            {
+                built.catalogs[i].bound = *match.bound;
+            }
+            built.catalogs.back().bound = std::move(*match.bound);
+        }
+        return built;
+    }
+
+    /// Caches @p built under @p context's key: each slot's catalog and the engine's verdict.
+    void storeSlotted(const MatchContext& context, SlottedBuild built) const
+    {
+        for(size_t i = 0; i < _slots.size(); ++i)
+        {
+            noteSlotCatalog(_slots[i], context, built.catalogs[i]);
+        }
+        const auto engineKey = cacheKey(context, {});
+        if(!engineKey.has_value())
+        {
+            return;
+        }
+        for(size_t i = 0; i < _slots.size(); ++i)
+        {
+            auto slotKey = *engineKey;
+            slotKey.slot = _slots[i].name;
+            // putIfAbsent, as for an unslotted catalog: a ranked catalog may already be there.
+            _catalogCache.putIfAbsent(slotKey, std::move(built.catalogs[i]));
+        }
+        _verdictCache.putIfAbsent(*engineKey, std::move(built.verdict));
+    }
+
+    /// Why the shared region @p bound describes is unusable, or empty when it is usable: the
+    /// `shared_workspace` token must be a non-negative integer, `ws.scratch_offset` must be
+    /// published as that size rounded up to the engine contract's alignment, and every
+    /// `ws.<name>.offset` token must be a non-negative integer. @p sharedBytes receives the
+    /// token's value when it is. The messages name the token and are stable.
+    std::string checkSharedWorkspace(const BoundTokens& bound, size_t& sharedBytes) const
+    {
+        const auto declared = "shared_workspace token '" + _sharedWorkspaceToken + "'";
+        const auto sharedIt = bound.find(_sharedWorkspaceToken);
+        if(sharedIt == bound.end())
+        {
+            return declared + " was not published by the graph match";
+        }
+        const auto* size = std::get_if<int64_t>(&sharedIt->second);
+        if(size == nullptr)
+        {
+            return declared + " is not an integer";
+        }
+        if(*size < 0)
+        {
+            return declared + " is negative (" + std::to_string(*size) + ")";
+        }
+        const auto aligned = alignSharedWorkspace(static_cast<size_t>(*size));
+
+        const auto scratchIt = bound.find(SCRATCH_OFFSET_TOKEN);
+        if(scratchIt == bound.end())
+        {
+            return std::string(SCRATCH_OFFSET_TOKEN) + " was not published by the graph match";
+        }
+        const auto* scratchOffset = std::get_if<int64_t>(&scratchIt->second);
+        if(scratchOffset == nullptr)
+        {
+            return std::string(SCRATCH_OFFSET_TOKEN) + " is not an integer";
+        }
+        if(*scratchOffset < 0 || static_cast<size_t>(*scratchOffset) != aligned)
+        {
+            return std::string(SCRATCH_OFFSET_TOKEN) + " (" + std::to_string(*scratchOffset)
+                   + ") does not equal " + declared + " value " + std::to_string(*size)
+                   + " rounded up to " + std::to_string(SHARED_WORKSPACE_ALIGNMENT) + " bytes ("
+                   + std::to_string(aligned) + ")";
+        }
+
+        // The first offender by name, so the message does not depend on hash order.
+        const std::string* badOffset = nullptr;
+        for(const auto& [name, value] : bound)
+        {
+            constexpr std::string_view ROOT = "ws.";
+            constexpr std::string_view SUFFIX = ".offset";
+            const bool isOffsetToken
+                = name.size() > ROOT.size() + SUFFIX.size()
+                  && name.compare(0, ROOT.size(), ROOT) == 0
+                  && name.compare(name.size() - SUFFIX.size(), SUFFIX.size(), SUFFIX) == 0;
+            if(!isOffsetToken)
+            {
+                continue;
+            }
+            const auto* offset = std::get_if<int64_t>(&value);
+            if((offset == nullptr || *offset < 0) && (badOffset == nullptr || name < *badOffset))
+            {
+                badOffset = &name;
+            }
+        }
+        if(badOffset != nullptr)
+        {
+            return "offset token '" + *badOffset + "' is not a non-negative integer";
+        }
+
+        sharedBytes = static_cast<size_t>(*size);
+        return {};
+    }
+
+    /// Runs @p match's graph match (lazily, on the first pack that clears the arch gate) and
+    /// every pack's UMDs of @p slot: graph-scoped criteria (memoized across packs and slots),
+    /// then kernel-scoped ones. The catalog's `bound` is left to the caller; it is
+    /// `match.bound`, shared by every slot of a build.
+    Catalog buildCatalog(const SlotState& slot,
+                         const MatchContext& context,
+                         GraphMatchState& match) const
     {
         CatalogGraphStage stage = matchGraph(context);
         if(stage.firstPack < _packs.size() && !stage.bound.has_value())
@@ -1084,6 +1978,8 @@ private:
         }
         return matchVariants(context, std::move(stage));
     }
+        // PORT(S): C1-23 buildCatalog body start beside develop's matchGraph call
+        Catalog catalog;
 
     /// The pack-level arch gate up to the first pack that clears it, then graph_match,
     /// run lazily there so an engine no pack of which supports the device never runs it.
@@ -1139,8 +2035,10 @@ private:
         GraphMatcherMemo graphVerdicts;
 
         for(size_t packIndex = stage.firstPack; packIndex < _packs.size(); ++packIndex)
+        // PORT(S): C1-24 slot.packs loop beside develop's matchGraph and matchVariants
+        for(size_t packIndex = 0; packIndex < slot.packs.size(); ++packIndex)
         {
-            const auto& pack = _packs[packIndex];
+            const auto& pack = slot.packs[packIndex];
 
             // matchGraph already cleared the first pack.
             if(packIndex != stage.firstPack && !packSupportsDevice(packIndex, context))
@@ -1149,6 +2047,17 @@ private:
             }
 
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, catalog.bound))
+            // PORT(S): C1-25 runGraphMatch call and match.verdicts beside develop's graphLevelMatchersPass call
+            runGraphMatch(context, match);
+
+            if(!match.bound.has_value())
+            {
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine declined graph_match for device "
+                                       << context.deviceId);
+                return catalog;
+            }
+
+            if(!graphLevelMatchersPass(pack, context, match.verdicts, *match.bound))
             {
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id)
                                                          << " declined at a graph-scoped matcher");
@@ -1156,7 +2065,7 @@ private:
             }
 
             size_t admitted = 0;
-            for(const auto& precomputed : _definitions[packIndex])
+            for(const auto& precomputed : slot.definitions[packIndex])
             {
                 // The pack gate above answered for the pack's own list; a kernel that
                 // narrowed itself still has to be asked. Restating it for an unrestricted
@@ -1175,6 +2084,10 @@ private:
                 // Referenced, not rebuilt or copied: every field was settled at
                 // construction, and `_definitions` never changes after it.
                 if(kernelLevelMatchersPass(pack, context, catalog.bound, precomputed))
+                // PORT(S): C1-26 kernelLevelMatchersPass with match.bound beside develop's referenced definitions
+                // Copied only when admitted: matchers take it by const reference, and most
+                // kernels are rejected.
+                if(kernelLevelMatchersPass(pack, context, *match.bound, precomputed))
                 {
                     catalog.entries.push_back(&precomputed);
                     ++admitted;
@@ -1198,9 +2111,11 @@ private:
 
         shadowByArchTier(catalog, context);
 
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: catalog for device "
-                               << context.deviceId << " holds " << catalog.entries.size()
-                               << " kernel(s) from " << _packs.size() << " pack(s)");
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: "
+                               << (_slotted ? "slot '" + slot.name + "' catalog" : "catalog")
+                               << " for device " << context.deviceId << " holds "
+                               << catalog.entries.size() << " kernel(s) from " << slot.packs.size()
+                               << " pack(s)");
         return catalog;
     }
 
@@ -1365,7 +2280,7 @@ private:
             }
         }
 
-        std::vector<std::pair<WinnerKey, WinnerRecord>> decoded;
+        std::vector<DecodedWinnerLine> decoded;
         bool attemptSettled = false;
         auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
         if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
@@ -1382,7 +2297,7 @@ private:
         else
         {
             auto [records, readStatus]
-                = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerRecordLine);
+                = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerLine);
             if(readStatus == hipdnn_data_sdk::utilities::LineStoreStatus::OK)
             {
                 attemptSettled = true;
@@ -1409,20 +2324,34 @@ private:
 
         // mergeAbsent() applies last-line-wins and keeps in-memory keys (newer than the file)
         // as one atomic step, so eviction during the merge cannot resurrect a stale ranking.
+        // A line of the other engine kind is skipped: an unslotted engine reads whole-graph
+        // records only, a slotted one slot records and program lines.
         std::vector<std::pair<WinnerKey, WinnerRecord>> newestFirst;
+        std::vector<std::pair<WinnerKey, ProgramRecord>> newestFirstPrograms;
         newestFirst.reserve(decoded.size());
         for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
         {
-            if(!it->first.graph.isUsable())
+            if(!it->key.graph.isUsable())
             {
                 // A key whose graph carries no content is not even equal to itself
                 // (GraphContentKey::operator==), so it can never be looked up -- and as
                 // a non-reflexive key it would violate the cache's KeyEqual requirements.
                 continue;
             }
-            newestFirst.push_back(std::move(*it));
+            if(it->program.has_value())
+            {
+                if(_slotted)
+                {
+                    newestFirstPrograms.emplace_back(std::move(it->key), std::move(*it->program));
+                }
+            }
+            else if(_slotted == !it->key.slot.empty())
+            {
+                newestFirst.emplace_back(std::move(it->key), std::move(it->record));
+            }
         }
         _winnerCache.mergeAbsent(std::move(newestFirst));
+        _programCache.mergeAbsent(std::move(newestFirstPrograms));
     }
 
     /// Write-back: re-reads @p key's shard under its LineStore lock, then applies
@@ -1513,6 +2442,191 @@ private:
         return record;
     }
 
+    /// What one `recordSlotted` call settles while holding the shard lock.
+    struct SlottedWritePlan
+    {
+        /// The slot rankings to keep in memory: each one appended, or the on-disk record a fresh
+        /// miss adopted.
+        std::vector<std::pair<std::string, WinnerRecord>> slotRecords;
+        /// The program record to keep in memory; empty when none was given or it was invalid.
+        std::optional<ProgramRecord> program;
+        /// Encoded lines to append, in order: every slot record, then the program line.
+        std::vector<std::string> lines;
+    };
+
+    /// Decides what @p slotRecords and @p program contribute, from the lines @p onDisk holds
+    /// (nullptr when no shard is usable, in which case the in-memory slot rankings stand in).
+    /// Each slot record follows @p slotCause as `writeBackToShard` does, the program line
+    /// @p programCause. A program line is planned only if it names, for every slot, the winner
+    /// (first entry) of that slot's record as it will stand after this write; a mismatch drops
+    /// the program line and keeps the slot records, so a program line never lands without
+    /// valid slot records. Last-line-wins over @p onDisk, as in the reader.
+    SlottedWritePlan
+        planSlottedWrite(const WinnerKey& baseKey,
+                         const std::vector<std::pair<std::string, WinnerRecord>>& slotRecords,
+                         const std::optional<ProgramRecord>& program,
+                         WinnerWriteCause slotCause,
+                         WinnerWriteCause programCause,
+                         const std::vector<DecodedWinnerLine>* onDisk) const
+    {
+        std::unordered_map<std::string, const WinnerRecord*> diskSlots;
+        const ProgramRecord* diskProgram = nullptr;
+        if(onDisk != nullptr)
+        {
+            for(const auto& line : *onDisk)
+            {
+                if(line.key.device != baseKey.device || line.key.graph != baseKey.graph)
+                {
+                    continue;
+                }
+                if(line.program.has_value())
+                {
+                    diskProgram = &*line.program;
+                }
+                else if(!line.key.slot.empty())
+                {
+                    diskSlots[line.key.slot] = &line.record;
+                }
+            }
+        }
+
+        SlottedWritePlan plan;
+        plan.slotRecords.reserve(slotRecords.size());
+        plan.lines.reserve(slotRecords.size() + 1);
+        for(const auto& [slot, record] : slotRecords)
+        {
+            if(record.empty())
+            {
+                // As recordWinner: an all-unusable sweep has nothing to record.
+                continue;
+            }
+            const auto existing = diskSlots.find(slot);
+            if(existing != diskSlots.end() && slotCause == WinnerWriteCause::FRESH_MISS)
+            {
+                plan.slotRecords.emplace_back(slot, *existing->second);
+                continue;
+            }
+            WinnerKey key = baseKey;
+            key.slot = slot;
+            plan.lines.push_back(encodeWinnerRecordLine(key, record));
+            plan.slotRecords.emplace_back(slot, record);
+        }
+
+        if(!program.has_value())
+        {
+            return plan;
+        }
+
+        for(const auto& pick : program->picks)
+        {
+            WinnerRecord inMemory;
+            const WinnerRecord* winner = nullptr;
+            const auto planned
+                = std::find_if(plan.slotRecords.begin(),
+                               plan.slotRecords.end(),
+                               [&pick](const auto& entry) { return entry.first == pick.slot; });
+            if(planned != plan.slotRecords.end())
+            {
+                winner = &planned->second;
+            }
+            else if(onDisk != nullptr)
+            {
+                const auto existing = diskSlots.find(pick.slot);
+                winner = existing != diskSlots.end() ? existing->second : nullptr;
+            }
+            else
+            {
+                WinnerKey key = baseKey;
+                key.slot = pick.slot;
+                if(auto cached = _winnerCache.get(key); cached.has_value())
+                {
+                    inMemory = std::move(*cached);
+                    winner = &inMemory;
+                }
+            }
+            if(winner == nullptr || winner->empty() || winner->front().kernelId != pick.kernelId)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("ingestor: a program record was not written because slot '"
+                                       << pick.slot << "' has no record whose winner is kernel '"
+                                       << toString(pick.kernelId) << "'");
+                return plan;
+            }
+        }
+
+        if(diskProgram != nullptr && programCause == WinnerWriteCause::FRESH_MISS)
+        {
+            plan.program = *diskProgram;
+            return plan;
+        }
+        plan.lines.push_back(encodeProgramLine(baseKey, *program));
+        plan.program = *program;
+        return plan;
+    }
+
+    /// `recordSlotted`'s disk half: reads the shard, plans and appends every line under one hold
+    /// of the shard's lock. A disk failure degrades to the in-memory plan, as `writeBackToShard`
+    /// does. A failed append stops the sequence, so the program line, last, never lands without
+    /// its slot records.
+    SlottedWritePlan
+        writeSlottedToShard(const WinnerKey& baseKey,
+                            const std::vector<std::pair<std::string, WinnerRecord>>& slotRecords,
+                            const std::optional<ProgramRecord>& program,
+                            WinnerWriteCause slotCause,
+                            WinnerWriteCause programCause) const
+    {
+        if(_engine.name.empty() || !_engine.contentIdentified)
+        {
+            return planSlottedWrite(
+                baseKey, slotRecords, program, slotCause, programCause, nullptr);
+        }
+
+        const auto& gcnArchName = baseKey.device.properties().gcnArchName;
+        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
+        if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
+            return planSlottedWrite(
+                baseKey, slotRecords, program, slotCause, programCause, nullptr);
+        }
+        if(openStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK || !shard.has_value())
+        {
+            logShardFailureOnce(WinnerShardFailureKind::OPEN, gcnArchName);
+            return planSlottedWrite(
+                baseKey, slotRecords, program, slotCause, programCause, nullptr);
+        }
+        if(hipdnn_data_sdk::utilities::lockLineStore(*shard)
+           != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            logShardFailureOnce(WinnerShardFailureKind::LOCK, gcnArchName);
+            return planSlottedWrite(
+                baseKey, slotRecords, program, slotCause, programCause, nullptr);
+        }
+
+        const auto [existing, readStatus]
+            = hipdnn_data_sdk::utilities::readAllLines(*shard, &decodeWinnerLine);
+        if(readStatus != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+        {
+            hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+            logShardFailureOnce(WinnerShardFailureKind::READ, gcnArchName);
+            return planSlottedWrite(
+                baseKey, slotRecords, program, slotCause, programCause, nullptr);
+        }
+
+        auto plan
+            = planSlottedWrite(baseKey, slotRecords, program, slotCause, programCause, &existing);
+        for(const auto& line : plan.lines)
+        {
+            if(hipdnn_data_sdk::utilities::appendLine(*shard, line)
+               != hipdnn_data_sdk::utilities::LineStoreStatus::OK)
+            {
+                logShardFailureOnce(WinnerShardFailureKind::APPEND, gcnArchName);
+                break;
+            }
+        }
+        hipdnn_data_sdk::utilities::unlockLineStore(*shard);
+        return plan;
+    }
+
     enum class WinnerShardFailureKind
     {
         OPEN,
@@ -1571,7 +2685,11 @@ private:
         }
     }
 
-    MetadataSchema _schema;
+    bool _slotted;
+    /// In launch order; exactly one, unnamed, for an unslotted engine.
+    std::vector<SlotState> _slots;
+    /// The bound token holding the shared workspace size; empty when none is declared.
+    std::string _sharedWorkspaceToken;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
@@ -1592,11 +2710,17 @@ private:
     /// addressable by an int64 knob. Fixed at construction.
     std::map<std::string, std::vector<MetadataValue>> _ordinalDomains;
     std::shared_ptr<IKernelHeuristic> _heuristic;
+    // PORT(S): C1-27 develop's per-engine member list kept; slotted model keeps per-slot state instead (nothing re-inserted)
     GraphMatchFn _graphMatchFn = nullptr;
+    /// Keyed by slot: an unslotted engine's catalogs under the empty slot, a slotted engine's
+    /// one entry per slot name.
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
     /// The full catalog's calibrated ranking; a knob-pinned request restricts it instead of
     /// ranking its own subset (RFC 0019 §9.2).
     mutable LruCache<CatalogKey, CalibratedRanking, CatalogKeyHash> _calibratedCache;
+    /// A slotted engine's verdict per (graph, device, engine version, metric), under the empty
+    /// slot; built with the slot catalogs by one graph match.
+    mutable LruCache<CatalogKey, SlotProgramVerdict, CatalogKeyHash> _verdictCache;
 
     /// The engine's identity. The name locates the on-disk winner-cache shard (empty disables
     /// it); the revision is the version half of every CatalogKey.
@@ -1604,6 +2728,14 @@ private:
 
     /// Separate from _catalogCache so benchmarked rankings and catalogs cannot evict each other.
     mutable LruCache<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    /// A slotted engine's program records, keyed by the whole-graph key (empty slot). Its own
+    /// cache at the same capacity, so program records and slot records are each LRU-accounted
+    /// and neither evicts the other.
+    mutable LruCache<WinnerKey, ProgramRecord, WinnerKeyHash> _programCache;
+    /// Which kernels each slot's catalog held for a (graph, device), keyed like a slot record.
+    /// Lets programFor() check a program record against the catalogs without a MatchContext;
+    /// refreshed by every slotted catalog access, so a missing entry means "not seen".
+    mutable LruCache<WinnerKey, std::vector<DescriptorId>, WinnerKeyHash> _slotCatalogIds;
     /// Guards the two sets below, not _winnerCache, which locks internally.
     mutable std::mutex _winnerCacheMutex;
     /// Shard arch components (`stripArchFeatures(gcnArchName)`) whose on-disk shard has

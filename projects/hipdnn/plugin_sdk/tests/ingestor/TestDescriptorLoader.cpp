@@ -1955,7 +1955,7 @@ INSTANTIATE_TEST_SUITE_P(
         // this build has no reader for.
         ViolationCase{"version_newer_minor",
                       [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["version"] = "1.1";
+                          documentOfType(documents, ".ued.json")["version"] = "1.2";
                       }},
         // RFC 0020 §11.1: a major mismatch is a hard break in either direction.
         ViolationCase{"version_newer_major",
@@ -4984,7 +4984,7 @@ std::vector<OracleCase> oracleCases()
          skipped,
          [] {
              auto header = oracleHeaderWithout("version");
-             header.emplace_back("version", "1.1");
+             header.emplace_back("version", "1.2");
              return oraclePackText(header, nlohmann::json::array({oracleKernel(1)}));
          }},
         // Needs the repeated `version`: the kernels stream under 1.0, and the last value
@@ -6029,6 +6029,915 @@ TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+// ---------------------------------------------------------------------------------------
+// RFC 0021 kernel slots: descriptor model and loader.
+// ---------------------------------------------------------------------------------------
+
+namespace
+{
+
+const std::string SLOTTED_GRAPH_MATCH_SYMBOL = "descriptorloader.slotted_graph_match";
+
+/// A UUID of set @p tag with @p n spelled into its second group, so one set can mint dozens.
+std::string slotUuid(char tag, int n)
+{
+    static constexpr std::string_view HEX = "0123456789abcdef";
+    std::string id = testUuid(tag, '0');
+    id[2] = HEX[(n >> 4) & 15];
+    id[3] = HEX[n & 15];
+    return id;
+}
+
+constexpr int SLOT_KMD_PREP = 0x01;
+constexpr int SLOT_KMD_DKDV = 0x02;
+constexpr int SLOT_KMD_DQ = 0x03;
+constexpr int SLOT_UHD_DKDV = 0x04;
+constexpr int SLOT_UHD_DQ = 0x05;
+constexpr int SLOT_UED = 0x06;
+constexpr int SLOT_UMD_GRAPH = 0x07;
+constexpr int SLOT_UMD_KERNEL = 0x08;
+constexpr int SLOT_UDD = 0x09;
+constexpr int SLOT_PACK_PREP = 0x10;
+constexpr int SLOT_PACK_DKDV = 0x11;
+constexpr int SLOT_PACK_DQ = 0x12;
+constexpr int SLOT_KERNEL_PREP = 0x20; // two kernels: 0x20, 0x21
+constexpr int SLOT_KERNEL_DKDV = 0x22; // 0x22, 0x23
+constexpr int SLOT_KERNEL_DQ = 0x24; // 0x24, 0x25
+
+/// A valid split-backward-shaped engine: three slots (`prep`, `dkdv`, `dq`), one pack and two
+/// kernels each. `dkdv` and `dq` carry a metric-less ranker and the `block_size` knob; the
+/// `dkdv` KMD alone declares `variant`.
+Documents makeSlottedDocuments(char tag, const std::string& engineName)
+{
+    const auto id = [tag](int n) { return slotUuid(tag, n); };
+
+    const auto kmd = [&](int n, const std::string& name, bool withVariant) {
+        auto fields = nlohmann::json::array();
+        fields.push_back(
+            nlohmann::json{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}});
+        if(withVariant)
+        {
+            fields.push_back(
+                nlohmann::json{{"name", "variant"}, {"type", "string"}, {"default_value", "a"}});
+        }
+        return TestDocument{
+            ".kmd.json",
+            nlohmann::json{{"version", "1.0"}, {"id", id(n)}, {"name", name}, {"fields", fields}}};
+    };
+    const auto ranker = [&](int n, const std::string& name) {
+        return TestDocument{".uhd.json",
+                            nlohmann::json{{"version", "1.0"},
+                                           {"id", id(n)},
+                                           {"name", name},
+                                           {"adapter", "native"},
+                                           {"objective", "max"},
+                                           {"native", {{"symbol", SCORE_SYMBOL}}}}};
+    };
+    const auto kernel = [&](int n, const std::string& name, int64_t blockSize) {
+        return nlohmann::json{{"version", "1.0"},
+                              {"id", id(n)},
+                              {"name", name},
+                              {"kernel_source",
+                               {{"kind", "embedded_source"},
+                                {"source_file", "Kernel.cpp"},
+                                {"entry_point", "Entry"}}},
+                              {"metadata", {{"block_size", blockSize}}},
+                              {"priority", 0}};
+    };
+    const auto pack = [&](int n, const std::string& slot, int firstKernel) {
+        auto kernels = nlohmann::json::array();
+        kernels.push_back(kernel(firstKernel, "kernel_" + slot + "_0", 64));
+        kernels.push_back(kernel(firstKernel + 1, "kernel_" + slot + "_1", 128));
+        return TestDocument{".kdp.json",
+                            nlohmann::json{{"version", "1.1"},
+                                           {"id", id(n)},
+                                           {"name", "pack " + slot},
+                                           {"slot", slot},
+                                           {"matchers", {id(SLOT_UMD_GRAPH), id(SLOT_UMD_KERNEL)}},
+                                           {"engine", id(SLOT_UED)},
+                                           {"dispatch", id(SLOT_UDD)},
+                                           {"kernelDescriptors", kernels}}};
+    };
+
+    auto slots = nlohmann::json::array();
+    slots.push_back(nlohmann::json{{"name", "prep"}, {"metadata", id(SLOT_KMD_PREP)}});
+    slots.push_back(nlohmann::json{{"name", "dkdv"},
+                                   {"metadata", id(SLOT_KMD_DKDV)},
+                                   {"sort_kernel_catalog", {{"default", id(SLOT_UHD_DKDV)}}},
+                                   {"knobs", {"block_size"}}});
+    slots.push_back(nlohmann::json{{"name", "dq"},
+                                   {"metadata", id(SLOT_KMD_DQ)},
+                                   {"sort_kernel_catalog", {{"default", id(SLOT_UHD_DQ)}}},
+                                   {"knobs", {"block_size"}}});
+
+    Documents documents;
+    documents.push_back(kmd(SLOT_KMD_PREP, "prep fields", false));
+    documents.push_back(kmd(SLOT_KMD_DKDV, "dkdv fields", true));
+    documents.push_back(kmd(SLOT_KMD_DQ, "dq fields", false));
+    documents.push_back(ranker(SLOT_UHD_DKDV, "dkdv ranker"));
+    documents.push_back(ranker(SLOT_UHD_DQ, "dq ranker"));
+    documents.push_back(
+        TestDocument{".ued.json",
+                     nlohmann::json{{"version", "1.1"},
+                                    {"id", id(SLOT_UED)},
+                                    {"name", engineName},
+                                    {"graph_match", {{"native", SLOTTED_GRAPH_MATCH_SYMBOL}}},
+                                    {"shared_workspace", "ws.bytes"},
+                                    {"slots", slots}}});
+    documents.push_back(TestDocument{".umd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UMD_GRAPH)},
+                                                    {"name", "graph shape"},
+                                                    {"scope", "graph"},
+                                                    {"match_symbol", GRAPH_SYMBOL}}});
+    documents.push_back(TestDocument{".umd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UMD_KERNEL)},
+                                                    {"name", "kernel block"},
+                                                    {"scope", "kernel"},
+                                                    {"match_symbol", KERNEL_SYMBOL}}});
+    documents.push_back(TestDocument{".udd.json",
+                                     nlohmann::json{{"version", "1.0"},
+                                                    {"id", id(SLOT_UDD)},
+                                                    {"name", "dispatch"},
+                                                    {"dispatch_symbol", DISPATCH_SYMBOL}}});
+    documents.push_back(pack(SLOT_PACK_PREP, "prep", SLOT_KERNEL_PREP));
+    documents.push_back(pack(SLOT_PACK_DKDV, "dkdv", SLOT_KERNEL_DKDV));
+    documents.push_back(pack(SLOT_PACK_DQ, "dq", SLOT_KERNEL_DQ));
+    return documents;
+}
+
+/// The document of type @p suffix whose `id` is @p id.
+nlohmann::json& documentById(Documents& documents, std::string_view suffix, const std::string& id)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == suffix && document.body.at("id").get<std::string>() == id)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no document of type " + std::string(suffix) + " with id " + id);
+}
+
+/// The pack serving @p slot.
+nlohmann::json& slotPack(Documents& documents, const std::string& slot)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == ".kdp.json" && document.body.value("slot", std::string{}) == slot)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no pack serves slot " + slot);
+}
+
+void eraseSlotPack(Documents& documents, const std::string& slot)
+{
+    documents.erase(std::remove_if(documents.begin(),
+                                   documents.end(),
+                                   [&slot](const TestDocument& document) {
+                                       return document.suffix == ".kdp.json"
+                                              && document.body.value("slot", std::string{}) == slot;
+                                   }),
+                    documents.end());
+}
+
+nlohmann::json dependencyOf(const nlohmann::json& descriptor)
+{
+    return nlohmann::json{{"id", descriptor.at("id")},
+                          {"revision", descriptor.value("revision", std::string("1.0"))}};
+}
+
+/// `trained_against` naming the UED and every UMD, for a caller to add its KMD form to.
+nlohmann::json trainedAgainstWithoutKmd(Documents& documents)
+{
+    auto matchers = nlohmann::json::array();
+    for(const auto& document : documents)
+    {
+        if(document.suffix == ".umd.json")
+        {
+            matchers.push_back(dependencyOf(document.body));
+        }
+    }
+    return nlohmann::json{{"ued", dependencyOf(documentOfType(documents, ".ued.json"))},
+                          {"umd", matchers}};
+}
+
+/// `kmds` naming each of @p slots, in order.
+nlohmann::json kmdsOf(Documents& documents, const std::vector<std::pair<std::string, int>>& slots)
+{
+    auto kmds = nlohmann::json::array();
+    for(const auto& [slot, kmdNumber] : slots)
+    {
+        auto entry = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', kmdNumber)));
+        entry["slot"] = slot;
+        kmds.push_back(std::move(entry));
+    }
+    return kmds;
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("three_slots"));
+    auto documents = makeSlottedDocuments('1', "test:three_slots");
+    // A field only the `dkdv` KMD declares: coerced against that slot's KMD, not another's.
+    slotPack(documents, "dkdv").at("kernelDescriptors")[0]["metadata"]["variant"] = "b";
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    ASSERT_EQ(set.slots.size(), 3u);
+    ASSERT_EQ(set.engine.slots.size(), 3u);
+
+    const std::array<std::string, 3> names{"prep", "dkdv", "dq"};
+    const std::array<int, 3> firstKernels{SLOT_KERNEL_PREP, SLOT_KERNEL_DKDV, SLOT_KERNEL_DQ};
+    for(size_t i = 0; i < names.size(); ++i)
+    {
+        ASSERT_EQ(set.slots[i].packs.size(), 1u) << names[i];
+        const auto& pack = set.slots[i].packs.front();
+        ASSERT_EQ(pack.kernels.size(), 2u) << names[i];
+        EXPECT_EQ(toString(pack.kernels[0].id), slotUuid('1', firstKernels[i]));
+        EXPECT_EQ(toString(pack.kernels[1].id), slotUuid('1', firstKernels[i] + 1));
+    }
+    EXPECT_EQ(std::get<std::string>(set.slots[1].packs.front().kernels[0].metadata.at("variant")),
+              "b");
+
+    // Per-slot rankers: `prep` ships none, the others one metric-less ranker each.
+    EXPECT_FALSE(set.slots[0].heuristic.has_value());
+    EXPECT_TRUE(set.slots[0].heuristicsByMetric.empty());
+    EXPECT_EQ(set.slots[1].heuristicsByMetric.at("").count("default"), 1u);
+    EXPECT_TRUE(set.slots[2].heuristic.has_value());
+    EXPECT_EQ(set.engine.slots[1].knobs, std::vector<std::string>{"block_size"});
+    EXPECT_TRUE(set.engine.slots[0].knobs.empty());
+
+    // The slotted engine's selection state lives only in its slots; matchers and dispatches
+    // are the union over them.
+    EXPECT_TRUE(set.packs.empty());
+    EXPECT_FALSE(set.heuristic.has_value());
+    EXPECT_TRUE(set.heuristicsByMetric.empty());
+    EXPECT_EQ(set.matchers.size(), 2u);
+    EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, UnslottedFilesLoadWithEmptySlotState)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_1_0"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:unslotted"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_TRUE(set.slots.empty());
+    EXPECT_TRUE(set.engine.slots.empty());
+    EXPECT_TRUE(set.engine.sharedWorkspaceToken.empty());
+    ASSERT_EQ(set.packs.size(), 1u);
+    EXPECT_TRUE(set.heuristic.has_value());
+    EXPECT_EQ(set.engine.knobs, std::vector<std::string>{"block_size"});
+}
+
+TEST(TestDescriptorLoader, AcceptsFormat11OnAnUnslottedEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_1_1"));
+    auto documents = makeSetDocuments('1', "test:unslotted_1_1");
+    for(const auto suffix : {".ued.json", ".kdp.json", ".uhd.json"})
+    {
+        documentOfType(documents, suffix)["version"] = "1.1";
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().slots.empty());
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+namespace
+{
+/// gtest parameter names must be PascalCase; case names stay snake_case for directory names.
+std::string pascalCase(const std::string& snake)
+{
+    std::string result;
+    result.reserve(snake.size());
+    bool upper = true;
+    for(const char c : snake)
+    {
+        if(c == '_')
+        {
+            upper = true;
+            continue;
+        }
+        result += upper ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : c;
+        upper = false;
+    }
+    return result;
+}
+} // namespace
+
+/// One RFC 0021 §8 rejection: the mutation that breaks the rule, the stable text the loader
+/// must log at ERROR, and how many engines survive.
+struct SlotRule
+{
+    std::string name;
+    bool unslottedBase;
+    std::function<void(Documents&)> mutate;
+    std::vector<std::string> messages;
+    size_t engines;
+};
+
+class TestDescriptorLoaderSlotRules : public ::testing::TestWithParam<SlotRule>
+{
+};
+
+TEST_P(TestDescriptorLoaderSlotRules, RejectsWithAStableMessage)
+{
+    const auto& rule = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("slot_rule_" + rule.name));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = rule.unslottedBase ? makeSetDocuments('1', "test:slot_rule")
+                                        : makeSlottedDocuments('1', "test:slot_rule");
+    rule.mutate(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    EXPECT_EQ(sets.size(), rule.engines);
+    for(const auto& message : rule.messages)
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, message)) << message;
+    }
+}
+
+namespace
+{
+nlohmann::json& slotOf(Documents& documents, size_t index)
+{
+    return documentOfType(documents, ".ued.json").at("slots")[index];
+}
+} // namespace
+
+INSTANTIATE_TEST_SUITE_P(
+    Slot,
+    TestDescriptorLoaderSlotRules,
+    ::testing::Values(
+        // The slot list itself.
+        SlotRule{
+            "slots_empty",
+            false,
+            [](Documents& d) { documentOfType(d, ".ued.json")["slots"] = nlohmann::json::array(); },
+            {"must be a non-empty array of slots"},
+            0},
+        SlotRule{"slots_not_an_array",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json")["slots"] = "prep"; },
+                 {"must be a non-empty array of slots"},
+                 0},
+        SlotRule{"slot_name_uppercase",
+                 false,
+                 [](Documents& d) { slotOf(d, 0)["name"] = "Prep"; },
+                 {"slot name 'Prep' in", "must match ^[a-z][a-z0-9_]*$"},
+                 0},
+        SlotRule{"slot_named_global",
+                 false,
+                 [](Documents& d) { slotOf(d, 0)["name"] = "global"; },
+                 {"slot name 'global' in", "is reserved for engine-wide knobs"},
+                 0},
+        SlotRule{"slot_name_duplicate",
+                 false,
+                 [](Documents& d) { slotOf(d, 2)["name"] = "dkdv"; },
+                 {"slot name 'dkdv' is declared more than once in"},
+                 0},
+        SlotRule{"slot_missing_metadata",
+                 false,
+                 [](Documents& d) { slotOf(d, 1).erase("metadata"); },
+                 {"missing required key 'metadata' in", "slot 'dkdv'"},
+                 0},
+        SlotRule{"slot_unknown_member",
+                 false,
+                 [](Documents& d) {
+                     slotOf(d, 1)["predict_applicable_kernels"]
+                         = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+                 },
+                 {"unknown key 'predict_applicable_kernels'"},
+                 0},
+        // Engine-level selection members beside `slots`.
+        SlotRule{"metadata_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["metadata"] = slotUuid('1', SLOT_KMD_PREP);
+                 },
+                 {"key 'metadata' in", "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        SlotRule{
+            "sort_kernel_catalog_beside_slots",
+            false,
+            [](Documents& d) {
+                documentOfType(d, ".ued.json")["sort_kernel_catalog"]
+                    = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+            },
+            {"key 'sort_kernel_catalog' in", "must not appear beside 'slots'; declare it per slot"},
+            0},
+        SlotRule{"knobs_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["knobs"]
+                         = nlohmann::json::array({"block_size"});
+                 },
+                 {"key 'knobs' in", "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        SlotRule{"predict_applicable_kernels_beside_slots",
+                 false,
+                 [](Documents& d) {
+                     documentOfType(d, ".ued.json")["predict_applicable_kernels"]
+                         = nlohmann::json{{"default", slotUuid('1', SLOT_UHD_DKDV)}};
+                 },
+                 {"key 'predict_applicable_kernels' in",
+                  "must not appear beside 'slots'; declare it per slot"},
+                 0},
+        // `shared_workspace`.
+        SlotRule{"shared_workspace_without_graph_match",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json").erase("graph_match"); },
+                 {"key 'shared_workspace' in", "requires a native graph_match"},
+                 0},
+        SlotRule{"shared_workspace_on_unslotted_engine",
+                 true,
+                 [](Documents& d) {
+                     auto& ued = documentOfType(d, ".ued.json");
+                     ued["version"] = "1.1";
+                     ued["shared_workspace"] = "ws.bytes";
+                     ued["graph_match"] = nlohmann::json{{"native", SLOTTED_GRAPH_MATCH_SYMBOL}};
+                 },
+                 {"key 'shared_workspace' in", "requires 'slots'"},
+                 0},
+        // A 1.0-labelled file carrying a 1.1 member.
+        SlotRule{"ued_1_0_with_slots",
+                 false,
+                 [](Documents& d) { documentOfType(d, ".ued.json")["version"] = "1.0"; },
+                 {"declares version 1.0 but uses slot member 'slots'; slot members require "
+                  "version 1.1"},
+                 0},
+        SlotRule{"ued_1_0_with_shared_workspace",
+                 true,
+                 [](Documents& d) {
+                     auto& ued = documentOfType(d, ".ued.json");
+                     ued["shared_workspace"] = "ws.bytes";
+                     ued["graph_match"] = nlohmann::json{{"native", SLOTTED_GRAPH_MATCH_SYMBOL}};
+                 },
+                 {"declares version 1.0 but uses slot member 'shared_workspace'; slot members "
+                  "require version 1.1"},
+                 0},
+        SlotRule{"kdp_1_0_with_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["version"] = "1.0"; },
+                 {"declares version 1.0 but uses slot member 'slot'; slot members require "
+                  "version 1.1"},
+                 1},
+        // A pack's `slot`.
+        SlotRule{"kdp_slot_name_invalid",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["slot"] = "Dkdv"; },
+                 {"slot name 'Dkdv' in", "must match ^[a-z][a-z0-9_]*$"},
+                 1},
+        SlotRule{"pack_of_slotted_engine_without_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv").erase("slot"); },
+                 {"declares no slot, which every pack of slotted engine", "must"},
+                 1},
+        SlotRule{"pack_names_unknown_slot",
+                 false,
+                 [](Documents& d) { slotPack(d, "dkdv")["slot"] = "nope"; },
+                 {"names slot 'nope', which engine", "does not declare"},
+                 1},
+        SlotRule{"pack_slot_on_unslotted_engine",
+                 true,
+                 [](Documents& d) {
+                     auto& pack = documentOfType(d, ".kdp.json");
+                     pack["version"] = "1.1";
+                     pack["slot"] = "prep";
+                 },
+                 {"declares slot 'prep', but engine", "declares no slots"},
+                 0},
+        SlotRule{"kernel_in_two_slots",
+                 false,
+                 [](Documents& d) {
+                     slotPack(d, "dq").at("kernelDescriptors")[0]["id"]
+                         = slotUuid('1', SLOT_KERNEL_DKDV);
+                 },
+                 {"which already serves slot 'dkdv' of engine", "a kernel serves at most one slot"},
+                 1},
+        SlotRule{"kernel_field_outside_its_slot_kmd",
+                 false,
+                 [](Documents& d) {
+                     slotPack(d, "prep").at("kernelDescriptors")[0]["metadata"]["variant"] = "b";
+                 },
+                 {"supplies metadata field 'variant', which schema 'prep fields' does not "
+                  "declare"},
+                 1},
+        // Per-slot checks that cost the engine.
+        SlotRule{"slot_ranker_declares_a_metric",
+                 false,
+                 [](Documents& d) {
+                     auto& ranker = documentById(d, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+                     ranker["score"] = nlohmann::json{{"metric", "tflops"}, {"calibrated", true}};
+                 },
+                 {"slot 'dkdv' ranker", "a slot ranker must be metric-less"},
+                 0},
+        SlotRule{"slot_knob_not_in_its_kmd",
+                 false,
+                 [](Documents& d) { slotOf(d, 1)["knobs"] = nlohmann::json::array({"nope"}); },
+                 {"slot 'dkdv' exposes knob 'nope'", "does not declare"},
+                 0},
+        SlotRule{"slot_kmd_missing",
+                 false,
+                 [](Documents& d) { slotOf(d, 2)["metadata"] = slotUuid('f', 0x3f); },
+                 {"slot 'dq' names metadata schema", "which no descriptor defines"},
+                 0}),
+    [](const ::testing::TestParamInfo<SlotRule>& info) { return pascalCase(info.param.name); });
+
+TEST(TestDescriptorLoader, SlottedEngineWithAnEmptySlotWarnsAndStaysRegistered)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty_slot"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:empty_slot");
+    eraseSlotPack(documents, "dq");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().slots.size(), 3u);
+    EXPECT_EQ(sets.front().slots[0].packs.size(), 1u);
+    EXPECT_EQ(sets.front().slots[1].packs.size(), 1u);
+    EXPECT_TRUE(sets.front().slots[2].packs.empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          "slot 'dq' has no loadable kernel pack; the engine "
+                                          "stays registered and declines every graph"));
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no loadable kernel pack"));
+}
+
+TEST(TestDescriptorLoader, SlottedEngineWhoseEverySlotIsEmptyStaysRegistered)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("all_slots_empty"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:all_slots_empty");
+    for(const auto* slot : {"prep", "dkdv", "dq"})
+    {
+        eraseSlotPack(documents, slot);
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(countLogsContaining(recorder, "has no loadable kernel pack; the engine stays"), 3u);
+}
+
+TEST(TestDescriptorLoader, UnslottedEngineWithNoLoadablePackIsStillDropped)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_empty"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSetDocuments('1', "test:unslotted_empty");
+    documentOfType(documents, ".kdp.json")["dispatch"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    EXPECT_TRUE(sets.empty());
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "has no loadable kernel pack; dropping it"));
+}
+
+/// A slot ranker records the slot it was trained for: `trained_against` carries `slot` beside
+/// its slot's `kmd` (RFC 0021 §9), in a 1.1 UHD.
+TEST(TestDescriptorLoader, LoadsASlotRankerRecordingItsSlotProvenance)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_provenance"));
+    auto documents = makeSlottedDocuments('1', "test:ranker_provenance");
+    auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+    ranker["version"] = "1.1";
+    auto trained = trainedAgainstWithoutKmd(documents);
+    trained["kmd"]
+        = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+    trained["slot"] = "dkdv";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(sets.front().slots[1].heuristic.has_value());
+    EXPECT_EQ(sets.front().slots[1].heuristicsByMetric.at("").count("default"), 1u);
+}
+
+struct RankerProvenanceCase
+{
+    std::string name;
+    std::function<void(nlohmann::json& trained, Documents& documents)> mutate;
+    std::string message;
+};
+
+class TestDescriptorLoaderRankerProvenance : public ::testing::TestWithParam<RankerProvenanceCase>
+{
+};
+
+/// A slot ranker whose provenance names another slot, another slot's KMD, or the `kmds` form
+/// is disabled, and the engine stays with that slot ranking by the fallback order.
+TEST_P(TestDescriptorLoaderRankerProvenance, DisablesTheRankerAndKeepsTheEngine)
+{
+    const auto& testCase = GetParam();
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("ranker_provenance_" + testCase.name));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSlottedDocuments('1', "test:ranker_provenance_rule");
+    auto trained = trainedAgainstWithoutKmd(documents);
+    trained["kmd"]
+        = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+    trained["slot"] = "dkdv";
+    testCase.mutate(trained, documents);
+    auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+    ranker["version"] = "1.1";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, testCase.message)) << testCase.message;
+    EXPECT_TRUE(sets.front().slots[1].heuristicsByMetric.empty());
+    EXPECT_FALSE(sets.front().slots[1].heuristic.has_value());
+    EXPECT_EQ(sets.front().slots[1].unavailableHeuristicArches.at("").count("default"), 1u);
+    // The sibling slot's ranker is untouched.
+    EXPECT_TRUE(sets.front().slots[2].heuristic.has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Provenance,
+    TestDescriptorLoaderRankerProvenance,
+    ::testing::Values(
+        RankerProvenanceCase{"names_another_slot",
+                             [](nlohmann::json& trained, Documents&) { trained["slot"] = "dq"; },
+                             "trained_against names slot 'dq', but the ranker serves slot 'dkdv'"},
+        RankerProvenanceCase{"names_another_slots_kmd",
+                             [](nlohmann::json& trained, Documents& documents) {
+                                 trained["kmd"] = dependencyOf(documentById(
+                                     documents, ".kmd.json", slotUuid('1', SLOT_KMD_DQ)));
+                             },
+                             "incompatible KMD identity or semantic revision for slot 'dkdv'"},
+        RankerProvenanceCase{
+            "names_no_slot",
+            [](nlohmann::json& trained, Documents&) { trained.erase("slot"); },
+            "trained_against names no slot, but the ranker of slot 'dkdv' must name the slot it "
+            "was trained for"},
+        RankerProvenanceCase{
+            "names_kmds",
+            [](nlohmann::json& trained, Documents& documents) {
+                trained.erase("kmd");
+                trained.erase("slot");
+                trained["kmds"] = kmdsOf(documents, {{"dkdv", SLOT_KMD_DKDV}});
+            },
+            "trained_against names kmds, but the ranker of slot 'dkdv' must name its own "
+            "slot's kmd"},
+        RankerProvenanceCase{
+            "reads_a_workspace_token",
+            [](nlohmann::json&, Documents& documents) {
+                auto& ranker = documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV));
+                const auto signature = nlohmann::json::array({"$kernel.block_size", "$ws.bytes"});
+                ranker["features_signature"] = signature;
+                ranker["features_hash"]
+                    = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+            },
+            "feature signature reads '$ws.bytes', a shared-workspace token a slotted engine "
+            "reserves"}),
+    [](const ::testing::TestParamInfo<RankerProvenanceCase>& info) {
+        return pascalCase(info.param.name);
+    });
+
+/// A 1.0 UHD naming slot provenance is mislabelled: the form exists from 1.1, so it is rejected
+/// whole rather than read as 1.1.
+TEST(TestDescriptorLoader, RejectsAFormat10UhdNamingSlotProvenance)
+{
+    for(const bool useKmds : {false, true})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(useKmds ? "uhd_1_0_kmds" : "uhd_1_0_slot"));
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        auto documents = makeSlottedDocuments('1', "test:uhd_1_0");
+        auto trained = trainedAgainstWithoutKmd(documents);
+        if(useKmds)
+        {
+            trained["kmds"] = kmdsOf(documents, {{"dkdv", SLOT_KMD_DKDV}});
+        }
+        else
+        {
+            trained["kmd"]
+                = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+            trained["slot"] = "dkdv";
+        }
+        documentById(documents, ".uhd.json", slotUuid('1', SLOT_UHD_DKDV))["trained_against"]
+            = trained;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_TRUE(recorder.hasLogContaining(
+            HIPDNN_SEV_ERROR, "trained_against uses slot provenance ('slot' or 'kmds') in"))
+            << useKmds;
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "which requires UHD version 1.1"))
+            << useKmds;
+        EXPECT_TRUE(sets.front().slots[1].heuristicsByMetric.empty());
+    }
+}
+
+/// An unslotted engine has no slot to name, so a model recording one cannot be its model.
+TEST(TestDescriptorLoader, DisablesAnUnslottedEnginesRankerNamingASlot)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unslotted_slot_prov"));
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    auto documents = makeSetDocuments('1', "test:unslotted_slot_prov");
+    auto trained = provenanceOf(documents);
+    trained["slot"] = "prep";
+    auto& ranker = documentOfType(documents, ".uhd.json");
+    ranker["version"] = "1.1";
+    ranker["trained_against"] = trained;
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "slot provenance ('slot' or 'kmds'), which an engine that declares no slots"));
+    EXPECT_TRUE(sets.front().heuristicsByMetric.empty());
+}
+
+/// The engine-level `predict_engine` model of a slotted engine models the whole program, so it
+/// names every slot's KMD in `kmds` (RFC 0021 §9).
+class TestDescriptorLoaderSlottedEstimate : public ::testing::Test
+{
+protected:
+    /// A slotted engine whose `predict_engine` model records @p trained.
+    static std::vector<DescriptorSet>
+        load(const std::string& name, const std::function<void(nlohmann::json&, Documents&)>& edit)
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+        auto documents = makeSlottedDocuments('1', "test:" + name);
+        auto trained = trainedAgainstWithoutKmd(documents);
+        edit(trained, documents);
+        const auto modelId = slotUuid('1', 0x50);
+        documents.push_back(
+            TestDocument{".uhd.json",
+                         nlohmann::json{{"version", "1.1"},
+                                        {"id", modelId},
+                                        {"name", "slotted engine estimate"},
+                                        {"adapter", "native"},
+                                        {"native", {{"symbol", L1_SCORER_SYMBOL}}},
+                                        {"objective", "max"},
+                                        {"score", {{"metric", "tflops"}, {"calibrated", true}}},
+                                        {"trained_against", trained}}});
+        documentOfType(documents, ".ued.json")["predict_engine"]["default"]
+            = nlohmann::json::array({modelId});
+        writeDocuments(dir.path(), documents);
+        return loadFrom(dir.path());
+    }
+
+    const ScopedL1Scorer _scorer;
+};
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, LoadsAModelNamingEverySlotsKmd)
+{
+    const auto sets = load("estimate_kmds", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmds"] = kmdsOf(
+            documents, {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}, {"dq", SLOT_KMD_DQ}});
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+}
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesTheSingleKmdForm)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets = load("estimate_kmd", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmd"]
+            = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_PREP)));
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "a slotted engine's predict_engine model must name every slot's KMD in kmds"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+}
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesAModelMissingASlot)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets = load("estimate_missing", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmds"] = kmdsOf(documents, {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}});
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "trained_against kmds does not name slot 'dq'"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+}
+
+/// The slotted engine's model must name exactly the slots the engine declares, each at a KMD
+/// identity and revision the slot's schema satisfies; every refusal disables the estimate.
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesAModelNamingAnUndeclaredSlot)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets
+        = load("estimate_undeclared", [](nlohmann::json& trained, Documents& documents) {
+              trained["kmds"]
+                  = kmdsOf(documents,
+                           {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}, {"dq", SLOT_KMD_DQ}});
+              auto extra = trained["kmds"][0];
+              extra["slot"] = "epilogue";
+              trained["kmds"].push_back(std::move(extra));
+          });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "trained_against kmds names slot 'epilogue', which the engine does not declare"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+}
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesASlotsKmdAtAnIncompatibleRevision)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets = load("estimate_revision", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmds"] = kmdsOf(
+            documents, {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DKDV}, {"dq", SLOT_KMD_DQ}});
+        trained["kmds"][1]["revision"] = "9.0";
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "incompatible KMD identity or semantic revision for slot 'dkdv'"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+}
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesASlotNamedWithAnotherSlotsKmd)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const auto sets = load("estimate_swapped", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmds"] = kmdsOf(
+            documents, {{"prep", SLOT_KMD_PREP}, {"dkdv", SLOT_KMD_DQ}, {"dq", SLOT_KMD_DKDV}});
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR, "incompatible KMD identity or semantic revision for slot 'dkdv'"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+}
+
+TEST_F(TestDescriptorLoaderSlottedEstimate, RefusesASingleSlotBesideTheKmds)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    // `slot` beside a `kmd` is a slot ranker's form; a slotted engine's model must use `kmds`.
+    const auto sets = load("estimate_slot", [](nlohmann::json& trained, Documents& documents) {
+        trained["kmd"]
+            = dependencyOf(documentById(documents, ".kmd.json", slotUuid('1', SLOT_KMD_DKDV)));
+        trained["slot"] = "dkdv";
+    });
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "trained_against names a single slot, but a slotted engine's predict_engine model must "
+        "name every slot's KMD in kmds"));
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

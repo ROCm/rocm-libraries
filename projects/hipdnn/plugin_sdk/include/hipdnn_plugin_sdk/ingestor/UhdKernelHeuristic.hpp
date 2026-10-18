@@ -96,7 +96,10 @@ inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& 
 
 /// True for a name in a namespace the engine publishes itself: `graph.*` and `device.*`
 /// (problemFeatures), `constraint.*` (engineFeatures) and `kernel.*` (kernel metadata).
-inline bool isReservedFeatureName(const std::string& name)
+/// @param reserveWorkspace Also reserves the `ws.*` root, the shared-workspace tokens of a
+///        slotted engine's graph match (RFC 0021 §6); an unslotted engine's `ws.*` tokens stay
+///        ordinary features.
+inline bool isReservedFeatureName(const std::string& name, bool reserveWorkspace = false)
 {
     const std::string_view bare
         = !name.empty() && name.front() == '$' ? std::string_view(name).substr(1) : name;
@@ -107,17 +110,19 @@ inline bool isReservedFeatureName(const std::string& name)
             return true;
         }
     }
-    return false;
+    constexpr std::string_view WORKSPACE_ROOT = "ws.";
+    return reserveWorkspace && bare.substr(0, WORKSPACE_ROOT.size()) == WORKSPACE_ROOT;
 }
 
 /// Binds graph-match tokens as features. Reserved names are skipped so a matcher cannot
 /// override a canonical feature such as `graph.flops`.
 inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
-                                   const BoundTokens& bound)
+                                   const BoundTokens& bound,
+                                   bool reserveWorkspace = false)
 {
     for(const auto& entry : queryVarsFrom(bound))
     {
-        if(!isReservedFeatureName(entry.first))
+        if(!isReservedFeatureName(entry.first, reserveWorkspace))
         {
             features.bind(entry.first, entry.second);
         }
@@ -129,10 +134,11 @@ inline void bindGraphMatchBindings(uhd::FeatureExtractionContext& features,
 /// features. Excludes `constraint.*` because ranked catalogs are cached per CatalogKey.
 /// Compute once per graph, not per candidate.
 inline uhd::FeatureExtractionContext catalogProblemFeatures(const MatchContext& context,
-                                                            const BoundTokens& bound)
+                                                            const BoundTokens& bound,
+                                                            bool reserveWorkspace = false)
 {
     auto features = heuristics::problemFeatures(context.graph, context.deviceProperties);
-    bindGraphMatchBindings(features, bound);
+    bindGraphMatchBindings(features, bound, reserveWorkspace);
     return features;
 }
 
@@ -182,6 +188,8 @@ public:
     /// model: longest matching arch-key prefix, then `default`, within the metric (RFC 0019
     /// §3.1, §8.3).
     /// @param byMetric Metric (`""` for the metric-less ranker) to arch key to descriptor.
+    /// @param reserveWorkspaceTokens Keep `ws.*` graph-match tokens out of every feature row,
+    ///        as a slotted engine's ranker requires (RFC 0021 §6).
     /// @param unavailable Metric to arch keys whose named model was refused: such a key never
     ///        falls back to the `default` key's model for the same metric.
     static std::shared_ptr<UhdKernelHeuristic> makeResolver(
@@ -189,13 +197,15 @@ public:
         const std::string& describedBy,
         const std::vector<std::string>& knobs,
         const std::unordered_set<std::string>& kmdFields = {},
-        const std::map<std::string, std::set<std::string>>& unavailable = {})
+        const std::map<std::string, std::set<std::string>>& unavailable = {},
+        bool reserveWorkspaceTokens = false)
     {
         auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
         built->_byMetric = byMetric;
         built->_knobs = knobs;
         built->_kmdFields = kmdFields;
         built->_unavailable = unavailable;
+        built->_reserveWorkspaceTokens = reserveWorkspaceTokens;
         return built;
     }
 
@@ -290,7 +300,7 @@ public:
         {
             return 0.0;
         }
-        auto ctx = detail::catalogProblemFeatures(context, bound);
+        auto ctx = detail::catalogProblemFeatures(context, bound, _reserveWorkspaceTokens);
         ctx.bindKernelVars(detail::kernelVarsFrom(kernel));
         // The reported form; ranking goes through rankScored instead.
         return scoreCandidate(_extractor->extract(ctx)).reported;
@@ -448,8 +458,13 @@ public:
         // Lazily resolved models face the same knob/field checks (RFC 0019 §8.3).
         std::ostringstream failure;
         bool awaitingArtifact = false;
-        std::shared_ptr<const UhdKernelHeuristic> loaded
-            = create(*chosen, _describedBy, _knobs, _kmdFields, failure, awaitingArtifact);
+        std::shared_ptr<const UhdKernelHeuristic> loaded = create(*chosen,
+                                                                  _describedBy,
+                                                                  _knobs,
+                                                                  _kmdFields,
+                                                                  failure,
+                                                                  awaitingArtifact,
+                                                                  _reserveWorkspaceTokens);
 
         const std::lock_guard<std::mutex> lock(_archMutex);
         bool report = false;
@@ -509,7 +524,8 @@ private:
                const std::vector<std::string>& knobs,
                const std::unordered_set<std::string>& kmdFields,
                std::ostream& failure,
-               bool& awaitingArtifact)
+               bool& awaitingArtifact,
+               bool reserveWorkspaceTokens = false)
     {
         // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
         const auto loadStart = Clock::now();
@@ -665,6 +681,7 @@ private:
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
             built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
+            built->_reserveWorkspaceTokens = reserveWorkspaceTokens;
             return built;
         }
         catch(const std::exception& e)
@@ -805,7 +822,8 @@ private:
             // RFC 0019 §5 step 2: problem/device slots are evaluated once per selection;
             // only kernel slots vary. §9.4 times the prefix and per-candidate tail apart.
             const auto prefixStart = Clock::now();
-            auto ctx = detail::catalogProblemFeatures(context, catalog.bound);
+            auto ctx
+                = detail::catalogProblemFeatures(context, catalog.bound, _reserveWorkspaceTokens);
             auto features = _extractor->prepare(ctx);
             _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
             _timing.selections.fetch_add(1, std::memory_order_relaxed);
@@ -1086,6 +1104,8 @@ private:
     std::map<std::string, std::map<std::string, HeuristicDescriptor>> _byMetric;
     std::map<std::string, std::set<std::string>> _unavailable;
     std::vector<std::string> _knobs;
+    /// Whether this ranker belongs to a slotted engine, whose `ws.*` tokens are not features.
+    bool _reserveWorkspaceTokens = false;
 
     /// The KMD's declared field names, for checking lazily resolved models (§6.3 check 2).
     std::unordered_set<std::string> _kmdFields;

@@ -193,6 +193,33 @@ TEST(TestIngestorWinnerCache, KeysDifferingOnlyInGraphAreDistinct)
     EXPECT_NE(firstKey, secondKey);
 }
 
+TEST(TestIngestorWinnerCache, EmptySlotKeyMatchesAggregateInitKeyAndHash)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    const WinnerKey plain{GraphContentKey{graph}, DeviceKey{properties}};
+    const WinnerKey explicitEmpty{GraphContentKey{graph}, DeviceKey{properties}, std::string{}};
+
+    EXPECT_EQ(plain, explicitEmpty);
+    EXPECT_EQ(WinnerKeyHash{}(plain), WinnerKeyHash{}(explicitEmpty));
+}
+
+TEST(TestIngestorWinnerCache, KeysDifferingOnlyInSlotAreDistinct)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    DeviceProperties properties;
+    properties.gcnArchName = "gfx942";
+    const WinnerKey unslotted{GraphContentKey{graph}, DeviceKey{properties}};
+    const WinnerKey slotA{GraphContentKey{graph}, DeviceKey{properties}, "a"};
+    const WinnerKey slotB{GraphContentKey{graph}, DeviceKey{properties}, "b"};
+
+    EXPECT_NE(unslotted, slotA);
+    EXPECT_NE(slotA, slotB);
+    EXPECT_NE(WinnerKeyHash{}(unslotted), WinnerKeyHash{}(slotA));
+    EXPECT_NE(WinnerKeyHash{}(slotA), WinnerKeyHash{}(slotB));
+}
+
 TEST(TestIngestorWinnerCache, EqualGraphAndDeviceProduceEqualKeys)
 {
     DeviceProperties properties;
@@ -713,6 +740,152 @@ WinnerRecord recordFor(uint8_t kernel, double timeMs)
 
 /// UUID text is already a plain path component, so it reaches the shard path verbatim.
 const std::string UHD_ID = toString(HEURISTIC_ID);
+
+// ---------------------------------------------------------------------------
+// Golden pins of the unslotted on-disk contract.
+// Every expected value below is spelled out literally, derived from the codec in
+// WinnerCacheFile.hpp, so a change to an unslotted engine's persisted bytes or shard
+// location fails here rather than silently orphaning existing caches.
+// ---------------------------------------------------------------------------
+
+/// The persisted line: format v2, keys in nlohmann's sorted order, device fields as plain
+/// JSON, ranked entries with UUID text ids. The graph payload is base64 of the graph's
+/// serialized bytes, so it is spliced in from GraphContentKey::toJson() instead of spelled
+/// out; its envelope is pinned separately.
+TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineBytesAreFormatV2)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.5),
+                              entryFor(definitionFor(0x02), 0.25)};
+
+    const auto graphJson = key.graph.toJson();
+    ASSERT_TRUE(graphJson.is_object());
+    ASSERT_EQ(graphJson.size(), 1U);
+    ASSERT_TRUE(graphJson.contains("content_base64"));
+
+    const std::string expected
+        = std::string(
+              R"({"device":{"gcn_arch_name":"gfx942:sramecc+:xnack-","memory_bus_width":8192,)"
+              R"("memory_clock_rate":2600000,"multi_processor_count":304,)"
+              R"("shared_mem_per_block":65536,"total_global_mem":206141652992,"warp_size":64},)"
+              R"("entries":[{"dispatch_id":"d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0",)"
+              R"("kernel_id":"01010101-0101-0101-0101-010101010101",)"
+              R"("pack_id":"f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0","time_ms":1.5},)"
+              R"({"dispatch_id":"d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0",)"
+              R"("kernel_id":"02020202-0202-0202-0202-020202020202",)"
+              R"("pack_id":"f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0","time_ms":0.25}],"graph":)")
+          + graphJson.dump() + R"(,"v":2})";
+
+    EXPECT_EQ(encodeWinnerRecordLine(key, record), expected);
+    EXPECT_EQ(detail::WINNER_LINE_FORMAT_VERSION, 2);
+}
+
+TEST(TestIngestorWinnerCache, UnslottedGoldenWinnerRecordLineDecodesBackToTheSameKeyAndRecord)
+{
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto key = keyFor(graph, suffixedDeviceProperties());
+    const WinnerRecord record{entryFor(definitionFor(0x01), 1.5),
+                              entryFor(definitionFor(0x02), 0.25)};
+
+    const auto line = encodeWinnerRecordLine(key, record);
+    const auto decoded = decodeWinnerRecordLine(line);
+
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->first, key);
+    ASSERT_EQ(decoded->second.size(), record.size());
+    for(size_t index = 0; index < record.size(); ++index)
+    {
+        SCOPED_TRACE(index);
+        EXPECT_EQ(decoded->second[index].kernelId, record[index].kernelId);
+        EXPECT_EQ(decoded->second[index].packId, record[index].packId);
+        EXPECT_EQ(decoded->second[index].dispatchId, record[index].dispatchId);
+        EXPECT_DOUBLE_EQ(decoded->second[index].timeMs, record[index].timeMs);
+    }
+    EXPECT_EQ(encodeWinnerRecordLine(decoded->first, decoded->second), line)
+        << "decode followed by encode must reproduce the persisted bytes";
+}
+
+/// The shard path relative to the cache root, as the forward-slash string it is documented
+/// as: `ingestor-winners/<data-sdk version>/<sanitized engine>/<uhd id>/
+/// <revision>-<model hash>/<base arch>/winners.jsonl`.
+std::string relativeShardPath(const EngineIdentity& engine, std::string_view gcnArchName)
+{
+    const auto path = winnerCacheShardPath(engine, gcnArchName);
+    return path.lexically_relative(hipdnn_data_sdk::utilities::cacheRoot()).generic_string();
+}
+
+/// The sanitized engine component is `<stem>-<FNV-1a of the whole name>`; for "test:Golden"
+/// that is `test_Golden-89323a9478aa8f9c`. The model hash is truncated to 16 hex digits.
+TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithAModel)
+{
+    const ScopedCacheDir cacheDir("unslotted_golden_path_model");
+    const EngineIdentity engine{
+        "test:Golden", {1, 2, 3}, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2", "0123456789abcdef0123"};
+
+    EXPECT_EQ(relativeShardPath(engine, "gfx942:sramecc+:xnack-"),
+              "ingestor-winners/" + std::string(winnerCacheVersion())
+                  + "/test_Golden-89323a9478aa8f9c/e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2/"
+                    "1.2.3-0123456789abcdef/gfx942/winners.jsonl");
+}
+
+TEST(TestIngestorWinnerCache, UnslottedGoldenShardPathLayoutForAnEngineWithoutAModel)
+{
+    const ScopedCacheDir cacheDir("unslotted_golden_path_no_model");
+    const EngineIdentity engine{"test:Golden", {1, 0, 0}};
+
+    EXPECT_EQ(relativeShardPath(engine, "gfx950"),
+              "ingestor-winners/" + std::string(winnerCacheVersion())
+                  + "/test_Golden-89323a9478aa8f9c/no-uhd/1.0.0-unhashed/gfx950/winners.jsonl");
+}
+
+/// What the state manager really writes: the data-SDK version line, then exactly
+/// encodeWinnerRecordLine() for the record. A later line for the same key supersedes
+/// earlier ones when a fresh manager reads the shard.
+TEST(TestIngestorWinnerCacheStateManager,
+     UnslottedGoldenShardHoldsTheVersionLineThenTheEncodedRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("unslotted_golden_shard");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+    const EngineIdentity engine{"test:UnslottedGoldenShard"};
+    const auto first = recordFor(0x01, 1.5);
+
+    {
+        const auto writer = makeIdentifiedStateManager(engine);
+        writer->recordWinner(key, first, WinnerWriteCause::FRESH_MISS);
+    }
+
+    const auto path = winnerCacheShardPath(engine, properties.gcnArchName);
+    ASSERT_TRUE(std::filesystem::exists(path));
+    EXPECT_EQ(path.filename().string(), "winners.jsonl");
+    {
+        std::ifstream shardFile(path);
+        ASSERT_TRUE(shardFile.is_open());
+        std::vector<std::string> rawLines;
+        for(std::string line; std::getline(shardFile, line);)
+        {
+            rawLines.push_back(line);
+        }
+        ASSERT_EQ(rawLines.size(), 2U);
+        EXPECT_EQ(rawLines[0], std::string(winnerCacheVersion()));
+        EXPECT_EQ(rawLines[1], encodeWinnerRecordLine(key, first));
+    }
+
+    {
+        std::ofstream out(path, std::ios::app);
+        out << encodeWinnerRecordLine(key, recordFor(0x02, 2.0)) << "\n";
+        out << encodeWinnerRecordLine(key, recordFor(0x03, 3.0)) << "\n";
+    }
+
+    const auto served = makeIdentifiedStateManager(engine)->winnerFor(key);
+    ASSERT_TRUE(served.has_value());
+    ASSERT_EQ(served->size(), 1U);
+    EXPECT_EQ(served->front().kernelId, testId(0x03)) << "the last line for a key must win";
+    EXPECT_DOUBLE_EQ(served->front().timeMs, 3.0);
+}
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.
