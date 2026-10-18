@@ -206,6 +206,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         endif()
     endforeach()
 
+    # The packed-load test also reads the slotted fixtures' shards (RFC 0021), which sit
+    # beside the unit tree rather than inside it. The multi-launch one packs only with
+    # rocKE on, and the define tells the test whether to expect it.
+    foreach(_hkp_slotted hkp_packaging_slotted hkp_packaging_slotted_hsaco)
+        if(TARGET ${_hkp_slotted})
+            add_dependencies(hip_kernel_provider_tests ${_hkp_slotted})
+        endif()
+    endforeach()
+    if(TARGET hkp_packaging_slotted_multi_launch)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_slotted_multi_launch)
+        target_compile_definitions(hip_kernel_provider_tests PRIVATE
+            HIPKERNELPROVIDER_PACKED_SLOTTED_MULTI_LAUNCH)
+    endif()
+
     # The census binary additionally reads the production shard, which is wired only
     # where a production root holds descriptors this build packs for. Absent, there is
     # nothing to depend on and no entry is registered against it either.

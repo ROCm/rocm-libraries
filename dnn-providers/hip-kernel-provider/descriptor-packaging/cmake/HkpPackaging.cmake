@@ -1754,6 +1754,49 @@ function(hkp_add_packaging)
         PACK_JOBS 1
         ${_root_args})
 
+    # The slotted fixture of the pytest suite (RFC 0021), packed once more so that
+    # the packed-load test reads the packer's real output for a slotted engine. It is a
+    # sibling of the unit and integration trees, not a subtree of one: the unit tree is
+    # walked by hkp_verify_embedded_sources(), and the fixture's embedded sources name
+    # no kernel any binary registers. The wildcard arch packs it for every selected arch.
+    _hkp_wire_root(
+        NAME slotted
+        SOURCE_ROOT "${HKP_FIXTURES}/slotted"
+        ARCHES "${_arches}"
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/slotted"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The consumer-shaped slotted fixture: authored hsaco slots, `dq` with a second
+    # symbol of its object named by a KMD field and a generic-target pack. The packed-load
+    # test loads the gfx950 shard, so that is the arch it is packed for whatever the build
+    # selects. hsaco runs no compiler, so rocKE state does not gate it.
+    _hkp_wire_root(
+        NAME slotted_hsaco
+        SOURCE_ROOT "${HKP_FIXTURES}/slotted_hsaco"
+        ARCHES gfx950
+        HIPCC "${HKP_HIPCC}"
+        ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+        OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/slotted_hsaco"
+        PACK_JOBS 1
+        ${_root_args})
+
+    # The slotted multi-launch fixture: every slot is rocKE (develop's gfx1151 decode
+    # builders), so it packs only with rocKE on. Absent otherwise, with its tests.
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        _hkp_wire_root(
+            NAME slotted_multi_launch
+            SOURCE_ROOT "${HKP_FIXTURES}/slotted_multi_launch"
+            ARCHES gfx1151
+            HIPCC "${HKP_HIPCC}"
+            ROCM_KPACK_DIR "${_rocm_kpack_dir}"
+            OUT_ROOT "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/slotted_multi_launch"
+            PACK_JOBS 1
+            ${_root_args})
+    endif()
+
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
         include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")

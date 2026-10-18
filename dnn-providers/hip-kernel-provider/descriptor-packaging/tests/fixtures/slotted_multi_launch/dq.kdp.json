@@ -1,0 +1,54 @@
+{
+  "version": "1.1",
+  "id": "d5b00000-0000-4000-8000-00000000000d",
+  "name": "hipkernel:slotted_multi_launch_dq",
+  "arch": [
+    "gfx1151"
+  ],
+  "matchers": [
+    "d5b00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "d5b00000-0000-4000-8000-000000000001",
+  "dispatch": "d5b00000-0000-4000-8000-00000000000a",
+  "slot": "dq",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d5b00000-0000-4000-8000-000000000010",
+      "name": "dq.wmma_decode",
+      "arch": [
+        "gfx1151"
+      ],
+      "kernel_source": {
+        "kind": "rocke",
+        "source": "kernels/gfx1151/wmma_fmha_decode.py",
+        "builder": "build_wmma_fmha_decode_merge",
+        "spec": {
+          "head_size": 128
+        },
+        "compile_target": "gfx1151"
+      },
+      "metadata": {
+        "family": "dq"
+      },
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "d5b00000-0000-4000-8000-000000000001",
+              "kmd_id": "d5b00000-0000-4000-8000-000000000004",
+              "metadata_fields": [],
+              "matcher_only_fields": [
+                "family"
+              ],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

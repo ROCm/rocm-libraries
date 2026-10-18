@@ -137,6 +137,49 @@ std::vector<const hipdnn_plugin_sdk::ingestor::KernelSource*>
     return sources;
 }
 
+// PORT(H): C4-01 slotted fixture shard helpers, kept beside develop's launchSources
+/// The packed slotted fixture's arch shards (RFC 0021): the packer's output for
+/// `descriptor-packaging/tests/fixtures/slotted`, staged as a sibling of the unit and
+/// integration trees so that the embedded-source verification of the unit tree does not
+/// walk it.
+///
+/// Reached from the unit kpack root because a binary that finds one finds both. Absent
+/// when the unit shards exist, the slotted pack did not run: that fails, since a shard
+/// that was never produced is exactly what these cases must not pass over.
+std::vector<std::filesystem::path> packedSlottedShards()
+{
+    std::vector<std::filesystem::path> shards;
+
+    std::error_code ec;
+    const std::filesystem::path root = unitKpackRoot().parent_path().parent_path() / "slotted";
+    for(const auto& entry : std::filesystem::directory_iterator(root, ec))
+    {
+        std::error_code inner;
+        if(entry.is_directory(inner))
+        {
+            shards.push_back(entry.path());
+        }
+    }
+
+    std::sort(shards.begin(), shards.end());
+    return shards;
+}
+
+/// The slotted shards, a skip when nothing was packed at all, or a failure when the unit
+/// pack ran and the slotted one did not.
+#define REQUIRE_PACKED_SLOTTED_SHARDS(slottedShards)                                    \
+    REQUIRE_PACKED_SHARDS(unitShards);                                                  \
+    /* NOLINTNEXTLINE(bugprone-macro-parentheses) declarator name, not an expression */ \
+    const auto slottedShards = packedSlottedShards();                                   \
+    ASSERT_FALSE((slottedShards).empty())                                               \
+        << "the unit shards exist but the slotted fixture was not packed under "        \
+        << (unitKpackRoot().parent_path().parent_path() / "slotted")                    \
+        << ". Its packing root (hkp_packaging_slotted) did not run or is not a "        \
+           "dependency of this binary.";                                                \
+    static_assert(true, "swallow the trailing semicolon")
+
+constexpr const char* SLOTTED_ENGINE = "hipkernel:SlottedFixture";
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -462,6 +505,148 @@ TEST(TestPackedDescriptorLoad, PackedKernelsWereRewrittenToKpackForm)
                     }
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A packed SLOTTED engine (RFC 0021)
+// ---------------------------------------------------------------------------
+
+/// Every descriptor the packer wrote for the slotted fixture is one the loader accepts.
+///
+/// Counted for the reason EveryPackedDescriptorInTheShardIsLoaded counts: the loader skips
+/// a file it cannot parse, so a 1.1 UED, KDP or UHD the loader refuses would vanish, and
+/// every later case here would run on whatever survived.
+TEST(TestPackedDescriptorLoad, EverySlottedDescriptorInTheShardIsLoaded)
+{
+    REQUIRE_PACKED_SLOTTED_SHARDS(shards);
+
+    for(const auto& shard : shards)
+    {
+        size_t engineFiles = 0;
+        size_t packFiles = 0;
+        size_t modelFiles = 0;
+
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(shard, ec))
+        {
+            const auto name = entry.path().filename().string();
+            const auto endsWith = [&name](const std::string& suffix) {
+                return name.size() > suffix.size()
+                       && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+            };
+            engineFiles += endsWith(".ued.json") ? 1U : 0U;
+            packFiles += endsWith(".kdp.json") ? 1U : 0U;
+            modelFiles += endsWith(".uhd.json") ? 1U : 0U;
+        }
+        ASSERT_EQ(engineFiles, 1U) << shard;
+        ASSERT_EQ(packFiles, 3U) << shard;
+        ASSERT_EQ(modelFiles, 3U) << shard;
+
+        const DescriptorCatalog catalog = loadDescriptorCatalog(shard);
+
+        EXPECT_EQ(catalog.engines.size(), engineFiles) << shard;
+        EXPECT_EQ(catalog.packs.size(), packFiles) << shard;
+        EXPECT_EQ(catalog.heuristics.size(), modelFiles) << shard;
+    }
+}
+
+/// The slotted engine resolves, every slot keeps its own pack and KMD, and the kernels
+/// each pack carried reach their slot and no other.
+///
+/// An engine the loader drops would leave resolveDescriptorSets() without the name; a slot
+/// whose pack the loader dropped is a warning, not an error, and leaves the engine
+/// registered to decline every graph. Both are silent without these assertions.
+TEST(TestPackedDescriptorLoad, PackedSlottedEngineKeepsEverySlotsPack)
+{
+    REQUIRE_PACKED_SLOTTED_SHARDS(shards);
+
+    for(const auto& shard : shards)
+    {
+        const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
+        const auto engine = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
+            return set.engine.name == SLOTTED_ENGINE;
+        });
+        ASSERT_NE(engine, sets.end()) << shard << " resolved no engine named " << SLOTTED_ENGINE;
+
+        // Selection state is per slot, so the engine-level copies stay empty.
+        EXPECT_TRUE(engine->packs.empty()) << shard;
+        EXPECT_EQ(engine->engine.sharedWorkspaceToken, "ws.bytes") << shard;
+
+        std::vector<std::string> names;
+        std::vector<size_t> kernelCounts;
+        for(const auto& slot : engine->slots)
+        {
+            names.push_back(slot.name);
+            ASSERT_EQ(slot.packs.size(), 1U)
+                << shard << ": slot '" << slot.name << "' lost its pack.";
+            kernelCounts.push_back(slot.packs.front().kernels.size());
+            EXPECT_EQ(slot.packs.front().slot, slot.name) << shard;
+        }
+        EXPECT_EQ(names, (std::vector<std::string>{"prep", "dkdv", "dq"})) << shard;
+        EXPECT_EQ(kernelCounts, (std::vector<size_t>{1, 2, 2})) << shard;
+
+        // One KMD per slot: the packs completed against their own slot's schema.
+        ASSERT_EQ(engine->slots.size(), 3U);
+        EXPECT_NE(engine->slots[0].schema.id, engine->slots[1].schema.id) << shard;
+        EXPECT_NE(engine->slots[1].schema.id, engine->slots[2].schema.id) << shard;
+        EXPECT_NE(engine->slots[0].schema.id, engine->slots[2].schema.id) << shard;
+    }
+}
+
+/// The models the slotted fixture ships are bound, not merely present: each slot ranker
+/// and the engine estimate survive the loader's provenance check against the packs the
+/// packer wrote.
+///
+/// A model that fails it is disabled with an error and the engine stays registered with
+/// declared-order fallback, so the engine and its packs can look healthy while every
+/// ranker is gone. The checks that decide it are the ones the packer mirrors: the slot a
+/// ranker names, its slot's KMD, the `kmds` of the estimate, and the matcher the packs
+/// share. `unavailable*` lists what the loader refused by name.
+TEST(TestPackedDescriptorLoad, PackedSlottedModelsAreBoundToTheirSlots)
+{
+    REQUIRE_PACKED_SLOTTED_SHARDS(shards);
+
+    for(const auto& shard : shards)
+    {
+        const auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
+        const auto engine = std::find_if(sets.begin(), sets.end(), [](const auto& set) {
+            return set.engine.name == SLOTTED_ENGINE;
+        });
+        ASSERT_NE(engine, sets.end()) << shard << " resolved no engine named " << SLOTTED_ENGINE;
+        ASSERT_EQ(engine->slots.size(), 3U) << shard;
+
+        // `prep` ships no ranker; `dkdv` and `dq` ship a metric-less one each.
+        EXPECT_FALSE(engine->slots[0].heuristic.has_value()) << shard;
+        for(size_t index = 1; index < engine->slots.size(); ++index)
+        {
+            const auto& slot = engine->slots[index];
+            EXPECT_TRUE(slot.unavailableHeuristicArches.empty())
+                << shard << ": the ranker of slot '" << slot.name << "' was refused.";
+            ASSERT_TRUE(slot.heuristic.has_value())
+                << shard << ": slot '" << slot.name << "' has no usable ranker.";
+            ASSERT_TRUE(slot.heuristic->trainedAgainst.has_value()) << shard;
+            EXPECT_EQ(slot.heuristic->trainedAgainst->slot, slot.name) << shard;
+            EXPECT_EQ(slot.heuristic->trainedAgainst->kmd.id, slot.schema.id) << shard;
+            EXPECT_TRUE(slot.heuristic->score.metric.empty()) << shard;
+            ASSERT_EQ(slot.heuristicsByMetric.count(""), 1U) << shard;
+            EXPECT_EQ(slot.heuristicsByMetric.at("").count("default"), 1U) << shard;
+        }
+
+        EXPECT_TRUE(engine->unavailableEnginePredictionArches.empty())
+            << shard << ": the engine estimate was refused.";
+        ASSERT_EQ(engine->enginePredictionsByMetric.count("time"), 1U)
+            << shard << ": the engine estimate is not bound.";
+        const auto& estimate = engine->enginePredictionsByMetric.at("time");
+        ASSERT_EQ(estimate.count("default"), 1U) << shard;
+        const auto& trained = estimate.at("default").trainedAgainst;
+        ASSERT_TRUE(trained.has_value()) << shard;
+        ASSERT_EQ(trained->kmds.size(), engine->slots.size()) << shard;
+        for(size_t index = 0; index < engine->slots.size(); ++index)
+        {
+            EXPECT_EQ(trained->kmds[index].slot, engine->slots[index].name) << shard;
+            EXPECT_EQ(trained->kmds[index].kmd.id, engine->slots[index].schema.id) << shard;
         }
     }
 }

@@ -1,0 +1,43 @@
+{
+  "version": "1.1",
+  "id": "d5a00000-0000-4000-8000-000000000001",
+  "name": "hipkernel:SlottedFixture",
+  "graph_match": {
+    "native": "hipkernel.slotted_fixture.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "predict_engine": {
+    "default": [
+      "d5a00000-0000-4000-8000-000000000012"
+    ]
+  },
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "d5a00000-0000-4000-8000-000000000002"
+    },
+    {
+      "name": "dkdv",
+      "metadata": "d5a00000-0000-4000-8000-000000000003",
+      "sort_kernel_catalog": {
+        "default": "d5a00000-0000-4000-8000-000000000010"
+      },
+      "knobs": [
+        "block_m"
+      ]
+    },
+    {
+      "name": "dq",
+      "metadata": "d5a00000-0000-4000-8000-000000000004",
+      "sort_kernel_catalog": {
+        "default": "d5a00000-0000-4000-8000-000000000011"
+      },
+      "knobs": [
+        "block_n"
+      ]
+    }
+  ]
+}

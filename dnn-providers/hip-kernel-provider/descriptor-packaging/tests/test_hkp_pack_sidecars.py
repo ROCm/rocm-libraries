@@ -394,7 +394,22 @@ def _canonical_uhd_validator():
         "empty_feature",
         "invalid_hash",
         "unknown_header",
+        "format_1_1",
+        "slot_provenance",
+        "kmds_provenance",
         "unsupported_format",
+        "slot_in_1_0",
+        "kmds_in_1_0",
+        "slot_without_kmd",
+        "slot_with_kmds",
+        "kmd_and_kmds",
+        "empty_kmds",
+        "kmds_without_slot_name",
+        "kmds_global_slot",
+        "kmds_uppercase_slot",
+        "slot_global",
+        "slot_uppercase",
+        "slot_not_string",
         "tflops_metric",
         "time_metric",
         "units_field",
@@ -413,6 +428,9 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     doc = _model_uhd("model.bin")
     valid = mutation in (
         "valid",
+        "format_1_1",
+        "slot_provenance",
+        "kmds_provenance",
         "tflops_metric",
         "time_metric",
         "feature_semantics",
@@ -438,8 +456,55 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["features_hash"] = "sha256:not-hex"
     elif mutation == "unknown_header":
         doc["unknown"] = True
-    elif mutation == "unsupported_format":
+    elif mutation == "format_1_1":
         doc["version"] = "1.1"
+    elif mutation == "unsupported_format":
+        doc["version"] = "1.2"
+    elif mutation in (
+        "slot_provenance",
+        "slot_in_1_0",
+        "slot_global",
+        "slot_uppercase",
+        "slot_not_string",
+    ):
+        # RFC 0021 §9: `slot` beside `kmd` is a slot ranker's provenance, and 1.1-only.
+        doc["version"] = "1.0" if mutation == "slot_in_1_0" else "1.1"
+        doc["trained_against"]["slot"] = {
+            "slot_global": "global",
+            "slot_uppercase": "Dkdv",
+            "slot_not_string": 7,
+        }.get(mutation, "dkdv")
+    elif mutation in (
+        "kmds_provenance",
+        "kmds_in_1_0",
+        "slot_with_kmds",
+        "kmd_and_kmds",
+        "empty_kmds",
+        "kmds_without_slot_name",
+        "kmds_global_slot",
+        "kmds_uppercase_slot",
+    ):
+        trained = doc["trained_against"]
+        kmd = trained["kmd"]
+        slots = [{"slot": "prep", **kmd}, {"slot": "dkdv", **kmd}]
+        doc["version"] = "1.0" if mutation == "kmds_in_1_0" else "1.1"
+        if mutation != "kmd_and_kmds":
+            del trained["kmd"]
+        trained["kmds"] = slots
+        if mutation == "slot_with_kmds":
+            trained["slot"] = "dkdv"
+        elif mutation == "empty_kmds":
+            trained["kmds"] = []
+        elif mutation == "kmds_without_slot_name":
+            del slots[0]["slot"]
+        elif mutation == "kmds_global_slot":
+            slots[0]["slot"] = "global"
+        elif mutation == "kmds_uppercase_slot":
+            slots[0]["slot"] = "Prep"
+    elif mutation == "slot_without_kmd":
+        doc["version"] = "1.1"
+        doc["trained_against"].pop("kmd")
+        doc["trained_against"]["slot"] = "dkdv"
     elif mutation == "tflops_metric":
         doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
     elif mutation == "time_metric":

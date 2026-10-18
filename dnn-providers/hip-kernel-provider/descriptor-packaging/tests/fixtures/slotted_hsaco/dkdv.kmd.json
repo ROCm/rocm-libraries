@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "d5c00000-0000-4000-8000-000000000003",
+  "name": "dkdv variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}
