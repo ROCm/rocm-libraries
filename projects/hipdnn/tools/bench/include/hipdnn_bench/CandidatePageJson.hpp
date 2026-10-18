@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -208,21 +209,52 @@ inline std::string slotReferenceText(const std::vector<std::string>& marks)
     return text;
 }
 
+/// The slot columns of a measured configuration: its candidate's composite id and its
+/// `slot_reference` text. The marks are per catalog position, so the candidate is found by its
+/// knob tuple in @p catalog, never by the result's own position. Empty when @p knobs match no
+/// enrolled candidate.
+struct SlotRow
+{
+    std::string candidateId;
+    std::string reference;
+};
+
+inline std::optional<SlotRow>
+    slotRowOf(const hipdnn_frontend::EngineCandidatePage& catalog,
+              const SlotReferences& references,
+              const std::map<hipdnn_frontend::KnobType_t, hipdnn_frontend::KnobValueVariant>& knobs)
+{
+    const auto candidate
+        = std::find_if(catalog.candidates.begin(),
+                       catalog.candidates.end(),
+                       [&knobs](const auto& item) { return item.variant.knobSettings == knobs; });
+    if(candidate == catalog.candidates.end())
+    {
+        return std::nullopt;
+    }
+    return SlotRow{candidate->id,
+                   slotReferenceText(references.marks.at(
+                       static_cast<size_t>(std::distance(catalog.candidates.begin(), candidate))))};
+}
+
 /// @p page as JSON, naming the graph by @p graphKey (@ref graphContentKey) and the id it
-/// carries, @p graphId.
+/// carries, @p graphId. A descriptor engine's page (non-empty `engineDescriptorId`) also names
+/// each candidate's slot kernels; the ids of any other engine are opaque and never parsed.
 inline nlohmann::json pageJson(const hipdnn_frontend::EngineCandidatePage& page,
                                const std::string& graphKey,
                                const std::string& graphId)
 {
+    const bool descriptor = !page.engineDescriptorId.empty();
     nlohmann::json candidates = nlohmann::json::array();
     for(const auto& candidate : page.candidates)
     {
         nlohmann::json entry = {{"id", candidate.id},
                                 {"knob_settings", knobJson(candidate.variant.knobSettings)},
                                 {"kernel_features", candidate.kernelFeatures}};
-        // A slotted candidate also names each slot's kernel, in slot order. An unslotted one
-        // prints exactly what it always has.
-        if(const auto kernels = slotKernels(candidate.id); !kernels.empty())
+        // A slotted candidate also names each slot's kernel, in slot order; an unslotted one
+        // carries no `slot_kernels`.
+        if(const auto kernels = descriptor ? slotKernels(candidate.id) : std::vector<SlotKernel>{};
+           !kernels.empty())
         {
             nlohmann::json named = nlohmann::json::array();
             for(const auto& kernel : kernels)

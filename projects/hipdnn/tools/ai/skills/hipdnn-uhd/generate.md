@@ -54,6 +54,9 @@ binding decides everything below:
   directory named for the arch on the path from the provider's staged directory down to the
   installed UED (for a provider that packs kernels, the directory that also holds `kpack/`).
   Hand that root, never the UED's own folder, to every tool.
+  A UED with a `slots` list is a **slotted engine** (version `1.1`): one KMD, catalog, knobs
+  and metric-less `sort_kernel_catalog` per slot, `predict_engine` at the engine
+  ([Slotted engines](#slotted-engines)).
 - **Opaque engine** (no UED): L1 only, bound in its provider's code. The engine overrides
   `getPrediction` and passes the UHD ids it reads to the plugin SDK's binding
   (`EngineModelBinding` / `resolveDeclaredEnginePredictions`, in
@@ -167,6 +170,44 @@ binding decides everything below:
    `<output dir>/generation_manifest.json` (the directory holding `heuristic.uhd.json`, the
    payload and `eval_report.json`), beside that model's `training_problem_keys` and
    `eval_problem_keys`. [evaluate.md](evaluate.md) reads it, then [validate.md](validate.md).
+
+## Slotted engines
+
+A slotted engine (UED `slots`, RFC 0021) selects one kernel per slot, in slot order; a
+candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob is
+`<slot>.<field>`. The workflow above holds with these differences:
+
+- **Roles.** L2 is one metric-less ranker **per slot**, trained from that slot's rows; L1 is
+  the engine-level `predict_engine`, trained as above from the bench's L1 corpus; its
+  `trained_against` names every slot's KMD in `kmds` and `train` writes it as a `1.1` UHD (no
+  GPU-free run of this role exists, so it is untested here). A slot ranker is trained
+  without `--metric`: one that declares `score.metric` makes the loader drop the engine, and
+  `generate --slot` and `promote` refuse it. Slots carry no `predict_applicable_kernels`.
+- **Collect (step 5, L2).** `uhd_gen generate` refuses to collect measurements for a slotted
+  engine (`generate measures an engine that declares no slots`). Sweep each graph with `hipdnn_bench --sweep`,
+  which times the product of the slot catalogs and adds the `kernel` (composite id) and
+  `slot_reference` columns, then convert it ([data.md](data.md), "Slotted sweeps"). A
+  reference kernel that fails to launch fails the sweep, naming the reference program; fix or
+  remove that kernel, as no row is dropped. (The runtime benchmark instead moves a failing
+  reference pick to the slot's next kernel.)
+- **Train (step 7, L2).** One run per slot, with `generate --dataset <dataset dir> --slot
+  <slot> --no-promote --target avgTimeMs --objective min --features ...`; the dataset is a
+  published (CSV) one, so the model is left for `promote`. The command, what `--slot` rewrites
+  and the training-problem minimum are in the uhd_gen README ("Slotted engines").
+- **Install.** `promote` with `--role sort_kernel_catalog` installs the slot's ranker under
+  `heuristics/<ued-id>/<slot>/` and its refusals are listed in the uhd_gen README ("Slotted engines"). See
+  [validate.md](validate.md).
+- **Dispatch and launches.** Each slot has its own UDD (dispatch symbol
+  `<namespace>.<slot>_dispatch`), because packs with different launch sets need different
+  dispatch descriptors. A slot's kernels may be multi-launch UKD 1.1 `sources` (a packaged
+  `rocke` pack with `launches`; the generator checks one launch set per slot). A dependent
+  kernel that lives in the selected UKD's own code object, as an `hsaco` UKD requires, is
+  launched by symbol: the KMD records its name and the slot's native handler launches it
+  (RFC 0021 §3); no `sources` entry is needed.
+- **Local tests.** The `uhd_gen` slot tests need pandas, pyarrow and lightgbm, which CI does
+  not install: they skip in CI and run only locally.
+- **Reference picks.** The sweep's and the runtime's differ (kernel-id order against
+  plan-build order); the README covers it.
 
 ## Decision rules
 
