@@ -284,8 +284,8 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             {"kv_fp8", cfg->kv_fp8, 2, {p->k_scale, p->v_scale}},
             {"paged",
              paged,
-             4,
-             {p->block_table, p->table_row, p->stride_k_block, p->stride_v_block}},
+             5,
+             {p->block_table, p->table_row, p->stride_k_block, p->stride_v_block, p->num_blocks}},
             {"dense K/V", !paged, 2, {p->k_bytes, p->v_bytes}},
         };
         std::string missing;
@@ -634,7 +634,13 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
     }
 
     /* Paged K / V: rows past the sequence (or of an invalid tile) read
-     * nothing; their block-table index is clamped to 0. */
+     * nothing; their block-table index is clamped to 0. A page id outside
+     * [0, num_blocks) reads nothing either. */
+    auto page_ok = [&](Val phys) {
+        Val ge = rocke_b_cmp_ge(b, phys, c0);
+        Val lt = rocke_b_cmp_lt(b, phys, p->num_blocks);
+        return rocke_b_land(b, ge, lt);
+    };
     auto issue_paged_loads = [&](Val t, Val valid, Vals* kr, std::vector<Vals>* vr) {
         int lps = 0;
         while((1 << lps) < ps)
@@ -664,6 +670,10 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             {
                 Val idx = rocke_b_add(b, p->table_row, blk);
                 phys = rocke_b_global_load_i32(b, p->block_table, idx, 4);
+            }
+            {
+                Val in_cache = page_ok(phys);
+                rem = rocke_b_select(b, in_cache, rem, c0);
             }
             Val in_page;
             {
@@ -707,6 +717,10 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             {
                 Val idx = rocke_b_add(b, p->table_row, blk);
                 phys = rocke_b_global_load_i32(b, p->block_table, idx, 4);
+            }
+            {
+                Val in_cache = page_ok(phys);
+                ok = rocke_b_land(b, ok, in_cache);
             }
             Val in_page;
             {

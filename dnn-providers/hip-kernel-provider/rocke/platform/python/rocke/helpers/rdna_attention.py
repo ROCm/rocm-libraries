@@ -237,6 +237,7 @@ def rdna_attention_fwd_body(
     table_row: Optional[Value] = None,
     stride_k_block: Optional[Value] = None,
     stride_v_block: Optional[Value] = None,
+    num_blocks: Optional[Value] = None,
 ) -> None:
     """Emit the K loop and epilogue of one CTA.
 
@@ -271,7 +272,9 @@ def rdna_attention_fwd_body(
     Paged K / V (``cfg.page_block_size``): ``k_rsrc`` / ``v_rsrc`` cover the
     whole cache at this head; key ``t`` lives at element ``block_table[
     table_row + t / page] * stride_{k,v}_block + (t % page) * stride_{k,v}``
-    (``k_bytes`` / ``v_bytes`` unused).
+    (``k_bytes`` / ``v_bytes`` unused). The table's values are caller data: a
+    page id outside ``[0, num_blocks)`` (the caches' page count) is not
+    addressed -- its keys read as zero K / V rows, like rows past the sequence.
     """
     cfg.validate()
     bf16 = cfg.dtype == "bf16"
@@ -310,7 +313,7 @@ def rdna_attention_fwd_body(
             (
                 "paged",
                 paged,
-                (block_table, table_row, stride_k_block, stride_v_block),
+                (block_table, table_row, stride_k_block, stride_v_block, num_blocks),
             ),
             ("dense K/V", not paged, (k_bytes, v_bytes)),
         )
@@ -486,6 +489,10 @@ def rdna_attention_fwd_body(
         vr = [[load_kv(v_rsrc, b.add(o, tv)) for o in offs] for offs in v_goff]
         return kr, vr
 
+    def page_ok(phys):
+        """``phys`` names a page of the cache: ``0 <= phys < num_blocks``."""
+        return b.land(b.cmp_ge(phys, c0), b.cmp_lt(phys, num_blocks))
+
     def issue_paged_loads(t, valid):
         """Paged K / V: rows past the sequence (or of an invalid tile) read
         nothing; their block-table index is clamped to 0."""
@@ -496,6 +503,7 @@ def rdna_attention_fwd_body(
             # The whole tile sits in one page: one lookup per tile.
             blk = b.select(valid, b.lshr(tok0, ci(lps)), c0)
             phys = b.global_load_i32(block_table, b.add(table_row, blk))
+            rem = b.select(page_ok(phys), rem, c0)
             in_page = b.land(tok0, ci(ps - 1))
             tk = kv_byte(b.add(b.mul(phys, stride_k_block), b.mul(in_page, stride_k)))
             tv = kv_byte(b.add(b.mul(phys, stride_v_block), b.mul(in_page, stride_v)))
@@ -515,6 +523,7 @@ def rdna_attention_fwd_body(
             ok = b.cmp_lt(r, rem)
             blk = b.select(ok, b.lshr(tok, ci(lps)), c0)
             phys = b.global_load_i32(block_table, b.add(table_row, blk))
+            ok = b.land(ok, page_ok(phys))
             in_page = b.land(tok, ci(ps - 1))
             row = b.add(b.mul(phys, stride_blk), b.mul(in_page, stride_tok))
             return b.select(ok, b.add(o, kv_byte(row)), oob)

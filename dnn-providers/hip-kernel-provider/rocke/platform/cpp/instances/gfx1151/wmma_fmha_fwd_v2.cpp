@@ -291,6 +291,7 @@ void v2_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd_v2_spec_
             scalar("block_table_stride", rocke_i32());
             scalar("stride_k_block", rocke_i32());
             scalar("stride_v_block", rocke_i32());
+            scalar("num_blocks", rocke_i32());
         }
     }
     if(fp8)
@@ -564,6 +565,7 @@ rocke_status_t
         p.block_table = param("block_table");
         p.stride_k_block = param("stride_k_block");
         p.stride_v_block = param("stride_v_block");
+        p.num_blocks = param("num_blocks");
     }
     if(spec->use_softcap)
         p.softcap = param("softcap");

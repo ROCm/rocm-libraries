@@ -1043,6 +1043,9 @@ def _rdna_validate_and_collect(
                     "block_table_stride": row_stride,
                     "stride_k_block": _fits_i32(k.stride(0), "stride_k_block"),
                     "stride_v_block": _fits_i32(v.stride(0), "stride_v_block"),
+                    # Every block_table entry is bounded to this page count on
+                    # device (v's matches k's, checked above).
+                    "num_blocks": _fits_i32(_shape(k, "k")[0], "num_blocks"),
                     "stride_k_token": _fits_i32(k.stride(1), "stride_k_token"),
                     "stride_k_head": _fits_i32(k.stride(2), "stride_k_head"),
                     "stride_v_token": _fits_i32(v.stride(1), "stride_v_token"),
@@ -1212,7 +1215,9 @@ def bind_rdna_prefill_torch(
     Runtime scalar kwargs are ``softmax_scale`` (default ``1/sqrt(hdim_q)``),
     ``softcap`` (required and positive when enabled), ``k_scale``/``v_scale``
     for FP8 KV, ``stream``, and ``fence``. Validation reads shapes, dtypes and
-    strides only (never the contents of the layout metadata). The compiled
+    strides only (never the contents of the layout metadata); the kernels bound
+    every ``block_table`` entry to the cache's page count on device (an entry
+    outside ``[0, k.shape[0])`` reads as zero K / V rows). The compiled
     ``KernelLauncher`` is cached by ``(arch, spec)``.
     """
     from kernels.gfx1151.wmma_fmha_fwd_v2 import wmma_fmha_fwd_v2_grid

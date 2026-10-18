@@ -464,6 +464,7 @@ void dec_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_decode_spec
         (void)rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         (void)rocke_b_param(b, "stride_k_block", rocke_i32(), NULL);
         (void)rocke_b_param(b, "stride_v_block", rocke_i32(), NULL);
+        (void)rocke_b_param(b, "num_blocks", rocke_i32(), NULL);
     }
     if(fp8)
     {
@@ -1206,6 +1207,13 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
         Val a = e.add(bt_row, blk);
         return rocke_b_global_load_i32(b, P("block_table"), a, 4);
     };
+    /* `phys` names a page of the cache: 0 <= phys < num_blocks. The table's
+     * values are caller data; a page outside the cache reads as zeros. */
+    auto page_ok = [&](Val phys) {
+        Val ge = rocke_b_cmp_ge(b, phys, c0);
+        Val lt = rocke_b_cmp_lt(b, phys, P("num_blocks"));
+        return rocke_b_land(b, ge, lt);
+    };
     auto paged_tile_rsrc
         = [&](Val slice_ptr, Val extent, Val row_bytes, Val blk_stride, Val t, Val valid) {
               Val kv0_;
@@ -1218,6 +1226,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
                   Val po = page_of(kv0_, valid);
                   phys = rocke_b_readfirstlane(b, po);
               }
+              Val in_cache = page_ok(phys);
               Val page_off;
               {
                   Val z1 = rocke_b_zext(b, phys, rocke_i64());
@@ -1240,6 +1249,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
               }
               if(valid != NULL)
                   nrec = e.sel(valid, nrec, c0);
+              nrec = e.sel(in_cache, nrec, c0);
               Val p = rocke_b_global_ptr_add(b, slice_ptr, page_off);
               return rocke_b_buffer_rsrc(b, p, nrec);
           };
@@ -1329,6 +1339,10 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
                   if(valid != NULL)
                       ok = e.land(ok, valid);
                   Val phys = page_of(key, ok);
+                  {
+                      Val in_cache = page_ok(phys);
+                      ok = e.land(ok, in_cache);
+                  }
                   Val off;
                   {
                       Val m1 = e.mul(phys, blk_stride);

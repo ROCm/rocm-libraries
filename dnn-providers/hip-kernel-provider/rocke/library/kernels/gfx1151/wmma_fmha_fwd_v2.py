@@ -31,7 +31,9 @@ sinks (``sink_ptr``,
 (``qq_bias_ptr`` [rows, cols] f32 with ``qq_bias_rows / cols / stride``), a
 packed layout -- ragged (``cu_seqlens_q``, ``cu_seqlens_k``) or paged
 (``cu_seqlens_q``, ``seqused_k``, ``block_table``, ``block_table_stride``,
-``stride_k_block``, ``stride_v_block``; power-of-two ``page_block_size``) --
+``stride_k_block``, ``stride_v_block``, ``num_blocks`` (the caches' page count;
+a ``block_table`` entry outside ``[0, num_blocks)`` reads as zero K / V rows);
+power-of-two ``page_block_size``) --
 and OCP E4M3FN K/V (``k_scale``, ``v_scale``). Packed layouts take Q / O as
 [total_q, Hq, D] and LSE per packed row; ``batch`` is the sequence count and
 ``seqlen_q`` / ``seqlen_k`` are the maxima (they size the grid; the
@@ -367,7 +369,13 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdV2Spec):
         else:
             ptr("seqused_k", I32, 4)
             ptr("block_table", I32, 4)
-            scalars(I32, "block_table_stride", "stride_k_block", "stride_v_block")
+            scalars(
+                I32,
+                "block_table_stride",
+                "stride_k_block",
+                "stride_v_block",
+                "num_blocks",
+            )
     if spec.kv_dtype:
         scalars(F32, "k_scale", "v_scale")
     if spec.bias:
@@ -579,6 +587,7 @@ def build_wmma_fmha_fwd_v2(spec: WmmaFmhaFwdV2Spec, *, arch: str) -> KernelDef:
         table_row=table_row,
         stride_k_block=p.get("stride_k_block"),
         stride_v_block=p.get("stride_v_block"),
+        num_blocks=p.get("num_blocks"),
     )
     b.ret()
     return b.kernel

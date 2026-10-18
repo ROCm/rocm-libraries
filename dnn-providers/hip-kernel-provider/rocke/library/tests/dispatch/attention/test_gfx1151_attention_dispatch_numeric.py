@@ -2639,6 +2639,7 @@ class TestMetadataSafety:
         )
         assert values["block_table_stride"] == 6
         assert values["stride_k_block"] == 8 * 2 * 64
+        assert values["num_blocks"] == 5
         assert (values["stride_k_token"], values["stride_k_head"]) == (2 * 64, 64)
 
     def test_rejects_undersized_packed_output_and_values(self, kind):

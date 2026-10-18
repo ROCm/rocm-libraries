@@ -585,6 +585,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_wmma_fmha_fwd_v2_numeric.py"
         "tests/library/tests/test_wmma_fmha_fwd_v2_features.py"
         "tests/library/tests/test_wmma_fmha_decode_numeric.py"
+        "tests/library/tests/test_wmma_fmha_paged_guard.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
         "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")

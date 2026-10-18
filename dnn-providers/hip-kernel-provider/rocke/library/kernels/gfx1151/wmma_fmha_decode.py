@@ -78,7 +78,10 @@ everything else is a kernel argument.
   ``seqused_k`` lengths. Both take the maxima as ``seqlen_q`` / ``seqlen_k``
   (grid, workspace) and each sequence's own lengths for masks and positions;
   pages of at least one key tile cost one wave-uniform table read per tile,
-  smaller pages one read per loaded row.
+  smaller pages one read per loaded row. A ``block_table`` entry outside
+  ``[0, num_blocks)`` (``num_blocks``: the caches' page count, a runtime
+  argument) is contained: its keys read as zero K / V rows and nothing outside
+  the caches is addressed.
 """
 
 from __future__ import annotations
@@ -566,7 +569,12 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaDecodeSpec):
     elif spec.layout == "paged":
         for name in ("cu_seqlens_q", "seqused_k", "block_table"):
             p[name] = b.param(name, i32p, noalias=True, readonly=True, align=4)
-        for name in ("block_table_stride", "stride_k_block", "stride_v_block"):
+        for name in (
+            "block_table_stride",
+            "stride_k_block",
+            "stride_v_block",
+            "num_blocks",
+        ):
             p[name] = b.param(name, I32)
     if spec.kv_dtype:
         p["k_scale"] = b.param("k_scale", F32)
@@ -800,11 +808,17 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
                 blk = b.select(valid, blk, c0)
             return b.global_load_i32(p["block_table"], b.add(bt_row, blk))
 
+        def page_ok(phys):
+            """``phys`` names a page of the cache: ``0 <= phys < num_blocks``. The
+            table's values are caller data; a page outside the cache reads as zeros."""
+            return b.land(b.cmp_ge(phys, c0), b.cmp_lt(phys, p["num_blocks"]))
+
     def paged_tile_rsrc(slice_ptr, extent, row_bytes, blk_stride, t, valid):
         """A key tile is aligned and no larger than a page, so it lies in one page:
         one wave-uniform block-table read per tile moves the tile's resource base."""
         kv0_ = b.mul(t, ci(T))
         phys = b.readfirstlane(page_of(kv0_, valid))
+        in_cache = page_ok(phys)
         page_off = b.mul(
             b.mul(b.zext(phys, I64), b.zext(blk_stride, I64)), b.const_i64(kv_eb)
         )
@@ -814,6 +828,7 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
         nrec = b.smax(b.sub(extent, b.mul(kv0_, row_bytes)), c0)
         if valid is not None:
             nrec = b.select(valid, nrec, c0)
+        nrec = b.select(in_cache, nrec, c0)
         return b.buffer_rsrc(b.global_ptr_add(slice_ptr, page_off), nrec)
 
     def k_rsrc(t, valid=None):
@@ -864,6 +879,7 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
                 if valid is not None:
                     ok = b.land(ok, valid)
                 phys = page_of(key, ok)
+                ok = b.land(ok, page_ok(phys))
                 off = b.add(
                     b.mul(phys, blk_stride), b.mul(b.land(key, page_mask), row_stride)
                 )

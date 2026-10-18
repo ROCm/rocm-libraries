@@ -126,6 +126,7 @@ typedef struct rocke_rdna_attn_params
     rocke_value_t* table_row;
     rocke_value_t* stride_k_block;
     rocke_value_t* stride_v_block;
+    rocke_value_t* num_blocks;
 } rocke_rdna_attn_params_t;
 
 /* rdna_attention_fwd_body(b, cfg, **params): emit the K loop and epilogue of

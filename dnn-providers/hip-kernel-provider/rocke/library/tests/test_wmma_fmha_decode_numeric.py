@@ -528,6 +528,7 @@ def test_decode_matches_reference(case, dtype):
                     seqused_k=upload("seqused", inp.seqused_k),
                     block_table=upload("bt", inp.block_table),
                     block_table_stride=inp.block_table.shape[1],
+                    num_blocks=inp.k.shape[0],
                 )
         if spec.softcap:
             values["softcap"] = c["softcap"]

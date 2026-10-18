@@ -194,7 +194,8 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
                 "softcap", "sink_ptr", "alibi_slopes_ptr", "qq_bias_ptr",
                 "qq_bias_rows", "qq_bias_cols", "qq_bias_stride", "cu_seqlens_q",
                 "seqused_k", "block_table", "block_table_stride", "stride_k_block",
-                "stride_v_block", "k_scale", "v_scale", "attn_bias_ptr",
+                "stride_v_block", "num_blocks", "k_scale", "v_scale",
+                "attn_bias_ptr",
                 "bias_stride_b", "bias_stride_h", "bias_stride_q",
             ],
         )  # fmt: skip

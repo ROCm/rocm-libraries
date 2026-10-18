@@ -453,6 +453,7 @@ def test_prefill_feature_matches_reference(case, dtype):
                 values["block_table_stride"] = table.shape[1]
                 values["stride_k_block"] = ps * Hk * dq
                 values["stride_v_block"] = ps * Hv * dv
+                values["num_blocks"] = n_pages
                 strides["k"] = (0, Hk * dq, dq)
                 strides["v"] = (0, Hv * dv, dv)
         values["Q"] = dev.put(q_all)

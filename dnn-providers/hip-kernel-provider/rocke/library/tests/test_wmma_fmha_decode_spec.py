@@ -279,6 +279,7 @@ class TestDecodeSpec(unittest.TestCase):
                 "block_table_stride",
                 "stride_k_block",
                 "stride_v_block",
+                "num_blocks",
                 "k_scale",
                 "v_scale",
                 "attn_bias_ptr",
