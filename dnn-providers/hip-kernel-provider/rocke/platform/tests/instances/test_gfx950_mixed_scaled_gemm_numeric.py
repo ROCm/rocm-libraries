@@ -6,10 +6,6 @@ from itertools import product
 
 import pytest
 
-pytestmark = pytest.mark.skip(
-    reason="Disabled pending CI availability of hipcc and llvm-objdump."
-)
-
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 
