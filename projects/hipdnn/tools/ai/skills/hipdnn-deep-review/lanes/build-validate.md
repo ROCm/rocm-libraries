@@ -23,10 +23,15 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
    | Docs | Doxygen (`projects/hipdnn/Doxyfile`) for frontend API docs; Sphinx (`projects/hipdnn/docs/user-guides/conf.py`) for the user guide | Relative links and anchors in changed Markdown resolve | Changed files |
    | Core C++ or CMake with new options or install rules | Also configure only: tests OFF, and the superbuild beside the standalone build | The configure exits 0 | — |
    | ASAN | Host-only configure with `-DBUILD_ADDRESS_SANITIZER=ON`; device ASAN (Linux, `HSA_XNACK=1`) needs a GPU: an approval request (`projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md`, § "Sanitizers and platforms") | Host-runnable tests that exercise the ownership paths in question | `ctest -R <regex>` |
+   | `plugin_sdk`, `data_sdk`, `flatbuffers_sdk` or `test_sdk` | The consumer providers' host builds, hipdnn-superbuild | The consumer providers' host tests that **Consumers** (`CONTEXT.md`) lists, hipdnn-superbuild-test | Those tests |
    | Anything | — | `pre-commit run --files <changed files>` (hooks include `verify-support-claims`, `check-yaml`) | Changed files |
 
    `<regex>`, `<label>`, `<pattern>` and `<expr>` come from step 3; `<changed files>` is the path list in `numstat.txt`. Enable
-   every option the change depends on and say which. Cap parallelism to what the host allows. Keep full logs in
+   every option the change depends on and say which; **Options and guards** (`CONTEXT.md`) lists them with their defaults.
+   Record each flag enabled as a **Coverage** line for `AUTH`. Every scratch configure passes `-DENABLE_CLANG_TIDY=OFF` (the
+   option of core and each provider, default ON off Windows, which makes CMake run clang-tidy on every translation unit) and,
+   where the environment or a preset sets it, `-DCMAKE_CXX_CLANG_TIDY=`. Set a unique `TMPDIR` under `$SCRATCH/RUN/` for each
+   attempt and clear it when a run is killed. Cap parallelism to what the host allows. Keep full logs in
    `$SCRATCH/RUN/`; read only tails and error lines.
 3. **Select tests.** Only those that reach the changed files. Record each changed file's selected tests.
 4. **Registration.** Each new CTest test appears under its expected label: `ctest -N -L <label>`, or `ctest --show-only=json-v1`
@@ -40,7 +45,8 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
 6. **Failures.** Rerun each failing selection once at `$HEAD` to separate flaky from broken, then at `$BASE` in
    `$SCRATCH/RUN/base`. A failure at both is pre-existing; attach both logs.
 7. **Account.** One row per suite under **Checked, no finding**: suite, arch, selected, passed, skipped, failed, engine, log; read
-   counts and the serving engine from the logs. Record build directories, install prefixes and binaries so verifiers reuse them.
+   counts and the serving engine from the logs. Record the build directory, install prefix, binaries, `compile_commands.json` path and the exact configure line so verifiers
+   reuse them. A build tree is bound to its absolute path: do not relocate it, and mutate it only as [verify.md](verify.md) *Mutating a built tree* says.
 
 ## Findings
 

@@ -9,8 +9,7 @@ Map the behavior the change adds or alters to the tests that exercise it, and re
    sweep JSON). Record test name and tier.
 3. Report every behavior with no reaching test, and every dimension below that the change claims but tests do not cover.
 4. For each behavior with no reaching test, record whether the PR provides a safe-default flag (default OFF; cite the option) or a
-   written waiver (cite where). Give the orchestrator the M2 line: `PASS`, `FAIL`, `WAIVED(<code>)` or `UNVERIFIED`, with
-   evidence. New functionality with none of the three is `BLOCKING` ([../policy.md](../policy.md) *M-rules*).
+   written waiver (cite where). Give the `M2:` line ([../findings.md](../findings.md) *Lane report*). New functionality with none of the three is `BLOCKING` ([../policy.md](../policy.md) *M-rules*).
 
 ## Dimensions
 

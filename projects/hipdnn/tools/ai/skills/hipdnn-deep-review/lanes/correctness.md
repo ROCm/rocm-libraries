@@ -32,4 +32,5 @@ Read every changed line of your owned files, and the outside code each change de
 - Dead code, unused parameters, commented-out code, unexplained magic numbers.
 - Complexity that a simpler construct in the same codebase already solves.
 
-Record anything for another lane under **Handoffs**; do not file it.
+Missing or weak tests are not findings here: hand them off to `TESTQ` (weak tests) or `TESTB` (missing coverage). Test registration in
+`test_categories.yaml` is owned by `BUILD`: hand it off, do not file it. Record anything else for another lane under **Handoffs**; do not file it.

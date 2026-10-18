@@ -26,23 +26,32 @@ Previous head: <sha>   Previous base: <sha>     (round > 1)
 
 ## Final IDs
 
-Assign `<LANE>-<n>` (no `<k>`), continuing each lane's counter in `LEDGER.md`; all
-correctness lanes share `CORR-<n>`. Write `ID-MAP.md`: `Lane / provisional | Final ID |
-SUPERSEDED-BY`.
+`ledger.py ids` assigns `<LANE>-<n>` (no `<k>`), continuing each lane's counter in
+`LEDGER.md`; all correctness lanes share `CORR-<n>`. It writes `ID-MAP.md`, a table with the
+columns `Lane / provisional | Final ID | SUPERSEDED-BY`; the first column is `<report
+stem>/<provisional ID>` (`CORR2/CORR2-p3`, `TESTQ-f1/TESTQ-p4`), and `SUPERSEDED-BY` holds the
+kept finding's final ID or is empty. A later run keeps assigned IDs and applies each
+`SUPERSEDED-BY` cell to the ledger row's Status.
 
 ## LEDGER.md
 
-`$EVIDENCE/LEDGER.md`, the complete machine record across rounds. The schema is stable; a
-row in another format is a candidate, not a record.
+`$EVIDENCE/LEDGER.md`, the complete machine record across rounds, written by `ledger.py` and
+by hand. It holds only `##` headings and pipe tables (the scripts reject any other line). The
+schema is stable; a row in another format is a candidate, not a record.
 
 ```markdown
-## Coverage (round N): File | Lines | Owner lane | Read depth | Tests reaching it
-## Findings: ID | Tier (reported -> final) | Kind | Status | Verdict | Claim (narrowed if
-   PARTIAL) | Where | Evidence | Round opened | Round closed
-## Lanes (round N): Lane | Ran / N/A / merged into / split / FAILED (reason) | Report | STOP
-## Decisions: Round | Question | Decision | Findings affected
-## Open questions: ID | Question | Options | Recommendation
+## Coverage (round N)     table: File | Lines | Owner lane | Read depth | Tests reaching it
+## Findings               table: ID | Tier (`<reported> -> <final>`) | Kind | Status | Verdict | Claim (narrowed
+                          if PARTIAL; the first line of `Actual:` until a verdict) | Where | Evidence |
+                          Round opened | Round closed | known-open-item (empty or `K<n>`)
+## Lanes (round N)        table: Lane | Ran / N/A / merged into / split / FAILED (reason) | Report | STOP
+## Decisions              table: Round | Question | Decision | Findings affected
+## Open questions         table: ID | Question | Options | Recommendation
 ```
+
+`ledger.py seed` writes the Coverage and Lanes tables, `ids` the candidate Findings rows,
+`verdicts` the verdict, status and final tier. A candidate has empty Status and Verdict. A second-verifier verdict that differs from the
+first replaces it.
 
 From round 2, append; never rewrite the file. The seed has one Coverage row per changed file (Read depth `pending`, Tests `-`) and one
 Lanes row per lane; copy each lane's read depth and tests in as it reports.
@@ -71,7 +80,8 @@ refactor, known unresolved failures. A required run that has not passed raises t
 
 The human handoff: the reader acts without opening the ledger. Group findings by theme;
 lead each bullet with the problem, not an ID (cite IDs sparingly, in parentheses). Every
-statement traces to a ledger row. Omit `REFUTED` findings and empty sections. Aim for about
+statement traces to a ledger row; the REPORT may call a finding with a
+`known-open-item` understated and cite the author's `K<n>`. Omit `REFUTED` findings and empty sections. Aim for about
 80 lines.
 
 ```markdown
@@ -103,6 +113,12 @@ unverified findings, pending approvals, open decisions, `STOP:` rows, FAILED lan
 
 ## COMMENTS.md
 
-Drafts for the user to post: one `### <path>:<line> (<ID>, <tier>)` entry per `OPEN`
-finding (problem, consequence, smallest fix). The line is in the PR's diff at `$HEAD`; a
-finding with none, or about removed content, goes under `## General`.
+Drafts for the user to post. One `### <path>:<line> (<ID>, <tier>)` entry per `BLOCKING` or
+`IMPORTANT` finding that is `OPEN` (problem, consequence, smallest fix). Batch `SUGGESTION` and
+`FUTURE WORK` findings by theme into `## General`, one item per theme.
+
+`comments.py draft` writes the first draft from the `OPEN` ledger rows. The anchor line must lie
+inside a changed new-side hunk of the diff between `$BASE` and `$HEAD` for that path (`-U0`
+`@@ +<start>,<count>` headers; a count of 0 is an empty range). A finding whose line is
+outside every hunk, or about removed content, goes under `## General`. Text pasted from
+`Actual:` carries no code fences. Edit the draft before the user sees it.

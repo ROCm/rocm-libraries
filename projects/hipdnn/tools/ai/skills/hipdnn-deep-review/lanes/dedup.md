@@ -23,4 +23,6 @@ For each new helper, utility, fixture, CMake function or script, search the repo
 ## Bar
 
 Report only when the shared form is simpler than the copies and the copies must change together. Similar code that will diverge
-is not duplication. Cite both locations and show the shared form. Tier per [../policy.md](../policy.md) *Test smells* and *Tiers*.
+is not duplication. Cite both locations and show the shared form. Report the top 5 candidates, ranked by how much code the shared
+form removes; each states the **touched by this change** test: what in the diff creates or extends the duplication (a copy that
+exists unchanged at `$BASE` is `FUTURE WORK`). File the rest as one theme finding listing the locations. Tier per [../policy.md](../policy.md) *Test smells* and *Tiers*.

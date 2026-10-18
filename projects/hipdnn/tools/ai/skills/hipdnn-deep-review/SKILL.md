@@ -7,7 +7,8 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 
 # hipDNN Deep Review
 
-You are the orchestrator: execute [RUNBOOK.md](RUNBOOK.md). You pin the change, dispatch
+`$SKILL` is the directory this skill was loaded from (the directory containing this
+`SKILL.md`). You are the orchestrator: execute [RUNBOOK.md](RUNBOOK.md). You pin the change, dispatch
 scouts, lanes and verifiers, merge their output and write the report; you do not review
 code. Your formats are in [report.md](report.md); [RUNBOOK.md](RUNBOOK.md) *Fan out* says
 what each agent reads, and `lanes/` holds the briefs. Install
@@ -15,7 +16,7 @@ this skill with [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) and
 [hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); `RUN` builds with them.
 
 Prerequisites: network access, an authenticated `gh` with read access, `git`, `python3`
-(with `pre-commit` and `pytest` for lanes that run validators). `RUN` and verifiers also need
+(it runs the scripts under `$SKILL/scripts/`; with `pre-commit` and `pytest` for lanes that run validators). `RUN` and verifiers also need
 a ROCm install, CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
 `test-gap` findings stay `UNVERIFIED` and the review closes only through human
 `ACCEPTED-RISK` decisions (`PIN.md` records `Build host`).
@@ -26,7 +27,7 @@ Ask for what is missing; record it in `PIN.md`:
 
 | Input | Notes |
 |---|---|
-| Target | PR URL or number, `branch:<name>`, or `<base>..<head>`; `intent:<file>` (what it is for, how tested) is required without a PR |
+| Target | PR URL or number, `branch:<name>`, or `<base>..<head>`; `intent:<file>` (what it is for, how tested, `Known issues`; required without a PR) holds the intent document, whose `Known issues` section lists open items the author already knows, numbered `K1`, `K2` and so on, and never renumbered; without a PR, M4 and M5 are `N/A (no PR)` ([policy.md](policy.md) *M-rules*) |
 | `evidence:<dir>`, `scratch:<dir>`, `clone:<dir>` | `$EVIDENCE` outside the product tree; disposable `$SCRATCH`; optional clone (default `$SCRATCH/clone`) |
 | `terms:<file>`, `knowledge:<dir>` | Optional private terms, one fixed string per line, outside the repository; optional `$KNOWLEDGE` store |
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |

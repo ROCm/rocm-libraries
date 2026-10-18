@@ -85,7 +85,7 @@ disabled (...)` lines.
 
 Confirm it from the `test_type` output of the `configure` job in `therock-multi-arch-ci.yml` and the `Test Artifacts (<family>,
 <release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
-`<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`)
+`<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`; registering a test in them is owned by `BUILD`: hand it off, do not file it)
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.
 Provider and integration YAMLs do not, so a test they categorize only as `comprehensive` never runs in PR CI.
 
@@ -97,7 +97,8 @@ When the change adds or alters tests or shipped code, one of these must hold, or
   exclude label, a covered family runs it, and that job's log shows it executed (counts).
 - The PR description states the author verified it in a TheRock build, with flags, arch and result.
 
-**Flags.** Resolve each flag or option the change depends on, per workflow, from four places:
+**Flags.** Take each flag or option the change depends on, with its component default, from **Options and guards** (`CONTEXT.md`);
+resolve it per workflow from four places:
 
 | Source | Effect |
 |---|---|

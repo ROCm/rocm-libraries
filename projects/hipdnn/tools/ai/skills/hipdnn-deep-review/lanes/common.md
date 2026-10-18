@@ -9,18 +9,24 @@ and inputs. Scouts and `SYNTH` read this file and [orient.md](orient.md) only.
 | `$SKILL`, `$EVIDENCE` | This skill's directory; the review output directory (layout below; `PIN.md` records every value) |
 | `$SCRATCH` | Disposable directory; work only in `$SCRATCH/<ID>/` (your lane, scout, `SYNTH`, `VER-<batch>`) |
 | `$CLONE`, `$KNOWLEDGE` | The repository clone (read-only); the store of published Orient files |
-| `$HEAD`, `$BASE` | Full SHAs of the head and its base (merge base; left side of a range) |
+| `$HEAD`, `$HEAD_SHORT`, `$BASE` | Full SHA of the head; its first 12 hex digits; full SHA of the base (merge base; left side of a range) |
 | `$KEY`, `$TARGET` | Key for `refs/review/$KEY/`; the branch the change is measured against |
 | `$REPO`, `$REPO_BASE` | Sparse worktrees of `$CLONE` at `$HEAD` and `$BASE` |
 ```markdown
 $EVIDENCE/LEDGER.md   $EVIDENCE/r<N>/: PIN.md env.sh CONTEXT.md ID-MAP.md REPORT.md COMMENTS.md
-  files.txt numstat.txt commits.txt sparse.txt owners.tsv   (round > 1: range-diff.txt affected.txt)
+  dispatch-context.md files.txt numstat.txt commits.txt sparse.txt areas.tsv owners.tsv   (round > 1: range-diff.txt affected.txt)
   pr/ (pr.json body.md inline.json files.json checks.tsv) | intent.md   orient/<slug>.md
   packets/<LANE>.md  lanes/<LANE>.md  verify/<ID>.md
+  evidence subdirectories: verify/<ID>-evidence/  lanes/*-evidence/  lanes/<ID>/
 ```
+Evidence subdirectories hold raw logs, diffs and scratch output. They are local-only: never
+shared, published or swept, and no report or comment may depend on a reader opening them.
 
 ## Rules
 
+- Read the description (`pr/body.md` or `intent.md`) with its `Known issues` items (`K<n>`). Do not file a known item. File it
+  only when the description understates it (worse effect, wider reach or higher tier than stated); the finding then says
+  `understated: known-open-item K<n>`.
 - Never edit `$REPO`, `$REPO_BASE` or `$CLONE`, or write refs into `$CLONE`. To try a fetch,
   `git clone --shared --no-checkout` it into `$SCRATCH/<ID>/clone` and `git remote set-url
   origin https://github.com/<owner>/<repo>.git` there.

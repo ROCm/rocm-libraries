@@ -13,8 +13,8 @@ Read `$REPO_BASE`, and `git -C "$CLONE" show "$BASE:<path>"` outside the sparse 
 read `$REPO`, the diff or the PR's commits: reviewers measure the change against your
 account of the base. The changed paths and the description only say where to look.
 
-Describe the area, not the change, in at most 80 lines. Link; do not copy. Put a path in
-backticks only when it is relative to the repository root.
+Describe the area, not the change, in at most 80 lines. Link; do not copy. Every backticked path is relative to the
+repository root, never to the area. Write alternatives as `a, b and c`, never as `a/b/c` in backticks.
 
 ```markdown
 # <Area>
@@ -25,7 +25,14 @@ Then, as `##` sections: **Purpose and boundaries**; **Glossary** (term, meaning,
 at); **Code map** (path, role); **Design as it stands** (entry points, contracts, extension
 points such as how a new op, engine or option is added, known limits, where a document and
 the code disagree); **Docs and RFCs** (path, what it settles, status); **Tests** (suite,
-where, what it covers, how to select it).
+where, what it covers, how to select it); **Options and guards**; **Consumers**.
+
+**Options and guards.** For the area's changed files: each `option()` and cache variable with its default, each
+`#ifdef`, `#if` and CMake `if(...)` guard, and for each change the flag it depends on and that flag's default, so a change
+that is dead code with the flag OFF shows. `RUN`, `ROCK` and `AUTH` read this section.
+
+**Consumers.** The in-repo includers of the area's changed public headers (`git -C "$CLONE" grep -l <header name> "$BASE"
+-- <pathspec>`) and which project or provider tests exercise them. `RUN` and `AUTH` read this section.
 
 Sources, in order: the area's `README.md` and `docs/`; `projects/hipdnn/docs/`; RFCs under
 `projects/hipdnn/docs/rfcs/`; then the code and tests. Check a document against the code
@@ -51,7 +58,8 @@ sentences from the description); **Glossary** (merged, one line per term; mark a
 areas define differently); **Areas** (table: area, relative link to its Orient file, status,
 one-line summary); **Where the change lands** (per area: the entry points, contracts and
 extension points the stated purpose goes through, and the touch points a change of this
-kind updates: registries, CMake lists, docs, tests); **Tests that should move** (suite,
+kind updates: registries, CMake lists, docs, tests); **Options and guards** (merged from the area files: flag, default, areas and paths it gates);
+**Consumers** (merged: header or surface, consumer project, tests); **Tests that should move** (suite,
 area, why); **Questions for reviewers** (contracts the description leaves open,
 contradictions between area files).
 

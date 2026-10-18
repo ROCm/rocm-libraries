@@ -49,22 +49,25 @@ or `UPGRADED` (tier changed, with the reason), `REFUTED` or `UNVERIFIED` (what b
 correct tier inflation as readily as errors.
 
 A second verifier, who is neither the reporter nor the first verifier, rechecks a `REFUTED`
-verdict on a `BLOCKING` or `IMPORTANT` finding and any tier change that crosses between
-`IMPORTANT` and `SUGGESTION` (`DOWNGRADED`, `PARTIAL`, `UPGRADED`); an upgrade needs the
-proof its kind requires. If both agree the verdict stands; otherwise the second applies. At a new head, state the evidence class: `rerun` (the
-reproduction or mutation ran again), `text-read` (the text was compared with the claim) or
-`not-exercised`.
+verdict on a `BLOCKING` or `IMPORTANT` finding and any verdict whose final tier is on the
+other side of the `IMPORTANT`/`SUGGESTION` line from the reported tier; an upgrade needs the
+proof its kind requires. If both agree the verdict stands; otherwise the second applies. At a
+new head, state the evidence class: `rerun` (the reproduction or mutation ran again),
+`text-read` (the text was compared with the claim) or `not-exercised`.
 
 ## Lane report
 
 `$EVIDENCE/r<N>/lanes/<LANE>.md`; a follow-up writes `lanes/<LANE>-f<k>.md` with the same
-sections. The first line is `# <LANE> (round <N>, <short $HEAD sha>)`. Sections, in order:
+sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in order:
 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
 2. **Coverage:** one row per examined file: path, read depth (`full`, `diff-only`,
    `sampled`), tests that reach it.
-3. **Checked, no finding:** what was examined and found correct.
+3. **Checked, no finding:** what was examined and found correct. A lane that owns an M-rule
+   ([policy.md](policy.md) *M-rules*: `TESTQ` M1 and M3, `TESTB` M2, `AUTH` M4 and M5) puts
+   one literal line per rule here: `M<n>: PASS|FAIL|WAIVED(<code>)|N/A|UNVERIFIED <evidence>`
+   (with no PR, `N/A (no PR)` for M4 and M5).
 4. **Handoffs:** `<target lane>: <one line>` for issues outside the brief.
 5. **Approval requests:** command, architecture, test selection, expected duration and
    where it runs, for anything needing a GPU, remote compute or another approval.
@@ -79,8 +82,21 @@ first line is present.
 
 ## Verifier output
 
-`$EVIDENCE/r<N>/verify/<ID>.md`, or `<ID>-2.md` for a second verifier. It holds the verdict,
-the final tier, the narrowed claim for `PARTIAL`, a one-line reason, the proof command, exit
-code and log path, the evidence class at a new head, what the proof does not establish, and
-any approval request in the form above. Write issues found while verifying to
+`$EVIDENCE/r<N>/verify/<ID>.md`, or `<ID>-2.md` for a second verifier. It starts with this
+block, one labelled line each; an approval request in the form above may follow:
+
+```markdown
+ID:        <ID>
+Verdict:   CONFIRMED | PARTIAL | DOWNGRADED | UPGRADED | REFUTED | UNVERIFIED
+Tier:      <final tier>
+Claim:     <the narrowed claim, one sentence; PARTIAL only>
+Reason:    <one line>
+Proof:     <command, exit code, log as $EVIDENCE/<relative path>>
+Class:     rerun | text-read | not-exercised   (at a new head)
+Not established: <what the proof does not cover>
+```
+
+Keep mutation diffs and logs in
+`verify/<ID>-evidence/`; evidence subdirectories are local-only (never shared) and the
+verify file cites them by `$EVIDENCE/` path. Write issues found while verifying to
 `verify/VER-<batch>.md` (*Lane report* format) as `VER<batch>-p<n>` candidates.

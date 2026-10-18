@@ -20,15 +20,22 @@ one to `IMPORTANT` or above, also run step 3.
    input, a test elsewhere, a document that makes the behavior intentional. Start with the
    docs, RFCs and tests the area files list.
 3. Run the proof [../findings.md](../findings.md) *Proof per kind* requires.
-   - Copy the build tree from `$SCRATCH/RUN/` and never mutate it in place. With none, build
+   - Reuse the build directory, configure line and binaries `RUN` recorded under **Checked, no finding**, and never mutate the
+     shared `$SCRATCH/RUN/` tree. Every scratch build disables clang-tidy as `RUN` does
+     ([build-validate.md](build-validate.md) step 2). With none, build
      the smallest target that holds the proof, or return `UNVERIFIED` with `no build
      available`.
+   - **Mutating a built tree.** A build tree is bound to its absolute path (the generator hashes command lines), so a copy at
+     another path rebuilds everything. Use `Mutation:` from `dispatch-context.md` when it names a recipe. Otherwise, in order:
+     (1) a private copy visible at the original absolute path, where the host provides one (mount namespace, container or VM);
+     (2) the shared tree in place, serialized with a lock, reverted and baseline-checked after every mutant; (3) your own
+     full build in `$SCRATCH/VER-<batch>/`. Record which you used.
    - **defect:** the smallest reproduction (test, probe or CLI call) that fails at `$HEAD`.
      Run it at `$BASE` when the finding says the PR introduced it.
    - **test-gap:** confirm the named tests pass unmutated; mutate the behavior the finding
      names, inside the changed code or what it calls. Rebuild, rerun, revert, and recheck
      the baseline before the next mutant. Discard a mutant that changes no observable
-     behavior.
+     behavior. When the reporter already mutated, rerun only the 3 most decisive mutants and state which were reused.
 4. Set the verdict and the tier you can defend; `PARTIAL` states the narrower claim.
 
 Use the claim's revision and configuration. A proof awaiting approval stays `UNVERIFIED`;

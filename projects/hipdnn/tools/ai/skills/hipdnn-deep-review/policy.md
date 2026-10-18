@@ -26,7 +26,9 @@ Never mark an unrelated improvement `BLOCKING` or soften incomplete cleanup.
 | M4 | A non-trivial PR carries work tracking (ticket, public issue or a credible no-tracker reason) | Written reason |
 | M5 | The PR links its work item, the defect it fixes and related PRs, and the links resolve | Written reason |
 
-An unwaived M-rule `FAIL` is `BLOCKING`. A waiver is a code plus a one-to-two-sentence reason; a bare "N/A" is not one. Codes:
+Without a PR (a range or branch review), M4 and M5 are `N/A (no PR)`; the line notes that they are settled at PR time.
+An unwaived M-rule `FAIL` is `BLOCKING`. An `UNVERIFIED` M-rule becomes a finding, and blocks closure only at `BLOCKING` or `IMPORTANT`
+([SKILL.md](SKILL.md) *Completion*). A waiver is a code plus a one-to-two-sentence reason; a bare "N/A" is not one. Codes:
 `W-DOC` (docs or comments only), `W-BUILD` (build or CI only), `W-REVERT` (the linked
 reverted PR), `W-HOTFIX` (test deferred to a linked follow-up; needs a named approver),
 `W-FLAG` (new behavior dark behind a safe-default flag, with a tracker), `W-NOTICKET`

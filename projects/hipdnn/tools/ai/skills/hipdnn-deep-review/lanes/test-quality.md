@@ -1,7 +1,7 @@
 # Lane: test quality (`TESTQ`)
 
-Judge whether each added or changed test, and each change to test configuration, would fail on a plausible bug. Supply the M1 and
-M3 lines ([../policy.md](../policy.md) *M-rules*).
+Judge whether each added or changed test, and each change to test configuration, would fail on a plausible bug. Supply the `M1:` and
+`M3:` lines ([../policy.md](../policy.md) *M-rules*; format in [../findings.md](../findings.md) *Lane report*).
 
 ## Checks
 

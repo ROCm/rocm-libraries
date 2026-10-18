@@ -136,18 +136,25 @@ not in the final diff). The lane report may quote a private term; text drafted f
 
 ## Sweeping review output
 
-For the output sweep, search the round's `REPORT.md`, `COMMENTS.md`, `CONTEXT.md`, `orient/*.md`, `verify/*.md` and `LEDGER.md`
-instead of the published change: load them with `meta` (a missing file fails the load), then run step 2 and filter:
+For the output sweep, search the round's `REPORT.md`, `COMMENTS.md`, `CONTEXT.md`, every `.md` under `orient/` and `verify/`
+(recursively, except `*-evidence/`), the published copy `$KNOWLEDGE/$KEY-r<N>/*.md` and `LEDGER.md` instead of the
+published change: load them with `meta` (a missing file or `$KNOWLEDGE` copy fails the load), then run step 2 and filter.
+Evidence subdirectories (`verify/<ID>-evidence/`, `lanes/*-evidence/`, `lanes/<ID>/`) are local-only and never shared, so
+the sweep skips them; they may hold local paths and private terms:
 
 ```bash
 load_output() {
-  local R="$EVIDENCE/r<N>" f n=0 miss=0
-  shopt -s nullglob
-  for f in "$R/REPORT.md" "$R/COMMENTS.md" "$R/CONTEXT.md" "$R"/orient/*.md "$R"/verify/*.md "$EVIDENCE/LEDGER.md"; do
+  local R="$EVIDENCE/r<N>" K="$KNOWLEDGE/$KEY-r<N>" f n=0 miss=0
+  for f in "$R/REPORT.md" "$R/COMMENTS.md" "$R/CONTEXT.md" "$EVIDENCE/LEDGER.md"; do
     if [ -f "$f" ]; then meta "${f#"$EVIDENCE"/}" < "$f"; n=$((n + 1))
     else echo "sweep: missing $f" >&2; miss=1; fi
   done
-  shopt -u nullglob
+  while IFS= read -r f; do meta "${f#"$EVIDENCE"/}" < "$f"; n=$((n + 1))
+  done < <(find "$R/orient" "$R/verify" -type f -name '*.md' -not -path '*-evidence/*' 2>/dev/null | sort)
+  if [ -d "$K" ] && [ -n "$(find "$K" -type f -name '*.md' -print -quit)" ]; then
+    while IFS= read -r f; do meta "knowledge/${f#"$KNOWLEDGE"/}" < "$f"; n=$((n + 1))
+    done < <(find "$K" -type f -name '*.md' | sort)
+  else echo "sweep: missing published copy $K" >&2; miss=1; fi
   echo "sweep: read $n files"; return $miss
 }
 : > "$L/pub.anchor"; : > "$L/pub.content"
