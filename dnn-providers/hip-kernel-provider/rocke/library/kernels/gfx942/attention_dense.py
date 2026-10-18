@@ -118,9 +118,10 @@ P5 is deliberately no-op for this kernel (a decision, not code):
     was GPU-timed in the Step-0 funnel and is proven-negative for fp16 D128 and only
     part-dependently positive for bf16 D128 (halving the KV tile doubles the tile/grid
     count and the extra loop/barrier overhead outweighs the LDS relief while occupancy
-    stays pinned). The opt-in ``lds_num_buffers=2`` path (bf16 D128 CFVST) instead
-    doubles only K at ``block_n=64`` and prefetches the next V tile into registers,
-    which does fit; it waits with a full ``vmcnt(0)``, not a partial one. Bounding the
+    stays pinned). The opt-in BF16 D128 CFVST path can double only K at
+    ``block_n=64`` and/or prefetch next V into registers. Both are separate
+    spec-only knobs; the combined path fits and waits with a full ``vmcnt(0)``,
+    not a partial one. Bounding the
     live set with partial ``vmcnt=N`` waits entangles with the K async DMA, which
     shares the same counter -- see the reverted cfvst-chunking experiment recorded in
     the ``V_ITEMS`` NOTE below.
@@ -141,11 +142,11 @@ P0 is CORRECTNESS-FIRST: the naive-V path (D64 / bf16-D128) is non-pipelined (a
 single LDS buffer) and reads V element-wise; the remaining perf levers (P2-P4) layer
 on top. It is validated against an fp32 SDPA reference across the in-scope cohort.
 
-Opt-in bf16 D128: ``use_cfvst=True`` enables the V transpose at bf16 D128 standard
-causal attention, and additionally setting ``lds_num_buffers=2`` uses two K LDS slots
-plus a single V LDS slot with the next V tile prefetched into registers. Both are
-opt-in; every default resolves to ``lds_num_buffers=1`` and the :func:`_use_cfvst`
-policy.
+Opt-in bf16 D128: ``use_cfvst=True`` enables the V transpose for standard
+causal attention. ``lds_num_buffers=2`` independently uses two K LDS slots;
+``v_reg_prefetch=True`` independently loads next-tile V data into registers
+before current PV. V LDS stays single-buffered for all combinations. All
+shipped defaults use ``lds_num_buffers=1`` and ``v_reg_prefetch=False``.
 
 :func:`supports_attention_dense` is the SINGLE gate: it rejects every spec
 :func:`build_attention_dense` cannot emit -- including the modes deferred to later
@@ -217,7 +218,7 @@ from kernels.common._lse_store import (
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
-# Pipeline constants (K-only double buffering is used for bf16 D128).
+# Pipeline constants (gfx942 BF16 D128 K-buffer count and V prefetch are opt-in).
 # The shipped geometry starts at 256 query rows per CTA = 8 wave64s. ``block_m``
 # is inherited from AttentionDenseSpec, so the grid and body read the same
 # immutable value and cannot disagree silently (rows written twice/never).
@@ -368,8 +369,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     # use_cfvst: force the P1 conflict-free perm_b32 V transpose on/off.
     #   None -> the :func:`_use_cfvst` policy (fp16 D128). True is also legal at
     #   bf16 D128 standard causal attention (no sliding window, causal_diag_split,
-    #   or sinks); False is always legal; D64 rejects True. lds_num_buffers=2
-    #   requires bf16 D128 CFVST.
+    #   or sinks); False is always legal; D64 rejects True. KDB and VPF opt-ins
+    #   require bf16 D128 CFVST.
     use_cfvst: bool | None = None
 
     # use_v_swizzle: force the V^T XOR bank-conflict swizzle on/off, INDEPENDENTLY of
@@ -432,11 +433,14 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   ``lazy_rescale`` field has no effect here: this body always rescales, and
     #   only the shared kernel_name() reads it (the ``lazyrs`` token).
     #
-    # lds_num_buffers: 1 uses a single K LDS buffer;
-    #   2 enables K-only double buffering plus register V prefetch (BF16 D128,
-    #   CFVST, block_n=64 and standard causal attention only). V stays
-    #   single-buffered. This variant uses 51,200 B LDS with the shipped K pad.
+    # lds_num_buffers: K LDS buffer count, independent of V register prefetch.
+    #   1 keeps a single K slot; 2 allows K[j+1] DMA to overlap PV[j] in a
+    #   different slot. V LDS is always single-buffered. The opt-in pipeline
+    #   supports BF16 D128 standard causal CFVST at block_n=64.
     lds_num_buffers: int = field(default=1, kw_only=True)
+    # v_reg_prefetch: issue the next V tile's register loads before PV[j]
+    #   rather than after PV[j]. Independent of the K LDS buffer count.
+    v_reg_prefetch: bool = field(default=False, kw_only=True)
     # iglp_mode: the iglp_opt argument emitted when ``iglp`` is on (0 or 1).
     iglp_mode: int = field(default=_DEFAULT_IGLP_MODE, kw_only=True)
     # pv_loop_order: PV MFMA traversal. "d_major" keeps the output tile outer,
@@ -479,6 +483,11 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             raise ValueError(
                 "lds_num_buffers must be an int, got "
                 f"{type(self.lds_num_buffers).__name__}"
+            )
+        if type(self.v_reg_prefetch) is not bool:
+            raise ValueError(
+                "v_reg_prefetch must be a bool, got "
+                f"{type(self.v_reg_prefetch).__name__}"
             )
         if self.causal_bottom_right:
             raise ValueError(
@@ -721,9 +730,12 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     :meth:`Gfx942AttentionDenseSpec.kernel_name` itself.
     """
     parts: list[str] = []
-    # NBUF=2 is an explicit spec override, so it needs a unique cache/name tag.
-    if _use_kdb_vpf(spec):
-        parts.append("kdbvpf1")
+    # Both IR-changing controls have independent cache/name tags. Neither
+    # changes the default symbol, which has one K buffer and no V prefetch.
+    if _use_kdb(spec):
+        parts.append("kdb1")
+    if _use_vpf(spec):
+        parts.append("vpf1")
     if spec.lds_row_pad != _DEFAULT_LDS_ROW_PAD:
         parts.append(f"krowpad{spec.lds_row_pad}")
     vp = spec.resolved_v_row_pad()
@@ -868,14 +880,23 @@ def _default_v_row_pad(spec: "Gfx942AttentionDenseSpec") -> int:
     return _v_row_pad(spec.head_size, spec.dtype, spec.block_n)
 
 
-def _use_kdb_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
-    """Whether the user requests K-only LDS double buffering + V prefetch.
-
-    ``supports_attention_dense`` restricts depth 2 to standard causal BF16
-    D128 with CFVST. Every other accepted spec has NBUF=1 and the single-K-buffer
-    body. No sequence-length based policy is used.
-    """
+def _use_kdb(spec: "Gfx942AttentionDenseSpec") -> bool:
+    """Whether K uses two LDS slots rather than one (spec-only opt-in)."""
     return spec.lds_num_buffers == 2
+
+
+def _use_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
+    """Whether to issue next-tile V VMEM loads before the current PV (opt-in)."""
+    return spec.v_reg_prefetch
+
+
+def _use_kdb_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
+    """Combined variant predicate kept for existing external callers.
+
+    Neither knob implies the other. The kernel's allocation, scheduling, and
+    naming use ``_use_kdb`` and ``_use_vpf`` independently.
+    """
+    return _use_kdb(spec) and _use_vpf(spec)
 
 
 def _v_swizzle_width(block_n: int) -> int:
@@ -1044,15 +1065,14 @@ def _lds_bytes(spec: "Gfx942AttentionDenseSpec") -> int:
 
     ``resolved_v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation; both
     sites go through the same resolver, so the budget cannot silently under-count the
-    allocation.
+    allocation. ``v_reg_prefetch`` changes VGPR scheduling only, not LDS size.
     """
     if _k_group_pad_active(spec):
         rpi = _rows_per_instr(spec.head_size)
         k_bytes = (spec.block_n // rpi) * _k_group_stride(spec) * 2
     else:
         k_bytes = spec.block_n * _lds_row_stride(spec) * 2
-    if _use_kdb_vpf(spec):
-        k_bytes *= 2  # K[j] and K[j+1] occupy disjoint LDS slots.
+    k_bytes *= spec.lds_num_buffers  # Only K is double-buffered.
     if spec.resolved_use_cfvst():
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
         v_bytes = spec.head_size * (spec.block_n + spec.resolved_v_row_pad()) * 2
@@ -1227,9 +1247,10 @@ def supports_attention_dense(
     # Performance-only codegen knobs: ranges, plus the one scheduling conflict.
     if spec.lds_num_buffers not in (1, 2):
         return False, "lds_num_buffers must be 1 or 2"
-    # block_n=64 only: the pipeline was measured there. At block_n=32 the second K
-    # slot lowers occupancy at block_m=128 and nothing has measured it.
-    if _use_kdb_vpf(spec) and not (
+    # These are independent opt-in scheduling levers, but both currently share
+    # the same validated BF16 D128 CFVST scope. In particular, block_n=64 only:
+    # the other tile sizes have not been validated for these pipeline modes.
+    if (_use_kdb(spec) or _use_vpf(spec)) and not (
         spec.dtype == "bf16"
         and spec.head_size == 128
         and spec.causal
@@ -1240,8 +1261,9 @@ def supports_attention_dense(
         and not spec.use_sinks
     ):
         return False, (
-            "NOT_YET_IMPLEMENTED: lds_num_buffers=2 requires bf16 D128 causal CFVST "
-            "at block_n=64, without sliding_window, causal_diag_split, or sinks"
+            "NOT_YET_IMPLEMENTED: lds_num_buffers=2 or v_reg_prefetch=True requires "
+            "bf16 D128 causal CFVST at block_n=64, without sliding_window, "
+            "causal_diag_split, or sinks"
         )
     if spec.iglp_mode not in (0, 1):
         return False, f"iglp_mode must be 0 or 1, got {spec.iglp_mode}"
@@ -1361,9 +1383,9 @@ def build_attention_dense(
 ) -> KernelDef:
     """Emit the gfx942 dense flash-attention prefill kernel for ``spec``.
 
-    Delegates to :func:`_build_attention_dense_single_buffer`, which builds both the
-    single-K-buffer body and, at ``lds_num_buffers=2``, the bf16 D128 K-double-buffer
-    / V-prefetch pipeline. It retains CFVST, exp2_fast, fused
+    Delegates to :func:`_build_attention_dense_single_buffer`, which builds the
+    default single-buffer body and the independently selected BF16 D128 K-double-
+    buffer / V-register-prefetch variants. It retains CFVST, exp2_fast, fused
     rescale, per-config waves-per-eu and persistent grid-stride. Every scope
     restriction --
     including the modes deferred to later follow-ups -- lives in
@@ -1424,9 +1446,10 @@ def _build_attention_dense_single_buffer(
 ) -> KernelDef:
     """gfx942 dense prefill body: 32x32x8 atom + K-loop doubling.
 
-    The opt-in BF16 D128 pipeline (lds_num_buffers=2) uses two K LDS slots
-    and V register prefetch. All configurations with lds_num_buffers=1
-    retain the original single-buffer loop. Each tile computes QK then softmax/PV.
+    The opt-in BF16 D128 pipeline exposes K LDS double buffering
+    (lds_num_buffers=2) and V register prefetch (v_reg_prefetch=True) as
+    independent spec-only levers. At (1, False) the original single-buffer
+    body is unchanged. Each tile computes QK then softmax/PV.
     The per-work-item compute is factored into
     ``_run_work_item(qb, hq, bt)``, shared by the default grid (one CTA per work item)
     and the P4 persistent grid-stride path (one CTA strides over many). Perf levers
@@ -1543,8 +1566,10 @@ def _build_attention_dense_single_buffer(
     # exception is when _k_group_pad_active(spec): D64 K_lds then takes the padded
     # [1, block_n // rows_per_instr, _k_group_stride] 2-row-group layout below.
     USE_CFVST = spec.resolved_use_cfvst()  # P1 V transpose at D128.
-    USE_PIPELINE = _use_kdb_vpf(spec)  # Explicit NBUF=2; FP16 remains NBUF=1.
-    K_BUFS = 2 if USE_PIPELINE else 1
+    USE_KDB = _use_kdb(spec)
+    USE_VPF = _use_vpf(spec)
+    USE_PIPELINE = USE_KDB or USE_VPF
+    K_BUFS = spec.lds_num_buffers
     LDROW = _lds_row_stride(spec)
     # Hypothesis #3 (D64 K-LDS bank conflicts): K_lds with a row-group boundary pad,
     # sized by the shared spec.lds_k_group_pad (0 disables it -- that is the A/B probe).
@@ -2172,9 +2197,10 @@ def _build_attention_dense_single_buffer(
         # unroll=True (P3) or a sync_lds_only->sync swap cannot silently delete it.
         # Verified byte-identical codegen with and without the flag today.
         if USE_PIPELINE:
-            # tile_body serves every FP16, D64, sliding-window and diagonal-split
-            # configuration. This BF16 branch overlaps K[j+1] DMA + V[j+1] VMEM loads
-            # with softmax/PV[j]; both run the same per-tile math via softmax_pv.
+            # tile_body serves the shipped single-buffer configurations unchanged.
+            # This BF16 CFVST pipeline independently schedules K[j+1] DMA and
+            # V[j+1] register loads across softmax/PV[j]. KDB overlaps its next
+            # DMA only with a distinct K slot; VPF overlaps V loads in registers.
             def publish_prefetched_v(values):
                 # Prefetch carries only packed V data across softmax/PV, not the
                 # transposition coordinates. Recompute coordinates at publication.
@@ -2215,25 +2241,41 @@ def _build_attention_dense_single_buffer(
                 if spec.iglp:
                     b.iglp_opt(spec.iglp_mode)
 
-                # Current tile is fully published from the prologue or prior
-                # iteration. K and Q are consumed before scheduling next K DMA.
-                kbuf = b.mod(j, b.const_i32(2))
+                # The current K and V tiles are fully published by the prologue
+                # or the preceding iteration. With one K slot, do not overwrite
+                # it until *all* waves have completed current-tile LDS reads.
+                kbuf = b.mod(j, b.const_i32(K_BUFS))
                 s = do_qk(kbuf)
                 next_j = b.add(j, b.const_i32(1))
-                next_kbuf = b.mod(next_j, b.const_i32(2))
-                load_pipeline_k(next_kbuf, next_j)
-                # Load V next into VGPRs. The payload holds data ONLY; the
-                # address-calculation results are not loop-carried.
-                v_next = [(x0, x1) for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)]
+                next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
+                if USE_KDB:
+                    # Distinct LDS slot: K[j+1] DMA overlaps current softmax/PV.
+                    load_pipeline_k(next_kbuf, next_j)
+                if USE_VPF:
+                    # Only V data (not addresses) stays live across softmax/PV.
+                    v_next = [
+                        (x0, x1)
+                        for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)
+                    ]
                 m_new, l_new, o_acc = softmax_pv(
                     s, j, m_i, l_i, o_acc, masked=True, lower=False
                 )
 
-                # WAR: wait for ALL waves' current PV ds_reads before any V_lds
-                # overwrite. This is an LDS-only fence, leaving VMEM in flight.
+                # WAR: finish all waves' K/V LDS reads before a single K slot
+                # or the (always single-buffered) V slot can be overwritten.
+                # LDS-only sync leaves early K DMA / V VMEM loads in flight.
                 b.sync_lds_only()
-                # Drain K[next] async-DMA and prefetched V register loads in
-                # this wave, publish V[next], then enforce cross-wave readiness.
+                if not USE_KDB:
+                    # Single K slot: only overwrite it after the cross-wave WAR.
+                    load_pipeline_k(next_kbuf, next_j)
+                if not USE_VPF:
+                    # No V prefetch: issue V[j+1] loads only after current PV.
+                    v_next = [
+                        (x0, x1)
+                        for _d0, _t0, x0, x1 in _cfvst_load_v(next_j)
+                    ]
+                # Drain next K async-DMA and next V VMEM loads before V LDS
+                # publication; then rendezvous before any next-tile QK/PV.
                 b.s_waitcnt(vmcnt=0)
                 publish_prefetched_v(v_next)
                 b.sync_lds_only()
@@ -2245,7 +2287,7 @@ def _build_attention_dense_single_buffer(
             m_i = loop_res[0]
             l_i = loop_res[1]
             o_acc = list(loop_res[2 : 2 + D_TILES])
-            last_kbuf = b.mod(last_j, b.const_i32(2))
+            last_kbuf = b.mod(last_j, b.const_i32(K_BUFS))
             s = do_qk(last_kbuf)
             m_i, l_i, o_acc = softmax_pv(
                 s, last_j, m_i, l_i, o_acc, masked=True, lower=False
