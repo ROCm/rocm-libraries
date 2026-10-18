@@ -1210,6 +1210,13 @@ rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
     else
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "buffer_load_vN: unsupported dtype '%s'", dtype->name);
+    if(n <= 0 || (n * elem_bytes) % 4 != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "buffer_load_vN: n=%d dtype=%s is not a whole number of dwords",
+            n,
+            dtype->name);
     dwords = (n * elem_bytes) / 4;
     if(!(dwords == 1 || dwords == 2 || dwords == 4))
         return (rocke_value_t*)rocke_i_set_err(b,

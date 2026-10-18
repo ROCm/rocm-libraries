@@ -2954,6 +2954,9 @@ void case_buffer_load_vN_generic()
         {"buffer_load_vN: unsupported dtype 'f64'", rocke_f64, 2},
         {"buffer_load_vN: n=16 dtype=f16 -> dwords=8 must be 1, 2, or 4", rocke_f16, 16},
         {"buffer_load_vN: n=3 dtype=f32 -> dwords=3 must be 1, 2, or 4", rocke_f32, 3},
+        {"buffer_load_vN: n=3 dtype=bf16 is not a whole number of dwords", rocke_bf16, 3},
+        {"buffer_load_vN: n=5 dtype=f16 is not a whole number of dwords", rocke_f16, 5},
+        {"buffer_load_vN: n=0 dtype=f32 is not a whole number of dwords", rocke_f32, 0},
     };
     for(const Reject& r : rejects)
     {
