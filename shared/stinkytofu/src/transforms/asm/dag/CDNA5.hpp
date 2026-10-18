@@ -3417,13 +3417,14 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             }
             loads.push_back({id, start, end});
         }
-        // WMMAs kept free in front of a stage end for the last ds_load to return: the LDS return
-        // time plus the WMMA queue depth (the wave runs up to a full queue ahead of the matrix
-        // pipe, so the WMMAs behind the last load cover its return only after the queue). 17
-        // WMMAs for 8-cycle WMMAs, the old scheduler's value on f8; a reserve of 9 (return time
-        // only) measured no better on medium, MAF or MAB.
+        // WMMAs kept free in front of a stage end for the last ds_load to return. Typical case:
+        // ceil(creditLifetime / window) (9 for 8-cycle WMMAs). The worst case (4 waves loading
+        // together, sched_test) needs about 17. kDrainSlackWmmas is an UNVERIFIED magic number
+        // chosen so the sum is the old scheduler's 17 on f8; a reserve of 9 measured no better
+        // on medium, MAF or MAB.
+        static constexpr int kDrainSlackWmmas = 8;
         const int drainWindows =
-            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + wmmaQueueDepth();
+            (dsReadCreditLifetime() + windowCycles - 1) / windowCycles + kDrainSlackWmmas;
         const int batch = std::max(1, dagFeatures.dsBatchWmmas);
         dsSpread_.plan(loads, wmmaTotalThisRegion_, batch, dagFeatures.dsCatchUpPace, drainWindows);
         dsOverflow_ =
