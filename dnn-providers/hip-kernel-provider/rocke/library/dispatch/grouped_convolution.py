@@ -7,10 +7,10 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward convolutions on gfx942 and gfx950, and backward-data (dgrad)
-convolutions on gfx950. Weight-gradient (wgrad) and gfx1250 forward have no
-list registered at all: this rewrite moved fwd/dgrad onto the instance-list
-machinery but has not yet ported wgrad or gfx1250 onto it, so those
+forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
+(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
+this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
+ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
 default. Every
@@ -145,7 +145,6 @@ CONV_DIRECT_ABI_VERSION = "hipkg-conv-direct/v1"
 # The registered instance lists, by (arch, direction). Relative to this file.
 _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instances")
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
-    ("gfx942", "fwd"): "gfx942_fwd.json",
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
 }
