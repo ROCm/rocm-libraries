@@ -16,6 +16,8 @@ they stay fast and hardware-free.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
@@ -23,6 +25,9 @@ from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcm
 from Tensile.Components.DecouplePGR import dcpThickGateFromTokenPasses
 from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
 from Tensile.KernelWriter import KernelWriter
+
+
+pytestmark = pytest.mark.unit
 
 
 def _mockWriter():
@@ -333,6 +338,43 @@ def test_the_pass_does_not_run_below_optlevel_3():
     assert len(_barriers(root)) == 1
 
 
+def test_the_pass_preserves_the_single_loop_pgr_edge_barrier():
+    """The taken bypass edge owns synchronization that the linear walk cannot rebuild."""
+    toPGR1 = Label("toPGR1", "")
+    edgeBarrier = SBarrier(comment="single-loop PGR bypass sync")
+    authored = SBarrier(comment="ordinary writer barrier")
+    root = Module("kernelBody")
+    loop = Module("main loop")
+    loop.add(_fill())
+    loop.add(edgeBarrier)
+    loop.add(_branchTo(toPGR1, "single-loop bypass"))
+    loop.add(_fill())
+    loop.add(authored)
+    loop.add(_read())
+    loop.add(toPGR1)
+    loop.add(_read())
+    root.add(loop)
+
+    _runPass(_waveParityKernel(), root)
+
+    barriers = _barriers(root)
+    assert edgeBarrier in barriers, "the planner removed the path-local bypass barrier"
+    assert authored not in barriers, "an ordinary authored barrier was not rebuilt"
+    assert len(barriers) > 1, "the preserved edge barrier disabled normal planning"
+
+
+def test_the_pass_preserves_pgr1_tdm_synchronization():
+    """PGR1's authored tensor drain and extra barrier are one synchronization unit."""
+    firstBarrier = SBarrier(comment="PGR, and wait until LW done to sync")
+    secondBarrier = SBarrier(comment="PGR1 and TDM, another wait to sync")
+    root = _seq(_fill(), firstBarrier, secondBarrier, _read())
+
+    _runPass(_waveParityKernel(PrefetchGlobalRead=1), root)
+
+    assert _barriers(root) == [firstBarrier, secondBarrier], \
+        "the planner replaced PGR1's required authored TDM barrier pair"
+
+
 def test_the_pass_runs_at_optlevel_0_for_a_decoupled_token_gate():
     """A TOKENS thick gate rebuilds barriers at any opt level."""
     kernel = _waveParityKernel(_StinkyTofuOptLevel=0, **_TOKEN_GATE_KEYS)
@@ -482,9 +524,9 @@ def test_a_loop_prologue_barrier_inside_a_divergent_region_is_rejected():
         guardEnd,
     )
 
-    # PrefetchGlobalRead=1 turns on the back-edge model that produces a
-    # loop-prologue barrier.
-    writer = _runPass(_waveParityKernel(PrefetchGlobalRead=1), root)
+    # PrefetchGlobalRead<2 turns on the back-edge model that produces a
+    # loop-prologue barrier. Use 0 because PGR1 TDM keeps authored barriers.
+    writer = _runPass(_waveParityKernel(PrefetchGlobalRead=0), root)
 
     assert writer.states.overflowedResources == _REJECTED
     assert not _barriers(root)

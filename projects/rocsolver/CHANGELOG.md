@@ -26,8 +26,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed memory access faults and wrong results for matrices with more than 2^31 elements (for example in GETRF, GEQLF, ORGQL/UNGQL, GELQF, SYTRF, SYEV, SYGV and GEHRD), caused by 32-bit internal matrix offsets and indices.
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
-
 * Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues

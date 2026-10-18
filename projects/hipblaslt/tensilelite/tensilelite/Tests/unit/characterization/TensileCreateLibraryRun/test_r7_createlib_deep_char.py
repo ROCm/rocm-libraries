@@ -397,16 +397,18 @@ class TestWriteSolutionsAndKernelsTCL:
         src_tc = MagicMock()
         kwa = MagicMock()
 
-        # Patch getKernelFileBase to return same name for both => k2 is duplicate
-        with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
-            with patch.object(M, "ParallelMap2", return_value=[]):
-                with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
-                    with patch.object(M, "buildSourceCodeObjectFiles"):
-                        with patch.object(M, "writeHelpers"):
-                            n, uq, results = M.writeSolutionsAndKernelsTCL(
-                                tmp_path / "output2",
-                                asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
-                            )
+        # Same compile key and artifact => compile one representative.
+        with patch.object(M, "getKernelCompileKey", return_value="same_key"):
+            with patch.object(M, "getKernelNameMin", return_value="same_kernel"):
+                with patch.object(M, "getKernelFileBase", return_value="same_kernel"):
+                    with patch.object(M, "ParallelMap2", return_value=[]):
+                        with patch.object(M, "buildAssemblyCodeObjectFiles", return_value=[]):
+                            with patch.object(M, "buildSourceCodeObjectFiles"):
+                                with patch.object(M, "writeHelpers"):
+                                    n, uq, results = M.writeSolutionsAndKernelsTCL(
+                                        tmp_path / "output2",
+                                        asm_tc, src_tc, [], [k1, k2], [], kwa, ["gfx942"],
+                                    )
         # n should be count of unique kernels, not total
         assert n == 1
         assert len(uq) == 1
@@ -440,6 +442,38 @@ class TestWriteSolutionsAndKernelsTCL:
                             asm_tc, src_tc, [], [], [], kwa, ["gfx942"],
                         )
         assert called, "writeHelpers must be called from writeSolutionsAndKernelsTCL"
+
+    @pytest.mark.parametrize("disableAsmComments", [True, False])
+    def test_disable_asm_comments_sets_output_no_comment(self, tmp_path, disableAsmComments):
+        """--disable-asm-comments must reach kernel codegen as outputNoComment=True.
+
+        Regression test for AIHPBLAS-5170: the TCL path used to pass the negation.
+        """
+        seen = []
+
+        class _Stop(Exception):
+            pass
+
+        def _spy_process(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress=False):
+            seen.append(outOptions.outputNoComment)
+            raise _Stop
+
+        def _fake_pm2(fn, items, *args, **kw):
+            return [fn(item) for item in items]
+
+        k = MagicMock()
+        k.__getitem__ = lambda self, key: "Assembly" if key == "KernelLanguage" else ""
+
+        with patch.object(M, "getKernelFileBase", return_value="kernel"):
+            with patch.object(M, "processKernelSource", side_effect=_spy_process):
+                with patch.object(M, "ParallelMap2", side_effect=_fake_pm2):
+                    with pytest.raises(_Stop):
+                        M.writeSolutionsAndKernelsTCL(
+                            tmp_path / "output",
+                            MagicMock(), MagicMock(), [], [k], [], MagicMock(), ["gfx942"],
+                            disableAsmComments=disableAsmComments,
+                        )
+        assert seen == [disableAsmComments]
 
 
 # ===========================================================================

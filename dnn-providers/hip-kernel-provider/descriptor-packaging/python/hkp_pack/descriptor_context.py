@@ -8,6 +8,7 @@ import json
 import os
 
 from . import agreement, provenance_sidecar
+from . import generic_targets as gtmod
 from .errors import HkpPackError
 
 _DESCRIPTOR_TYPES = ("kdp", "ukd", "kmd", "ued", "umd", "udd", "uhd")
@@ -219,7 +220,19 @@ def declarations(bundles: list[Bundle], schemas: dict) -> dict:
     return found
 
 
-def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
+def archive_arch(entry_arch: list, target: str, generic_targets) -> str:
+    """The arch spelling of the kpack archive for @target (a generic copy is keyed by its generic)."""
+    if target in entry_arch:
+        return target
+    for entry in entry_arch:
+        if gtmod.entry_tier(entry, target, generic_targets) == gtmod.TIER_GENERIC:
+            return entry
+    return target
+
+
+def consumer_records(
+    bundles: list[Bundle], schemas: dict, arch: str, generic_targets
+) -> dict:
     """UKD id -> canonical records over EVERY consumer inside the caller root.
 
     Shared standalone UKDs carry all KDP/engine/KMD bindings, not just the selected
@@ -230,7 +243,12 @@ def consumer_records(bundles: list[Bundle], schemas: dict, arch: str) -> dict:
         header = {k: v for k, v in bundle.kdp_doc.items() if k != "kernelDescriptors"}
         header["arch"] = [arch]
         for entry in bundle.entries:
-            if entry.arch and arch not in entry.arch:
+            # Literal test kept: a generic copy's @arch is the generic's own name, no device.
+            if (
+                entry.arch
+                and arch not in entry.arch
+                and not gtmod.admits_target(entry.arch, arch, generic_targets)
+            ):
                 continue
             enclosing = bundle.kdp_doc if entry.inline else None
             if agreement.resolved_contract(entry.ukd, enclosing) is None:

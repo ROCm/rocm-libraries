@@ -5,8 +5,8 @@ installed trees. Exits non-zero on any failure. The numbered sections in
   1. BINARY NESTING -- the larger set can still choose every binary the
      smaller one could.
   2. LOADER-TUPLE UNIQUENESS -- with absent keys filled from the KMD
-     `default_value`, each tuple is unique per device. A duplicate rejects the
-     whole engine at load.
+     `default_value`, each tuple is unique per device and tier (explicit,
+     generic, unrestricted). A duplicate rejects the whole engine at load.
   3. NO SENTINEL -- `-1` never reaches a shipped descriptor.
   4. METADATA MATCHES ITS BINARY -- the matcher selects on metadata, the spec
      decides what was built.
@@ -48,9 +48,14 @@ def _agreement_python_root() -> Path:
     )
 
 
+#: The IngestorGenerator root, for the engine naming rules in `codegen.models`.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(_agreement_python_root()))
 
+from codegen import json_input  # noqa: E402
+from codegen.models import ENGINE_NAME_PATTERN  # noqa: E402
 from hkp_pack import agreement, descriptor_context  # noqa: E402
+from hkp_pack import generic_targets as gtmod  # noqa: E402
 from hkp_pack.errors import HkpPackError  # noqa: E402
 
 
@@ -59,76 +64,121 @@ class GateError(RuntimeError):
     failures, which are reported and counted."""
 
 
-class Profile:
-    """Per-kernel facts the descriptors do not carry.
+class Manifest:
+    """Per-kernel facts the descriptors do not carry, read from the engine
+    manifest (`configs/<slug>.engine.yaml`)::
 
-    A profile is a small JSON/YAML document beside the generator config::
+        engine:
+          name: hipkernel:Gfx950AttentionDense
+        specialization:
+          vocabulary:
+            dtype: {bf16: BF16, fp16: FP16}
 
-        bundle: <bundle-folder-name>
-        vocabulary:
-          dtype: [BF16, FP16]
-
-    ``bundle`` names the engine to gate when a tree holds more than one (see
-    `select`). ``vocabulary`` declares the matcher's legal spellings for a
-    field, as a builder-to-matcher mapping or the legal set; a UKD's
-    ``specialization_contract`` is merged in automatically, so a profile need
-    only cover fields no declaration does.
+    ``engine.name`` selects the bundles to gate, by the UED ``name`` their KDPs
+    reference, when a tree holds more than one engine (see `select`).
+    ``specialization.vocabulary`` declares the matcher's legal spellings for a field,
+    as a builder-to-matcher mapping or the legal set; a UKD's
+    ``specialization_contract`` is merged in automatically, so a manifest need only
+    cover fields no declaration does. Nothing else in the manifest is read.
     """
 
     def __init__(self, raw: dict, path: str | None = None):
         self.path = path
-        self.bundle = raw.get("bundle")
-        self.vocabulary = dict(raw.get("vocabulary") or {})
+        legacy = sorted({"bundle", "vocabulary"} & raw.keys())
+        if legacy:
+            raise SystemExit(
+                f"FAIL: manifest {path}: top-level {', '.join(legacy)} is a retired "
+                f"tool profile; pass the engine manifest (configs/<slug>.engine.yaml)."
+            )
+        engine = {} if raw.get("engine") is None else raw["engine"]
+        specialization = (
+            {} if raw.get("specialization") is None else raw["specialization"]
+        )
+        if not isinstance(engine, dict) or not isinstance(specialization, dict):
+            raise SystemExit(
+                f"FAIL: manifest {path}: 'engine' and 'specialization' must be "
+                f"mappings."
+            )
+        name = engine.get("name")
+        if name is not None and not (
+            isinstance(name, str) and ENGINE_NAME_PATTERN.match(name)
+        ):
+            raise SystemExit(
+                f"FAIL: manifest {path}: engine.name {name!r} is not "
+                f"'<namespace>:<Name>'."
+            )
+        self.engine_name = name
+        vocabulary = specialization.get("vocabulary", {})
+        if not isinstance(vocabulary, dict):
+            raise SystemExit(
+                f"FAIL: manifest {path}: specialization.vocabulary must be a "
+                f"mapping of field to spellings."
+            )
+        self.vocabulary = dict(vocabulary)
         # Absent and explicitly empty are different claims: (4a) treats an
         # undeclared string field as ambiguous only when no vocabulary block
         # exists at all, which `bool(self.vocabulary)` cannot distinguish.
-        self.vocabulary_declared = "vocabulary" in raw
+        self.vocabulary_declared = "vocabulary" in specialization
 
     @classmethod
-    def load(cls, path: str) -> "Profile":
-        with open(path) as fh:
-            text = fh.read()
+    def load(cls, path: str) -> "Manifest":
+        """Read a manifest as JSON, else as YAML. Only the YAML fallback needs PyYAML,
+        so a JSON manifest loads where it is not installed."""
         try:
-            raw = json.loads(text)
-        except json.JSONDecodeError:
-            try:
-                import yaml
-            except ImportError:  # pragma: no cover - environment-dependent
-                raise SystemExit(
-                    f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
-                    f"as YAML."
-                )
-            raw = yaml.safe_load(text)
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
+        try:
+            raw = json_input.loads(text)
+        except json_input.RepeatedJsonKey as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {path}: {exc}")
+        except ValueError:
+            raw = cls._read_yaml(path)
         if not isinstance(raw, dict):
-            raise SystemExit(f"FAIL: profile {path} must be a mapping.")
+            raise SystemExit(f"FAIL: manifest {path} must be a mapping.")
         return cls(raw, path)
 
+    @staticmethod
+    def _read_yaml(path: str):
+        try:
+            import yaml
+
+            from codegen.config_loader import read_yaml
+        except ImportError:
+            raise SystemExit(
+                f"FAIL: {path} is not JSON and PyYAML is not installed to read it "
+                f"as YAML."
+            )
+        try:
+            return read_yaml(Path(path))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise SystemExit(f"FAIL: manifest {path} is not readable: {exc}")
+
     @classmethod
-    def empty(cls) -> "Profile":
+    def empty(cls) -> "Manifest":
         return cls({})
 
 
 def select(
-    bundles: list[descriptor_context.Bundle], profile: Profile
+    bundles: list[descriptor_context.Bundle], manifest: Manifest
 ) -> list[descriptor_context.Bundle]:
     """The bundles of the one engine this run gates. Several KDPs may declare
     one engine, but two engines under one root is a question only the author
     can answer."""
     if not bundles:
         raise GateError("no *.kdp.json under this root -- is this a descriptor tree?")
-    if profile.bundle:
-        wanted = f"{profile.bundle}.kdp.json"
-        bundles = [b for b in bundles if os.path.basename(b.kdp_path) == wanted]
+    if manifest.engine_name is not None:
+        bundles = [b for b in bundles if b.engine.get("name") == manifest.engine_name]
         if not bundles:
-            raise GateError(f"no {wanted} under this root")
+            raise GateError(f"no KDP of engine {manifest.engine_name} under this root")
     engines = sorted({b.engine["id"] for b in bundles})
     if len(engines) > 1:
         names = ", ".join(
             sorted(os.path.basename(b.kdp_path)[: -len(".kdp.json")] for b in bundles)
         )
         raise GateError(
-            f"{len(engines)} engines under this root ({names}). Set 'bundle' in the "
-            f"profile to say which one this gate is about -- checking the wrong "
+            f"{len(engines)} engines under this root ({names}). Set engine.name in "
+            f"the manifest to say which one this gate is about -- checking the wrong "
             f"engine would pass while the one under test is broken."
         )
     return bundles
@@ -208,6 +258,17 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
     return violations
 
 
+def _shared_devices(left: list, right: list, table) -> str:
+    """The devices both competing arch lists admit."""
+    left_devices = gtmod.expand(left, table)
+    right_devices = gtmod.expand(right, table)
+    if left_devices is None or right_devices is None:
+        shared = left_devices or right_devices
+    else:
+        shared = left_devices & right_devices
+    return ", ".join(sorted(shared)) if shared else "every arch"
+
+
 def effective_arch(
     bundles: list[descriptor_context.Bundle], requested: str | None
 ) -> str:
@@ -232,8 +293,9 @@ class Payloads:
     descriptor that cannot produce them has not shown its evidence is about the
     artifact it ships, so that is a failure rather than an unchecked property."""
 
-    def __init__(self, kpack_python_dir: str | None = None):
+    def __init__(self, kpack_python_dir: str | None = None, generic_targets=None):
         self._dir = kpack_python_dir
+        self._table = generic_targets
         self._archives: dict = {}
         self._module = None
 
@@ -269,8 +331,12 @@ class Payloads:
                 f"{entry.ukd.get('name')}: kernel_source.library resolves to "
                 f"{archive_path}, which does not exist."
             )
+        # A generic document's archive is keyed by the generic's name.
+        if self._table is None:
+            self._table = gtmod.GenericTargets.load(gtmod.DEFAULT_TABLE_PATH)
+        key = descriptor_context.archive_arch(entry.arch, arch, self._table)
         try:
-            blob = self._archive(archive_path).get_kernel(toc_key, arch)
+            blob = self._archive(archive_path).get_kernel(toc_key, key)
         except HkpPackError:
             raise
         except Exception as exc:
@@ -280,7 +346,7 @@ class Payloads:
         if blob is None:
             raise GateError(
                 f"{entry.ukd.get('name')}: {archive_path} carries no member "
-                f"{toc_key!r} for {arch}."
+                f"{toc_key!r} for {key}."
             )
         return blob
 
@@ -299,10 +365,11 @@ def _comparable(value):
 def check(
     label: str,
     root: str,
-    profile: Profile,
+    manifest: Manifest,
     mode: str,
     arch: str | None = None,
     payloads: Payloads | None = None,
+    generic_targets=None,
     *,
     provenance_root: str | None = None,
 ):
@@ -316,10 +383,12 @@ def check(
 
     `provenance_root` is as for `descriptor_context.Index`.
     """
+    if generic_targets is None:
+        generic_targets = gtmod.GenericTargets.load(gtmod.DEFAULT_TABLE_PATH)
     index = descriptor_context.Index(root, provenance_root=provenance_root)
     schemas = index.schemas()
     all_bundles = descriptor_context.resolve_bundles(index)
-    bundles = select(all_bundles, profile)
+    bundles = select(all_bundles, manifest)
     kmd = bundles[0].kmd
     engine_id = bundles[0].engine["id"]
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
@@ -329,14 +398,14 @@ def check(
 
     declared = descriptor_context.declarations(bundles, schemas)
     knobs = {f for d in declared.values() for f in d["metadata_fields"]}
-    vocabulary = dict(profile.vocabulary)
+    vocabulary = dict(manifest.vocabulary)
     for declaration in declared.values():
         vocabulary.update(declaration["vocabulary"])
     # A declaration's vocabulary speaks only for the fields it specialises on,
     # so it is merged into the translations above but does not answer whether
     # there was a place to declare a translation for a given field. Only the
-    # profile's block does that.
-    vocabulary_declared = profile.vocabulary_declared
+    # manifest's block does that.
+    vocabulary_declared = manifest.vocabulary_declared
 
     # (2) Loader-tuple uniqueness, engine-wide because the loader assembles one
     # catalog per engine per device, arch-aware because disjoint coverages
@@ -357,16 +426,11 @@ def check(
     collisions = []
     for i, (left, left_key) in enumerate(completed):
         for right, right_key in completed[i + 1 :]:
-            if left_key != right_key or not agreement.overlap(left.arch, right.arch):
+            if left_key != right_key or not gtmod.compete(
+                left.arch, right.arch, generic_targets
+            ):
                 continue
-            # A wildcard covers whatever the other side names, so the overlap it
-            # reports is that side's list rather than an empty intersection.
-            both = set(left.arch) & set(right.arch)
-            either = set(left.arch) | set(right.arch)
-            where = (
-                ", ".join(sorted(both if left.arch and right.arch else either))
-                or "every arch"
-            )
+            where = _shared_devices(left.arch, right.arch, generic_targets)
             collisions.append(
                 f"{left.ukd.get('name')} and {right.ukd.get('name')} complete to one "
                 f"tuple on {where}"
@@ -394,7 +458,7 @@ def check(
         for field, declared_spellings in vocabulary.items():
             # A mapping declares builder-spelling -> matcher-spelling and its VALUES
             # are the legal set; a bare list declares the legal set directly. Both are
-            # accepted so one profile serves this tool and the parity generator.
+            # accepted so one manifest serves this tool and the descriptor generator.
             allowed = (
                 declared_spellings.values()
                 if isinstance(declared_spellings, dict)
@@ -415,7 +479,7 @@ def check(
                     f"(the matcher compares {sorted(allowed_set)})"
                 )
     else:
-        unchecked.append("vocabulary (no 'vocabulary' in profile or declaration)")
+        unchecked.append("vocabulary (no 'vocabulary' in manifest or declaration)")
 
     # (4) Metadata matches the binary it names, in two kinds of field.
     #
@@ -474,7 +538,7 @@ def check(
         unchecked.append(
             "metadata-matches-binary for UNDECLARED STRING field(s) "
             f"{', '.join(sorted(undeclared_string_fields))} (no 'vocabulary' in "
-            f"profile or declaration to judge them against)"
+            f"manifest or declaration to judge them against)"
         )
 
     # (4b) Compiled specialization: the fields a declaration marks as settled
@@ -482,7 +546,9 @@ def check(
     # producing compile's evidence says what the binary was built with. Full
     # mode checks it against the payload bytes; structural mode names it.
     if mode == "full":
-        records = descriptor_context.consumer_records(all_bundles, schemas, arch)
+        records = descriptor_context.consumer_records(
+            all_bundles, schemas, arch, generic_targets
+        )
         for bundle in bundles:
             for entry in bundle.entries:
                 name = entry.ukd.get("name")
@@ -604,15 +670,21 @@ def main(argv=None) -> int:
         "Required when the tree does not pin exactly one.",
     )
     parser.add_argument(
-        "--profile",
-        help="Per-kernel profile (JSON or YAML) declaring the bundle name to gate "
-        "and the matcher's vocabulary for fields no descriptor declaration covers.",
+        "--manifest",
+        help="Engine manifest (`configs/<slug>.engine.yaml`, JSON or YAML). Only "
+        "engine.name (which engine's KDPs to gate) and specialization.vocabulary are "
+        "read; the rest of the file is not checked.",
     )
     parser.add_argument(
         "--kpack-python-dir",
         help="Directory holding the rocm_kpack package, for reading the payload "
         "bytes a packed descriptor names under --mode full. Omit it to use the "
         "installed one.",
+    )
+    parser.add_argument(
+        "--generic-targets-json",
+        default=str(gtmod.DEFAULT_TABLE_PATH),
+        help="The generic GPU target table (gpu_generic_targets.json).",
     )
     parser.add_argument(
         "--provenance-root",
@@ -645,15 +717,20 @@ def main(argv=None) -> int:
             )
         provenance_roots[label] = directory
 
-    profile = Profile.load(args.profile) if args.profile else Profile.empty()
+    manifest = Manifest.load(args.manifest) if args.manifest else Manifest.empty()
 
     print("variant-set gate")
     print(f"  mode: {args.mode}")
 
     sets, by_label, bad, skipped, knobs = {}, {}, [], [], set()
     unverified: list[str] = []
-    payloads = Payloads(args.kpack_python_dir) if args.mode == "full" else None
     try:
+        generic_targets = gtmod.GenericTargets.load(args.generic_targets_json)
+        payloads = (
+            Payloads(args.kpack_python_dir, generic_targets)
+            if args.mode == "full"
+            else None
+        )
         arch = None
         if args.mode == "full":
             probe = descriptor_context.resolve_bundles(
@@ -666,10 +743,11 @@ def main(argv=None) -> int:
             binaries, descriptors, failures, unchecked, unbound, declared = check(
                 label,
                 root,
-                profile,
+                manifest,
                 args.mode,
                 arch,
                 payloads,
+                generic_targets,
                 provenance_root=provenance_roots.get(label),
             )
             sets[label] = binaries
