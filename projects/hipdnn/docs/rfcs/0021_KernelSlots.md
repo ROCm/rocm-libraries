@@ -119,7 +119,8 @@ The UED gains two members, and each slot carries the selection members the engin
 A KDP gains `slot`, naming the slot its kernels serve. It is required for a slotted engine and
 forbidden otherwise. A slot may have several packs. A UKD is unchanged; it fills the KMD of its
 pack's slot. A kernel serves at most one slot of an engine, so logs and records can name it without
-its slot.
+its slot. A producer also reads `slot` to pick the KMD that completes a pack's metadata and the
+ranker that orders it; no wire format other than the member itself changes.
 
 ```jsonc
 // UED
@@ -236,6 +237,29 @@ is acceptable under the separability assumption (§ 11).
 
 ## 8. Validation
 
+**Producer.** A producer packer (`hkp_pack`) rejects the statically checkable conditions below
+before it writes a bundle, with the loader's rules and messages where the two overlap:
+
+- the version gates: `slots`, `shared_workspace` and KDP `slot` need format 1.1, and a KDP of an
+  unslotted engine has no `slot`;
+- the `slots` shape: nonempty, names matching § 4, no `global`, no duplicates, no engine-level
+  selection members beside `slots`, no top-level `metadata` on a slotted engine;
+- `shared_workspace` only beside `slots`, with a native graph match and a nonempty token;
+- a KDP `slot` that names a declared slot, and a kernel id that serves at most one slot where the
+  identities are static;
+- each slot's KMD, which completes a pack's metadata for compilation and desk check, and each
+  slot's knobs, checked against that slot's KMD;
+- slot rankers without a metric and without `ws.*` reads in their feature signatures;
+- UHD 1.1 provenance: a slot ranker's `slot` and `kmd`, and a slotted `predict_engine` model's
+  `kmds`, which name every declared slot once with that slot's KMD id.
+
+Every slot's KMD and ranker is reachable from its engine, so a pruned shard keeps them. A slotted
+engine with an empty slot is not a packer error, because the loader permits it.
+
+**Loader.** The SDK load stays authoritative for what a packer cannot decide: model binding and
+provenance revisions, native registrations, per-arch collisions and preflight, and a slot with no
+loadable pack.
+
 At load, the runtime applies RFC 0020 § 13 and rejects a slotted engine, or a pack, that breaks a
 rule in § 4: engine-level selection members beside `slots`, an empty or misnamed slot list, a slot
 ranker that declares a metric, `shared_workspace` without a native graph match, a pack with a
@@ -244,10 +268,12 @@ missing or unknown `slot`, or one kernel in two slots. The existing per-engine c
 the engine stays registered and declines every graph. An unslotted engine with no loadable pack is
 still dropped, as today. Within a slotted engine, a duplicate metadata tuple in a slot or a duplicate
 kernel id in a slot's arch group drops the offending pack; unslotted engines keep today's behavior.
+The outcomes stay distinct: a broken engine is dropped, a broken pack is dropped, a model with bad
+provenance is disabled while its engine stays, and an empty slot warns.
 
 A slot ranker whose feature signature reads a `ws.*` token is disabled at load (its engine stays and
-the slot orders its catalog by priority, then id) and is refused by the validator: the root is
-reserved (§ 6), so the feature could never be bound.
+the slot orders its catalog by priority, then id) and is refused by the validator and the producer
+packer: the root is reserved (§ 6), so the feature could never be bound.
 
 ## 9. Compatibility
 
@@ -257,6 +283,10 @@ for a slot ranker, whose `trained_against` adds `slot`, and a slotted `predict_e
 files that use slots are written as 1.1. A 1.0 runtime skips 1.1 files with a warning, and a 1.1 KDP
 beside a skipped UED is reported as orphaned; a 1.1 runtime reads 1.0 files unchanged. A 1.0-labelled
 file that contains slot members is rejected.
+
+Producer packers accept the 1.1 forms of all three formats, including the UHD `slot` and `kmds`
+provenance, and refuse them under a 1.0 label. A bundle without slots is written as 1.0 with the
+same bytes it has without slot support.
 
 An engine without slots keeps its knob ids, trained models and winner records, so nothing trained or
 stored is invalidated. Adding, removing, renaming or reordering slots is a breaking engine revision,
@@ -273,11 +303,33 @@ statements about an engine's kernel selection apply per slot. The edit list:
 
 | RFC | Change |
 |---|---|
-| 0017 | Kernel slots replace the multi-launch pack (§ 15.1) and its intermediate buffers (§ 15.3) for multi-kernel engines; the UCD (§ 15.2) is unaffected. KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers that read offset tokens (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 10). |
+| 0017 | Kernel slots replace the multi-launch pack (§ 15.1) and its intermediate buffers (§ 15.3) for multi-kernel engines; the UCD (§ 15.2) is unaffected. KDPs gain `slot` (§ 4). Applicability requires a kernel in every slot, and workspace includes the shared region (§ 8.1, § 8.4, § 8.6). Declarative workspace arguments are not offset past the shared region, so v1 slots use native handlers that read offset tokens (§ 6). Metadata-tuple uniqueness is per slot; a kernel id belongs to one slot (§ 4, § 10). Packaging validation applies the shape rules of RFC 0021 § 4, and a pack's KMD is the KMD of its slot for the packer's compilation completion and desk check (RFC 0021 § 8). |
 | 0018 | Kernel-scoped matchers check against the KMD of the pack's slot (§ 8, § A.5). |
-| 0019 | KMD, ranker, catalog, winner records, caches and contract checks are per slot; slot rankers are metric-less and train on whole-program times; a slotted engine has no model-based configuration estimate; its benchmark cost is the product of slot catalogs (§ 3, § 4.1, § 5, § 6.3, § 8.1, § 9.2, § 11, § 13.2). |
+| 0019 | KMD, ranker, catalog, winner records, caches and contract checks are per slot; slot rankers are metric-less and train on whole-program times; a slotted engine has no model-based configuration estimate; its benchmark cost is the product of slot catalogs (§ 3, § 4.1, § 5, § 6.3, § 8.1, § 9.2, § 11, § 13.2). Packaging reaches and checks every slot's ranker, and the `trained_against` provenance of a slot ranker or the engine estimate names declared slots and their KMDs (§ 8). |
 | 0019.13 | Slot rankers train per slot (§ 3.5, § 7.3, § 8.3). |
-| 0020 | UED gains `slots` and `shared_workspace`; `metadata` is required only without `slots` (§ 4.2, § 10). Selection members and knobs move to slots, with knob ids `<slot>.<field>` (§ 4.2, § 4.6, § 8). A native graph match may publish `ws.*` tokens (§ 6.1). Load checks run per slot (§ 13). |
+| 0020 | UED gains `slots` and `shared_workspace`; `metadata` is required only without `slots` (§ 4.2, § 10). Selection members and knobs move to slots, with knob ids `<slot>.<field>` (§ 4.2, § 4.6, § 8). A native graph match may publish `ws.*` tokens (§ 6.1). Load checks run per slot (§ 13). Packaging reaches every slot's KMD and checks each slot's knobs against that slot's KMD (§ 8). |
+
+### Public surface changes
+
+Unslotted engines behave as before. "Source" marks changes that affect code built against the SDK
+headers.
+
+| Item | Change | Affected | How to adapt |
+|---|---|---|---|
+| `GenericEngine` constructor | Gains a trailing defaulted `BenchmarkPlan<THandle>::Timer timer = {}` parameter. | None: existing calls compile unchanged. | Pass a timer only to inject benchmark timing, as tests do. |
+| `HeuristicProvenance` | Gains `slot` (string) and `kmds` (`std::vector<SlotDependency>`) members between `kmd` and `umd`. | Source: positional aggregate initialization. | Initialize by member name, or supply `slot` and `kmds` before `umd`. |
+| `KernelIngestorStateManager::metadataSchema()` | Throws `std::logic_error` on a slotted manager, like the other unslotted-only accessors. | Source: code that reads the schema of an engine that may be slotted. | Test `isSlotted()`, and call `slotSchema(slot)` with the slot's index for a slotted engine. |
+| `SlotProgramBenchmark.hpp`, `BenchmarkDetail.hpp` | New SDK headers: the slotted benchmark plan (§ 7) and the sampling machinery it shares with `BenchmarkPlan`. | None; both are SDK-internal. | Include them only to use those types directly. |
+| `hipdnn_bench enumerate`, `--json` | Enumerated pages carry `slot_kernels` (a `{slot, kernel}` list in slot order) on slotted candidates. `--json` result rows of a slotted sweep carry `slot_reference`, the names of the slots whose training rows the candidate is, joined by `\|` (empty when it is none). Unslotted output is unchanged. | Consumers of the bench JSON. | Ignore the keys, or read them to train per-slot rankers (§ 7). |
+| `hipdnn_bench` sweep CSV | A slotted sweep adds the columns `kernel` (the composite candidate id) and `slot_reference` (as in `--json`) between the `kernel.<knob>` columns and `engine`. | Consumers of the sweep CSV. | Read columns by header name, not position. |
+| Candidate ids | A candidate id that contains `=` is a slotted composite (`prep=<id>\|dkdv=<id>\|dq=<id>`, § 5); a malformed composite is an error. | Code that parses candidate ids. | Split on `\|`, then `=`. A bare kernel id (a UUID) contains no `=`. |
+| Descriptor formats | UED and KDP gain `slots`, `shared_workspace` and `slot`; a UHD's `trained_against` gains `slot` beside `kmd`, or `kmds` in place of `kmd`. All require version 1.1 (`uhd.schema.json` admits `"1.1"` and states the rule), and a slot member under a 1.0 label is refused by the loader, the validator and the packer. | Descriptor producers and consumers. | Label slotted documents 1.1; unslotted documents stay as they are. |
+| `makeStateManager`, `makeKernelHeuristic`, `UhdKernelHeuristic::makeResolver`, `UhdKernelHeuristic::create` | `makeStateManager` gains trailing defaulted `slotKnobs` and `sharedWorkspaceToken` parameters; the other three gain a trailing `bool reserveWorkspaceTokens = false`. | None: existing calls compile unchanged. | Pass the new arguments only to build a slotted engine. |
+| `winners.jsonl` | Slotted engines write format v3: per-slot lines carry `slot`, and `program` lines record the selected slot combination. Unslotted lines stay v2. | Readers of the winner cache. | Decode v2 and v3, and tell per-slot records from program records. |
+| `uhd_gen --slot` | `dataset export`, `generate` and `knobs` select one slot's reference rows and rename its `kernel.<slot>.<field>` columns to `kernel.<field>`; `generate --slot` writes a version 1.1 UHD. `--slot` refuses a sweep that is not slotted, and `generate --slot` needs `--dataset`. | Training pipelines. | Sweep with `hipdnn_bench`, then run `generate --dataset ... --slot <name>` once per slot. |
+| `uhd_gen promote` | Installs a slot ranker under `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`, reading the slot from the model's `trained_against.slot`. It refuses a `sort_kernel_catalog` model with no slot, an unknown slot, a slot ranker that declares `score.metric`, and any `predict_applicable_kernels` model on a slotted engine. `generate` without `--dataset` refuses a slotted engine. | Training and install pipelines. | Train each slot with `generate --slot`, then `promote` each model. |
+| Descriptor and cache types | `EngineDescriptor` gains `slots` and `sharedWorkspaceToken`, `DescriptorSet` gains `slots`, `KernelDescriptorPack`, `CatalogKey` and `WinnerKey` gain `slot`; all default to empty. `HeuristicProvenance` is the one mid-struct insertion (above). | None: existing initializations compile unchanged. | Read each slot's schema, packs and ranker for a slotted set instead of the singular selection fields. |
+| `hkp_pack` | Accepts slotted UED, KDP and UHD bundles and resolves each pack against its slot's KMD. A pack that names no declared slot, a kernel reused across slots, a slot ranker that declares a metric or reads `ws.*`, and slot provenance that disagrees with the slot fail packaging. | Bundle producers. | Declare a slot for every pack, keep each kernel id in one slot, and give slot rankers matching `slot` and `kmd` provenance. |
 
 ## 11. Deferred Work and Open Questions
 
