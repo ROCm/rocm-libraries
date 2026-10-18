@@ -51,6 +51,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 64, 1, 1, 1, 1, 1, 1] # m, n = 16, k = 64
           # - [16, 16, 64, 1, 1, 1, 1, 2, 2] # m, n = 16, k = 64
@@ -64,7 +65,8 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - TransposeLDS: [-1]
         - SourceSwap: [false]
         - LdsPadA: [-1]
@@ -72,7 +74,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         # - VectorWidthA: [1, 2, 4, 8]
         # - VectorWidthB: [1, 2, 4, 8]
         - GlobalReadVectorWidthA: [-1]

@@ -53,5 +53,9 @@ def _build(spec, *, arch):
     return b.kernel
 
 
+def main() -> int:
+    return run_emit(_spec, _build)
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_emit(_spec, _build))
+    raise SystemExit(main())
