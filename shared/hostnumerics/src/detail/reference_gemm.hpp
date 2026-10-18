@@ -7,6 +7,7 @@
 #include <complex>
 #include <cstddef>
 #include <optional>
+#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/gemm.hpp>
 #include <stdexcept>
 #include <string>
@@ -177,7 +178,8 @@ inline GemmSupportInfo checkRuntimeGemm(const GemmInvocation& problem) {
         return {.reason = "Reference GEMM destination must not overlap the A block scale."};
     if (problem.blockScaleB && storageOverlaps(problem.d, *problem.blockScaleB))
         return {.reason = "Reference GEMM destination must not overlap the B block scale."};
-    if (!isValidIndexOrder(problem.d.shape().rank(), problem.outputSelection.indexOrder()))
+    if (!ShapeAccess::isValidIndexOrder(problem.d.shape().rank(),
+                                        problem.outputSelection.indexOrder()))
         return {.reason = "Tensor index order must contain each dimension once."};
     if (auto error = outputSelectionError(problem.outputSelection, outputCount))
         return {.reason = std::string(message(*error))};
