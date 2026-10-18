@@ -16,7 +16,7 @@ import pytest
 
 from hkp_pack import descriptor_context, pipeline, provenance_sidecar
 from hkp_pack.errors import HkpPackError
-from pack_helpers import is_compact, write_shipped
+from pack_helpers import GENERIC_TARGETS_JSON, is_compact, write_shipped
 
 SHA = "a" * 64
 OTHER_SHA = "b" * 64
@@ -645,7 +645,15 @@ def test_desk_check_fails_a_kdp_whose_sidecar_does_not_bind(tmp_path, mode):
     kdp = tmp_path / "shard.kdp.json"
     write_shipped(kdp, {"id": "pack-id", "kernelDescriptors": [_embedded_ukd("k0")]})
     control = subprocess.run(
-        [sys.executable, str(_DESK_CHECK), "--mode", "structural", str(kdp)],
+        [
+            sys.executable,
+            str(_DESK_CHECK),
+            "--mode",
+            "structural",
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            str(kdp),
+        ],
         capture_output=True,
         text=True,
     )
@@ -654,7 +662,15 @@ def test_desk_check_fails_a_kdp_whose_sidecar_does_not_bind(tmp_path, mode):
     )
 
     result = subprocess.run(
-        [sys.executable, str(_DESK_CHECK), "--mode", mode, str(kdp)],
+        [
+            sys.executable,
+            str(_DESK_CHECK),
+            "--mode",
+            mode,
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
+            str(kdp),
+        ],
         capture_output=True,
         text=True,
     )
@@ -683,6 +699,8 @@ def test_desk_check_reads_sidecars_from_a_provenance_root(tmp_path):
                 str(_DESK_CHECK),
                 "--mode",
                 "structural",
+                "--generic-targets-json",
+                str(GENERIC_TARGETS_JSON),
                 *flags,
                 str(kdp),
             ],
@@ -716,6 +734,8 @@ def test_desk_check_refuses_a_provenance_root_for_an_unmarked_kdp(tmp_path):
             str(_DESK_CHECK),
             "--mode",
             "structural",
+            "--generic-targets-json",
+            str(GENERIC_TARGETS_JSON),
             "--provenance-root",
             str(tmp_path / "provenance"),
             str(kdp),

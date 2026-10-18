@@ -419,9 +419,11 @@ class TestStreamKHostPlan(unittest.TestCase):
         eng = _engine()
         for ctas in (0, -3):
             with self.subTest(ctas=ctas), self.assertRaises(ValueError):
-                eng.conv_wgrad_streamk_host(_spec_dict(_spec(streamk_ctas=ctas)))
+                eng.conv_wgrad_streamk_host(
+                    _spec_dict(_spec(streamk_ctas=ctas)), "gfx950"
+                )
         with self.assertRaises(ValueError):
-            eng.conv_wgrad_streamk_host(_spec_dict(_spec(streamk="off")))
+            eng.conv_wgrad_streamk_host(_spec_dict(_spec(streamk="off")), "gfx950")
 
     def test_signature_tracks_reduction(self):
         names = lambda s: [p["name"] for p in wgrad_streamk_signature(s)]  # noqa: E731
@@ -451,7 +453,7 @@ class TestStreamKHostPlan(unittest.TestCase):
                         streamk_reduction=reduction,
                         streamk_ctas=7,
                     )
-                    got = eng.conv_wgrad_streamk_host(_spec_dict(spec))
+                    got = eng.conv_wgrad_streamk_host(_spec_dict(spec), "gfx950")
                     flags, partials = wgrad_streamk_workspace_layout(spec)
                     with self.subTest(g=problem.groups, mode=mode, r=reduction):
                         self.assertEqual(tuple(got["grid"]), wgrad_streamk_grid(spec))
@@ -531,9 +533,12 @@ class TestStreamKHostPlan(unittest.TestCase):
                                 self.assertEqual(partials, pool * 64 * 64 * 4)
                                 split += 1
         self.assertEqual(split, 2 * 2 * 2)
-        # Without an arch both engines default to gfx950.
+        # The Python helpers default to gfx950; the C++ binding takes no default
+        # target, so it has to be named, and an empty one is refused.
         spec = _spec(streamk="persistent", streamk_ctas=-1)
-        got = eng.conv_wgrad_streamk_host(_spec_dict(spec))
+        with self.assertRaisesRegex(ValueError, "explicit gfx target"):
+            eng.conv_wgrad_streamk_host(_spec_dict(spec), "")
+        got = eng.conv_wgrad_streamk_host(_spec_dict(spec), "gfx950")
         self.assertEqual(tuple(got["grid"]), wgrad_streamk_grid(spec))
 
 

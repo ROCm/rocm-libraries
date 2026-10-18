@@ -28,8 +28,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * LANGE now sets the norm to zero when m = 0 or n = 0, accumulates the Frobenius norm with scaling
   to avoid overflow and underflow, and returns NaN for complex elements with a NaN real part
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
-
 * Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues
