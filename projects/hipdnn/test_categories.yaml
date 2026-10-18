@@ -83,3 +83,4 @@ test_categories:
       - "hipdnn_validate_descriptors_l2_dynamic_features"
       - "hipdnn_validate_descriptors_l1_static_order"
       - "hipdnn_validate_descriptors_l1_native"
+      - "hipdnn_validate_descriptors_slotted_.*"

@@ -41,7 +41,13 @@ from .features import (
     require_admissible_kernel_axes,
     signature_references,
 )
-from .dataset.training_table import best_per_shape
+from .dataset.training_table import (
+    SLOT_REFERENCE,
+    WORKSPACE_PREFIX,
+    best_per_shape,
+    slot_kernels,
+    slot_training_rows,
+)
 from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
@@ -141,6 +147,12 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         help="Explicit NAME=INTEGER collection pin (repeatable)",
+    )
+    parser.add_argument(
+        "--slot",
+        help="With --dataset: train this slot's ranker from a slotted engine's sweep. "
+        "Keeps the slot's reference rows (the reference program and the candidates that vary "
+        "only this slot) and names kernel.<slot>.<field> columns kernel.<field>",
     )
     parser.add_argument(
         "--workspace-limit",
@@ -490,6 +502,43 @@ def _training_rows(directory: Path, chosen: list, sources: list, only, purposes)
     return rows, superseded, excluded
 
 
+def slot_view(measured: dict, slot: str, provenance: dict) -> dict:
+    """`load_dataset`'s result as one slot's ranker sees it: the slot's reference rows
+    (`slot_training_rows`), its kernel fields, knobs and knob numbering named by field, and
+    `provenance`, the descriptors it ranks for (`snapshot_provenance` with the slot).
+    """
+    own = slot + "."
+
+    def field(name: str) -> str | None:
+        prefix = "kernel." if name.startswith("kernel.") else ""
+        bare = name[len(prefix) :]
+        return prefix + bare[len(own) :] if bare.startswith(own) else None
+
+    return {
+        **measured,
+        "provenance": provenance,
+        "rows": {
+            source: slot_training_rows(rows, slot)
+            for source, rows in measured["rows"].items()
+        },
+        "published": {
+            name
+            for name in measured["published"]
+            if not name.startswith(WORKSPACE_PREFIX)
+        },
+        "kernel_fields": {
+            named for name in measured["kernel_fields"] if (named := field(name))
+        },
+        "shipping_knobs": [
+            named for name in measured["shipping_knobs"] if (named := field(name))
+        ],
+        "collection_knobs": [
+            named for name in measured["collection_knobs"] if (named := field(name))
+        ],
+        "knob_encodings": addressing.for_slot(measured["knob_encodings"], slot),
+    }
+
+
 def _all_published(chosen: list) -> bool:
     kinds = {(c.get("origin") or {}).get("kind") for c in chosen}
     if "csv" in kinds and kinds != {"csv"}:
@@ -806,6 +855,10 @@ def collect_graph(
     published = set(_feature_map(first, "problem_features")) | set(
         _feature_map(first, "device_features")
     )
+    if slot_kernels(candidates[0]["id"]):
+        published = {
+            name for name in published if not name.startswith(WORKSPACE_PREFIX)
+        }
     # A crashing kernel loses the whole graph's rows; one that fails to build or run is
     # reported as an unsucceeded result and still reaches the corpus.
     results = measured.get("results")
@@ -881,11 +934,26 @@ def collect_graph(
             # §13.2: suppressed here, where the row is built, so every consumer sees it
             # suppressed; otherwise a wrong-but-fast kernel becomes the label.
             suppress_timings(row)
+        slotted = bool(slot_kernels(candidate["id"]))
+        if slotted:
+            # RFC 0021 §6: the marker says whose training row this is, and workspace tokens
+            # (which the engine already withholds) are never a training feature.
+            row[SLOT_REFERENCE] = result.get(SLOT_REFERENCE)
+            if not isinstance(row[SLOT_REFERENCE], str):
+                raise ValueError(
+                    "a slotted sweep's result must carry the benchmark's slot_reference marker"
+                )
         for mapping in (
             first["problem_features"],
             first["device_features"],
             candidate["kernel_features"],
         ):
+            if slotted:
+                mapping = {
+                    name: value
+                    for name, value in mapping.items()
+                    if not name.startswith(WORKSPACE_PREFIX)
+                }
             collision = set(row) & set(mapping)
             if collision:
                 raise ValueError(
@@ -1042,6 +1110,12 @@ def _measure(
     provenance, ued, exposed, kernel_fields, ordinals = None, {}, {}, set(), {}
     if not immediate:
         provenance = snapshot_provenance(tree, args.engine, args.arch)
+        if "kmds" in provenance:
+            raise ValueError(
+                "generate measures an engine that declares no slots; a slotted engine is "
+                "swept with hipdnn_bench --sweep, added to a dataset, and trained one slot at "
+                "a time with --dataset and --slot"
+            )
         ued_path, ued = _descriptor(tree, ".ued.json", provenance["ued"]["id"])
         _, kmd = _descriptor(tree, ".kmd.json", provenance["kmd"]["id"])
         kernel_fields = {"kernel." + field["name"] for field in kmd["fields"]}
@@ -1417,14 +1491,32 @@ def _relocate_stage(stage: Path, output: Path) -> None:
 
 
 def _train_and_score(
-    train_args: list[str], eval_args: list[str], model_dir: Path, what: str
+    train_args: list[str],
+    eval_args: list[str],
+    model_dir: Path,
+    what: str,
+    slot: str | None = None,
 ) -> tuple[Path, dict]:
     """Train a model into `model_dir` and score it: `uhd_gen train <train_args>`, then
-    `uhd_gen evaluate <eval_args>`. Returns the evaluation report and its path."""
+    `uhd_gen evaluate <eval_args>`. Returns the evaluation report and its path.
+
+    A `slot` ranker must be metric-less (RFC 0021 §7): the loader drops the whole engine
+    for one that declares `score.metric`, so a model that does is refused here.
+    """
     from .__main__ import main, train
 
     if train(train_args):
         raise ValueError(f"training {what} failed; no model was published")
+    if slot is not None:
+        trained = json.loads(
+            (model_dir / "heuristic.uhd.json").read_text(encoding="utf-8")
+        )
+        metric = trained.get("score", {}).get("metric")
+        if metric:
+            raise ValueError(
+                f"slot '{slot}' ranker declares score.metric '{metric}'; a slot ranker "
+                "must be metric-less; train it on a timing label without --metric"
+            )
     if main(["evaluate", *eval_args]):
         raise ValueError(f"evaluating {what} failed; no model was published")
     report_path = model_dir / "eval_report.json"
@@ -1437,8 +1529,10 @@ def _generate_published(
     """Train and score a model from a published dataset, as `train` and `evaluate` would.
 
     Published rows carry no engine binding and no UED, so the features, label and direction
-    are stated rather than inferred, and the model cannot be promoted. The holdout is
-    generate's own: `--eval-benchmarks`, `--eval-fraction`, or `--recall`.
+    are stated rather than inferred, and `generate` leaves installing it to `promote`. With
+    `--slot` the model's provenance is the slot's, from `--descriptor-tree`, so `promote`
+    accepts it. The holdout is generate's own: `--eval-benchmarks`, `--eval-fraction`, or
+    `--recall`.
     """
     if args.role == ROLE:
         raise ValueError(
@@ -1560,7 +1654,7 @@ def _generate_published(
     if args.feature_evaluator:
         eval_args += ["--feature-evaluator", args.feature_evaluator]
     report_path, report = _train_and_score(
-        train_args, eval_args, model_dir, "the published dataset"
+        train_args, eval_args, model_dir, "the published dataset", args.slot
     )
     training_keys = set(problem_keys(train_frame, grouping))
     evaluated_keys = set(problem_keys(eval_frame, grouping))
@@ -1655,6 +1749,10 @@ def _check_generate_arguments(
         raise ValueError(
             "--collect-only measures --graphs; it cannot also read --dataset"
         )
+    if args.slot and not args.dataset:
+        raise ValueError(
+            "--slot selects one slot's rows of a slotted sweep; it needs --dataset"
+        )
     if args.dataset and (args.knob or args.device or args.workspace_limit is not None):
         raise ValueError(
             "--knob, --device and --workspace-limit shape a measurement, and a "
@@ -1672,7 +1770,7 @@ def _check_generate_arguments(
 
 
 def _usable_rows(
-    frames: dict, immediate: bool, engine: str | None
+    frames: dict, immediate: bool, engine: str | None, slot: str | None = None
 ) -> tuple[dict, CatalogDensity | None]:
     """Each source's rows that may label training, and a catalog's candidate density.
 
@@ -1690,7 +1788,7 @@ def _usable_rows(
     if not immediate:
         density = candidate_density(usable[None])
         if density.deterministic:
-            raise DeterministicCatalogError(density.diagnosis(engine))
+            raise DeterministicCatalogError(density.diagnosis(engine, slot))
         thin = density.near_deterministic_warning()
         if thin:
             logger.warning("%s", thin)
@@ -1937,6 +2035,12 @@ def run_generate(args: argparse.Namespace) -> int:
             measured = load_dataset(
                 args.dataset, role=args.role, sources=sources, only=args.contribution
             )
+            if args.slot:
+                measured = slot_view(
+                    measured,
+                    args.slot,
+                    snapshot_provenance(tree, args.engine, args.arch, args.slot),
+                )
             if measured["from_published"]:
                 code = _generate_published(args, measured, stage, output, metrics)
                 stage = None if code == 0 else stage
@@ -2034,7 +2138,7 @@ def run_generate(args: argparse.Namespace) -> int:
             _write_json(corpora[source], _absent_as_null(rows[source]))
             frames[source] = frame
         _write_json(stage / "provenance.json", provenance)
-        usable, density = _usable_rows(frames, immediate, args.engine)
+        usable, density = _usable_rows(frames, immediate, args.engine, args.slot)
         # (declared metric, target, calibrated, timing statistic, source) per UHD emitted.
         # L1 is always calibrated, and every calibrated label comes from `avgTimeMs`.
         labels = []
@@ -2154,7 +2258,7 @@ def run_generate(args: argparse.Namespace) -> int:
             if args.feature_evaluator:
                 eval_args.extend(["--feature-evaluator", args.feature_evaluator])
             report_path, report = _train_and_score(
-                train_args, eval_args, model_dir, requested
+                train_args, eval_args, model_dir, requested, args.slot
             )
             if not report["metrics"]["problems_scored"]:
                 # A wholly deterministic catalog was refused above, so this is a thin

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "c2a00000-0000-4000-8000-000000000005",
+  "name": "fixture dkdv dispatch",
+  "dispatch_symbol": "hipkernel.fixture_slotted_multi_launch.dkdv_dispatch"
+}

@@ -1,0 +1,148 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000008",
+  "name": "hipkernel:fixture_slotted_multi_launch_dkdv",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "c2a00000-0000-4000-8000-000000000006"
+  ],
+  "engine": "c2a00000-0000-4000-8000-000000000001",
+  "dispatch": "c2a00000-0000-4000-8000-000000000005",
+  "slot": "dkdv",
+  "kernelDescriptors": [
+    {
+      "version": "1.1",
+      "id": "c2a00000-0000-4000-8000-000000000021",
+      "name": "dkdv.m64",
+      "sources": {
+        "decode": {
+          "kind": "kpack",
+          "library": "kpack/fixture_slotted_multi_launch_gfx942.kpack",
+          "toc_key": "stage_m64",
+          "symbol": "fixture_decode",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "signature": [
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 0,
+              "name": "in"
+            },
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 8,
+              "name": "out"
+            },
+            {
+              "kind": "by_value",
+              "size": 4,
+              "offset": 16,
+              "name": "n"
+            }
+          ]
+        },
+        "merge": {
+          "kind": "kpack",
+          "library": "kpack/fixture_slotted_multi_launch_gfx942.kpack",
+          "toc_key": "stage_m64",
+          "symbol": "fixture_merge",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "signature": [
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 0,
+              "name": "in"
+            },
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 8,
+              "name": "out"
+            },
+            {
+              "kind": "by_value",
+              "size": 4,
+              "offset": 16,
+              "name": "n"
+            }
+          ]
+        }
+      },
+      "metadata": {
+        "block_m": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.1",
+      "id": "c2a00000-0000-4000-8000-000000000022",
+      "name": "dkdv.m128",
+      "sources": {
+        "decode": {
+          "kind": "kpack",
+          "library": "kpack/fixture_slotted_multi_launch_gfx942.kpack",
+          "toc_key": "stage_m128",
+          "symbol": "fixture_decode",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "signature": [
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 0,
+              "name": "in"
+            },
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 8,
+              "name": "out"
+            },
+            {
+              "kind": "by_value",
+              "size": 4,
+              "offset": 16,
+              "name": "n"
+            }
+          ]
+        },
+        "merge": {
+          "kind": "kpack",
+          "library": "kpack/fixture_slotted_multi_launch_gfx942.kpack",
+          "toc_key": "stage_m128",
+          "symbol": "fixture_merge",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "signature": [
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 0,
+              "name": "in"
+            },
+            {
+              "kind": "global_buffer",
+              "size": 8,
+              "offset": 8,
+              "name": "out"
+            },
+            {
+              "kind": "by_value",
+              "size": 4,
+              "offset": 16,
+              "name": "n"
+            }
+          ]
+        }
+      },
+      "metadata": {
+        "block_m": 128,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ]
+}

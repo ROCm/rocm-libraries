@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "c2a00000-0000-4000-8000-000000000003",
+  "name": "dkdv variant fields",
+  "fields": [
+    {
+      "name": "block_m",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000008",
+  "name": "hipkernel:fixture_dkdv",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "c2a00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "c2a00000-0000-4000-8000-000000000001",
+  "dispatch": "c2a00000-0000-4000-8000-000000000006",
+  "slot": "dkdv",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "c2a00000-0000-4000-8000-000000000021",
+      "name": "dkdv.m64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "Fixture.cpp",
+        "entry_point": "Fixture"
+      },
+      "metadata": {
+        "block_m": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c2a00000-0000-4000-8000-000000000022",
+      "name": "dkdv.m128",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "Fixture.cpp",
+        "entry_point": "Fixture"
+      },
+      "metadata": {
+        "block_m": 128,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ]
+}

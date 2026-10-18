@@ -1,0 +1,36 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000011",
+  "name": "dq selector",
+  "adapter": "native",
+  "objective": "min",
+  "native": {
+    "symbol": "hipkernel.fixture.dq_score"
+  },
+  "features_signature": [
+    "$kernel.block_n"
+  ],
+  "features_hash": "sha256:1b8447a4088e55ce",
+  "trained_against": {
+    "ued": {
+      "id": "c2a00000-0000-4000-8000-000000000001",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "c2a00000-0000-4000-8000-000000000004",
+      "revision": "1.0"
+    },
+    "slot": "dq",
+    "umd": [
+      {
+        "id": "c2a00000-0000-4000-8000-000000000005",
+        "revision": "1.0"
+      }
+    ]
+  },
+  "score": {
+    "metric": "time",
+    "calibrated": true,
+    "transform": "identity"
+  }
+}

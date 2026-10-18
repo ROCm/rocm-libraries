@@ -32,7 +32,12 @@ from .models import (
     IngestorConfig,
     KernelSpec,
     PackSpec,
+    SlotSpec,
 )
+
+#: RFC 0021 §9: UED and KDP files that use slot members are format 1.1; every
+#: other descriptor, and every unslotted engine's, stays 1.0.
+SLOT_FILE_VERSION = "1.1"
 
 #: Header every emitted C++/CMake file opens with. It contains ©, so emitted
 #: files are written as UTF-8.
@@ -75,9 +80,7 @@ def cpp_escape(value) -> str:
     return "".join(out)
 
 
-def kernel_key(
-    metadata: dict, arch, config: IngestorConfig
-) -> tuple[str, tuple[str, ...]]:
+def kernel_key(metadata: dict, arch, config: IngestorConfig, slot: str = "") -> tuple:
     """A kernel's catalog identity: its metadata tuple completed with the CURRENT
     config's KMD fields, plus its effective arch. It is the key the loader uses,
     so it is unique among emitted kernels, and names and positions play no part.
@@ -87,8 +90,13 @@ def kernel_key(
     while a metadata fix or a different tuple gets a new one. A match is reused
     only if the kernel's source fields are unchanged outside ``spec``: the same
     tuple built from different compiled bytes is a retune and gets a new id (see
-    `mint_ids`)."""
-    return (_dedup_key(metadata, config), tuple(sorted(arch or [])))
+    `mint_ids`).
+
+    For a slotted engine ``config`` is the kernel's slot view and ``slot`` its
+    name: the tuple is completed with that slot's KMD fields and filed under the
+    slot, so equal tuples of two slots are two kernels."""
+    dedup = _dedup_key(metadata, config)
+    return ((slot, dedup) if slot else dedup, tuple(sorted(arch or [])))
 
 
 class _Held(NamedTuple):
@@ -135,8 +143,23 @@ def _source_covers(prior: dict, new: dict) -> bool:
 
 
 def _prior_key(kdp, entry: dict, config: IngestorConfig) -> tuple:
-    """`kernel_key` of a kernel entry read from a previous KDP."""
-    return kernel_key(entry.get("metadata") or {}, kdp.effective_arch(entry), config)
+    """`kernel_key` of a kernel entry read from a previous KDP.
+
+    A previous KDP names its slot (``slot``). One naming a slot this config does
+    not have, or a slot where the config has none (or the reverse), can match no
+    kernel of the config, so its key is built from the raw metadata and never
+    equals a config kernel's."""
+    metadata = entry.get("metadata") or {}
+    arch = kdp.effective_arch(entry)
+    spec = next((s for s in config.slots if s.name == kdp.slot), None)
+    if config.is_slotted and spec is not None:
+        return kernel_key(metadata, arch, config.slot_view(spec), kdp.slot)
+    if not config.is_slotted and not kdp.slot:
+        return kernel_key(metadata, arch, config)
+    return (
+        (kdp.slot, json.dumps(metadata, sort_keys=True)),
+        tuple(sorted(arch or [])),
+    )
 
 
 def mint_ids(
@@ -156,6 +179,12 @@ def mint_ids(
 
     * Engine-level ids come from the engine's home bundle, ``prior`` or one of
       ``siblings``, whichever holds the UED.
+    * A slotted engine (RFC 0021) keeps a KMD and, when the slot ranks, a UHD
+      per slot: ``("slot_kmd", i)`` and ``("slot_uhd", i)`` take the ids of the
+      slot of the same name in the previous bundle, so a slot's ids follow its
+      name across a reorder, and only a slot the previous bundle lacked is
+      minted. A kernel is matched within its slot: its key carries the slot
+      name, so the same tuple in two slots is two kernels.
     * A pack takes the id of the ``prior`` KDP with the same name; a sibling's KDP
       id is never reused, since two KDPs sharing an id are a conflict at load.
     * A kernel takes the id of the ``prior`` kernel with the same
@@ -198,11 +227,23 @@ def mint_ids(
         claimed.add(identity)
         return identity
 
-    ids = {
-        "kmd": take(engine.kmd["id"] if engine else None),
-        "ued": take(engine.ued["id"] if engine else None),
-        "kernel_match": take(engine.kernel_match_umd["id"] if engine else None),
-    }
+    ids = {}
+    if config.is_slotted:
+        # One KMD, and one ranker UHD when the slot ranks, per slot (RFC 0021
+        # §3). A slot takes the pair its namesake held in the previous bundle;
+        # a slot the previous bundle lacked is new and gets fresh ids.
+        held_slots = engine.slots if engine else {}
+        for slot_index, slot in enumerate(config.slots):
+            docs = held_slots.get(slot.name)
+            ids[("slot_kmd", slot_index)] = take(docs.kmd["id"] if docs else None)
+            if slot.ranker:
+                ids[("slot_uhd", slot_index)] = take(
+                    docs.uhd["id"] if docs and docs.uhd else None
+                )
+    else:
+        ids["kmd"] = take(engine.kmd["id"] if engine and engine.kmd else None)
+    ids["ued"] = take(engine.ued["id"] if engine else None)
+    ids["kernel_match"] = take(engine.kernel_match_umd["id"] if engine else None)
     if config.engine.has_heuristic:
         ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
     ids["udd"] = take(engine.udd["id"] if engine else None)
@@ -257,18 +298,21 @@ def mint_ids(
         name = f"{config.engine.namespace}:{config.kdp_stem(pack)}"
         matched = prior_packs.get(name) or supplement_packs.get(name)
         ids[("pack", pack_index)] = take(matched.id if matched else None)
-        if config.is_multi_pack:
+        if config.has_operation_umd(pack):
             ids[("operation_umd", pack_index)] = take(
                 matched.operation_umd_id if matched else None
             )
+        slot_spec = config.slot_of(pack)
+        scope = config.slot_view(slot_spec) if slot_spec else config
         for kernel_index, kernel in enumerate(pack.kernels):
             slot = ("kernel", pack_index, kernel_index)
             key = source = None
             if held:
                 key = kernel_key(
-                    _resolved_metadata(kernel, config),
+                    _resolved_metadata(kernel, scope),
                     kernel.arch or pack.arch,
-                    config,
+                    scope,
+                    pack.slot,
                 )
                 source = kernel.kernel_source.descriptor_fields()
                 candidate = (key, _candidate_identity(kernel))
@@ -345,6 +389,39 @@ def build_kmd(config: IngestorConfig, ids: dict) -> dict:
     }
 
 
+def build_slot_kmd(config: IngestorConfig, slot: SlotSpec, ids: dict) -> dict:
+    """One slot's KMD: the fields its packs' kernels fill (RFC 0021 §4)."""
+    document = build_kmd(
+        config.slot_view(slot), {"kmd": ids[_slot_key("kmd", config, slot)]}
+    )
+    document["name"] = f"{config.engine.local_name} {slot.name} variant fields"
+    return document
+
+
+def build_slot_uhd(config: IngestorConfig, slot: SlotSpec, ids: dict) -> dict | None:
+    """One slot's ranker: a native UHD with no ``score.metric``, which is how a
+    slot ranker is metric-less (RFC 0021 §4, §7). None when the slot ranks by
+    priority then id."""
+    if not slot.ranker:
+        return None
+    return {
+        "version": "1.0",
+        "id": ids[_slot_key("uhd", config, slot)],
+        "name": f"{config.engine.local_name} {slot.name} selector",
+        "adapter": "native",
+        "objective": "max",
+        "native": {"symbol": config.slot_score_symbol(slot)},
+    }
+
+
+def _slot_key(kind: str, config: IngestorConfig, slot: SlotSpec) -> tuple:
+    """The `mint_ids` key of a slot's KMD or UHD, by slot position."""
+    for index, candidate in enumerate(config.slots):
+        if candidate is slot:
+            return (f"slot_{kind}", index)
+    raise ValueError(f"slot {slot.name!r} is not part of this config")
+
+
 def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     if not config.engine.has_heuristic:
         return None
@@ -364,6 +441,8 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     """The engine descriptor. ``sdk_version`` is always emitted, including the
     ``"1.0.0"`` baseline, because ``GenericPlanBuilder::understandsGraph()``
     gates on it at match time."""
+    if config.is_slotted:
+        return _build_slotted_ued(config, ids)
     ued = {
         "version": "1.0",
         "id": ids["ued"],
@@ -377,6 +456,34 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         ued["sort_kernel_catalog"] = {"default": ids["uhd"]}
     if config.engine.knobs:
         ued["knobs"] = list(config.engine.knobs)
+    if config.engine.behavior_notes:
+        ued["behavior_notes"] = list(config.engine.behavior_notes)
+    return ued
+
+
+def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
+    """The slotted engine descriptor (RFC 0021 §4): version 1.1, with the KMD,
+    ranker and knobs on each slot rather than the engine."""
+    ued = {
+        "version": SLOT_FILE_VERSION,
+        "id": ids["ued"],
+        "name": config.engine.name,
+        "sdk_version": config.engine.sdk_version,
+        "graph_match": {"native": config.graph_match_symbol},
+    }
+    if config.engine.shared_workspace:
+        ued["shared_workspace"] = config.engine.shared_workspace
+    slots = []
+    for slot in config.slots:
+        entry = {"name": slot.name, "metadata": ids[_slot_key("kmd", config, slot)]}
+        if slot.ranker:
+            entry["sort_kernel_catalog"] = {
+                "default": ids[_slot_key("uhd", config, slot)]
+            }
+        if slot.knobs:
+            entry["knobs"] = list(slot.knobs)
+        slots.append(entry)
+    ued["slots"] = slots
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
     return ued
@@ -639,8 +746,9 @@ def build_operation_umd(
 ) -> dict | None:
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only when
     the engine has more than one pack. A single-pack engine gets zero
-    graph-scoped UMDs."""
-    if not config.is_multi_pack:
+    graph-scoped UMDs. A slotted engine narrows within a slot: only a slot with
+    more than one pack gets them."""
+    if not config.has_operation_umd(pack):
         return None
     return {
         "version": "1.0",
@@ -651,19 +759,28 @@ def build_operation_umd(
     }
 
 
-def build_specialization_contract(config: IngestorConfig, ids: dict) -> dict:
+def build_specialization_contract(
+    config: IngestorConfig, ids: dict, slot: SlotSpec | None = None
+) -> dict:
     """The ``provenance.specialization_contract`` this bundle's KDP carries.
 
     Self-contained data, so a bundle can be checked without rocKE installed.
     ``engine_id`` and ``kmd_id`` come from `mint_ids` (reused from the previous
     bundle when there is one); the rest is authored.
-    A missing declaration is an error, never an empty contract.
+    A missing declaration is an error, never an empty contract. A slotted
+    engine's KDP carries its slot's declaration and its slot's KMD id.
     """
-    declaration = config.specialization
+    declaration = slot.specialization if slot is not None else config.specialization
+    kmd_id = ids[_slot_key("kmd", config, slot)] if slot is not None else ids["kmd"]
+    subject = f"engine {config.engine.name!r}"
+    scope = "top-level"
+    if slot is not None:
+        subject += f" slot {slot.name!r}"
+        scope = f"slots[{slot.name}]"
     if not declaration:
         raise ValueError(
-            f"engine {config.engine.name!r} emits descriptors but declares no "
-            f"top-level 'specialization' block, so nothing here states which "
+            f"{subject} emits descriptors but declares no "
+            f"{scope} 'specialization' block, so nothing here states which "
             f"metadata fields the producing compiler specialized on. A UKD without "
             f"provenance.specialization_contract cannot be checked against the "
             f"builder it was compiled from -- on the receiving machine there is no "
@@ -676,7 +793,7 @@ def build_specialization_contract(config: IngestorConfig, ids: dict) -> dict:
         "consumers": [
             {
                 "engine_id": ids["ued"],
-                "kmd_id": ids["kmd"],
+                "kmd_id": kmd_id,
                 "metadata_fields": list(declaration.get("metadata_fields") or []),
                 "matcher_only_fields": list(
                     declaration.get("matcher_only_fields") or []
@@ -707,11 +824,16 @@ def build_kdp(
     De-duplication is engine-wide because the loader collects packs into one
     ``DescriptorSet`` by engine id, and a duplicate tuple drops the engine at
     load. Widen this engine's union to close a coverage gap; a new slug mints
-    a different engine.
+    a different engine. For a slotted engine the scope is the slot (RFC 0021
+    §4: tuple uniqueness is per slot), so `build_kdp_documents` keeps one
+    ``seen_metadata`` per slot.
     """
     pack_index = _pack_index(config, pack)
+    slot = config.slot_of(pack) if config.is_slotted else None
+    # The KMD this pack's kernels fill: the engine's, or its slot's.
+    kmd_scope = config.slot_view(slot) if slot is not None else config
     matchers = [ids["kernel_match"]]
-    if config.is_multi_pack:
+    if config.has_operation_umd(pack):
         matchers.insert(0, ids[("operation_umd", pack_index)])
     # Generation expressions targeting one engine may overlap, so a shared
     # tuple is a duplicate only when arch coverage competes: the same candidate
@@ -720,16 +842,16 @@ def build_kdp(
     if seen_metadata is None:
         seen_metadata = {}
     duplicates: list = []
-    contract = build_specialization_contract(config, ids)
+    contract = build_specialization_contract(config, ids, slot)
     for index, kernel in enumerate(pack.kernels):
         # Resolve first, then key on the resolved form, so the dedup key and
         # the emitted document derive from the same values.
-        metadata = _resolved_metadata(kernel, config)
+        metadata = _resolved_metadata(kernel, kmd_scope)
         # Before the type check: the unset sentinel is an int, so a type check
         # would report "-1 is not a string" for a knob nobody decided.
-        _check_metadata_resolved(kernel, metadata, config)
-        _check_metadata_types(kernel, metadata, config)
-        key = _dedup_key(metadata, config)
+        _check_metadata_resolved(kernel, metadata, kmd_scope)
+        _check_metadata_types(kernel, metadata, kmd_scope)
+        key = _dedup_key(metadata, kmd_scope)
         # A kernel stating no arch inherits its pack's, per the KDP convention
         # the loader reads; comparing the authored list would make every kernel
         # of an arch-scoped pack look like a wildcard.
@@ -835,7 +957,7 @@ def build_kdp(
             f"declare it."
         )
     kdp = {
-        "version": "1.0",
+        "version": SLOT_FILE_VERSION if slot is not None else "1.0",
         "id": ids[("pack", pack_index)],
         "name": f"{config.engine.namespace}:{config.kdp_stem(pack)}",
         "matchers": matchers,
@@ -848,6 +970,8 @@ def build_kdp(
         "provenance": {"specialization_contract": contract},
         "kernelDescriptors": kernel_descriptors,
     }
+    if slot is not None:
+        kdp["slot"] = slot.name
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
@@ -861,14 +985,21 @@ def build_kdp(
 def build_kdp_documents(
     config: IngestorConfig, ids: dict, seed: dict | None = None
 ) -> list:
-    """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide.
-    The single de-duplication scope; see `build_kdp`.
+    """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated engine-wide
+    (per slot for a slotted engine). The single de-duplication scope; see
+    `build_kdp`.
 
     ``seed`` pre-fills the de-duplication state with the kernels of sibling
-    bundles of the same engine (see `resolve_ids`); it is copied, not mutated."""
-    seen_metadata: dict = copy.deepcopy(seed) if seed else {}
+    bundles of the same engine (see `resolve_ids`); it is copied, not mutated.
+    Siblings are single-pack and unslotted, so the seed lands in the unslotted
+    scope."""
+    seen_by_scope: dict = {"": copy.deepcopy(seed)} if seed else {}
     return [
-        (pack, build_kdp(config, pack, ids, seen_metadata)) for pack in config.packs
+        (
+            pack,
+            build_kdp(config, pack, ids, seen_by_scope.setdefault(pack.slot, {})),
+        )
+        for pack in config.packs
     ]
 
 
@@ -928,6 +1059,13 @@ def _check_seed_entry(path: Path, entry: dict) -> None:
 
 
 def _check_sibling_mode(config: IngestorConfig) -> None:
+    if config.is_slotted:
+        raise prior_ids.NotOverridable(
+            "sibling bundles are not supported for a slotted engine: its slots "
+            "keep their KMDs, rankers and kernels in one bundle (RFC 0021), and "
+            "its operation matchers name symbols only that bundle's own "
+            "registrations provide."
+        )
     if not config.is_packaged:
         raise prior_ids.NotOverridable(
             "--engine-ids-from needs a packaged bundle: each test_descriptors/<set> "
@@ -1252,6 +1390,7 @@ def _report(
                 engine.udd,
                 engine.kernel_match_umd,
                 engine.uhd,
+                *(d for slot in engine.slots.values() for d in (slot.kmd, slot.uhd)),
             )
             if doc
         )
@@ -1264,10 +1403,11 @@ def _report(
     }
     reused = {"engine": 0, "packs": 0, "operation_umds": 0, "kernels": 0}
     total = 0
-    for key in ("kmd", "ued", "kernel_match", "udd", "uhd"):
-        if key in ids:
-            total += 1
-            reused["engine"] += ids[key] in known
+    engine_keys = [k for k in ("kmd", "ued", "kernel_match", "udd", "uhd") if k in ids]
+    engine_keys += [k for k in ids if isinstance(k, tuple) and k[0].startswith("slot_")]
+    for key in engine_keys:
+        total += 1
+        reused["engine"] += ids[key] in known
     emitted: set[str] = set()
     arch_moved = []
     for pack, document in kdp_documents:
@@ -1275,7 +1415,7 @@ def _report(
         total += 1
         emitted.add(document["id"])
         reused["packs"] += document["id"] in known
-        if config.is_multi_pack:
+        if config.has_operation_umd(pack):
             total += 1
             reused["operation_umds"] += ids[("operation_umd", index)] in known
         for entry in document["kernelDescriptors"]:
@@ -1414,6 +1554,8 @@ class IngestorGenerator:
         ddir = config.descriptor_dir
         if resolution is not None and resolution.satellite:
             return [f"{ddir}/{config.kdp_stem(pack)}.kdp.json" for pack in config.packs]
+        if config.is_slotted:
+            return self._slotted_descriptor_files(config)
         files = [
             f"{ddir}/{slug}.kmd.json",
             f"{ddir}/{slug}.ued.json",
@@ -1431,6 +1573,27 @@ class IngestorGenerator:
         files.append(f"tests/Test{config.engine.pascal_name}Matchers.cpp")
         for fragment in FRAGMENT_FILENAMES:
             files.append(f"fragments/{fragment}")
+        return files
+
+    @staticmethod
+    def _slotted_descriptor_files(config: IngestorConfig) -> list[str]:
+        """The descriptor files of a slotted engine (RFC 0021): one KMD (and
+        one UHD when the slot ranks) per slot, one KDP per pack."""
+        slug = config.engine.slug
+        ddir = config.descriptor_dir
+        files = [f"{ddir}/{slug}_{slot.name}.kmd.json" for slot in config.slots]
+        files.append(f"{ddir}/{slug}.ued.json")
+        files.append(f"{ddir}/{slug}.udd.json")
+        files += [
+            f"{ddir}/{slug}_{slot.name}.uhd.json"
+            for slot in config.slots
+            if slot.ranker
+        ]
+        files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
+        for pack in config.packs:
+            files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
+            if config.has_operation_umd(pack):
+                files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         return files
 
     @staticmethod
@@ -1471,6 +1634,10 @@ class IngestorGenerator:
 
         Every KDP is built before rendering, since the templates are given the
         emitted inventory and that view needs the engine-wide de-duplication.
+
+        A slotted engine (RFC 0021) gets its descriptors only: the C++ stub and
+        fragment templates describe a single-KMD engine and are not rendered
+        for it.
         """
         output_dir = Path(output_dir)
         self.refuse_second_kdp(config, output_dir)
@@ -1492,6 +1659,30 @@ class IngestorGenerator:
             write_text(rel, _dump(obj))
 
         kdp_documents = resolution.kdp_documents
+        if config.is_slotted:
+            for slot in config.slots:
+                write_json(
+                    f"{ddir}/{slug}_{slot.name}.kmd.json",
+                    build_slot_kmd(config, slot, ids),
+                )
+            write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
+            write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+            for slot in config.slots:
+                uhd = build_slot_uhd(config, slot, ids)
+                if uhd is not None:
+                    write_json(f"{ddir}/{slug}_{slot.name}.uhd.json", uhd)
+            write_json(
+                f"{ddir}/kernel_dtype_matches_graph.umd.json",
+                build_kernel_match_umd(config, ids),
+            )
+            for pack, document in kdp_documents:
+                write_json(f"{ddir}/{config.kdp_stem(pack)}.kdp.json", document)
+                op_umd = build_operation_umd(config, pack, ids)
+                if op_umd is not None:
+                    write_json(
+                        f"{ddir}/operation_is_{pack.discriminator}.umd.json", op_umd
+                    )
+            return written
         emitted = emitted_inventory(config, kdp_documents)
 
         if not resolution.satellite:
