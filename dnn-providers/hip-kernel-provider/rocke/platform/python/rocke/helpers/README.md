@@ -856,7 +856,8 @@ if_branch = b.cmp_eq(all_below, b.const_i32(1))
 # ... skip the per-row rescale when every lane agrees ...
 ```
 
-Lowered to `llvm.amdgcn.ballot.i64` + `icmp eq i64 ... -1`. Pairs
+Lowered to `llvm.amdgcn.ballot.i64` + `icmp eq i64 ...` against the
+full-wave mask (`-1` on wave64, `0xffffffff` on wave32). Pairs
 naturally with adaptive online-softmax rescaling: skip the rescale
 pass entirely when every lane's `max_diff` stayed below threshold.
 

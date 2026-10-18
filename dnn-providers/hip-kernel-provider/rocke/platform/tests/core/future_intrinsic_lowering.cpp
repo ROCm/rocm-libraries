@@ -3188,6 +3188,38 @@ void case_lowbit_dtype_aliases()
     }
 }
 
+/* wave_all compares ballot.i64 against the full-wave mask: -1 on wave64 but
+ * 0xffffffff on wave32 (ballot.i64 only sets the low wave_size bits). */
+void case_wave_all_full_wave_mask()
+{
+    struct ArchMask
+    {
+        const char* arch;
+        const char* mask;
+    };
+    const ArchMask archs[] = {{"gfx950", ", -1\n"},
+                              {"gfx942", ", -1\n"},
+                              {"gfx1151", ", 4294967295\n"},
+                              {"gfx11-generic", ", 4294967295\n"},
+                              {"gfx12-generic", ", 4294967295\n"},
+                              {"gfx1201", ", 4294967295\n"}};
+    for(const ArchMask& a : archs)
+    {
+        const std::string ir = lower_one(
+            "wave_all_mask",
+            [](rocke_ir_builder_t* b) { rocke_b_wave_all(b, rocke_b_const_i32(b, 1)); },
+            a.arch);
+        EXPECT_IR(ir, "@llvm.amdgcn.ballot.i64");
+        const size_t at = ir.find("icmp eq i64 ");
+        const size_t eol = ir.find('\n', at);
+        const std::string line = at == std::string::npos ? "" : ir.substr(at, eol - at);
+        const std::string want(a.mask, strlen(a.mask) - 1);
+        if(line.size() < want.size()
+           || line.compare(line.size() - want.size(), want.size(), want) != 0)
+            fail(a.arch, __LINE__);
+    }
+}
+
 struct TestCase
 {
     const char* name;
@@ -3273,6 +3305,7 @@ const TestCase k_cases[] = {
     {"flag_ops_verify_and_llvm_arity", case_flag_ops_verify_and_llvm_arity},
     {"flag_ops_reject_non_i32_ptr", case_flag_ops_reject_non_i32_ptr},
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
+    {"wave_all_full_wave_mask", case_wave_all_full_wave_mask},
 };
 
 } // namespace

@@ -2968,8 +2968,8 @@ class IRBuilder:
 
         Returns a wave-uniform i32 that is 1 iff *every* lane's
         ``predicate`` was non-zero, 0 otherwise. Lowered to
-        ``__builtin_amdgcn_read_exec()`` AND/compare on AMDGPU
-        (a single ``s_or_b64`` / ``s_cmp_eq`` pair) — no ds_bpermute,
+        ``@llvm.amdgcn.ballot.i64`` compared against the full-wave mask
+        (``-1`` on wave64, ``0xffffffff`` on wave32) — no ds_bpermute,
         no LDS round-trip.
 
         Pairs naturally with adaptive online-softmax rescaling: when
@@ -3000,8 +3000,8 @@ class IRBuilder:
         """Wave-wide ballot: returns a 64-bit mask of which lanes
         satisfied the predicate.
 
-        Lowered to ``__builtin_amdgcn_ballot_w64`` (or the wave32
-        equivalent on gfx12). For boolean reductions prefer the
+        Lowered to ``@llvm.amdgcn.ballot.i64`` (the mask has only the low
+        ``wave_size`` bits set on wave32). For boolean reductions prefer the
         higher-level :meth:`wave_all` / :meth:`wave_any` which avoid
         forcing the mask materialisation on the consumer side.
         """

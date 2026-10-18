@@ -2736,6 +2736,38 @@ class TestCdnaPrimitives(unittest.TestCase):
         # and silently breaks downstream uniform-value selection.
         self.assertNotIn("asm sideeffect", ll)
 
+    # ---- wave_all / wave_any ----
+    def _lower_wave_votes(self, arch):
+        from rocke.core.ir import IRBuilder, PtrType, I32
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = IRBuilder("wave_vote_smoke")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        Out = b.param("Out", PtrType(I32, "global"))
+        pred = b.const_i32(1)
+        b.global_store(Out, b.const_i32(0), b.wave_all(pred))
+        b.global_store(Out, b.const_i32(1), b.wave_any(pred))
+        return lower_kernel_to_llvm(b.kernel, arch=arch)
+
+    def test_wave_all_full_mask_matches_wave_size(self):
+        import re
+
+        # ballot.i64 only sets the low wave_size bits: the full-wave mask
+        # is -1 on wave64 but 0xffffffff on wave32.
+        for arch, full in (
+            ("gfx950", "-1"),
+            ("gfx942", "-1"),
+            ("gfx1151", "4294967295"),
+            ("gfx11-generic", "4294967295"),
+            ("gfx12-generic", "4294967295"),
+            ("gfx1201", "4294967295"),
+        ):
+            with self.subTest(arch=arch):
+                ll = self._lower_wave_votes(arch)
+                self.assertIn("@llvm.amdgcn.ballot.i64", ll)
+                self.assertRegex(ll, rf"icmp eq i64 %\S+, {re.escape(full)}\n")
+                self.assertRegex(ll, r"icmp ne i64 %\S+, 0\n")
+
     # ---- coherency hints ----
     def test_async_buffer_load_lds_addr_propagates_aux(self):
         from rocke.core.ir import (
