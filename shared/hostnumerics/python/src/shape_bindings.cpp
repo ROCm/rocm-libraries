@@ -22,10 +22,44 @@ nb::tuple shapeTuple(const Shape& shape) {
 
 namespace roc::hostnumerics::python_bindings {
 void registerShapeBindings(nb::module_& module) {
-    nb::class_<Shape>(module, "Shape",
-                      "Immutable Python tuple-like sequence of nonnegative extents. "
-                      "A rank-zero shape describes one scalar. "
-                      "The product of nonzero extents must fit size_t.")
+    nb::class_<Shape>(module, "Shape", R"doc(
+Immutable tuple-like sequence of nonnegative extents, independent of storage.
+
+Integer indexing returns an extent and accepts negative positions. Slicing
+selects dimensions and returns a new Shape, rather than selecting positions
+within each dimension. Length, iteration, membership, count, index, and hashing
+follow tuple semantics. Shapes compare equal to other Shapes with the same
+extents; they do not compare equal to tuples or lists. Mutation, concatenation,
+repetition, and ordering comparisons are not supported.
+
+Examples:
+    >>> shape = Shape([2, 3, 5])
+    >>> shape[-1]
+    5
+    >>> shape[1:]
+    Shape((3, 5))
+    >>> shape[::-1]
+    Shape((5, 3, 2))
+    >>> tuple(shape)
+    (2, 3, 5)
+    >>> len(shape)
+    3
+    >>> Shape(range(20))[0:16:5]
+    Shape((0, 5, 10, 15))
+
+Shape() has rank zero and represents one scalar. A zero extent describes a shape
+with no elements, so both index conversions reject it. Construction requires
+the product of all nonzero extents to fit size_t, even when an extent is zero.
+If SIZE_MAX denotes the maximum size_t value, [SIZE_MAX, 2] and [SIZE_MAX, 2, 0]
+fail construction; [SIZE_MAX, 1, 0] has zero elements. Every dimension subrange,
+projection, and slice therefore has a representable element count.
+
+Named methods use nonnegative axes, coordinates, and range bounds. Unlike tuple
+indexing, extent, project, element_count_in_range, and index-conversion order
+arguments do not normalize negative axes. Invalid logical arguments raise
+RuntimeError; tuple operations retain their native Python exceptions. Values
+that cannot be converted to size_t raise TypeError.
+)doc")
         .def(nb::init<>())
         .def(nb::init<std::vector<size_t>>(), "dimensions"_a)
         .def_prop_ro("rank", &Shape::rank)
@@ -35,7 +69,8 @@ void registerShapeBindings(nb::module_& module) {
                 return std::vector<size_t>(shape.dimensions().begin(), shape.dimensions().end());
             },
             "Return a copy of the extents.")
-        .def("extent", &Shape::extent, "dimension"_a)
+        .def("extent", &Shape::extent, "dimension"_a,
+             "Return the extent at a nonnegative axis less than rank.")
         .def("__len__", &Shape::rank)
         .def("__iter__", [](const Shape& shape) { return shapeTuple(shape).attr("__iter__")(); })
         .def(
@@ -75,7 +110,9 @@ void registerShapeBindings(nb::module_& module) {
              [](const Shape& shape) {
                  return "Shape(" + nb::cast<std::string>(nb::repr(shapeTuple(shape))) + ")";
              })
-        .def_prop_ro("element_count", [](const Shape& shape) { return shape.elementCount(); })
+        .def_prop_ro(
+            "element_count", [](const Shape& shape) { return shape.elementCount(); },
+            "Product of all extents; one for rank zero and zero if any extent is zero.")
         .def("element_count_in_range",
              static_cast<size_t (Shape::*)(size_t, size_t) const>(&Shape::elementCount),
              "first_dimension"_a, "one_past_last_dimension"_a,
@@ -89,15 +126,48 @@ void registerShapeBindings(nb::module_& module) {
             [](const Shape& shape, const std::vector<size_t>& indices,
                const std::vector<size_t>& order) { return shape.linearIndex(indices, order); },
             "indices"_a, "order"_a = std::vector<size_t>{},
-            "Order lists axis numbers from outermost to innermost (slowest to fastest); "
-            "empty selects row-major, with the last axis fastest.")
+            R"doc(
+Convert one coordinate per axis to a logical index, independent of storage strides.
+
+Coordinates always use the original axis order. For Shape([2, 3, 5]), axes 0,
+1, and 2 have extents 2, 3, and 5. Order lists axis numbers from slowest to fastest
+(outermost to innermost loop); its last entry changes fastest. It must be a
+permutation of all axes, or empty to select ascending axes (row-major).
+
+For order [1, 2, 0], traversal is equivalent to these three nested loops:
+
+    index = 0
+    for i1 in range(3):
+        for i2 in range(5):
+            for i0 in range(2):
+                visit(index, i0, i1, i2)
+                index += 1
+
+The formula is (i1 * 5 + i2) * 2 + i0. The logical strides in original axis
+order are [1, 10, 2], and coordinates [1, 2, 3] map to index 27.
+
+Other orders for the same shape and coordinates:
+    [0, 1, 2] (default): strides [15, 5, 1], index 28
+    [0, 2, 1]:           strides [15, 1, 3], index 26
+    [2, 1, 0]:           strides [1, 2, 6], index 23
+
+Every coordinate must be less than its extent. A shape with a zero extent has
+no valid coordinates. Shape().linear_index([]) returns 0 for its one scalar.
+)doc")
         .def(
             "coordinates",
             [](const Shape& shape, size_t index, const std::vector<size_t>& order) {
                 return shape.coordinates(index, order);
             },
             "linear_index"_a, "order"_a = std::vector<size_t>{},
-            "Invert linear_index using the same outermost-to-innermost axis order.")
+            R"doc(
+Invert linear_index using the same slowest-to-fastest axis order.
+
+The logical index must lie in [0, element_count). The result always uses the
+original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 3].
+See linear_index for the nested-loop interpretation of order. A shape with a
+zero extent has no valid index; Shape().coordinates(0) returns [] for its scalar.
+)doc")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
             nb::is_operator())
