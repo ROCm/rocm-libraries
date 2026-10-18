@@ -152,7 +152,10 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
 /// test: there is no mode enum to disambiguate it from layer norm.
 const data_objects::RMSNormAttributes* rmsNormNode(const MatchContext& context)
 {
-    if(context.graph.nodeCount() != 1)
+    // The engine declares graph schema 1.2.0 so a runtime pass-by-value epsilon reaches
+    // it, which also admits override-shape graphs (1.1.0). Rows and width are bound from
+    // the graph's shapes at prepare, so those are declined.
+    if(context.graph.nodeCount() != 1 || context.graph.getGraph().is_override_shape_enabled())
     {
         return nullptr;
     }
@@ -180,6 +183,10 @@ bool hasUsableShape(const data_objects::TensorAttributes& tensor, uint32_t minim
 /// inside it. Stronger than the descriptor strictly needs -- it could carry a padded row
 /// stride -- but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride
 /// has to describe all of the leading axes at once.
+///
+/// An axis of extent 1 is never stepped along, so its stride is not checked: frameworks
+/// write anything there (hipdnn_torch gives an `F.rms_norm` weight stride 0 on its unit
+/// axes), and the data SDK's own packed test exempts it the same way.
 bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
@@ -191,7 +198,7 @@ bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
         const int64_t extent = dims->Get(index);
         // A non-positive extent, or one whose product would overflow, describes no tensor
         // the kernel can address.
-        if(strides->Get(index) != expected || extent <= 0
+        if((extent != 1 && strides->Get(index) != expected) || extent <= 0
            || expected > std::numeric_limits<int64_t>::max() / extent)
         {
             return false;
@@ -205,29 +212,77 @@ bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
 /// buffer whose offsets are 32-bit bytes, and takes M and N as int32.
 constexpr int64_t MAX_OPERAND_BYTES = 2147483647LL;
 
-/// Product of every extent except the innermost: the row count the grid is sized from.
-/// -1 for a non-positive extent or a product past MAX_OPERAND_BYTES, which no launch
-/// could address anyway.
-int64_t rowCount(const data_objects::TensorAttributes& tensor)
+/// Product of x's extents over [begin, end). -1 for a non-positive extent or a product
+/// past MAX_OPERAND_BYTES, which no launch could address anyway.
+int64_t extentProduct(const flatbuffers::Vector<int64_t>& dims,
+                      flatbuffers::uoffset_t begin,
+                      flatbuffers::uoffset_t end)
 {
-    const auto* dims = tensor.dims();
-    int64_t rows = 1;
-    for(flatbuffers::uoffset_t axis = 0; axis + 1 < dims->size(); ++axis)
+    int64_t product = 1;
+    for(auto axis = begin; axis < end; ++axis)
     {
-        const int64_t extent = dims->Get(axis);
-        if(extent <= 0 || rows > MAX_OPERAND_BYTES / extent)
+        const int64_t extent = dims.Get(axis);
+        if(extent <= 0 || product > MAX_OPERAND_BYTES / extent)
         {
             return -1;
         }
-        rows *= extent;
+        product *= extent;
     }
-    return rows;
+    return product;
 }
 
-int64_t innermostExtent(const data_objects::TensorAttributes& tensor)
+/// x as the kernel sees it: `rows` independent rows of `columns` normalised elements.
+struct RowSplit
 {
-    const auto* dims = tensor.dims();
-    return dims->Get(dims->size() - 1);
+    int64_t rows = 0;
+    int64_t columns = 0;
+};
+
+/// The frontend's normalised shape (`validateScaleNormalizedShape`): the longest trailing
+/// run of axes where gamma's extent equals x's, never including the batch axis 0, with
+/// gamma 1 on every axis before it. So cuDNN's `x {B*S, D, 1, 1}` with
+/// `gamma {1, D, 1, 1}` normalises over D. A gamma of lower rank -- which the frontend
+/// rejects, but the matcher must be total -- is aligned at the innermost axis, its missing
+/// leading axes read as 1. Packed x then makes the axes before the run the rows and the
+/// run itself one contiguous row of `columns` elements; packed gamma makes it one vector.
+std::optional<RowSplit> normalisedSplit(const data_objects::TensorAttributes& x,
+                                        const data_objects::TensorAttributes& scale)
+{
+    const auto& xDims = *x.dims();
+    const auto& scaleDims = *scale.dims();
+    const auto rank = xDims.size();
+    if(scaleDims.size() > rank)
+    {
+        return std::nullopt;
+    }
+    const auto offset = rank - scaleDims.size();
+    const auto scaleExtent = [&](flatbuffers::uoffset_t axis) -> int64_t {
+        return axis < offset ? 1 : scaleDims.Get(axis - offset);
+    };
+
+    auto start = rank;
+    while(start > 1 && scaleExtent(start - 1) == xDims.Get(start - 1))
+    {
+        --start;
+    }
+    if(start == rank)
+    {
+        return std::nullopt;
+    }
+    for(flatbuffers::uoffset_t axis = 0; axis < start; ++axis)
+    {
+        if(scaleExtent(axis) != 1)
+        {
+            return std::nullopt;
+        }
+    }
+
+    const RowSplit split{extentProduct(xDims, 0, start), extentProduct(xDims, start, rank)};
+    if(split.rows <= 0 || split.columns <= 0)
+    {
+        return std::nullopt;
+    }
+    return split;
 }
 
 bool sameShape(const data_objects::TensorAttributes& lhs, const data_objects::TensorAttributes& rhs)
@@ -266,12 +321,19 @@ bool declaresVectorAlignment(const data_objects::TensorAttributes& tensor)
 /// The dtypes the shipped instances were built for; see the `dtype` values in the UKDs.
 bool isSupportedDataType(data_objects::DataType dataType)
 {
-    return dataType == data_objects::DataType::BFLOAT16 || dataType == data_objects::DataType::HALF;
+    return dataType == data_objects::DataType::BFLOAT16 || dataType == data_objects::DataType::HALF
+           || dataType == data_objects::DataType::FLOAT;
+}
+
+/// Bytes per element of a supported dtype, for the 32-bit addressing bound.
+int64_t elementBytes(data_objects::DataType dataType)
+{
+    return dataType == data_objects::DataType::FLOAT ? 4 : 2;
 }
 
 /// The kernel metadata spelling of a graph dtype. Deliberately not `EnumNameDataType`: the
-/// descriptors say `bf16`/`f16`, the flatbuffer enum says `BFLOAT16`/`HALF`, and this is the
-/// one place the two vocabularies meet.
+/// descriptors say `bf16`/`f16`/`f32`, the flatbuffer enum says `BFLOAT16`/`HALF`/`FLOAT`,
+/// and this is the one place the two vocabularies meet.
 std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)
 {
     switch(dataType)
@@ -280,6 +342,8 @@ std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)
         return std::string("bf16");
     case data_objects::DataType::HALF:
         return std::string("f16");
+    case data_objects::DataType::FLOAT:
+        return std::string("f32");
     default:
         return std::nullopt;
     }
@@ -386,22 +450,19 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
 
-    const auto rows = rowCount(*x);
-    const auto columns = innermostExtent(*x);
-    if(rows <= 0 || columns <= 0)
+    // Gamma must cover exactly the normalised axes: any other shape would be a broadcast
+    // the kernel does not perform.
+    const auto split = normalisedSplit(*x, *scale);
+    if(!split.has_value())
     {
         return std::nullopt;
     }
-    // Every element of x and y within the 32-bit byte offsets of one buffer view (2 bytes
-    // each, bf16 or f16), which also keeps M and N within the kernel's int32 arguments.
-    if(columns > MAX_OPERAND_BYTES / 2 || rows > MAX_OPERAND_BYTES / (2 * columns))
-    {
-        return std::nullopt;
-    }
-
-    // Gamma must be exactly the normalised axis: any other extent would be a broadcast the
-    // kernel does not perform.
-    if(rowCount(*scale) != 1 || innermostExtent(*scale) != columns)
+    const auto rows = split->rows;
+    const auto columns = split->columns;
+    // Every element of x and y within the 32-bit byte offsets of one buffer view, which
+    // also keeps M and N within the kernel's int32 arguments.
+    const auto bytes = elementBytes(x->data_type());
+    if(columns > MAX_OPERAND_BYTES / bytes || rows > MAX_OPERAND_BYTES / (bytes * columns))
     {
         return std::nullopt;
     }
@@ -647,10 +708,18 @@ public:
         // Reads the operand uids the graph match bound rather than re-deriving them.
         const auto binding = flydslRmsNormBinding(bound);
         const auto& xTensor = requireTensor(context, binding.x);
+        const auto& scaleTensor = requireTensor(context, binding.scale);
 
-        // Shapes were validated packed and rank >= 2 by the graph matcher.
-        const auto rows = rowCount(xTensor);
-        const auto columns = innermostExtent(xTensor);
+        // Shapes were validated packed, rank >= 2 and splittable by the graph matcher.
+        const auto split = normalisedSplit(xTensor, scaleTensor);
+        if(!split.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "flydsl_rmsnorm: prepare() given a graph its matcher would decline");
+        }
+        const auto rows = split->rows;
+        const auto columns = split->columns;
 
         const auto blockThreads
             = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_THREADS_FIELD)));

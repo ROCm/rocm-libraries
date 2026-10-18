@@ -174,12 +174,18 @@ RMSNORM_SPECIALIZED_N = (3072, 3584, 4096, 5120, 8192)
 # the native matcher already carry the axis when it grows.
 RMSNORM_BLOCK_THREADS = (256,)
 
+# Dtypes built in the generic tier only. The kernel's specialized-N fast path is
+# 128-bit tiles of 16-bit elements (`elem_bits <= 16` in rmsnorm_kernel.py), so an
+# f32 object baked for one width would run the same scalar loop the generic one
+# does; the specialized tier would add objects and no speed.
+RMSNORM_GENERIC_ONLY_DTYPES = ("f32",)
+
 
 def rmsnorm_instances() -> list[Instance]:
     """The RMSNorm instance table: generic tier first, then the specialists."""
     instances: list[Instance] = []
     for block_threads in RMSNORM_BLOCK_THREADS:
-        for dtype in DTYPES:
+        for dtype in DTYPES + RMSNORM_GENERIC_ONLY_DTYPES:
             instances.append(
                 Instance(
                     op="rmsnorm",

@@ -9,7 +9,7 @@
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
     "generic_target_shim": "chipset=gfx1100",
-    "inputs_sha256": "bc75a464ce3e5b1d5a2d26cc485a9589548137fa55e1fe635b9ff94e36061358"
+    "inputs_sha256": "59d770cd16b094a3ad622eea7331f4479834fd93a7f5196ef2e8596ef85b6682"
   },
   "instances": [
     {
@@ -61,6 +61,41 @@
       "symbol": "rmsnorm_kernel_0",
       "bytes": 4896,
       "sha256": "4f53aaf69019854a353833c5ad68b143f9a085a915f5cf3ecb4f8df505ebaaf7",
+      "kernarg_segment_size": 80,
+      "lds_bytes": 64,
+      "vgprs": 8,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+      ]
+    },
+    {
+      "name": "rmsnorm_f32_ngeneric_bt256",
+      "op": "rmsnorm",
+      "dtype": "f32",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "block_threads": 256
+      },
+      "file": "rmsnorm_f32_ngeneric_bt256.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 4896,
+      "sha256": "d0bc25ea2ca4f13608861a809ca43da81c8effd74388beeb4c9c7e04fcf9ae7b",
       "kernarg_segment_size": 80,
       "lds_bytes": 64,
       "vgprs": 8,

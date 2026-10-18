@@ -105,8 +105,11 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm` | 12 |
-| `gfx12-generic` | `rmsnorm` | 12 |
+| `gfx11-generic` | `rmsnorm` | 13 |
+| `gfx12-generic` | `rmsnorm` | 13 |
+| `gfx90a` | `rmsnorm` | 13 |
+| `gfx942` | `rmsnorm` | 13 |
+| `gfx950` | `rmsnorm` | 13 |
 
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl
@@ -181,7 +184,7 @@ cd dnn-providers/hip-kernel-provider/flydsl
 # (1) Compile. Writes $CONTENT/<op>/<arch>/*.hsaco + manifest.json, and
 #     $CONTENT/<op>/<arch>.SOURCE.md
 #     for each op.
-for ARCH in gfx11-generic gfx12-generic; do
+for ARCH in gfx11-generic gfx12-generic gfx90a gfx942 gfx950; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it

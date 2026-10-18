@@ -116,8 +116,9 @@ inline std::vector<int64_t> flydslPackedStrides(const std::vector<int64_t>& dims
  *        the tensor carries no value and the caller supplies one at execute.
  */
 /// The fields buildFlydslRmsNormGraph()'s positional parameters do not reach: the node's
-/// compute type, each tensor's declared alignment, virtual flag and ragged offset, and
-/// epsilon's shape. Each exists for a case that pins the matcher's reading of it.
+/// compute type, each tensor's declared alignment, virtual flag and ragged offset,
+/// epsilon's shape, gamma's strides and the graph's override-shape flag. Each exists for
+/// a case that pins the matcher's reading of it.
 struct RmsNormGraphExtras
 {
     /// The node's compute type; unset means x's dtype, as the defaults always wrote.
@@ -126,6 +127,9 @@ struct RmsNormGraphExtras
     std::set<int64_t> virtualTensors;
     std::set<int64_t> raggedTensors;
     std::vector<int64_t> epsilonDims;
+    /// Gamma's strides; unset means packed for its shape.
+    std::optional<std::vector<int64_t>> scaleStrides;
+    bool overrideShapeEnabled = false;
 };
 
 inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
@@ -181,7 +185,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
 
     const auto xStrides = xStridesOverride.value_or(flydslPackedStrides(xDims));
     const auto yStrides = flydslPackedStrides(xDims);
-    const auto scaleStrides = flydslPackedStrides(resolvedScaleDims);
+    const auto scaleStrides = extras.scaleStrides.value_or(flydslPackedStrides(resolvedScaleDims));
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -259,6 +263,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     graphBuilder.add_name(name);
     graphBuilder.add_tensors(tensorsVector);
     graphBuilder.add_nodes(nodesVector);
+    graphBuilder.add_is_override_shape_enabled(extras.overrideShapeEnabled);
     builder.Finish(graphBuilder.Finish());
 
     return builder;

@@ -139,9 +139,6 @@ def _build_one(kernel_module, torch, instance: Instance, dump_dir: Path) -> byte
     """Compile one instance and return its code object."""
     import_n = instance.knobs["N"]
     trace_n = _GENERIC_TRACE_N if import_n is None else import_n
-    # `f32` has no instance in the table today, but the kernel supports it and
-    # this map was the only thing that raised on it (NOTES §18.6). Kept so that
-    # widening `DTYPES` is a one-line change here rather than two in two files.
     torch_dtype = {
         "bf16": torch.bfloat16,
         "f16": torch.float16,

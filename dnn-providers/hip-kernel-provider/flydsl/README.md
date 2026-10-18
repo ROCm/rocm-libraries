@@ -37,8 +37,8 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-For RDNA, one op -- RMSNorm, 12 kernel objects per family -- built once for each of
-two LLVM generic targets and shipped to every part each covers:
+One op -- RMSNorm, 13 kernel objects per target. For RDNA it is built once for each
+of two LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
   gfx1150, gfx1151, gfx1152 and gfx1153. Verified on gfx1151.
@@ -46,13 +46,15 @@ two LLVM generic targets and shipped to every part each covers:
   sources, which carry both WMMA operand layouts. Verified on gfx1201.
 
 Each member's shard carries its family's bytes (see [REGEN.md §3](REGEN.md) for
-why one object set per family is enough, and what it needs).
+why one object set per family is enough, and what it needs). For CDNA it is built
+for each of gfx90a, gfx942 and gfx950.
 
-**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 12 objects, bf16 and f16:
+**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 13 objects, bf16, f16 and f32:
 
 - a **specialized** tier with `N` baked in at 3072 / 3584 / 4096 / 5120 / 8192
 - a **generic** tier that reads `N` from the tensor descriptor at runtime, so
-  every other width is served too — more slowly, but served
+  every other width is served too — more slowly, but served. f32 ships this tier
+  only, since the kernel's fast path is for 16-bit elements.
 
 Widths outside the specialized list are a **performance** boundary, not a
 coverage one. The things that are genuinely out of scope — backward, training

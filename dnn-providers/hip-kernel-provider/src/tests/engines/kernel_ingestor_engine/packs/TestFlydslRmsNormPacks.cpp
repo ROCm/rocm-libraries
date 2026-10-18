@@ -9,10 +9,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <string>
 #include <utility>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslRmsNormTestGraphs.hpp"
@@ -28,7 +32,7 @@
  * suites -- matchers, scoring, dispatch and the real launches -- stay in
  * TestFlydslRmsNormEngine.cpp.
  *
- * These three are the ones that qualify for a census entry. Every case here reads the
+ * These are the ones that qualify for a census entry. Every case here reads the
  * staged set, none skips, and none touches a device; a suite that built its graph
  * in-process instead would stay green against an EMPTY shard, which is the exact miss the
  * census exists to catch.
@@ -62,19 +66,22 @@ TEST(TestFlydslRmsNormPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     EXPECT_EQ(kernelScoped, 1U);
 }
 
-TEST(TestFlydslRmsNormPacks, ShipsBothTiersForBothDtypes)
+TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerDtypeAndBakedTiersFor16Bit)
 {
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
 
-    size_t generic = 0;
-    size_t baked = 0;
+    std::map<std::string, size_t> generic;
+    std::map<std::string, size_t> baked;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
         {
             const auto* n = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_N_FIELD);
             ASSERT_NE(n, nullptr) << kernel.name << " declares no integer N";
-            (*n == FLYDSL_GENERIC_N ? generic : baked) += 1;
+            const auto* dtype
+                = tryGetMetadataField<std::string>(kernel.metadata, FLYDSL_DTYPE_FIELD);
+            ASSERT_NE(dtype, nullptr) << kernel.name << " declares no string dtype";
+            (*n == FLYDSL_GENERIC_N ? generic : baked)[*dtype] += 1;
 
             // Only ever kpack: these are pre-built flyDSL code objects, so there is no
             // source for the runtime compiler to fall back to.
@@ -85,10 +92,30 @@ TEST(TestFlydslRmsNormPacks, ShipsBothTiersForBothDtypes)
         }
     }
 
-    // One sentinel kernel per dtype, and at least one baked instance beside it -- a shard
-    // holding only the generic tier would still plan, silently, at the slower tier.
-    EXPECT_EQ(generic, 2U);
-    EXPECT_GT(baked, 0U);
+    // One sentinel kernel per dtype, and baked instances beside the 16-bit ones -- a shard
+    // holding only the generic tier would still plan, silently, at the slower tier. f32
+    // has no baked tier: the kernel's fast path is 16-bit only, so it would not be faster.
+    const std::map<std::string, size_t> oneEach{{"bf16", 1}, {"f16", 1}, {"f32", 1}};
+    EXPECT_EQ(generic, oneEach);
+    EXPECT_GT(baked["bf16"], 0U);
+    EXPECT_GT(baked["f16"], 0U);
+    EXPECT_EQ(baked.count("f32"), 0U);
+}
+
+// GenericPlanBuilder declines a graph whose schema floor is above the engine's, before
+// the native matcher runs. A runtime pass-by-value epsilon raises the floor to 1.2.0,
+// which this engine declares so that launch() can resolve it. A declared alignment other
+// than the default raises it to 1.3.0, which stays above: such graphs are declined.
+TEST(TestFlydslRmsNormPacks, UnderstandsRuntimeEpsilonGraphsButNotAlignedOnes)
+{
+    const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
+
+    const auto& runtimeEpsilon
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, false, false, false);
+    const auto& aligned
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, false, false, true, false);
+    EXPECT_FALSE(set.engine.sdkVersion < runtimeEpsilon) << set.engine.sdkVersion.str();
+    EXPECT_TRUE(set.engine.sdkVersion < aligned) << set.engine.sdkVersion.str();
 }
 
 TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheEightSlotSignature)

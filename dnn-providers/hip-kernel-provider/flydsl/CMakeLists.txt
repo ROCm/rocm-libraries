@@ -153,7 +153,8 @@ set(_flydsl_check_commands "")
 foreach(_target IN LISTS _flydsl_check_dirs)
     list(APPEND _flydsl_check_commands
         COMMAND ${Python3_EXECUTABLE} "${FLYDSL_GEN_SCRIPT}"
-                --content-dir "${FLYDSL_CONTENT_DIR}" --arch ${_target} --check)
+                --content-dir "${FLYDSL_CONTENT_DIR}" --arch ${_target} --check
+                --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
 endforeach()
 
 set(_flydsl_check_stamp "${CMAKE_CURRENT_BINARY_DIR}/flydsl-descriptors.checked")
@@ -162,6 +163,7 @@ add_custom_command(
     ${_flydsl_check_commands}
     COMMAND ${CMAKE_COMMAND} -E touch "${_flydsl_check_stamp}"
     DEPENDS ${_flydsl_content} "${FLYDSL_GEN_SCRIPT}" "${_flydsl_families_json}"
+            "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
     COMMENT "flydsl: checking descriptors against the checked-in objects"
     VERBATIM
 )
@@ -190,6 +192,13 @@ if(_flydsl_product_root)
     )
     add_dependencies(flydsl_shard_check hkp_packaging_product)
 endif()
+
+# The shipped objects are compiled from Apache-2.0 sources, which asks that a copy
+# of the License go with them in object form.
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/hip-kernel-provider/flydsl"
+)
 
 string(REPLACE ";" ", " _flydsl_arch_csv "${_flydsl_archs}")
 message(STATUS "flydsl: shipping through the product pack for ${_flydsl_arch_csv}")

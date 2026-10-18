@@ -73,6 +73,26 @@
     },
     {
       "version": "1.0",
+      "id": "854b206d-46c6-5ab9-ad3f-0677a96a145c",
+      "name": "rmsnorm_f32_ngeneric_bt256",
+      "arch": [
+        "gfx1200",
+        "gfx1201"
+      ],
+      "kernel_source": {
+        "kind": "hsaco",
+        "file": "rmsnorm_f32_ngeneric_bt256.hsaco",
+        "symbol": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "dtype": "f32",
+        "N": 0,
+        "block_threads": 256
+      },
+      "priority": 10
+    },
+    {
+      "version": "1.0",
       "id": "4501ab9b-bf55-5969-a56e-28a9fc467dde",
       "name": "rmsnorm_bf16_n3072_bt256",
       "arch": [

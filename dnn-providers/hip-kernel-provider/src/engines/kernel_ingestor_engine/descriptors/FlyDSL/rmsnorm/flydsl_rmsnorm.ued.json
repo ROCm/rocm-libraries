@@ -2,6 +2,7 @@
   "version": "1.0",
   "id": "43c4a81e-f427-56ec-b01f-688019b91f85",
   "name": "hipkernel:flydsl_rmsnorm",
+  "sdk_version": "1.2.0",
   "graph_match": {
     "native": "hipkernel.flydsl_rmsnorm.graph_match"
   },

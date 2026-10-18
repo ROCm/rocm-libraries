@@ -59,7 +59,7 @@
  *    the graph's width is preferred (`priority: 100`); a generic kernel carrying the
  *    `N: 0` sentinel takes the width as a kernarg and serves any width (`priority: 10`).
  *    The kernel matcher admits both and `score` orders them, so a width no instance was
- *    baked for still plans.
+ *    baked for still plans. f32 ships the generic tier only.
  *
  *  - Its kernels BAKE EPSILON. A graph asking for a materially different one is not one
  *    these kernels compute, so `graph_match` declines it -- quietly, so another engine
@@ -229,6 +229,26 @@ flatbuffers::FlatBufferBuilder rmsNormGraphWith(const RmsNormGraphExtras& extras
                                    extras);
 }
 
+/// rmsNormGraphWith() at a chosen x and gamma shape, and optionally x's strides.
+flatbuffers::FlatBufferBuilder
+    rmsNormGraphWithShapes(const std::vector<int64_t>& xDims,
+                           const std::vector<int64_t>& scaleDims,
+                           const RmsNormGraphExtras& extras,
+                           const std::optional<std::vector<int64_t>>& xStrides = std::nullopt)
+{
+    return buildFlydslRmsNormGraph(DataType::BFLOAT16,
+                                   xDims,
+                                   FLYDSL_BAKED_EPSILON,
+                                   false,
+                                   scaleDims,
+                                   std::nullopt,
+                                   xStrides,
+                                   false,
+                                   false,
+                                   NormFwdPhase::NOT_SET,
+                                   extras);
+}
+
 std::string graphCaseName(const ::testing::TestParamInfo<GraphCase>& info)
 {
     return info.param.name;
@@ -250,7 +270,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         GraphCase{"Bfloat16", [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16); }},
         // Every value of a field the kernels handle, beside the refusals below: a compute
-        // type at or below their f32 arithmetic, a wider alignment, a rank-2 scalar epsilon.
+        // type at or below their f32 arithmetic, a rank-2 scalar epsilon. (A wider alignment
+        // needs graph schema 1.3.0, above the engine's; the census pins that.)
         GraphCase{"ComputeTypeFloat",
                   [] {
                       RmsNormGraphExtras extras;
@@ -263,13 +284,6 @@ INSTANTIATE_TEST_SUITE_P(
                       extras.computeDataType = DataType::UNSET;
                       return rmsNormGraphWith(extras);
                   }},
-        GraphCase{"OperandsAlignedTo256",
-                  [] {
-                      RmsNormGraphExtras extras;
-                      extras.alignment
-                          = {{FLYDSL_X_UID, 256}, {FLYDSL_SCALE_UID, 256}, {FLYDSL_Y_UID, 256}};
-                      return rmsNormGraphWith(extras);
-                  }},
         GraphCase{"EpsilonOfRankTwo",
                   [] {
                       RmsNormGraphExtras extras;
@@ -277,6 +291,51 @@ INSTANTIATE_TEST_SUITE_P(
                       return rmsNormGraphWith(extras);
                   }},
         GraphCase{"Half", [] { return buildFlydslRmsNormGraph(DataType::HALF); }},
+        // The generic tier only: see RMSNORM_GENERIC_ONLY_DTYPES in the generator.
+        GraphCase{"Float", [] { return buildFlydslRmsNormGraph(DataType::FLOAT); }},
+        // A stride on an axis of extent 1 is never stepped along, so any value describes
+        // the same memory. hipdnn_torch describes an F.rms_norm weight this way, with
+        // stride 0 on every unit axis, at rank 2...
+        GraphCase{"ScaleWithStrideZeroOnItsUnitAxis",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.scaleStrides = {0, 1};
+                      return rmsNormGraphWithShapes({8, 4096}, {1, 4096}, extras);
+                  }},
+        // ...and at rank 4.
+        GraphCase{"Rank4ScaleWithStrideZeroOnItsUnitAxes",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.scaleStrides = {0, 0, 0, 1};
+                      return rmsNormGraphWithShapes({2, 8, 4, 4096}, {1, 1, 1, 4096}, extras);
+                  }},
+        GraphCase{"ScaleWithUnitStridesOnItsUnitAxes",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.scaleStrides = {1, 1, 1, 1};
+                      return rmsNormGraphWithShapes({2, 8, 4, 4096}, {1, 1, 1, 4096}, extras);
+                  }},
+        // cuDNN's layout, as hipDNN's cuDNN-shim samples build it: x {B*S, D, 1, 1} with
+        // gamma {1, D, 1, 1}. The normalised axes are the trailing run where gamma equals
+        // x -- D and the two unit axes -- not the innermost axis alone.
+        GraphCase{"CudnnLayoutWithTrailingUnitAxes",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.scaleStrides = {4096, 1, 4096, 4096};
+                      return rmsNormGraphWithShapes({32, 4096, 1, 1},
+                                                    {1, 4096, 1, 1},
+                                                    extras,
+                                                    std::vector<int64_t>{4096, 1, 4096, 4096});
+                  }},
+        // A multi-axis normalised shape, F.rms_norm(x, (4, 1024)): one row of 4096.
+        GraphCase{"MultiAxisNormalisedShape",
+                  [] { return rmsNormGraphWithShapes({8, 4, 1024}, {1, 4, 1024}, {}); }},
+        // The same exemption on x: a unit batch axis with a stride that matches nothing.
+        GraphCase{"XWithAnOddStrideOnAUnitAxis",
+                  [] {
+                      return rmsNormGraphWithShapes(
+                          {1, 8, 4096}, {4096}, {}, std::vector<int64_t>{7, 4096, 1});
+                  }},
         // Rank above two is collapsed, not refused: the leading axes multiply into the row
         // count, which is sound precisely because packed row-major is also required.
         GraphCase{"Rank4CollapsesToRows",
@@ -328,8 +387,9 @@ TEST(TestFlydslRmsNormBinding, CollapsesRank4UnderABroadcastShapedScale)
 {
     // Rank 4 with a scale of (1,1,1,W) rather than the rank-1 {W} every other case uses.
     // The matcher asks only that the scale carry ONE row and that its innermost extent be
-    // the width, so leading unit axes are accepted the same way a rank-1 scale is -- the
-    // shape a framework emits when gamma is broadcast against x is not a refusal here.
+    // the width, so leading unit axes are accepted the same way a rank-1 scale is. Packed
+    // strides here; the stride-0 form frameworks emit is the acceptance suite's
+    // Rank4ScaleWithStrideZeroOnItsUnitAxes.
     // The three leading axes of x still collapse into the row count, 2x8x4.
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                        {2, 8, 4, 4096},
@@ -346,6 +406,48 @@ TEST(TestFlydslRmsNormBinding, CollapsesRank4UnderABroadcastShapedScale)
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 64);
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_COLUMNS_TOKEN), 4096);
+}
+
+TEST(TestFlydslRmsNormBinding, SplitsTheCudnnLayoutAtTheNormalisedAxes)
+{
+    // Rows are the axes before gamma's trailing run, columns the run: 32 rows of 4096,
+    // not 32*4096 rows of 1 as reading the innermost axis alone would give.
+    RmsNormGraphExtras extras;
+    extras.scaleStrides = {4096, 1, 4096, 4096};
+    const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
+                                                       {32, 4096, 1, 1},
+                                                       FLYDSL_BAKED_EPSILON,
+                                                       false,
+                                                       std::vector<int64_t>{1, 4096, 1, 1},
+                                                       std::nullopt,
+                                                       std::vector<int64_t>{4096, 1, 4096, 4096},
+                                                       false,
+                                                       false,
+                                                       NormFwdPhase::NOT_SET,
+                                                       extras));
+
+    const auto bound = matchesGraph(FLYDSL_RMSNORM, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 32);
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_COLUMNS_TOKEN), 4096);
+}
+
+TEST(TestFlydslRmsNormBinding, JoinsAMultiAxisNormalisedShapeIntoOneRow)
+{
+    // F.rms_norm(x, (4, 1024)) on x [8, 4, 1024]: 8 rows of 4096, which the baked
+    // N = 4096 instance then serves.
+    const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
+                                                       {8, 4, 1024},
+                                                       FLYDSL_BAKED_EPSILON,
+                                                       false,
+                                                       std::vector<int64_t>{1, 4, 1024}));
+
+    const auto bound = matchesGraph(FLYDSL_RMSNORM, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 8);
+    EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_COLUMNS_TOKEN), 4096);
+    EXPECT_TRUE(
+        matchesKernel(FLYDSL_RMSNORM, fixture.context(), makeFlydslKernel("bf16", 4096), *bound));
 }
 
 // ---------------------------------------------------------------------------
@@ -478,8 +580,48 @@ INSTANTIATE_TEST_SUITE_P(
                       extras.epsilonDims = {2};
                       return rmsNormGraphWith(extras);
                   }},
-        // Only two dtypes were baked, and there is no upconverting path.
-        GraphCase{"AnUnsupportedDtype", [] { return buildFlydslRmsNormGraph(DataType::FLOAT); }},
+        // Only bf16, f16 and f32 were built, and there is no converting path.
+        GraphCase{"AnUnsupportedDtype", [] { return buildFlydslRmsNormGraph(DataType::DOUBLE); }},
+        // The 32-bit addressing bound counts bytes, so f32 reaches it at half the elements:
+        // 2^29 of them is 2 GiB, one byte past it, where bf16 would still fit.
+        GraphCase{"FloatPastThirtyTwoBitAddressing",
+                  [] { return buildFlydslRmsNormGraph(DataType::FLOAT, {1 << 19, 1 << 10}); }},
+        // Rows and width are read from the graph's shapes at prepare, which an
+        // override-shape graph may replace at execute.
+        GraphCase{"OverrideShapeEnabled",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.overrideShapeEnabled = true;
+                      return rmsNormGraphWith(extras);
+                  }},
+        // Desc2D could carry this row stride, but the launch passes the width; until it
+        // passes the graph's stride, a padded row is declined rather than misread.
+        GraphCase{"PaddedRowStride",
+                  [] {
+                      return rmsNormGraphWithShapes(
+                          {8, 4096}, {4096}, {}, std::vector<int64_t>{4160, 1});
+                  }},
+        // The unit-axis exemption does not reach the axes around it: the outer axis still
+        // has to step over exactly one row.
+        GraphCase{"NonContiguousLeadingAxes",
+                  [] {
+                      return rmsNormGraphWithShapes(
+                          {2, 1, 4096}, {4096}, {}, std::vector<int64_t>{12288, 4096, 1});
+                  }},
+        // The frontend's sandwich case: gamma matches x on the innermost axis only, and is
+        // not 1 on the axis before it, so it is a broadcast the kernel does not perform.
+        GraphCase{"SandwichScale",
+                  [] { return rmsNormGraphWithShapes({2, 2, 3, 3}, {1, 2, 1, 3}, {}); }},
+        // More axes than x has: nothing to align it with.
+        GraphCase{"ScaleOfHigherRank",
+                  [] { return rmsNormGraphWithShapes({8, 4096}, {1, 1, 4096}, {}); }},
+        // Gamma is read with unit stride along the normalised axis.
+        GraphCase{"ScaleStridedAlongTheAxis",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.scaleStrides = {2};
+                      return rmsNormGraphWithShapes({8, 4096}, {4096}, extras);
+                  }},
         // One instance, one dtype for all three operands -- gamma is read at x's type.
         GraphCase{"GammaAtADifferentDtype",
                   [] {
@@ -788,7 +930,9 @@ private:
 };
 
 /// Runs the staged (@p dtype, @p bakedN) kernel over a @p rows x @p columns graph and
-/// checks every element against the host reference.
+/// checks every element against the host reference. @p scaleDims, @p extras and @p xDims
+/// describe the operands the way a framework might; they must split into the same
+/// @p rows x @p columns, so the buffers are the same packed arrays either way.
 ///
 /// Skips rather than fails when the staged set holds no such kernel: on an arch this build
 /// packed nothing for, there is no kernel to be wrong about.
@@ -798,7 +942,11 @@ void expectRmsNormMatchesReference(DataType dataType,
                                    int64_t bakedN,
                                    int64_t rows,
                                    int64_t columns,
-                                   double relativeTolerance)
+                                   double relativeTolerance,
+                                   const std::optional<std::vector<int64_t>>& scaleDims
+                                   = std::nullopt,
+                                   const RmsNormGraphExtras& extras = {},
+                                   const std::optional<std::vector<int64_t>>& xDims = std::nullopt)
 {
     KernelDefinition kernel;
     if(!findStagedKernel(dtype, bakedN, kernel))
@@ -807,8 +955,19 @@ void expectRmsNormMatchesReference(DataType dataType,
                      << " in this build's descriptor root";
     }
 
-    const GraphFixture fixture(buildFlydslRmsNormGraph(dataType, {rows, columns}),
-                               packedArchDeviceProperties());
+    const GraphFixture fixture(
+        buildFlydslRmsNormGraph(dataType,
+                                xDims.value_or(std::vector<int64_t>{rows, columns}),
+                                FLYDSL_BAKED_EPSILON,
+                                false,
+                                scaleDims,
+                                std::nullopt,
+                                std::nullopt,
+                                false,
+                                false,
+                                NormFwdPhase::NOT_SET,
+                                extras),
+        packedArchDeviceProperties());
     const auto& handler = dispatchHandler(FLYDSL_RMSNORM);
 
     const auto prepared
@@ -861,6 +1020,47 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesF16AtABakedWidth)
 
     expectRmsNormMatchesReference<hipdnn_data_sdk::types::half>(
         DataType::HALF, "f16", 4096, 4, 4096, 5e-3);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesF32WithTheGenericKernel)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // f32 in and out, so the only error is the kernel's f32 reduction against the
+    // double reference: far inside 1e-4 at either width.
+    expectRmsNormMatchesReference<float>(DataType::FLOAT, "f32", FLYDSL_GENERIC_N, 4, 4096, 1e-4);
+    expectRmsNormMatchesReference<float>(DataType::FLOAT, "f32", FLYDSL_GENERIC_N, 4, 640, 1e-4);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesWithGammaDescribedAsHipdnnTorchDescribesIt)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // A (1, W) gamma with stride 0 on its unit axis, the form hipdnn_torch gives an
+    // F.rms_norm weight: the same vector in memory, so the same answer.
+    RmsNormGraphExtras extras;
+    extras.scaleStrides = {0, 1};
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, std::vector<int64_t>{1, 4096}, extras);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesTheCudnnLayout)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // x {4, 4096, 1, 1} and gamma {1, 4096, 1, 1}, cuDNN's strides: 4 rows of 4096.
+    RmsNormGraphExtras extras;
+    extras.scaleStrides = {4096, 1, 4096, 4096};
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16,
+        "bf16",
+        4096,
+        4,
+        4096,
+        2e-2,
+        std::vector<int64_t>{1, 4096, 1, 1},
+        extras,
+        std::vector<int64_t>{4, 4096, 1, 1});
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, TheGenericKernelComputesAWidthNothingWasBakedFor)

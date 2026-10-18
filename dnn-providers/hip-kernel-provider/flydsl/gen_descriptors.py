@@ -86,10 +86,11 @@ from generators._manifest import inputs_digest  # noqa: E402
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
 DESCRIPTOR_VERSION = "1.0"
-# Ops whose engines read a runtime pass-by-value scalar (the softmax scale), and the
-# graph schema that introduced such tensors (PluginVersionConstants.hpp,
-# K_PASS_BY_VALUE_MIN_API_VERSION).
+# Ops whose engines read a runtime pass-by-value scalar (the SDPA softmax scale, the
+# RMSNorm epsilon), and the graph schema that introduced such tensors
+# (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
 SDPA_OPS: tuple[str, ...] = ()
+PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 
 MANIFEST_NAME = "manifest.json"
@@ -291,8 +292,9 @@ class OpDescriptors:
         }
         # The graph schema the engine's matcher understands: the ingestor declines any
         # graph whose schema floor is above it. Runtime pass-by-value scalars (1.2.0) are
-        # read by the SDPA engines, whose scale may be one; the rest stay at the baseline.
-        if self.op in SDPA_OPS:
+        # read by the engines whose scale or epsilon may be one; the rest stay at the
+        # baseline.
+        if self.op in PASS_BY_VALUE_OPS:
             ued["sdk_version"] = PASS_BY_VALUE_SDK_VERSION
         kmd_fields = []
         for name, type_token in self.fields.items():
@@ -541,6 +543,14 @@ def main() -> int:
         action="store_true",
         help="Validate the checked-in descriptors and exit; write nothing",
     )
+    parser.add_argument(
+        "--generic-targets-json",
+        type=Path,
+        default=DEFAULT_TABLE_PATH,
+        help="The plugin SDK's generic-target table, as the packer reads it (CMake "
+        "passes HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON; default: the copy in "
+        "this source tree)",
+    )
     args = parser.parse_args()
 
     try:
@@ -577,7 +587,7 @@ def main() -> int:
     try:
         load_flat_input(
             args.content_dir,
-            GenericTargets.load(DEFAULT_TABLE_PATH),
+            GenericTargets.load(args.generic_targets_json),
             log=lambda *a, **k: None,
         )
     except HkpPackError as exc:
