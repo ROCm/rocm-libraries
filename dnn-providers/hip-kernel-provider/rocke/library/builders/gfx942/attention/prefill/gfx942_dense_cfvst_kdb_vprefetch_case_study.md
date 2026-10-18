@@ -228,24 +228,6 @@ The five-way ablation was measured on gfx942 with 304 CUs, using 12 BF16 D128 ca
 | ROCKE compiler backend | Python |
 | LLVM flavor | `llvm23` |
 
-**Benchmark harness:** `library/benchmarks/gfx942/attention/prefill/bench_rocke_5way_specs.py`
-
-**Kernel source:** `library/kernels/gfx942/attention_dense.py`
-
-**Replay invocation:** Run from the ROCKE root (`dnn-providers/hip-kernel-provider/rocke`) in an equivalent ROCm environment, with the repository's Python import paths and ROCm runtime library paths configured:
-
-```bash
-export ROCKE_BACKEND=python
-export ROCKE_LLVM_FLAVOR=llvm23
-
-python library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/bench_rocke_5way_specs.py \
-  --rocke-root . \
-  --out-dir library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/results/5way_specs
-```
-
-This is the repository-relative equivalent of the recorded Python invocation; the original run used absolute paths in the benchmark environment. The replay requires the same compatible SDK/comgr and HIP runtime libraries, and appropriately configured `PYTHONPATH` and `LD_LIBRARY_PATH`.
-
-
 **Correctness:** Each variant was validated against the same FP32 reference before measurement and after every timed batch. All validations passed. Post-batch checks cover the final output after 50 launches, not each individual launch.
 
 #### Shape-by-shape default kernel identity built by `attention_tuning_spec(req, "gfx942_dense").kernel_spec`
@@ -264,5 +246,167 @@ This is the repository-relative equivalent of the recorded Python invocation; th
 | bf16 | 16 | 4096 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
 | bf16 | 16 | 4096 | 32 | 16 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `true` | `true` | `qb_major` | `[304, 1, 1]` | `[512, 1, 1]` |
 | bf16 | 16 | 8192 | 32 | 8 | 128 | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2` | `true` | `true` | `hkv_major` | `[304, 1, 1]` | `[512, 1, 1]` |
+
+**Benchmark harness:** `library/benchmarks/gfx942/attention/prefill/bench_rocke_5way_specs.py`
+**Kernel source:** `library/kernels/gfx942/attention_dense.py`
+
+#### Reproducability
+
+Create gpu-bench/ at root. Clone branch into it. Below setup.sh sets up python env for rocke. Store it in 
+```bash
+dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/setup.sh
+```
+```bash
+
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+ROOT="${GPU_BENCH_ROOT:-/root/gpu-bench}"
+ROCKE="$REPO/dnn-providers/hip-kernel-provider/rocke"
+VENV="$ROOT/venvs"
+ENV="$ROOT/env"
+
+AMD_INDEX=https://stable.repo.amd.com/rocm/whl-next/
+
+mkdir -p "$VENV" "$ENV"
+
+# ----------------------------------------------------------------------
+# Host dependencies
+# ----------------------------------------------------------------------
+
+apt-get update
+apt-get install -y \
+  git python3.12 python3.12-venv python3.12-dev python3-pip \
+  cmake ninja-build build-essential pkg-config libnuma-dev
+
+# ----------------------------------------------------------------------
+# ROCKE virtual environment
+# ----------------------------------------------------------------------
+
+ROCKE_VENV="$VENV/rocke"
+
+if [ ! -x "$ROCKE_VENV/bin/python" ] || \
+   ! "$ROCKE_VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+  rm -rf "$ROCKE_VENV"
+  python3.12 -m venv "$ROCKE_VENV"
+fi
+
+"$ROCKE_VENV/bin/python" -m pip install -U \
+  pip setuptools wheel packaging ninja psutil
+
+"$ROCKE_VENV/bin/python" -m pip install \
+  --index-url "$AMD_INDEX" \
+  'rocm[devel,device-gfx942,libraries]==10.0.0' \
+  'torch[device-gfx942]==2.13.0+rocm10.0.0'
+
+"$ROCKE_VENV/bin/rocm-sdk" init >/dev/null
+
+# ----------------------------------------------------------------------
+# Install ROCKE
+# ----------------------------------------------------------------------
+
+"$ROCKE_VENV/bin/python" -m pip install -e "$ROCKE/platform"
+"$ROCKE_VENV/bin/python" -m pip install -e "$ROCKE/library" --no-deps
+
+# ----------------------------------------------------------------------
+# ROCKE environment activation script
+# ----------------------------------------------------------------------
+
+cat > "$ENV/rocke_env.sh" <<EOF
+source "$ROCKE_VENV/bin/activate"
+
+rocm-sdk init >/dev/null
+
+export ROCM_HOME="\$(rocm-sdk path --root)"
+export ROCM_PATH="\$ROCM_HOME"
+export HIP_PATH="\$ROCM_HOME"
+export PATH="\$(rocm-sdk path --bin):\$PATH"
+
+export HIP_PLATFORM=amd
+export ROCKE_BACKEND=python
+export ROCKE_LLVM_FLAVOR=llvm23
+
+LIB="\$(python -c 'import importlib.util, pathlib; s=importlib.util.find_spec("_rocm_sdk_core"); print(pathlib.Path(list(s.submodule_search_locations)[0]) / "lib")')"
+
+export ROCKE_COMGR_LIB="\$LIB/libamd_comgr.so.3"
+export ROCKE_HIP_LIB="\$LIB/libamdhip64.so.7"
+export LD_LIBRARY_PATH="\$LIB:\${LD_LIBRARY_PATH:-}"
+
+unset LIB
+EOF
+
+bash -n "$ENV/rocke_env.sh"
+
+echo
+echo "ROCKE setup complete."
+echo "ROCKE env: source $ENV/rocke_env.sh"
+```
+Run setup.sh
+```bash
+cd /root/gpu-bench/rocm-libraries/dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill/
+chmod +x setup.sh
+./setup.sh
+```
+
+Store below run_5way.sh in
+```bash
+dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill/rocke_vs_aiter/run_5way.sh
+```
+```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+GPU_BENCH_ROOT="${GPU_BENCH_ROOT:-/root/gpu-bench}"
+ROCM_REPO="${ROCM_REPO:-$GPU_BENCH_ROOT/rocm-libraries}"
+ROCKE_ROOT="${ROCKE_ROOT:-$ROCM_REPO/dnn-providers/hip-kernel-provider/rocke}"
+ROCKE_VENV="${ROCKE_VENV:-$GPU_BENCH_ROOT/venvs/rocke}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT_DIR="${OUT_DIR:-$SCRIPT_DIR/results/5way_specs}"
+
+[[ -f "$ROCKE_ROOT/library/kernels/gfx942/attention_dense.py" ]] || {
+  echo "Missing $ROCKE_ROOT/library/kernels/gfx942/attention_dense.py" >&2; exit 2;
+}
+[[ -f "$ROCKE_VENV/bin/activate" ]] || {
+  echo "Missing Python virtualenv $ROCKE_VENV" >&2; exit 2;
+}
+source "$ROCKE_VENV/bin/activate"
+
+SITE="$(python - <<'PY'
+import site
+packages = [p for p in site.getsitepackages() if p.endswith('site-packages')]
+if not packages:
+    raise SystemExit('Could not find Python site-packages')
+print(packages[0])
+PY
+)"
+CORE_LIB="$SITE/_rocm_sdk_core/lib"
+[[ -f "$CORE_LIB/libamd_comgr.so.3" && -f "$CORE_LIB/libamdhip64.so.7" ]] || {
+  echo "Expected wheel ROCm shared libraries not found in $CORE_LIB" >&2; exit 2;
+}
+export ROCKE_ROOT
+export ROCKE_BACKEND=python
+export ROCKE_LLVM_FLAVOR="${ROCKE_LLVM_FLAVOR:-llvm23}"
+export ROCKE_COMGR_LIB="$CORE_LIB/libamd_comgr.so.3"
+export ROCKE_HIP_LIB="$CORE_LIB/libamdhip64.so.7"
+export LD_LIBRARY_PATH="$CORE_LIB"
+unset LD_PRELOAD
+export PYTHONPATH="$ROCKE_ROOT/library:$ROCKE_ROOT/platform/Python:$ROCKE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+# One shell launch -> one Python process -> one current HIP stream.
+exec python "$SCRIPT_DIR/bench_rocke_5way_specs.py" \
+  --rocke-root "$ROCKE_ROOT" \
+  --out-dir "$OUT_DIR" \
+  "$@"
+```
+Run run_5way.sh
+```bash
+cd /root/gpu-bench/rocm-libraries/dnn-providers/hip-kernel-provider/rocke/library/benchmarks/gfx942/attention/prefill/
+chmod +x run_5way.sh
+./run_5way.sh
+```
+Results available in results/
+
 ---
+
 
