@@ -3,6 +3,7 @@
 
 #include <TensileLite/Client/hostnumerics/GemmInvocationAdapter.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <roc/hostnumerics/detail/shape_access.hpp>
 
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/Utils.hpp>
@@ -587,12 +588,12 @@ namespace TensileLite::Client::hostnumerics
                 = requiresCompleteD ? OutputSelection::all(outputSelection.indexOrder())
                                     : std::move(outputSelection);
             const auto logicalCount
-                = roc::hostnumerics::detail::tryElementCount(problem.d().sizes());
+                = roc::hostnumerics::detail::ShapeAccess::tryElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor shape product of nonzero extents exceeds size_t.");
-            if(!roc::hostnumerics::detail::isValidIndexOrder(problem.d().dimensions(),
-                                                             globalSelection.indexOrder()))
+            if(!roc::hostnumerics::detail::ShapeAccess::isValidIndexOrder(
+                   problem.d().dimensions(), globalSelection.indexOrder()))
                 return failure(TranslationFailureCode::InvalidDescriptor,
                                "Tensor index order must contain each dimension once.");
             if(auto error

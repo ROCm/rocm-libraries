@@ -144,6 +144,7 @@ target_sources(hostnumerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_storage.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/scalar_type.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/shape.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/detail/shape_access.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/tensor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/tensor_transformations.hpp"
 )
