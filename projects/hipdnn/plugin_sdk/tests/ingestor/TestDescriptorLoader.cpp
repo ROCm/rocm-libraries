@@ -2208,24 +2208,111 @@ TEST(TestDescriptorLoader, CarriesAPacksDeclaredArchitectures)
     EXPECT_EQ(sets.front().packs.front().arch, (std::vector<std::string>{"gfx90a", "gfx942"}));
 }
 
-/// The validator must admit exactly what archMatches admits of an authored entry: a bare
-/// base id. LLVM generic targets are real gcnArchName values whose base id carries a '-',
-/// so a shape check keyed on that character would make them unauthorable.
-TEST(TestDescriptorLoader, AcceptsGenericTargetIds)
+namespace
 {
-    const ScopedSymbols symbols;
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch_generic"));
-    auto documents = makeSetDocuments('1', "test:arch_generic");
-    documentOfType(documents, ".kdp.json")["arch"]
-        = nlohmann::json::array({"gfx942", "gfx9-4-generic"});
-    writeDocuments(dir.path(), documents);
 
-    const auto sets = loadFrom(dir.path());
+const std::vector<std::string> INTACT_ONLY{"test:intact"};
+const std::vector<std::string> BOTH{"test:candidate", "test:intact"};
 
-    ASSERT_EQ(sets.size(), 1u);
-    ASSERT_EQ(sets.front().packs.size(), 1u);
-    EXPECT_EQ(sets.front().packs.front().arch,
-              (std::vector<std::string>{"gfx942", "gfx9-4-generic"}));
+nlohmann::json arch(std::initializer_list<std::string> entries)
+{
+    const nlohmann::json list = std::vector<std::string>(entries);
+    return list;
+}
+
+Documents candidateWithKernelArch(const nlohmann::json& packArch,
+                                  const nlohmann::json& kernelArch,
+                                  bool standalone)
+{
+    auto documents = makeSetDocuments('2', "test:candidate");
+    if(standalone)
+    {
+        referenceLastKernel(documents);
+        documentOfType(documents, ".ukd.json")["arch"] = kernelArch;
+        documentOfType(documents, ".kdp.json")["arch"] = packArch;
+        return documents;
+    }
+    auto& pack = documentOfType(documents, ".kdp.json");
+    pack["arch"] = packArch;
+    pack.at("kernelDescriptors")[0]["arch"] = kernelArch;
+    return documents;
+}
+
+/// Sorted names of the engines that load when @p candidate sits beside an intact engine.
+std::vector<std::string> engineNames(const Documents& candidate)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("generic_arch_rule"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    writeDocuments(dir.path(), candidate);
+
+    std::vector<std::string> names;
+    for(const auto& set : loadFrom(dir.path()))
+    {
+        names.push_back(set.engine.name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+} // namespace
+
+/// A generic-shaped name the table does not list matches no device, so its file is dropped.
+TEST(TestDescriptorLoader, DropsAPackNamingAGenericAbsentFromTheTable)
+{
+    EXPECT_EQ(engineNames(candidateWithKernelArch(arch({"gfx99-generic"}), arch({}), false)),
+              INTACT_ONLY);
+}
+
+TEST(TestDescriptorLoader, DropsAPackListingAGenericAndOneOfItsMembers)
+{
+    EXPECT_EQ(
+        engineNames(candidateWithKernelArch(arch({"gfx11-generic", "gfx1151"}), arch({}), false)),
+        INTACT_ONLY);
+    EXPECT_EQ(
+        engineNames(candidateWithKernelArch(arch({"gfx1151", "gfx11-generic"}), arch({}), false)),
+        INTACT_ONLY);
+    EXPECT_EQ(engineNames(candidateWithKernelArch(
+                  arch({"gfx11-generic", "gfx12-generic", "gfx942"}), arch({}), false)),
+              BOTH);
+}
+
+/// A kernel names a generic only when its pack lists that generic itself.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelNamesAGenericThePackDoesNotList)
+{
+    nlohmann::json members = nlohmann::json::array();
+    for(std::size_t i = 0; i < hipdnn_plugin_sdk::findGenericTarget("gfx11-generic")->memberCount;
+        ++i)
+    {
+        members.push_back(
+            std::string(hipdnn_plugin_sdk::findGenericTarget("gfx11-generic")->members[i]));
+    }
+    for(const bool standalone : {false, true})
+    {
+        EXPECT_EQ(
+            engineNames(candidateWithKernelArch(members, arch({"gfx11-generic"}), standalone)),
+            INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+    }
+}
+
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelOmitsOrExceedsTheGenericPackArch)
+{
+    for(const bool standalone : {false, true})
+    {
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic", "gfx942"}), arch({"gfx942"}), standalone)),
+                  INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic"}), arch({"gfx1151"}), standalone)),
+                  INTACT_ONLY)
+            << (standalone ? "standalone" : "inline");
+        EXPECT_EQ(engineNames(candidateWithKernelArch(
+                      arch({"gfx11-generic", "gfx942"}), arch({"gfx11-generic"}), standalone)),
+                  BOTH)
+            << (standalone ? "standalone" : "inline");
+    }
+    EXPECT_EQ(engineNames(candidateWithKernelArch(arch({"gfx11-generic"}), arch({}), false)), BOTH);
 }
 
 /// The default: a pack naming no architecture applies everywhere, so absence must parse

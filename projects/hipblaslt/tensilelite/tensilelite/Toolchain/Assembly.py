@@ -109,8 +109,13 @@ def buildAssemblyCodeObjectFiles(
             of the three can be derived from the ISA the kernels carry.
     """
 
+    def representative(entry):
+      return getattr(entry, "representative", entry)
+
     if globalParameters["ValidateMetadata"]:
-        validateCustomKernelMetadataAtBuild(kernels)
+        validateCustomKernelMetadataAtBuild([
+            alias for entry in kernels for alias in getattr(entry, "aliases", (entry,))
+        ])
 
     extObj = ".o"
     extCo = ".co"
@@ -119,28 +124,34 @@ def buildAssemblyCodeObjectFiles(
     archNames = archNames or {}
     destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
-    for k in kernels:
-      archKernelMap[tuple(k['ISA'])].append(k)
+    for entry in kernels:
+      archKernelMap[tuple(representative(entry)['ISA'])].append(entry)
 
     coFiles = []
-    for arch, archKernels in archKernelMap.items():
-      if len(archKernels) == 0:
+    for arch, archEntries in archKernelMap.items():
+      if len(archEntries) == 0:
         continue
 
       name = archNames.get(arch) or isaToGfx(arch)
       destDir = Path(ensurePath(destRoot / name))
 
-      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
-      if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ compilerTargetOf(name) + extCoRaw)] = objectFiles
-      for kernel in archKernels:
-        coName = kernel.get("codeObjectFile", None)
-        if coName:
-          coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
+      for entry in archEntries:
+        kernel = representative(entry)
+        baseName = getattr(entry, "baseName", kernel["BaseName"])
+        objectFile = str(asmDir / (baseName + extObj))
+        aliases = getattr(entry, "aliases", (kernel,))
+        for alias in aliases:
+          if "codeObjectFile" not in alias:
+            destination = asmDir / ("TensileLibrary_" + compilerTargetOf(name) + extCoRaw)
+          else:
+            coName = alias.get("codeObjectFile", None)
+            destination = asmDir / (coName + extCoRaw) if coName else None
+          if destination is not None:
+            coFileMap[destination].add(objectFile)
 
       for coFileRaw, objFiles in coFileMap.items():
-        # Canonicalize both the default-list and explicit-set linker input paths.
+        # Keep link order independent of record and alias ordering.
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
