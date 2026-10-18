@@ -1,7 +1,14 @@
 name: gfx942 hardware parity baseline
-run-name: gfx942 hardware ${{ inputs.ctest_label || '^quick$' }} (ROCm ${{ inputs.rocm_version || '10.2.0a20260928' }})
+run-name: gfx942 hardware ${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }} (ROCm ${{ inputs.rocm_version || '10.2.0a20260928' }})
 
 on:
+  push:
+    branches:
+      - users/sa-faizal/rocjitsu-q0-full-quick
+      - users/sa-faizal/rocjitsu-q0-full-ffm-quick
+    paths:
+      - ".github/workflows/gfx942-hardware-parity.yml"
+      - ".github/scripts/ffm_quick_rocjitsu.py"
   workflow_dispatch:
     inputs:
       ctest_label:
@@ -42,7 +49,7 @@ jobs:
         id: discover
         env:
           ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
-          TEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
+          TEST_LABEL: ${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }}
         run: |
           set -euo pipefail
           mkdir -p test-root cache
@@ -52,7 +59,7 @@ jobs:
           echo "components=$components" >> "$GITHUB_OUTPUT"
 
   hardware-suites:
-    name: "${{ inputs.ctest_label || '^quick$' }} / ${{ matrix.test.component }} on GFX942"
+    name: "${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }} / ${{ matrix.test.component }} on GFX942"
     needs: discover
     strategy:
       fail-fast: false
@@ -64,7 +71,7 @@ jobs:
       image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
-      TEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
+      TEST_LABEL: ${{ inputs.ctest_label || (contains(github.ref_name, 'ffm-quick') && '^ffm-quick$' || '^quick$') }}
       COMPONENT: ${{ matrix.test.component }}
     steps:
       - name: Install runtime tools
