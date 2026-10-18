@@ -40,6 +40,23 @@ struct BlockFmhaPagedKVRows
     // One TDM gather takes eight 32-bit row indices.
     static constexpr index_t kGatherRows = 8;
 
+    CK_TILE_HOST_DEVICE BlockFmhaPagedKVRows(const index_t* page_idx_,
+                                             index_t max_page_,
+                                             index_t seqlen_k_,
+                                             MakeKView make_k_view_,
+                                             MakeVView make_v_view_,
+                                             index_t k_page_rows_ = 0,
+                                             index_t v_page_rows_ = 0)
+        : page_idx(page_idx_),
+          max_page(max_page_),
+          seqlen_k(seqlen_k_),
+          make_k_view(make_k_view_),
+          make_v_view(make_v_view_),
+          k_page_rows(k_page_rows_),
+          v_page_rows(v_page_rows_)
+    {
+    }
+
     const index_t* page_idx; // this sequence's physical page ids
     index_t max_page;        // last valid index into page_idx
     index_t seqlen_k;
@@ -160,12 +177,12 @@ struct BlockFmhaPagedKVRows
     load_gather(const TDMConfig& config, LdsWindow& lds_window, const Window& window) const
     {
         static_assert(kGather);
-        using DataType          = remove_cvref_t<typename Window::DataType>;
         constexpr auto ys_to_d  = typename Window::TileDstr{}.get_ys_to_d_descriptor();
         constexpr index_t kRows = ys_to_d.get_lengths()[number<0>{}];
         static_assert(ys_to_d.get_num_of_dimension() == 2 && kRows == kGatherWarpRows,
                       "gather: one (kGatherWarpRows x cols) box per warp");
 #if CK_TILE_ENABLE_TDM_FEATURE
+        using DataType          = remove_cvref_t<typename Window::DataType>;
         constexpr index_t kCols = ys_to_d.get_lengths()[number<1>{}];
         const index_t warp_row  = warp_row_of(window);
         const index_t col       = window.get_window_origin()[number<1>{}];

@@ -476,7 +476,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
 
         // K tile in LDS
         auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
-        auto k_lds_store = generate_tuple(
+        [[maybe_unused]] auto k_lds_store = generate_tuple(
             [&](auto i_buf) {
                 return make_tile_window(
                     make_tensor_view<address_space_enum::lds>(
@@ -713,7 +713,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
 
         constexpr auto k_oob_ck = bool_constant<true>{};
-        constexpr auto k_pre_np = [&]() {
+        [[maybe_unused]] constexpr auto k_pre_np = [&]() {
             if constexpr(kPadSeqLenK &&
                          (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                           (BiasEnum != BlockAttentionBiasEnum::NO_BIAS && kHasDropout)))

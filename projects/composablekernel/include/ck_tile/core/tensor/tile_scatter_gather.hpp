@@ -601,7 +601,7 @@ struct tile_scatter_gather
         using vector_t      = typename Traits::vector_t;
         using SFC_Ys        = typename Traits::SFC_Ys;
 
-        constexpr auto tile_dstr = TileDstr{};
+        [[maybe_unused]] constexpr auto tile_dstr = TileDstr{};
 
         // Precompute invariant values outside loops
         const auto window_origin       = lds_tile.get_window_origin();
