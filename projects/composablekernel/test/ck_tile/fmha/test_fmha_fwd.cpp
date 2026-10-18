@@ -1041,6 +1041,80 @@ TEST_P(BatchPrefill, DataTypeConfig)
         GTEST_SKIP() << "batch_prefill tests run fp16 and bf16";
     }
 }
+
+// batch_prefill on qr_tdm_pingpong: its grids (at least 2 (batch, head) pairs per CU, below
+// 640 rows) take the 64-row tile, up to 16 rows the 16-row one. Pages of 1024, 16 (a warp's
+// 16 K/V rows) and 1 (TDM gather), with GQA.
+// seqlen_q, seqlen_k, mask, page_block_size, kv_lookup, i_perm, tile
+using BatchPrefillPingPongCase =
+    std::tuple<int, int, const char*, int, const char*, bool, const char*>;
+
+class BatchPrefillPingPong : public TestWithParam<BatchPrefillPingPongCase>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    BatchPrefillPingPong,
+    Values(BatchPrefillPingPongCase{100, 500, "0", 1024, "sglang", false, "_b64x"},
+           BatchPrefillPingPongCase{100, 500, "b", 16, "vllm", true, "_b64x"},
+           BatchPrefillPingPongCase{100, 500, "t:64,32", 1, "sglang", false, "_b64x"},
+           BatchPrefillPingPongCase{8, 532, "0", 16, "vllm", true, "_b16x"},
+           BatchPrefillPingPongCase{8, 532, "b", 1, "sglang", false, "_b16x"}));
+
+TEST_P(BatchPrefillPingPong, DataTypeConfig)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "qr_tdm_pingpong is only supported on gfx1250";
+
+        const auto [seqlen_q, seqlen_k, mask_str, page_block_size, kv_lookup, i_perm, tile] =
+            GetParam();
+        const auto [batch, nhead] = PingPongGrid(mode_enum::batch, 4);
+
+        std::string selected_kernel;
+        auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                                   batch,
+                                                   nhead,
+                                                   2,
+                                                   std::vector<int>(batch, seqlen_q),
+                                                   std::vector<int>(batch, seqlen_k),
+                                                   128,
+                                                   128,
+                                                   0,
+                                                   {-1},
+                                                   {-1},
+                                                   {},
+                                                   {},
+                                                   0,
+                                                   i_perm,
+                                                   true,
+                                                   0,
+                                                   0,
+                                                   true,
+                                                   true,
+                                                   page_block_size,
+                                                   false,
+                                                   "n",
+                                                   0.0f,
+                                                   0,
+                                                   0,
+                                                   false,
+                                                   mask_str,
+                                                   qscale_str,
+                                                   true,
+                                                   1,
+                                                   COMMON_ARGS,
+                                                   std::nullopt,
+                                                   &selected_kernel,
+                                                   "linear",
+                                                   kv_lookup);
+        CHECK_RESULT(result);
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        EXPECT_NE(selected_kernel.find(tile), std::string::npos) << selected_kernel;
+    }
+}
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 
 class General

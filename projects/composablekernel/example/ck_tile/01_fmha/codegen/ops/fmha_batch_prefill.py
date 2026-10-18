@@ -23,6 +23,7 @@ from codegen.cpp_symbol_map import (
     QSCALE_MAP,
 )
 from codegen.arch import ArchTrait
+from codegen.ops.fmha_fwd import GFX125_QR_TDM_PINGPONG_RANGE
 from codegen.utils import update_file
 
 # Architecture trait for kernels requiring global_load_lds (CDNA3+).
@@ -81,11 +82,17 @@ FMHA_BATCH_PREFILL_PIPELINE_MAP = {
     "qr_async": "ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSAsync",
     "qr_tdm": "ck_tile::BlockFmhaPipelineQRKSVSTdm",
     "qr_tdm_sched": "ck_tile::BlockFmhaPipelineQRKSVSTdmSched",
+    "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong",
 }
 
 # fp16/bf16 qr_tdm runs with double K/V LDS buffers and progressive K LDS loading, as in
 # fmha_fwd; its fp8 instances keep the defaults, also as in fmha_fwd.
-PROBLEM_EXTRA_MAP = {"qr_async": "", "qr_tdm": ", true, true", "qr_tdm_sched": ""}
+PROBLEM_EXTRA_MAP = {
+    "qr_async": "",
+    "qr_tdm": ", true, true",
+    "qr_tdm_sched": "",
+    "qr_tdm_pingpong": "",
+}
 
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
@@ -154,10 +161,7 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBatchPrefillPipelineProb
 using fmha_pipeline_{F_idx} = {F_pipeline}<
     fmha_pipeline_problem_{F_idx}>;
 
-using fmha_epilogue_{F_idx} =
-    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType,
-                                           typename FmhaFwdTypeConfig<{F_dtype}>::ODataType,
-                                           {F_spad}, {F_dvpad}>>;
+{F_epilogue}
 
 using fmha_kernel_{F_idx} =
     ck_tile::FmhaBatchPrefillWithPagedKVCacheKernel<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
@@ -367,12 +371,12 @@ class FmhaFwdApiTrait:
 
     @property
     def dcheck(self) -> str:
-        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched"):
+        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dpad == "t":
                 return f"a.hdim_q % {vec} == 0"
             else:
-                assert self.pipeline_tag == "qr_tdm_sched"
+                assert self.pipeline_tag in ("qr_tdm_sched", "qr_tdm_pingpong")
                 return f"a.hdim_q == {self.bk0max}"
         elif self.pipeline_tag in ["qr"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
@@ -385,12 +389,12 @@ class FmhaFwdApiTrait:
 
     @property
     def dvcheck(self) -> str:
-        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched"):
+        if self.pipeline_tag in ("qr_async", "qr_tdm", "qr_tdm_sched", "qr_tdm_pingpong"):
             vec = int((32 * 4) / DTYPE_BITS[self.dtype])
             if self.dvpad == "t":
                 return f"a.hdim_v % {vec} == 0"
             else:
-                assert self.pipeline_tag == "qr_tdm_sched"
+                assert self.pipeline_tag in ("qr_tdm_sched", "qr_tdm_pingpong")
                 return f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag in ["qr"]:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
@@ -681,6 +685,26 @@ class FmhaFwdKernel:
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
             F_arch_check=self._arch_check(),
+            F_epilogue=self._epilogue_decl(),
+        )
+
+    def _epilogue_decl(self) -> str:
+        spad = BOOL_MAP[self.F_pipeline.F_spad]
+        dvpad = BOOL_MAP[self.F_pipeline.F_dvpad]
+        acc = f"typename FmhaFwdTypeConfig<{FWD_DTYPE_MAP[self.F_dtype]}>::OaccDataType"
+        out = f"typename FmhaFwdTypeConfig<{FWD_DTYPE_MAP[self.F_dtype]}>::ODataType"
+        if self.F_pipeline.tag == "qr_tdm_pingpong":
+            # As in fmha_fwd: O is stored through the pipeline's LDS (coalesced rows).
+            return (
+                f"using fmha_epilogue_{self.F_idx} = ck_tile::LdsShuffle2DEpilogue<\n"
+                f"    ck_tile::LdsShuffle2DEpilogueProblem<{acc}, {out}, fmha_shape_{self.F_idx}::NumWarps,\n"
+                f"        {self.F_tile.F_bm0}, {self.F_tile.F_bn1}, {spad}, {dvpad}>>;"
+            )
+        return (
+            f"using fmha_epilogue_{self.F_idx} =\n"
+            f"    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<{acc},\n"
+            f"                                           {out},\n"
+            f"                                           {spad}, {dvpad}>>;"
         )
 
     def _arch_check(self) -> str:
@@ -879,6 +903,15 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         192 : FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  2, F_arch=GFX125_ARCH),
     }  # fmt: skip
 
+    # fmha_fwd's qr_tdm_pingpong tiles and its grid rule (GFX125_QR_TDM_PINGPONG_RANGE):
+    # below 640 rows with at least 2 (batch, head) pairs per CU, and the 16-row tile up
+    # to 16 rows. In batch_prefill `batch` is the number of sequences, as in group-mode
+    # fmha_fwd.
+    _QR_TDM_PINGPONG_TILES = {
+        128 : [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(f"a.max_seqlen_q <= 16 && {GFX125_QR_TDM_PINGPONG_RANGE}"), F_arch=GFX125_ARCH),
+               FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(GFX125_QR_TDM_PINGPONG_RANGE), F_arch=GFX125_ARCH)],
+    }  # fmt: skip
+
     # fmha_fwd's fp8 qr_tdm tile: the scaled gemm1 needs warp K 128 (kK1).
     _QR_TDM_FP8_TILES = {
         128 : FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1, F_arch=GFX125_ARCH),
@@ -893,6 +926,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
         # The d256 qr_tdm tile has the async tile's geometry, so pair by identity.
         if any(tile is t for t in cls._QR_TDM_SCHED_TILES.values()):
             return pipeline.tag == "qr_tdm_sched"
+        if any(tile is t for tiles in cls._QR_TDM_PINGPONG_TILES.values() for t in tiles):
+            return pipeline.tag == "qr_tdm_pingpong"
         if any(
             tile is t
             for t in (*cls._QR_TDM_TILES.values(), *cls._QR_TDM_FP8_TILES.values())
@@ -907,10 +942,26 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
     @classmethod
     def get_pipelines(cls, dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
         pipelines = []
-        # As in fmha_fwd: qr_tdm_sched first for max_seqlen_q >= 128, then qr_tdm.
+        # As in fmha_fwd: qr_tdm_pingpong on its grids, then qr_tdm_sched for
+        # max_seqlen_q >= 128, then qr_tdm.
+        if dtype in ["fp16", "bf16"] and hdim in cls._QR_TDM_PINGPONG_TILES:
+            for head_pad, mask, bias, lse, sink, kv_lookup_table in itertools.product(
+                ["f", "t"],
+                get_mask_map(mask_impl).keys(),
+                BIAS_MAP.keys(),
+                ["t", "f"],
+                ["t", "f"],
+                SUPPORTED_KV_LOOKUP_TABLE,
+            ):
+                if sink == "t" and mask in ("no", "s_no"):
+                    continue
+                pipelines.append(FmhaFwdPipeline("qr_tdm_pingpong", "row", "t", "t", head_pad, head_pad, "f", bias, lse, "f", "no", mask, sink, "linear", kv_lookup_table))  # fmt: skip
         if dtype in ["fp16", "bf16"] and hdim in cls._QR_TDM_SCHED_TILES:
             head_pad = "f" if hdim == 64 else "t"
-            sched_constraint = CppConstraint("a.max_seqlen_q >= 128")
+            sched_seqlen_q = "a.max_seqlen_q >= 128"
+            if hdim in cls._QR_TDM_PINGPONG_TILES:
+                sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
+            sched_constraint = CppConstraint(sched_seqlen_q)
             for mask, lse, kv_lookup_table in itertools.product(
                 get_mask_map(mask_impl).keys(), ["t", "f"], SUPPORTED_KV_LOOKUP_TABLE
             ):
@@ -944,7 +995,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactory):
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
             return {
-                hdim: (
+                hdim: cls._QR_TDM_PINGPONG_TILES.get(hdim, [])
+                + (
                     [cls._QR_TDM_SCHED_TILES[hdim]]
                     if hdim in cls._QR_TDM_SCHED_TILES
                     else []

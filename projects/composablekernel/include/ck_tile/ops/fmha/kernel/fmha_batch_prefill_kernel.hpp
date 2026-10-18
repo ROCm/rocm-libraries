@@ -48,6 +48,17 @@ struct is_batch_prefill_segmented_tdm_pipeline<
     : std::bool_constant<Pipeline::kUsesFixedSegmentedLdsArena>
 {
 };
+// Whether an epilogue takes the kernel's LDS as a 4th operator() argument (kUsesSmem),
+// e.g. the LDS-shuffle epilogue of qr_tdm_pingpong.
+template <typename Epilogue, typename = void>
+struct batch_prefill_epilogue_uses_smem : std::false_type
+{
+};
+template <typename Epilogue>
+struct batch_prefill_epilogue_uses_smem<Epilogue, std::void_t<decltype(Epilogue::kUsesSmem)>>
+    : std::bool_constant<Epilogue::kUsesSmem>
+{
+};
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -1556,7 +1567,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                              make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                              {i_m0, i_n1});
 
-        EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
+        // The pipeline is done with its LDS; an epilogue that asks for it reuses it.
+        if constexpr(detail::batch_prefill_epilogue_uses_smem<EpiloguePipeline>::value)
+            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr, smem_ptr);
+        else
+            EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
     }
 };
 
