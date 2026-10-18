@@ -17,7 +17,13 @@ what rocke's kernels cannot compute (see the table's comments).
 
 The non-grouped (``groups == 1``) forward kernel bakes less: its channel counts
 are kernargs as well, so its capabilities record ``cpg = kpg = 0`` (runtime)
-and one binary serves every ``C``/``K`` its tile divides.
+and one binary serves every ``C``/``K`` its tile divides. The wgrad kernel is
+built the same way (``runtime_channels``): one binary per filter, padding and
+tuning knob serves every per-group channel count its knobs fit. So is the
+runtime-channel MFMA dgrad pipeline (``direct_dgrad_mfma_rtc``), which serves
+dense as well as grouped problems: its compute pass keeps the weights of its
+K-atoms in registers, so what it bakes is the *number* of K-atoms and M-tiles
+(knobs ``k_atoms`` / ``m_tiles``), and the exact channel counts are kernargs.
 
 The run side is split in two. :func:`direct_plans` is pure CPU: it picks the
 cached kernels that fit a problem, re-validates each spec against the real
@@ -43,8 +49,13 @@ from kernels.common.conv_direct_aot_jobs import (  # noqa: F401 (the grid and bu
     BLOCK_Q,
     DGRAD_BLOCK_H,
     DGRAD_BLOCK_Q,
+    DGRAD_RTC_LOOP_MAX_ATOMS,
+    DGRAD_RTC_M_TILES,
+    DGRAD_RTC_MAX_KPG,
+    DGRAD_RTC_VGPR_FILL,
     DGRAD_WAVES,
     DIRECT_CAPABILITIES,
+    DIRECT_DIRECTIONS,
     DIRECT_DTYPE,
     DIRECT_DTYPES,
     DOUBLE_BUFFER,
@@ -57,18 +68,30 @@ from kernels.common.conv_direct_aot_jobs import (  # noqa: F401 (the grid and bu
     DW_TILED_BLOCK_W,
     DW_TILED_BLOCK_WAVES,
     DW_TILED_UNROLL,
+    WGRAD_HPB,
+    WGRAD_MFMA_K,
+    WGRAD_WAVES_C_WIDE,
+    WGRAD_WAVES_FIXED,
+    WGRAD_WAVES_K_WIDE,
     DirectCaps,
     _caps_jobs,
     _caps_of,
     _helper_identity,
     count_direct_jobs,
+    dgrad_rtc_k_atoms,
+    dgrad_rtc_spills,
+    dgrad_rtc_vgprs,
     direct_job_for_identity,
     direct_kernel_for_job,
     probe_problem,
+    wgrad_waves,
 )
 from kernels.common.conv_direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
     DIRECT_DGRAD_REORGANIZE as _REORGANIZE,
+    DIRECT_DGRAD_REORGANIZE_RTC as _REORGANIZE_RTC,
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
+    DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
+    DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
@@ -93,8 +116,8 @@ def enumerate_direct_jobs(
 ) -> List[BuildJob]:
     """Every direct kernel worth caching for ``arch``, pre-validated.
 
-    ``directions`` takes the benchmark's names, ``fwd`` and ``dgrad``. The MFMA
-    dgrad entries pull in their weight-transform helpers.
+    ``directions`` takes the benchmark's names, ``fwd``, ``dgrad`` and
+    ``wgrad``. The MFMA dgrad entries pull in their weight-transform helpers.
 
     The grid is walked one (variant, capability) cell at a time; with
     ``jobs > 1`` the cells run in a process pool. Cells are merged in order,
@@ -103,8 +126,10 @@ def enumerate_direct_jobs(
     seconds, as for the implicit-GEMM enumeration.
     """
     for d in directions:
-        if d not in ("fwd", "dgrad"):
-            raise ValueError(f"direct conv has no {d!r} kernel; expected fwd or dgrad")
+        if d not in DIRECT_DIRECTIONS:
+            raise ValueError(
+                f"direct conv has no {d!r} kernel; expected one of {DIRECT_DIRECTIONS}"
+            )
     if dtype not in DIRECT_DTYPES:
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
     wave_size = target.wave_size
@@ -228,7 +253,8 @@ class DirectStep:
 
     ``buffers`` names the buffers bound to the A, B and D kernarg slots (B is
     ``None`` for the two-operand weight transforms). ``conv_args`` is ``None``
-    for those too; a conv kernel takes its extents from it.
+    for those too; a conv kernel takes its extents from it. ``scalars`` are
+    the transforms' remaining kernargs (name, value), if any.
     """
 
     kernel_name: str
@@ -238,6 +264,7 @@ class DirectStep:
     block: Tuple[int, int, int]
     buffers: Tuple[str, Optional[str], str]
     conv_args: object = None
+    scalars: Tuple[Tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -245,7 +272,8 @@ class DirectPlan:
     """Everything needed to run one cached kernel (or pipeline) on a problem.
 
     Buffer names: ``x``/``w``/``y`` for forward, ``dy``/``w``/``dx`` for
-    dgrad, plus the scratch buffers in ``workspaces`` (name -> bytes).
+    dgrad, ``dy``/``x``/``dw`` (fp32) for wgrad, plus the scratch buffers in
+    ``workspaces`` (name -> bytes).
     """
 
     identity: KernelIdentity
@@ -309,7 +337,14 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "y")
         )
         return DirectPlan(identity, (step,)), "ok"
-    if variant != "direct_grouped_dgrad_mfma":
+    if identity.direction == "direct_wgrad":
+        # dY rides A, X rides B, and D is the fp32 dW the kernel accumulates
+        # into atomically (the caller zeroes it).
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        )
+        return DirectPlan(identity, (step,)), "ok"
+    if variant not in _MFMA_DGRAD:
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "dgrad", ("dy", "w", "dx")
         )
@@ -318,7 +353,15 @@ def plan_for(
     # MFMA pipeline: W -> W_T (transpose), optionally W_T -> W_coa
     # (reorganize), then a forward pass over the transposed problem.
     caps = _caps_of(identity)
-    helpers = direct_dgrad_weight_transforms(knobs)
+    runtime_channels = variant == "direct_dgrad_mfma_rtc"
+    helpers = direct_dgrad_weight_transforms(knobs, variant)
+    # The runtime-channel transforms take the original problem's per-group
+    # channel counts as kernargs.
+    scalars = (
+        tuple(zip(dc.DIRECT_WEIGHT_TRANSFORM_RTC_ARGS, (problem.cpg, problem.kpg)))
+        if runtime_channels
+        else ()
+    )
     steps = []
     for helper, helper_knobs, src, dst in helpers:
         helper_id = _helper_identity(
@@ -339,10 +382,13 @@ def plan_for(
             DirectStep(
                 kernel_name=entry[1]["kernel_name"],
                 hsaco_path=helper_path,
-                signature=conv_direct_transform_signature(identity.dtype_a),
+                signature=conv_direct_transform_signature(
+                    identity.dtype_a, runtime_channels
+                ),
                 grid=grid,
                 block=block,
                 buffers=(src, None, dst),
+                scalars=scalars,
             )
         )
     weights = helpers[-1][3]
@@ -391,7 +437,13 @@ def launch_values(
     """Kernarg values of ``step`` with its buffers bound to ``ptrs``/``sizes``."""
     a, b, d = step.buffers
     if step.conv_args is None:
-        return {"A": ptrs[a], "D": ptrs[d], "A_bytes": sizes[a], "D_bytes": sizes[d]}
+        return {
+            "A": ptrs[a],
+            "D": ptrs[d],
+            "A_bytes": sizes[a],
+            "D_bytes": sizes[d],
+            **dict(step.scalars),
+        }
     return step.conv_args.to_launch_values(
         ptrs[a], ptrs[b], ptrs[d], sizes[a], sizes[b], sizes[d]
     )

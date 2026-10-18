@@ -18,7 +18,11 @@ from dataclasses import replace
 
 __all__ = [
     "DIRECT_DGRAD_REORGANIZE",
+    "DIRECT_DGRAD_REORGANIZE_RTC",
     "DIRECT_DGRAD_TRANSPOSE",
+    "DIRECT_DGRAD_TRANSPOSE_RTC",
+    "DIRECT_MFMA_DGRAD",
+    "DIRECT_MFMA_HELPERS",
     "direct_dgrad_weight_transforms",
     "direct_dgrad_workspaces",
     "direct_mfma_knobs_reason",
@@ -30,9 +34,28 @@ __all__ = [
 ]
 
 # Weight-transform kernels of the MFMA dgrad pipeline, cached as their own
-# entries and found by exact identity.
+# entries and found by exact identity. The _RTC pair takes the channel counts
+# as kernargs (one binary per filter and fold_k32).
 DIRECT_DGRAD_TRANSPOSE = "direct_dgrad_transpose"
 DIRECT_DGRAD_REORGANIZE = "direct_dgrad_reorganize"
+DIRECT_DGRAD_TRANSPOSE_RTC = "direct_dgrad_transpose_rtc"
+DIRECT_DGRAD_REORGANIZE_RTC = "direct_dgrad_reorganize_rtc"
+DIRECT_MFMA_DGRAD = ("direct_grouped_dgrad_mfma", "direct_dgrad_mfma_rtc")
+# variant -> (transpose helper, reorganize helper)
+DIRECT_MFMA_HELPERS = {
+    "direct_grouped_dgrad_mfma": (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE),
+    "direct_dgrad_mfma_rtc": (DIRECT_DGRAD_TRANSPOSE_RTC, DIRECT_DGRAD_REORGANIZE_RTC),
+}
+_HELPERS = (
+    DIRECT_DGRAD_TRANSPOSE,
+    DIRECT_DGRAD_REORGANIZE,
+    DIRECT_DGRAD_TRANSPOSE_RTC,
+    DIRECT_DGRAD_REORGANIZE_RTC,
+)
+# Register budget for the MFMA dgrad fprop pass's preloaded weights and
+# accumulators (see direct_mfma_knobs_reason): three quarters of the 512-VGPR
+# file, leaving the rest for the LDS fragments and addressing.
+_MFMA_PRELOAD_VGPR_BUDGET = 384
 
 
 def make_direct_spec(variant: str, problem, knobs: dict):
@@ -86,10 +109,33 @@ def make_direct_spec(variant: str, problem, knobs: dict):
             problem, **{k: v for k, v in knobs.items() if k != "fold_k32"}
         )
         return replace(spec, fold_k32=fold_k32) if fold_k32 else spec
+    if variant == "direct_dgrad_mfma_rtc":
+        fold_k32 = knobs["fold_k32"]
+        spec = dc.make_dgrad_fprop_spec(
+            problem,
+            runtime_channels=True,
+            **{k: v for k, v in knobs.items() if k != "fold_k32"},
+        )
+        return replace(spec, fold_k32=fold_k32) if fold_k32 else spec
+    if variant == "direct_wgrad":
+        return dc.DirectConvWgradSpec(
+            problem=problem,
+            name="rocke_direct_conv_wgrad",
+            runtime_channels=True,
+            **knobs,
+        )
     if variant == DIRECT_DGRAD_TRANSPOSE:
         return dc.DirectTransposeWeightsDgradSpec(problem=problem)
     if variant == DIRECT_DGRAD_REORGANIZE:
         return dc.DirectReorganizeWeightsSpec(problem=problem, **knobs)
+    if variant == DIRECT_DGRAD_TRANSPOSE_RTC:
+        return dc.DirectTransposeWeightsDgradSpec(
+            problem=problem, runtime_channels=True
+        )
+    if variant == DIRECT_DGRAD_REORGANIZE_RTC:
+        return dc.DirectReorganizeWeightsSpec(
+            problem=problem, runtime_channels=True, **knobs
+        )
     raise ValueError(f"unknown direct conv variant {variant!r}")
 
 
@@ -99,6 +145,14 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
     The fprop spec validates K-atoms as ``ceil(cpg/16)``; with ``fold_k32``
     the pass actually runs ``kpg/32`` atoms of 32, and each wave along K
     takes an equal slice, so the split has to divide that count instead.
+
+    With ``waves_k > 1`` the fprop pass preloads its whole weight slice into
+    registers and keeps ``KH`` accumulator slots per (Q-subtile, M-tile) on
+    top. Past :data:`_MFMA_PRELOAD_VGPR_BUDGET` the kernel sits at the
+    512-VGPR ceiling and spills, and comgr's VGPR-to-AGPR spilling there has
+    produced a kernel that silently computes the wrong dX (correct at -O1
+    and with ``-amdgpu-spill-vgpr-to-agpr=0``). No spec under the budget
+    spills, so the cut costs no kernel that runs out of registers cleanly.
     """
     if knobs["fold_k32"]:
         if problem.kpg % 32:
@@ -108,6 +162,25 @@ def direct_mfma_knobs_reason(problem, knobs: dict) -> str | None:
         n_atoms = (problem.kpg + 15) // 16
     if n_atoms == 0 or n_atoms % knobs["waves_k"]:
         return f"{n_atoms} K-atoms do not split over waves_k={knobs['waves_k']}"
+    if knobs["waves_k"] > 1:
+        # The fprop pass runs on the transposed problem: it reduces over this
+        # kpg and its M-tiles cover this cpg.
+        n_m_tiles = (problem.cpg + 15) // 16
+        frag_vgprs = 4 if knobs["fold_k32"] else 2
+        weights = (
+            problem.KH
+            * problem.KW
+            * (n_atoms // knobs["waves_k"])
+            * n_m_tiles
+            * frag_vgprs
+        )
+        q_subtiles = knobs["block_q"] // knobs.get("waves_q", 1) // 16
+        accumulators = q_subtiles * n_m_tiles * problem.KH * 4
+        if weights + accumulators > _MFMA_PRELOAD_VGPR_BUDGET:
+            return (
+                f"preloaded weights ({weights}) + accumulators ({accumulators}) "
+                f"VGPRs > {_MFMA_PRELOAD_VGPR_BUDGET}: the kernel would spill"
+            )
     return None
 
 
@@ -121,19 +194,19 @@ def direct_uses_coalesced_weights(knobs: dict) -> bool:
 
 
 def direct_dgrad_weight_transforms(
-    knobs: dict,
+    knobs: dict, variant: str = "direct_grouped_dgrad_mfma"
 ) -> tuple[tuple[str, dict, str, str], ...]:
-    """The weight transforms the MFMA dgrad runs before its fprop pass.
+    """The weight transforms the MFMA dgrad ``variant`` runs before its fprop pass.
 
     ``(variant, knobs, source, destination)`` per kernel, in launch order, over
     the buffers ``w`` (the KYXC filter), ``ws_t`` and ``ws_coa`` (the scratch
     of :func:`direct_dgrad_workspaces`). The fprop pass reads the last
     destination.
     """
-    passes = [(DIRECT_DGRAD_TRANSPOSE, {}, "w", "ws_t")]
+    transpose, reorganize = DIRECT_MFMA_HELPERS[variant]
+    passes = [(transpose, {}, "w", "ws_t")]
     if direct_uses_coalesced_weights(knobs):
-        reorganize = {"fold_k32": knobs["fold_k32"]}
-        passes.append((DIRECT_DGRAD_REORGANIZE, reorganize, "ws_t", "ws_coa"))
+        passes.append((reorganize, {"fold_k32": knobs["fold_k32"]}, "ws_t", "ws_coa"))
     return tuple(passes)
 
 
@@ -157,7 +230,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
     try:
         if variant == "direct_nongrouped":
             return dn.is_valid_nongrouped_spec(spec, arch=arch)
-        if variant in ("direct_grouped", "direct_grouped_dgrad_mfma"):
+        if variant in ("direct_grouped",) + DIRECT_MFMA_DGRAD:
             spec.validate()
             return dc.is_valid_spec(spec, arch=arch)
         if variant == "direct_depthwise":
@@ -173,7 +246,10 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             return dc.is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
         if variant == "direct_grouped_dgrad":
             return dc.is_valid_dgrad_spec(spec, arch=arch)
-        if variant in (DIRECT_DGRAD_TRANSPOSE, DIRECT_DGRAD_REORGANIZE):
+        if variant == "direct_wgrad":
+            spec.validate()
+            return dc.is_valid_wgrad_spec(spec, arch=arch)
+        if variant in _HELPERS:
             return True, "ok"
     except ValueError as e:
         return False, str(e)
@@ -196,14 +272,18 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
         "direct_grouped_dgrad_mfma": dc.build_direct_conv,
+        "direct_dgrad_mfma_rtc": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
         "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,
         "direct_depthwise_dgrad": dc.build_direct_depthwise_dgrad_streaming,
         "direct_grouped_dgrad": dc.build_direct_conv_dgrad,
+        "direct_wgrad": dc.build_direct_conv_wgrad,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,
         DIRECT_DGRAD_REORGANIZE: dc.build_direct_reorganize_weights,
+        DIRECT_DGRAD_TRANSPOSE_RTC: dc.build_direct_transpose_weights_dgrad,
+        DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
     }
     return builders[variant](spec, arch=arch)
 
@@ -222,7 +302,7 @@ def direct_spec_for_problem(
     the shape too. The returned spec is the one its launch geometry comes from.
     Returns ``(None, why)`` otherwise.
     """
-    if variant == "direct_grouped_dgrad_mfma":
+    if variant in DIRECT_MFMA_DGRAD:
         why = direct_mfma_knobs_reason(problem, knobs)
         if why:
             return None, why
@@ -230,6 +310,15 @@ def direct_spec_for_problem(
     ok, why = validate_direct_spec(variant, spec, arch)
     if not ok:
         return None, why
+    if variant == "direct_wgrad":
+        # As the JIT sweep: no C tile wider than the problem's channels, so no
+        # wave stages and multiplies only channels the epilogue then drops.
+        c_tiles = -(-problem.cpg // spec.wave_tile_c)
+        if spec.waves_c > c_tiles:
+            return None, (
+                f"waves_c={spec.waves_c} exceeds the {c_tiles} channel tile(s) "
+                f"of cpg={problem.cpg}"
+            )
     if variant == "direct_nongrouped":
         # A binary serves every width, but only the widths a sweep for this
         # shape would try are offered, so no binary spends MFMA work past the

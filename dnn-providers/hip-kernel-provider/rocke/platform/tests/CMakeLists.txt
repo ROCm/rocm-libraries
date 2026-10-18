@@ -156,6 +156,38 @@ if(BUILD_TESTING)
                  rocke_tanh_lowering)
   endif()
 
+  # BF16x3 expansion of the emulated XF32 atoms, lowered from serialized IR.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_xf32_bf16x3_lowering.cpp")
+    add_executable(rocke_xf32_bf16x3_lowering core/test_xf32_bf16x3_lowering.cpp)
+    target_link_libraries(rocke_xf32_bf16x3_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_xf32_bf16x3_lowering COMMAND rocke_xf32_bf16x3_lowering)
+    set_tests_properties(rocke_xf32_bf16x3_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_xf32_bf16x3_lowering)
+    set_target_properties(rocke_xf32_bf16x3_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_xf32_bf16x3_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_xf32_bf16x3_lowering)
+  endif()
+
+  # f64 op rejection and f64 vector arithmetic in both C++ lowerers.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_f64_lowering.cpp")
+    add_executable(rocke_f64_lowering core/test_f64_lowering.cpp)
+    target_link_libraries(rocke_f64_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_f64_lowering COMMAND rocke_f64_lowering)
+    set_tests_properties(rocke_f64_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_lowering)
+    set_target_properties(rocke_f64_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_f64_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_f64_lowering)
+  endif()
+
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/flavor_datalayout_ssot.cpp")
     add_executable(rocke_flavor_datalayout_ssot core/flavor_datalayout_ssot.cpp)
@@ -253,6 +285,31 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_tiled_attention_2d_reentrancy)
+  endif()
+
+  # The three scalar-attention _lower_to_llvm wrappers take no target, so they
+  # lower for a fixed one while the lowerer itself rejects a NULL arch. Nothing
+  # else calls them, so this is the only thing that notices when they stop
+  # working.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/unified_attention_scalar_lower_to_llvm.cpp")
+    add_executable(rocke_unified_attention_scalar_lower_to_llvm
+                   instances/unified_attention_scalar_lower_to_llvm.cpp)
+    target_link_libraries(rocke_unified_attention_scalar_lower_to_llvm PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_unified_attention_scalar_lower_to_llvm PRIVATE m)
+    endif()
+    add_test(NAME rocke_unified_attention_scalar_lower_to_llvm
+             COMMAND rocke_unified_attention_scalar_lower_to_llvm)
+    set_tests_properties(rocke_unified_attention_scalar_lower_to_llvm
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name
+                                  rocke_unified_attention_scalar_lower_to_llvm)
+    set_target_properties(rocke_unified_attention_scalar_lower_to_llvm
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_unified_attention_scalar_lower_to_llvm
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_unified_attention_scalar_lower_to_llvm)
   endif()
 
   # Spec-validation parity for the two C++ fused-MoE mega builders: the

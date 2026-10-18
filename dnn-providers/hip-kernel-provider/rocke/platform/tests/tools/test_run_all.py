@@ -69,6 +69,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--build-root",
             str(tmp_path),
             "--config",
@@ -133,6 +134,7 @@ def test_ctest_readiness_and_failure_propagation(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -162,6 +164,7 @@ def test_ctest_discovery_failure_is_an_error(runner, monkeypatch, tmp_path):
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--no-pytest",
             "--build-root",
             str(tmp_path),
@@ -184,6 +187,23 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
 def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
     assert "ROCKE_STORAGE_TEST" not in runner.native_pytest_env(tmp_path, "Release")
     assert "native storage parity: SKIPPED" in capsys.readouterr().out
+
+
+def test_existing_engine_archive_is_reused_by_pytest(runner, tmp_path):
+    archive = tmp_path / "librocke_core.a"
+    archive.touch()
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(archive.resolve())
+
+
+def test_explicit_engine_archive_override_wins(runner, monkeypatch, tmp_path):
+    built = tmp_path / "librocke_core.a"
+    built.touch()
+    override = tmp_path / "override.a"
+    override.touch()
+    monkeypatch.setenv("ROCKE_TEST_ENGINE_ARCHIVE", str(override))
+    env = runner.native_pytest_env(tmp_path, "Release")
+    assert env["ROCKE_TEST_ENGINE_ARCHIVE"] == str(override.resolve())
 
 
 def test_invalid_override_is_an_error(runner, monkeypatch, tmp_path):
@@ -222,6 +242,7 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
             "--no-guard",
             "--no-gate",
             "--no-ir-validity",
+            "--no-arch-domain",
             "--build-root",
             str(tmp_path),
         ],

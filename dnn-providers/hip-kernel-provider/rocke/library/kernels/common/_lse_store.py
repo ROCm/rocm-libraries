@@ -30,11 +30,18 @@ def lse_store(
     b.global_store(dst, element_offset, value, align=4)
 
 
-def dense_row_has_key(b, query_row, kv_length, *, causal, diagonal, window):
-    """Key existence is independent of the finite score-mask sentinel."""
+def dense_row_has_key(
+    b, query_row, kv_length, *, causal, diagonal, window, right_bound=0
+):
+    """Key existence is independent of the finite score-mask sentinel.
+
+    ``right_bound`` is the causal lookahead: the last visible key is
+    ``diagonal + query_row + right_bound`` (ignored when not ``causal``).
+    """
     last_key = b.sub(kv_length, b.const_i32(1))
     shifted_q = b.add(query_row, b.const_i32(diagonal)) if diagonal else query_row
-    upper = b.smin(last_key, shifted_q) if causal else last_key
+    upper_q = b.add(shifted_q, b.const_i32(right_bound)) if right_bound else shifted_q
+    upper = b.smin(last_key, upper_q) if causal else last_key
     lower = (
         b.smax(b.const_i32(0), b.sub(shifted_q, b.const_i32(window - 1)))
         if window
