@@ -31,7 +31,6 @@
 #include <type_traits>
 
 #include <cassert>
-#include <cstring>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -186,6 +185,8 @@ enum class target_arch : unsigned int
     gfx1151 = 1151,
     gfx1152 = 1152,
     gfx1153 = 1153,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250,
@@ -258,7 +259,9 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1150:
         case target_arch::gfx1151:
         case target_arch::gfx1152:
-        case target_arch::gfx1153: return gen::rdna3;
+        case target_arch::gfx1153:
+        case target_arch::gfx1170:
+        case target_arch::gfx1171: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
         case target_arch::gfx1250: return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
@@ -285,19 +288,22 @@ constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
 };
 
 /**
- * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
+ * \brief Checks if the first `n` characters of `rhs` are equivalent to `lhs`
  * 
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
- * \return true if the `n` character long prefix of `rhs` is equal to `lhs`
+ * \return true if the `n` character long prefix of `rhs` is equivalent to `lhs`,
+ *         with '-' in `rhs` treated as equivalent to '_' in `lhs`.
  */
 constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
 {
     std::size_t i = 0;
     for(; i < n; ++i)
     {
-        if(*lhs != *rhs || *lhs == '\0')
+        // Treat '-' in rhs as equivalent to '_' in lhs
+        const bool same = *lhs == *rhs || (*lhs == '_' && *rhs == '-');
+        if(!same || *lhs == '\0')
         {
             break;
         }
@@ -335,6 +341,8 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1151);
     ROCPRIM_RETURN_IF_ARCH(gfx1152);
     ROCPRIM_RETURN_IF_ARCH(gfx1153);
+    ROCPRIM_RETURN_IF_ARCH(gfx1170);
+    ROCPRIM_RETURN_IF_ARCH(gfx1171);
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
     ROCPRIM_RETURN_IF_ARCH(gfx1250);
@@ -380,14 +388,7 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
         return result;
     }
 
-    // `gfx1250-strict` isn't valid C++ syntax, so if gcnArchName is `gfx1250-strict`, it will be converted to `gfx1250_strict` in parse_gcn_arch.
-    char* arch_name = device_props.gcnArchName;
-    char hyphen = '-';
-    char underscore = '_';
-    char* arch_name_end = arch_name + std::strlen(arch_name);
-    std::replace(arch_name, arch_name_end, hyphen, underscore);
-
-    arch = parse_gcn_arch(arch_name);
+    arch = parse_gcn_arch(device_props.gcnArchName);
     arch_cache[device_id].exchange(arch, std::memory_order_relaxed);
 
     return hipSuccess;

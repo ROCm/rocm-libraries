@@ -150,4 +150,17 @@ if( "${BACKEND}" STREQUAL "HIP")
         ${RPP_SOURCE_DIR}/src/include/common/hip
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE hip::device)
+    # Debug device code carries -g for every --offload-arch, which makes .hip_fatbin the bulk of
+    # librpp.so. Store the device bundles compressed -- the HIP runtime inflates them on module
+    # load -- so kernels stay debuggable without the build producing multi-GB artifacts. Scoped
+    # to this target because --offload-compress is HIP-only and would go unused elsewhere.
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+        check_cxx_compiler_flag("--offload-compress -x hip" RPP_CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+        if(RPP_CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+            target_compile_options(${PROJECT_NAME} PRIVATE --offload-compress)
+            message("-- ${Green}AMD RPP ${PROJECT_NAME} -- Debug build: HIP device code compressed (--offload-compress)${ColourReset}")
+        else()
+            message(WARNING "AMD RPP ${PROJECT_NAME} -- Debug build: --offload-compress is unsupported; device code will not be compressed")
+        endif()
+    endif()
 endif()
