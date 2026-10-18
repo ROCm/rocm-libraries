@@ -13,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,9 @@ struct ScoredKernel
 
 namespace detail
 {
+
+/// The root of the shared-workspace tokens a graph match publishes (RFC 0021 §6): `ws.<name>`.
+inline constexpr std::string_view WORKSPACE_TOKEN_ROOT = "ws.";
 
 /// `priority` descending, then id ascending (RFC 0019 §5 step 5). Never discovery order, which
 /// varies by filesystem.

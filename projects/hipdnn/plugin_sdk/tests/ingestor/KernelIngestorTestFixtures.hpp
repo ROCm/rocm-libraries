@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -29,7 +30,9 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -1071,6 +1074,336 @@ void runConcurrently(int threadCount, Body body)
     }
 }
 
+/// Builds an engine config setting each of @p settings, an integer knob each. Knob ids are free
+/// text, so `<slot>.<field>` and the `global.` knobs can be set alike.
+inline hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+    makeIntKnobsEngineConfig(flatbuffers::FlatBufferBuilder& builder,
+                             const std::vector<std::pair<std::string, int64_t>>& settings)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    std::vector<flatbuffers::Offset<KnobSetting>> knobSettings;
+    knobSettings.reserve(settings.size());
+    for(const auto& [name, value] : settings)
+    {
+        knobSettings.push_back(CreateKnobSettingDirect(
+            builder, name.c_str(), KnobValue::IntValue, CreateIntValue(builder, value).Union()));
+    }
+    auto knobsVector = builder.CreateVector(knobSettings);
+    builder.Finish(CreateEngineConfig(builder, ENGINE_ID.front(), knobsVector));
+
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// A synthetic three-slot engine (prep, dkdv, dq; RFC 0021) for plan, workspace and enumeration
+/// tests. Its native graph match publishes the shared-workspace tokens, and each slot's handler
+/// records what it was launched with. Nested so that its names stay out of other fixtures' scopes.
+namespace slotted
+{
+
+constexpr const char* GRAPH_MATCH = "hipdnn.kernel_ingestor.test.slotted_engine.graph_match";
+constexpr const char* SHARED_TOKEN = "ws.bytes";
+constexpr const char* DELTA_OFFSET_TOKEN = "ws.delta.offset";
+constexpr const char* LSE_OFFSET_TOKEN = "ws.lse.offset";
+constexpr const char* SEQLEN_TOKEN = "seqlen";
+constexpr const char* BLOCK_M = "block_m";
+constexpr const char* SCRATCH = "scratch";
+constexpr int64_t DELTA_OFFSET = 0;
+constexpr int64_t LSE_OFFSET = 512;
+
+/// What the graph match publishes. Global because a graph match is a plain function pointer;
+/// SlottedEngineFixture resets it on construction.
+struct GraphMatchConfig
+{
+    int64_t sharedBytes = 1000;
+    bool declines = false;
+};
+
+inline GraphMatchConfig& graphMatchConfig()
+{
+    static GraphMatchConfig s_config;
+    return s_config;
+}
+
+inline std::optional<BoundTokens> slottedGraphMatch(const MatchContext& /*context*/)
+{
+    const auto& config = graphMatchConfig();
+    if(config.declines)
+    {
+        return std::nullopt;
+    }
+    return BoundTokens{
+        {SHARED_TOKEN, config.sharedBytes},
+        {SCRATCH_OFFSET_TOKEN,
+         static_cast<int64_t>(alignSharedWorkspace(static_cast<size_t>(config.sharedBytes)))},
+        {DELTA_OFFSET_TOKEN, DELTA_OFFSET},
+        {LSE_OFFSET_TOKEN, LSE_OFFSET},
+        {SEQLEN_TOKEN, int64_t{128}}};
+}
+
+/// One launch as a slot handler saw it.
+struct SlotLaunch
+{
+    std::string slot;
+    DescriptorId kernel{};
+    /// The workspace pointer the handler was handed: the plan's unshifted base.
+    const void* workspace = nullptr;
+    /// What the handler read from the graph match's tokens in prepare().
+    int64_t scratchOffset = 0;
+    int64_t deltaOffset = 0;
+};
+
+/// What the handlers did, and which kernels fail to prepare.
+struct SlotLog
+{
+    std::vector<SlotLaunch> launches;
+    std::set<DescriptorId> failingPrepare;
+    /// Kernels whose prepare throws a HipdnnPluginException of the given status.
+    std::map<DescriptorId, hipdnnPluginStatus_t> failingPrepareWithStatus;
+    /// Kernels whose launch throws.
+    std::set<DescriptorId> failingLaunch;
+
+    std::vector<std::string> slotOrder() const
+    {
+        std::vector<std::string> order;
+        order.reserve(launches.size());
+        for(const auto& launch : launches)
+        {
+            order.push_back(launch.slot);
+        }
+        return order;
+    }
+};
+
+class RecordingSlotHandler : public IKernelDispatchHandler<StubHandle>
+{
+    struct Prepared : PreparedDispatch
+    {
+        DescriptorId kernel{};
+        int64_t scratchOffset = 0;
+        int64_t deltaOffset = 0;
+    };
+
+public:
+    RecordingSlotHandler(std::string slot, SlotLog& log)
+        : _slot(std::move(slot))
+        , _log(&log)
+    {
+    }
+
+    /// Scratch only, as RFC 0021 §6 requires of a slotted kernel.
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(SCRATCH));
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& bound,
+                                              const KernelDefinition& kernel) const override
+    {
+        if(_log->failingPrepare.count(kernel.kernelId) != 0)
+        {
+            throw std::runtime_error("synthetic prepare failure");
+        }
+        if(const auto failing = _log->failingPrepareWithStatus.find(kernel.kernelId);
+           failing != _log->failingPrepareWithStatus.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(failing->second,
+                                                           "synthetic prepare status failure");
+        }
+        auto prepared = std::make_unique<Prepared>();
+        prepared->kernel = kernel.kernelId;
+        prepared->scratchOffset = tryGetBoundInt(bound, SCRATCH_OFFSET_TOKEN).value_or(-1);
+        prepared->deltaOffset = tryGetBoundInt(bound, DELTA_OFFSET_TOKEN).value_or(-1);
+        return prepared;
+    }
+
+    void launch(const StubHandle& /*handle*/,
+                const PreparedDispatch& prepared,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* workspace) const override
+    {
+        const auto& state = static_cast<const Prepared&>(prepared);
+        if(_log->failingLaunch.count(state.kernel) != 0)
+        {
+            throw std::runtime_error("synthetic launch failure");
+        }
+        _log->launches.push_back(
+            {_slot, state.kernel, workspace, state.scratchOffset, state.deltaOffset});
+    }
+
+private:
+    std::string _slot;
+    SlotLog* _log;
+};
+
+struct SlotKernel
+{
+    uint8_t seed;
+    const char* name;
+    int64_t blockM;
+    int64_t scratch;
+};
+
+/// prep {2 kernels}, dkdv {3}, dq {2}: twelve combinations. Kernel ids sort as seeds do.
+inline std::vector<std::vector<SlotKernel>> defaultSlotKernels()
+{
+    return {{{0x11, "prep_a", 64, 0}, {0x12, "prep_b", 128, 256}},
+            {{0x21, "dkdv_a", 64, 4096}, {0x22, "dkdv_b", 128, 16384}, {0x23, "dkdv_c", 256, 8192}},
+            {{0x31, "dq_a", 64, 2048}, {0x32, "dq_b", 128, 12288}}};
+}
+
+inline const std::vector<std::string>& slotNames()
+{
+    static const std::vector<std::string> s_names{"prep", "dkdv", "dq"};
+    return s_names;
+}
+
+/// The engine, its handlers, and the symbols they register, for one test.
+class SlottedEngineFixture
+{
+public:
+    using Engine = GenericEngine<StubHandle, StubSettings, StubContext>;
+
+    /// @param timer Replaces the benchmark's HIP-event timer, so benchmarking runs without a device.
+    explicit SlottedEngineFixture(const std::vector<std::vector<SlotKernel>>& kernelsBySlot
+                                  = defaultSlotKernels(),
+                                  BenchmarkPlan<StubHandle>::Timer timer = {})
+    {
+        graphMatchConfig() = GraphMatchConfig{};
+        GraphMatchRegistry::registerSymbol(GRAPH_MATCH, &slottedGraphMatch);
+
+        EngineDescriptor engine = makeEngineWithKnobs({});
+        engine.name = "test:slotted";
+        engine.graphMatchNativeSymbol = GRAPH_MATCH;
+        engine.sharedWorkspaceToken = SHARED_TOKEN;
+
+        std::vector<KernelSlotInput> inputs;
+        std::vector<DispatchDescriptor> dispatches;
+        const auto& names = slotNames();
+        inputs.reserve(names.size());
+        dispatches.reserve(names.size());
+        _handlers.reserve(names.size());
+        _symbols.reserve(names.size());
+        engine.slots.reserve(names.size());
+        for(size_t slot = 0; slot < names.size(); ++slot)
+        {
+            const auto base = static_cast<uint8_t>(0x10 * (slot + 1));
+            const auto dispatchId = testId(static_cast<uint8_t>(0xD0 + slot));
+            _symbols.push_back("hipdnn.kernel_ingestor.test.slotted_engine.dispatch."
+                               + names[slot]);
+            _handlers.push_back(std::make_unique<RecordingSlotHandler>(names[slot], _log));
+            DispatchRegistry<StubHandle>::registerSymbol(_symbols.back(), _handlers.back().get());
+            dispatches.push_back({dispatchId, names[slot] + " dispatch", _symbols.back()});
+
+            KernelDescriptorPack pack;
+            pack.id = testId(base);
+            pack.name = names[slot] + " pack";
+            pack.engineId = ENGINE_ID;
+            pack.dispatchId = dispatchId;
+            pack.slot = names[slot];
+            for(const auto& spec : kernelsBySlot[slot])
+            {
+                KernelDescriptor kernel;
+                kernel.id = testId(spec.seed);
+                kernel.name = spec.name;
+                kernel.source.sourceFile = "Test.cpp";
+                kernel.source.entryPoint = spec.name;
+                kernel.metadata = {{BLOCK_M, MetadataValue{spec.blockM}},
+                                   {SCRATCH, MetadataValue{spec.scratch}}};
+                pack.kernels.push_back(std::move(kernel));
+            }
+
+            MetadataSchema schema{testId(static_cast<uint8_t>(0xA0 + slot)),
+                                  names[slot] + " kmd",
+                                  {{BLOCK_M, MetadataType::INT, std::nullopt},
+                                   {SCRATCH, MetadataType::INT, std::nullopt}}};
+            inputs.push_back({names[slot],
+                              std::move(schema),
+                              {std::move(pack)},
+                              std::make_shared<UnrankedKernelHeuristic>()});
+
+            SlotDescriptor described;
+            described.name = names[slot];
+            described.metadataSchemaId = testId(static_cast<uint8_t>(0xA0 + slot));
+            described.knobs = {BLOCK_M};
+            engine.slots.push_back(std::move(described));
+        }
+
+        auto manager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+            std::move(inputs),
+            std::vector<MatchDescriptor>{},
+            std::move(dispatches),
+            GRAPH_MATCH,
+            SHARED_TOKEN,
+            "engine 'slotted fixture'");
+        _manager = manager.get();
+        _engine = std::make_unique<Engine>(
+            std::move(engine),
+            std::move(manager),
+            _resolver,
+            std::map<std::string, std::map<std::string, HeuristicDescriptor>>{},
+            std::map<std::string, std::set<std::string>>{},
+            std::string{},
+            nlohmann::json::object(),
+            std::move(timer));
+    }
+
+    ~SlottedEngineFixture()
+    {
+        _engine.reset();
+        for(const auto& symbol : _symbols)
+        {
+            DispatchRegistry<StubHandle>::unregisterSymbol(symbol);
+        }
+        GraphMatchRegistry::unregisterSymbol(GRAPH_MATCH);
+    }
+
+    SlottedEngineFixture(const SlottedEngineFixture&) = delete;
+    SlottedEngineFixture& operator=(const SlottedEngineFixture&) = delete;
+    SlottedEngineFixture(SlottedEngineFixture&&) = delete;
+    SlottedEngineFixture& operator=(SlottedEngineFixture&&) = delete;
+
+    Engine& engine()
+    {
+        return *_engine;
+    }
+
+    SlotLog& log()
+    {
+        return _log;
+    }
+
+    /// The engine's state manager, which owns its winner records.
+    const KernelIngestorStateManager<StubHandle>& manager() const
+    {
+        return *_manager;
+    }
+
+    /// Builds the plan @p config selects for @p graph.
+    StubContext planFor(const TestGraph& graph,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config)
+    {
+        StubContext context;
+        const StubHandle handle;
+        _engine->initializeExecutionContext(handle, graph, config, context);
+        return context;
+    }
+
+private:
+    SlotLog _log;
+    StubDeviceResolver _resolver;
+    std::vector<std::string> _symbols;
+    std::vector<std::unique_ptr<RecordingSlotHandler>> _handlers;
+    const KernelIngestorStateManager<StubHandle>* _manager = nullptr;
+    std::unique_ptr<Engine> _engine;
+};
+
+} // namespace slotted
 } // namespace hipdnn_plugin_sdk::ingestor::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -505,6 +505,50 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsA
     EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
 }
 
+/// Golden pin of an unslotted engine's advertised knobs: the ids are the bare KMD field
+/// names in the UED's declared order (never prefixed), an INT field is addressed by its
+/// own value and a non-INT one by its ordinal, each default is the top-ranked value, and
+/// the constraint lists the values in ranked-first order with step 1. The catalog is
+/// {64 FLOAT, 256 FLOAT, 64 HALF} scored by block size, so 256 FLOAT ranks first.
+TEST(TestIngestorGenericPlanBuilder, UnslottedGoldenCustomKnobsAreBareKmdFieldIdsWithPinnedDomains)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x9B));
+    const auto knobs = builder.getCustomKnobs(0, graph);
+
+    ASSERT_EQ(knobs.size(), 2U);
+
+    const auto& blockSize = knobs[0];
+    EXPECT_EQ(blockSize.knob_id, "block_size");
+    EXPECT_EQ(blockSize.description, "Kernel metadata field 'block_size' of engine 'test:engine'");
+    ASSERT_TRUE(blockSize.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(blockSize.default_value.AsIntValue()->value, 256);
+    ASSERT_TRUE(blockSize.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->min_value, 64);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->max_value, 256);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->valid_values,
+              (std::vector<int64_t>{256, 64}));
+
+    const auto& dtype = knobs[1];
+    EXPECT_EQ(dtype.knob_id, "dtype");
+    EXPECT_EQ(dtype.description,
+              "Kernel metadata field 'dtype' of engine 'test:engine'"
+              " (ordinal: an index into the field's value set)");
+    ASSERT_TRUE(dtype.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(dtype.default_value.AsIntValue()->value, 0);
+    ASSERT_TRUE(dtype.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->min_value, 0);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->max_value, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->valid_values, (std::vector<int64_t>{0, 1}));
+}
+
 TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);

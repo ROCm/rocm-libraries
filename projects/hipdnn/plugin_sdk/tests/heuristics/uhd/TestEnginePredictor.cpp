@@ -392,6 +392,32 @@ TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
     EXPECT_EQ(scorerCalls, 0U);
 }
 
+/// A slotted engine's model records `kmds` in a 1.1 document (RFC 0021 §9); the engine role
+/// must estimate from it rather than refusing the provenance form.
+TEST_F(TestEnginePredictor, AModelNamingEverySlotsKmdIsEstimatedAndAMalformedOneIsNot)
+{
+    auto slotted = document();
+    slotted["version"] = "1.1";
+    slotted["trained_against"].erase("kmd");
+    slotted["trained_against"]["kmds"]
+        = {{{"slot", "prep"}, {"id", "31112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}},
+           {{"slot", "dkdv"}, {"id", "32112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}};
+    auto cfg = config(slotted);
+
+    const auto result = predict(cfg);
+    ASSERT_EQ(result.status, PredictionStatus::AVAILABLE) << result.reason;
+    EXPECT_NEAR(result.value, 42.0, 1e-12);
+
+    // A config that bypassed the parser is judged by the same slot rules: a repeated slot is
+    // refused, and no estimate is produced.
+    scorerCalls = 0;
+    cfg.trainedAgainst["kmds"].push_back(cfg.trainedAgainst["kmds"][0]);
+    const auto refused = predict(cfg);
+    EXPECT_NE(refused.status, PredictionStatus::AVAILABLE);
+    EXPECT_NE(refused.reason.find("twice"), std::string::npos) << refused.reason;
+    EXPECT_EQ(scorerCalls, 0U);
+}
+
 /// Revisions compare for equality, so 1.0, "1" or true must not be read as 1.
 TEST_F(TestEnginePredictor, AFeatureSemanticsRevisionMustBeAPositiveInteger)
 {

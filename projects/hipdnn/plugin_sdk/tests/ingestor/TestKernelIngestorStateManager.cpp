@@ -424,6 +424,38 @@ TEST(TestKernelIngestorStateManager, RejectsATupleSharedByTwoPacksAtTheSameGener
                  std::invalid_argument);
 }
 
+/// An unslotted engine still refuses, at construction, two kernels sharing one id even when
+/// their metadata tuples differ: an id names one candidate per device. (The duplicate-tuple
+/// counterpart is the RejectsTwoKernelsSharingAMetadataTuple case of
+/// TestKernelIngestorStateManagerConstructionThrows.)
+TEST(TestKernelIngestorStateManager, UnslottedGoldenRejectsTwoKernelsSharingAKernelId)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    auto pack = makePack({GRAPH_MATCHER_ID});
+    // testId(0x64) is already "kernel_64_float"; this one differs in tuple only.
+    pack.kernels.push_back(makeKernel(testId(0x64), "kernel_same_id", 512, "FLOAT"));
+
+    try
+    {
+        const StateManager manager(makeSchema(),
+                                   makeTestMatchers(),
+                                   makeTestDispatches(),
+                                   {pack},
+                                   std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                   "test.graph");
+        FAIL() << "expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        EXPECT_NE(
+            std::string(ex.what()).find("is declared twice on an arch both declarations reach"),
+            std::string::npos)
+            << ex.what();
+    }
+}
+
 inline bool declineTheExplicitKernel(const MatchContext& context,
                                      const BoundTokens& bound,
                                      const KernelDefinition& kernel)
@@ -1196,6 +1228,8 @@ TEST(TestKernelIngestorStateManager, ASortedCatalogIsCachedPerRankingMetric)
         << "the time request was served the order cached for tflops";
 }
 
+constexpr const char* ENGINE_NAME = "test.decline.engine";
+
 // A pack whose kernel matchers reject everything contributes nothing, so it must read
 // as excluded rather than as a participant that happened to score zero. The two declines
 // ahead of it, arch and graph-scoped, both say plainly that the pack is out.
@@ -1205,14 +1239,15 @@ TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanRepor
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", rejectEveryKernel);
-    const auto manager = makeStateManager();
+    const auto manager = makeNamedStateManager(ENGINE_NAME);
     const TestGraph graph(makeGraphId(0x5E));
     const auto properties = testDeviceProperties();
 
     EXPECT_TRUE(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
 
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
-                                          toString(PACK_ID)
+                                          "engine '" + std::string(ENGINE_NAME) + "' pack "
+                                              + toString(PACK_ID)
                                               + " admitted no kernel of 3 at the arch gate or a "
                                                 "kernel-scoped matcher"))
         << "a pack that contributed nothing must not read as one that scored zero:\n"
@@ -1220,6 +1255,31 @@ TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanRepor
 
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "admitted 0 of"))
         << "the zero-admit case must not fall through to the contributor message:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
+// A cached decline is reused without re-running the engine's matchers, so the repeat call
+// must name the engine itself for a reader attributing the decline.
+TEST(TestKernelIngestorStateManager, ReusingACachedDeclineNamesTheEngine)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", rejectEveryKernel);
+    const auto manager = makeNamedStateManager(ENGINE_NAME);
+    const TestGraph graph(makeGraphId(0x60));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const std::string reuse
+        = "engine '" + std::string(ENGINE_NAME) + "' reuses its cached decline for device 0";
+
+    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, reuse))
+        << "the first query builds the catalog, it does not reuse one:\n"
+        << recorder.getRecordedLogsAsString();
+
+    EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, reuse))
         << recorder.getRecordedLogsAsString();
 }
 
