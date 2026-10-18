@@ -4,6 +4,7 @@
 #pragma once
 
 #include <numeric>
+#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/layout.hpp>
 #include <type_traits>
 #include <vector>
@@ -17,7 +18,7 @@ inline std::vector<size_t> resolvedIndexOrder(const Shape& shape, std::span<cons
     }
     if (axes.size() != shape.rank())
         throw std::runtime_error("Tensor index order rank does not match shape rank.");
-    if (!detail::isValidIndexOrder(shape.rank(), axes))
+    if (!detail::ShapeAccess::isValidIndexOrder(shape.rank(), axes))
         throw std::runtime_error("Tensor index order must contain each dimension once.");
     return axes;
 }

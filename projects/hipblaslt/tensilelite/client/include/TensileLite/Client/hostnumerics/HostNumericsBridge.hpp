@@ -6,6 +6,7 @@
 // TensileLite client-private adapter.
 
 #include <roc/hostnumerics/comparison.hpp>
+#include <roc/hostnumerics/detail/shape_access.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/operation_types.hpp>
 #include <roc/hostnumerics/tensor.hpp>
@@ -114,7 +115,7 @@ namespace TensileLite::Client
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::StrideRankMismatch));
         }
-        if(!roc::hostnumerics::detail::tryElementCount(descriptor.sizes()))
+        if(!roc::hostnumerics::detail::ShapeAccess::tryElementCount(descriptor.sizes()))
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
                 hostnumerics::detail::DescriptorError::ElementCountOverflow));
@@ -347,7 +348,8 @@ namespace TensileLite::Client
         tryReferenceOutputSelection(TensorDescriptor const& descriptor, size_t elementsToValidate)
     {
         using roc::hostnumerics::OutputSelection;
-        const auto logicalCount = roc::hostnumerics::detail::tryElementCount(descriptor.sizes());
+        const auto logicalCount
+            = roc::hostnumerics::detail::ShapeAccess::tryElementCount(descriptor.sizes());
         if(!logicalCount)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
