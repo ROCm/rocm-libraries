@@ -7,7 +7,6 @@ from ...implementations import wmma
 from ...contract import Case
 
 NAME = "gfx1151"
-FAMILIES = (NAME,)
 CASES = wmma.CASES
 CASE_BY_ID = {case.id: case for case in CASES}
 

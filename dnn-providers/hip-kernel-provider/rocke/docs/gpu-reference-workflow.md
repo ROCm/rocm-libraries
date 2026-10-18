@@ -47,7 +47,7 @@ kernel binary while still exercising distinct address calculations.
 
 For existing operations, edit
 `library/tests/<operation>_reference/architectures/<arch>/__init__.py` and its
-`CASES`. The adapter exports `NAME`, `FAMILIES`, `CASES`, `CASE_BY_ID`, `prepare`,
+`CASES`. The adapter exports `NAME`, `CASES`, `CASE_BY_ID`, `prepare`,
 `launch`, and `exported_kernel`. It must use the production dispatch/launch path
 and freeze the complete replay ABI. Keep the independent oracle independent of
 production indexing and geometry helpers.
@@ -269,6 +269,36 @@ payload belongs under
 `bin/hip_kernel_provider/engines/test_arch_content/rocke/<operation>/<arch>/` in
 its architecture's test artifact, outside release library payloads. Test the
 assembled generic and matching architecture artifacts when validating packaging.
+
+### Processor selection in TheRock jobs
+
+TheRock owns build-family membership and expands it into the job's
+`AMDGPU_TARGETS`. Reference tests consume that comma-separated list of concrete
+processors; they do not define their own family aliases or infer qualification
+from `AMDGPU_FAMILIES`. A family name describes build and artifact selection,
+not a promise that every member has a qualified reference bundle.
+
+The shared test artifact contains CTest entries for all published reference
+pairs. Before accessing a bundle, each entry checks its processor against the
+requested targets and the actual GPU:
+
+| Condition | Result |
+|---|---|
+| The suite's processor is outside `AMDGPU_TARGETS` | Skip with exit 77 |
+| The GPU is another processor in `AMDGPU_TARGETS` | Skip with exit 77, even if that GPU has no reference cohort or published bundle |
+| The GPU matches the suite's processor | Run; missing or corrupt required reference data fails |
+| The suite's processor is requested, but the GPU is absent or outside `AMDGPU_TARGETS` | Fail with a required-GPU error |
+
+When `AMDGPU_TARGETS` is absent, selection uses the actual processor: a different
+GPU skips the suite, and a missing GPU fails an explicitly selected suite.
+Family-name spelling does not change those decisions. Source pytest without an
+explicit operation/architecture request also skips processors without an enrolled
+cohort or installed bundle. An explicit candidate-verification request still
+requires its own qualified bundle and lock, including on qualification-only
+processors such as gfx1200. A skip records absent coverage; it does not qualify
+another processor or permit reuse of another processor's certificate.
+
+### Enroll provider test selection
 
 New published pairs get separate `rocke_<operation>_gpu_<arch>_pytest` CTest
 entries. Add each new entry to the provider's

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,15 +28,9 @@ def reference_bundle(pytestconfig):
         pytest.skip("reference options select another operation")
     configured = pytestconfig.getoption("--rocke-reference-bundle")
     arch = get_device_processor()
-    declared = os.environ.get("AMDGPU_FAMILIES", "").lower()
     if arch not in ARCHITECTURES:
-        expected = any(
-            family in declared
-            for name in ARCHITECTURES
-            for family in get_architecture(name).FAMILIES
-        )
         required = operation or configured
-        if expected or (not arch and required):
+        if not arch and required:
             pytest.fail("the required enrolled SDPA GPU is not available")
         pytest.skip(f"no SDPA reference cohort is enrolled for {arch}")
     target = get_architecture(arch)

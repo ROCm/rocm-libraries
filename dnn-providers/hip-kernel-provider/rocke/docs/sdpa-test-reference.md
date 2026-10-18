@@ -179,6 +179,10 @@ device initialization. Run a device preflight when selecting another setup.
 job's requested artifacts, not two GPUs present on the runner. Session startup
 compares the physical processor with these targets before opening a reference
 bundle. It preserves `gfx1200` instead of using its `gfx12-generic` catalog name.
+TheRock owns the family expansion; the reference selector consumes its concrete
+target list without maintaining separate family aliases. If that list is absent,
+the suite selects by physical processor alone. See the shared
+[processor-selection rules](gpu-reference-workflow.md#processor-selection-in-therock-jobs).
 
 For a job with that target list:
 
@@ -379,7 +383,7 @@ Normal provider CI uses the defaults. The settings are:
 
 Explicit operation/architecture selection makes the suite required, including
 failure on a missing bundle. CTest supplies these options. Architecture-lane
-selection still uses the detected GPU and CI's `AMDGPU_FAMILIES`/`AMDGPU_TARGETS`.
+selection still uses the detected GPU and CI's concrete `AMDGPU_TARGETS`.
 Bundle and lock overrides require explicit operation and architecture options.
 A lock override also requires a bundle path. For candidate qualification and
 verification, follow the [reference workflow](gpu-reference-workflow.md).

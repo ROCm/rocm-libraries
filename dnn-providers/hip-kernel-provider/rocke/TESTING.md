@@ -746,9 +746,13 @@ not add `ex_gpu_*` labels: the current provider runner would use those labels
 as an inclusion filter and omit unrelated tests. Architecture selection occurs
 inside the reference test entry, before collection and bundle lookup. TheRock
 passes `AMDGPU_FAMILIES` for the family and comma-separated `AMDGPU_TARGETS`
-for the fetched target artifacts. The gate uses exact targets when available,
-falls back to family expectations for local runs, and checks the actual HIP
-device architecture before executing a selected cohort. Adding a
+for the fetched target artifacts. The gate uses exact targets when available
+and selects by the physical HIP processor when they are absent. It does not
+infer reference enrollment from family names. A processor without a published
+cohort skips the other processors' suites; this records absent pinned-reference
+coverage. Explicit candidate requests still require their bundle and lock.
+See the [processor-selection rules](docs/gpu-reference-workflow.md#processor-selection-in-therock-jobs).
+Adding a
 published architecture creates a separate CTest automatically. Add its exact
 test name to the provider category YAML; it also requires an adapter, qualified
 bundle, and matching CI hardware.

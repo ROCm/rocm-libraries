@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
 NAME = "gfx950"
-FAMILIES = ("gfx950",)
 
 CASES = tuple(
     Case(*row)

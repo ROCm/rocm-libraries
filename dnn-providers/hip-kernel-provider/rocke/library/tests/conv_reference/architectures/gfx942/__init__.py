@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from rocke.runtime import KernelLauncher
 
 NAME = "gfx942"
-FAMILIES = ("gfx942", "gfx94x")
 CASES = tuple(
     Case(name=name, dtype=dtype, **geometry)
     for name, geometry in (

@@ -451,9 +451,7 @@ def test_reference_session_uses_hardware_target_identity(
 def test_reference_entry_skips_a_different_gpu_lane():
     from reference_common.pytest_support import architecture_available
 
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx950", "gfx950-dcgpu"
-    )
+    assert not architecture_available("gfx942", "gfx950")
 
 
 @pytest.mark.parametrize("device", [None, "gfx950"], ids=["missing-gpu", "wrong-gpu"])
@@ -461,29 +459,96 @@ def test_reference_selected_target_requires_matching_hardware(device):
     from reference_common.pytest_support import architecture_available
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
-        architecture_available(
-            "gfx942", ("gfx942", "gfx94x"), device, "gfx94X-dcgpu", "gfx942"
-        )
+        architecture_available("gfx942", device, "gfx942")
 
 
-def test_reference_exact_targets_override_the_family():
+def test_reference_exact_targets_select_only_matching_cohorts():
     from reference_common.pytest_support import architecture_available
 
-    # Same family, different artifact target: do not require the gfx942 bundle.
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941"
-    )
+    # Same family, different artifact target: do not require the gfx1201 bundle.
+    assert not architecture_available("gfx1201", "gfx1200", "gfx1200")
     # Downloading both artifacts does not mean both devices are present.
-    assert not architecture_available(
-        "gfx942", ("gfx942", "gfx94x"), "gfx941", "gfx94X-dcgpu", "gfx941,gfx942"
-    )
+    assert not architecture_available("gfx1201", "gfx1200", "gfx1200,gfx1201")
 
 
 def test_reference_local_run_without_a_gpu_fails():
     from reference_common.pytest_support import architecture_available
 
     with pytest.raises(RuntimeError, match="required gfx942 GPU unavailable"):
-        architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
+        architecture_available("gfx942", None)
+
+
+@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+def test_reference_family_labels_do_not_require_another_processors_cohort(
+    operation, monkeypatch
+):
+    """A multi-family job may run on a supported GPU without this reference."""
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx94X-dcgpu,gfx950-dcgpu")
+    monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: "gfx950")
+    options = {
+        "--rocke-reference-operation": operation,
+        "--rocke-reference-arch": "gfx942",
+    }
+    with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
+        start_reference_session(SimpleNamespace(getoption=options.get))
+    assert error.value.returncode == 77
+
+
+def test_reference_family_label_does_not_hide_a_missing_gpu(monkeypatch):
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx120X-all")
+    monkeypatch.delenv("AMDGPU_TARGETS", raising=False)
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: None)
+    options = {
+        "--rocke-reference-operation": "sdpa",
+        "--rocke-reference-arch": "gfx1201",
+    }
+    with pytest.raises(pytest.UsageError, match="required gfx1201 GPU unavailable"):
+        try:
+            start_reference_session(SimpleNamespace(getoption=options.get))
+        except pytest.exit.Exception:
+            pytest.fail("a selected reference must not skip a missing GPU")
+
+
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx1100"), ("conv", "gfx950"), ("conv", "gfx1151")],
+)
+def test_reference_fixture_skips_supported_gpu_without_cohort(
+    operation, architecture, monkeypatch
+):
+    """Broader build families do not enroll reference coverage for this GPU."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from rocke.runtime import hip_module
+
+    gpu_tests = import_module(f"test_{operation}_pinned_reference")
+    monkeypatch.setenv("AMDGPU_FAMILIES", "gfx94X-dcgpu,gfx110X-all,gfx950-dcgpu")
+    monkeypatch.setenv("AMDGPU_TARGETS", architecture)
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+
+    def unexpected_bundle_lookup(*args, **kwargs):
+        pytest.fail("an unenrolled processor must skip before looking up a bundle")
+
+    monkeypatch.setattr(gpu_tests, "default_bundle_path", unexpected_bundle_lookup)
+    fixture = gpu_tests.reference_bundle.__wrapped__(
+        SimpleNamespace(getoption=lambda option: None)
+    )
+    with pytest.raises(pytest.skip.Exception, match="no .* reference cohort"):
+        next(fixture)
 
 
 @pytest.mark.parametrize(
@@ -566,10 +631,13 @@ def test_reference_path_options_require_explicit_scope(options, message):
         start_reference_session(SimpleNamespace(getoption=options.get))
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx942"), ("conv", "gfx942"), ("sdpa", "gfx1200")],
+)
 @pytest.mark.parametrize("selected", [False, True])
 def test_reference_missing_bundle_fails_only_when_selected(
-    operation, selected, tmp_path, monkeypatch
+    operation, architecture, selected, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -578,7 +646,9 @@ def test_reference_missing_bundle_fails_only_when_selected(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
-    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: "gfx942")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
     )

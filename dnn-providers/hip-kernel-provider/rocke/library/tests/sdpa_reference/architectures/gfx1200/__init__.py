@@ -7,7 +7,6 @@ from ...implementations import wmma
 from ...contract import Case
 
 NAME = "gfx1200"
-FAMILIES = (NAME,)
 COMPILER_TARGET = "gfx12-generic"
 CASES = wmma.CASES
 CASE_BY_ID = {case.id: case for case in CASES}
