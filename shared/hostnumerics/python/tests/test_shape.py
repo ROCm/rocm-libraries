@@ -209,11 +209,16 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(shape.project([]), hn.Shape())
         with self.assertRaisesRegex(RuntimeError, "repeats dimension 1"):
             shape.project([1, 1])
-        for order in ([0], [0, 0, 2], [0, 1, 3]):
-            with self.assertRaises(RuntimeError):
-                shape.coordinates(0, order)
-            with self.assertRaises(RuntimeError):
-                shape.linear_index([0, 0, 0], order)
+        for order, message in (
+            ([0], "index order rank 1 does not match shape rank 3"),
+            ([0, 0, 2], r"index order must be a permutation of \[0, 3\)"),
+            ([0, 1, 3], r"index order must be a permutation of \[0, 3\)"),
+        ):
+            with self.subTest(order=order):
+                with self.assertRaisesRegex(RuntimeError, message):
+                    shape.coordinates(0, order)
+                with self.assertRaisesRegex(RuntimeError, message):
+                    shape.linear_index([0, 0, 0], order)
 
     def test_coordinate_errors(self):
         shape = hn.Shape([2, 3, 4])
