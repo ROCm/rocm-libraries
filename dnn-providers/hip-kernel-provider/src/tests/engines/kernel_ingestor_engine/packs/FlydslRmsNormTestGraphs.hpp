@@ -48,6 +48,8 @@ constexpr const char* FLYDSL_EPSILON_TOKEN = "flydsl_rmsnorm.epsilon.uid";
 constexpr const char* FLYDSL_DTYPE_FIELD = "dtype";
 constexpr const char* FLYDSL_N_FIELD = "N";
 constexpr const char* FLYDSL_BLOCK_THREADS_FIELD = "block_threads";
+/// 1 for an object that reads gamma as f32 beside bf16/f16 x, else 0.
+constexpr const char* FLYDSL_SCALE_F32_FIELD = "scale_f32";
 
 /// `N: 0` in a UKD means "takes the width as a kernarg". Mirrored from the pack's own
 /// GENERIC_N_SENTINEL rather than shared, so a change there has to be made twice and is
@@ -55,9 +57,10 @@ constexpr const char* FLYDSL_BLOCK_THREADS_FIELD = "block_threads";
 /// detail either side may move alone.
 constexpr int64_t FLYDSL_GENERIC_N = 0;
 
-/// `EPS` in kernels_src/kernels/norm/rmsnorm_common.py, baked into every instance. A graph
-/// asking for anything materially different is not one these kernels compute.
-constexpr float FLYDSL_BAKED_EPSILON = 1e-5f;
+/// The epsilon the test graphs carry unless a case sets its own: PyTorch's and the
+/// frontend's usual 1e-5. The kernels take epsilon as an argument, so it is a default
+/// here, not a constraint.
+constexpr float FLYDSL_TEST_EPSILON = 1e-5f;
 
 /// Tensor uids buildFlydslRmsNormGraph() uses, in kernel argument order.
 constexpr int64_t FLYDSL_X_UID = 1;
@@ -136,7 +139,7 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
     const std::vector<int64_t>& xDims = {8, 4096},
-    float epsilon = FLYDSL_BAKED_EPSILON,
+    float epsilon = FLYDSL_TEST_EPSILON,
     bool runtimeEpsilon = false,
     const std::optional<std::vector<int64_t>>& scaleDims = std::nullopt,
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> scaleDataType = std::nullopt,

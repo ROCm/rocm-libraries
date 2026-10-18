@@ -14,10 +14,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -61,11 +63,13 @@
  *    The kernel matcher admits both and `score` orders them, so a width no instance was
  *    baked for still plans. f32 ships the generic tier only.
  *
- *  - Its kernels BAKE EPSILON. A graph asking for a materially different one is not one
- *    these kernels compute, so `graph_match` declines it -- quietly, so another engine
- *    takes the graph rather than the plan build failing. An epsilon the caller supplies at
- *    execute cannot be seen then, so `launch()` re-checks it and throws there instead.
- *    Both paths are covered below; they are one condition reported two ways.
+ *  - Its kernels take EPSILON AS AN ARGUMENT, so any finite, non-negative value is served,
+ *    whether the graph fixes it or the caller supplies it at execute. One that is not --
+ *    negative, NaN, infinite -- is declined by `graph_match` when baked, and refused by
+ *    `launch()` when it arrives at execute. Both paths are covered below.
+ *
+ *  - Gamma may be f32 beside bf16/f16 x and y, served by objects built to read it so
+ *    (`scale_f32: 1`); the kernel matcher pairs each graph with objects of its own form.
  *
  *  - Its kernel code is only ever KPACK. There is no embedded-source fallback, so every
  *    case that reaches `prepare()` needs the staged archive this binary's descriptor root
@@ -132,14 +136,16 @@ hipdnn_plugin_sdk::ingestor::DeviceProperties packedArchDeviceProperties()
 KernelDefinition makeFlydslKernel(const std::string& dtype,
                                   int64_t bakedN,
                                   int64_t blockThreads = 256,
-                                  int64_t priority = 100)
+                                  int64_t priority = 100,
+                                  int64_t scaleF32 = 0)
 {
     KernelDefinition kernel;
     kernel.name = "rmsnorm_" + dtype + "_n" + std::to_string(bakedN);
     kernel.priority = priority;
     kernel.metadata = {{std::string(FLYDSL_DTYPE_FIELD), dtype},
                        {std::string(FLYDSL_N_FIELD), bakedN},
-                       {std::string(FLYDSL_BLOCK_THREADS_FIELD), blockThreads}};
+                       {std::string(FLYDSL_BLOCK_THREADS_FIELD), blockThreads},
+                       {std::string(FLYDSL_SCALE_F32_FIELD), scaleF32}};
     return kernel;
 }
 
@@ -152,10 +158,14 @@ KernelDefinition makeFlydslKernel(const std::string& dtype,
 /// as the boundary it may not resolve outside of. Guessing any of them fails at load with
 /// a diagnostic about the guess rather than about the kernel.
 ///
-/// Returns false when the loaded set holds no kernel with that (dtype, N) for this device,
-/// which is the normal answer on an arch this build packed nothing for. A build for several
-/// arches loads every arch's shard, so a kernel staged for another device is passed over.
-bool findStagedKernel(const std::string& dtype, int64_t bakedN, KernelDefinition& out)
+/// Returns false when the loaded set holds no kernel with that (dtype, N, scale_f32) for
+/// this device, which is the normal answer on an arch this build packed nothing for. A
+/// build for several arches loads every arch's shard, so a kernel staged for another device
+/// is passed over.
+bool findStagedKernel(const std::string& dtype,
+                      int64_t bakedN,
+                      KernelDefinition& out,
+                      int64_t scaleF32 = 0)
 {
     // A build for CDNA targets only stages no RMSNorm set at all.
     const auto* staged = findLoadedSet(FLYDSL_RMSNORM.engineName);
@@ -178,7 +188,10 @@ bool findStagedKernel(const std::string& dtype, int64_t bakedN, KernelDefinition
             const auto* name
                 = tryGetMetadataField<std::string>(kernel.metadata, FLYDSL_DTYPE_FIELD);
             const auto* n = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_N_FIELD);
-            if(name == nullptr || n == nullptr || *name != dtype || *n != bakedN)
+            const auto* f32Scale
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SCALE_F32_FIELD);
+            if(name == nullptr || n == nullptr || f32Scale == nullptr || *name != dtype
+               || *n != bakedN || *f32Scale != scaleF32)
             {
                 continue;
             }
@@ -218,7 +231,7 @@ flatbuffers::FlatBufferBuilder rmsNormGraphWith(const RmsNormGraphExtras& extras
 {
     return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                    {8, 4096},
-                                   FLYDSL_BAKED_EPSILON,
+                                   FLYDSL_TEST_EPSILON,
                                    false,
                                    std::nullopt,
                                    std::nullopt,
@@ -238,7 +251,7 @@ flatbuffers::FlatBufferBuilder
 {
     return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                    xDims,
-                                   FLYDSL_BAKED_EPSILON,
+                                   FLYDSL_TEST_EPSILON,
                                    false,
                                    scaleDims,
                                    std::nullopt,
@@ -344,10 +357,37 @@ INSTANTIATE_TEST_SUITE_P(
         // and the graph matcher does not know about tiers at all.
         GraphCase{"AnUnbakedWidth",
                   [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 640}); }},
-        // Within the relative tolerance of the baked constant, so these kernels do compute it.
-        GraphCase{"AnEpsilonWithinTolerance",
-                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 1.005e-5F); }},
-        // Not inspectable at match time. Deferred to launch(), which re-checks it there.
+        // Epsilon is a kernel argument, so every usable value is served: vLLM's and HF's
+        // 1e-6, PyTorch's eps=None (f32's machine epsilon), and zero.
+        GraphCase{"AnEpsilonOfOneInAMillion",
+                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 1e-6F); }},
+        GraphCase{"TheF32MachineEpsilon",
+                  [] {
+                      return buildFlydslRmsNormGraph(
+                          DataType::BFLOAT16, {8, 4096}, std::numeric_limits<float>::epsilon());
+                  }},
+        GraphCase{"AZeroEpsilon",
+                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 0.0F); }},
+        // An f32 gamma beside 16-bit x and y: cuDNN's and PyTorch's usual mixed form.
+        GraphCase{"Bfloat16WithAnF32Scale",
+                  [] {
+                      return buildFlydslRmsNormGraph(DataType::BFLOAT16,
+                                                     {8, 4096},
+                                                     FLYDSL_TEST_EPSILON,
+                                                     false,
+                                                     std::nullopt,
+                                                     DataType::FLOAT);
+                  }},
+        GraphCase{"HalfWithAnF32Scale",
+                  [] {
+                      return buildFlydslRmsNormGraph(DataType::HALF,
+                                                     {8, 4096},
+                                                     FLYDSL_TEST_EPSILON,
+                                                     false,
+                                                     std::nullopt,
+                                                     DataType::FLOAT);
+                  }},
+        // Not inspectable at match time. Deferred to launch(), which checks it there.
         GraphCase{
             "ARuntimeEpsilon",
             [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 0.0F, true); }},
@@ -355,7 +395,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      std::nullopt,
@@ -393,7 +433,7 @@ TEST(TestFlydslRmsNormBinding, CollapsesRank4UnderABroadcastShapedScale)
     // The three leading axes of x still collapse into the row count, 2x8x4.
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                        {2, 8, 4, 4096},
-                                                       FLYDSL_BAKED_EPSILON,
+                                                       FLYDSL_TEST_EPSILON,
                                                        false,
                                                        std::vector<int64_t>{1, 1, 1, 4096},
                                                        std::nullopt,
@@ -416,7 +456,7 @@ TEST(TestFlydslRmsNormBinding, SplitsTheCudnnLayoutAtTheNormalisedAxes)
     extras.scaleStrides = {4096, 1, 4096, 4096};
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                        {32, 4096, 1, 1},
-                                                       FLYDSL_BAKED_EPSILON,
+                                                       FLYDSL_TEST_EPSILON,
                                                        false,
                                                        std::vector<int64_t>{1, 4096, 1, 1},
                                                        std::nullopt,
@@ -438,7 +478,7 @@ TEST(TestFlydslRmsNormBinding, JoinsAMultiAxisNormalisedShapeIntoOneRow)
     // N = 4096 instance then serves.
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                        {8, 4, 1024},
-                                                       FLYDSL_BAKED_EPSILON,
+                                                       FLYDSL_TEST_EPSILON,
                                                        false,
                                                        std::vector<int64_t>{1, 4, 1024}));
 
@@ -474,7 +514,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      std::nullopt,
@@ -487,7 +527,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      std::nullopt,
@@ -501,7 +541,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      std::nullopt,
@@ -622,12 +662,12 @@ INSTANTIATE_TEST_SUITE_P(
                       extras.scaleStrides = {2};
                       return rmsNormGraphWithShapes({8, 4096}, {4096}, extras);
                   }},
-        // One instance, one dtype for all three operands -- gamma is read at x's type.
+        // Gamma is read at x's type or as f32, never as another 16-bit type.
         GraphCase{"GammaAtADifferentDtype",
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      DataType::HALF);
@@ -640,7 +680,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::nullopt,
                                                      std::nullopt,
@@ -662,7 +702,7 @@ INSTANTIATE_TEST_SUITE_P(
                       return buildFlydslRmsNormGraph(
                           DataType::BFLOAT16,
                           dims,
-                          FLYDSL_BAKED_EPSILON,
+                          FLYDSL_TEST_EPSILON,
                           false,
                           std::vector<int64_t>{1, 1, 1, 4096},
                           std::nullopt,
@@ -675,7 +715,7 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::vector<int64_t>{1});
                   }},
@@ -684,14 +724,34 @@ INSTANTIATE_TEST_SUITE_P(
                   [] {
                       return buildFlydslRmsNormGraph(DataType::BFLOAT16,
                                                      {8, 4096},
-                                                     FLYDSL_BAKED_EPSILON,
+                                                     FLYDSL_TEST_EPSILON,
                                                      false,
                                                      std::vector<int64_t>{8, 4096});
                   }},
-        // Declined rather than approximated, and declined QUIETLY: the graph is still
-        // computable, just not by these kernels, so another engine must get the chance.
-        GraphCase{"ABakedEpsilonOutsideTolerance",
-                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, 1e-6F); }}),
+        // An epsilon no norm is computed with: every output would be NaN or infinite.
+        GraphCase{"ANegativeEpsilon",
+                  [] { return buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}, -1e-5F); }},
+        GraphCase{"ANaNEpsilon",
+                  [] {
+                      return buildFlydslRmsNormGraph(
+                          DataType::BFLOAT16, {8, 4096}, std::numeric_limits<float>::quiet_NaN());
+                  }},
+        GraphCase{"AnInfiniteEpsilon",
+                  [] {
+                      return buildFlydslRmsNormGraph(
+                          DataType::BFLOAT16, {8, 4096}, std::numeric_limits<float>::infinity());
+                  }},
+        // The mixed form is a 16-bit x with an f32 gamma, never the reverse: there is no
+        // object that reads a 16-bit gamma beside f32 x.
+        GraphCase{"FloatWithABfloat16Scale",
+                  [] {
+                      return buildFlydslRmsNormGraph(DataType::FLOAT,
+                                                     {8, 4096},
+                                                     FLYDSL_TEST_EPSILON,
+                                                     false,
+                                                     std::nullopt,
+                                                     DataType::BFLOAT16);
+                  }}),
     graphCaseName);
 
 // ---------------------------------------------------------------------------
@@ -728,6 +788,29 @@ TEST(TestFlydslRmsNormKernelMatcher, TheGenericTierAdmitsAWidthNothingWasBakedFo
                               fixture.context(),
                               makeFlydslKernel("bf16", FLYDSL_GENERIC_N, 256, 10),
                               bound));
+}
+
+TEST(TestFlydslRmsNormKernelMatcher, PairsAnF32ScaleWithTheObjectsThatReadOne)
+{
+    const GraphFixture mixed(buildFlydslRmsNormGraph(
+        DataType::BFLOAT16, {8, 4096}, FLYDSL_TEST_EPSILON, false, std::nullopt, DataType::FLOAT));
+    const auto mixedBound = bindingsFor(mixed.context());
+
+    // An object reading gamma as bf16 would read the f32 vector as twice as many halves.
+    EXPECT_TRUE(matchesKernel(
+        FLYDSL_RMSNORM, mixed.context(), makeFlydslKernel("bf16", 4096, 256, 100, 1), mixedBound));
+    EXPECT_FALSE(matchesKernel(
+        FLYDSL_RMSNORM, mixed.context(), makeFlydslKernel("bf16", 4096, 256, 100, 0), mixedBound));
+    EXPECT_TRUE(matchesKernel(FLYDSL_RMSNORM,
+                              mixed.context(),
+                              makeFlydslKernel("bf16", FLYDSL_GENERIC_N, 256, 10, 1),
+                              mixedBound));
+
+    // And the reverse: a bf16 gamma must not reach an object that reads f32.
+    const GraphFixture plain(buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}));
+    const auto plainBound = bindingsFor(plain.context());
+    EXPECT_FALSE(matchesKernel(
+        FLYDSL_RMSNORM, plain.context(), makeFlydslKernel("bf16", 4096, 256, 100, 1), plainBound));
 }
 
 TEST(TestFlydslRmsNormKernelMatcher, RefusesAKernelOfTheWrongDtype)
@@ -830,8 +913,9 @@ TEST(TestFlydslRmsNormDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 ///
 /// x is filled with exactly-representable values so the only rounding in the comparison is
 /// the kernel's own: the reference is computed from the SAME bf16/f16 values the device
-/// reads, which keeps input quantisation out of the error budget.
-template <typename T>
+/// reads, which keeps input quantisation out of the error budget. Gamma is held as @p G,
+/// which is T unless the case gives a 16-bit x an f32 gamma.
+template <typename T, typename G = T>
 class RmsNormBuffers
 {
 public:
@@ -852,18 +936,18 @@ public:
         }
         for(int64_t column = 0; column < columns; ++column)
         {
-            _gamma[static_cast<size_t>(column)] = T(0.5F + static_cast<float>(column % 4) * 0.25F);
+            _gamma[static_cast<size_t>(column)] = G(0.5F + static_cast<float>(column % 4) * 0.25F);
         }
 
         EXPECT_EQ(hipSuccess, hipMalloc(&_xDevice, _x.size() * sizeof(T)));
-        EXPECT_EQ(hipSuccess, hipMalloc(&_gammaDevice, _gamma.size() * sizeof(T)));
+        EXPECT_EQ(hipSuccess, hipMalloc(&_gammaDevice, _gamma.size() * sizeof(G)));
         EXPECT_EQ(hipSuccess, hipMalloc(&_yDevice, _x.size() * sizeof(T)));
         EXPECT_EQ(hipSuccess,
                   hipMemcpy(_xDevice, _x.data(), _x.size() * sizeof(T), hipMemcpyHostToDevice));
         EXPECT_EQ(
             hipSuccess,
             hipMemcpy(
-                _gammaDevice, _gamma.data(), _gamma.size() * sizeof(T), hipMemcpyHostToDevice));
+                _gammaDevice, _gamma.data(), _gamma.size() * sizeof(G), hipMemcpyHostToDevice));
         EXPECT_EQ(hipSuccess, hipMemset(_yDevice, 0, _x.size() * sizeof(T)));
     }
 
@@ -893,7 +977,7 @@ public:
     }
 
     /// y = x * rsqrt(mean(x^2) + eps) * gamma, in double from the quantised inputs.
-    std::vector<double> reference() const
+    std::vector<double> reference(double epsilon) const
     {
         std::vector<double> expected(_x.size());
         for(int64_t row = 0; row < _rows; ++row)
@@ -905,9 +989,8 @@ public:
                     static_cast<float>(_x[static_cast<size_t>(row * _columns + column)]));
                 sumOfSquares += value * value;
             }
-            const double scale = 1.0
-                                 / std::sqrt(sumOfSquares / static_cast<double>(_columns)
-                                             + static_cast<double>(FLYDSL_BAKED_EPSILON));
+            const double scale
+                = 1.0 / std::sqrt(sumOfSquares / static_cast<double>(_columns) + epsilon);
             for(int64_t column = 0; column < _columns; ++column)
             {
                 const auto index = static_cast<size_t>(row * _columns + column);
@@ -923,7 +1006,7 @@ private:
     int64_t _rows;
     int64_t _columns;
     std::vector<T> _x;
-    std::vector<T> _gamma;
+    std::vector<G> _gamma;
     void* _xDevice = nullptr;
     void* _gammaDevice = nullptr;
     void* _yDevice = nullptr;
@@ -936,37 +1019,48 @@ private:
 ///
 /// Skips rather than fails when the staged set holds no such kernel: on an arch this build
 /// packed nothing for, there is no kernel to be wrong about.
-template <typename T>
+/// How a launch case describes its operands and epsilon, beyond the dtype and the
+/// rows x columns its buffers hold. The shapes and strides must split into those same
+/// rows x columns, so the buffers are the same packed arrays either way.
+struct RmsNormLaunchCase
+{
+    std::optional<std::vector<int64_t>> scaleDims;
+    RmsNormGraphExtras extras;
+    std::optional<std::vector<int64_t>> xDims;
+    float epsilon = FLYDSL_TEST_EPSILON;
+    /// Supply epsilon at execute rather than fixing it in the graph.
+    bool runtimeEpsilon = false;
+};
+
+template <typename T, typename G = T>
 void expectRmsNormMatchesReference(DataType dataType,
                                    const std::string& dtype,
                                    int64_t bakedN,
                                    int64_t rows,
                                    int64_t columns,
                                    double relativeTolerance,
-                                   const std::optional<std::vector<int64_t>>& scaleDims
-                                   = std::nullopt,
-                                   const RmsNormGraphExtras& extras = {},
-                                   const std::optional<std::vector<int64_t>>& xDims = std::nullopt)
+                                   const RmsNormLaunchCase& launchCase = {})
 {
+    constexpr bool F32_SCALE = std::is_same_v<G, float> && !std::is_same_v<T, float>;
     KernelDefinition kernel;
-    if(!findStagedKernel(dtype, bakedN, kernel))
+    if(!findStagedKernel(dtype, bakedN, kernel, F32_SCALE ? 1 : 0))
     {
         GTEST_SKIP() << "nothing packed for dtype=" << dtype << " N=" << bakedN
-                     << " in this build's descriptor root";
+                     << " scale_f32=" << F32_SCALE << " in this build's descriptor root";
     }
 
     const GraphFixture fixture(
         buildFlydslRmsNormGraph(dataType,
-                                xDims.value_or(std::vector<int64_t>{rows, columns}),
-                                FLYDSL_BAKED_EPSILON,
-                                false,
-                                scaleDims,
-                                std::nullopt,
+                                launchCase.xDims.value_or(std::vector<int64_t>{rows, columns}),
+                                launchCase.epsilon,
+                                launchCase.runtimeEpsilon,
+                                launchCase.scaleDims,
+                                F32_SCALE ? std::optional<DataType>(DataType::FLOAT) : std::nullopt,
                                 std::nullopt,
                                 false,
                                 false,
                                 NormFwdPhase::NOT_SET,
-                                extras),
+                                launchCase.extras),
         packedArchDeviceProperties());
     const auto& handler = dispatchHandler(FLYDSL_RMSNORM);
 
@@ -974,16 +1068,24 @@ void expectRmsNormMatchesReference(DataType dataType,
         = handler.prepare(fixture.context(), bindingsFor(fixture.context()), kernel);
     ASSERT_NE(prepared, nullptr);
 
-    const RmsNormBuffers<T> buffers(rows, columns);
+    const RmsNormBuffers<T, G> buffers(rows, columns);
     const auto descriptors = buffers.descriptors();
+    std::vector<hipdnnPluginDeviceBuffer_t> arguments(descriptors.begin(), descriptors.end());
+    // A pass-by-value scalar is read from host memory, so this slot carries a pointer into
+    // the stack.
+    float epsilon = launchCase.epsilon;
+    if(launchCase.runtimeEpsilon)
+    {
+        arguments.push_back(hipdnnPluginDeviceBuffer_t{FLYDSL_EPSILON_UID, &epsilon});
+    }
     const Handle handle;
 
     handler.launch(
-        handle, *prepared, descriptors.data(), static_cast<uint32_t>(descriptors.size()), nullptr);
+        handle, *prepared, arguments.data(), static_cast<uint32_t>(arguments.size()), nullptr);
     ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
 
     const auto actual = buffers.readOutput();
-    const auto expected = buffers.reference();
+    const auto expected = buffers.reference(static_cast<double>(launchCase.epsilon));
     ASSERT_EQ(actual.size(), expected.size());
 
     double worst = 0.0;
@@ -1038,10 +1140,11 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesWithGammaDescribedAsHipdnnTorchDescri
 
     // A (1, W) gamma with stride 0 on its unit axis, the form hipdnn_torch gives an
     // F.rms_norm weight: the same vector in memory, so the same answer.
-    RmsNormGraphExtras extras;
-    extras.scaleStrides = {0, 1};
+    RmsNormLaunchCase launchCase;
+    launchCase.scaleDims = std::vector<int64_t>{1, 4096};
+    launchCase.extras.scaleStrides = {0, 1};
     expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
-        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, std::vector<int64_t>{1, 4096}, extras);
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, launchCase);
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, ComputesTheCudnnLayout)
@@ -1049,18 +1152,56 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesTheCudnnLayout)
     SKIP_IF_NO_DEVICES();
 
     // x {4, 4096, 1, 1} and gamma {1, 4096, 1, 1}, cuDNN's strides: 4 rows of 4096.
-    RmsNormGraphExtras extras;
-    extras.scaleStrides = {4096, 1, 4096, 4096};
+    RmsNormLaunchCase launchCase;
+    launchCase.scaleDims = std::vector<int64_t>{1, 4096, 1, 1};
+    launchCase.extras.scaleStrides = {4096, 1, 4096, 4096};
+    launchCase.xDims = std::vector<int64_t>{4, 4096, 1, 1};
     expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
-        DataType::BFLOAT16,
-        "bf16",
-        4096,
-        4,
-        4096,
-        2e-2,
-        std::vector<int64_t>{1, 4096, 1, 1},
-        extras,
-        std::vector<int64_t>{4, 4096, 1, 1});
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, launchCase);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesAnF32ScaleBesideBf16AndF16)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Gamma read as f32 by its own objects, at a baked width (the 128-bit fast path, with
+    // gamma's own copies) and through the generic tier.
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16, float>(
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2);
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16, float>(
+        DataType::BFLOAT16, "bf16", FLYDSL_GENERIC_N, 4, 640, 2e-2);
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::half, float>(
+        DataType::HALF, "f16", 8192, 4, 8192, 5e-3);
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesWithTheGraphsOwnEpsilon)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // The inputs' mean square is about 1, so an epsilon of 0.5 moves every output by
+    // about a fifth: a kernel that ignored it, or kept 1e-5, would fail by far more than
+    // the tolerance. Zero is the other edge.
+    for(const float epsilon : {0.5F, 0.0F})
+    {
+        SCOPED_TRACE(::testing::Message() << "epsilon " << epsilon);
+        RmsNormLaunchCase launchCase;
+        launchCase.epsilon = epsilon;
+        expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, launchCase);
+        expectRmsNormMatchesReference<float>(
+            DataType::FLOAT, "f32", FLYDSL_GENERIC_N, 4, 640, 1e-4, launchCase);
+    }
+}
+
+TEST(TestGpuFlydslRmsNormDispatch, ComputesWithAnEpsilonSuppliedAtExecute)
+{
+    SKIP_IF_NO_DEVICES();
+
+    RmsNormLaunchCase launchCase;
+    launchCase.epsilon = 0.5F;
+    launchCase.runtimeEpsilon = true;
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", 4096, 4, 4096, 2e-2, launchCase);
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, TheGenericKernelComputesAWidthNothingWasBakedFor)
@@ -1205,7 +1346,7 @@ TEST(TestGpuFlydslRmsNormTiers, CostTheBakedAndGenericTiersOverOneGraph)
     }
 }
 
-TEST(TestGpuFlydslRmsNormDispatch, RejectsARuntimeEpsilonTheKernelDoesNotBake)
+TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1215,9 +1356,9 @@ TEST(TestGpuFlydslRmsNormDispatch, RejectsARuntimeEpsilonTheKernelDoesNotBake)
         GTEST_SKIP() << "nothing packed for bf16 N=4096 in this build's descriptor root";
     }
 
-    // The other half of the epsilon contract. A baked mismatch is declined silently at
-    // graph_match so another engine takes the graph; a mismatch the caller only supplies
-    // at execute has no such escape -- the plan is already built -- so it is an error.
+    // The other half of the epsilon contract. An unusable baked epsilon is declined at
+    // graph_match so another engine takes the graph; one the caller only supplies at
+    // execute has no such escape -- the plan is already built -- so it is an error.
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {4, 4096}, 0.0F, true),
                                packedArchDeviceProperties());
     ASSERT_TRUE(matches(fixture.context())) << "a runtime epsilon must still pass graph_match";
@@ -1233,7 +1374,7 @@ TEST(TestGpuFlydslRmsNormDispatch, RejectsARuntimeEpsilonTheKernelDoesNotBake)
 
     // A pass-by-value scalar is read from host memory, not copied off the device, so this
     // slot legitimately carries a pointer into the stack.
-    float epsilon = 1e-2F;
+    float epsilon = -1e-2F;
     withEpsilon.push_back(hipdnnPluginDeviceBuffer_t{FLYDSL_EPSILON_UID, &epsilon});
 
     const Handle handle;

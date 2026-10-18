@@ -7,8 +7,8 @@
 
 Writes ``<content>/rmsnorm/<arch>/<instance>.hsaco`` for every row of
 ``_instances.rmsnorm_instances()``, plus the ``manifest.json`` beside them and
-``<content>/rmsnorm/<arch>.SOURCE.md`` next to the folder (``<arch>/`` is kept in
-DVC, the summary in git). ``<content>`` is FlyDSL's bundle folder under the
+``<content>/rmsnorm/<arch>.SOURCE.md`` next to the folder, all committed.
+``<content>`` is FlyDSL's bundle folder under the
 provider's production descriptor root (``_flydsl_env.CONTENT_DIR``).
 
 Compilation needs no matching GPU. Under ``COMPILE_ONLY=1`` the launcher traces
@@ -60,10 +60,10 @@ _TRACE_M = 4
 _GENERIC_TRACE_N = 4096
 
 # The kernarg layout every instance of this family must have. Four (pointer,
-# descriptor) pairs for `rmsnorm_kernel(Input, Gamma, Rstd, Output)`; the 16/4
-# descriptor sizes are 2D tensors vs 1D ones. Recorded from the gate run and
-# byte-identical across both objects it examined.
-_KERNARG_SEGMENT_SIZE = 80
+# descriptor) pairs for `rmsnorm_kernel(Input, Gamma, Rstd, Output, Eps)`; the 16/4
+# descriptor sizes are 2D tensors vs 1D ones. Then `Eps`, an f32 by value (vendored
+# modification 4). The gamma descriptor is the same size whatever gamma's dtype.
+_KERNARG_SEGMENT_SIZE = 84
 _EXPECTED_SIGNATURE = (
     ("global_buffer", 8, 0),
     ("by_value", 16, 8),
@@ -73,6 +73,7 @@ _EXPECTED_SIGNATURE = (
     ("by_value", 4, 48),
     ("global_buffer", 8, 56),
     ("by_value", 16, 64),
+    ("by_value", 4, 80),
 )
 # What the slots above mean, in order. `Rstd` aliases `Gamma` whenever
 # `store_rstd=False` -- upstream passes Gamma twice to fill the unused slot -- so
@@ -86,6 +87,7 @@ _SEMANTIC_ARG_NAMES = (
     "Rstd.desc",
     "Output.ptr",
     "Output.desc",
+    "Eps",
 )
 
 # The launch geometry the native dispatch handler has to reproduce. One block per
@@ -146,17 +148,21 @@ def _build_one(kernel_module, torch, instance: Instance, dump_dir: Path) -> byte
     }[instance.dtype]
 
     env.set_dump_dir(dump_dir)
+    weight_dtype = "f32" if instance.knobs["scale_f32"] else instance.dtype
     launch = kernel_module.build_rmsnorm_module(
         import_n,
         instance.dtype,
         BLOCK_THREADS=instance.knobs["block_threads"],
+        weight_dtype_str=weight_dtype,
     )
 
     # CPU tensors on purpose: COMPILE_ONLY never dispatches, and requiring a live
     # HIP context here would mean a machine with a working GPU is needed to build
     # objects for a machine we do not have.
     x = torch.zeros((_TRACE_M, trace_n), dtype=torch_dtype)
-    gamma = torch.zeros((trace_n,), dtype=torch_dtype)
+    gamma = torch.zeros(
+        (trace_n,), dtype=torch.float32 if instance.knobs["scale_f32"] else torch_dtype
+    )
     y = torch.zeros((_TRACE_M, trace_n), dtype=torch_dtype)
     launch(x, gamma, y, _TRACE_M)
 

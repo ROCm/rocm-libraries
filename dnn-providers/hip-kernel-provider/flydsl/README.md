@@ -37,7 +37,7 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-One op -- RMSNorm, 13 kernel objects per target. For RDNA it is built once for each
+One op -- RMSNorm, 25 kernel objects per target. For RDNA it is built once for each
 of two LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -49,7 +49,8 @@ Each member's shard carries its family's bytes (see [REGEN.md §3](REGEN.md) for
 why one object set per family is enough, and what it needs). For CDNA it is built
 for each of gfx90a, gfx942 and gfx950.
 
-**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 13 objects, bf16, f16 and f32:
+**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 25 objects: bf16, f16 and f32, and bf16
+and f16 with an f32 gamma; epsilon is a kernel argument, so any value is served:
 
 - a **specialized** tier with `N` baked in at 3072 / 3584 / 4096 / 5120 / 8192
 - a **generic** tier that reads `N` from the tensor descriptor at runtime, so
@@ -197,10 +198,6 @@ it is generated output inside the per-target folders.**
 arch; both can sit side by side under
 one op, each its own folder and summary, as the provider grows arch-specific
 objects beside a family set.
-
-The per-target folders are laid out to move to DVC as they are -- one DVC
-pointer per `<op>/<target>/`, with `<target>.SOURCE.md` beside it in git -- once
-the object sets outgrow the repository. Until then they are committed.
 
 **Who changes what.** A contribution changes the *inputs*: the kernel sources
 under `kernels_src/`, the generators and their instance table, the docs. The

@@ -44,9 +44,8 @@ Layout, per op:
   engine, heuristic, dispatch and the kernel-scoped matcher. One copy, so the
   authored root holds each id once.
 * ``<content>/<op>/<arch>/`` -- that arch's pack (KDP), one UKD per object, and
-  the objects themselves with ``manifest.json``: generated content, kept in DVC
-  (``<content>/<op>/<arch>.dvc``). Its readable summary, ``<arch>.SOURCE.md``,
-  sits beside the pointer in git.
+  the objects themselves with ``manifest.json``: generated content, committed.
+  Its readable summary, ``<arch>.SOURCE.md``, sits beside the folder.
 
 ``--check`` re-derives the documents and compares them to what is checked in,
 then runs the packer's own authoring validator over the whole FlyDSL folder.
@@ -118,6 +117,7 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
+    "scale_f32",
     "head_dim",
     "head_dim_v",
     "qk_mask",
@@ -195,8 +195,7 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             raise ValueError(
                 f"{manifest_path}: the objects were generated from kernel and "
                 f"generator sources with digest {recorded}, but the tree's are "
-                f"{current}. Regenerate ({op}, {arch}) as flydsl/REGEN.md describes; "
-                "the regenerated objects are published to DVC by a maintainer."
+                f"{current}. Regenerate ({op}, {arch}) as flydsl/REGEN.md describes."
             )
         # An object the manifest no longer names is left behind when an instance is
         # renamed or dropped; the generators write objects but never delete them.

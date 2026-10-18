@@ -52,11 +52,14 @@
  * the kernel does -- it can only decline graphs the kernel was not built for. Two facts
  * were baked at pack time and are therefore matcher obligations here:
  *
- *   - epsilon is a literal in the kernel body (`EPS = 1e-5`), not a kernarg, so a graph
- *     asking for a different epsilon must be refused rather than silently computed with
- *     the wrong constant;
+ *   - the element types of x/y and of gamma, so a graph is matched to an object built for
+ *     exactly its dtypes;
  *   - the innermost stride is a literal 1, absent from the descriptor structs below, so
  *     only packed row-major operands may be accepted.
+ *
+ * Epsilon is not baked: it is the kernel's trailing argument (vendored modification 4),
+ * so one object serves every epsilon a graph asks for, fixed in the graph or supplied at
+ * execute.
  *
  * Symbol names are restated here rather than shared via a header, since a descriptor can't
  * reference a C++ constant; the loader pre-flights every symbol a descriptor names, so a
@@ -81,6 +84,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_rmsnorm.dispatch"
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view N_FIELD = "N";
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
+/// 1 when the object reads gamma as f32 beside bf16/f16 x and y, else 0 (gamma in x's type).
+constexpr std::string_view SCALE_F32_FIELD = "scale_f32";
 
 constexpr std::string_view X_TOKEN = "flydsl_rmsnorm.x.uid";
 constexpr std::string_view SCALE_TOKEN = "flydsl_rmsnorm.scale.uid";
@@ -93,14 +98,6 @@ constexpr std::string_view COLUMNS_TOKEN = "flydsl_rmsnorm.columns";
 /// has a zero-width normalised axis, so the value is free to carry the sentinel; see
 /// `GENERIC_N` in `flydsl/gen_descriptors.py` for why null could not be used instead.
 constexpr int64_t GENERIC_N_SENTINEL = 0;
-
-/// `EPS` in `kernels_src/kernels/norm/rmsnorm_common.py`, baked into every instance.
-constexpr double BAKED_EPSILON = 1e-5;
-
-/// Relative slack when comparing a graph's epsilon against the baked one. Wide enough that
-/// 1e-5 surviving a half-precision round-trip (~1.4e-3 relative error) still matches, and
-/// far too narrow to admit a caller who genuinely wanted a different epsilon.
-constexpr double EPSILON_RELATIVE_TOLERANCE = 1e-2;
 
 /// A row-major 2-D operand as the kernel reads it: `fly.make_layout((M, N), (stride, 1))`
 /// lowered to a packed LLVM struct. The innermost stride is a compile-time 1 and so has no
@@ -119,7 +116,8 @@ struct Desc1D
     int32_t shape0 = 0;
 };
 
-// The kernarg segment is 80 bytes with the descriptors laid out packed; natural C++
+// The descriptors fill the first 80 bytes of the kernarg segment, packed, and epsilon
+// (an f32) follows at 80 for a segment of 84; natural C++
 // alignment happens to reproduce that layout exactly, which is worth asserting rather
 // than assuming, since a mismatch would corrupt every launch silently.
 static_assert(sizeof(Desc2D) == 16, "Desc2D must occupy the kernel's 16-byte 2-D layout");
@@ -364,19 +362,21 @@ std::optional<hipdnn_plugin_sdk::ScalarOperand> epsilonOperand(const MatchContex
     }
 }
 
-bool matchesBakedEpsilon(double epsilon)
+/// An epsilon the kernel computes with: a finite, non-negative f32. Anything else would
+/// make every output NaN or infinite rather than a norm.
+bool isUsableEpsilon(double epsilon)
 {
-    return std::abs(epsilon - BAKED_EPSILON) <= BAKED_EPSILON * EPSILON_RELATIVE_TOLERANCE;
+    return std::isfinite(epsilon) && epsilon >= 0.0
+           && epsilon <= static_cast<double>(std::numeric_limits<float>::max());
 }
 
 /**
  * @brief Graph-scoped applicability: is this a single RMS-norm node over packed 2-D-
  *        collapsible operands that the pre-built flyDSL kernels actually compute?
  *
- * Refuses rather than approximates. In particular a graph whose epsilon is baked into the
- * op-graph and differs from the kernel's own `EPS` is declined here, so it falls through to
- * an engine that can honour it instead of failing the whole plan build. Epsilon supplied by
- * the caller at execute cannot be inspected yet; `launch()` re-checks it there.
+ * Refuses rather than approximates. Epsilon is a kernel argument, so any value is served; a
+ * baked one that is not a usable f32 is declined here, and one supplied at execute is
+ * checked by `launch()`.
  */
 std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context)
 {
@@ -429,10 +429,12 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
 
-    // One dtype for all three: the kernel loads gamma with the same element type it loads x
-    // with, and writes y in that type too.
-    if(!isSupportedDataType(x->data_type()) || scale->data_type() != x->data_type()
-       || y->data_type() != x->data_type())
+    // x and y in one dtype; gamma in that dtype too, or f32 beside bf16/f16 x (cuDNN's and
+    // PyTorch's usual mixed form), which the kernel reads with its own element type.
+    const bool scaleMatchesX = scale->data_type() == x->data_type()
+                               || (scale->data_type() == data_objects::DataType::FLOAT
+                                   && x->data_type() != data_objects::DataType::FLOAT);
+    if(!isSupportedDataType(x->data_type()) || !scaleMatchesX || y->data_type() != x->data_type())
     {
         return std::nullopt;
     }
@@ -486,7 +488,7 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         return std::nullopt;
     }
     if(!epsilon->isRuntimeUserSupplied
-       && !matchesBakedEpsilon(hipdnn_plugin_sdk::toDouble(epsilon->bakedDefault)))
+       && !isUsableEpsilon(hipdnn_plugin_sdk::toDouble(epsilon->bakedDefault)))
     {
         return std::nullopt;
     }
@@ -526,8 +528,22 @@ bool flydslRmsNormKernelMatches(const MatchContext& context,
         return false;
     }
 
+    const auto* scale = findTensor(context, attributes->scale_tensor_uid());
+    if(scale == nullptr)
+    {
+        return false;
+    }
+
     const auto dtype = kernelDataTypeName(x->data_type());
     if(!dtype.has_value() || kernel.getStringMetadata(std::string(DTYPE_FIELD)) != *dtype)
+    {
+        return false;
+    }
+
+    // An f32 gamma beside a 16-bit x needs an object built to read it as f32, and a gamma
+    // in x's own type needs one that is not.
+    const int64_t scaleF32 = scale->data_type() != x->data_type() ? 1 : 0;
+    if(kernel.getIntMetadata(std::string(SCALE_F32_FIELD)) != scaleF32)
     {
         return false;
     }
@@ -654,7 +670,7 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
  *        one, and the `signature` block every one of this pack's UKDs carries.
  *
  * Four operands, each a pointer followed by its descriptor struct: x (2-D), gamma (1-D),
- * rstd (1-D), y (2-D). The rstd pair is vestigial -- the kernels were built with
+ * rstd (1-D), y (2-D); then epsilon, an f32. The rstd pair is vestigial -- the kernels were built with
  * `store_rstd=False` and never store through it -- but the entry point still takes the
  * slots, so launch() fills them with gamma rather than leaving them undefined.
  *
@@ -667,8 +683,9 @@ const std::vector<KernelArgument>& flydslRmsNormKernelSignature()
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_desc2d{"by_value", static_cast<uint32_t>(sizeof(Desc2D)), 0, ""};
     static const KernelArgument s_desc1d{"by_value", static_cast<uint32_t>(sizeof(Desc1D)), 0, ""};
+    static const KernelArgument s_epsilon{"by_value", static_cast<uint32_t>(sizeof(float)), 0, ""};
     static const std::vector<KernelArgument> s_signature{
-        s_buffer, s_desc2d, s_buffer, s_desc1d, s_buffer, s_desc1d, s_buffer, s_desc2d};
+        s_buffer, s_desc2d, s_buffer, s_desc1d, s_buffer, s_desc1d, s_buffer, s_desc2d, s_epsilon};
     return s_signature;
 }
 
@@ -763,17 +780,17 @@ public:
         const auto& preparedRmsNorm = dynamic_cast<const PreparedFlydslRmsNorm&>(prepared);
         const auto& binding = preparedRmsNorm.binding();
 
-        // The kernel's epsilon is a literal, so a caller-supplied value that disagrees with
-        // it would be quietly ignored. A graph that baked its epsilon was already screened
-        // out by the matcher; one that defers the value to execute can only be checked here.
+        // Baked or supplied now, epsilon reaches the kernel as its last argument. A baked one
+        // was screened by the matcher; one supplied at execute can only be checked here.
         const auto epsilon = hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
             preparedRmsNorm.epsilon(), deviceBuffers, numDeviceBuffers));
-        if(!matchesBakedEpsilon(epsilon))
+        if(!isUsableEpsilon(epsilon))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                "flydsl_rmsnorm kernels bake epsilon = " + std::to_string(BAKED_EPSILON)
-                    + "; this execution supplied " + std::to_string(epsilon));
+                "flydsl_rmsnorm needs a finite, non-negative f32 epsilon; this execution "
+                "supplied "
+                    + std::to_string(epsilon));
         }
 
         const auto x
@@ -802,7 +819,8 @@ public:
                     scale.ptr,
                     scaleDesc,
                     y.ptr,
-                    yDesc);
+                    yDesc,
+                    static_cast<float>(epsilon));
     }
 
 private:

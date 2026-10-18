@@ -8,7 +8,7 @@
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "70823ee008efb8892c5bb0e1c3b6a5d47492b501998c26372d984f19cd2929d2"
+    "inputs_sha256": "aafcb137dbb833e80e42d66b77a7aa652e3300c34a763fdff88a48cea8cf5e46"
   },
   "instances": [
     {
@@ -19,13 +19,14 @@
       "tier": "generic",
       "knobs": {
         "N": null,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_ngeneric_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 5536,
-      "sha256": "7d02582d397e7c5ccfdcc6676ff6ca5d0eab6c64153fdf7317023fb02c8d6852",
-      "kernarg_segment_size": 80,
+      "sha256": "df438c5534be5b478d1bc7552590e6580680a2839ecc8541340316bec723ed49",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 9,
       "block": [
@@ -43,7 +44,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -54,13 +56,14 @@
       "tier": "generic",
       "knobs": {
         "N": null,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_ngeneric_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 5536,
-      "sha256": "a5dc96b3ac2150e154cf272b28804e155986d308dd0dcc5aa563a770202603da",
-      "kernarg_segment_size": 80,
+      "sha256": "a899ccefa4c225ec24e6de08a6fdea1d7a03392891b5af6ea217b01dd51610d7",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 9,
       "block": [
@@ -78,7 +81,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -89,13 +93,14 @@
       "tier": "generic",
       "knobs": {
         "N": null,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f32_ngeneric_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 5472,
-      "sha256": "1fa88bf1accfbeab8a386a1eae5db26b19a7bcc95ecfc7a0b3d7bb68c94a9ab8",
-      "kernarg_segment_size": 80,
+      "sha256": "b61aae853b7b5fa0b28d12838d23c5c4ea42f18bff9674ea9e7565fedc4cc8d2",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 9,
       "block": [
@@ -113,7 +118,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -124,13 +130,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 3072,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_n3072_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 6752,
-      "sha256": "a89757e818835d34ed114ef1122b8694e131b26577f1571fa06f231b4bb33219",
-      "kernarg_segment_size": 80,
+      "sha256": "3e29337740a4a6c39287b1b72e4d1ac51edf758b792b8938ea5919c37217f855",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 21,
       "block": [
@@ -148,7 +155,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -159,13 +167,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 3584,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_n3584_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 7008,
-      "sha256": "3cc15e740cba732672c94cff5e55ad55dce4b99cb0e7f1607df084e966f7f400",
-      "kernarg_segment_size": 80,
+      "sha256": "fce8648197613501d55c8374cfb0d626e723ba7af3bc4815b917ffe3817aed67",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 23,
       "block": [
@@ -183,7 +192,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -194,13 +204,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 4096,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_n4096_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 6048,
-      "sha256": "eab21616dde13f85f6d3d9f796eb3f06043cf47aaa1619395d5f5547709dbff8",
-      "kernarg_segment_size": 80,
+      "sha256": "baefd3263af70999ddb836c4abecd58030e7c4c8f5e74bf78759c2efd98ce246",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 32,
       "block": [
@@ -218,7 +229,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -229,13 +241,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 5120,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_n5120_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 7712,
-      "sha256": "1fd747c2ea457204c452adb5e34db897c3ac389c1d31cedf5d65dd3bc8716d12",
-      "kernarg_segment_size": 80,
+      "sha256": "432cbede488e8d6fb3909b8a37e8aa5ac3b4d976e8016b995c565e957b67780e",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 35,
       "block": [
@@ -253,7 +266,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -264,13 +278,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 8192,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_bf16_n8192_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 7008,
-      "sha256": "200b38c37a532bd07836b2aeb5976245675797d0a2db210041b1b7955cb72912",
-      "kernarg_segment_size": 80,
+      "sha256": "394709c3b2997416af7cc150e1a91a65e35eb1971974ca0a60b2466bd69bcc16",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 60,
       "block": [
@@ -288,7 +303,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -299,13 +315,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 3072,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_n3072_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 6240,
-      "sha256": "63ef5ed8805abc9087e3b17d6671062f5c670d4a9c5d9314fbf37308ccd3ff1d",
-      "kernarg_segment_size": 80,
+      "sha256": "82a37b804bcb2527460b4dc5aa84f8b50446184ed4656d04fbfa0b1bd2519f8c",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 21,
       "block": [
@@ -323,7 +340,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -334,13 +352,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 3584,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_n3584_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 6432,
-      "sha256": "ed8cc4dfb438d5c51056206c9657733eb5f0566cc08804108bcd08d1f6905855",
-      "kernarg_segment_size": 80,
+      "sha256": "58d16e74524124a0a170ef92a23dced03a653bcb0340cbb08b2457f22481ac77",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 23,
       "block": [
@@ -358,7 +377,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -369,13 +389,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 4096,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_n4096_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
       "bytes": 5856,
-      "sha256": "756a46a6b968d15153a70a85eb19b3b6a885ad4db294fb614da3123b6b6b4d7c",
-      "kernarg_segment_size": 80,
+      "sha256": "1eca6330560fa537caaa8048d28df05ec2fa9f443d44b25108ea580005d27325",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 32,
       "block": [
@@ -393,7 +414,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -404,13 +426,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 5120,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_n5120_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
-      "bytes": 6880,
-      "sha256": "2386bb17b21be67071a22767eb9480dcd954c6008b6f63851d6ea5d1586479bb",
-      "kernarg_segment_size": 80,
+      "bytes": 6944,
+      "sha256": "eb4e93403b5eaec2202ecab6f499bf4fcf96c953e2f68b9d3f5385634a3cf16f",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 35,
       "block": [
@@ -428,7 +451,8 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     },
     {
@@ -439,13 +463,14 @@
       "tier": "specialized",
       "knobs": {
         "N": 8192,
-        "block_threads": 256
+        "block_threads": 256,
+        "scale_f32": 0
       },
       "file": "rmsnorm_f16_n8192_bt256.hsaco",
       "symbol": "rmsnorm_kernel_0",
-      "bytes": 6496,
-      "sha256": "8225613a23b19d3609d4ab70985f501a9bdc7c896788013bd5a708a1bf7efddf",
-      "kernarg_segment_size": 80,
+      "bytes": 6560,
+      "sha256": "0ed9d96d9178b80f04a8a218033e9340452bbd77a95bca35645a33cf05e1aa91",
+      "kernarg_segment_size": 84,
       "lds_bytes": 32,
       "vgprs": 60,
       "block": [
@@ -463,7 +488,452 @@
         {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
         {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
         {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
-        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64}
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_ngeneric_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_ngeneric_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 5536,
+      "sha256": "075fb5e745dd000368d56379ecc8d0bd9b22f23dd44ba4d864a4f8753d3e73fc",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 10,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_ngeneric_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 10,
+      "tier": "generic",
+      "knobs": {
+        "N": null,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_ngeneric_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 5536,
+      "sha256": "2e8482f1fdabcaa448669b3f5d45311e0ebb2b34abd5adfc075fe34a50388fec",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 9,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_n3072_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_n3072_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6688,
+      "sha256": "b499c3b49897649488b2d84d6b7f9fcdce73577a924d759c0dd68b872dbf555f",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 21,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_n3584_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_n3584_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6944,
+      "sha256": "7e3770818f07aaa3f9dda2ed4be31273c6fa17ad9b6ec229be4af0fa8aa96aee",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 23,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_n4096_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_n4096_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 5984,
+      "sha256": "87e2bfee4041713bc0cafbf88dd2504406426ebbd987aa92bfc84e17f5cce26c",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 32,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_n5120_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_n5120_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 7648,
+      "sha256": "2851729ff14d717bf7d55577bee4e6d3324af66da85abe562b3294643b554728",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 35,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_bf16_n8192_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "bf16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_bf16_n8192_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6880,
+      "sha256": "7a86f0ada5c8974d7dcdbdfc91b9e2b3a9723e5446e20de67d5c9e409df5e607",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 60,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_n3072_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3072,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_n3072_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6240,
+      "sha256": "82ebf53f5983a6fa262334c48579b8f91782646b920a3ae393bab138f00721aa",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 21,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_n3584_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 3584,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_n3584_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6432,
+      "sha256": "1593870cde1379904e09c644f6bf0dfe23d28bb2c9073d4d3abbfb6bf6587343",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 23,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_n4096_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 4096,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_n4096_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 5792,
+      "sha256": "39ba407a3345c79e505db2f72ac3fffe5aafd70f33a832b9d81ab6279e1c8aed",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 32,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_n5120_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 5120,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_n5120_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6944,
+      "sha256": "2c270abe5f4c01d98f6c125abd4fa52b139de0dffa2333b5b5c25440e67c088a",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 35,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
+      ]
+    },
+    {
+      "name": "rmsnorm_f16_n8192_bt256_f32scale1",
+      "op": "rmsnorm",
+      "dtype": "f16",
+      "priority": 100,
+      "tier": "specialized",
+      "knobs": {
+        "N": 8192,
+        "block_threads": 256,
+        "scale_f32": 1
+      },
+      "file": "rmsnorm_f16_n8192_bt256_f32scale1.hsaco",
+      "symbol": "rmsnorm_kernel_0",
+      "bytes": 6368,
+      "sha256": "24e41773065f85887111800887f6a084758b6b542af457a8cc8daa9bd6262a4b",
+      "kernarg_segment_size": 84,
+      "lds_bytes": 32,
+      "vgprs": 60,
+      "block": [
+        256,
+        1,
+        1
+      ],
+      "grid_rule": "one_block_per_row",
+      "named_args": 0,
+      "args": [
+        {"name": "Input.ptr", "kind": "global_buffer", "size": 8, "offset": 0},
+        {"name": "Input.desc", "kind": "by_value", "size": 16, "offset": 8},
+        {"name": "Gamma.ptr", "kind": "global_buffer", "size": 8, "offset": 24},
+        {"name": "Gamma.desc", "kind": "by_value", "size": 4, "offset": 32},
+        {"name": "Rstd.ptr", "kind": "global_buffer", "size": 8, "offset": 40},
+        {"name": "Rstd.desc", "kind": "by_value", "size": 4, "offset": 48},
+        {"name": "Output.ptr", "kind": "global_buffer", "size": 8, "offset": 56},
+        {"name": "Output.desc", "kind": "by_value", "size": 16, "offset": 64},
+        {"name": "Eps", "kind": "by_value", "size": 4, "offset": 80}
       ]
     }
   ]

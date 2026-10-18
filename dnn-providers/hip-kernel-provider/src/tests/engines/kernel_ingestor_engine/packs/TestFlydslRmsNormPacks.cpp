@@ -66,7 +66,7 @@ TEST(TestFlydslRmsNormPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     EXPECT_EQ(kernelScoped, 1U);
 }
 
-TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerDtypeAndBakedTiersFor16Bit)
+TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerFormAndBakedTiersFor16Bit)
 {
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
 
@@ -81,7 +81,12 @@ TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerDtypeAndBakedTiersFor16Bit)
             const auto* dtype
                 = tryGetMetadataField<std::string>(kernel.metadata, FLYDSL_DTYPE_FIELD);
             ASSERT_NE(dtype, nullptr) << kernel.name << " declares no string dtype";
-            (*n == FLYDSL_GENERIC_N ? generic : baked)[*dtype] += 1;
+            const auto* scaleF32
+                = tryGetMetadataField<int64_t>(kernel.metadata, FLYDSL_SCALE_F32_FIELD);
+            ASSERT_NE(scaleF32, nullptr) << kernel.name << " declares no integer scale_f32";
+            // The form: x's dtype, and "+f32" when gamma is read as f32 beside it.
+            const auto form = *dtype + (*scaleF32 != 0 ? "+f32" : "");
+            (*n == FLYDSL_GENERIC_N ? generic : baked)[form] += 1;
 
             // Only ever kpack: these are pre-built flyDSL code objects, so there is no
             // source for the runtime compiler to fall back to.
@@ -92,13 +97,17 @@ TEST(TestFlydslRmsNormPacks, ShipsTheGenericTierPerDtypeAndBakedTiersFor16Bit)
         }
     }
 
-    // One sentinel kernel per dtype, and baked instances beside the 16-bit ones -- a shard
+    // One sentinel kernel per form -- bf16, f16 and f32 with gamma in x's type, and bf16
+    // and f16 with an f32 gamma -- and baked instances beside each 16-bit form: a shard
     // holding only the generic tier would still plan, silently, at the slower tier. f32
     // has no baked tier: the kernel's fast path is 16-bit only, so it would not be faster.
-    const std::map<std::string, size_t> oneEach{{"bf16", 1}, {"f16", 1}, {"f32", 1}};
+    const std::map<std::string, size_t> oneEach{
+        {"bf16", 1}, {"f16", 1}, {"f32", 1}, {"bf16+f32", 1}, {"f16+f32", 1}};
     EXPECT_EQ(generic, oneEach);
-    EXPECT_GT(baked["bf16"], 0U);
-    EXPECT_GT(baked["f16"], 0U);
+    for(const char* form : {"bf16", "f16", "bf16+f32", "f16+f32"})
+    {
+        EXPECT_GT(baked[form], 0U) << form;
+    }
     EXPECT_EQ(baked.count("f32"), 0U);
 }
 
@@ -118,7 +127,7 @@ TEST(TestFlydslRmsNormPacks, UnderstandsRuntimeEpsilonGraphsButNotAlignedOnes)
     EXPECT_TRUE(set.engine.sdkVersion < aligned) << set.engine.sdkVersion.str();
 }
 
-TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheEightSlotSignature)
+TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheNineSlotSignature)
 {
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
 
@@ -127,7 +136,7 @@ TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheEightSlotSignature)
         for(const auto& kernel : pack.kernels)
         {
             // Four (pointer, descriptor) pairs: x/Desc2D, gamma/Desc1D, rstd/Desc1D,
-            // y/Desc2D. Offsets are pinned alongside sizes because the two 4-byte
+            // y/Desc2D; then epsilon, an f32. Offsets are pinned alongside sizes because the two 4-byte
             // descriptors sit before 8-byte pointers and are padded out to their
             // alignment -- the slots sum to 72 bytes but span a segment of 80, and a
             // reader who assumed the sizes were contiguous would place y four bytes low.
@@ -135,11 +144,11 @@ TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheEightSlotSignature)
             // The third pair is VESTIGIAL: the instances are built store_rstd=False, so
             // nothing is written through it, and launch() fills it with gamma's pointer
             // and descriptor rather than leaving it null. A rebuild with store_rstd=True
-            // would produce this same eight-slot signature and silently write the
+            // would produce this same nine-slot signature and silently write the
             // statistic over gamma. That aliasing is invisible in the signature, so this
             // is where it gets caught: if a regenerated manifest ever changes this table,
             // re-read launch() before updating the expectation.
-            static const std::array<std::pair<const char*, uint32_t>, 8> s_slots{
+            static const std::array<std::pair<const char*, uint32_t>, 9> s_slots{
                 {{"global_buffer", 8},
                  {"by_value", 16},
                  {"global_buffer", 8},
@@ -147,8 +156,9 @@ TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheEightSlotSignature)
                  {"global_buffer", 8},
                  {"by_value", 4},
                  {"global_buffer", 8},
-                 {"by_value", 16}}};
-            static const std::array<uint32_t, 8> s_offsets{0, 8, 24, 32, 40, 48, 56, 64};
+                 {"by_value", 16},
+                 {"by_value", 4}}};
+            static const std::array<uint32_t, 9> s_offsets{0, 8, 24, 32, 40, 48, 56, 64, 80};
 
             ASSERT_EQ(kernel.source.signature.size(), s_slots.size()) << kernel.name;
             for(size_t slot = 0; slot < s_slots.size(); ++slot)

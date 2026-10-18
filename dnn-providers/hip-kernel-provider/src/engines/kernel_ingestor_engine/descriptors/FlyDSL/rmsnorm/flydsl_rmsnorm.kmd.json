@@ -15,6 +15,10 @@
       "name": "block_threads",
       "type": "int",
       "default_value": 256
+    },
+    {
+      "name": "scale_f32",
+      "type": "int"
     }
   ]
 }

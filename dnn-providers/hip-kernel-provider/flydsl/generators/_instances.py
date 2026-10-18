@@ -105,6 +105,7 @@ _ABBREV = {
     "has_sink": "sink",
     "bias_f32": "f32bias",
     "bias_kstrided": "kstrbias",
+    "scale_f32": "f32scale",
 }
 
 # Knobs omitted from an instance's name when they add nothing to it; see
@@ -129,6 +130,7 @@ _NAME_OMITTED_WHEN = {
     "has_sink": lambda knobs: knobs["has_sink"] == 0,
     "bias_f32": lambda knobs: knobs["bias_f32"] == 0,
     "bias_kstrided": lambda knobs: knobs["bias_kstrided"] == 0,
+    "scale_f32": lambda knobs: knobs["scale_f32"] == 0,
     # A pick rule, not a build choice: two objects never differ in it alone.
     "prefer_feature": lambda knobs: True,
     "prefer_min": lambda knobs: True,
@@ -181,29 +183,46 @@ RMSNORM_BLOCK_THREADS = (256,)
 RMSNORM_GENERIC_ONLY_DTYPES = ("f32",)
 
 
+# `scale_f32`: gamma read as f32 beside bf16/f16 x and y (the kernel's
+# `weight_dtype_str="f32"`), the mixed form cuDNN and PyTorch commonly send. 0 is
+# gamma in x's own dtype. f32 x has only 0: its gamma is already f32. Both tiers
+# are built for it; the 16-bit fast path reads gamma with its own 128-bit copies.
+RMSNORM_SCALE_F32 = (0, 1)
+
+
 def rmsnorm_instances() -> list[Instance]:
     """The RMSNorm instance table: generic tier first, then the specialists."""
     instances: list[Instance] = []
-    for block_threads in RMSNORM_BLOCK_THREADS:
-        for dtype in DTYPES + RMSNORM_GENERIC_ONLY_DTYPES:
-            instances.append(
-                Instance(
-                    op="rmsnorm",
-                    dtype=dtype,
-                    priority=PRIORITY_GENERIC,
-                    knobs={"N": None, "block_threads": block_threads},
-                )
-            )
-        for dtype in DTYPES:
-            for n in RMSNORM_SPECIALIZED_N:
+    for scale_f32 in RMSNORM_SCALE_F32:
+        dtypes = DTYPES if scale_f32 else DTYPES + RMSNORM_GENERIC_ONLY_DTYPES
+        for block_threads in RMSNORM_BLOCK_THREADS:
+            for dtype in dtypes:
                 instances.append(
                     Instance(
                         op="rmsnorm",
                         dtype=dtype,
-                        priority=PRIORITY_SPECIALIZED,
-                        knobs={"N": n, "block_threads": block_threads},
+                        priority=PRIORITY_GENERIC,
+                        knobs={
+                            "N": None,
+                            "block_threads": block_threads,
+                            "scale_f32": scale_f32,
+                        },
                     )
                 )
+            for dtype in DTYPES:
+                for n in RMSNORM_SPECIALIZED_N:
+                    instances.append(
+                        Instance(
+                            op="rmsnorm",
+                            dtype=dtype,
+                            priority=PRIORITY_SPECIALIZED,
+                            knobs={
+                                "N": n,
+                                "block_threads": block_threads,
+                                "scale_f32": scale_f32,
+                            },
+                        )
+                    )
     _assert_unique(instances)
     return instances
 

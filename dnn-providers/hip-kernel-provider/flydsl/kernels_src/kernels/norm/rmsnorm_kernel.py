@@ -20,6 +20,11 @@
 #     section (upstream lines 1498-1902). This copy is imported by an AOT
 #     generator to build modules, never for eager use, and the section drags in
 #     kernels.common.tensor_shim plus the backward builders above.
+#   - rmsnorm_kernel() takes epsilon as a trailing `Eps: fx.Float32` kernel
+#     argument instead of folding the builder's `eps` into the body, so one
+#     object serves every epsilon a graph asks for. Its launchers take `eps`
+#     (default: the builder's `eps`) and pass it through. Only this kernel
+#     changes; the small-N, fused-add and quant builders below still fold it.
 #
 # Upstream-first: prefer landing these changes in FlyDSL; this copy exists so
 # the provider is not blocked on that. Re-diff with tools/diff_upstream.py.
@@ -135,6 +140,7 @@ def build_rmsnorm_module(
         Gamma: fx.Tensor,
         Rstd: fx.Tensor,
         Output: fx.Tensor,
+        Eps: fx.Float32,
     ):
         bid = fx.block_idx.x
         tid = fx.thread_idx.x
@@ -142,7 +148,7 @@ def build_rmsnorm_module(
         elem_dtype = dtype_to_elem_type(dtype_str)
         weight_elem_dtype = dtype_to_elem_type(weight_dtype_str)
         fm_fast = arith.FastMathFlags.fast
-        eps_c = eps
+        eps_c = Eps
         if const_expr(RUNTIME_N):
             # Dim 1 of the input descriptor is the normalized dimension. Taking
             # the bound and the tail predicate from there -- rather than from a
@@ -385,8 +391,9 @@ def build_rmsnorm_module(
             Rstd: fx.Tensor,
             m_in: fx.Int32,
             stream: fx.Stream = fx.Stream(None),
+            eps: fx.Float32 = eps,
         ):
-            launcher = rmsnorm_kernel(Input, Gamma, Rstd, Output)
+            launcher = rmsnorm_kernel(Input, Gamma, Rstd, Output, eps)
             launcher.launch(
                 grid=(m_in, 1, 1),
                 block=(BLOCK_THREADS, 1, 1),
@@ -402,10 +409,11 @@ def build_rmsnorm_module(
         Output: fx.Tensor,
         m_in: fx.Int32,
         stream: fx.Stream = fx.Stream(None),
+        eps: fx.Float32 = eps,
     ):
         # store_rstd=False path: the Rstd slot is an unused placeholder here, so
         # we pass Gamma to fill the argument (it is never dereferenced in-kernel).
-        launcher = rmsnorm_kernel(Input, Gamma, Gamma, Output)
+        launcher = rmsnorm_kernel(Input, Gamma, Gamma, Output, eps)
         launcher.launch(
             grid=(m_in, 1, 1),
             block=(BLOCK_THREADS, 1, 1),

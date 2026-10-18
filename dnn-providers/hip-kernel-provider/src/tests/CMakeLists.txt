@@ -286,9 +286,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestFlydslRmsNormPacks
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
-                ShipsTheGenericTierPerDtypeAndBakedTiersFor16Bit
+                ShipsTheGenericTierPerFormAndBakedTiersFor16Bit
                 UnderstandsRuntimeEpsilonGraphsButNotAlignedOnes
-                EveryKernelDeclaresTheEightSlotSignature
+                EveryKernelDeclaresTheNineSlotSignature
         )
     endif()
 

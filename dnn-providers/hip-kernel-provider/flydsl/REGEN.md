@@ -105,11 +105,11 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm` | 13 |
-| `gfx12-generic` | `rmsnorm` | 13 |
-| `gfx90a` | `rmsnorm` | 13 |
-| `gfx942` | `rmsnorm` | 13 |
-| `gfx950` | `rmsnorm` | 13 |
+| `gfx11-generic` | `rmsnorm` | 25 |
+| `gfx12-generic` | `rmsnorm` | 25 |
+| `gfx90a` | `rmsnorm` | 25 |
+| `gfx942` | `rmsnorm` | 25 |
+| `gfx950` | `rmsnorm` | 25 |
 
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl

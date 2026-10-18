@@ -8,7 +8,7 @@ SPDX-License-Identifier:  MIT
 Built once for each of two LLVM generic targets -- `gfx11-generic` (RDNA3 /
 RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4: gfx1200,
 gfx1201) -- and shipped to every member, and once for each of the CDNA targets
-gfx90a, gfx942 and gfx950: **RMSNorm forward** (13 kernel objects per target,
+gfx90a, gfx942 and gfx950: **RMSNorm forward** (25 kernel objects per target,
 §1–§4). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
@@ -22,33 +22,47 @@ silently; one that declines it costs a fallback.
 
 ---
 
-## 1. The 13 instances
+## 1. The 25 instances
 
 Generated from [`generators/_instances.py`](generators/_instances.py), which is
 the single source of truth — the compiler, the packer and the descriptor emitter
 all read it, so adding an instance is a row there rather than an edit in three
 places that can disagree.
 
-| Instance | Tier | dtype | `N` | `block_threads` | priority |
-|---|---|---|---|---|---|
-| `rmsnorm_bf16_ngeneric_bt256` | generic | bf16 | runtime | 256 | 10 |
-| `rmsnorm_f16_ngeneric_bt256` | generic | f16 | runtime | 256 | 10 |
-| `rmsnorm_f32_ngeneric_bt256` | generic | f32 | runtime | 256 | 10 |
-| `rmsnorm_bf16_n3072_bt256` | specialized | bf16 | 3072 | 256 | 100 |
-| `rmsnorm_bf16_n3584_bt256` | specialized | bf16 | 3584 | 256 | 100 |
-| `rmsnorm_bf16_n4096_bt256` | specialized | bf16 | 4096 | 256 | 100 |
-| `rmsnorm_bf16_n5120_bt256` | specialized | bf16 | 5120 | 256 | 100 |
-| `rmsnorm_bf16_n8192_bt256` | specialized | bf16 | 8192 | 256 | 100 |
-| `rmsnorm_f16_n3072_bt256` | specialized | f16 | 3072 | 256 | 100 |
-| `rmsnorm_f16_n3584_bt256` | specialized | f16 | 3584 | 256 | 100 |
-| `rmsnorm_f16_n4096_bt256` | specialized | f16 | 4096 | 256 | 100 |
-| `rmsnorm_f16_n5120_bt256` | specialized | f16 | 5120 | 256 | 100 |
-| `rmsnorm_f16_n8192_bt256` | specialized | f16 | 8192 | 256 | 100 |
+| Instance | Tier | x/y dtype | gamma dtype | `N` | `block_threads` | priority |
+|---|---|---|---|---|---|---|
+| `rmsnorm_bf16_ngeneric_bt256` | generic | bf16 | bf16 | runtime | 256 | 10 |
+| `rmsnorm_f16_ngeneric_bt256` | generic | f16 | f16 | runtime | 256 | 10 |
+| `rmsnorm_f32_ngeneric_bt256` | generic | f32 | f32 | runtime | 256 | 10 |
+| `rmsnorm_bf16_n3072_bt256` | specialized | bf16 | bf16 | 3072 | 256 | 100 |
+| `rmsnorm_bf16_n3584_bt256` | specialized | bf16 | bf16 | 3584 | 256 | 100 |
+| `rmsnorm_bf16_n4096_bt256` | specialized | bf16 | bf16 | 4096 | 256 | 100 |
+| `rmsnorm_bf16_n5120_bt256` | specialized | bf16 | bf16 | 5120 | 256 | 100 |
+| `rmsnorm_bf16_n8192_bt256` | specialized | bf16 | bf16 | 8192 | 256 | 100 |
+| `rmsnorm_f16_n3072_bt256` | specialized | f16 | f16 | 3072 | 256 | 100 |
+| `rmsnorm_f16_n3584_bt256` | specialized | f16 | f16 | 3584 | 256 | 100 |
+| `rmsnorm_f16_n4096_bt256` | specialized | f16 | f16 | 4096 | 256 | 100 |
+| `rmsnorm_f16_n5120_bt256` | specialized | f16 | f16 | 5120 | 256 | 100 |
+| `rmsnorm_f16_n8192_bt256` | specialized | f16 | f16 | 8192 | 256 | 100 |
+| `rmsnorm_bf16_ngeneric_bt256_f32scale1` | generic | bf16 | f32 | runtime | 256 | 10 |
+| `rmsnorm_f16_ngeneric_bt256_f32scale1` | generic | f16 | f32 | runtime | 256 | 10 |
+| `rmsnorm_bf16_n3072_bt256_f32scale1` | specialized | bf16 | f32 | 3072 | 256 | 100 |
+| `rmsnorm_bf16_n3584_bt256_f32scale1` | specialized | bf16 | f32 | 3584 | 256 | 100 |
+| `rmsnorm_bf16_n4096_bt256_f32scale1` | specialized | bf16 | f32 | 4096 | 256 | 100 |
+| `rmsnorm_bf16_n5120_bt256_f32scale1` | specialized | bf16 | f32 | 5120 | 256 | 100 |
+| `rmsnorm_bf16_n8192_bt256_f32scale1` | specialized | bf16 | f32 | 8192 | 256 | 100 |
+| `rmsnorm_f16_n3072_bt256_f32scale1` | specialized | f16 | f32 | 3072 | 256 | 100 |
+| `rmsnorm_f16_n3584_bt256_f32scale1` | specialized | f16 | f32 | 3584 | 256 | 100 |
+| `rmsnorm_f16_n4096_bt256_f32scale1` | specialized | f16 | f32 | 4096 | 256 | 100 |
+| `rmsnorm_f16_n5120_bt256_f32scale1` | specialized | f16 | f32 | 5120 | 256 | 100 |
+| `rmsnorm_f16_n8192_bt256_f32scale1` | specialized | f16 | f32 | 8192 | 256 | 100 |
 
-2 dtypes × (1 generic + 5 specialized widths), plus a generic f32 object. f32 has
-no specialized tier because the kernel's 128-bit fast path (below) is for 16-bit
-elements only: an f32 object with `N` baked in runs the same scalar loop the
-generic one does. `block_threads` is single-valued
+Two gamma forms × 2 dtypes × (1 generic + 5 specialized widths), plus a generic f32
+object. The second form reads gamma as f32 beside bf16/f16 x and y (`scale_f32: 1`,
+the kernel's `weight_dtype_str="f32"`): the mixed form cuDNN and PyTorch commonly
+send. f32 has no specialized tier because the kernel's 128-bit fast path (below) is
+for 16-bit elements only: an f32 object with `N` baked in runs the same scalar loop
+the generic one does. `block_threads` is single-valued
 today: it is launch geometry, not correctness, so a second value only earns its
 6 extra objects once benchmarking says it wins somewhere. It stays in the knob
 dict so the descriptors and the matcher already carry the axis when it grows.
@@ -117,15 +131,15 @@ Evaluated once per graph. Every one of these is a hard refusal.
 |---|---|
 | Exactly **one node**, and its attributes are `RMSNormAttributes` | Each kernel serves one complete graph. `RMSNormAttributes` is its own union arm, so matching it is the whole node-type test — there is no mode enum to disambiguate it from layer norm. |
 | No `bias_tensor_uid` | Every instance was compiled with no bias term and adds nothing after scaling. |
-| No `inv_rms_tensor_uid`, and `forward_phase != TRAINING` | All 13 were built `store_rstd=False`. A TRAINING graph wants the statistic even when it forgot to name the tensor, so the phase is refused too. |
+| No `inv_rms_tensor_uid`, and `forward_phase != TRAINING` | All 25 were built `store_rstd=False`. A TRAINING graph wants the statistic even when it forgot to name the tensor, so the phase is refused too. |
 | x, scale, y all present and all **device operands** | Not virtual, not pass-by-value: the kernel reads each through a pointer. |
-| One dtype for all three, in {`BFLOAT16`, `HALF`, `FLOAT`} | The kernel loads gamma with the same element type it loads x with, and writes y in that type. |
+| x and y one dtype, in {`BFLOAT16`, `HALF`, `FLOAT`}; gamma in that dtype, or `FLOAT` beside `BFLOAT16`/`HALF` | Each object reads x and writes y in one element type, and reads gamma in that type or, for the `scale_f32` objects, as f32. |
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
 | rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
 | gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The same rule as `validateScaleNormalizedShape` in the frontend. |
-| epsilon is runtime-user-supplied, **or** within 1% of `1e-5` | See below. |
+| epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
 | The graph is not override-shape | Rows and width are bound from the graph's shapes at prepare, which an override-shape graph may replace at execute. |
 
 Rank > 2 is accepted, not rejected: the axes before the normalised run collapse to
@@ -148,6 +162,8 @@ On success it binds `flydsl_rmsnorm.{x,scale,epsilon,y}.uid` plus `.rows` and
 
 Evaluated once per candidate kernel, against the KMD metadata:
 
+- `scale_f32` must be 1 exactly when gamma's dtype differs from x's (f32 beside
+  bf16/f16), so an object reads gamma in the type it has.
 - `dtype` metadata must equal the graph dtype's kernel spelling. This function
   is the one place the two vocabularies meet — descriptors say `bf16`/`f16`/`f32`,
   the flatbuffer enum says `BFLOAT16`/`HALF`/`FLOAT`.
@@ -155,21 +171,18 @@ Evaluated once per candidate kernel, against the KMD metadata:
   admitted only when it equals the bound `columns`. A real graph never has a
   zero-width normalised axis, so the value is free to carry the sentinel.
 
-### Epsilon, which is checked twice
+### Epsilon, a kernel argument
 
-Epsilon is a **literal in the kernel body** (`EPS = 1e-5`), not a kernarg. So:
+Epsilon is the kernel's last argument, an f32 (vendored modification 4), so one
+object serves every value: PyTorch's 1e-5, vLLM's and HF's 1e-6, and `eps=None`
+(f32's machine epsilon) alike.
 
-- A graph that **bakes** its epsilon into the op-graph is compared at match time
-  against `BAKED_EPSILON = 1e-5` with `EPSILON_RELATIVE_TOLERANCE = 1e-2`, and
-  declined when it disagrees — falling through to an engine that can honour it,
-  rather than failing the whole plan build.
+- A graph that **bakes** its epsilon into the op-graph is matched for any finite,
+  non-negative f32, and declined otherwise (negative, NaN, infinite) — falling
+  through to another engine rather than failing the plan build.
 - A graph that **defers** epsilon to execute cannot be inspected then, so
-  `launch()` re-checks the resolved value and throws
-  `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` on a mismatch.
-
-The 1% tolerance is wide enough that `1e-5` surviving a half-precision
-round-trip (~1.4e-3 relative error) still matches, and far too narrow to admit a
-caller who genuinely wanted a different epsilon.
+  `launch()` checks the resolved value the same way and throws
+  `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` on one that is not usable.
 
 ---
 
@@ -181,10 +194,10 @@ do not compute, declined rather than approximated.
 | | Why, and what handles it |
 |---|---|
 | **RMSNorm backward** | Forward-only. The vendored copy deliberately drops the `rmsnorm_bwd_kernel` re-export (modification 2). |
-| **Training phase / saved `inv_rms`** | `store_rstd=False` in all 13. |
+| **Training phase / saved `inv_rms`** | `store_rstd=False` in all 25. |
 | **Bias** | No instance has the term. |
 | **dtypes other than bf16 / f16 / f32** | fp8 and the rest are not built. Declined on dtype in both matchers. |
-| **Mixed dtypes across x / scale / y** | The kernel uses one element type throughout. |
+| **Other mixed dtypes** (y unlike x; a 16-bit gamma unlike x; a 16-bit gamma beside f32 x) | Only an f32 gamma beside bf16/f16 x and y has objects. |
 | **Non-packed / padded / transposed operands** | Innermost stride is a literal 1 with no descriptor slot, and the launch passes the width as the row stride. Unit axes are exempt (§2). |
 | **Rank < 2 on x or y** | No row to reduce over. |
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
@@ -198,10 +211,10 @@ do not compute, declined rather than approximated.
 
 | Claim | Checked by |
 |---|---|
-| The 13 objects per target are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — SHA256 against `manifest.json`, currently 13/13 |
+| The 25 objects per target are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — SHA256 against `manifest.json`, currently 25/25 |
 | Descriptors agree with the objects they describe | `gen_descriptors.py --check`, run by the build before staging |
 | Each object is built for the target its directory names | `gen_descriptors.py --check` reads `amdhsa.target` and, for a generic target, the ELF machine |
 | Every member arch's shard holds exactly the checked-in objects | `tools/check_shards.py`, run by the build after the product pack |
 | The vendored sources match upstream but for recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
-| The pack ships the generic tier for every dtype and the specialized tier for bf16 and f16, every kernel declares the 8-slot signature, and the engine's schema admits runtime epsilons | `TestFlydslRmsNormPacks` — and the shard census that runs it, which fails when the suite is green against an empty shard |
+| The pack ships the generic tier for every dtype and gamma form and the specialized tier for the 16-bit ones, every kernel declares the 9-slot signature (epsilon last), and the engine's schema admits runtime epsilons | `TestFlydslRmsNormPacks` — and the shard census that runs it, which fails when the suite is green against an empty shard |
 | The accept/refuse rules above hold | The matcher-acceptance suites in `TestFlydslRmsNormEngine.cpp` |
