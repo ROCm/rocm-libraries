@@ -114,7 +114,7 @@ The UED gains two members, and each slot carries the selection members the engin
 | `slots[].metadata` | The slot's KMD. |
 | `slots[].sort_kernel_catalog` | The slot's ranker (optional, metric-less; § 7). |
 | `slots[].knobs` | KMD fields the slot exposes as knobs (optional). |
-| `shared_workspace` | The bound token holding the shared region's size (optional; § 6). |
+| `shared_workspace` | The bound token holding the shared region's size (optional, only with `slots`; § 6). |
 
 A KDP gains `slot`, naming the slot its kernels serve. It is required for a slotted engine and
 forbidden otherwise. A slot may have several packs. A UKD is unchanged; it fills the KMD of its
@@ -174,10 +174,11 @@ depends only on the graph, so the engine's native graph match (provider code, no
 pattern) computes it and publishes it as bound tokens, named values written `ws.*`. The UED's
 `shared_workspace` names the token holding the total size. The match also publishes
 `ws.scratch_offset`, the shared size rounded up to 256 B, and an offset token per shared object
-(for example `ws.delta.offset`). The runtime checks the token at catalog build: a missing, non-integer
-or negative value makes the engine decline the graph with an error naming the token. For a slotted
-engine the `ws.` root is reserved: its tokens are excluded from ranker features, problem features and
-training rows. For split SDPA backward, the region
+(for example `ws.delta.offset`). The runtime checks the tokens at catalog build: a missing,
+non-integer or negative size token, a `ws.scratch_offset` that is not that size rounded up to 256 B,
+or an offset token that is not a non-negative integer makes the engine decline the graph with an
+error naming the token. For a slotted engine the `ws.` root is reserved: its tokens are excluded
+from ranker features, problem features and training rows. For split SDPA backward, the region
 holds Delta and the sanitized log-sum-exp, sized once for the maximum sequence length.
 
 **Workspace size** is the aligned shared region plus the largest scratch any one slot needs. Slots run
@@ -244,6 +245,10 @@ the engine stays registered and declines every graph. An unslotted engine with n
 still dropped, as today. Within a slotted engine, a duplicate metadata tuple in a slot or a duplicate
 kernel id in a slot's arch group drops the offending pack; unslotted engines keep today's behavior.
 
+A slot ranker whose feature signature reads a `ws.*` token is disabled at load (its engine stays and
+the slot orders its catalog by priority, then id) and is refused by the validator: the root is
+reserved (§ 6), so the feature could never be bound.
+
 ## 9. Compatibility
 
 UED and KDP take a minor bump to 1.1, adding `slots`, `shared_workspace` and `slot`; UHD takes 1.1
@@ -256,8 +261,8 @@ file that contains slot members is rejected.
 An engine without slots keeps its knob ids, trained models and winner records, so nothing trained or
 stored is invalidated. Adding, removing, renaming or reordering slots is a breaking engine revision,
 because knob ids and record keys change. For a slotted engine, winner records carry the slot name,
-the cache shard path uses the UED id and the hash of the slot rankers' model hashes in slot order,
-and a slot ranker with a model but no hash disables persistence, as for an unslotted engine
+the cache shard path uses the UED id and one digest over every slot's name and rankers, in slot
+order, and a slot ranker with a model but no hash disables persistence, as for an unslotted engine
 (RFC 0019 § 4.1, § 9.2). Winner-record lines move to format v3 for slotted engines only; v2 lines
 remain readable.
 
