@@ -2,13 +2,10 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run every installed ffm-quick CTest entry under one rocJITsu process tree.
+"""Run installed CTest entries matching a label under rocJITsu.
 
-The nightly's CTestTestfile.cmake files already carry the ffm-quick label.
-This walks those files, in ascending test-count order, and launches each
-selected command as ``rocjitsu --config <gfx942> -- <command>``. A failing
-suite is recorded and the walk continues. Each test is capped at one hour
-so one suite cannot consume the whole six-hour job.
+Each invocation handles one component so workflow matrices can fan out. Tests
+have no per-test timeout; the GitHub Actions job limit remains the outer cap.
 """
 
 import argparse
@@ -20,12 +17,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-
-LABEL_PATTERN = re.compile(r"^ffm-quick$")
-EXCLUDE_PATTERN = re.compile(r"ex_gpu")
-DEFAULT_TIMEOUT = 1800
-TIMEOUT_CAP = 3600
-
 
 def tokenize_cmake_args(text: str) -> list[str]:
     """Split one CMake argument list, including quotes and [[brackets]]."""
@@ -144,22 +135,12 @@ def parse_ctest_file(text: str) -> dict[str, dict]:
     return {name: tests[name] for name in order if tests[name]["command"]}
 
 
-def selects_ffm_quick(test: dict) -> bool:
-    labels = test["labels"]
-    if any(EXCLUDE_PATTERN.search(label) for label in labels):
-        return False
-    return any(LABEL_PATTERN.search(label) for label in labels)
+def selects_label(test: dict, label_pattern: re.Pattern) -> bool:
+    return any(label_pattern.search(label) for label in test["labels"])
 
 
-def timeout_seconds(test: dict) -> int:
-    raw = test.get("timeout")
-    if raw is None:
-        return DEFAULT_TIMEOUT
-    return max(1, min(int(raw), TIMEOUT_CAP))
-
-
-def discover(rocm_root: Path) -> list[dict]:
-    """Installed ffm-quick tests, fewest tests in a directory first."""
+def discover(rocm_root: Path, label_pattern: re.Pattern) -> list[dict]:
+    """Installed matching tests, fewest tests in a directory first."""
     groups = []
     bin_dir = rocm_root / "bin"
     for ctest_file in sorted(bin_dir.rglob("CTestTestfile.cmake")):
@@ -168,7 +149,7 @@ def discover(rocm_root: Path) -> list[dict]:
             for test in parse_ctest_file(
                 ctest_file.read_text(encoding="utf-8", errors="replace")
             ).values()
-            if selects_ffm_quick(test)
+            if selects_label(test, label_pattern)
         ]
         if not tests:
             continue
@@ -209,36 +190,27 @@ def build_env(rocm_root: Path) -> dict:
     return env
 
 
-def run_one(rocjitsu: Path, config: Path, test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
-    timeout = timeout_seconds(test)
-    command = [str(rocjitsu), "--config", str(config), "--", *test["command"]]
+def run_one(rocjitsu: Path, config: Path, rocjitsu_args: list[str], test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
+    command = [str(rocjitsu), "--config", str(config), *rocjitsu_args, "--", *test["command"]]
     work = Path(test["working_directory"]) if test["working_directory"] else cwd
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     print(
-        f"START {test['name']} timeout={timeout}s cmd={shlex.join(test['command'])}",
+        f"START {test['name']} timeout=disabled cmd={shlex.join(test['command'])}",
         flush=True,
     )
-    try:
-        proc = subprocess.run(
-            command,
-            cwd=work,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=timeout,
-            check=False,
-        )
-        output = proc.stdout or ""
-        status = "passed" if proc.returncode == 0 else "failed"
-        returncode = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", errors="replace")
-        status = "timeout"
-        returncode = None
+    proc = subprocess.run(
+        command,
+        cwd=work,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    output = proc.stdout or ""
+    status = "passed" if proc.returncode == 0 else "failed"
+    returncode = proc.returncode
     if status != "passed" and output_skips(output, test["skip_regex"]):
         status = "skipped"
     elapsed = time.monotonic() - started
@@ -253,13 +225,13 @@ def run_one(rocjitsu: Path, config: Path, test: dict, cwd: Path, env: dict, log_
         "status": status,
         "seconds": round(elapsed, 1),
         "returncode": returncode,
-        "timeout": timeout,
+        "timeout": None,
     }
 
 
-def render_summary(rows: list[dict]) -> str:
+def render_summary(rows: list[dict], label: str) -> str:
     lines = [
-        "# rocJITsu ffm-quick",
+        f"# rocJITsu {label}",
         "",
         "| component | tests | passed | failed | timeout | skipped | not started | seconds |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -285,14 +257,33 @@ def main() -> int:
     parser.add_argument("--config", required=True)
     parser.add_argument("--rocm-root", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--deadline-seconds", type=int, default=19800)
+    parser.add_argument("--label-regex", default="^ffm-quick$", help="CTest label regex; for example ^quick$ or ^ffm-quick$")
+    parser.add_argument("--component", help="Exact component name; omit with --list-components")
+    parser.add_argument("--rocjitsu-arg", action="append", default=[], help="Extra rocJITsu argument; repeat for multiple flags")
+    parser.add_argument("--list-components", action="store_true")
     parser.add_argument("--list-only", action="store_true")
     args = parser.parse_args()
 
     rocm_root = Path(args.rocm_root)
-    groups = discover(rocm_root)
+    label_pattern = re.compile(args.label_regex)
+    groups = discover(rocm_root, label_pattern)
+    if args.list_components:
+        print(json.dumps([
+            {
+                "component": group["component"],
+                "id": re.sub(r"[^A-Za-z0-9_.-]+", "_", group["component"]),
+            }
+            for group in groups
+        ]))
+        return 0
+    if args.component:
+        groups = [group for group in groups if group["component"] == args.component]
+    elif not args.list_only:
+        raise SystemExit("--component is required unless --list-components or --list-only is used")
+    if not groups:
+        raise SystemExit(f"No installed tests match component={args.component!r}, label={args.label_regex!r}")
     total = sum(len(group["tests"]) for group in groups)
-    print(f"ffm-quick directories: {len(groups)} tests: {total}", flush=True)
+    print(f"{args.label_regex} directories: {len(groups)} tests: {total}", flush=True)
     for group in groups:
         print(f"  {len(group['tests']):4d}  {group['component']}", flush=True)
     if args.list_only:
@@ -303,7 +294,6 @@ def main() -> int:
     env = build_env(rocm_root)
     rocjitsu = Path(args.rocjitsu).resolve()
     config = Path(args.config).resolve()
-    deadline = time.monotonic() + args.deadline_seconds
     rows = []
     any_problem = False
     for group in groups:
@@ -311,21 +301,9 @@ def main() -> int:
         results = []
         print(f"COMPONENT {group['component']} tests={len(group['tests'])}", flush=True)
         for test in group["tests"]:
-            if time.monotonic() >= deadline:
-                results.append(
-                    {
-                        "name": test["name"],
-                        "status": "not_started",
-                        "seconds": 0,
-                        "returncode": None,
-                        "timeout": timeout_seconds(test),
-                    }
-                )
-                any_problem = True
-                continue
             safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", test["name"])[:120]
             log_path = out_dir / "logs" / group["component"] / f"{safe}.log"
-            result = run_one(rocjitsu, config, test, group["directory"], env, log_path)
+            result = run_one(rocjitsu, config, args.rocjitsu_arg, test, group["directory"], env, log_path)
             results.append(result)
             if result["status"] in ("failed", "timeout"):
                 any_problem = True
@@ -341,7 +319,7 @@ def main() -> int:
             "tests": results,
         }
         rows.append(row)
-        summary = render_summary(rows)
+        summary = render_summary(rows, args.label_regex)
         (out_dir / "summary.md").write_text(summary, encoding="utf-8")
         (out_dir / "summary.json").write_text(
             json.dumps(rows, indent=2) + "\n", encoding="utf-8"
