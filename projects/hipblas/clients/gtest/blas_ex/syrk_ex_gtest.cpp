@@ -51,14 +51,14 @@ namespace
                     return false;
 
                 // type filters
-                return static_cast<bool>(FILTER<T...>{});
+                return FILTER<T...>::value;
             }
         };
 
         // Filter for which types apply to this suite
         static bool type_filter(const Arguments& arg)
         {
-            return hipblas_simple_dispatch<syrk_ex_template::template type_filter_functor>(arg);
+            return hipblas_syrk_ex_dispatch<syrk_ex_template::template type_filter_functor>(arg);
         }
 
         // Filter for which functions apply to this suite
@@ -102,15 +102,7 @@ namespace
     // When the condition in the second argument is satisfied, the type combination
     // is valid. When the condition is false, this specialization does not apply.
     template <typename Ti, typename To, typename Tc>
-    struct syrk_ex_testing<
-        Ti,
-        To,
-        Tc,
-        std::enable_if_t<
-            !std::is_same_v<
-                Ti,
-                void> && !(std::is_same_v<Ti, Tc> && std::is_same_v<Ti, hipblasBfloat16>)>>
-        //&& !(std::is_same_v<Ti, To> && std::is_same_v<Ti, Tc>)>>
+    struct syrk_ex_testing<Ti, To, Tc, std::enable_if_t<!std::is_same_v<Ti, void>>>
         : hipblas_test_valid
     {
         void operator()(const Arguments& arg)
