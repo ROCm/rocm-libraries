@@ -82,7 +82,7 @@ _MAX_LDS_BYTES = 65536
 class WmmaFmhaFwdV2Spec:
     """One compiled RDNA prefill object.
 
-    Tuning knobs (all emitted IR changes; the defaults are the measured
+    Tuning knobs (all emitted IR changes; the defaults are the shipping
     shipping configuration): ``block_m``, ``block_n``, ``waves_per_eu``,
     ``scheduler_strategy``, ``lazy_rescale``, ``k_pad`` / ``v_pad``,
     ``wave_pair`` and ``cta_order``. Feature flags: ``use_softcap``,
@@ -102,7 +102,7 @@ class WmmaFmhaFwdV2Spec:
     layout: str = "dense"  # "dense" | "ragged" | "paged"
     page_block_size: int = 0  # paged only: tokens per page (power of two)
     kv_dtype: str = ""  # "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN K/V bytes
-    # Query rows per CTA (16 per wave or wave pair). 0 -> the measured
+    # Query rows per CTA (16 per wave or wave pair). 0 -> the shipping
     # default: 128 (8 waves), or 64 (8 waves as 4 pairs) with the wave pair.
     block_m: int = 0
     block_n: int = 32  # keys per tile (multiple of 16, <= 128)

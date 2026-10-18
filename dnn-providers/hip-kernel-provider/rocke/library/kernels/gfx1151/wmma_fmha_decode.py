@@ -389,7 +389,7 @@ def resolve_wmma_fmha_decode_spec(
     DRAM locality (cold cache): the splits of a head interleave their key tiles on both
     families, and on gfx12 a barrier per key-loop iteration keeps a workgroup's waves on
     adjacent tiles. Without the barrier the waves drift apart and every workgroup becomes
-    several scattered DRAM streams: 1.3-1.6x slower from DRAM at the same hot-cache speed.
+    several scattered DRAM streams, which costs cold-cache throughput.
 
     Feature objects keep these knobs except: FP8 K/V prefetches on gfx11 below D256 (its
     raw K/V carry half the registers) and decodes with ``v_cvt_pk_f32_fp8`` on gfx12
@@ -436,14 +436,14 @@ def resolve_wmma_fmha_decode_spec(
         prefetch=auto["prefetch"] if spec.prefetch is None else spec.prefetch,
         lockstep=auto["lockstep"] if spec.lockstep is None else spec.lockstep,
         # gfx12 D128 sits at the VGPR limit: the hardware conversion's F32 temporaries spill
-        # there (26 VGPRs) where the integer decode spills 8-11 and measures faster.
+        # there where the integer decode spills far fewer registers and is faster.
         fp8_cvt=(
             (gfx12 and spec.head_size != 128)
             if spec.fp8_cvt is None
             else (spec.fp8_cvt and gfx12)
         ),
-        # The exp2/rcp softcap spills gfx11 D256 (already at 256 VGPRs) under max-ilp: 25 vs
-        # 7 VGPRs, 1.5x slower; with FP8 K/V (fewer live K/V registers) it wins there too.
+        # The exp2/rcp softcap spills gfx11 D256 (already at 256 VGPRs) under max-ilp, so it
+        # is slower there; with FP8 K/V (fewer live K/V registers) it wins there too.
         tanh_fast=(
             (gfx12 or not d256 or bool(spec.kv_dtype))
             if spec.tanh_fast is None
@@ -1950,7 +1950,7 @@ def wmma_fmha_decode_fused_merge(num_splits: int) -> bool:
     """Merge in the last split (pass WS_CNT) rather than launch the merge kernel.
 
     The fused merge saves the second launch but lengthens every workgroup's tail by an
-    agent-scope release, a barrier and an atomic; measured, it wins up to
+    agent-scope release, a barrier and an atomic; it wins up to
     ``_FUSED_MAX_SPLITS`` splits and the merge kernel wins above.
     """
     return 1 < num_splits <= _FUSED_MAX_SPLITS

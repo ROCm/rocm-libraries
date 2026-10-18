@@ -396,7 +396,7 @@ on an axis or in an exemption.
 
 Two kernels serve every `gfx11-generic`, `gfx1151`, `gfx12-generic` and
 `gfx1201` request. Requests for a generic target compile one code object set
-that loads on every device of the generation (gfx1100-gfx1153, or
+that loads on every device of the generation (gfx1100-gfx1154, or
 gfx1200/gfx1201); map a device name with
 `rocke.core.arch.generic_arch_from_target_id`. Other architecture defaults are
 unchanged.
@@ -407,8 +407,8 @@ unchanged.
 | `attention_rdna_wmma_prefill` (priority 5) | multi-wave prefill (`kernels.gfx1151.wmma_fmha_fwd_v2`) | `algorithm="wmma_fmha_fwd_v2"`, `spec_id="rdna_wmma_fmha_fwd_v2"` | every other request |
 
 The decode/prefill rule is `gfx1151.rdna_attention_use_decode`, a pure function
-of the problem, the WMMA family and the CU count; its docstring records how the
-thresholds were chosen. A decode bucket
+of the problem, the WMMA family and the CU count; its docstring describes the
+crossover points it encodes. A decode bucket
 (64/128/256) serves Q/K widths only from its own minimum up
 (`wmma_fmha_decode_bucket`), so widths no bucket serves (Q64/V128, for
 instance) and `runtime_head_dims` requests run the prefill. Pinning either
@@ -469,9 +469,14 @@ The shipped `hipkernel:Gfx1151WmmaAttention` catalog does not package these
 kernels yet: it still builds the single-wave `kernels.gfx1151.wmma_fmha_fwd`
 objects (runtime-head-dim buckets, plus exact D64/D128 transposed-QK objects
 on gfx11), which rocKE dispatch no longer selects. Moving the catalog to the
-prefill/decode pair is a separate packaging change. Kernel design, ABI and
+prefill/decode pair is a separate packaging change. Kernel design and
 generic-target requirements are in the
-[RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md).
+[RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
+dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
+(`rocke-attention-gfx1151/v7`): v7 retires the single-wave forward kernel from
+dispatch, gives the prefill a `batch` argument and a flat 1-D grid, and routes
+decode-shaped requests to the split-KV decode with its workspace and merge
+kernel. Callers built against an earlier header must be rebuilt.
 
 ### Tuned RDNA WMMA candidates
 
@@ -549,7 +554,10 @@ RDNA specs are the exception described under *Tuned RDNA WMMA candidates*.
 
 - gfx942/gfx950 dense attention;
 - explicit unified 2D/3D tuning kernels;
-- gfx1250 WMMA attention.
+- gfx1250 WMMA attention;
+- RDNA prefill (`bind_rdna_prefill_torch`) and split-KV decode
+  (`bind_rdna_decode_torch`), which share one tensor, layout and scalar
+  contract.
 
 Bindings close over caller-owned tensors and return `TorchBinding(launch, grid,
 block)`. Torch is never imported at dispatch module load time; it remains a

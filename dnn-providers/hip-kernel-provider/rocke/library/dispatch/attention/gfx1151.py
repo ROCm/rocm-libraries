@@ -5,7 +5,7 @@
 packed layouts.
 
 One kernel set per RDNA generation: requests name ``gfx11-generic`` (code
-objects load on gfx1100-gfx1153) or ``gfx12-generic`` (gfx1200/gfx1201). A
+objects load on gfx1100-gfx1154) or ``gfx12-generic`` (gfx1200/gfx1201). A
 request may still name ``gfx1151`` or ``gfx1201`` to build processor-specific
 objects.
 
@@ -290,10 +290,9 @@ def rdna_attention_use_decode(
     compute bound. Past 64 rows per head the prefill wins unless its CTAs
     would leave most of the device idle.
 
-    The thresholds come from a decode-vs-prefill sweep on gfx1100, gfx1101
-    and gfx1201 (B 1..32, Sk 512..32768, g 1/4/8, Sq 1..256): the 2048-key
-    gfx12 threshold and the prefill-underfill exception sit at the measured
-    crossovers.
+    The thresholds are the decode/prefill crossover points: the 2048-key gfx12
+    threshold and the prefill-underfill exception mark where the prefill
+    kernel overtakes split-KV decode.
     """
     g = max(1, num_query_heads // max(num_kv_heads, 1))
     if seqlen_q > 64:

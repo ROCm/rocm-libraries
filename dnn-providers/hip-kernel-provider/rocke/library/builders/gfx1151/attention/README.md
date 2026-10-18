@@ -131,7 +131,7 @@ authored or shipped:
 
 | Generation | Generic target | Devices | WMMA atom |
 |---|---|---|---|
-| RDNA3/3.5 | `gfx11-generic` | gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153 | `wmma_f32_16x16x16_{f16,bf16}` (operands duplicated across lane halves) |
+| RDNA3/3.5 | `gfx11-generic` | gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1154 | `wmma_f32_16x16x16_{f16,bf16}` (operands duplicated across lane halves) |
 | RDNA4 | `gfx12-generic` | gfx1200, gfx1201 | `wmma_gfx12_f32_16x16x16_{f16,bf16}` (K split across lane halves) |
 
 rocKE IR names no processor: the LLVM module carries only the
