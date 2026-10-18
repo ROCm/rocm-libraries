@@ -16,17 +16,6 @@
 
 #define CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD 0
 
-// Number of XCDs the workgroups are dispatched round-robin across, used by the
-// head-major decode to remap the grid into contiguous per-XCD segments.
-// 0 disables the remap. Only enabled where it has been measured (gfx1250).
-#if !defined(CK_TILE_FMHA_FWD_NUM_XCDS)
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-#define CK_TILE_FMHA_FWD_NUM_XCDS 8
-#else
-#define CK_TILE_FMHA_FWD_NUM_XCDS 0
-#endif
-#endif
-
 #if !defined(CK_TILE_FMHA_FORCE_HEAD_MAJOR)
 #if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
 #define CK_TILE_FMHA_FORCE_HEAD_MAJOR 1
@@ -1577,7 +1566,7 @@ struct FmhaFwdKernel
         }
     }
 
-#if CK_TILE_FMHA_FWD_NUM_XCDS
+#if CK_TILE_XCD_REMAP_NUM_XCDS
     // Whether every (batch, head) has the same work. The grid is sized by the
     // longest sequence, so with per-batch lengths (group mode, or cu_seqlen_q/k
     // in batch mode) the short batches' blocks exit early and whole-batch XCD
@@ -1588,14 +1577,6 @@ struct FmhaFwdKernel
             return false;
         else
             return kargs.cu_seqlen_q_ptr == nullptr && kargs.cu_seqlen_k_ptr == nullptr;
-    }
-
-    // Block L is dispatched to XCD L % CK_TILE_FMHA_FWD_NUM_XCDS, which scatters
-    // consecutive ids over every L2; remap them to contiguous per-XCD segments.
-    CK_TILE_DEVICE static index_t RemapXCD(index_t linear_id)
-    {
-        return ck_tile::remap_xcd(
-            linear_id, gridDim.x * gridDim.y * gridDim.z, CK_TILE_FMHA_FWD_NUM_XCDS);
     }
 #endif
 
@@ -1741,11 +1722,11 @@ struct FmhaFwdKernel
                 const index_t blocks_per_batch = num_head * num_tile_total;
                 index_t linear_id = blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
 
-#if CK_TILE_FMHA_FWD_NUM_XCDS
+#if CK_TILE_XCD_REMAP_NUM_XCDS
                 // The m-tiles of one (batch, head) are consecutive in linear_id
-                // and read the same K/V; keep them on one XCD (see RemapXCD).
+                // and read the same K/V; keep them on one XCD (see remap_xcd).
                 if(HasUniformWork(kargs))
-                    linear_id = RemapXCD(linear_id);
+                    linear_id = remap_xcd_grid(linear_id);
 #endif
 
                 const index_t i_batch = linear_id / blocks_per_batch;
@@ -1805,7 +1786,7 @@ struct FmhaFwdKernel
             index_t i_nhead = blockIdx.x; // blockIdx.y
             index_t i_batch = blockIdx.z;
 
-#if CK_TILE_FMHA_FWD_NUM_XCDS
+#if CK_TILE_XCD_REMAP_NUM_XCDS
             // bshd inputs take this path. Dispatch order is blockIdx.x (head)
             // fastest, so the m-tiles of one (batch, head) sit num_head apart in
             // linear_id and scatter over the XCDs just like above. Apply the same
@@ -1822,11 +1803,11 @@ struct FmhaFwdKernel
             // (batch, head) (gridDim.y == 1) has no K/V to share, and per-batch
             // lengths keep the round-robin (see HasUniformWork).
             const bool remap_masked =
-                gridDim.x * gridDim.z >= CK_TILE_FMHA_FWD_NUM_XCDS * gridDim.y;
+                gridDim.x * gridDim.z >= CK_TILE_XCD_REMAP_NUM_XCDS * gridDim.y;
             if(HasUniformWork(kargs) && gridDim.y > 1 && (!kHasMask || remap_masked))
             {
                 const index_t linear_id =
-                    RemapXCD(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
+                    remap_xcd_grid(blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z));
 
                 const index_t rest = linear_id / static_cast<index_t>(gridDim.y);
                 i_block            = linear_id - rest * static_cast<index_t>(gridDim.y);

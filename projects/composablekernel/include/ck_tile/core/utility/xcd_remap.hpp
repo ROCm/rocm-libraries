@@ -6,6 +6,17 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 
+// Number of XCDs the workgroups are dispatched round-robin across, for the kernels
+// that remap their grid with remap_xcd_grid. 0 disables the remap. Only enabled
+// where it has been measured (gfx1250); define it to override.
+#if !defined(CK_TILE_XCD_REMAP_NUM_XCDS)
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+#define CK_TILE_XCD_REMAP_NUM_XCDS 8
+#else
+#define CK_TILE_XCD_REMAP_NUM_XCDS 0
+#endif
+#endif
+
 namespace ck_tile {
 
 // Workgroup id L is dispatched to XCD L % num_xcds, which scatters consecutive
@@ -39,5 +50,14 @@ remap_xcd_inverse(index_t remapped, index_t total, index_t num_xcds)
     const index_t r = remapped - tall_span;
     return (r % short_len) * num_xcds + tall_xcds + r / short_len;
 }
+
+#if CK_TILE_XCD_REMAP_NUM_XCDS
+// remap_xcd over the whole grid: linear_id is the workgroup's dispatch-order id,
+// blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z).
+CK_TILE_DEVICE index_t remap_xcd_grid(index_t linear_id)
+{
+    return remap_xcd(linear_id, gridDim.x * gridDim.y * gridDim.z, CK_TILE_XCD_REMAP_NUM_XCDS);
+}
+#endif
 
 } // namespace ck_tile
