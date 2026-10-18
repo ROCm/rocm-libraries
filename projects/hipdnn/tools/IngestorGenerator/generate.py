@@ -95,7 +95,8 @@ def main() -> None:
         "config's engine emits, searched under --emitted-root (default: "
         "--output-dir), and exit 1 if any remain or if any of them cannot be "
         "located. It derives the file set from the config, so it cannot miss a "
-        "file a hand-written glob forgot.",
+        "file a hand-written glob forgot. A slotted config generates descriptors only, "
+        "so it is refused with exit 2.",
     )
     parser.add_argument(
         "--emitted-root",
@@ -135,7 +136,10 @@ def main() -> None:
 
     print(f"Loaded config for engine: {config.engine.name}")
     print(f"  Packs: {[p.name for p in config.packs]}")
-    print(f"  Knobs: {config.engine.knobs}")
+    if config.is_slotted:
+        print("  Descriptors only: no provider splice for slotted engines")
+    else:
+        print(f"  Knobs: {config.engine.knobs}")
 
     template_dir = Path(__file__).parent / "templates"
     generator = IngestorGenerator(template_dir)
@@ -150,6 +154,15 @@ def main() -> None:
         return
 
     if args.check_placeholders:
+        if config.is_slotted:
+            # A slotted engine generates descriptors only, so there is no file to fill
+            # and a pass here would check nothing.
+            print(
+                "Error: --check-placeholders is not supported for slotted engines "
+                "(descriptors only: there are no hook bodies to fill).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         expected = generator.preview_files(config)
         # No --emitted-root means the output dir is the one root.
         roots = args.emitted_roots or [args.output_dir]
@@ -264,10 +277,13 @@ def main() -> None:
             "count too."
         )
 
-    print(
-        "\nDone. See README.md for the CMake/registration splice points and the "
-        "validate-descriptors round trip."
-    )
+    if config.is_slotted:
+        print("\nDone. See README.md for the validate-descriptors round trip.")
+    else:
+        print(
+            "\nDone. See README.md for the CMake/registration splice points and the "
+            "validate-descriptors round trip."
+        )
 
 
 if __name__ == "__main__":

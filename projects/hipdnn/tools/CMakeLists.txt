@@ -371,7 +371,9 @@ endif()
 
         # The role fixtures: the exit status, and every model_checks entry's role and verdict
         # in report order. HIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS is a comma-separated list
-        # of <role>=<true|false>, comma rather than semicolon so it survives add_test().
+        # of <role>=<true|false>, comma rather than semicolon so it survives add_test(). A slot
+        # ranker's role is spelled <role>@<slot>. HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC, when
+        # set, is text some reported diagnostic must contain.
         file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake" [[
 if(NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_TOOL
    OR NOT DEFINED HIPDNN_VALIDATE_DESCRIPTORS_ROOT
@@ -426,6 +428,10 @@ foreach(expected IN LISTS expectedChecks)
     list(GET expectedPair 0 expectedRole)
     list(GET expectedPair 1 expectedSuccess)
     string(JSON role GET "${toolStdout}" model_checks ${index} role)
+    string(JSON slot ERROR_VARIABLE slotError GET "${toolStdout}" model_checks ${index} slot)
+    if(NOT slotError)
+        set(role "${role}@${slot}")
+    endif()
     string(JSON success GET "${toolStdout}" model_checks ${index} success)
     if(success)
         set(success true)
@@ -439,6 +445,14 @@ foreach(expected IN LISTS expectedChecks)
     endif()
     math(EXPR index "${index} + 1")
 endforeach()
+
+if(DEFINED HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC)
+    string(FIND "${toolStdout}" "${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}" diagnosticPosition)
+    if(diagnosticPosition EQUAL -1)
+        message(FATAL_ERROR
+            "no diagnostic contains '${HIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC}'")
+    endif()
+endif()
 ]])
         # cmake-format: on
 
@@ -472,7 +486,9 @@ endforeach()
         )
         list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_smoke_multi_launch)
 
-        # <fixture>:<exit status>:<model checks>, as the fixtures' README states them. A
+        # PORT(T): C2-01 fixture-list comment with the optional diagnostic field (develop's multi_launch root kept above)
+        # <fixture>:<exit status>:<model checks>[:<diagnostic>], as the fixtures' README states
+        # them; the optional diagnostic is a colon-free text a reported diagnostic must contain. A
         # predict_engine model is admitted only through the L1 guards, so a static_order
         # estimate fails the run while a static_order kernel ranker does not. A ranker whose
         # features need a sample, run without one, is admitted with extraction skipped.
@@ -482,11 +498,25 @@ endforeach()
             "l2_dynamic_features:0:sort_kernel_catalog=true"
             "l1_static_order:1:sort_kernel_catalog=true,predict_engine=false"
             "l1_native:0:sort_kernel_catalog=true,predict_engine=true"
+            "slotted_valid:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true"
+            "slotted_empty_slot:0:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=true:has no loadable kernel pack"
+            "slotted_ranker_undeclared_field:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:Feature references an undeclared KMD field"
+            "slotted_ranker_unexposed_axis:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:which its UED does not expose as knobs"
+            "slotted_ranker_reads_workspace_token:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=false,predict_engine=true:a shared-workspace token a slotted engine reserves"
+            "slotted_ranker_names_other_slot:1:sort_kernel_catalog@dkdv=false,sort_kernel_catalog@dq=true,predict_engine=true:but the ranker serves slot"
+            "slotted_estimate_missing_slot_kmd:1:sort_kernel_catalog@dkdv=true,sort_kernel_catalog@dq=true,predict_engine=false:does not name slot"
+            "slotted_kernel_in_two_slots:1:sort_kernel_catalog@dkdv=false,sort_kernel_catalog@dq=true,predict_engine=true:a kernel serves at most one slot"
         )
             string(REPLACE ":" ";" roleFixture "${roleFixture}")
             list(GET roleFixture 0 fixtureName)
             list(GET roleFixture 1 fixtureExit)
             list(GET roleFixture 2 fixtureChecks)
+            set(fixtureDiagnosticArg)
+            list(LENGTH roleFixture roleFixtureLength)
+            if(roleFixtureLength GREATER 3)
+                list(GET roleFixture 3 fixtureDiagnostic)
+                set(fixtureDiagnosticArg "-DHIPDNN_VALIDATE_DESCRIPTORS_DIAGNOSTIC=${fixtureDiagnostic}")
+            endif()
             add_test(
                 NAME hipdnn_validate_descriptors_${fixtureName}
                 COMMAND
@@ -496,6 +526,7 @@ endforeach()
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_ENGINE=${HIPDNN_VALIDATE_DESCRIPTORS_SMOKE_ENGINE}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_EXIT=${fixtureExit}"
                     "-DHIPDNN_VALIDATE_DESCRIPTORS_MODEL_CHECKS=${fixtureChecks}"
+                    ${fixtureDiagnosticArg}
                     -P "${CMAKE_CURRENT_BINARY_DIR}/ValidateDescriptorsModelChecksTest.cmake"
             )
             list(APPEND HIPDNN_VALIDATE_DESCRIPTORS_TESTS hipdnn_validate_descriptors_${fixtureName})

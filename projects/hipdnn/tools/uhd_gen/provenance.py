@@ -10,6 +10,11 @@ from pathlib import Path
 
 ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
+_SLOT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+#: Descriptor file-format versions the tooling reads; 1.1 adds the RFC 0021 slot members.
+SUPPORTED_FILE_VERSIONS = ("1.0", "1.1")
+#: UED and KDP members that exist only from file-format 1.1.
+_SLOT_MEMBERS = frozenset({"slots", "slot", "shared_workspace"})
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 #: `trained_against` member: what published feature values mean (`FeatureSemantics.hpp`).
 FEATURE_SEMANTICS_REVISION = "feature_semantics_revision"
@@ -43,18 +48,59 @@ def _dependency(value: object, where: str) -> dict:
     return {"id": identity, "revision": f"{major}.{minor}"}
 
 
+def slot_name(value: object, where: str) -> str:
+    """A valid slot name (RFC 0021 §4): `^[a-z][a-z0-9_]*$`, never the reserved `global`."""
+    if (
+        not isinstance(value, str)
+        or not _SLOT_NAME.fullmatch(value)
+        or value == "global"
+    ):
+        raise ProvenanceError(
+            f"{where} {value!r} is not a valid slot name (^[a-z][a-z0-9_]*$, never 'global')"
+        )
+    return value
+
+
+def _slot_dependencies(value: object, where: str) -> list[dict]:
+    """`trained_against.kmds`: a non-empty array of `{slot, id, revision}`, one per slot."""
+    if not isinstance(value, list) or not value:
+        raise ProvenanceError(f"{where} must be a non-empty array")
+    entries = []
+    seen = set()
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"slot", "id", "revision"}:
+            raise ProvenanceError(
+                f"{where} entries require exactly slot, id and revision"
+            )
+        name = slot_name(entry["slot"], f"{where} slot")
+        if name in seen:
+            raise ProvenanceError(f"{where} names slot {name!r} twice")
+        seen.add(name)
+        entries.append(
+            {
+                "slot": name,
+                **_dependency({k: entry[k] for k in ("id", "revision")}, where),
+            }
+        )
+    return entries
+
+
 def validate_provenance(snapshot: object) -> dict:
     """Validate a recorded snapshot without consulting or inventing dependencies.
 
     Accepts what the loader accepts (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`,
     all or none) and/or a `selector_revision` for engines with no UED, plus an optional
-    `feature_semantics_revision` (absent means 1).
+    `feature_semantics_revision` (absent means 1). RFC 0021 §9 adds two slot forms: `slot`
+    beside `kmd` (one slot's ranker), and `kmds: [{slot, id, revision}]` in place of `kmd`
+    (a slotted engine's `predict_engine` model).
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
     unknown = set(snapshot) - {
         "ued",
         "kmd",
+        "kmds",
+        "slot",
         "umd",
         "selector_revision",
         FEATURE_SEMANTICS_REVISION,
@@ -74,42 +120,46 @@ def validate_provenance(snapshot: object) -> dict:
                 f"trained_against.{FEATURE_SEMANTICS_REVISION} must be an integer >= 1"
             )
         semantics[FEATURE_SEMANTICS_REVISION] = recorded_semantics
-    names_descriptor_set = bool({"ued", "kmd", "umd"} & set(snapshot))
-    if not names_descriptor_set:
-        if "selector_revision" not in snapshot:
-            raise ProvenanceError(
-                "trained_against must name a descriptor set or a selector_revision"
-            )
+    names_descriptor_set = bool({"ued", "kmd", "kmds", "umd"} & set(snapshot))
+    if not names_descriptor_set and "selector_revision" not in snapshot:
+        raise ProvenanceError(
+            "trained_against must name a descriptor set or a selector_revision"
+        )
+    if "selector_revision" in snapshot:
         revision_text = snapshot["selector_revision"]
         if not isinstance(revision_text, str) or not revision_text:
             raise ProvenanceError(
                 "trained_against.selector_revision must be a non-empty string"
             )
-        return {"selector_revision": revision_text, **semantics}
-    # All three or none: a partial descriptor set is unverifiable.
-    if not {"ued", "kmd", "umd"} <= set(snapshot):
-        raise ProvenanceError("trained_against requires exactly ued, kmd and umd")
+    if "slot" in snapshot and "kmd" not in snapshot:
+        raise ProvenanceError("trained_against.slot requires kmd, and excludes kmds")
+    if "kmd" in snapshot and "kmds" in snapshot:
+        raise ProvenanceError("trained_against names both kmd and kmds")
+    if not names_descriptor_set:
+        return {"selector_revision": snapshot["selector_revision"], **semantics}
+    # All three or none: a partial descriptor set is unverifiable. `kmds` stands in for `kmd`.
+    kmd_key = "kmds" if "kmds" in snapshot else "kmd"
+    if not {"ued", kmd_key, "umd"} <= set(snapshot):
+        raise ProvenanceError(
+            f"trained_against requires exactly ued, {kmd_key} and umd"
+        )
     if not isinstance(snapshot["umd"], list):
         raise ProvenanceError("trained_against.umd must be an array")
     matchers = [_dependency(item, "trained_against.umd") for item in snapshot["umd"]]
     ids = [item["id"] for item in matchers]
     if len(ids) != len(set(ids)):
         raise ProvenanceError("trained_against.umd has duplicate matcher identities")
-    recorded = {
-        "ued": _dependency(snapshot["ued"], "trained_against.ued"),
-        "kmd": _dependency(snapshot["kmd"], "trained_against.kmd"),
-        "umd": sorted(matchers, key=lambda item: item["id"]),
-    }
+    recorded = {"ued": _dependency(snapshot["ued"], "trained_against.ued")}
+    if kmd_key == "kmds":
+        recorded["kmds"] = _slot_dependencies(snapshot["kmds"], "trained_against.kmds")
+    else:
+        recorded["kmd"] = _dependency(snapshot["kmd"], "trained_against.kmd")
+        if "slot" in snapshot:
+            recorded["slot"] = slot_name(snapshot["slot"], "trained_against.slot")
+    recorded["umd"] = sorted(matchers, key=lambda item: item["id"])
     if "selector_revision" in snapshot:
         # A descriptor-backed engine may also record its selector revision; the loader
         # checks it independently of the descriptor revisions.
-        if (
-            not isinstance(snapshot["selector_revision"], str)
-            or not snapshot["selector_revision"]
-        ):
-            raise ProvenanceError(
-                "trained_against.selector_revision must be a non-empty string"
-            )
         recorded["selector_revision"] = snapshot["selector_revision"]
     return {**recorded, **semantics}
 
@@ -143,6 +193,82 @@ def record_feature_semantics(snapshot: object, current: int) -> dict:
     return {**recorded, FEATURE_SEMANTICS_REVISION: current}
 
 
+def _check_dependency(kind: str, dependency: dict, by_id: dict, foreign=frozenset()):
+    """One recorded dependency must still exist (or be another arch's) and not regress."""
+    identity = dependency["id"]
+    current = by_id.get(identity)
+    if current is None and kind == "umd" and identity in foreign:
+        return
+    if current is None:
+        raise ProvenanceError(
+            f"trained_against.{kind}: dependency {identity} is missing or not owned by this engine/architecture"
+        )
+    expected = revision(dependency["revision"], kind)
+    found = revision(current["revision"], kind)
+    if found[0] != expected[0] or found[1] < expected[1]:
+        raise ProvenanceError(
+            f"trained_against.{kind}: {identity} revision {current['revision']} is incompatible with trained revision {dependency['revision']}"
+        )
+
+
+def _compare_kmds(trained: dict, actual: dict) -> None:
+    """The KMD half of the comparison, in the unslotted, slot-ranker and engine-level forms.
+
+    Mirrors `slottedProvenanceError` (DescriptorLoader.hpp): a slot ranker names its own
+    slot's KMD (`slot` optional); an engine-level model of a slotted engine names every
+    slot's KMD in `kmds`; an unslotted engine satisfies neither slot form.
+    """
+    if "kmds" in trained:
+        if "kmds" not in actual:
+            if "slot" in actual:
+                raise ProvenanceError(
+                    f"trained_against names kmds, but the ranker of slot {actual['slot']!r} "
+                    "must name its own slot's kmd"
+                )
+            raise ProvenanceError(
+                "trained_against names slot provenance ('kmds'), which an engine that "
+                "declares no slots cannot satisfy"
+            )
+        declared = {entry["slot"]: entry for entry in actual["kmds"]}
+        for entry in trained["kmds"]:
+            current = declared.get(entry["slot"])
+            if current is None:
+                raise ProvenanceError(
+                    f"trained_against kmds names slot {entry['slot']!r}, which the engine "
+                    "does not declare"
+                )
+            _check_dependency("kmds", entry, {current["id"]: current})
+        named = {entry["slot"] for entry in trained["kmds"]}
+        for slot in declared:
+            if slot not in named:
+                raise ProvenanceError(
+                    f"trained_against kmds does not name slot {slot!r}"
+                )
+        return
+    if "kmds" in actual:
+        if "slot" in trained:
+            raise ProvenanceError(
+                "trained_against names a single slot, but a slotted engine's predict_engine "
+                "model must name every slot's KMD in kmds"
+            )
+        raise ProvenanceError(
+            "trained_against names kmd, but a slotted engine's predict_engine model must "
+            "name every slot's KMD in kmds"
+        )
+    if "slot" in trained:
+        if "slot" not in actual:
+            raise ProvenanceError(
+                "trained_against names slot provenance ('slot'), which an engine that "
+                "declares no slots cannot satisfy"
+            )
+        if trained["slot"] != actual["slot"]:
+            raise ProvenanceError(
+                f"trained_against names slot {trained['slot']!r}, but the ranker serves "
+                f"slot {actual['slot']!r}"
+            )
+    _check_dependency("kmd", trained["kmd"], {actual["kmd"]["id"]: actual["kmd"]})
+
+
 def compare_provenance(
     trained: object, actual: object, *, foreign_matchers=frozenset()
 ) -> None:
@@ -151,7 +277,10 @@ def compare_provenance(
     As `DescriptorLoader.hpp`'s provenanceError decides it: a recorded matcher in
     `foreign_matchers` (owned only by other arches' packs) is ignored, and every matcher in
     `actual` -- the arch's own -- must be recorded, since the runtime disables a model that
-    never saw one of them. Selector revisions are opaque and must match exactly.
+    never saw one of them. The same matcher rule holds for slotted engines (`actual` is then
+    scoped to the ranker's slot, or to every slot for an engine-level model), as in
+    `umdProvenanceError`. Selector revisions are opaque and must match exactly. Slot forms
+    compare as `_compare_kmds` describes.
     """
     trained = validate_provenance(trained)
     actual = validate_provenance(actual)
@@ -173,25 +302,11 @@ def compare_provenance(
         raise ProvenanceError(
             "trained_against names a descriptor set the engine does not have"
         )
-    for kind in ("ued", "kmd", "umd"):
-        recorded = trained[kind] if kind == "umd" else [trained[kind]]
-        available = actual[kind] if kind == "umd" else [actual[kind]]
-        by_id = {item["id"]: item for item in available}
-        for dependency in recorded:
-            identity = dependency["id"]
-            current = by_id.get(identity)
-            if current is None and kind == "umd" and identity in foreign_matchers:
-                continue
-            if current is None:
-                raise ProvenanceError(
-                    f"trained_against.{kind}: dependency {identity} is missing or not owned by this engine/architecture"
-                )
-            expected = revision(dependency["revision"], kind)
-            found = revision(current["revision"], kind)
-            if found[0] != expected[0] or found[1] < expected[1]:
-                raise ProvenanceError(
-                    f"trained_against.{kind}: {identity} revision {current['revision']} is incompatible with trained revision {dependency['revision']}"
-                )
+    _check_dependency("ued", trained["ued"], {actual["ued"]["id"]: actual["ued"]})
+    _compare_kmds(trained, actual)
+    by_id = {item["id"]: item for item in actual["umd"]}
+    for dependency in trained["umd"]:
+        _check_dependency("umd", dependency, by_id, foreign_matchers)
     recorded_matchers = {item["id"] for item in trained["umd"]}
     for matcher in actual["umd"]:
         if matcher["id"] not in recorded_matchers:
@@ -227,9 +342,18 @@ def load_descriptor_tree(
                     f"duplicate/conflicting descriptor {identity}: {identities[identity]} and {path}"
                 )
             identities[identity] = path
-            if doc.get("version") != "1.0":
+            # Only the kinds that carry slot members have a 1.1; a file that carries them
+            # at 1.0 is the loader's refusal too (RFC 0021 §9).
+            versions = SUPPORTED_FILE_VERSIONS if kind in ("ued", "kdp") else ("1.0",)
+            if doc.get("version") not in versions:
                 raise ProvenanceError(
-                    f"{path}: unsupported file-format version {doc.get('version')!r}; expected 1.0"
+                    f"{path}: unsupported file-format version {doc.get('version')!r}; "
+                    f"expected one of {', '.join(versions)}"
+                )
+            slotted = sorted(_SLOT_MEMBERS & set(doc))
+            if doc["version"] == "1.0" and slotted:
+                raise ProvenanceError(
+                    f"{path}: {', '.join(slotted)} require file-format version 1.1"
                 )
             if kind != "kdp":
                 revision(doc.get("revision", "1.0"), str(path))
@@ -255,15 +379,20 @@ def select_engine(index: dict, engine: str | None) -> tuple[Path, dict]:
     return matches[0]
 
 
-def _pack_matchers(index: dict, ued_id: str, arch: str | None) -> set[str]:
+def _pack_matchers(
+    index: dict, ued_id: str, arch: str | None, slot: str | None = None
+) -> set[str]:
     """Matcher ids of the engine's packs that serve `arch` (every pack for None/default).
 
     A pack with no `arch` list serves every architecture, exactly as the loader reads it.
+    With `slot`, only the packs of that slot of a slotted engine count.
     """
     matchers = set()
     for path, pack in index["kdp"].values():
         owner = descriptor_id(pack.get("engine"), f"{path}.engine")
         if owner != ued_id:
+            continue
+        if slot is not None and pack.get("slot") != slot:
             continue
         arches = pack.get("arch", [])
         if not isinstance(arches, list) or any(
@@ -280,15 +409,45 @@ def _pack_matchers(index: dict, ued_id: str, arch: str | None) -> set[str]:
     return matchers
 
 
-def foreign_matcher_ids(index: dict, ued: dict, arch: str | None) -> frozenset[str]:
-    """Matchers owned only by the engine's packs for architectures other than `arch`."""
+def foreign_matcher_ids(
+    index: dict, ued: dict, arch: str | None, slot: str | None = None
+) -> frozenset[str]:
+    """Matchers owned only by the engine's packs for architectures other than `arch`
+    (of `slot`'s packs, for a slot ranker)."""
     ued_id = descriptor_id(ued.get("id"), "UED")
     return frozenset(
-        _pack_matchers(index, ued_id, None) - _pack_matchers(index, ued_id, arch)
+        _pack_matchers(index, ued_id, None, slot)
+        - _pack_matchers(index, ued_id, arch, slot)
     )
 
 
-def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> dict:
+def declared_slots(ued: dict) -> list[dict] | None:
+    """The UED's `slots` entries, or None for an unslotted engine."""
+    slots = ued.get("slots")
+    if slots is None:
+        return None
+    if not isinstance(slots, list) or not slots:
+        raise ProvenanceError("UED slots must be a non-empty array")
+    names = []
+    for entry in slots:
+        if not isinstance(entry, dict):
+            raise ProvenanceError("UED slots entries must be objects")
+        names.append(slot_name(entry.get("name"), "UED slots[].name"))
+    if len(names) != len(set(names)):
+        raise ProvenanceError("UED slots names must be unique")
+    return slots
+
+
+def provenance_for_engine(
+    index: dict, ued: dict, arch: str | None = None, slot: str | None = None
+) -> dict:
+    """The snapshot an engine-bound model is compared against.
+
+    An unslotted engine has one form. A slotted engine has two: a slot ranker's
+    (`slot` given: that slot's KMD and packs only) and the engine-level `kmds` form
+    (`slot` None: every slot's KMD, every pack).
+    """
+
     def resolve(kind: str, identity: object) -> dict:
         identity = descriptor_id(identity, kind)
         entry = index[kind].get(identity)
@@ -301,20 +460,60 @@ def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> di
     # knob-removal revision.
     ued_dependency = resolve("ued", ued_id)
     ued_dependency["revision"] = ued.get("revision", "1.0")
-    matchers = _pack_matchers(index, ued_id, arch)
+    slots = declared_slots(ued)
+    if slots is None:
+        if slot is not None:
+            raise ProvenanceError(
+                f"engine {ued.get('name', ued_id)!r} declares no slots, so it has no "
+                f"slot {slot!r}"
+            )
+        matchers = _pack_matchers(index, ued_id, arch)
+        return validate_provenance(
+            {
+                "ued": ued_dependency,
+                "kmd": resolve("kmd", ued.get("metadata")),
+                "umd": [resolve("umd", identity) for identity in sorted(matchers)],
+            }
+        )
+    matchers = _pack_matchers(index, ued_id, arch, slot)
+    umd = [resolve("umd", identity) for identity in sorted(matchers)]
+    if slot is not None:
+        entry = next((item for item in slots if item["name"] == slot), None)
+        if entry is None:
+            raise ProvenanceError(
+                f"engine {ued.get('name', ued_id)!r} declares no slot {slot!r}"
+            )
+        return validate_provenance(
+            {
+                "ued": ued_dependency,
+                "kmd": resolve("kmd", entry.get("metadata")),
+                "slot": slot,
+                "umd": umd,
+            }
+        )
     return validate_provenance(
         {
             "ued": ued_dependency,
-            "kmd": resolve("kmd", ued.get("metadata")),
-            "umd": [resolve("umd", identity) for identity in sorted(matchers)],
+            "kmds": [
+                {"slot": item["name"], **resolve("kmd", item.get("metadata"))}
+                for item in slots
+            ],
+            "umd": umd,
         }
     )
 
 
 def snapshot_provenance(
-    descriptor_tree: Path, engine: str | None = None, arch: str | None = None
+    descriptor_tree: Path,
+    engine: str | None = None,
+    arch: str | None = None,
+    slot: str | None = None,
 ) -> dict:
-    """Snapshot the selected engine, its KMD, and all relevant pack matchers."""
+    """Snapshot the selected engine, its KMD, and all relevant pack matchers.
+
+    For a slotted engine, `slot` snapshots one slot's ranker (that slot's KMD and
+    packs); without it the snapshot is the engine-level one (every slot's KMD, every pack).
+    """
     index = load_descriptor_tree(descriptor_tree)
     _, ued = select_engine(index, engine)
-    return provenance_for_engine(index, ued, arch)
+    return provenance_for_engine(index, ued, arch, slot)

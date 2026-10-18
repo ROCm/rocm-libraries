@@ -55,23 +55,100 @@ MALFORMED_FIXTURES = [
     ("dangling_uuid", "9341b3cb-3540-44f6-9066-f3695a3b6a2d"),
     ("duplicate_tuple", "4dfc8557-7e87-48d1-b512-be076419fad0"),
     ("undeclared_knob", "tile_count"),
+    ("slotted_ranker_declares_metric", "a slot ranker must be metric-less"),
 ]
 
-# Each role fixture is valid/ with one role-bound UHD changed; the engine loads in every
-# case. Expected: exit status, then (role, success) for every model_checks entry in report
-# order. See the fixtures' README for the runtime admission each one mirrors.
+# Each role fixture is valid/ (or slotted_valid/) with one role-bound UHD, pack or
+# provenance record changed; the engine loads in every case. Expected: exit status, then
+# (role, success) for every model_checks entry in report order -- a slot ranker's role is
+# spelled role@slot -- then text some reported diagnostic must contain (None: not pinned).
+# See the fixtures' README for the runtime admission each one mirrors.
+SLOTTED_CHECKS_OK = [
+    ("sort_kernel_catalog@dkdv", True),
+    ("sort_kernel_catalog@dq", True),
+    ("predict_engine", True),
+]
 ROLE_FIXTURES = [
-    ("l2_static_order", 0, [("sort_kernel_catalog", True)]),
-    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)]),
+    ("l2_static_order", 0, [("sort_kernel_catalog", True)], None),
+    ("l2_dynamic_features", 0, [("sort_kernel_catalog", True)], None),
     (
         "l1_static_order",
         1,
         [("sort_kernel_catalog", True), ("predict_engine", False)],
+        None,
     ),
     (
         "l1_native",
         0,
         [("sort_kernel_catalog", True), ("predict_engine", True)],
+        None,
+    ),
+    ("slotted_valid", 0, SLOTTED_CHECKS_OK, None),
+    (
+        "slotted_empty_slot",
+        0,
+        SLOTTED_CHECKS_OK,
+        "has no loadable kernel pack",
+    ),
+    (
+        "slotted_ranker_undeclared_field",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", True),
+            ("sort_kernel_catalog@dq", False),
+            ("predict_engine", True),
+        ],
+        "Feature references an undeclared KMD field",
+    ),
+    (
+        "slotted_ranker_unexposed_axis",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", True),
+            ("sort_kernel_catalog@dq", False),
+            ("predict_engine", True),
+        ],
+        "which its UED does not expose as knobs",
+    ),
+    (
+        "slotted_ranker_reads_workspace_token",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", True),
+            ("sort_kernel_catalog@dq", False),
+            ("predict_engine", True),
+        ],
+        "a shared-workspace token a slotted engine reserves",
+    ),
+    (
+        "slotted_ranker_names_other_slot",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", False),
+            ("sort_kernel_catalog@dq", True),
+            ("predict_engine", True),
+        ],
+        "but the ranker serves slot",
+    ),
+    (
+        "slotted_estimate_missing_slot_kmd",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", True),
+            ("sort_kernel_catalog@dq", True),
+            ("predict_engine", False),
+        ],
+        "does not name slot",
+    ),
+    (
+        "slotted_kernel_in_two_slots",
+        1,
+        [
+            ("sort_kernel_catalog@dkdv", False),
+            ("sort_kernel_catalog@dq", True),
+            ("predict_engine", True),
+        ],
+        "a kernel serves at most one slot",
     ),
 ]
 
@@ -155,19 +232,28 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
 
 
 @pytest.mark.parametrize(
-    "name,exit_code,expected_checks",
+    "name,exit_code,expected_checks,diagnostic",
     ROLE_FIXTURES,
-    ids=[name for name, _, _ in ROLE_FIXTURES],
+    ids=[fixture[0] for fixture in ROLE_FIXTURES],
 )
-def test_role_fixture_model_checks(validator, name, exit_code, expected_checks):
+def test_role_fixture_model_checks(
+    validator, name, exit_code, expected_checks, diagnostic
+):
     result, payload = _run_validator(validator, FIXTURE_ROOT / name)
 
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert payload["success"] is (exit_code == 0)
     assert FIXTURE_ENGINE in payload["engines"]
     assert [
-        (check["role"], check["success"]) for check in payload["model_checks"]
+        (
+            check["role"] + (f"@{check['slot']}" if "slot" in check else ""),
+            check["success"],
+        )
+        for check in payload["model_checks"]
     ] == expected_checks, payload["model_checks"]
+    if diagnostic is not None:
+        messages = " ".join(d["message"] for d in payload["diagnostics"])
+        assert diagnostic in messages, messages
 
 
 @pytest.mark.parametrize(
@@ -242,3 +328,35 @@ def test_binary_ops_round_trip_validates_clean(
     payload = json.loads(result.stdout)
     assert payload["success"] is True
     assert binary_ops_config.engine.name in payload["engines"]
+
+
+def test_a_slotted_bundle_with_a_non_default_sdk_version_and_notes_validates_clean(
+    validator, generator, tmp_path
+):
+    """The generated slotted bundle loads in the real validator, and the two engine
+    members the shipped fixture leaves at their defaults survive into the UED it loads.
+    """
+    from tests.test_slots import _load, non_default_engine
+
+    config = _load(tmp_path, non_default_engine)
+    generator.render(config, tmp_path)
+    descriptors = tmp_path / config.descriptor_dir
+
+    result = subprocess.run(
+        [
+            str(validator),
+            str(descriptors),
+            "--expect-engine",
+            config.engine.name,
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert config.engine.name in payload["engines"]
+    ued = json.loads((descriptors / "split_bwd.ued.json").read_text("utf-8"))
+    assert ued["sdk_version"] == "2.0.0"
+    assert ued["behavior_notes"] == ["runtime_compilation"]

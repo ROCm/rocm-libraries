@@ -1,0 +1,39 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000012",
+  "name": "fixture engine estimate",
+  "adapter": "native",
+  "objective": "min",
+  "score": {
+    "metric": "time",
+    "calibrated": true,
+    "transform": "identity"
+  },
+  "native": {
+    "symbol": "hipkernel.fixture.engine_estimate"
+  },
+  "trained_against": {
+    "ued": {
+      "id": "c2a00000-0000-4000-8000-000000000001",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "c2a00000-0000-4000-8000-000000000005",
+        "revision": "1.0"
+      }
+    ],
+    "kmds": [
+      {
+        "slot": "prep",
+        "id": "c2a00000-0000-4000-8000-000000000002",
+        "revision": "1.0"
+      },
+      {
+        "slot": "dkdv",
+        "id": "c2a00000-0000-4000-8000-000000000003",
+        "revision": "1.0"
+      }
+    ]
+  }
+}

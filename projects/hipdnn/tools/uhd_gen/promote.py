@@ -32,8 +32,10 @@ from .features import (
 )
 from .provenance import (
     ROLES,
+    SUPPORTED_FILE_VERSIONS,
     ProvenanceError,
     compare_provenance,
+    declared_slots,
     descriptor_id,
     foreign_matcher_ids,
     load_descriptor_tree,
@@ -82,6 +84,9 @@ class PromotePlan:
     write_descriptor: bool = True
     #: The incoming UHD's `score.metric`; None for a metric-less ranker.
     metric: str | None = None
+    #: The slot a slotted engine's ranker installs into; None for an unslotted engine
+    #: and for the engine-level `predict_engine` role.
+    slot: str | None = None
 
 
 def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
@@ -687,9 +692,15 @@ def _installed_uhds(descriptor_tree) -> tuple[list, dict]:
     return installed, installed_ids
 
 
-def _remove_knobs(ued: dict, remove_knobs) -> list:
-    """Withdraw authored knobs from the UED (a new major revision); returns them sorted."""
-    exposed = ued.get("knobs", [])
+def _remove_knobs(ued: dict, remove_knobs, slot: str | None = None) -> list:
+    """Withdraw authored knobs from the UED, or from `slot`'s knobs of a slotted engine
+    (a new major revision of the UED either way); returns them sorted."""
+    holder = (
+        ued
+        if slot is None
+        else next(entry for entry in ued["slots"] if entry["name"] == slot)
+    )
+    exposed = holder.get("knobs", [])
     if not isinstance(exposed, list) or any(
         not isinstance(item, str) for item in exposed
     ):
@@ -700,7 +711,7 @@ def _remove_knobs(ued: dict, remove_knobs) -> list:
     dropped = sorted(set(remove_knobs))
     major, _ = revision(ued.get("revision", "1.0"), "UED")
     ued["revision"] = f"{major + 1}.0"
-    ued["knobs"] = [knob for knob in exposed if knob not in dropped]
+    holder["knobs"] = [knob for knob in exposed if knob not in dropped]
     return dropped
 
 
@@ -775,15 +786,37 @@ def _build_plan(
             f"model {identity} is not the id --uhd-id names for metric {metric} "
             f"({requested}); promote never renames a model"
         )
-    # One directory per metric (RFC 0019 §3.1); a metric-less ranker uses the arch directory.
-    destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
+    slots = declared_slots(original_ued)
+    slot = (
+        _promotion_slot(role, provenance, slots, engine_name)
+        if slots is not None
+        else None
+    )
+    if slot is not None and metric is not None:
+        # The loader drops the whole engine for a slot ranker that declares a metric
+        # (RFC 0021 §7): refuse it here instead of installing an engine that cannot load.
+        raise PromoteError(
+            f"{engine_name} slot '{slot}' ranker {identity} declares score.metric "
+            f"'{metric}'; a slot ranker must be metric-less"
+        )
+    # One directory per metric (RFC 0019 §3.1); a metric-less ranker uses the arch
+    # directory. A slot's rankers live under the slot's own directory.
+    destination_dir = ued_path.parent / "heuristics" / original_ued["id"]
+    if slot is not None:
+        destination_dir /= slot
+    destination_dir = destination_dir / role / arch
     if metric is not None:
         destination_dir /= metric
     ueds = list(index["ued"].values())
     references = [ref for path, doc in ueds for ref in _role_references(path, doc)]
     installed, installed_ids = _installed_uhds(descriptor_tree)
     ued = copy.deepcopy(original_ued)
-    bound, replaced = _rebind(ued, role, arch, identity, metric, installed_ids)
+    holder = (
+        next(entry for entry in ued["slots"] if entry["name"] == slot)
+        if slot is not None
+        else ued
+    )
+    bound, replaced = _rebind(holder, role, arch, identity, metric, installed_ids)
     old = replaced[0] if replaced else None
     destination_descriptor = destination_dir / descriptor_path.name
     _contained(destination_descriptor, descriptor_tree, "destination descriptor")
@@ -800,44 +833,51 @@ def _build_plan(
         destination_descriptor,
         installed_descriptor,
         metric=metric,
+        slot=slot,
     )
     plan.warnings.extend(gate_warnings)
     if remove_knobs:
-        plan.dropped_knobs = _remove_knobs(ued, remove_knobs)
+        plan.dropped_knobs = _remove_knobs(ued, remove_knobs, slot)
     if descriptor.get("features_signature"):
-        # RFC 0019 §6.3 check 2, against the UED after any --remove-knob.
-        knobs = ued.get("knobs", [])
-        if not isinstance(knobs, list) or any(
-            not isinstance(item, str) for item in knobs
-        ):
-            raise PromoteError("UED knobs must be an array of strings")
-        kmd = index["kmd"].get(
-            descriptor_id(ued.get("metadata"), f"{engine_name} metadata")
-        )
-        if kmd is None:
-            raise PromoteError(
-                f"{engine_name} names KMD {ued.get('metadata')}, which the tree does not contain"
-            )
-        kmd_fields = [
-            item.get("name")
-            for item in kmd[1].get("fields", [])
-            if isinstance(item, dict)
-        ]
         removal = " once --remove-knob is applied" if remove_knobs else ""
-        require_admissible_kernel_axes(
-            descriptor["features_signature"],
-            knobs,
-            kmd_fields,
-            f"model {identity}{removal}",
-        )
+        # An engine-level model of a slotted engine reads no kernel features at all
+        # (`validate_model` refuses them), so it has no axes to admit.
+        if slots is None or slot is not None:
+            # RFC 0019 §6.3 check 2, against the UED (or the model's slot, RFC 0021
+            # §8) after any --remove-knob.
+            where = f"{engine_name} slot {slot!r}" if slot else engine_name
+            knobs = holder.get("knobs", [])
+            if not isinstance(knobs, list) or any(
+                not isinstance(item, str) for item in knobs
+            ):
+                raise PromoteError("UED knobs must be an array of strings")
+            kmd = index["kmd"].get(
+                descriptor_id(holder.get("metadata"), f"{where} metadata")
+            )
+            if kmd is None:
+                raise PromoteError(
+                    f"{where} names KMD {holder.get('metadata')}, which the tree does not contain"
+                )
+            kmd_fields = [
+                item.get("name")
+                for item in kmd[1].get("fields", [])
+                if isinstance(item, dict)
+            ]
+            require_admissible_kernel_axes(
+                descriptor["features_signature"],
+                knobs,
+                kmd_fields,
+                f"model {identity}{removal}",
+                slot,
+            )
 
-    actual = provenance_for_engine(index, ued, arch)
+    actual = provenance_for_engine(index, ued, arch, slot)
     if actual is not None and "trained_against" in descriptor:
         try:
             compare_provenance(
                 provenance,
                 actual,
-                foreign_matchers=foreign_matcher_ids(index, ued, arch),
+                foreign_matchers=foreign_matcher_ids(index, ued, arch, slot),
             )
         except ProvenanceError as error:
             suffix = (
@@ -851,12 +891,12 @@ def _build_plan(
             "explicit knob removal requires training provenance for the intended revised UED; retrain first"
         )
 
-    target = (ued_path.resolve(), role, arch)
+    target = (ued_path.resolve(), _role_key(role, slot), arch)
     # Every binding except the ones this promotion replaces, including other metrics here.
     others = [
-        (path, slot, target_arch, ref)
-        for path, slot, target_arch, ref in references
-        if (path.resolve(), slot, target_arch) != target or ref not in replaced
+        (path, role_key, target_arch, ref, ref_slot)
+        for path, role_key, target_arch, ref, ref_slot in references
+        if (path.resolve(), role_key, target_arch) != target or ref not in replaced
     ]
     # A UUID shared by another role or arch is immutable here, even at the same filename.
     descriptor_changes = not _same_file(descriptor_path, destination_descriptor)
@@ -896,7 +936,7 @@ def _build_plan(
         if not same_destination:
             continue
         holders = [
-            (p, r, a) for p, r, a, ref in others if ref in (current_id, identity)
+            (p, r, a) for p, r, a, ref, _ in others if ref in (current_id, identity)
         ]
         if holders and (descriptor_changes or plan.copies):
             raise PromoteError(
@@ -904,7 +944,7 @@ def _build_plan(
             )
         if current_id != identity and current_id != old:
             plan.warnings.append(f"OVERWRITING unreferenced UHD {current_id} at {path}")
-    if any(ref == identity for _, _, _, ref in others) and (
+    if any(ref == identity for _, _, _, ref, _ in others) and (
         descriptor_changes or plan.copies
     ):
         raise PromoteError(
@@ -929,7 +969,7 @@ def _build_plan(
                 f"unowned destination artifact already exists: {destination_artifact}"
             )
     if remove_knobs:
-        for path, other_role, other_arch, ref in others:
+        for path, other_role, other_arch, ref, other_slot in others:
             if path.resolve() != ued_path.resolve():
                 continue
             model_path = installed_ids.get(ref)
@@ -942,20 +982,23 @@ def _build_plan(
                 try:
                     compare_provenance(
                         model.get("trained_against", {}),
-                        provenance_for_engine(index, ued, other_arch),
-                        foreign_matchers=foreign_matcher_ids(index, ued, other_arch),
+                        provenance_for_engine(index, ued, other_arch, other_slot),
+                        foreign_matchers=foreign_matcher_ids(
+                            index, ued, other_arch, other_slot
+                        ),
                     )
                 except ProvenanceError as error:
                     raise PromoteError(
                         f"knob removal would invalidate {other_role}/{other_arch}: {error}"
                     ) from error
-            if set(plan.dropped_knobs) & kernel_axes(
+            # Knob names are scoped to their slot.
+            if other_slot == slot and set(plan.dropped_knobs) & kernel_axes(
                 model.get("features_signature", [])
             ):
                 raise PromoteError(
                     f"knob removal would affect {other_role}/{other_arch}"
                 )
-    ued.setdefault(role, {})[arch] = bound
+    holder.setdefault(role, {})[arch] = bound
     plan.write_descriptor = descriptor_changes
     return plan
 
@@ -981,7 +1024,7 @@ def _role_value(value, role: str, where: str) -> list[str]:
 
 
 def _rebind(
-    ued: dict,
+    holder: dict,
     role: str,
     arch: str,
     identity: str,
@@ -990,11 +1033,12 @@ def _rebind(
 ) -> tuple:
     """The arch key's value once `identity` is bound, and the ids it displaces.
 
+    `holder` is the UED, or the slot of a slotted engine, whose `role` map is edited.
     A metric-keyed role holds one UHD per metric, and the metric lives only in each UHD, so
     every bound UHD must be installed in this tree to be classified.
     """
     where = f"{role}.{arch}"
-    value = ued.get(role, {}).get(arch)
+    value = holder.get(role, {}).get(arch)
     current = [] if value is None else _role_value(value, role, where)
     if role not in _METRIC_ROLES:
         return identity, current
@@ -1024,21 +1068,63 @@ def _rebind(
 
 
 def _role_references(path: Path, document: dict):
+    """Every model binding of a UED as (path, role key, arch, uhd id, slot).
+
+    A slotted engine binds `sort_kernel_catalog` in each slot, keyed by `_role_key`.
+    """
     if "heuristic" in document:
         raise PromoteError(
             f"{path}: a top-level 'heuristic' field is not supported; use role/arch maps"
         )
-    for role in ROLES:
-        if role not in document:
-            continue
-        entries = document[role]
-        if not isinstance(entries, dict) or not entries:
-            raise PromoteError(f"{path}.{role} must be a nonempty arch-to-UUID map")
-        for arch, value in entries.items():
-            if arch != "default" and not _ARCH.fullmatch(arch):
-                raise PromoteError(f"{path}.{role}: invalid architecture {arch!r}")
-            for identity in _role_value(value, role, f"{path}.{role}.{arch}"):
-                yield path, role, arch, identity
+    holders = [(None, document)]
+    if declared_slots(document) is not None:
+        holders += [(entry["name"], entry) for entry in document["slots"]]
+    for slot, holder in holders:
+        for role in ROLES:
+            if role not in holder:
+                continue
+            where = f"{path}.{_role_key(role, slot)}"
+            entries = holder[role]
+            if not isinstance(entries, dict) or not entries:
+                raise PromoteError(f"{where} must be a nonempty arch-to-UUID map")
+            for arch, value in entries.items():
+                if arch != "default" and not _ARCH.fullmatch(arch):
+                    raise PromoteError(f"{where}: invalid architecture {arch!r}")
+                for identity in _role_value(value, role, f"{where}.{arch}"):
+                    yield path, _role_key(role, slot), arch, identity, slot
+
+
+def _role_key(role: str, slot: str | None) -> str:
+    """How reports and ownership checks name a role map: `role`, or `slots[s].role`."""
+    return role if slot is None else f"slots[{slot}].{role}"
+
+
+def _promotion_slot(role: str, provenance: dict, slots: list, engine_name: str):
+    """The slot a model installs into on a slotted engine; None for the engine-level role.
+
+    A slot ranker names its slot in `trained_against.slot`; `predict_engine` is
+    engine-level; the slots carry no `predict_applicable_kernels` (RFC 0021 §11).
+    """
+    if role == "predict_applicable_kernels":
+        raise PromoteError(
+            f"{engine_name} is slotted and declares no engine-level {role}; RFC 0021 "
+            "defers slots[].predict_applicable_kernels"
+        )
+    if role != "sort_kernel_catalog":
+        return None
+    slot = provenance.get("slot")
+    names = [entry["name"] for entry in slots]
+    if slot is None:
+        raise PromoteError(
+            f"{engine_name} is slotted, so a {role} model must record "
+            f"trained_against.slot naming the slot it ranks (slots: {names}); this "
+            "model records none. Retrain with --slot"
+        )
+    if slot not in names:
+        raise PromoteError(
+            f"trained_against.slot {slot!r} is not a slot of {engine_name} (slots: {names})"
+        )
+    return slot
 
 
 def _validate_descriptor(document: dict, path: Path) -> None:
@@ -1062,9 +1148,19 @@ def _validate_descriptor(document: dict, path: Path) -> None:
         raise PromoteError(
             f"{path}: unknown UHD fields {sorted(set(document) - known)}"
         )
-    if document.get("version") != "1.0":
+    if document.get("version") not in SUPPORTED_FILE_VERSIONS:
         raise PromoteError(
             f"{path}: unsupported UHD file-format version {document.get('version')!r}"
+        )
+    recorded = document.get("trained_against")
+    if (
+        document["version"] == "1.0"
+        and isinstance(recorded, dict)
+        and ({"slot", "kmds"} & set(recorded))
+    ):
+        raise PromoteError(
+            f"{path}: trained_against uses slot provenance ('slot' or 'kmds'), which "
+            "requires UHD version 1.1"
         )
     if not isinstance(document.get("name"), str) or not document["name"]:
         raise PromoteError(f"{path}: missing required name")
@@ -1436,6 +1532,8 @@ def _report(plan: PromotePlan, dry_run: bool) -> None:
     print(
         f"  engine: {plan.engine_name}\n  binding: {binding}\n  role/arch: {plan.role}/{plan.arch}"
     )
+    if plan.slot is not None:
+        print(f"  slot: {plan.slot}")
     print(f"  metric: {plan.metric or '(none: metric-less ranker)'}")
     print(
         f"  heuristic was: {plan.old_heuristic or '(none)'}\n  heuristic now: {plan.descriptor_id}"

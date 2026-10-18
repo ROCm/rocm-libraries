@@ -13,6 +13,7 @@ from uhd_gen.__main__ import main  # noqa: E402
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+DQ_KMD = "d48a31bc-6e07-4d95-b1f2-3a8c0e5792d6"
 
 
 def _l1_corpus(path, metric="tflops"):
@@ -96,6 +97,51 @@ def test_a_bad_source_date_epoch_fails_training_before_anything_is_written(
     )
     assert "SOURCE_DATE_EPOCH" in caplog.text
     assert not (tmp_path / "model").exists()
+
+
+def _trained_version(output):
+    return json.loads((output / "heuristic.uhd.json").read_text("utf-8"))["version"]
+
+
+def test_an_unslotted_model_stays_uhd_1_0(tmp_path, evaluator):
+    """Unslotted output is byte-for-byte what it was before slots: no 1.1 stamp."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    assert _trained_version(output) == "1.0"
+
+
+def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator):
+    """A slotted engine's L1 model records `kmds`, which only UHD 1.1 may carry; the
+    snapshot is replayed with `--provenance`, so no GPU or descriptor tree is needed."""
+    provenance = {
+        "ued": {"id": UED, "revision": "1.0"},
+        "kmds": [
+            {"slot": "prep", "id": KMD, "revision": "1.0"},
+            {"slot": "dq", "id": DQ_KMD, "revision": "1.0"},
+        ],
+        "umd": [],
+    }
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text("utf-8"))
+    for row in rows:
+        row["binding"]["trained_against"] = provenance
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    snapshot = tmp_path / "provenance.json"
+    snapshot.write_text(json.dumps(provenance), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus,
+            output,
+            "--provenance",
+            str(snapshot),
+            "--feature-evaluator",
+            evaluator,
+        )
+        == 0
+    )
+    assert _trained_version(output) == "1.1"
 
 
 def test_rows_collected_under_another_metric_cannot_train_a_model(

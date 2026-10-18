@@ -1,0 +1,30 @@
+{
+  "version": "1.1",
+  "id": "c2a00000-0000-4000-8000-000000000007",
+  "name": "hipkernel:fixture_prep",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "c2a00000-0000-4000-8000-000000000005"
+  ],
+  "engine": "c2a00000-0000-4000-8000-000000000001",
+  "dispatch": "c2a00000-0000-4000-8000-000000000006",
+  "slot": "prep",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "c2a00000-0000-4000-8000-000000000020",
+      "name": "prep.f32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "Fixture.cpp",
+        "entry_point": "Fixture"
+      },
+      "metadata": {
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ]
+}
