@@ -34,6 +34,9 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
     container:
       image: ubuntu:24.04
     outputs:
@@ -67,6 +70,9 @@ jobs:
         test: ${{ fromJSON(needs.discover.outputs.components) }}
     runs-on: ${{ inputs.runner_label || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
     timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
     container:
       image: ubuntu:24.04
     env:
