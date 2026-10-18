@@ -3,7 +3,7 @@
 
 """Shared strided FP16 WMMA reference launch and frozen replay ABI.
 
-The gfx1151/gfx1201 adapters exercise the standalone verifier's kernel.
+The gfx1151/gfx1200/gfx1201 adapters exercise the standalone verifier's kernel.
 This does not establish automatic unified-attention dispatch coverage.
 """
 
@@ -42,7 +42,7 @@ def prepare(case: Case, library_root: str, architecture: str) -> Prepared:
     validate_library_root(library_root)
     if case not in CASES:
         raise ValueError("case is outside the qualified WMMA cohort")
-    if architecture in ("gfx1151", "gfx1201"):
+    if architecture in ("gfx1151", "gfx12-generic"):
         from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec
 
         # Qualification can select the published baseline's older source tree,
@@ -209,6 +209,7 @@ def exported_kernel(prepared: Prepared) -> tuple[bytes, dict]:
     if launcher is None:
         raise RuntimeError("cannot export an unlaunched WMMA reference")
     return launcher._hsaco, {
+        "compiler_target": prepared.architecture,
         "abi": prepared.abi,
         "name": launcher.kernel_name,
         "signature": launcher.signature,

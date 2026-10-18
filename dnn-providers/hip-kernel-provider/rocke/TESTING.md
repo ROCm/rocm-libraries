@@ -117,7 +117,9 @@ the strategy's biggest holes live (see
 - The pinned SDPA reference lane qualifies old rocKE
   against independent NumPy SDPA offline, then executes old and current rocKE
   on gfx942, gfx950, gfx1151, or gfx1201 using a conservative triangle-inequality
-  error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. Required
+  error budget. The gfx1151/gfx1201 cohorts exercise standalone FP16 WMMA kernels. The gfx1201
+  replacement compiles for `gfx12-generic`; gfx1200 uses the same compile target
+  but remains qualification-only until its own certificate and archive exist. Required
   executions fail when hardware or qualification is missing. Each architecture cohort
   is enrolled in installed tests when a qualified bundle is supplied at build time.
   Provider builds enable `ROCKE_INSTALL_TEST_GPU_REFERENCES` by default. Run
@@ -704,9 +706,19 @@ comparisons on gfx942, gfx1151, or gfx1201, or seven on gfx950, plus three failu
 controls. The gfx942 convolution entry adds sixteen comparisons and three failure
 controls. Confirm the matching entries executed with zero selected GPU skips.
 
+For `AMDGPU_TARGETS=gfx1200,gfx1201`, a gfx1200 runner skips the gfx1201 pinned
+entry with code 77. There is no installed gfx1200 pinned entry until its own
+archive is qualified and published. See
+[gfx120X family selection](docs/sdpa-test-reference.md#gfx120x-family-ci-selection)
+for the distinction between a valid skip and GPU reference coverage.
+
 Default publication supplies four SDPA bundles (gfx942, gfx950, gfx1151, gfx1201)
 and the gfx942 convolution bundle. Fetch all five DVC archives before configuring;
-missing published archives fail configuration. From the rocm-libraries root:
+missing published archives fail configuration.
+
+The generic gfx1201 replacement currently awaits DVC publication. Its updated
+pointer requires that upload before the fetch below or CI source preparation
+can succeed. From the rocm-libraries root:
 
 ```bash
 dvc pull --recursive dnn-providers/hip-kernel-provider/rocke/library/tests/reference_bundles

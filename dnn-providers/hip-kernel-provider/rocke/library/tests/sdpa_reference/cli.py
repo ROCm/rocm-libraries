@@ -23,6 +23,7 @@ import numpy as np
 
 from reference_common.source import snapshot
 from reference_common.runner import run_worker
+from reference_common.targets import processor_from_target_id
 
 from .architectures import ARCHITECTURES, baseline_lock, get_architecture
 
@@ -208,8 +209,14 @@ def _validate_cases(manifest: dict, architecture: str) -> None:
         raise ValueError("SDPA bundle does not cover the complete enrolled cohort")
     for case in target.CASES:
         entry = manifest["cases"][case.id]
-        if entry["device_target"].split(":", 1)[0] != architecture:
+        if processor_from_target_id(entry["device_target"]) != architecture:
             raise ValueError(f"SDPA bundle targets a different architecture: {case.id}")
+        compiler_target = getattr(target, "COMPILER_TARGET", None)
+        if (
+            compiler_target is not None
+            and entry["kernel"].get("compiler_target") != compiler_target
+        ):
+            raise ValueError(f"SDPA bundle has a different compiler target: {case.id}")
         if entry["case"] != asdict(case):
             raise ValueError(f"SDPA case contract changed: {case.id}")
         budget = ErrorBudget(**entry["budget"])

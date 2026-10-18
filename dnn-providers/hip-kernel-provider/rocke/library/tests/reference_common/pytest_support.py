@@ -65,13 +65,17 @@ def start_reference_session(config) -> None:
         target = registry.get_architecture(architecture)
     except ValueError as error:
         raise pytest.UsageError(str(error)) from error
-    from rocke.runtime.hip_module import get_device_arch
+    from .targets import get_device_processor
+
+    # Match the processor against artifact targets. get_device_arch() returns
+    # a catalog name (e.g. gfx12-generic for gfx1200), losing that identity.
+    detected = get_device_processor()
 
     try:
         available = architecture_available(
             architecture,
             target.FAMILIES,
-            get_device_arch(),
+            detected,
             os.environ.get("AMDGPU_FAMILIES", ""),
             os.environ.get("AMDGPU_TARGETS", ""),
         )

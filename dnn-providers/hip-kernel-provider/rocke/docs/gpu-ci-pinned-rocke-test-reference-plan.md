@@ -17,8 +17,15 @@ forward cases; the operation guides and DVC pointers record the current bundle
 identities. All five pairs are enrolled for default installation. Both operations share
 tensor-free artifact handling, worker transport, and installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
-gfx942. The gfx950, gfx1151, and gfx1201 bundles passed GPU qualification, source
+gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
 verification, installed Python reference tests, and fresh-cache DVC download checks.
+The gfx1201 replacement compiles for `gfx12-generic` and passed qualification,
+source verification, and installed tests; its DVC upload and fresh-cache download
+check remain pending. The gfx1200 adapter uses the same compiler target but
+awaits its own GPU qualification and installation enrollment. On a gfx1200
+runner requesting both gfx120X targets, the gfx1201 pinned CTest skips with code
+77; that result is not gfx1200 pinned coverage. See
+[family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
 Native provider execution and final TheRock artifact splitting remain unvalidated
 for those three targets.
 Further architectures, convolution gradients, KDA, and GDN remain future work.
@@ -266,7 +273,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | Component | Responsibility |
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
-| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1201 for SDPA and gfx942 for convolution |
+| `architectures/registry.json` | Supported qualification cohorts; gfx942/gfx950/gfx1151/gfx1200/gfx1201 for SDPA (gfx1200 awaits GPU qualification) and gfx942 for convolution |
 | `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
 | `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; architecture adapters retain target-specific cohorts and candidate selection |
@@ -276,6 +283,7 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 | `../reference_common/artifact.py` | Common archive command with explicit operation |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
+| `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
 | `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default; SDPA/gfx942, SDPA/gfx950, SDPA/gfx1151, SDPA/gfx1201, and convolution/gfx942 |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 

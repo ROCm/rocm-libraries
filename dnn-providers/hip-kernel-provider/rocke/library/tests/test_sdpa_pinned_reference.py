@@ -19,6 +19,7 @@ from reference_common.numeric import decode, encode
 from sdpa_reference.architectures import ARCHITECTURES, get_architecture
 from reference_common.session import reuse_workers
 from reference_common.paths import default_bundle_path
+from reference_common.targets import get_device_processor
 
 
 @pytest.fixture(scope="module")
@@ -27,9 +28,7 @@ def reference_bundle(pytestconfig):
     if operation and operation != "sdpa":
         pytest.skip("reference options select another operation")
     configured = pytestconfig.getoption("--rocke-reference-bundle")
-    from rocke.runtime.hip_module import get_device_arch
-
-    arch = get_device_arch()
+    arch = get_device_processor()
     declared = os.environ.get("AMDGPU_FAMILIES", "").lower()
     if arch not in ARCHITECTURES:
         expected = any(

@@ -120,7 +120,8 @@ def test_independent_sdpa_matches_analytic_uniform_attention(causal):
     assert actual.dtype == np.float64
 
 
-def _bundle(tmp_path):
+def _bundle(tmp_path, architecture="gfx942"):
+    target = get_architecture(architecture)
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "fixture").write_bytes(b"artifact fixture")
@@ -132,16 +133,18 @@ def _bundle(tmp_path):
         "cases": {
             case.id: {
                 "case": asdict(case),
-                "device_target": "gfx942:sramecc+:xnack-",
+                "device_target": f"{architecture}:sramecc+:xnack-",
                 "budget": asdict(ErrorBudget(case.tolerance, 0.001, case.margin)),
                 "comparison_limit": ErrorBudget(
                     case.tolerance, 0.001, case.margin
                 ).comparison_limit,
                 "input_digests": {},
                 "output_digest": "not-a-qualified-output",
-                "kernel": {},
+                "kernel": {
+                    "compiler_target": getattr(target, "COMPILER_TARGET", architecture)
+                },
             }
-            for case in CASES
+            for case in target.CASES
         },
     }
     _lock(tmp_path, manifest)
@@ -246,7 +249,7 @@ def test_worker_prefers_selected_library_over_test_packages(tmp_path, monkeypatc
 
 
 def test_architecture_enrollment_and_locks():
-    assert ARCHITECTURES == ("gfx942", "gfx950", "gfx1151", "gfx1201")
+    assert ARCHITECTURES == ("gfx942", "gfx950", "gfx1151", "gfx1200", "gfx1201")
     assert get_architecture("gfx942").CASES == CASES
     assert baseline_lock("gfx942").is_file()
     for unsupported in ("gfx1100", "gfx1250", "../gfx942"):
@@ -260,6 +263,73 @@ def test_bundle_cannot_be_used_for_a_different_architecture(tmp_path):
     _lock(tmp_path, manifest)
     with pytest.raises(ValueError, match="different architecture"):
         load_bundle(tmp_path, tmp_path / "lock.json", architecture="gfx942")
+
+
+@pytest.mark.parametrize("architecture", ["gfx1200", "gfx1201"])
+@pytest.mark.parametrize(
+    "change",
+    [None, "other-processor", "generic-device", "specific-code", "missing-target"],
+)
+def test_generic_wmma_bundle_keeps_processor_qualification(
+    tmp_path, architecture, change
+):
+    """Generic compilation must not transfer a certificate between processors."""
+    manifest = _bundle(tmp_path, architecture)
+    entry = next(iter(manifest["cases"].values()))
+    if change == "other-processor":
+        entry["device_target"] = "gfx1201" if architecture == "gfx1200" else "gfx1200"
+    elif change == "generic-device":
+        entry["device_target"] = "gfx12-generic"
+    elif change == "specific-code":
+        entry["kernel"]["compiler_target"] = architecture
+    elif change == "missing-target":
+        del entry["kernel"]["compiler_target"]
+    _lock(tmp_path, manifest)
+    if change is None:
+        assert (
+            load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+            == manifest
+        )
+    else:
+        with pytest.raises(
+            ValueError, match="different architecture|different compiler target"
+        ):
+            load_bundle(tmp_path, tmp_path / "lock.json", architecture=architecture)
+
+
+@pytest.mark.parametrize("architecture", ["gfx1200", "gfx1201"])
+@pytest.mark.parametrize("mismatch", ["qualification", "current-features"])
+def test_generic_wmma_replay_requires_qualified_processor(
+    tmp_path, monkeypatch, architecture, mismatch
+):
+    from sdpa_reference import cli
+
+    manifest = _bundle(tmp_path, architecture)
+    case = get_architecture(architecture).CASES[0]
+    entry = manifest["cases"][case.id]
+    entry["input_digests"] = {
+        name: array_digest(a) for name, a in make_inputs(case).items()
+    }
+    out = np.zeros(case.shape, dtype="<f2")
+    entry["output_digest"] = array_digest(out)
+
+    def worker(request, **kwargs):
+        device = entry["device_target"]
+        if mismatch == "qualification":
+            device = "gfx1201" if architecture == "gfx1200" else "gfx1200"
+        elif request["mode"] == "source":
+            device = architecture + ":xnack+"
+        return [out], {"device_target": device, "launches": 1, "torch_imported": False}
+
+    monkeypatch.setattr(cli, "_worker", worker)
+    with pytest.raises(ValueError, match="qualified target|different target features"):
+        verify_case(
+            case,
+            bundle=tmp_path,
+            manifest=manifest,
+            architecture=architecture,
+            current_root=tmp_path,
+        )
 
 
 def test_generated_input_mismatch_prevents_any_worker(tmp_path, monkeypatch):
@@ -365,7 +435,7 @@ def test_versioned_generator_preserves_stream_order_and_quantized_bits(dtype, di
     checked_inputs(case, digests)
 
 
-@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1201"])
+@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1200", "gfx1201"])
 @pytest.mark.parametrize("case_index", range(8))
 def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
     import kernels
@@ -410,7 +480,7 @@ def test_wmma_reference_matches_production_kernel_abi(architecture, case_index):
         target.exported_kernel(prepared)
 
 
-@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1201"])
+@pytest.mark.parametrize("architecture", ["gfx1151", "gfx1200", "gfx1201"])
 def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeypatch):
     from types import SimpleNamespace
 
@@ -423,12 +493,14 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
 
     case = wmma.CASES[-1]  # Batched, causal GQA exercises the distinct K/V strides.
     root = Path(kernels.__file__).resolve().parent.parent
-    prepared = wmma.prepare(case, str(root), architecture)
+    target = get_architecture(architecture)
+    compiler_target = "gfx1151" if architecture == "gfx1151" else "gfx12-generic"
+    prepared = target.prepare(case, str(root))
     compiled = []
     launches = []
 
     def compile_kernel(kernel, **kwargs):
-        assert kwargs["arch"] == architecture
+        assert kwargs["arch"] == compiler_target
         compiled.append(kernel)
         return SimpleNamespace(hsaco=b"code-object", kernel_name=kernel.name)
 
@@ -449,6 +521,7 @@ def test_wmma_launch_and_export_preserve_runtime_arguments(architecture, monkeyp
     code, metadata = wmma.exported_kernel(prepared)
     assert code == b"code-object"
     assert metadata["abi"] == "wmma-strided-v2"
+    assert metadata["compiler_target"] == compiler_target
     assert len(compiled) == 1 and len(launches) == 2
     expected = pack_args(metadata["signature"], replay_values(metadata, buffers, case))
     for arguments, config in launches:
@@ -467,7 +540,7 @@ def test_wmma_reference_cohort_and_rejections():
         (d, kv, causal) for d in (64, 128) for kv in (1, 4) for causal in (False, True)
     }
     root = str(Path(kernels.__file__).resolve().parent.parent)
-    for architecture in ("gfx1151", "gfx1201"):
+    for architecture in ("gfx1151", "gfx1200", "gfx1201"):
         target = get_architecture(architecture)
         for changed in (
             replace(wmma.CASES[0], dtype="bf16"),

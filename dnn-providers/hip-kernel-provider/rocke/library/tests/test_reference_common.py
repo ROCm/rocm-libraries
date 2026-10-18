@@ -346,14 +346,13 @@ def test_reference_pytest_selects_cohort_and_keeps_negative_checks(tmp_path):
     """Test collection with a fake HIP probe; this does not execute GPU kernels."""
     import os
 
-    runtime = tmp_path / "rocke/runtime"
-    runtime.mkdir(parents=True)
-    (runtime.parent / "__init__.py").touch()
-    (runtime / "__init__.py").touch()
-    (runtime / "hip_module.py").write_text("def get_device_arch(): return 'gfx942'\n")
+    import rocke
+
     (tmp_path / "conftest.py").write_text(
         """
 from reference_common.pytest_support import start_reference_session, select_reference_items
+from rocke.runtime import hip_module
+hip_module.get_device_target_id = lambda device=0: "gfx942"
 def pytest_addoption(parser):
     parser.addoption("--rocke-reference-arch")
     parser.addoption("--rocke-reference-operation")
@@ -376,7 +375,12 @@ def test_negative_control():
 """
     )
     env = dict(os.environ, AMDGPU_FAMILIES="gfx94X-dcgpu", AMDGPU_TARGETS="gfx942")
-    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(Path(__file__).parent)])
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(Path(rocke.__file__).resolve().parent.parent),
+            str(Path(__file__).parent),
+        ]
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -397,6 +401,51 @@ def test_negative_control():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "2 passed, 1 deselected" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "architecture,device_target,targets,outcome",
+    [
+        ("gfx1200", "gfx1200", "gfx1200,gfx1201", "run"),
+        ("gfx1200", "gfx1201", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1200", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1200-strict:xnack-", "gfx1200,gfx1201", "skip"),
+        ("gfx1201", "gfx1201", "gfx1200,gfx1201", "run"),
+        ("gfx1201", "gfx1201-strict:xnack-", "gfx1200,gfx1201", "run"),
+        ("gfx1201", None, "gfx1200,gfx1201", "error"),
+        ("gfx1201", "gfx950", "gfx1200,gfx1201", "error"),
+        ("gfx1151", "gfx1100", "gfx1100,gfx1151", "skip"),
+        ("gfx942", "gfx942:sramecc+:xnack-", "gfx942", "run"),
+    ],
+)
+def test_reference_session_uses_hardware_target_identity(
+    monkeypatch, architecture, device_target, targets, outcome
+):
+    """Keep real catalog normalization while stubbing only the HIP target query."""
+    from types import SimpleNamespace
+
+    from reference_common.pytest_support import start_reference_session
+    from rocke.runtime import hip_module
+
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: device_target
+    )
+    monkeypatch.setenv("AMDGPU_FAMILIES", "")
+    monkeypatch.setenv("AMDGPU_TARGETS", targets)
+    options = {
+        "--rocke-reference-operation": "sdpa",
+        "--rocke-reference-arch": architecture,
+    }
+    config = SimpleNamespace(getoption=options.get)
+    if outcome == "skip":
+        with pytest.raises(pytest.exit.Exception, match="different GPU lane") as error:
+            start_reference_session(config)
+        assert error.value.returncode == 77
+    elif outcome == "error":
+        with pytest.raises(pytest.UsageError, match=f"required {architecture} GPU"):
+            start_reference_session(config)
+    else:
+        start_reference_session(config)
 
 
 def test_reference_entry_skips_a_different_gpu_lane():
@@ -437,10 +486,13 @@ def test_reference_local_run_without_a_gpu_fails():
         architecture_available("gfx942", ("gfx942", "gfx94x"), None, "")
 
 
-@pytest.mark.parametrize("operation", ["sdpa", "conv"])
+@pytest.mark.parametrize(
+    "operation,architecture",
+    [("sdpa", "gfx942"), ("sdpa", "gfx1200"), ("sdpa", "gfx1201"), ("conv", "gfx942")],
+)
 @pytest.mark.parametrize("candidate", [False, True])
 def test_reference_fixture_selects_explicit_paths(
-    operation, candidate, tmp_path, monkeypatch
+    operation, architecture, candidate, tmp_path, monkeypatch
 ):
     from contextlib import closing
     from importlib import import_module
@@ -456,7 +508,9 @@ def test_reference_fixture_selects_explicit_paths(
             tmp_path / "candidate-lock.json" if candidate else None
         ),
     }
-    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path
     )
@@ -471,11 +525,11 @@ def test_reference_fixture_selects_explicit_paths(
     with closing(gpu_tests.reference_bundle.__wrapped__(config)) as fixture:
         target, bundle, manifest = next(fixture)
         assert (target.NAME, bundle, manifest) == (
-            "gfx942",
+            architecture,
             tmp_path,
             {"candidate": candidate},
         )
-    assert calls == [(tmp_path, options["--rocke-reference-lock"], "gfx942")]
+    assert calls == [(tmp_path, options["--rocke-reference-lock"], architecture)]
     if candidate:
         options["--rocke-reference-operation"] = (
             "conv" if operation == "sdpa" else "sdpa"
@@ -524,7 +578,7 @@ def test_reference_missing_bundle_fails_only_when_selected(
     from rocke.runtime import hip_module
 
     gpu_tests = import_module(f"test_{operation}_pinned_reference")
-    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    monkeypatch.setattr(hip_module, "get_device_target_id", lambda device=0: "gfx942")
     monkeypatch.setattr(
         gpu_tests, "default_bundle_path", lambda *args, **kwargs: tmp_path / "missing"
     )

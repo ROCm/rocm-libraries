@@ -50,7 +50,8 @@ listed separately in the inventory, not added to the eight workload rows.
 | gfx942 paged GQA head-fold | 4 | No: different path | Skipped |
 | gfx950 dense attention | Historical inventory: 51 shapes in 50 configurations | Seven base causal configurations on gfx950 | Device-gated on gfx942; see gfx950 validation below |
 | gfx1151 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1151 CI artifact-splitting validation |
-| gfx1201 standalone WMMA attention | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1201 CI artifact-splitting validation |
+| gfx1200 standalone WMMA attention compiled for gfx12-generic | 8 adapter configurations | Pending GPU qualification; host selection, ABI, and contract tests only | No installed pinned CTest |
+| gfx1201 standalone WMMA attention compiled for gfx12-generic | 8 pinned configurations | Yes: FP16 D64/D128 × MHA/GQA × full/causal; source and installed Slurm validation passed | Device-gated on gfx942; no gfx1201 CI artifact-splitting validation |
 | gfx1250 WMMA attention | 2 | No | Device-gated; verifier uses NumPy/HIP |
 | Extended FMHA/Sage/sparse harness | 15 named cases | No | Outer test skips; per-case hardware guards also apply |
 | KDA/GDN prefill and decode | See separate matrix | No: recurrent operators | Torch/device-gated |
@@ -100,6 +101,11 @@ Hq4/Hkv4 or Hq4/Hkv1 × full/causal, with B2/Sq64/Sk64 and a nonpersistent
 `(4,4,2)` grid. All eight comparisons and three failure controls passed in source
 and installed Torch-free runs on each target, with no selected GPU skips.
 These use the standalone WMMA builders, not automatic unified attention dispatch.
+The gfx1201 replacement compiles for `gfx12-generic`; its DVC publication remains
+pending. The gfx1200 adapter uses the same compile target but has no qualified
+archive or installed pinned suite yet. On gfx1200, a gfx120X family job skips
+the gfx1201 pinned suite with code 77. That skip does not count as gfx1200
+numerical coverage; see [family CI selection](sdpa-test-reference.md#gfx120x-family-ci-selection).
 See the [SDPA guide](sdpa-test-reference.md#standalone-wmma-coverage) for
 qualification provenance, runtime requirements, and publication status.
 

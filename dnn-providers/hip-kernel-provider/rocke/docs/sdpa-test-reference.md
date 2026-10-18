@@ -11,6 +11,8 @@ on the GPU. It covers the eight base parameterizations in
 fp16/bf16, D64/D128, GQA/MHA, causal/full attention, and default/persistent grids.
 The gfx950 lane adds seven causal base configurations, described below.
 The gfx1151 and gfx1201 lanes each add eight standalone FP16 WMMA cases.
+A gfx1200 adapter is available for qualification; its archive and installation
+enrollment remain pending on-device qualification.
 For gfx942/gfx950, current execution uses the same dispatch factory and `run_attention_dense_torch`
 entry as those tests, passing raw HIP buffers through its existing pointer ABI.
 The selected backend is Python, matching that entry point. This lane does not
@@ -112,46 +114,92 @@ runtime-shape ABI. Head counts and batch strides are runtime arguments; the
 adapter supplies top-left masking, disabled windows, and a null LSE pointer with
 LSE writes disabled. It obtains the signature from the selected production spec.
 Qualification against older source snapshots still uses `wmma-strided-v1` when
-head counts are spec fields. The published bundles retain their frozen v1 runner,
-runtime, code objects, and baseline locks.
+head counts are spec fields. The gfx1151 archive retains its frozen v1 runner,
+runtime, and code objects. The replacement gfx1201 archive uses v2 for both
+baseline replay and current-source execution.
 
-| Target | Qualification and publication status |
+### Generic gfx12 code and processor-specific certificates
+
+The gfx1200 and gfx1201 adapters both compile for `gfx12-generic`. Their
+qualification identity remains the physical processor: the manifest records
+`device_target` separately from `kernel.compiler_target`. Verification retains
+exact old-output digests and old/current device-feature equality. A generic
+code object does not authorize copying a certificate between processors.
+
+Each qualified processor has its own archive, lock, and CTest entry. Payloads
+stay under concrete `gfx1200` or `gfx1201` installation directories so TheRock's
+artifact splitter and downloader select them correctly. A `gfx120X-all` job
+requests artifacts for both processors. A pinned suite executes only when that
+processor's archive is enrolled and its hardware is present.
+See the [reference workflow](gpu-reference-workflow.md#generic-code-objects-and-processor-qualification)
+for qualification and publication.
+
+| Processor | Compiler target | Status |
+|---|---|---|
+| gfx1151 | gfx1151 | Existing eight-case archive published and enrolled |
+| gfx1200 | gfx12-generic | Adapter and host tests ready; GPU qualification, archive, and installation enrollment pending |
+| gfx1201 | gfx12-generic | Replacement eight-case archive qualified locally; DVC publication pending |
+
+The gfx1201 replacement uses committed baseline
+`32bcaf47b7482ef815ce997808979e50cfa36323`, which contains generic WMMA support.
+Qualification used Python 3.12.3, NumPy 2.5.4, and COMGR LLVM 23 on gfx1201,
+without Torch. Three baseline executions per case reproduced identical output
+digests. Independent maximum absolute error bounds ranged from 0.000332024 to
+0.001056340 (rounded upward); the FP16 tolerance remains `0.02`, with the
+existing `0.001` reserved margin. All eight archived code objects were inspected
+and target `amdgcn-amd-amdhsa--gfx12-generic`.
+
+Source and installed verification each passed all eight comparisons and three
+failure controls, with zero selected GPU skips. The installed shared, SDPA, and
+convolution host suites passed 96, 84, and 63 tests respectively, with the source
+tree moved aside. All eight publication/install contract checks also passed.
+Installation used the lightweight Python CMake harness described in the testing
+guide. This qualification does not establish execution on gfx1200, automatic
+unified attention dispatch, or native provider execution.
+
+The local replacement archive has MD5 `8635f6cf21e20ef3bba89054f54ce952`
+and size 2,596,336 bytes. Upload the archive before running CI with its updated
+DVC pointer; committing the pointer and lock does not upload the payload.
+A fresh-cache anonymous download check is required before merging. The previous
+gfx1201 archive (`0373b7f4cea9cdfc0e718440d9e6226c`) contains processor-specific
+binaries and cannot satisfy the generic compiler-target contract.
+
+The unchanged gfx1151 archive was qualified from baseline
+`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed`, with Python 3.12.3, NumPy 2.5.4,
+and COMGR LLVM 23. Its published archive has MD5
+`9d806c3533bf4ab618d9acb1b1f6cbed` and size 2,528,096 bytes. Its original
+source and installed runs passed eight comparisons and three failure controls,
+with zero selected skips. That setup used HIP 6.4 with ROCm 7.14 COMGR;
+explicit runtime overrides were needed because the container HIP runtime failed
+device initialization. Run a device preflight when selecting another setup.
+
+### gfx120X family CI selection
+
+`AMDGPU_FAMILIES=gfx120X-all` and `AMDGPU_TARGETS=gfx1200,gfx1201` describe the
+job's requested artifacts, not two GPUs present on the runner. Session startup
+compares the physical processor with these targets before opening a reference
+bundle. It preserves `gfx1200` instead of using its `gfx12-generic` catalog name.
+
+For a job with that target list:
+
+| Hardware and requested suite | Behavior |
 |---|---|
-| gfx1151 | Eight qualified cases; archive and lock enrolled for installation |
-| gfx1201 | Eight qualified cases; archive and lock enrolled for installation |
+| gfx1200 running `rocke_sdpa_gpu_gfx1201_pytest` | pytest exits with code 77; CTest reports **Skipped** |
+| gfx1201 running `rocke_sdpa_gpu_gfx1201_pytest` | Runs all eight comparisons and three failure controls; missing or invalid reference data fails |
+| No GPU, or a processor outside the requested target list, running the gfx1201 suite | Fails with a required-GPU error |
+| gfx1200 with an explicit `--rocke-reference-arch gfx1200` request | Requires its own qualified bundle and lock; missing data or a gfx1201 certificate fails |
 
-Both published WMMA targets were independently qualified from baseline
-`c6f41a64e12f8e1a51afb4ebce1b9dee256aaaed` with Python 3.12.3, NumPy 2.5.4,
-and COMGR LLVM 23. Three baseline executions per case reproduced identical
-output digests. Each target's maximum absolute error bounds ranged from
-0.000332024 to 0.001056340 (rounded upward); the FP16 tolerance remains `0.02`
-with a `0.001` reserved margin. Exact per-target provenance and bounds are in
-the authenticated manifests.
+gfx1200 is not yet enrolled for installation, so normal CTest does not register
+a gfx1200 pinned suite. Skipping the gfx1201 suite on gfx1200 fixes the selection
+failure but does not establish gfx1200 pinned-reference coverage. Current-source
+WMMA numerical tests are separate from this pinned suite.
 
-Source verification passed eight comparisons and three failure controls per
-target, without Torch and with zero selected skips. Installed CTest also passed
-all eleven GPU checks per target with the source tree moved aside, plus 82 shared
-host and 56 SDPA host checks. Installation used a Python CMake harness; native
-provider execution and final TheRock artifact splitting remain unvalidated.
-
-The gfx1201 run used ROCm 7.14 HIP and COMGR. The gfx1151 run used HIP 6.4 with
-ROCm 7.14 COMGR: the container's HIP runtime failed during device initialization,
-while the host HIP runtime passed both initialization and qualification when
-mounted into the container. Use explicit `ROCKE_HIP_LIB` and `ROCKE_COMGR_LIB`
-overrides for that combination and make the host HIP dependencies available to
-the loader. This is evidence for the tested combination, not a general runtime
-compatibility claim. Run a device preflight before qualification on another setup.
-
-The archives were uploaded to DVC and downloaded into a fresh empty cache;
-both downloads authenticated against their reviewed locks:
-
-| Target | Archive MD5 | Compressed bytes |
-|---|---|---:|
-| gfx1151 | `9d806c3533bf4ab618d9acb1b1f6cbed` | 2,528,096 |
-| gfx1201 | `0373b7f4cea9cdfc0e718440d9e6226c` | 2,526,894 |
-
-Follow the [reference workflow](gpu-reference-workflow.md) using the selected
-architecture for fetching, qualification, verification, and publication.
+The selection correction itself needs no replacement archive. Generic baseline
+execution requires newly compiled and qualified code objects, so the generic
+gfx1201 replacement has a new DVC object and matching lock. Its publication is
+required for CI to fetch this branch's new pointer even when the runner will
+later skip the gfx1201 suite. See the
+[publication workflow](gpu-reference-workflow.md#5-review-pack-and-publish-the-replacement).
 
 ## Accuracy contract
 
