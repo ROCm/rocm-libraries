@@ -17,3 +17,5 @@ if(GPU_TARGETS MATCHES "gfx950")
         target_compile_options(test_ck_tile_permuten_epilogue_scale PRIVATE -DCK_TILE_USE_OCP_FP8)
     endif()
 endif()
+
+add_gtest_executable(test_ck_tile_lds_shuffle_2d_epilogue test_lds_shuffle_2d_epilogue.cpp)
