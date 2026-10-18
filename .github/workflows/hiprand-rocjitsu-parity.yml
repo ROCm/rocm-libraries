@@ -336,11 +336,12 @@ jobs:
     steps:
       - name: Install discovery tools
         run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
-      - name: Checkout parity scripts
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
+      - name: Fetch parity script
+        run: |
+          mkdir -p .github/scripts
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/ffm_quick_rocjitsu.py" \
+            -o .github/scripts/ffm_quick_rocjitsu.py
       - name: Download test metadata and discover components
         id: discover
         run: |
@@ -387,11 +388,14 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git ninja-build pkg-config python3
 
-      - name: Checkout rocm-libraries
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
+      - name: Fetch parity scripts
+        run: |
+          mkdir -p .github/scripts
+          for script in ffm_quick_rocjitsu.py resource_monitor.py; do
+            curl -fL --retry 3 \
+              "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/${script}" \
+              -o ".github/scripts/${script}"
+          done
 
       - name: Checkout rocJITsu
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
