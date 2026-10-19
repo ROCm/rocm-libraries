@@ -143,6 +143,7 @@ class ShapeTests(unittest.TestCase):
                     shape.coordinates(index),
                     shape.coordinates(index, list(range(shape.rank))),
                 )
+                self.assertEqual(shape.linear_index(shape.coordinates(index)), index)
         example = hn.Shape([2, 3, 5])
         self.assertEqual(example.linear_index([1, 2, 3], [1, 2, 0]), 27)
         self.assertEqual(example.coordinates(27, [1, 2, 0]), [1, 2, 3])
@@ -203,6 +204,7 @@ class ShapeTests(unittest.TestCase):
     def test_index_order_errors(self):
         shape = hn.Shape([2, 3, 4])
         for order, message in (
+            ([], "index order rank 0 does not match shape rank 3"),
             ([0], "index order rank 1 does not match shape rank 3"),
             ([0, 1, 2, 3], "index order rank 4 does not match shape rank 3"),
             ([0, 0, 2], r"index order must be a permutation of \[0, 3\)"),
