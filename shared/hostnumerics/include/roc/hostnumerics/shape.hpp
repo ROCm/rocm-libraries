@@ -50,7 +50,7 @@ class Shape {
     }
 
     size_t operator[](size_t dimension) const noexcept {
-      return m_dimensions[dimension];
+        return m_dimensions[dimension];
     }
 
     // The returned view remains valid while this Shape is alive and unmodified.
@@ -62,7 +62,7 @@ class Shape {
         return m_elementCount;
     }
 
-    // Select dimensions in the supplied order; repetition is allowed. 
+    // Select dimensions in the supplied order; repetition is allowed.
     Shape fromDimensions(std::span<const size_t> axes) const {
         validateDimensions(axes);
         std::vector<size_t> dimensions;
