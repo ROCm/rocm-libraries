@@ -49,10 +49,6 @@ method:
 - Write the bundles from the plan with one **test generator tool**. The same
   tool makes tensor values and fuzzes (§14).
 
-The first plan, convolution forward
-([`convolution-fwd.md`](../../../../dnn-providers/integration-tests/docs/test-plans/convolution-fwd.md),
-ALMIOPEN-2895), is the worked example. Its audit motivates most of this RFC.
-
 ## 2. Problem Statement
 
 The input space of an op is unbounded. Integer parameters have no limit, differ
@@ -185,8 +181,7 @@ pointer *less* aligned than declared and expects `BAD_PARAM`.
 **Defaults are non-degenerate.** Each dimension or ratio that can exceed 1 does
 so in the default shape.
 
-**Per-tier ceilings.** These values come from convolution forward. Each plan
-tunes them.
+**Per-tier ceilings.** Each plan tunes these starting values.
 
 | Tier | Ceiling for each case (fp32, x + w + y) | Sets |
 |---|---|---|
@@ -219,11 +214,11 @@ below it. `full_*` runs only in full.
 | full | `full/` | weekly | none |
 
 **Estimate before you generate.** A plan states the case count, FLOP per case
-and oracle cost for each tier and size class. The first draft for convolution
-forward had ~14,000 full-tier cases. About 10,000 of them repeated one fused
-epilogue over every geometry. The trimmed plan has ~3,800 cumulative cases and
-still covers every pair. A cold-cache timing run fixes the final counts. Solver
-search and compile time for each unique shape cost more than execution.
+and oracle cost for each tier and size class. A full product can be very large.
+For convolution forward, it is ~14,000 cases. About 10,000 of them repeat one
+fused epilogue over every geometry. A cold-cache timing run fixes the final
+counts. Solver search and compile time for each unique shape cost more than
+execution.
 
 ## 9. Case Purpose
 
@@ -246,15 +241,6 @@ Each plan has a register:
 
 | Product not run | Cases | Covered instead by | Add it back when |
 |---|---|---|---|
-
-The register of convolution forward, as an example:
-
-| Product not run | Cases | Covered instead by | Add it back when |
-|---|---|---|---|
-| Each activation × geometry × layout × dtype × both fusions | ~10,000 | Activation × core (complete), and activation × each S/L shape | A defect needs one activation and one geometry together |
-| Extra dtypes × each shape × layout | ~1,660 | Dtype × core, and dtype paired with each S shape | An engine claims the dtype |
-| Mixed layout, strides, alignment × each shape × dtype | ~580 | × core, and paired with each S shape | A layout bug depends on geometry |
-| `CONVOLUTION` × each shape × layout × dtype | ~380 | Mode × core, and paired with each S shape | An engine supports it |
 
 Rejection probes are never in the register.
 
@@ -504,10 +490,10 @@ per op. The plan tracks them.
 
 | Phase | Content | Exit |
 |---|---|---|
-| 1 | This RFC. The methodology guide and index under `docs/test-plans/`. The reviewed convolution-forward plan (ALMIOPEN-2895). | Plan merged |
-| 2 | I1, I2. Regenerate the conv-forward bundles from the plan. Harvest claims. Fix FFM pins and TOML globs. | Conv tiers green on supported engines. Each case traces to the plan. |
-| 3 | I3–I7, as the conv plan needs them. The conv golden set. | Conv reference gaps closed or recorded |
-| 4 | I10. Fuzz mode for conv forward, on a developer machine and in a scheduled non-gating job. | Fuzz finds a seeded fault. The minimizer writes a reproducer that runs as a `regression` case. |
+| 1 | This RFC. The methodology guide and index under `docs/test-plans/`. | RFC merged |
+| 2 | I1, I2. The first per-op plan, in its own PR, regenerates its bundles from the plan. Harvest claims. Fix FFM pins and TOML globs. | Tiers green on supported engines. Each case traces to the plan. |
+| 3 | I3–I7, as the first plan needs them. Its golden set. | Reference gaps closed or recorded |
+| 4 | I10. Fuzz mode for the first op, on a developer machine and in a scheduled non-gating job. | Fuzz finds a seeded fault. The minimizer writes a reproducer that runs as a `regression` case. |
 | 5 | Plans for the other op families, in epic order (attention, normalization, then the rest). Each plan regenerates its bundles. | Each op family has a plan |
 
 Each phase lands on its own. Bundles without a plan keep working until the plan
@@ -542,9 +528,9 @@ of their op replaces them.
 
 1. **Where axes and legality live.** A per-op Python module in
    `reference-data-scripts/`, or a data file beside the plan?
-2. **Precision strategy for fp16 and bf16 conv golden cases.** The plan proposes
-   matched precision. Confirm it against the accumulation contracts of all
-   claiming engines.
+2. **Precision strategy for fp16 and bf16 golden cases.** We propose matched
+   precision. Confirm it against the accumulation contracts of all claiming
+   engines.
 3. **Source of tolerance calibration.** Per-case `meta.json` (RFC 0011 level 2),
    or dynamic tolerances?
 4. **Full tier and unclaimed dtypes.** Should full-tier products run only on
