@@ -142,9 +142,6 @@ using _THRUST_STD::get;
 using _THRUST_STD::make_tuple;
 using _THRUST_STD::tie;
 
-/*! \endcond
- */
-
 /*! \} // tuple
  */
 
