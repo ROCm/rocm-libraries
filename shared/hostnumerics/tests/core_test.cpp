@@ -370,10 +370,13 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         Shape moved(std::move(copied));
         EXPECT_EQ(moved, original);
         EXPECT_EQ(moved.elementCount(), original.elementCount());
-        EXPECT_EQ(copied, Shape{});
+        // The move contract defines a scalar source that can be queried.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(copied.rank(), 0);
         EXPECT_EQ(copied.elementCount(), 1);
         EXPECT_TRUE(copied.coordinates(0).empty());
         EXPECT_THROW(copied.coordinates(1), std::runtime_error);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape assigned{7};
         assigned = original;
@@ -383,10 +386,12 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         moveAssigned = std::move(assigned);
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
-        EXPECT_EQ(assigned, Shape{});
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(assigned.rank(), 0);
         EXPECT_EQ(assigned.elementCount(), 1);
         EXPECT_TRUE(assigned.coordinates(0).empty());
         EXPECT_THROW(assigned.coordinates(1), std::runtime_error);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape& alias = moveAssigned;
         moveAssigned = std::move(alias);
