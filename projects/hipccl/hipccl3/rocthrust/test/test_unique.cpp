@@ -489,3 +489,31 @@ TEST(UniqueTests, TestUniqueWithCustomEqualityOp)
   ASSERT_EQ(error_counter[0], 0u);
   ASSERT_TRUE(thrust::equal(unique_out.cbegin(), unique_out.cend(), data));
 }
+
+template <typename F>
+struct NonConstAdapter
+{
+  F f;
+  NonConstAdapter(const F& func)
+      : f(func)
+  {}
+
+  template <typename... Args>
+  __device__ auto operator()(Args&&... args) -> decltype(f(_THRUST_STD::forward<Args>(args)...))
+  {
+    return f(_THRUST_STD::forward<Args>(args)...);
+  }
+};
+
+TEST(UniqueTests, TestUniqueWithCustomEqualityOpMutable)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> in = {1, 1, 2, 3, 4, 4, 5};
+  auto new_end = thrust::unique(in.begin(), in.end(), NonConstAdapter<thrust::equal_to<int>>(thrust::equal_to<int>{}));
+
+  thrust::device_vector<int> expected = {1, 2, 3, 4, 5};
+  ASSERT_EQ(new_end - in.begin(), 5);
+  in.resize(new_end - in.begin());
+  ASSERT_EQ(in, expected);
+}
