@@ -5003,6 +5003,32 @@ namespace TensileLite
                 return origami::reduction_t::tree;
             return reductionStrat;
         }
+
+        // Whether a Stream-K workgroup can stop part-way through a tile, which
+        // is the only thing the partial-tile workspace ever holds.
+        //
+        // Stream-K splits a flattened iteration space of tiles * itersPerTile.
+        // At itersPerTile == 1 one iteration is one whole tile, so no range can
+        // straddle a tile boundary however the grid divides the space: the
+        // kernel computes StreamKLocalStart = PersistentIteration - tileStart
+        // (always 0) and StreamKLocalEnd = min(PersistentIterationEnd, tileEnd)
+        // - tileStart (always ItersPerTile), so "does wg start tile?" always
+        // holds and "does wg finish tile?" always takes the regular store
+        // (StreamK.py). The store-partials and fixup paths are both
+        // unreachable, so reserving for them would reserve bytes nothing ever
+        // writes.
+        //
+        // itersPerTile must be the same value makeArgs() packs into the
+        // ItersPerTile kernarg -- getItersPerTile() clamped to at least 1 --
+        // or host and device disagree about which branch the kernel takes.
+        //
+        // This covers tile straddling only. Parallel reduction writes partials
+        // unconditionally through its own path at any itersPerTile, so every
+        // caller keeps that as a separate disjunct.
+        inline bool streamKStraddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
+        {
+            return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
+        }
     }
 
     void ContractionSolution::validatePersistentLoopArgsVersion() const
@@ -5810,6 +5836,10 @@ namespace TensileLite
                 // resolveStreamKSettings() uses, on the same triple, so the
                 // size reported here is the size the launch actually needs.
                 reductionStrat = streamKReconcileReduction(reductionStrat, skGrid, tiles);
+                // Same clamped value makeArgs() packs and the reserve-or-not
+                // rule keys on.
+                const size_t itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -5821,7 +5851,8 @@ namespace TensileLite
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
+                else if(streamKStraddlesTiles(itersPerTile, skGrid, tiles) && !streamKDP
+                        && !forceDPOnly)
                 {
                     // The workspace holds the partial tiles only. The per-XCD
                     // work-queue counters live at the base of the flag buffer
@@ -6301,9 +6332,12 @@ namespace TensileLite
 
         const bool streamKDP   = Debug::Instance().useStreamKDataParrallel();
         const bool forceDPOnly = sizeMapping.isPersistentDataParallel();
+        const size_t itersPerTile
+            = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(sk.grid > 0
            && (sk.reduction == origami::reduction_t::parallel
-               || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
+               || (streamKStraddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP
+                   && !forceDPOnly)))
         {
             // The workspace holds the partial tiles only. The per-XCD work-queue
             // counters live at the base of the flag buffer (AddressFlags), not
@@ -6331,7 +6365,7 @@ namespace TensileLite
         {
             if(sk.reduction == origami::reduction_t::parallel && tiles > 0)
                 sk.workspaceBytes = requiredWorkspaceSizeGsu(problem, hardware, sk.grid / tiles);
-            else if(tiles % sk.grid != 0 && !streamKDP)
+            else if(streamKStraddlesTiles(itersPerTile, sk.grid, tiles) && !streamKDP)
                 sk.workspaceBytes = partialTileSize(sk.grid);
         }
         return sk;
@@ -7246,11 +7280,14 @@ namespace TensileLite
             //   - parallel reduction is passed Flags == nullptr, and the kernel
             //     branches on that to skip the flag protocol
             //   - tiles % grid == 0 spreads the tiles evenly over the
-            //     workgroups, so no partial tiles exist to fix up. This is the
-            //     same test the workspace sizing uses to decide whether partials
-            //     exist, and it is what excludes every data-parallel path: they
-            //     all arrive at grid == tiles, whether from K == 0, from the
-            //     tree-fixup bound above, or from the data-parallel debug knob.
+            //     workgroups, so no partial tiles exist to fix up. It is what
+            //     excludes every data-parallel path: they all arrive at grid ==
+            //     tiles, whether from K == 0, from the tree-fixup bound above,
+            //     or from the data-parallel debug knob. The workspace sizing
+            //     additionally skips itersPerTile == 1 (streamKStraddlesTiles),
+            //     which this clamp does not: clamping a grid whose flags are
+            //     never written is only conservative, and widening the grid
+            //     here would be a grid decision, not an allocation one.
             //
             // Clamping outside those cases would shrink a grid that has no flag
             // region to overrun, and against the data-parallel fallbacks it
@@ -7338,8 +7375,9 @@ namespace TensileLite
     //     allocates from;
     //   * skTiles/skSplit/totalItems duplicate the kernel-arg packing in makeArgs().
     //
-    // The partials-workspace guard reserves iff (reduction==parallel || tiles%grid!=0),
-    // sized as partialTileSize(grid); the reservation does not depend on
+    // The partials-workspace guard reserves iff (reduction==parallel ||
+    // streamKStraddlesTiles(itersPerTile, grid, tiles)), sized as
+    // partialTileSize(grid); the reservation does not depend on
     // dynamicPartialsSlots. The
     // dynamicPartialsSlots field is still populated (skTiles*skSplit, computed
     // locally) purely for reporting.
@@ -7417,15 +7455,20 @@ namespace TensileLite
         d.numQueues           = streamKBakedQueueCount(hardware);
         d.givenWorkspaceBytes = problem.workspaceSize();
 
+        // Same clamped value makeArgs() packs and the reserve-or-not rule keys
+        // on; also reused by the skTiles / skSplit mirror further down.
+        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
         // Workspace / DP fallback. Reserve iff (reduction==parallel ||
-        // tiles%grid!=0), sized by grid (not by dynamicSlots). This is the same
-        // reserve-or-not rule requiredWorkspaceSize() implements independently, so
-        // the two must be changed together.
+        // the grid can straddle a tile), sized by grid (not by dynamicSlots).
+        // This is the same reserve-or-not rule requiredWorkspaceSize()
+        // implements independently, so the two must be changed together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
         if(grid > 0
            && (reduction == origami::reduction_t::parallel
-               || (tiles % grid != 0 && !streamKDP && !forceDPOnly)))
+               || (streamKStraddlesTiles(itersPerTile, grid, tiles) && !streamKDP
+                   && !forceDPOnly)))
         {
             needPartials = true;
             // The workspace holds the partial tiles only. The per-XCD work-queue
@@ -7450,7 +7493,6 @@ namespace TensileLite
 
         // skTiles / skSplit / totalItems -- mirror the kernel-arg packing in
         // makeArgs, using the FINAL (post-fallback) grid and reduction.
-        const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         if(isDynamic)
         {
             AMDGPU const* pAMDGPU   = dynamic_cast<AMDGPU const*>(&hardware);
