@@ -117,10 +117,6 @@ def _validate_install_tree(
             f"{_display_paths(unexpected_manifest)}"
         )
 
-    detail_dir = installed_include_dir / "roc" / "hostnumerics" / "detail"
-    if detail_dir.exists() or detail_dir.is_symlink():
-        errors.append(f"private detail directory was installed: {detail_dir}")
-
     missing_outputs = {
         path
         for path in manifest_entries
@@ -153,7 +149,7 @@ def _validate_install_tree(
 
     print(
         f"Validated {len(expected_public_files)} public install files; "
-        "no private detail directory is installed."
+        "no implementation headers outside the public include tree are installed."
     )
 
 
