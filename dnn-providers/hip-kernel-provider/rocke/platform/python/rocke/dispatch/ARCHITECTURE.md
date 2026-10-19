@@ -2237,4 +2237,5 @@ Worked examples: the toy family in
 `platform/tests/dispatch/dispatch_tests/tuning/test_tuning_template.py` (every
 piece in one file) and attention (`library/dispatch/attention`: `DenseSpace`
 in `dense_rules.py`, `UnifiedSpace` in `unified_rules.py`, factories in
-`candidate.py`).
+`candidate.py`; `WmmaSpace` in `wmma_rules.py` for a per-problem policy whose
+every knob is `recorded`, with its candidates in `gfx1151.py`).

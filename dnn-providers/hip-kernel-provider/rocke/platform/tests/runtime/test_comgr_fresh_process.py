@@ -139,7 +139,9 @@ def test_child_writes_the_protocol(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
 
     def build(ir, *, isa, options):
         seen.update(ir=ir, isa=isa, options=options)
-        return b"\x7fELF..", comgr.ComgrTimings(0.5, 0.25, 0.125)
+        return b"\x7fELF..", comgr.ComgrTimings(
+            bc=0.5, relocatable=0.25, executable=0.125
+        )
 
     monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", build)
     hdr = {"isa": "amdgcn-amd-amdhsa--gfx950", "options": ["-O3"], "out": str(out)}

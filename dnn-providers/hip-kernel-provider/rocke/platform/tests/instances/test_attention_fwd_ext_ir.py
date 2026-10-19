@@ -241,6 +241,16 @@ def test_ext_with_fp8_kv_is_rejected_before_any_emission(kv_dtype):
             "lse",
         ),
         ({"guard_seqlen_k": True}, {"wmma_kv_tail": True}, "wmma_kv_tail"),
+        (
+            {"seqlen_q": "i"},
+            {"wmma_head_dim_q": "i", "wmma_head_dim_v": "i"},
+            "runtime WMMA head dims",
+        ),
+        (
+            {"epilogue_hook": lambda b, e: None},
+            {"wmma_head_dim_q": "i", "wmma_head_dim_v": "i"},
+            "runtime WMMA head dims",
+        ),
     ],
 )
 def test_ext_overlapping_wmma_options_are_rejected_before_any_emission(

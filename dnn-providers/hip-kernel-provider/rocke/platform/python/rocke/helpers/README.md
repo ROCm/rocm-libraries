@@ -1001,7 +1001,7 @@ configs = [
 @functools.lru_cache(maxsize=None) # cache the compiled launcher
 def _build(cfg):
  k = build_universal_gemm(cfg.spec)
- ir = lower_kernel_to_llvm(k)
+ ir = lower_kernel_to_llvm(k, arch="gfx950")
  hsaco, _ = build_hsaco_from_llvm_ir(ir)
  return KernelLauncher(hsaco=hsaco, kernel_name=k.name,
  signature=gemm_args_signature()), cfg.spec

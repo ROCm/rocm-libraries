@@ -10,9 +10,10 @@ names defined here are re-exported from :mod:`rocke.helpers.mfma_attention`.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Callable, Optional
 
-from ..core.ir import FP8E4M3, IRBuilder, Value
+from ..core.ir import BF16, FP8E4M3, IRBuilder, Value
 from .attention_fwd_ext import AttnFwdExt, emit_rows_epilogue, last_index, score_stage
 from .attention import (
     apply_attention_mask,
@@ -55,15 +56,18 @@ __all__ = ["_wmma_attn_op_id", "_WMMA_ATTN_OP_ID", "_wmma_attention_fwd_inner_bo
 # hard-codes the wave32 magic numbers and one body serves both RDNA generations.
 
 
-# Per-arch WMMA attention op_id. gfx11 (RDNA3/3.5) uses the cross-half-duplicated
-# ``wmma_f32_16x16x16_*`` atom; gfx12 (RDNA4) uses the split-K
-# ``wmma_gfx12_f32_16x16x16_*`` atom (mirrors ``_wmma_params`` in
+# Per-target WMMA attention op_id, chosen from the target's MMA catalog so every
+# gfx11 (RDNA3/3.5) or gfx12 (RDNA4) row, concrete or generic, resolves without
+# naming a processor. A catalog with the split-K ``wmma_gfx12_f32_16x16x16_*``
+# atom uses it; otherwise the cross-half-duplicated gfx11
+# ``wmma_f32_16x16x16_*`` atom is requested (mirrors ``_wmma_params`` in
 # ``instances/common/_matmul_nbits_large_n.py``). The op_id also selects the f16
 # vs bf16 intrinsic mangling, so it is keyed on the kernel dtype.
-def _wmma_attn_op_id(arch: str, dtype: str) -> str:
+def _wmma_attn_op_id(target, dtype: str) -> str:
     elem = "bf16" if dtype == "bf16" else "f16"
-    if arch == "gfx1201":
-        return f"wmma_gfx12_f32_16x16x16_{elem}"
+    gfx12 = f"wmma_gfx12_f32_16x16x16_{elem}"
+    if target.mma.by_op_id(gfx12) is not None:
+        return gfx12
     return f"wmma_f32_16x16x16_{elem}"
 
 
@@ -82,6 +86,30 @@ def _load_wmma_fp8(b, source, address, count, scale, dtype):
         for i in range(count)
     ]
     return b.vec_pack(values, dtype)
+
+
+def _wmma_buffer_offset(b, elem_base, elem_offset, one):
+    """Byte voffset of element ``elem_base + elem_offset`` (constant offset).
+
+    The flagless shift keeps every element offset below 2**31 a valid
+    unsigned 32-bit byte offset; the backend folds the shifted constant into
+    the load immediate."""
+    elems = b.add(elem_base, b.const_i32(elem_offset)) if elem_offset else elem_base
+    return b.shl(elems, one)
+
+
+def _load_wmma_buffer(b, rsrc, elem_base, elem_offset, count, soffset, dtype, one):
+    """``count`` (8 or 16) two-byte elements starting at element
+    ``elem_base + elem_offset`` through a bounded buffer resource; bytes past
+    the resource extent read as zero."""
+    parts = []
+    for part in range(count // 8):
+        voffset = _wmma_buffer_offset(b, elem_base, elem_offset + 8 * part, one)
+        if dtype == BF16:
+            parts.append(b.buffer_load_vN_bf16(rsrc, voffset, soffset, 4))
+        else:
+            parts.append(b.buffer_load_vN_f16(rsrc, voffset, soffset, 4))
+    return parts[0] if len(parts) == 1 else b.vec_concat(parts[0], parts[1])
 
 
 def _wmma_out_col(b, n, col, value_offset):
@@ -141,6 +169,11 @@ def _wmma_attention_fwd_inner_body(
     value_tile_size: int = 0,
     value_offset: Optional[Value] = None,
     v_head_size: int = 0,
+    v_head_idx: Optional[Value] = None,
+    head_dim_q: Optional[Value] = None,
+    head_dim_v: Optional[Value] = None,
+    k_rsrc: Optional[Value] = None,
+    v_rsrc: Optional[Value] = None,
     lse: Optional[Value] = None,
     write_lse: Optional[Value] = None,
     stride_lse_token: Optional[Value] = None,
@@ -155,7 +188,7 @@ def _wmma_attention_fwd_inner_body(
     :func:`mfma_attention_fwd_inner_body`. The kernel must launch with
     ``block_size == wave_size`` (one wave32 per CTA).
     """
-    op_id = _wmma_attn_op_id(arch, dtype)
+    op_id = _wmma_attn_op_id(target, dtype)
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")
@@ -202,6 +235,32 @@ def _wmma_attention_fwd_inner_body(
             "WMMA value tile must be a positive multiple of 16 within the V head"
         )
     n_dv = value_head_size // 16
+    runtime_dims = head_dim_q is not None or head_dim_v is not None
+    if runtime_dims and (
+        head_dim_q is None
+        or head_dim_v is None
+        or value_tile_size
+        or value_offset is not None
+    ):
+        raise ValueError(
+            "runtime WMMA head dims need both widths and no output-column tiling"
+        )
+    if runtime_dims and ext is not None and ext.wants_epilogue:
+        # The ext epilogue stores every V/output tile; it has no dead-column
+        # gate, so the runtime ``head_dim_v`` bound would be silently dropped.
+        raise ValueError(
+            "runtime WMMA head dims and ext.seqlen_q / ext.epilogue_hook both "
+            "bound the O store; pass one"
+        )
+    v_head = v_head_idx if v_head_idx is not None else kv_head_idx
+    if (k_rsrc is not None and k_row_base_fn is not None) or (
+        v_rsrc is not None and v_row_base_fn is not None
+    ):
+        raise ValueError("bounded WMMA K/V resources need dense row addressing")
+    if (k_rsrc is not None or v_rsrc is not None) and (not runtime_dims or fp8_kv):
+        raise ValueError(
+            "bounded WMMA K/V resources need runtime head dims and 16-bit KV"
+        )
 
     # Row reduction across the 16 lanes that share one accumulator row. The
     # stage count is derived from the atom geometry (log2(16) = 4), not
@@ -253,15 +312,41 @@ def _wmma_attention_fwd_inner_body(
         q_valid = b.cmp_lt(b.add(q_local_base, a_row), query_length)
         q_addr_row_base = b.select(q_valid, q_addr_row_base, b.const_i32(0))
         q_zero = b.zero_vec(dtype_ir, a_frag)
+    # Runtime head widths: the d-tiles past ``head_dim_q`` read their row's
+    # first tile (always in bounds) and are then zeroed, so they add exactly
+    # zero to QK. Tile 0 is always live (widths are at least 16).
+    dim_zero = zero_i = None
+    qk_offsets = [None] * n_dk
+    dq_ok = [None] * n_dk
+    if runtime_dims:
+        zero_i = b.const_i32(0)
+        dim_zero = b.zero_vec(dtype_ir, a_frag)
     q_frags = []
     for d in range(n_dk):
-        q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
+        if runtime_dims and d:
+            d_off = b.const_i32(d * 16)
+            dq_ok[d] = b.cmp_lt(d_off, head_dim_q)
+            qk_offsets[d] = b.select(dq_ok[d], d_off, zero_i)
+            q_addr = b.add(q_addr_row_base, qk_offsets[d])
+        else:
+            q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
         if k_half_off is not None:
             q_addr = b.add(q_addr, k_half_off)
         q_frag = b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=2)
         if q_valid is not None:
             q_frag = b.select(q_valid, q_frag, q_zero)
+        if dq_ok[d] is not None:
+            q_frag = b.select(dq_ok[d], q_frag, dim_zero)
         q_frags.append(q_frag)
+    # Live V/output column tiles (tile 0 always is). Without a bounded V
+    # resource dead tiles clamp their V reads in bounds; either way their
+    # accumulators are discarded at the store.
+    dv_ok = [None] * n_dv
+    if runtime_dims:
+        for d in range(1, n_dv):
+            dv_ok[d] = b.cmp_lt(b.const_i32(d * 16), head_dim_v)
+    # Element -> byte shift for the bounded K/V buffer loads (16-bit KV only).
+    kv_shift = b.const_i32(1) if k_rsrc is not None or v_rsrc is not None else None
 
     k_zero = b.zero_vec(dtype_ir, a_frag) if kv_tail else None
     v_zero = b.zero_vec(dtype_ir, 8) if kv_tail and v_lds_stage else None
@@ -353,17 +438,33 @@ def _wmma_attention_fwd_inner_body(
             )
 
         # ---- QK^T WMMA chain: score = sum_d Q[d-tile] (x) K[d-tile] ----
+        k_elem_base = None
+        if k_rsrc is not None:
+            # One base per row; every d-tile is a constant offset from it.
+            k_elem_base = k_addr_row_base
+            if k_half_off is not None:
+                k_elem_base = b.add(k_elem_base, k_half_off)
         score = b.zero_vec_f32(c_frag)
         for d in range(n_dk):
-            k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
-            if k_half_off is not None:
-                k_addr = b.add(k_addr, k_half_off)
-            if fp8_kv:
-                k_frag = _load_wmma_fp8(b, K, k_addr, a_frag, k_scale, dtype_ir)
+            if k_elem_base is not None:
+                k_frag = _load_wmma_buffer(
+                    b, k_rsrc, k_elem_base, d * 16, a_frag, zero_i, dtype_ir, kv_shift
+                )
             else:
-                k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=2)
+                if qk_offsets[d] is not None:
+                    k_addr = b.add(k_addr_row_base, qk_offsets[d])
+                else:
+                    k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
+                if k_half_off is not None:
+                    k_addr = b.add(k_addr, k_half_off)
+                if fp8_kv:
+                    k_frag = _load_wmma_fp8(b, K, k_addr, a_frag, k_scale, dtype_ir)
+                else:
+                    k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=2)
             if k_valid is not None:
                 k_frag = b.select(k_valid, k_frag, k_zero)
+            if dq_ok[d] is not None:
+                k_frag = b.select(dq_ok[d], k_frag, dim_zero)
             score = b.mma(op, q_frags[d], k_frag, score)
 
         # ---- Scale + mask + per-row online softmax ----
@@ -456,30 +557,28 @@ def _wmma_attention_fwd_inner_body(
                 v_stage_base = b.add(
                     b.add(
                         b.mul(v_stage_row, stride_v_token),
-                        b.mul(kv_head_idx, stride_v_head),
+                        b.mul(v_head, stride_v_head),
                     ),
                     v_off,
                 )
             if value_offset is not None:
                 v_stage_base = b.add(v_stage_base, value_offset)
             for e in range(value_head_size // 8):
-                if fp8_kv:
-                    v_g = _load_wmma_fp8(
-                        b,
-                        V,
-                        b.add(v_stage_base, b.const_i32(e * 8)),
-                        8,
-                        v_scale,
-                        dtype_ir,
+                if v_rsrc is not None:
+                    v_g = _load_wmma_buffer(
+                        b, v_rsrc, v_stage_base, e * 8, 8, zero_i, dtype_ir, kv_shift
                     )
                 else:
-                    v_g = b.global_load_vN(
-                        V,
-                        b.add(v_stage_base, b.const_i32(e * 8)),
-                        dtype_ir,
-                        8,
-                        align=2,
-                    )
+                    if dv_ok[e // 2] is not None:
+                        e_off = b.const_i32(e * 8)
+                        live_off = b.select(dv_ok[e // 2], e_off, zero_i)
+                        v_addr = b.add(v_stage_base, live_off)
+                    else:
+                        v_addr = b.add(v_stage_base, b.const_i32(e * 8))
+                    if fp8_kv:
+                        v_g = _load_wmma_fp8(b, V, v_addr, 8, v_scale, dtype_ir)
+                    else:
+                        v_g = b.global_load_vN(V, v_addr, dtype_ir, 8, align=2)
                 if k_valid is not None:
                     v_g = b.select(k_valid, v_g, v_zero)
                 b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
@@ -506,12 +605,19 @@ def _wmma_attention_fwd_inner_body(
             )
             p_a = b.vec_insert(p_a, p_v, j)
 
+        # A bounded V resource gathers every column tile at a constant byte
+        # offset from one per-row base and needs no dead-column clamp.
+        gather_rsrc = v_rsrc is not None and not v_lds_stage
         for d in range(n_dv):
-            d_col = b.add(
-                b.const_i32(d * 16), col
-            )  # local LDS column, or global V column below
+            d_col = None
+            if not gather_rsrc:
+                # Local LDS column, or global V column below.
+                d_col = b.add(b.const_i32(d * 16), col)
             if not v_lds_stage and value_offset is not None:
                 d_col = b.add(d_col, value_offset)
+            if not v_lds_stage and not gather_rsrc and dv_ok[d] is not None:
+                # Dead output tile: gather the live first column instead.
+                d_col = b.select(dv_ok[d], d_col, col)
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
                 # B-operand for d-column ``d_col`` is V[k, d_col]. The K row this
@@ -546,11 +652,19 @@ def _wmma_attention_fwd_inner_body(
                         v_row_base = b.add(
                             b.add(
                                 b.mul(v_row, stride_v_token),
-                                b.mul(kv_head_idx, stride_v_head),
+                                b.mul(v_head, stride_v_head),
                             ),
                             v_off,
                         )
-                    if fp8_kv:
+                    if gather_rsrc:
+                        v_byte = _wmma_buffer_offset(
+                            b, b.add(v_row_base, col), d * 16, kv_shift
+                        )
+                        if dtype_ir == BF16:
+                            v_elem = b.buffer_load_bf16(v_rsrc, v_byte, zero_i)
+                        else:
+                            v_elem = b.buffer_load_f16(v_rsrc, v_byte, zero_i)
+                    elif fp8_kv:
                         raw = b.global_load(
                             V, b.add(v_row_base, d_col), FP8E4M3, align=1
                         )
@@ -637,29 +751,33 @@ def _wmma_attention_fwd_inner_body(
                 b.global_store(lse, lse_addr, lse_val, align=4)
 
     # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
+    # Output tiles past a runtime ``head_dim_v`` are not stored.
     for d in range(n_dv):
-        for r in range(c_frag):
-            row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
-            l_safe = ls_final[r]
-            zero_mask = b.fcmp("oeq", l_safe, zero_f)
-            inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))
-            v_f32 = b.fmul(b.vec_extract(accs_final[d], r), inv_l)
-            if v_scale is not None and not fp8_kv:
-                v_f32 = b.fmul(v_f32, v_scale)
-            o_row = b.add(q_tile_base, row_rel)
-            o_col = b.add(b.const_i32(d * 16), col_n)
-            if value_offset is not None:
-                o_col = b.add(o_col, value_offset)
-            o_addr = b.add(
-                b.add(
-                    b.mul(o_row, stride_o_token),
-                    b.mul(head_idx, stride_o_head),
-                ),
-                o_col,
-            )
-            if query_length is None:
-                b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
-            else:
-                keep_q = b.cmp_lt(b.add(q_local_base, row_rel), query_length)
-                with b.scf_if(keep_q):
-                    b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+        with b.scf_if(dv_ok[d]) if dv_ok[d] is not None else nullcontext():
+            for r in range(c_frag):
+                row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
+                l_safe = ls_final[r]
+                zero_mask = b.fcmp("oeq", l_safe, zero_f)
+                inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))
+                v_f32 = b.fmul(b.vec_extract(accs_final[d], r), inv_l)
+                if v_scale is not None and not fp8_kv:
+                    v_f32 = b.fmul(v_f32, v_scale)
+                o_row = b.add(q_tile_base, row_rel)
+                o_col = b.add(b.const_i32(d * 16), col_n)
+                if value_offset is not None:
+                    o_col = b.add(o_col, value_offset)
+                o_addr = b.add(
+                    b.add(
+                        b.mul(o_row, stride_o_token),
+                        b.mul(head_idx, stride_o_head),
+                    ),
+                    o_col,
+                )
+                if query_length is None:
+                    o_val = b.cast_f32_to(v_f32, dtype_ir)
+                    b.global_store(O, o_addr, o_val, align=2)
+                else:
+                    keep_q = b.cmp_lt(b.add(q_local_base, row_rel), query_length)
+                    with b.scf_if(keep_q):
+                        o_val = b.cast_f32_to(v_f32, dtype_ir)
+                        b.global_store(O, o_addr, o_val, align=2)

@@ -103,7 +103,9 @@ hsaco, timings = build_hsaco_from_llvm_ir(
 )
 ```
 
-Returns `(bytes, ComgrTimings)`. `ComgrTimings(bc, relocatable, executable)` carries per-stage seconds; `.total` is the sum.
+Returns `(bytes, ComgrTimings)`. `ComgrTimings(bc, link, relocatable, executable)` carries per-stage seconds; `.total` is the sum. Construct it by keyword.
+
+`build_hsaco_from_llvm_modules(ir_texts, isa=..., options=...)` compiles several modules into one code object: each is compiled to bitcode, the bitcode is linked (`LINK_BC_TO_BC`, timed as `link`; 0.0 for a single module) and code-generated once. `compile_module(KernelModule(...))` in `helpers/compile.py` uses it to ship companion kernels beside a primary.
 
 Errors from any stage raise `ComgrError(f"{where}: status={s} ({status_string(s)})")`. The actual error message comes from `amd_comgr_status_string`.
 
@@ -159,7 +161,9 @@ child's message; a child that dies raises `ComgrProcessDied` (a `ComgrError`).
 `COMGR_FRESH_PROCESS_ATTR` (`"comgr_fresh_process"`, compile policy only: no
 lowerer reads it, so the LLVM IR is unchanged). The attention backward main
 kernel sets it whenever it emits `iglp_opt(1)`; other families compile in-process
-as before. The cost is one short process start per such kernel.
+as before. The cost is one short process start per such kernel. `compile_module`
+links its modules in-process, so it refuses a kernel carrying the attribute
+(`ValueError`); compile such a kernel with `compile_kernel`.
 
 ## HIP Module Layer
 

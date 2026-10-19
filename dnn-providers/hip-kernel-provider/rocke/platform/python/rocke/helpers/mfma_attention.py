@@ -252,6 +252,11 @@ def mfma_attention_fwd_inner_body(
     wmma_value_tile_size: int = 0,
     wmma_value_offset: Optional[Value] = None,
     wmma_v_head_size: int = 0,
+    wmma_v_head_idx: Optional[Value] = None,
+    wmma_head_dim_q: Optional[Value] = None,
+    wmma_head_dim_v: Optional[Value] = None,
+    wmma_k_rsrc: Optional[Value] = None,
+    wmma_v_rsrc: Optional[Value] = None,
     lse: Optional[Value] = None,
     write_lse: Optional[Value] = None,
     stride_lse_token: Optional[Value] = None,
@@ -285,6 +290,22 @@ def mfma_attention_fwd_inner_body(
     contiguous PV/output-column tile; QK still traverses the full head size.
     ``wmma_v_head_size`` (default 0 = ``head_size``) sets a V/output head width
     that differs from the Q/K ``head_size``; wave32 targets only.
+    ``wmma_v_head_idx`` (default ``kv_head_idx``) addresses V heads separately
+    from K heads. ``wmma_head_dim_q`` / ``wmma_head_dim_v`` are optional runtime
+    i32 widths (multiples of 16, at least 16) within the compiled ``head_size``
+    / V head: Q and K tiles past ``wmma_head_dim_q`` read zeros, and V/output
+    columns past ``wmma_head_dim_v`` are never stored. Both are given together;
+    wave32 targets only, without output-column tiling.
+    Q always reads its dead tiles at a clamped offset and zeroes them. K and V
+    take one of two forms. With ``wmma_k_rsrc`` / ``wmma_v_rsrc`` (bounded
+    buffer resources over this batch's K / V, used for dense 16-bit KV), every
+    tile is a constant byte offset from one per-row base, so dead tiles cost
+    no extra addressing: bytes past the extent read as zero, dead K tiles are
+    zeroed (in-bounds neighbour data may be non-finite), and dead V columns
+    only feed accumulators that are never stored. Without them (ragged, paged
+    or FP8 KV), dead K/V tiles read at clamped in-bounds offsets instead.
+    Either resource requires the dense addressing (no row callbacks), 16-bit
+    KV storage and runtime head widths.
     ``lse`` is an optional FP32 output with runtime ``write_lse`` gating and
     token/head strides; it is currently supported by the wave32 path.
 
@@ -490,6 +511,11 @@ def mfma_attention_fwd_inner_body(
             value_tile_size=wmma_value_tile_size,
             value_offset=wmma_value_offset,
             v_head_size=wmma_v_head_size,
+            v_head_idx=wmma_v_head_idx,
+            head_dim_q=wmma_head_dim_q,
+            head_dim_v=wmma_head_dim_v,
+            k_rsrc=wmma_k_rsrc,
+            v_rsrc=wmma_v_rsrc,
             lse=lse,
             write_lse=write_lse,
             stride_lse_token=stride_lse_token,
@@ -503,6 +529,14 @@ def mfma_attention_fwd_inner_body(
         raise ValueError("WMMA output tiling requires a wave32 target")
     if wmma_v_head_size:
         raise ValueError("a distinct WMMA V head size requires a wave32 target")
+    if (
+        wmma_v_head_idx is not None
+        or wmma_head_dim_q is not None
+        or wmma_head_dim_v is not None
+        or wmma_k_rsrc is not None
+        or wmma_v_rsrc is not None
+    ):
+        raise ValueError("runtime WMMA head dims require a wave32 target")
     if lse is not None:
         raise ValueError("LSE output requires a wave32 target")
     if k_scale is not None:

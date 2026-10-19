@@ -22,7 +22,7 @@ validator (``--compile-all`` prints the per-direction breakdown of what
 survived). Values are the ``CACHE_*`` constants of this module; the dtype is
 fp16 or bf16 (one cache pass per dtype, A/B/D all of that dtype).
 
-Shared tile geometry, every direction::
+Base tile geometry, every direction (wgrad adds to it, see below)::
 
     tile_m, tile_n   16, 32, 64, 128, 256
     tile_k           16, 32, 64
@@ -46,7 +46,10 @@ Per direction, on top of that:
   and ``unroll_k`` loops, load widths derived by the builder, on the tile
   subset the ``CACHE_FWD_GROUP_MERGE_*`` constants allow), served only to
   depthwise problems whose merged GEMM-N fits the tile.
-* **wgrad** -- vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
+* **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
+  take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
+  carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
+  it has nothing to offer between 128 and 256. Vector widths: a in {1, 2, 4, 8} (dY along kpg), b = c in
   {1, 2, 4, 8} (X and dW along cpg); with the default epilogue (all
   two-stage kernels) c = 1 and b in {1, 2, 4, 8}. pipeline "wavelet" is not cached (wgrad
   builds it as mem). Both the non-split kernel (``split_k`` = 1) and the
@@ -82,10 +85,20 @@ Every direction builds the grouped kernel only: it serves groups == 1 as well
 (``CACHE_GROUPED``), so there is no separate ungrouped binary.
 
 Not swept (spec defaults): fwd ``lds_k_outer`` (off), wgrad ``async_dma``,
-``chiplet_swizzle``, ``lds_k_pad`` / ``lds_layout``, ``waves_per_eu``,
-accumulator epilogues, ``cshuffle_no_alias``, the pointwise fast path (1x1
-problems run the general kernels) and 3-D convolution. The direct-conv cache
-sweeps its own grid: see :mod:`benchmarks.common.direct_kernel_sweep`.
+``chiplet_swizzle``, ``lds_layout``, ``waves_per_eu``, accumulator epilogues,
+``cshuffle_no_alias``, the pointwise fast path (1x1 problems run the general
+kernels) and 3-D convolution. The direct-conv cache sweeps its own grid: see
+:mod:`benchmarks.common.direct_kernel_sweep`.
+
+Two more are not swept but are not left at the spec default either -- both are
+pure functions of the geometry, so they are derived rather than searched.
+wgrad ``lds_k_outer`` comes from
+:meth:`~kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec.default_lds_k_outer`,
+and ``lds_k_pad`` from
+:meth:`~kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec.default_lds_k_pad`,
+which supplies the bank-conflict-free row stride for the M-outer tile and
+stands aside (returning ``None``) wherever ``default_lds_k_outer`` chose the
+K-outer one, since that layout takes its stride from the builder.
 """
 
 from __future__ import annotations
@@ -138,6 +151,39 @@ CACHE_TILE_MN: Tuple[int, ...] = (16, 32, 64, 128, 256)
 CACHE_TILE_K: Tuple[int, ...] = (16, 32, 64)
 CACHE_WARP_MN: Tuple[int, ...] = (1, 2, 4, 8)
 CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
+
+# ---- wgrad-only geometry extension ----------------------------------------
+# wgrad is the one direction whose GEMM dims are filter-shaped rather than
+# tensor-shaped: N = Z*Y*X*cpg and M = kpg. For a 3x3 filter N carries a
+# factor of 9, which the power-of-two ladder has no way to represent, and the
+# ladder's steps are 2x apart -- so between 128 and 256 it offers nothing at
+# all. 144 and 192 fill that gap with the multiples of 16 that a 9*cpg N
+# actually lands on.
+#
+# Both failure modes this fixes were measured, and they are not the same one:
+#
+#  * cpg = 48 (N = 432): no power of two divides it, so every base-grid
+#    kernel runs a partial tile on the N edge and the waves on it do
+#    full-tile work for a fraction of a tile of output.
+#  * cpg = 128 (N = 1152): 128 divides it exactly and the edge is clean, yet
+#    192 still wins -- 6 fatter tiles beat 9 thinner ones on grid shape and
+#    per-workgroup arithmetic intensity, which divisibility says nothing
+#    about.
+#
+# So do not read these as "edge tiles for indivisible shapes". The ladder is
+# simply too coarse for this direction, and clean division is one of several
+# reasons a 1.5x step can win.
+#
+# Warps 3 and 6 come with them rather than separately: a 144 tile is only
+# reachable with warp_m in (1, 3) at warp_tile 16 (144 % (2*16) != 0), so the
+# odd splits are what makes the new edges usable at all. Adding the warps
+# without the tiles changes nothing -- no power-of-two tile divides by 3.
+#
+# fwd and dgrad keep the base grid: their GEMM dims come from N*Ho*Wo and C,
+# which have no factor of 9 to chase, and widening all three directions costs
+# several times the disk for no measured gain.
+CACHE_WGRAD_EXTRA_TILE_MN: Tuple[int, ...] = (144, 192)
+CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
 # accumulators no longer fit the 256 AGPRs MFMA accumulates into, so the
@@ -261,6 +307,8 @@ CACHE_WGRAD_STREAMK_SCALAR_MIN_TILE_N = 128
 _TILE_MN = CACHE_TILE_MN
 _TILE_K = CACHE_TILE_K
 _WARP_MN = CACHE_WARP_MN
+_WGRAD_EXTRA_TILE_MN = CACHE_WGRAD_EXTRA_TILE_MN
+_WGRAD_EXTRA_WARP_MN = CACHE_WGRAD_EXTRA_WARP_MN
 _WARP_TILE_MN = CACHE_WARP_TILE_MN
 _MAX_ACC_REGS = CACHE_MAX_ACC_REGS
 _VECS = CACHE_VECS
@@ -288,8 +336,28 @@ def _dtype_triple(dtype: str) -> Tuple[str, str, str]:
     return dtype, dtype, dtype
 
 
-def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
-    """The tile/warp/atom geometries every direction's generator walks.
+def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """``(tile_mn, warp_mn)`` for a direction, sorted so order is stable.
+
+    ``None`` means the base grid, which is what a caller that walks an
+    explicit geometry list already holds.
+    """
+    if direction != "wgrad":
+        return _TILE_MN, _WARP_MN
+    return (
+        tuple(sorted(set(_TILE_MN) | set(_WGRAD_EXTRA_TILE_MN))),
+        tuple(sorted(set(_WARP_MN) | set(_WGRAD_EXTRA_WARP_MN))),
+    )
+
+
+def _geometries(
+    target,
+    mma_family: str,
+    da: str,
+    db: str,
+    direction: Optional[str] = None,
+) -> Iterator[tuple]:
+    """The tile/warp/atom geometries a direction's generator walks.
 
     Yields ``(tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue,
     atom)`` for each combination whose warp tiling fits the block tile, whose
@@ -297,7 +365,14 @@ def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
     accumulator stays within :data:`CACHE_MAX_ACC_REGS`. Shared by the
     generators and :func:`count_jobs`, so the progress total cannot drift from
     what the generators actually yield.
+
+    ``direction`` selects the grid: wgrad gets the filter-shaped tile and warp
+    extensions (see :data:`CACHE_WGRAD_EXTRA_TILE_MN`), everything else the
+    base grid. It must be threaded through wherever a geometry list is built
+    for a direction, or the chunk bounds stop matching the list the worker
+    walks.
     """
+    tile_mn, warp_mn = _grid_axes(direction)
     for (
         tile_m,
         tile_n,
@@ -308,11 +383,11 @@ def _geometries(target, mma_family: str, da: str, db: str) -> Iterator[tuple]:
         pipeline,
         epilogue,
     ) in itertools.product(
-        _TILE_MN,
-        _TILE_MN,
+        tile_mn,
+        tile_mn,
         _TILE_K,
-        _WARP_MN,
-        _WARP_MN,
+        warp_mn,
+        warp_mn,
         _WARP_TILE_MN,
         _PIPELINES,
         _EPILOGUES,
@@ -412,7 +487,9 @@ def _fwd_jobs(
         epilogue,
         atom,
     ) in (
-        _geometries(target, mma_family, da, db) if geometries is None else geometries
+        _geometries(target, mma_family, da, db, "fwd")
+        if geometries is None
+        else geometries
     ):
         if not _aot_pipeline("fwd", pipeline):
             continue
@@ -670,7 +747,9 @@ def _wgrad_jobs(
         epilogue,
         atom,
     ) in (
-        _geometries(target, mma_family, da, db) if geometries is None else geometries
+        _geometries(target, mma_family, da, db, "wgrad")
+        if geometries is None
+        else geometries
     ):
         if not _aot_pipeline("wgrad", pipeline):
             continue
@@ -686,6 +765,23 @@ def _wgrad_jobs(
             warp_tile_n=wt,
             wave_size=wave_size,
         )
+        # The row stride is the LDS bank-conflict lever on the M-outer tile.
+        # Left unset the spec falls back to a flat pad of 8, which is not
+        # conflict-free; derive it instead. This has to be told which layout
+        # the geometry above settled on: a K-outer tile takes its stride from
+        # the builder and rejects an explicit pad, so the derivation returns
+        # None there -- as it does wherever else it does not apply (see
+        # default_lds_k_pad). The key is then omitted so the spec and the
+        # identity both keep their defaults.
+        _k_pad = WgradConvSpec.default_lds_k_pad(
+            arch=arch,
+            tile_k=tile_k,
+            dtype_a=da,
+            dtype_b=db,
+            lds_k_outer=lds_k_outer,
+            wave_size=wave_size,
+        )
+        _pad_cfg = {} if _k_pad is None else {"lds_k_pad": _k_pad}
         # wgrad's B (X) and D (dW) are both contiguous along cpg, so they
         # share one width; A (dY) runs along kpg. The default epilogue (and so
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
@@ -714,6 +810,7 @@ def _wgrad_jobs(
                     split_k=split_k,
                     two_stage=two_stage,
                     lds_k_outer=lds_k_outer,
+                    **_pad_cfg,
                 )
                 if two_stage:
                     # Pinned in the spec and the identity alike, so the host
@@ -763,6 +860,8 @@ def _wgrad_jobs(
                 vector_size_c=1,
                 streamk=mode,
                 streamk_reduction=reduction,
+                lds_k_outer=lds_k_outer,
+                **_pad_cfg,
             )
             if reduction == "workspace":
                 cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
@@ -807,6 +906,7 @@ def _wgrad_jobs(
                 two_stage=split_k > 1,
                 group_merge=gm,
                 lds_k_outer=lds_k_outer,
+                **_pad_cfg,
             )
             if split_k > 1:
                 cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
@@ -879,7 +979,9 @@ def _dgrad_jobs(
         epilogue,
         atom,
     ) in (
-        _geometries(target, mma_family, da, db) if geometries is None else geometries
+        _geometries(target, mma_family, da, db, "dgrad")
+        if geometries is None
+        else geometries
     ):
         if not _aot_pipeline("dgrad", pipeline):
             continue
@@ -1087,6 +1189,9 @@ def count_jobs(
     Cheap: it runs only the geometry filter and multiplies out the inner axes,
     without building a single identity -- which is where enumeration spends
     its time. Used as the denominator of the enumeration progress.
+
+    Counted per direction rather than once over a shared grid: wgrad walks a
+    wider one (see :func:`_grid_axes`).
     """
     da, db, _ = _dtype_triple(dtype)
     mma_family = "wmma" if target.wave_size == 32 else "mma"
@@ -1095,22 +1200,29 @@ def count_jobs(
     merged = sum(1 for sk in split_ks if sk > 1) * len(_WGRAD_GROUP_MERGES)
     dgrad_caps = len(_dgrad_caps())
     total = 0
-    for geo in _geometries(target, mma_family, da, db):
-        pipeline = geo[6]
-        if "fwd" in directions and _aot_pipeline("fwd", pipeline):
-            total += vecs * len(_fwd_k_loops(pipeline)) * layouts
-            if _fwd_merged_geometry(geo):
-                total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
-        if "wgrad" in directions and _aot_pipeline("wgrad", pipeline):
-            total += vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
-            total += merged
-            total += layouts * len(
-                _wgrad_streamk_builds(
-                    geo[7], geo[1], dtype, streamk_modes, streamk_reductions
+    for direction in directions:
+        if direction not in _AOT_ALIAS_PIPELINES:
+            continue
+        for geo in _geometries(target, mma_family, da, db, direction):
+            pipeline = geo[6]
+            if not _aot_pipeline(direction, pipeline):
+                continue
+            if direction == "fwd":
+                total += vecs * len(_fwd_k_loops(pipeline)) * layouts
+                if _fwd_merged_geometry(geo):
+                    total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
+            elif direction == "wgrad":
+                total += (
+                    vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
                 )
-            )
-        if "dgrad" in directions and _aot_pipeline("dgrad", pipeline):
-            total += vecs * dgrad_caps
+                total += merged
+                total += layouts * len(
+                    _wgrad_streamk_builds(
+                        geo[7], geo[1], dtype, streamk_modes, streamk_reductions
+                    )
+                )
+            elif direction == "dgrad":
+                total += vecs * dgrad_caps
     return total
 
 
@@ -1149,10 +1261,10 @@ def _direction_jobs(
     raise ValueError(f"unknown direction {direction!r}")
 
 
-def _geometry_list(target, dtype: str) -> List[tuple]:
+def _geometry_list(target, dtype: str, direction: Optional[str] = None) -> List[tuple]:
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     da, db, _ = _dtype_triple(dtype)
-    return list(_geometries(target, mma_family, da, db))
+    return list(_geometries(target, mma_family, da, db, direction))
 
 
 def _enumerate_chunk(
@@ -1204,7 +1316,7 @@ def _enumerate_chunk(
 
 # Per-process geometry lists, so a worker running many chunks rebuilds the
 # grid once rather than once per chunk.
-_WORKER_GEOMETRIES: Dict[Tuple[str, str], List[tuple]] = {}
+_WORKER_GEOMETRIES: Dict[Tuple[str, str, str], List[tuple]] = {}
 
 
 def _enumerate_worker(payload):
@@ -1223,9 +1335,11 @@ def _enumerate_worker(payload):
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
-    geos = _WORKER_GEOMETRIES.get((arch, dtype))
+    geos = _WORKER_GEOMETRIES.get((arch, dtype, direction))
     if geos is None:
-        geos = _WORKER_GEOMETRIES[(arch, dtype)] = _geometry_list(target, dtype)
+        geos = _WORKER_GEOMETRIES[(arch, dtype, direction)] = _geometry_list(
+            target, dtype, direction
+        )
     return _enumerate_chunk(
         direction,
         arch,
@@ -1296,31 +1410,30 @@ def enumerate_jobs(
             raise ValueError(f"unknown direction {direction!r}")
 
     flavor = current_llvm_flavor()
-    geos = _geometry_list(target, dtype)
     jobs = max(1, int(jobs))
-    # Enough chunks per direction to keep every worker busy despite uneven
-    # chunk costs, and to give the serial walk regular progress points.
-    n_chunks = max(1, min(len(geos), jobs * 8 if jobs > 1 else 64))
-    bounds = [
-        (len(geos) * i // n_chunks, len(geos) * (i + 1) // n_chunks)
-        for i in range(n_chunks)
-    ]
     streamk = (tuple(streamk_modes), tuple(streamk_reductions))
-    payloads = [
-        (
-            direction,
-            arch,
-            dtype,
-            tuple(split_ks),
-            max_sub_gemms,
-            validate,
-            flavor,
-            streamk,
-        )
-        + bound
-        for direction in directions
-        for bound in bounds
-    ]
+    # Chunk bounds are per direction: wgrad's grid is longer than fwd's and
+    # dgrad's (see _grid_axes), so one shared set of bounds would truncate it.
+    payloads = []
+    for direction in directions:
+        n_geos = len(_geometry_list(target, dtype, direction))
+        # Enough chunks per direction to keep every worker busy despite uneven
+        # chunk costs, and to give the serial walk regular progress points.
+        n_chunks = max(1, min(n_geos, jobs * 8 if jobs > 1 else 64))
+        payloads += [
+            (
+                direction,
+                arch,
+                dtype,
+                tuple(split_ks),
+                max_sub_gemms,
+                validate,
+                flavor,
+                streamk,
+            )
+            + (n_geos * i // n_chunks, n_geos * (i + 1) // n_chunks)
+            for i in range(n_chunks)
+        ]
 
     total = 0
     if log is not None:
@@ -1356,8 +1469,12 @@ def enumerate_jobs(
 
     if jobs <= 1:
         # In-process, with the caller's target and the module's own grid.
+        grids: Dict[str, List[tuple]] = {}
         for idx, payload in enumerate(payloads):
             direction, lo, hi = payload[0], payload[-2], payload[-1]
+            geos = grids.get(direction)
+            if geos is None:
+                geos = grids[direction] = _geometry_list(target, dtype, direction)
             _done(
                 idx,
                 *_enumerate_chunk(

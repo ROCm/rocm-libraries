@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
@@ -92,13 +93,6 @@ constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
                                       'kpack': 'KPACK',
                                       'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] }};
 
-/// A pack or kernel naming no architecture inherits/wildcards; one that names
-/// architectures must name the requested one, or this is the wrong shard.
-bool coversArch(const std::vector<std::string>& declared, const std::string& arch)
-{
-    return declared.empty() || std::find(declared.begin(), declared.end(), arch) != declared.end();
-}
-
 class Test{{ config.engine.pascal_name }}Packs : public ::testing::Test
 {
 protected:
@@ -169,12 +163,12 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, EveryLoadedDescriptorCoversTheR
 {
     for(const auto& pack : _set->packs)
     {
-        EXPECT_TRUE(coversArch(pack.arch, _arch))
+        EXPECT_TRUE(ingestor::archSupports(pack.arch, _arch))
             << "pack '" << pack.name << "' does not cover '" << _arch
             << "', so this is not that architecture's shard";
         for(const auto& kernel : pack.kernels)
         {
-            EXPECT_TRUE(coversArch(kernel.arch, _arch))
+            EXPECT_TRUE(ingestor::archSupports(kernel.arch, _arch))
                 << "kernel '" << kernel.name << "' does not cover '" << _arch << "'";
         }
     }

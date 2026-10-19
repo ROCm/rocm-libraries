@@ -74,7 +74,8 @@ from ..Common.ValidParameters import validParameters, \
                                             SW_INSTRUCTION_PREFETCH_AUTO
 from .Naming import getSolutionNameFull
 from .Problem import ProblemType
-from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget
+from .segment_interleave import evaluate as segIntEval, aligned_budget_ok as segAlignedBudget, \
+  b_rotate_reason as segBRotateReason
 from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
@@ -2954,12 +2955,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthA. VectorWidthA still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 1:
-          #   state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
-          # else:
-          state["VectorWidthA"] = 1
+        if state["ProblemType"]["Sparse"] == 1:
+          state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
       else:
         state["VectorWidthA"] = 1
 
@@ -2973,12 +2970,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthB. VectorWidthB still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 2:
-          #   state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
-          # else:
-          state["VectorWidthB"] = 1
+        if state["ProblemType"]["Sparse"] == 2:
+          state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
       else:
         state["VectorWidthB"] = 1
 
@@ -3020,6 +3013,8 @@ class Solution(collections.abc.Mapping):
     state["enableLDSTrMXSA"] = False
     state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytesB)
     state["enableLDSTrMXSB"] = False
+    state["enableLDSTrMetadata"] = state["ProblemType"]["Sparse"] and state["ProblemType"]["MetadataLayout"] \
+      and isLDSTrEnabled(isaInfoMap[isa].asmCaps, hasLDSTrans=True, unrollMajorLDS=False, dtv=False, numBytes=1)
 
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]
@@ -3043,6 +3038,13 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"] or state["enableGLTrB"]:
       state["VectorWidthB"] = 1
 
+    if state["enableLDSTrMetadata"]:
+      state["VectorWidthMetadata"] = 1
+      if state["ProblemType"]["Sparse"] == 1:
+        state["VectorWidthA"] = 1
+      elif state["ProblemType"]["Sparse"] == 2:
+        state["VectorWidthB"] = 1
+
     if state["_ScheduleIterAlg"] == 2:
       state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
@@ -3054,7 +3056,7 @@ class Solution(collections.abc.Mapping):
       if not (bufferLoad and ( state["PrefetchGlobalRead"] == 1 \
               or (state["PrefetchGlobalRead"] > 1 and \
                   (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()))
-              or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
+              or (state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]))):
         state["ExpandPointerSwap"] = False
 
     #################################################################
@@ -4576,6 +4578,11 @@ class Solution(collections.abc.Mapping):
               state["LocalReadVectorWidthA"] = wlrB * state["MIInputPerThreadA"]
             if wlrA < wlrB:
               state["LocalReadVectorWidthB"] = wlrA * state["MIInputPerThreadB"]
+          elif isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+            lrBytesA = state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes()
+            lrBytesB = state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes()
+            if lrBytesA != lrBytesB:
+              reject(state, printRejectionReason, f"gfx1250 requires LocalReadVectorWidthA/B to read the same bytes, actual: {lrBytesA:g}/{lrBytesB:g}")
 
           if state["ProblemType"]["Sparse"] == 1:
             state["LocalReadVectorWidthMetadata"] = state["LocalReadVectorWidthA"]
@@ -5564,16 +5571,6 @@ class Solution(collections.abc.Mapping):
       if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
         reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
         return False
-
-    state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
-    if state["enableLDSTrMetadata"]:
-      state["VectorWidthMetadata"] = 1
-
-      # the VetorWidth of the sparse matrix and metadta need to be the same.
-      if state["ProblemType"]["Sparse"] == 1:
-        state["VectorWidthA"] = 1
-      else:
-        state["VectorWidthB"] = 1
 
     wmmaV3 = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
     if wmmaV3:
@@ -6894,6 +6891,12 @@ class Solution(collections.abc.Mapping):
         if state["LoopIters"] % (state["PrefetchLocalRead"]+1) != 0:
           reject(state, "dot2 kernel does not support LoopIters(%u) %% (PLR+1)(%u) != 0" % (state["LoopIters"], state["PrefetchLocalRead"]+1))
 
+    if (state["EnableMatrixInstruction"] and not state["ClusterLocalRead"] and state["PrefetchLocalRead"] == 2
+        and state["LoopIters"] >= 4 and state["ProblemType"]["MacDataTypeA"].numBytes() < 4
+        and state["ProblemType"]["MacDataTypeB"].numBytes() < 4):
+      reject(state, printRejectionReason, "PrefetchLocalRead=2 with ClusterLocalRead=0 and numByte<4 does not support LoopIters>=4")
+      return
+
     # reject iterations are not enough to use wider local read
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
@@ -7371,6 +7374,12 @@ class Solution(collections.abc.Mapping):
       kMax = Solution.rapMaxResidentKTiles(
           state, problemType, isa, isaInfoMap, packedC0, packedC1)
       state["_RAPNumResidentKTiles"] = max(state["PrefetchGlobalRead"] + 1, kMax or 0)
+
+    if state["LDSSegmentBRotate"]:
+      _bRotReason = segBRotateReason(state, isPersistent(state))
+      if _bRotReason is not None:
+        reject(state, printRejectionReason, "LDSSegmentBRotate: %s" % _bRotReason)
+        return
 
   ########################################
   @ staticmethod

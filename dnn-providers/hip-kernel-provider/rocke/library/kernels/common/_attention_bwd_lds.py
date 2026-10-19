@@ -467,9 +467,15 @@ def _predict_max(
 
 
 def _predictor_targets() -> tuple[str, ...]:
+    """Targets with a wave64 conflict profile: the XT accesses are modelled per
+    64-lane wave, so a wave32-only profile (gfx1201) is not one of them and
+    keeps the RDNA default."""
     from rocke.analysis.lds import registered_targets
+    from rocke.analysis.lds.registry import resolve_profile
 
-    return tuple(registered_targets())
+    return tuple(
+        t for t in registered_targets() if 64 in resolve_profile(t).supported_wave_sizes
+    )
 
 
 def xt_conflicts(
@@ -479,7 +485,7 @@ def xt_conflicts(
 
     Returns ``{"read": m_r, "write": m_w}`` (1 = conflict-free) over every B
     fragment read of the image and every writer store of every wave, or None
-    when the predictor has no profile for ``arch`` (RDNA).
+    when the predictor has no wave64 profile for ``arch`` (RDNA).
     """
     if arch not in _predictor_targets():
         return None
