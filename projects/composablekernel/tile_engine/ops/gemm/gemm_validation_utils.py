@@ -701,16 +701,18 @@ DEFAULT_LDS_SIZE = 2**16  # 64KB
 # LDS A/B staging buffers each pipeline holds live at once. GetSmemSize() is
 # this many times the per-slot size, so the per-slot budget is the hardware LDS
 # divided by the slot count. Every entry here MIRRORS a default declared in C++
-# and diverges silently if that default is retuned -- comp_tdm_pc's 3 tracks
+# and diverges silently if that default is retuned -- comp_tdm_pc's 4 tracks
 # GemmPipelineAgBgCrCompTDMProducerConsumerPolicy's NumSlots_. Verified against the
-# emitted kernel descriptor: for bf16 rcr 128x128x64 the per-slot model (34784 B)
+# emitted kernel descriptor: for bf16 rcr 256x256x64 the per-slot model (69600 B)
 # times NumSlots reproduces .amdhsa_group_segment_fixed_size exactly at both
-# settings -- 69568 B at NumSlots=2, 104352 B at NumSlots=3.
+# settings -- 208800 B at NumSlots=3, 278400 B at NumSlots=4.
 #
 # Too HIGH here only over-rejects (a valid tile is never generated). Too LOW emits
-# instances the compiler rejects outright: at 256x256x128 bf16 the ring needs
-# 417696 B at NumSlots=3, and clang fails the TU with "local memory (417696)
-# exceeds limit (327680)". Raise this the moment NumSlots_ rises.
+# instances the compiler rejects outright: at 256x256x128 bf16 the ring already
+# needs 417696 B at NumSlots=3 alone, and clang fails the TU with "local memory
+# (417696) exceeds limit (327680)" -- the same tile is strictly worse at
+# NumSlots=4 (per-slot size does not shrink). Raise this the moment NumSlots_
+# rises again.
 #
 # Two of the 2s are conditional: preshufflev2 is 2 only because the builder always
 # emits DoubleSmemBuffer=true, and comp_tdm_v2 is 2*(slot + barrier) which stops
@@ -723,7 +725,7 @@ PIPELINE_SMEM_SLOTS = {
     "weight_preshuffle": 2,
     "comp_tdm": 2,
     "comp_tdm_v2": 2,
-    "comp_tdm_pc": 3,
+    "comp_tdm_pc": 4,
 }
 DEFAULT_SMEM_SLOTS = 1
 

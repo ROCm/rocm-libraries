@@ -445,8 +445,8 @@ class TestValidationRules(unittest.TestCase):
 
     def test_comp_tdm_pc_lds_budget_matches_its_ring_depth(self):
         # comp_tdm_pc rings PIPELINE_SMEM_SLOTS["comp_tdm_pc"] LDS slots
-        # (GetSmemSize = NumSlots * per-slot). At the shipped <3, 0> default that is
-        # one slot deeper than comp_tdm / comp_tdm_v2's two-slot budget, so comp_tdm_pc
+        # (GetSmemSize = NumSlots * per-slot). At the shipped <4, 0> default that is
+        # two slots deeper than comp_tdm / comp_tdm_v2's two-slot budget, so comp_tdm_pc
         # must reject tiles the other two still accept.
         lds = vu.validate_lds_capacity
         slots = vu.PIPELINE_SMEM_SLOTS["comp_tdm_pc"]
@@ -466,15 +466,15 @@ class TestValidationRules(unittest.TestCase):
         # test_gemm_universal_gfx1250.py indexes PIPELINE_SMEM_SLOTS directly
         # (not .get) for every pipeline it lints, so a missing key is a KeyError
         # rather than a readable failure. Every gfx1250 pipeline plus compv4 must
-        # have an entry; comp_tdm_pc is the only one that rings three slots today.
+        # have an entry; comp_tdm_pc is the only one that rings four slots today.
         required = (
             set(vu.GEMM_TDM_PIPELINES) | set(vu.GEMM_ASYNC_PIPELINES) | {"compv4"}
         )
         self.assertEqual(required - set(vu.PIPELINE_SMEM_SLOTS), set())
         # comp_tdm_pc's entry mirrors GemmPipelineAgBgCrCompTDMProducerConsumerPolicy's
-        # NumSlots_ default, <3, 0>.
-        self.assertEqual(vu.PIPELINE_SMEM_SLOTS["comp_tdm_pc"], 3)
-        self.assertEqual(set(vu.PIPELINE_SMEM_SLOTS.values()), {2, 3})
+        # NumSlots_ default, <4, 0>.
+        self.assertEqual(vu.PIPELINE_SMEM_SLOTS["comp_tdm_pc"], 4)
+        self.assertEqual(set(vu.PIPELINE_SMEM_SLOTS.values()), {2, 4})
         # Pipelines with no entry fall back to a single slot (full LDS budget).
         self.assertEqual(vu.DEFAULT_SMEM_SLOTS, 1)
         self.assertNotIn("compv3", vu.PIPELINE_SMEM_SLOTS)
