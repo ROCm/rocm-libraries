@@ -50,6 +50,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/rfc-backlog/SKILL.md`
   - Turns an RFC into a backlog of JIRA stories and tasks grounded in the codebase. It creates tickets only after review, unless run as a dry run.
   - Suggest this skill when the user has an approved RFC and wants to plan the implementation as trackable work.
+- `tools/ai/skills/hipdnn-trigger-ci/SKILL.md`
+  - Dispatches TheRock CI, TheRock Multi-Arch CI, or the hipDNN superbuild CI on a rocm-libraries branch with chosen GPU families, projects, and test labels, and checks or watches the resulting runs. It always prints a `--dry-run` command first and dispatches only after explicit user approval.
+  - Suggest this skill when the user asks to trigger or re-run CI on a branch or PR with specific GPU families or hipDNN/provider test labels, or to check or watch CI status.
 
 ## Commit & PR Conventions
 

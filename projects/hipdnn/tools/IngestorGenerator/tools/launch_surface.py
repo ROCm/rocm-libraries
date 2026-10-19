@@ -6,17 +6,20 @@ constants, spec resolution, applicability. Nothing else compares the two
 halves, and a mismatch does not fail: the kernel runs and computes something
 else.
 
-A ``launch_surface:`` block declares one entry per surface (grid, block,
-kernargs, baked_constants, spec_resolution, applicability, or any further
-split an op needs):
+An engine manifest's ``launch_surface:`` block declares one entry per surface
+(grid, block, kernargs, baked_constants, spec_resolution, applicability, or any
+further split an op needs):
 
     launch_surface:
       - name: grid
-        python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
-        cpp_mirror: dnn-providers/.../Gfx942AttentionDenseGeometry.hpp:attentionDenseGeometry
-        kmd_fields: [block_m, seqlen_q, num_query_heads, batch, persistent]
-        guard: attentionDenseGeometry throws on a non-positive dimension
-        test: dnn-providers/.../TestGfx942AttentionDenseGeometry.cpp
+        python_source: kernels/gfx950/attention_dense.py:attention_dense_grid
+        cpp_mirror: dnn-providers/.../Gfx950AttentionDenseGeometry.hpp
+        kmd_fields: [block_m, seqlen_q, num_query_heads, batch]
+        guard: gfx950AttentionDenseGeometry throws on a non-positive dimension
+        test: dnn-providers/.../TestGfx950AttentionDenseGeometry.cpp
+
+``python_source`` resolves under ``<provider_root>/rocke/library`` (else the repo
+root); ``cpp_mirror`` and ``test`` under the repo root.
 
 Write ``guard: none`` / ``test: none`` rather than omitting the key, so an
 unguarded surface is a visible choice.
@@ -24,11 +27,11 @@ unguarded surface is a visible choice.
 ``--check`` verifies, with no device and no build, that the fields a mirror
 needs are declared, that the files and symbols named are real, and that every
 unguarded surface is named. It never compares what the two halves compute, and
-it notices a missing surface only when that surface uniquely covered a
-metadata field a still-declared mirror reads through a required accessor.
+it notices a missing surface only when that surface uniquely covered a metadata
+field a still-declared mirror reads through a required or declining accessor.
 
-    launch_surface.py --check <profile.yaml> [--allow-unguarded]
-    launch_surface.py --report <profile.yaml>
+    launch_surface.py <manifest.engine.yaml> --check [--allow-unguarded]
+    launch_surface.py <manifest.engine.yaml> --report
 """
 
 from __future__ import annotations
@@ -38,6 +41,14 @@ import ast
 import re
 import sys
 from pathlib import Path
+
+import yaml
+
+_GENERATOR_ROOT = Path(__file__).resolve().parents[1]
+if str(_GENERATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(_GENERATOR_ROOT))
+
+from codegen.config_loader import read_json_or_yaml  # noqa: E402
 
 #: Enforced eagerly, so a surface missing a key is reported as a shape error rather
 #: than crashing on the first check that happens to dereference it.
@@ -49,41 +60,35 @@ NONE_SENTINEL = "none"
 
 
 class LaunchSurfaceError(RuntimeError):
-    """The profile could not be read, or its launch_surface block is malformed."""
+    """The manifest could not be read, or its launch_surface block is malformed."""
 
 
-def _load_profile(path: str) -> dict:
-    """Parse a profile as JSON, falling back to YAML. The mapping check covers
-    both paths: a file that parses as valid JSON but is not an object would
-    otherwise crash later naming neither the file nor the problem."""
-    text = Path(path).read_text(encoding="utf-8")
+def _load_manifest(path: str) -> dict:
+    """Parse a manifest as JSON, falling back to YAML; a repeated key is an error in
+    both. The mapping check covers both paths: a file that parses as valid JSON but
+    is not an object would otherwise crash later naming neither the file nor the
+    problem."""
     try:
-        import json
-
-        loaded = json.loads(text)
-    except ValueError:
-        try:
-            import yaml
-        except ImportError:  # pragma: no cover - environment-dependent
-            raise LaunchSurfaceError(f"{path} is not JSON and PyYAML is not installed.")
-        loaded = yaml.safe_load(text)
+        loaded = read_json_or_yaml(Path(path))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise LaunchSurfaceError(f"manifest {path} is not readable: {exc}") from exc
     if not isinstance(loaded, dict):
         raise LaunchSurfaceError(
-            f"profile {path} must be a mapping; got {type(loaded).__name__}."
+            f"manifest {path} must be a mapping; got {type(loaded).__name__}."
         )
     return loaded
 
 
-def load_surfaces(profile: dict) -> list[dict]:
-    """The declared ``launch_surface:`` list, or an error if the profile has none.
+def load_surfaces(manifest: dict) -> list[dict]:
+    """The declared ``launch_surface:`` list, or an error if the manifest has none.
 
     An absent block means the op has not been audited yet, not that there is nothing
     to audit, so it is a failure rather than a pass.
     """
-    surfaces = profile.get("launch_surface")
+    surfaces = manifest.get("launch_surface")
     if not surfaces:
         raise LaunchSurfaceError(
-            "profile declares no 'launch_surface:' block. Every op this engine ships "
+            "manifest declares no 'launch_surface:' block. Every op this engine ships "
             "restates a launch contract from Python; an absent block means it has "
             "not been audited, not that there is nothing to audit."
         )
@@ -117,6 +122,10 @@ def find_repo_root(start: Path) -> Path:
 #: ``tryGetMetadata`` is excluded: it is how this codebase spells "this field may
 #: legitimately be absent" (see Gfx950AttentionDenseNative.cpp on ``featureIsSet``).
 _REQUIRED_ACCESSORS = ("getIntMetadata", "getStringMetadata")
+
+#: Helpers called as ``helper(<kernel>, <FIELD>)`` that decline the match when the
+#: field is absent: a catalog omitting it declines every candidate.
+_DECLINING_ACCESSORS = ("integerMetadata",)
 
 _CONST_DEF_RE = re.compile(r'constexpr\s+std::string_view\s+(\w+)\s*=\s*"([^"]*)"\s*;')
 _WRAPPER_LAMBDA_RE = re.compile(
@@ -251,6 +260,31 @@ def extract_required_metadata_fields(cpp_text: str) -> set[str]:
     return fields
 
 
+def extract_declining_metadata_fields(cpp_text: str) -> set[str]:
+    """KMD field names ``cpp_text`` reads as ``<declining accessor>(<kernel>, <F>)``."""
+    code = _blank_cpp_string_contents(_strip_cpp_comments(cpp_text))
+    consts = dict(_CONST_DEF_RE.findall(_strip_cpp_comments(cpp_text)))
+    accessor_pattern = "|".join(_DECLINING_ACCESSORS)
+    call_re = re.compile(rf"\b(?:{accessor_pattern})\s*\(\s*\w+\s*,\s*(\w+)\s*\)")
+    return {consts[ident] for ident in call_re.findall(code) if ident in consts}
+
+
+#: (description, extractor, runtime consequence) per accessor class checked in (1b).
+_ACCESSOR_CLASSES = (
+    (
+        "a required accessor (" + "/".join(_REQUIRED_ACCESSORS) + ")",
+        extract_required_metadata_fields,
+        "the engine dereferences a field no surface admits to needing",
+    ),
+    (
+        "a declining accessor (" + "/".join(_DECLINING_ACCESSORS) + ")",
+        extract_declining_metadata_fields,
+        "a record without the field is declined, so its absence declines every "
+        "candidate",
+    ),
+)
+
+
 _LEADING_SYMBOL_RE = re.compile(r"[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*")
 
 
@@ -312,23 +346,24 @@ def validate_shape(surfaces: list[dict]) -> list[str]:
     return errors
 
 
-def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
+def check(manifest: dict, root: Path) -> tuple[list[str], list[str]]:
     """(failures, unguarded_or_untested) for every declared surface.
 
-    A failure is structural: the profile's claim about itself is false. An
+    A failure is structural: the manifest's claim about itself is false. An
     honestly-declared ``guard: none`` is a separate list the caller decides on
     (``--allow-unguarded``).
     """
-    surfaces = load_surfaces(profile)
+    surfaces = load_surfaces(manifest)
     shape_errors = validate_shape(surfaces)
     if shape_errors:
         return shape_errors, []
 
-    kmd_names = {f["name"] for f in (profile.get("kmd_fields") or [])}
-    provider_root = profile.get("provider_root")
+    kmd_names = {f["name"] for f in (manifest.get("kmd_fields") or [])}
+    provider_root = manifest.get("provider_root")
     python_root = (
         (root / provider_root / "rocke" / "library") if provider_root else root
     )
+    python_base = f"{provider_root}/rocke/library" if provider_root else "the repo root"
 
     failures: list[str] = []
     unguarded: list[str] = []
@@ -350,32 +385,33 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
                 cache[key] = None
         return cache[key]
 
-    # (1b) prep: each cpp_mirror file's required-accessor reads, gathered before the
+    # (1b) prep: each cpp_mirror file's reads per accessor class, gathered before the
     # per-surface loop so a field is checked against the UNION of every surface
     # sharing that file -- only their combined kmd_fields need to cover it.
-    required_by_file: dict[str, set[str]] = {}
+    reads_by_file: dict[str, list[set[str]]] = {}
     declared_by_file: dict[str, set[str]] = {}
     for surface in surfaces:
         cpp_path = _path_part(surface["cpp_mirror"])
         if not cpp_path:
             continue
         declared_by_file.setdefault(cpp_path, set()).update(surface["kmd_fields"])
-        if cpp_path not in required_by_file:
+        if cpp_path not in reads_by_file:
             text = read_cached(cpp_text_cache, root / cpp_path)
-            required_by_file[cpp_path] = (
-                extract_required_metadata_fields(text) if text is not None else set()
-            )
+            reads_by_file[cpp_path] = [
+                extract(text) if text is not None else set()
+                for _, extract, _ in _ACCESSOR_CLASSES
+            ]
 
-    for cpp_path, required in required_by_file.items():
-        missing = sorted(required - declared_by_file.get(cpp_path, set()))
-        if missing:
-            failures.append(
-                f"cpp_mirror '{cpp_path}' reads metadata field(s) {missing} through "
-                f"a required accessor (getIntMetadata/getStringMetadata), but no "
-                f"surface whose cpp_mirror names this file declares them in "
-                f"kmd_fields -- the engine dereferences a field no surface admits "
-                f"to needing"
-            )
+    for cpp_path, reads in reads_by_file.items():
+        declared = declared_by_file.get(cpp_path, set())
+        for (accessor, _, consequence), fields in zip(_ACCESSOR_CLASSES, reads):
+            missing = sorted(fields - declared)
+            if missing:
+                failures.append(
+                    f"cpp_mirror '{cpp_path}' reads metadata field(s) {missing} "
+                    f"through {accessor}, but no surface whose cpp_mirror names "
+                    f"this file declares them in kmd_fields -- {consequence}"
+                )
 
     for surface in surfaces:
         name = surface["name"]
@@ -386,7 +422,7 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
         if undeclared:
             failures.append(
                 f"surface '{name}' names kmd_fields {undeclared}, which the "
-                f"profile's own kmd_fields does not declare -- the C++ mirror would "
+                f"manifest's own kmd_fields does not declare -- the C++ mirror would "
                 f"dereference a field the descriptor cannot carry"
             )
 
@@ -413,13 +449,24 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
                     f"not appear in {cpp_path}"
                 )
 
-        # (1c) python_source's leading symbol, resolved against provider_root's
-        # rocke/library, the same base dispatch_parity.py imports modules from.
+        # (2b) python_source must name a real file.
         py_path = _path_part(surface["python_source"])
+        py_text = read_cached(py_text_cache, python_root / py_path) if py_path else None
+        if py_path and py_text is None:
+            reason = (
+                "path does not exist"
+                if not (python_root / py_path).is_file()
+                else "is not valid UTF-8"
+            )
+            failures.append(
+                f"surface '{name}' python_source {reason}: {py_path} (resolved "
+                f"under {python_base})"
+            )
+
+        # (1c) python_source's leading symbol, if any, must be defined.
         py_symbol = _leading_symbol(surface["python_source"])
-        if py_path and py_symbol:
-            py_text = read_cached(py_text_cache, python_root / py_path)
-            if py_text is not None and not python_symbol_exists(py_text, py_symbol):
+        if py_text is not None and py_symbol:
+            if not python_symbol_exists(py_text, py_symbol):
                 failures.append(
                     f"surface '{name}' python_source names '{py_symbol}', which is "
                     f"not defined in {py_path}"
@@ -441,9 +488,9 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
     return failures, unguarded
 
 
-def render_report(profile: dict) -> str:
+def render_report(manifest: dict) -> str:
     """The markdown table an integration owes, ready to paste into a PR."""
-    surfaces = load_surfaces(profile)
+    surfaces = load_surfaces(manifest)
     errors = validate_shape(surfaces)
     if errors:
         raise LaunchSurfaceError("; ".join(errors))
@@ -454,11 +501,17 @@ def render_report(profile: dict) -> str:
     ]
     for surface in surfaces:
         fields = ", ".join(surface["kmd_fields"]) or "(none)"
-        lines.append(
-            f"| {surface['name']} | {surface['python_source']} | "
-            f"{surface['cpp_mirror']} | {fields} | {surface['guard']} | "
-            f"{surface['test']} |"
+        cells = (
+            surface["name"],
+            surface["python_source"],
+            surface["cpp_mirror"],
+            fields,
+            surface["guard"],
+            surface["test"],
         )
+        # A YAML folded scalar (`>`) keeps a newline; a row must stay one line.
+        row = (" ".join(str(c).split()).replace("|", "\\|") for c in cells)
+        lines.append(f"| {' | '.join(row)} |")
     return "\n".join(lines)
 
 
@@ -466,12 +519,17 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Audit the Python/C++ launch-contract restatement, per surface.",
     )
-    parser.add_argument("profile", help="Path to the kernel's tool profile YAML.")
+    parser.add_argument(
+        "manifest",
+        help="Path to the engine manifest (configs/<slug>.engine.yaml) whose "
+        "launch_surface: block is audited.",
+    )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Verify kmd_fields/cpp_mirror/test mechanically; exit non-zero on a "
-        "structural failure or an unguarded surface (see --allow-unguarded).",
+        help="Verify kmd_fields/cpp_mirror/python_source/test mechanically; exit "
+        "non-zero on a structural failure or an unguarded surface (see "
+        "--allow-unguarded).",
     )
     parser.add_argument(
         "--report",
@@ -491,29 +549,33 @@ def main(argv=None) -> int:
         parser.error("choose --check and/or --report")
 
     try:
-        profile = _load_profile(args.profile)
+        manifest = _load_manifest(args.manifest)
     except LaunchSurfaceError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
 
     if args.report:
         try:
-            print(render_report(profile))
+            print(render_report(manifest))
         except LaunchSurfaceError as exc:
             print(f"FAIL: {exc}", file=sys.stderr)
             return 2
 
     if args.check:
         try:
-            surfaces = load_surfaces(profile)
+            surfaces = load_surfaces(manifest)
         except LaunchSurfaceError as exc:
             print(f"FAIL: {exc}", file=sys.stderr)
             return 2
 
-        failures, unguarded = check(profile, find_repo_root(Path(__file__).parent))
+        failures, unguarded = check(manifest, find_repo_root(Path(__file__).parent))
 
+        names = [
+            str(s.get("name", f"#{i}")) if isinstance(s, dict) else f"#{i}"
+            for i, s in enumerate(surfaces)
+        ]
         print("launch-surface check")
-        print(f"  surfaces declared  {len(surfaces)}")
+        print(f"  surfaces declared  {', '.join(names)}")
         if failures:
             print(f"  structural failures  {len(failures)}")
             for f in failures:
@@ -542,10 +604,10 @@ def main(argv=None) -> int:
             print(f"CHECK FAILED ({'; '.join(reasons)})")
             return 1
         print(
-            "CHECK PASSED: every surface's kmd_fields, cpp_mirror, test, and "
-            "referenced symbol are real, every metadata field a mirror reads "
-            "unconditionally is declared, and every unguarded surface was a "
-            "declared choice."
+            "CHECK PASSED: every surface's kmd_fields, python_source, cpp_mirror, "
+            "test, and referenced symbol are real, every metadata field a mirror "
+            "reads through a required or declining accessor is declared, and every "
+            "unguarded surface was a declared choice."
         )
         return 0
 

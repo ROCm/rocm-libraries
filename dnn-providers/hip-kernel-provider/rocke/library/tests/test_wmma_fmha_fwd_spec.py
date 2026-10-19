@@ -9,10 +9,11 @@ from itertools import combinations
 
 from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
-    _wmma_op_id_for_arch,
     is_valid_spec,
     wmma_fmha_fwd_grid,
 )
+from rocke.core.arch import ArchTarget
+from rocke.helpers.mfma_attention import _wmma_attn_op_id
 
 
 class TestWmmaFmhaFwdSpec(unittest.TestCase):
@@ -428,7 +429,9 @@ class TestWmmaFmhaFwdAtomSelection(unittest.TestCase):
             ("gfx1201", "bf16", "wmma_gfx12_f32_16x16x16_bf16"),
         ):
             with self.subTest(arch=arch, dtype=dtype):
-                self.assertEqual(_wmma_op_id_for_arch(arch, dtype), op_id)
+                self.assertEqual(
+                    _wmma_attn_op_id(ArchTarget.from_gfx(arch), dtype), op_id
+                )
 
     def test_is_valid_spec_accepts_both_dtypes_on_rdna(self):
         for arch in ("gfx1151", "gfx1201"):
