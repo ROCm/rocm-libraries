@@ -862,7 +862,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                         precision,
                                         arrayType);
 
-            // endpoints are addressed by world location; the wrapper
+            // endpoints are addressed by plan-communicator location; the wrapper
             // maps the peer to its NCCL rank
             switch(t.op)
             {
