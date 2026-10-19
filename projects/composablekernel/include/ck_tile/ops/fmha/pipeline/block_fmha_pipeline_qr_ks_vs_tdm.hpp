@@ -1818,7 +1818,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            s_wait_tensorcnt_barrier<1>();
+            // Three TDM loads are in flight: last iteration's V and K, plus the V issued
+            // above. TENSORcnt retires in issue order (CDNA5 ISA 6241), so <2> retires
+            // exactly the oldest -- last iteration's V, what load_tile_transpose reads.
+            // <1> also drained its K, which is not read until a PV gemm later.
+            s_wait_tensorcnt_barrier<2>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -2087,7 +2091,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                                        rowsum_p);
             }
 
-            s_wait_tensorcnt_barrier<1>();
+            // Mirrors the V wait: in flight are last iteration's K then this one's V and
+            // K, so <2> retires that K -- exactly what load_tile below reads.
+            s_wait_tensorcnt_barrier<2>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
             k_tile = load_tile(k_lds_read_window);
 
