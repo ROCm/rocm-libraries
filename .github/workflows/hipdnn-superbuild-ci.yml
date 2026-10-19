@@ -455,6 +455,21 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
+      # test_registry_regeneration.py regenerates the gfx950 attention catalog and
+      # diffs it against the shipped KDP. The rocKE KDPs are DVC-managed (each pointer
+      # names the `ingestor` remote), and this lane packs the example descriptors
+      # rather than the production tree, so nothing else fetches them. Without them
+      # both tests skip, and the tooling suite fails skips inside pytest. Same pull as
+      # the Windows lane, which packs the production tree.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
+          echo "Fetched $count rocKE KDP(s)"
+
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under. The
       # interpreter is named explicitly because it must be the one passed as
