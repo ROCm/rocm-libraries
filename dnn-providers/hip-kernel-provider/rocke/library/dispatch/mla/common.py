@@ -145,10 +145,11 @@ class MLARequest(OperatorRequest):
     # wrong value costs speed.
     num_cus: int = 0
     # Blocks in the paged KV pool (``c_kv`` / ``k_rope`` first dimension).
-    # Required: the candidate refuses 0 rather than skip the 32-bit paged
-    # extent admission (``check_mla_prefill_extents``). Callers holding the
-    # tensors pass ``c_kv.shape[0]``; callers without tensors pass the pool
-    # size they would allocate. Negative is malformed.
+    # Required by prefill: its candidate refuses 0 rather than skip the 32-bit
+    # paged extent admission (``check_mla_prefill_extents``). Decode ignores
+    # it (its pages are 64-bit addressed). Callers holding the tensors pass
+    # ``c_kv.shape[0]``; callers without tensors pass the pool size they would
+    # allocate. Negative is malformed.
     num_kv_blocks: int = 0
     op: str = MLA_OP
     dtype: str = "bf16"
@@ -315,25 +316,51 @@ def num_q_blocks_for(req: MLARequest, block_q: int) -> int:
     return int(req.total_q) // int(block_q) + int(req.num_seqs)
 
 
+def _live_device_is(arch: str) -> bool:
+    """Whether the build box's device is ``arch`` (base arch, target-ID
+    features ignored): only then may dispatch read a live device property, so
+    a cross-compile never takes another part's."""
+    try:
+        from rocke.runtime.hip_module import get_device_arch
+
+        return (get_device_arch() or "").split(":")[0] == arch.split(":")[0]
+    except (ImportError, OSError, RuntimeError):
+        # No HIP runtime or no device on the build box.
+        return False
+
+
 def resolve_num_cus(req: MLARequest) -> int:
     """Device CU count, or 0 when unknown.
 
     Taken from ``req.num_cus`` when the caller sets it, else from the live
-    device -- but only when the build box is the requested arch, so a
-    cross-compile never bakes another part's count into the kernel.
+    device when it is the requested arch (:func:`_live_device_is`).
     """
     n = int(req.num_cus)
     if n > 0:
         return n
-    try:
-        from rocke.runtime.hip_module import get_device_arch, get_device_num_cus
+    if _live_device_is(req.arch):
+        from rocke.runtime.hip_module import get_device_num_cus
 
-        if (get_device_arch() or "").split(":")[0] == req.arch.split(":")[0]:
-            return int(get_device_num_cus() or 0)
-    except (ImportError, OSError, RuntimeError):
-        # No HIP runtime or no device on the build box: the caller decides.
-        pass
+        return int(get_device_num_cus() or 0)
     return 0
+
+
+def resolve_max_grid_dims(req: MLARequest) -> tuple[int, int, int]:
+    """Per-axis grid limit, in workgroups, for a launch of ``req``.
+
+    The live device's when it is the requested arch (:func:`_live_device_is`);
+    otherwise :data:`rocke.helpers.spec.MAX_GRID_DIM` on every axis, which
+    only refuses grids a larger device would have taken.
+    """
+    from rocke.helpers.spec import MAX_GRID_DIM
+
+    if _live_device_is(req.arch):
+        from rocke.runtime.hip_module import get_device_max_grid_size
+
+        dims = get_device_max_grid_size()
+        if dims is not None:
+            return dims
+    return (MAX_GRID_DIM,) * 3
 
 
 __all__ = [
@@ -347,5 +374,6 @@ __all__ = [
     "_selector_matches",
     "mla_kernel_id",
     "num_q_blocks_for",
+    "resolve_max_grid_dims",
     "resolve_num_cus",
 ]

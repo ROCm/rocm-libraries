@@ -44,7 +44,6 @@ class MlaDecodeGfx950Spec(MlaDecodeSpec):
     ARCH: ClassVar[str] = "gfx950"
     SCORE_K: ClassVar[int] = 32
     PV_TRANSPOSE_READ: ClassVar[bool] = True
-    LDS_BYTES: ClassVar[int] = 160 * 1024
 
 
 def build_mla_decode_gfx950(

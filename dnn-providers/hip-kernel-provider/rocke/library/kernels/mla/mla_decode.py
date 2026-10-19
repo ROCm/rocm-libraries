@@ -37,9 +37,9 @@ fragment layouts carry over unchanged: the absorbed query is read straight
 into the score's B layout, the accumulator never leaves registers, and the PV
 reads the latent from the natural ``kv_lds`` tile (the read-path gather the
 prefill measured ahead of a second, transposed copy). Waves split heads only:
-the latent is the score's K axis *and* the PV's N axis, so splitting it
-across waves would turn the score into a split-K with a cross-wave combine on
-every tile.
+the latent is the score's K axis *and* the PV's m axis (the ``accᵀ`` form
+above), so splitting it across waves would turn the score into a split-K with
+a cross-wave combine on every tile.
 
 Masking. One query sees its whole cache (the bottom-right causal mask admits
 every key at ``S_q = 1``), so the only mask is the sequence's last, partly
@@ -73,6 +73,7 @@ import math
 from dataclasses import dataclass
 from typing import ClassVar
 
+from kernels.common.attention_arch import attention_lds_capacity_bytes
 from kernels.common.attention_dense_spec import INT32_LIMIT
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.attention import (
@@ -85,15 +86,15 @@ from rocke.helpers.spec import SignatureBuilder
 
 from .mla_decode_combine import NEG_INIT, WAVE_SIZE, MlaDecodeCombineSpec
 
-# The prefill kernel's fragment helpers and arch facts (atom shape, LDS pads
-# and budget, staging width): the decode pipeline is that kernel's
-# one-wave-per-head loop, so its fragments are laid out the same way. They are
-# private to that module; a shared kernels/mla module holding them under
-# public names is the cleaner home.
+# The prefill kernel's fragment helpers and layout facts (atom shape, LDS
+# pads, staging width): the decode pipeline is that kernel's one-wave-per-head
+# loop, so its fragments are laid out the same way. They are private to that
+# module, so a prefill change to them moves decode IR (the decode goldens catch
+# it); a shared kernels/mla module holding them under public names is the
+# cleaner home.
 from .mla_prefill_gfx942 import (
     C_PER_LANE,
     C_STAGE_W,
-    LDS_BYTES_PER_WORKGROUP,
     MFMA_K,
     MFMA_N,
     V8_PAD,
@@ -118,7 +119,13 @@ DECODE_SCORE_FENCE_EVERY = 4
 #: PV read groups issued ahead of the MFMAs that use them.
 DECODE_PV_PREFETCH = 1
 #: Lazy rescale threshold, in log2 units: a new running max replaces the one
-#: in use only when it is more than this far above it.
+#: in use only when it is more than this far above it. Untuned (the prefill's
+#: value). Safe while fp32 holds the inflated sums: against a max up to TAU
+#: stale, each probability is at most 2^TAU, so ``l`` stays under
+#: ``S_k * 2^TAU`` and ``acc`` under ``S_k * 2^TAU * max|c_kv|``, far inside
+#: fp32's 2^128 for 2^64 and any real cache. A smaller TAU rescales more often
+#: (a wave-uniform loop over the 128-VGPR accumulator); a larger one eats that
+#: headroom.
 DECODE_LAZY_TAU = 64.0
 
 __all__ = [  # noqa: RUF022  -- ordered spec -> gate -> launch geometry -> build
@@ -153,8 +160,6 @@ class MlaDecodeSpec:
     SCORE_K: ClassVar[int] = 16
     #: PV latent operand via ``ds_read_tr16_b64`` rather than the gather.
     PV_TRANSPOSE_READ: ClassVar[bool] = False
-    #: Per-workgroup LDS the admission check allows.
-    LDS_BYTES: ClassVar[int] = LDS_BYTES_PER_WORKGROUP
 
     num_heads: int
     d_rope: int = 64
@@ -271,8 +276,9 @@ def _lds_bytes(spec: MlaDecodeSpec) -> int:
 
 
 def _kr_stage_width(spec: MlaDecodeSpec) -> int:
-    """``k_rope`` staging chunk: a quarter of the c_kv tile, so at eight waves a
-    4-wide chunk per thread would over-cover it and the chunk narrows to 2."""
+    """``k_rope`` staging chunk width. The k_rope tile is an eighth of the c_kv
+    tile (16 x 64 = 1024 elements): one 4-wide chunk per thread at four waves
+    (256 threads); at eight waves 4-wide chunks would over-cover it, so 2."""
     return 4 if (spec.block_k * spec.d_rope) % (spec.threads * 4) == 0 else 2
 
 
@@ -333,10 +339,11 @@ def supports_mla_decode(spec: MlaDecodeSpec, *, arch: str) -> tuple[bool, str]:
                 f"{per_row} chunks"
             )
     lds = _lds_bytes(spec)
-    if lds > spec.LDS_BYTES:
+    budget = attention_lds_capacity_bytes(spec.ARCH)
+    if lds > budget:
         return False, (
-            f"the decode kernel needs {lds} B of LDS, over the "
-            f"{spec.LDS_BYTES} B per-workgroup budget"
+            f"the decode kernel needs {lds} B of LDS, over {spec.ARCH}'s "
+            f"{budget} B per-workgroup capacity"
         )
     return True, ""
 
@@ -646,24 +653,37 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
     def _load_page(tile, *, guard=None):
         page = b.global_load_i32(block_table, b.add(bt_row, tile))
         if guard is not None:
-            # A zero-trip segment's slot may be uninitialised; page 0 is always
-            # mapped, and its tile is never used.
+            # A zero-trip segment's slot may be uninitialised: page 0 keeps the
+            # descriptor's base inside the cache argument, and the zero bound
+            # _stage_loads gives such a segment keeps the loads off it.
             page = b.select(guard, page, b.const_i32(0))
         return page
 
-    def _stage_loads(page):
+    def _stage_loads(page, *, live=None):
         # The page's base is a 64-bit pointer (scalar math: a kernel argument
         # plus a wave-uniform page), and each descriptor bounds that one page.
         # An i32 byte offset from the cache base would wrap past 2 GiB of cache.
+        # With ``live`` false the bound is 0 bytes: every load is out of range,
+        # returns 0 and touches no memory, so a segment with no tiles reads
+        # nothing -- not even from an empty cache.
         page64 = b.zext(b.readfirstlane(page), I64)
-        c_rsrc = b.buffer_rsrc(
-            b.global_ptr_add(c_kv, b.mul(page64, b.const_i64(C_PAGE_BYTES))),
-            b.const_i32(C_PAGE_BYTES),
-        )
-        kr_rsrc = b.buffer_rsrc(
-            b.global_ptr_add(k_rope, b.mul(page64, b.const_i64(KR_PAGE_BYTES))),
-            b.const_i32(KR_PAGE_BYTES),
-        )
+
+        def _bound(nbytes):
+            full = b.const_i32(nbytes)
+            if live is None:
+                return full
+            empty = b.const_i32(0)
+            return b.select(live, full, empty)
+
+        def _page_rsrc(cache, page_bytes):
+            stride = b.const_i64(page_bytes)
+            offset = b.mul(page64, stride)
+            base = b.global_ptr_add(cache, offset)
+            bound = _bound(page_bytes)
+            return b.buffer_rsrc(base, bound)
+
+        c_rsrc = _page_rsrc(c_kv, C_PAGE_BYTES)
+        kr_rsrc = _page_rsrc(k_rope, KR_PAGE_BYTES)
         staged = [
             b.buffer_load_vN(
                 c_rsrc,
@@ -702,11 +722,16 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             b.smem_store_vN(kv_lds, [m, kr_col], staged[c_chunks + j], KR_W)
 
     # Page lookups never index past the segment, and an empty segment (or
-    # S_k = 0) stages page 0 instead of trusting its unused slot.
+    # S_k = 0) neither trusts its unused slot nor reads the cache.
+    #
+    # Prefetch depth: page ids run two tiles ahead of the one being computed
+    # (``pg_after``), staged data one tile ahead (``staged_next``, carried as
+    # the ``stg*`` iteration arguments); ``pgn`` is the page the next
+    # iteration's staging loads read.
     has_tiles = b.cmp_lt(t_lo, t_hi)
     last_tile = b.select(has_tiles, b.sub(t_hi, b.const_i32(1)), b.const_i32(0))
     first_tile = b.select(has_tiles, t_lo, b.const_i32(0))
-    prologue = _stage_loads(_load_page(first_tile, guard=has_tiles))
+    prologue = _stage_loads(_load_page(first_tile, guard=has_tiles), live=has_tiles)
     n_stage = len(prologue)
     iter_args += [(f"stg{j}", v) for j, v in enumerate(prologue)]
     iter_args += [
@@ -831,8 +856,9 @@ def build_mla_decode(spec: MlaDecodeSpec, *, arch: str | None = None) -> KernelD
             local_max = b.fmax(local_max, v)
         m_new = b.fmax(m_run, _query_reduce(b, local_max, combine="max"))
         # Lazy rescale (DECODE_LAZY_TAU): keep the max in use unless the new one is
-        # far enough above it. The partials and the final 1/l use the same max,
-        # so a stale one changes nothing.
+        # far enough above it. A stale max scales acc and l alike, so it cancels
+        # in acc / l (and in the combine, which merges each partial at its own
+        # max); only the intermediates grow, by at most 2^TAU.
         need = b.fcmp("ogt", m_new, b.fadd(m_run, b.const_f32(DECODE_LAZY_TAU)))
         m_new = b.select(need, m_new, m_run)
         alpha = b.exp2_fast(b.fsub(m_run, m_new))

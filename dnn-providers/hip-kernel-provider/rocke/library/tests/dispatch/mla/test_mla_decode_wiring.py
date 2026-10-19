@@ -108,16 +108,19 @@ class TestRouting:
         # total_q < num_seqs is still decode: the kernel exits for that sequence.
         assert dispatch_mla(_decode(total_q=3)).candidate.name == DECODE["gfx942"]
 
+    @pytest.mark.parametrize("num_heads", [16, 32, 192])
     @pytest.mark.parametrize("arch", sorted(DECODE))
-    def test_one_query_request_decode_cannot_serve_is_refused(self, arch):
-        # 32 heads do not fill a 64-head workgroup. No other kernel takes the
-        # absorbed query, so the request is refused with every reason.
-        req = _decode(arch=arch, num_heads=32)
+    def test_one_query_request_decode_cannot_serve_is_refused(self, arch, num_heads):
+        # 16 / 32 heads do not fill a 64-head workgroup; 192 lowers but has no
+        # GPU evidence yet. No other kernel takes the absorbed query, so the
+        # request is refused with every reason.
+        req = _decode(arch=arch, num_heads=num_heads)
+        reason = f"num_heads={num_heads} not in (64, 128)"
         ok, why = MLA_REGISTRY.get(DECODE[arch]).admits(req)
-        assert not ok and "num_heads=32 not a multiple of 64" in why
+        assert not ok and reason in why
         with pytest.raises(ValueError, match="no candidate supports request") as e:
             dispatch_mla(req)
-        assert "num_heads=32 not a multiple of 64" in str(e.value)
+        assert reason in str(e.value)
 
     @pytest.mark.parametrize("arch", sorted(DECODE))
     def test_llvm20_is_refused(self, monkeypatch, arch):
@@ -291,6 +294,80 @@ class TestLaunch:
     def test_prefill_selection_is_not_a_decode_launch(self):
         with pytest.raises(ValueError, match="not an MLA decode selection"):
             mla_decode_launch(dispatch_mla(_decode(total_q=8, max_seqlen_q=2)))
+
+
+class TestGridLimits:
+    """Every launch fits the device's per-axis grid limit: sequences on y,
+    split-KV segments on z (the combine's y, tokens, is no wider than the
+    latent's)."""
+
+    @staticmethod
+    def _limits(monkeypatch, dims):
+        monkeypatch.setattr(
+            "dispatch.mla.decode.resolve_max_grid_dims", lambda req: dims
+        )
+
+    def test_sequences_past_the_y_limit_are_refused(self, monkeypatch):
+        self._limits(monkeypatch, (65535, 100, 65535))
+        assert dispatch_mla(_decode(total_q=100, num_seqs=100)).grid[1] == 100
+        # Sequences with no query still occupy a grid row.
+        req = _decode(total_q=4, num_seqs=101)
+        ok, why = MLA_REGISTRY.get(DECODE["gfx942"]).admits(req)
+        assert not ok and "y extent 101 exceeds the device's 100" in why
+
+    def test_split_count_is_clamped_to_the_z_limit(self, monkeypatch):
+        req = _decode(total_q=1, num_seqs=1, max_seqlen_k=32768)
+        self._limits(monkeypatch, (65535,) * 3)
+        assert dispatch_mla(req).spec.num_seg > 3  # unclamped, it would split further
+        self._limits(monkeypatch, (65535, 65535, 3))
+        result = dispatch_mla(req)
+        assert result.spec.num_seg == 3 and result.grid[2] == 3
+
+    def test_a_forced_split_count_meets_the_same_limit(self, monkeypatch):
+        self._limits(monkeypatch, (65535, 65535, 3))
+        launch = mla_decode_launch(
+            dispatch_mla(_decode(total_q=1, num_seqs=1, max_seqlen_k=32768))
+        )
+        assert launch.with_num_seg(3).spec.num_seg == 3  # at the limit: admitted
+        with pytest.raises(ValueError, match="z extent 4 exceeds the device's 3"):
+            launch.with_num_seg(4)
+
+    def test_limits_come_from_the_device_of_the_requested_arch(self, monkeypatch):
+        from dispatch.mla.common import resolve_max_grid_dims
+        from rocke.helpers.spec import MAX_GRID_DIM
+        from rocke.runtime import hip_module
+
+        monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+        monkeypatch.setattr(
+            hip_module, "get_device_max_grid_size", lambda: (2**31 - 1, 7, 9)
+        )
+        assert resolve_max_grid_dims(_decode()) == (2**31 - 1, 7, 9)
+        # Another arch on the build box, or no answer: the platform constant.
+        assert resolve_max_grid_dims(_decode(arch="gfx950")) == (MAX_GRID_DIM,) * 3
+        monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda: None)
+        assert resolve_max_grid_dims(_decode()) == (MAX_GRID_DIM,) * 3
+
+    @pytest.mark.parametrize("exc", [OSError, RuntimeError])
+    def test_limits_fall_back_when_the_device_query_fails(self, monkeypatch, exc):
+        from dispatch.mla.common import resolve_max_grid_dims
+        from rocke.helpers.spec import MAX_GRID_DIM
+        from rocke.runtime import hip_module
+
+        def no_device(*a, **k):
+            raise exc("no device")
+
+        monkeypatch.setattr(hip_module, "get_device_arch", no_device)
+        assert resolve_max_grid_dims(_decode()) == (MAX_GRID_DIM,) * 3
+
+    def test_limits_match_the_base_arch_of_a_target_id(self, monkeypatch):
+        from dispatch.mla.common import resolve_max_grid_dims
+        from rocke.runtime import hip_module
+
+        monkeypatch.setattr(
+            hip_module, "get_device_arch", lambda: "gfx942:sramecc+:xnack-"
+        )
+        monkeypatch.setattr(hip_module, "get_device_max_grid_size", lambda: (5, 6, 7))
+        assert resolve_max_grid_dims(_decode(arch="gfx942")) == (5, 6, 7)
 
 
 class TestSupportImpliesBuildable:

@@ -106,6 +106,41 @@ class TestSpec:
         assert MlaDecodeSpec(num_heads=64).lds_pad == 4
         assert MlaDecodeGfx950Spec(num_heads=64).lds_pad == 8
 
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    def test_lds_budget_is_the_arch_catalogs(self, monkeypatch, arch):
+        # The per-workgroup LDS capacity comes from the target catalog, not a
+        # constant in the kernel: admission follows the catalog's value.
+        from kernels.mla import mla_decode
+        from kernels.mla.mla_decode import _lds_bytes
+
+        spec = SPECS[arch](num_heads=64)
+        need, asked = _lds_bytes(spec), []
+
+        def capacity(budget):
+            def query(a):
+                asked.append(a)
+                return budget
+
+            return query
+
+        assert supports_mla_decode(spec, arch=arch) == (True, "")
+        monkeypatch.setattr(mla_decode, "attention_lds_capacity_bytes", capacity(need))
+        assert supports_mla_decode(spec, arch=arch) == (True, "")  # exactly fits
+        monkeypatch.setattr(
+            mla_decode, "attention_lds_capacity_bytes", capacity(need - 1)
+        )
+        ok, why = supports_mla_decode(spec, arch=arch)
+        assert not ok and f"needs {need} B of LDS, over {arch}'s {need - 1} B" in why
+        assert set(asked) == {arch}  # the spec's own arch, never another's
+
+    @pytest.mark.parametrize(
+        "arch, budget", [("gfx942", 64 * 1024), ("gfx950", 160 * 1024)]
+    )
+    def test_lds_catalog_matches_the_retired_constants(self, arch, budget):
+        from kernels.common.attention_arch import attention_lds_capacity_bytes
+
+        assert attention_lds_capacity_bytes(arch) == budget
+
 
 class TestGate:
     @pytest.mark.parametrize("arch", sorted(SPECS))
@@ -345,6 +380,37 @@ class TestEmptySegments:
         (acc_block,) = acc_blocks
         assert acc_block.startswith("if.then"), acc_block
         assert acc_blocks != ml_blocks
+
+    @pytest.mark.parametrize("num_seg", [1, 4])
+    @pytest.mark.parametrize("arch", sorted(SPECS))
+    def test_a_segment_with_no_tiles_reads_no_cache(self, monkeypatch, arch, num_seg):
+        # The prologue's two descriptors (c_kv page, k_rope page) are bounded
+        # by select(has_tiles, page bytes, 0): with no tiles every staging load
+        # is out of range and touches no memory, so an empty cache is safe.
+        # Pinned to llvm22, the oldest flavor decode serves: its IR spells the
+        # bound as an i32 widened to the intrinsic's i64 by a zext.
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", "llvm22")
+        spec = SPECS[arch](num_heads=64, num_seg=num_seg)
+        ir = lower_kernel_to_llvm(build_mla_decode(spec, arch=arch), arch=arch)
+        c_bytes = spec.page_block_size * spec.r_kv * 2
+        kr_bytes = spec.page_block_size * spec.d_rope * 2
+        c_sel = re.findall(rf"(%\S+) = select i1 (%\S+), i32 {c_bytes}, i32 0", ir)
+        kr_sel = re.findall(rf"(%\S+) = select i1 (%\S+), i32 {kr_bytes}, i32 0", ir)
+        assert len(c_sel) == 1 and len(kr_sel) == 1, (c_sel, kr_sel)
+        assert c_sel[0][1] == kr_sel[0][1]  # one has_tiles predicate
+        # The selects bound the first descriptor pair (the prologue); every
+        # later staging descriptor (the loop's) keeps the full page bound.
+        zext = dict(re.findall(r"(%\S+) = zext i32 (\S+) to i64", ir))
+        bounds = [
+            zext[n]
+            for n in re.findall(
+                r"make\.buffer\.rsrc\.p8\.p1\(ptr addrspace\(1\) %\S+, i16 0, "
+                r"i64 (%\S+),",
+                ir,
+            )
+        ]
+        assert bounds[:2] == [c_sel[0][0], kr_sel[0][0]], bounds
+        assert set(bounds[2:]) == {str(c_bytes), str(kr_bytes)}, bounds
 
     def test_combine_reads_acc_only_for_live_segments(self):
         # The combine reads a segment's acc row (<4 x float>) only behind its

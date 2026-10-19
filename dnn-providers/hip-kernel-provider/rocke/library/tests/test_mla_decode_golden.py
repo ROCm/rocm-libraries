@@ -17,6 +17,9 @@ IR is built by the Python builders only. Its *lowering* is still dual-engine:
 engines and requires identical bytes (skipped where the C++ engine is not
 built).
 
+Goldens are recorded at the flavors decode serves, llvm22 and llvm23; llvm20
+is refused by dispatch (its backend spills the kernel) and has none.
+
 Re-bless, from ``rocke/library``:
 
     PYTHONPATH=../platform/python:. python tests/test_mla_decode_golden.py --write
@@ -31,7 +34,10 @@ import sys
 from pathlib import Path
 
 _GOLDEN = Path(__file__).resolve().parent / "golden" / "mla_decode_ir_sha256.json"
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
+# The flavors decode serves (``dispatch.mla.decode.DECODE_LLVM_FLAVORS``):
+# dispatch refuses llvm20, so it has no golden and a llvm20 host skips the
+# drift check.
+_FLAVORS = ("llvm22", "llvm23")
 _ARCHES = ("gfx942", "gfx950")
 _SCHEMA = "mla_decode.ir_golden_sha256/v1"
 
@@ -236,6 +242,15 @@ def test_mla_decode_cpp_python_byte_identity(monkeypatch):
     assert not mismatched, "MLA decode cpp/python IR mismatch:\n  " + "\n  ".join(
         mismatched
     )
+
+
+def test_golden_flavors_are_the_served_ones():
+    """A flavor decode serves without a golden would go unchecked; one it
+    refuses would only be re-blessed for nothing."""
+    from dispatch.mla.decode import DECODE_LLVM_FLAVORS
+
+    assert _FLAVORS == DECODE_LLVM_FLAVORS
+    assert tuple(sorted(_golden()["flavors"])) == DECODE_LLVM_FLAVORS
 
 
 def test_dispatch_cases_track_the_shipped_spec():

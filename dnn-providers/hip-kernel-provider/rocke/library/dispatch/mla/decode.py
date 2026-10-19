@@ -63,6 +63,7 @@ from .common import (
     _request_errors,
     _selector_matches,
     mla_kernel_id,
+    resolve_max_grid_dims,
     resolve_num_cus,
 )
 
@@ -73,6 +74,14 @@ DECODE_PRIORITY = 5
 #: The shipped decode layout: 16 heads per wave x 4 waves, ``BLOCK_H = 64``.
 #: 64 heads (one Kimi-K2 layer) is one head group, 128 (DeepSeek-V3) two.
 DECODE_NUM_WARPS = 4
+
+#: Head counts decode admits: the ones its GPU evidence covers. Any multiple
+#: of ``BLOCK_H`` lowers, but only these were run on a device. Head counts
+#: below 64 -- tensor-parallel shards such as 16 heads per rank -- need a
+#: smaller-``BLOCK_H`` layout first.
+# TODO: validate 192, 256, ... on gfx942 and gfx950 (numeric lane + goldens)
+# before admitting them.
+DECODE_NUM_HEADS = (64, 128)
 
 #: LLVM flavors whose backend keeps the decode kernel out of the AGPR file.
 #: llvm20 ignores ``agpr_alloc``: the same IR then spills and runs one
@@ -127,7 +136,8 @@ def decode_spec_for(
     """The decode spec dispatch ships for ``req``, with its split-KV count.
 
     The bring-up geometry, and the segment count :func:`choose_num_seg` picks
-    for this batch, clamped so the split workspace stays i32-addressable.
+    for this batch, clamped so the split workspace stays i32-addressable and
+    the grid's z axis (one workgroup per segment) stays within the device's.
     ``fallback_num_cus`` stands in when neither the request nor the live
     device gives a CU count; too high a value only splits further than needed.
     """
@@ -148,15 +158,48 @@ def decode_spec_for(
         num_cus=resolve_num_cus(req) or fallback_num_cus,
         wgs_per_cu=wgs_per_cu,
     )
-    num_seg = max(1, min(num_seg, mla_decode_max_num_seg(spec, total_q=req.total_q)))
-    return dataclasses.replace(spec, num_seg=num_seg)
+    num_seg = min(
+        num_seg,
+        mla_decode_max_num_seg(spec, total_q=req.total_q),
+        resolve_max_grid_dims(req)[2],
+    )
+    return dataclasses.replace(spec, num_seg=max(1, num_seg))
+
+
+def _check_grids(spec: MlaDecodeSpec, req: MLARequest) -> tuple[bool, str]:
+    """Whether every launch of ``spec`` fits the device's per-axis grid limit:
+    the latent kernel's ``(head groups, sequences, segments)`` and, split, the
+    combine's ``(head groups, tokens, 1)``."""
+    limits = resolve_max_grid_dims(req)
+    grids = [("latent", mla_decode_grid(spec, num_seqs=req.num_seqs))]
+    if spec.split_kv:
+        grids.append(
+            (
+                "split-KV combine",
+                mla_decode_combine_grid(
+                    mla_decode_combine_spec(spec), total_q=req.total_q
+                ),
+            )
+        )
+    for kernel, grid in grids:
+        for axis, extent, limit in zip("xyz", grid, limits, strict=True):
+            if extent > limit:
+                return False, (
+                    f"the {kernel} grid's {axis} extent {extent} exceeds the "
+                    f"device's {limit}"
+                )
+    return True, ""
 
 
 def _decode_spec_gate(spec: MlaDecodeSpec, req: MLARequest) -> tuple[bool, str]:
-    """The per-spec half of the candidate's support: i32 extents, the kernel
-    gate, and the combine gate when split. Dispatch's own choice and a forced
-    split count (:meth:`MlaDecodeLaunch.with_num_seg`) pass the same gate."""
+    """The per-spec half of the candidate's support: i32 extents, grid limits,
+    the kernel gate, and the combine gate when split. Dispatch's own choice and
+    a forced split count (:meth:`MlaDecodeLaunch.with_num_seg`) pass the same
+    gate."""
     ok, why = check_mla_decode_extents(spec, total_q=req.total_q)
+    if not ok:
+        return False, why
+    ok, why = _check_grids(spec, req)
     if not ok:
         return False, why
     ok, why = supports_mla_decode(spec, arch=req.arch)
@@ -251,7 +294,7 @@ def make_mla_decode_candidate(
             dtypes=("bf16",),
             shapes=(
                 ShapeRange("max_seqlen_q", max=1),
-                ShapeRange("num_heads", multiple_of=16 * DECODE_NUM_WARPS),
+                ShapeRange("num_heads", allowed=DECODE_NUM_HEADS),
                 ShapeRange("d_nope", allowed=(128,)),
                 ShapeRange("d_rope", allowed=(64,)),
                 ShapeRange("d_v", allowed=(128,)),
@@ -374,6 +417,7 @@ def mla_decode_launch(result: DispatchResult) -> MlaDecodeLaunch:
 __all__ = [
     "DECODE_LLVM_FLAVORS",
     "DECODE_MIN_TILES_PER_SEG",
+    "DECODE_NUM_HEADS",
     "DECODE_NUM_WARPS",
     "DECODE_PRIORITY",
     "MlaDecodeLaunch",
