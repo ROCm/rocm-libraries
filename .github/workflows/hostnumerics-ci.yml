@@ -175,7 +175,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=cl
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_CXX_FLAGS="/EHsc"
-          -DHOSTNUMERICS_SOURCE_DIR="${{ github.workspace }}/shared/hostnumerics"
+          -DHOSTNUMERICS_SOURCE_DIR:PATH="${{ github.workspace }}/shared/hostnumerics"
           -DCMAKE_PREFIX_PATH="${{ runner.temp }}/hostnumerics-windows-install"
 
       - name: Build installed-package consumer
