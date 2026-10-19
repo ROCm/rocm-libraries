@@ -19,6 +19,35 @@
 
 namespace ck_tile {
 
+namespace detail {
+
+// Opt-in markers a pipeline may define to request the TDM DRAM view shapes.
+// Named with a splitkv_ prefix so they cannot collide with the equivalent
+// detectors in fmha_fwd_kernel.hpp when both headers are included.
+template <typename T>
+using splitkv_has_untransposed_v_kernel_path = decltype(T::kUsesUntransposedVKernelPath);
+
+template <typename T>
+using splitkv_has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
+
+template <typename T>
+static inline constexpr bool splitkv_uses_untransposed_v_kernel_path_v = []() {
+    if constexpr(is_detected<splitkv_has_untransposed_v_kernel_path, T>::value)
+        return static_cast<bool>(T::kUsesUntransposedVKernelPath);
+    else
+        return false;
+}();
+
+template <typename T>
+static inline constexpr bool splitkv_uses_tdm_affine_dram_path_v = []() {
+    if constexpr(is_detected<splitkv_has_tdm_affine_dram_path, T>::value)
+        return static_cast<bool>(T::kUsesTdmAffineDramPath);
+    else
+        return false;
+}();
+
+} // namespace detail
+
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaFwdSplitKVKernel
 {
@@ -57,6 +86,15 @@ struct FmhaFwdSplitKVKernel
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
+
+    // TDM pipelines (qr_tdm_sched) consume native row-major V and need affine
+    // DRAM views: software padding would let the DMA engine pull in real
+    // neighbouring memory. Everything else about them is self-contained --
+    // in particular they carve up the LDS arena themselves.
+    static constexpr bool kUsesUntransposedVKernelPath =
+        detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
+    static constexpr bool kUsesTdmAffineDramPath =
+        detail::splitkv_uses_tdm_affine_dram_path_v<FmhaPipeline>;
 
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
@@ -785,10 +823,21 @@ struct FmhaFwdSplitKVKernel
                 number<FmhaPipeline::kAlignmentK>{},
                 number<1>{});
 
-            return pad_tensor_view(
-                k_dram_naive,
-                make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
-                sequence<false, kPadHeadDimQ>{});
+            // TDM box-major DMA cannot honor a software-padded view: the pad
+            // would let the engine pull real neighbouring memory in. Return the
+            // affine naive view so get_lengths()[hdim] stays at the true head
+            // dim and the TDM box clamp zero-fills the OOB tail instead.
+            if constexpr(kUsesTdmAffineDramPath)
+            {
+                return k_dram_naive;
+            }
+            else
+            {
+                return pad_tensor_view(
+                    k_dram_naive,
+                    make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
+                    sequence<false, kPadHeadDimQ>{});
+            }
         };
         const auto k_dram = [&]() {
             if constexpr(kIsPagedKV)
@@ -811,17 +860,27 @@ struct FmhaFwdSplitKVKernel
                     number<FmhaPipeline::kAlignmentV>{},
                     number<1>{});
 
-                const auto v_dram_transposed =
-                    transform_tensor_view(v_dram_naive,
-                                          make_tuple(make_pass_through_transform(kargs.hdim_v),
-                                                     make_pass_through_transform(length)),
-                                          make_tuple(sequence<1>{}, sequence<0>{}),
-                                          make_tuple(sequence<0>{}, sequence<1>{}));
+                // Pipelines with native row-major V consume (seqlen, hdim_v)
+                // windows directly. They also need the affine view, for the
+                // same reason make_k_dram does.
+                if constexpr(kUsesUntransposedVKernelPath)
+                {
+                    return v_dram_naive;
+                }
+                else
+                {
+                    const auto v_dram_transposed =
+                        transform_tensor_view(v_dram_naive,
+                                              make_tuple(make_pass_through_transform(kargs.hdim_v),
+                                                         make_pass_through_transform(length)),
+                                              make_tuple(sequence<1>{}, sequence<0>{}),
+                                              make_tuple(sequence<0>{}, sequence<1>{}));
 
-                return pad_tensor_view(
-                    v_dram_transposed,
-                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
-                    sequence<kPadHeadDimV, kPadSeqLenK>{});
+                    return pad_tensor_view(
+                        v_dram_transposed,
+                        make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
+                        sequence<kPadHeadDimV, kPadSeqLenK>{});
+                }
             }
             else
             {
