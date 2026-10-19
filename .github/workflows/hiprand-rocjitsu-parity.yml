@@ -161,7 +161,7 @@ jobs:
       BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
       # Pinned to a rocJITsu revision that supports --wait-checking for the
       # wait-diagnostic overhead comparison. Keep this pin fixed for both jobs.
-      ROCM_SYSTEMS_REF: fce2b166c86bda55df802978577cc6eebcbce991
+      ROCM_SYSTEMS_REF: 1c144a5d55ea53118ad48047dfac2b9256e3bb26
     steps:
       - name: Install build tools
         run: |
@@ -381,7 +381,7 @@ jobs:
       image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      ROCM_SYSTEMS_REF: fce2b166c86bda55df802978577cc6eebcbce991
+      ROCM_SYSTEMS_REF: 1c144a5d55ea53118ad48047dfac2b9256e3bb26
       TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
       COMPONENT: ${{ matrix.test.component }}
       DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
