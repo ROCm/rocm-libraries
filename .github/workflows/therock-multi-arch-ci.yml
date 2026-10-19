@@ -7,10 +7,9 @@
 # TheRock's reusable workflows directly. It provides sharded, multi-stage
 # builds with per-architecture testing.
 #
-# Key differences from therock-ci.yml:
 # - Uses TheRock's multi-arch sharded build pipeline (foundation -> compiler-runtime -> math-libs)
 # - Supports prebuilt stages to skip certain build stages
-# - Better parallelization across GPU architectures
+# - Parallelizes across GPU architectures
 
 name: TheRock Multi-Arch CI
 
@@ -155,10 +154,9 @@ jobs:
       # Limit GPU families for rocm-libraries CI.
       # gfx125X (CDNA5/gfx1250) is included build-only on every PR/push: no test
       # hardware exists for it yet (see amdgpu_family_matrix.py in TheRock, family
-      # key "gfx125x": test-runs-on is empty everywhere), but legacy therock-ci.yml
-      # built it on every PR/push before Multi-Arch CI became the default, and this
-      # restores that parity so gfx1250 build breaks are caught same-PR instead of
-      # only nightly.
+      # key "gfx125x": test-runs-on is empty everywhere). It is built on every
+      # PR/push anyway so gfx1250 build breaks are caught same-PR instead of only
+      # nightly.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       pr_labels: ${{ inputs.pr_labels || '' }}
