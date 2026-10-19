@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 594c570be2e2f2742c90cc3324eb9628bb503b05 # 2026-10-19
           path: TheRock
 
       - name: Install base dependencies
