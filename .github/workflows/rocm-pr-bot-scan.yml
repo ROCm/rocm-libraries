@@ -42,7 +42,7 @@ jobs:
       !endsWith(github.event.check_run.name, 'therock-pr-bot')
     uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@3ae33a370e0eaf5d305a736f7d775cc93cc95b98
     with:
-      repo_name: therock-ci-config
+      repo_name: rocm-libraries
     secrets:
       THEROCK_PR_BOT_APPID: ${{ secrets.THEROCK_PR_BOT_APPID }}
       THEROCK_PRBOT_KEY: ${{ secrets.THEROCK_PRBOT_KEY }}
