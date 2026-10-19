@@ -47,6 +47,7 @@
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include "rocroller_host.hpp"
 #endif
+#include "include/rocroller_selected.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
@@ -3579,7 +3580,6 @@ void initTensileGemmData(rocblaslt_handle       handle,
     throw std::runtime_error("Gemm problem type initialization not implemented.");
 }
 
-#ifdef HIPBLASLT_USE_ROCROLLER
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
     // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
@@ -3603,7 +3603,6 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
            || (handle->useRocRoller == -1
                && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
 }
-#endif
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
@@ -3658,6 +3657,18 @@ static rocblaslt_status bindSynchronizers(rocblaslt_handle                      
     return rocblaslt_status_success;
 }
 
+namespace
+{
+    thread_local int t_lastLaunchedIndex = -1;
+} // namespace
+
+int tuningLastLaunchedIndexForTest()
+{
+    const int index     = t_lastLaunchedIndex;
+    t_lastLaunchedIndex = -1;
+    return index;
+}
+
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasltContractionProblem *
@@ -3696,6 +3707,42 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(algo == nullptr)
         {
+            // Cache replay for a call that passed no algo. hipblasLtMatmul
+            // accepts algo == nullptr and then runs getBestSolutions below
+            // without ever entering hipblasLtMatmulAlgoGetHeuristic, so without
+            // this such a call would never be served from the cache. An
+            // explicit algo launches as given, whatever the cache holds.
+            try
+            {
+                const auto& tuning = TensileLite::TuningModeSingleton::getInstance();
+
+                if(tuning.reads() && !prob.grouped_gemm
+                   && prob.batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                {
+                    // A matmul-only caller never reaches the heuristic entry
+                    // point, which is the only other place that loads the file.
+                    TensileLite::loadTuningFileForReplay(tuning.cachePath());
+
+                    if(tuning_cache_replay(handle,
+                                           RocblasltContractionProblem2ProblemOverride(prob),
+                                           prob,
+                                           gemmData,
+                                           &heuristicResult.algo)
+                       >= 0)
+                        algo = &heuristicResult.algo;
+                }
+            }
+            catch(...)
+            {
+                // The cache is an optimisation: a lookup that throws leaves the
+                // call on default selection rather than failing it.
+                static_cast<void>(hipGetLastError());
+                algo = nullptr;
+            }
+        }
+
+        if(algo == nullptr)
+        {
             int returnAlgoCount = 0;
             status = getBestSolutions(
                 prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
@@ -3713,6 +3760,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
         int* solutionIndex = (int*)algo->data;
+
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
 
@@ -3883,6 +3931,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            t_lastLaunchedIndex = solution->index;
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
@@ -3899,10 +3948,14 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     catch(const std::exception& e)
     {
         log_error(__func__, e.what());
+        // status may already hold getBestSolutions' success for a call that
+        // passed no algo.
+        status = rocblaslt_status_internal_error;
     }
     catch(...)
     {
         log_error(__func__, "unknown exception");
+        status = rocblaslt_status_internal_error;
     }
 
     return status;
@@ -3928,7 +3981,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
 
         // Building the key queries the device, and this runs on every gemm
         // object creation, so only when a tuning file will be consulted.
-        const bool cacheTuningKey = OverrideSingleton::getInstance().env_mode;
+        const bool cacheTuningKey = TensileLite::selectTuningFile().active;
 
         if(gemmData)
         {
@@ -4900,6 +4953,126 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     return solutions;
 }
 
+static const char* rocRollerTypeToken(hipDataType type)
+{
+    if(static_cast<int>(type) == HIP_R_6F_E2M3)
+        return "FP6";
+    if(static_cast<int>(type) == HIP_R_6F_E3M2)
+        return "BF6";
+    if(static_cast<int>(type) == HIP_R_4F_E2M1)
+        return "FP4";
+    switch(type)
+    {
+    case HIP_R_16F:
+        return "Half";
+    case HIP_R_32F:
+        return "Float";
+    case HIP_R_16BF:
+        return "BFloat16";
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E4M3_FNUZ:
+        return "FP8";
+    case HIP_R_8F_E5M2:
+    case HIP_R_8F_E5M2_FNUZ:
+        return "BF8";
+    default:
+        return "";
+    }
+}
+
+static bool matchesRocRollerSelectedKernel(const std::string&                 kernel,
+                             const RocblasltContractionProblem& prob,
+                             const RocRollerSelectedTile&                     tile)
+{
+    if(tile.streamK || tile.nonTemporalA || tile.nonTemporalB)
+        return false;
+    if(rocRollerTypeToken(prob.a_type)[0] == '\0' || rocRollerTypeToken(prob.c_type)[0] == '\0')
+        return false;
+
+    const char transA = prob.trans_a == HIPBLAS_OP_T ? 'T' : 'N';
+    const char transB = prob.trans_b == HIPBLAS_OP_T ? 'T' : 'N';
+    const std::string prefix = std::string("RR_GEMM_") + transA + transB + "_"
+                               + rocRollerTypeToken(prob.a_type) + "_" + rocRollerTypeToken(prob.b_type) + "_"
+                               + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
+                               + "_Float_";
+    if(kernel.find(prefix) == std::string::npos)
+        return false;
+
+    const std::string wgt = "WGT_" + std::to_string(tile.m) + "x" + std::to_string(tile.n) + "x"
+                            + std::to_string(tile.k) + "_UR_";
+    if(kernel.find(wgt) == std::string::npos)
+        return false;
+
+    const bool hasWgm = kernel.find("_WGM_") != std::string::npos;
+    return hasWgm == tile.workgroupMapping;
+}
+
+// rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
+// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it.
+// No match yields an empty list, which the caller reports as not implemented.
+// Problems outside useRocRoller() never reach this function.
+static rocblaslt_status
+    getRocRollerSelectedSolutions(rocblaslt_handle                   handle,
+                        const RocblasltContractionProblem& prob,
+                        int                                requestedAlgoCount,
+                        rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
+                        size_t                             maxWorkSpaceBytes,
+                        int*                               returnAlgoCount)
+{
+    std::vector<RocRollerSelectedTile> ranked;
+    rocblaslt_status     status = rankRocRollerSelectedTiles(prob, ranked);
+    if(status != rocblaslt_status_success)
+        return status;
+
+    std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
+                                           library;
+    std::shared_ptr<hipDeviceProp_t>       deviceProp;
+    std::shared_ptr<TensileLite::Hardware> hardware;
+    static_cast<void>(get_library_and_adapter(&library, &deviceProp, &hardware, handle->device));
+    if(!library || !hardware)
+        return rocblaslt_status_invalid_pointer;
+
+    library->materializeAllSolutions();
+
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
+    for(const RocRollerSelectedTile& tile : ranked)
+    {
+        if(static_cast<int>(chosen.size()) >= cap)
+            break;
+        if(tile.m <= 0 || tile.n <= 0 || tile.k <= 0)
+            continue;
+        if(prob.m % tile.m != 0 || prob.n % tile.n != 0 || prob.k % tile.k != 0)
+            continue;
+
+        std::shared_ptr<TensileLite::ContractionSolution> found;
+        {
+            std::lock_guard<std::mutex> lock(library->solutionsGuard);
+            for(auto const& entry : library->solutions)
+            {
+                if(!entry.second)
+                    continue;
+                if(matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
+                   || matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
+                {
+                    found = entry.second;
+                    break;
+                }
+            }
+        }
+        if(found)
+            chosen.push_back(found);
+    }
+
+    auto tensileProblem = ConstructTensileProblem(prob);
+    const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
+                                                    : requestedAlgoCount;
+    _convertToHeuristicResultArray(
+        chosen, convertCount, heuristicResultsArray, returnAlgoCount, maxWorkSpaceBytes,
+        tensileProblem, *hardware);
+    return rocblaslt_status_success;
+}
+
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
@@ -4917,6 +5090,14 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                          heuristicResultsArray,
                                          maxWorkSpaceBytes,
                                          returnAlgoCount);
+#else
+    if(useRocRoller(handle, prob))
+        return getRocRollerSelectedSolutions(handle,
+                                   prob,
+                                   requestedAlgoCount,
+                                   heuristicResultsArray,
+                                   maxWorkSpaceBytes,
+                                   returnAlgoCount);
 #endif
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
@@ -5106,6 +5287,19 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getAllSolutionsRocRoller(prob, handle, heuristicResults, maxWorkSpaceBytes);
+#else
+    if(useRocRoller(handle, prob))
+    {
+        std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
+        int                                            count = 0;
+        rocblaslt_status                               status = getRocRollerSelectedSolutions(
+            handle, prob, -1, ranked.data(), maxWorkSpaceBytes, &count);
+        if(status != rocblaslt_status_success)
+            return status;
+        ranked.resize(static_cast<size_t>(std::max(count, 0)));
+        heuristicResults = std::move(ranked);
+        return rocblaslt_status_success;
+    }
 #endif
     auto tensile_prob = ConstructTensileProblem(prob);
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
@@ -5477,6 +5671,76 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
     updateTensileProblem(prob, data->problem);
     rocblaslt::RocTuningV2* tuning = nullptr;
     return isSolutionSupported(handle, data->problem, prob, algo, tuning, workspaceSizeInBytes);
+}
+
+rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                   handle,
+                                               const RocblasltContractionProblem& prob,
+                                               std::shared_ptr<void>              gemmData,
+                                               rocblaslt_matmul_algo*             algo,
+                                               size_t* workspaceSizeInBytes)
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+    {
+        RocblasltContractionProblem probe = prob;
+        return isRocRollerSolutionSupported(handle, probe, algo, workspaceSizeInBytes);
+    }
+#endif
+
+    std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    auto                             savedProblem = data->problem;
+    RocblasltContractionProblem      probe        = prob;
+
+    try
+    {
+        const rocblaslt_status status
+            = isSolutionSupported(handle, probe, gemmData, algo, workspaceSizeInBytes);
+        data->problem = std::move(savedProblem);
+        return status;
+    }
+    catch(...)
+    {
+        data->problem = std::move(savedProblem);
+        throw;
+    }
+}
+
+rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   handle,
+                                            const RocblasltContractionProblem& prob,
+                                            std::shared_ptr<void>              gemmData,
+                                            rocblaslt_matmul_algo*             algo,
+                                            size_t*                            workspaceSizeInBytes)
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+        return isSolutionSupportedNoMutation(handle, prob, gemmData, algo, workspaceSizeInBytes);
+#endif
+
+    std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    updateTensileProblem(prob, data->problem);
+
+    // All that the check below sets on the problem.
+    const auto params    = data->problem.getParams();
+    const auto workspace = data->problem.workspaceSize();
+    auto       restore   = [&] {
+        data->problem.setParams() = params;
+        data->problem.setWorkspaceSize(workspace);
+    };
+
+    RocblasltContractionProblem inputs = prob;
+    rocblaslt::RocTuningV2*     tuning = nullptr;
+    try
+    {
+        const rocblaslt_status status = isSolutionSupported(
+            handle, data->problem, inputs, algo, tuning, workspaceSizeInBytes);
+        restore();
+        return status;
+    }
+    catch(...)
+    {
+        restore();
+        throw;
+    }
 }
 
 template <typename T>
