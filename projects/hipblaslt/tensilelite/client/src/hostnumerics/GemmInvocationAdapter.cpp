@@ -609,7 +609,9 @@ namespace TensileLite::Client::hostnumerics
                 for(const size_t logicalIndex : globalSelection.indices(*logicalCount))
                 {
                     const std::vector<size_t> coordinate
-                        = outputShape.coordinates(logicalIndex, globalSelection.indexOrder());
+                        = globalSelection.indexOrder().empty()
+                              ? outputShape.coordinates(logicalIndex)
+                              : outputShape.coordinates(logicalIndex, globalSelection.indexOrder());
                     const size_t selectedBatch = coordinate[batchD];
                     const size_t row           = coordinate[indexMD];
                     const size_t column        = coordinate[indexND];

@@ -161,7 +161,9 @@ void runScalarOracle(const GemmTestCase& problem, const Tensor& destination) {
     for (const size_t logicalIndex :
          problem.outputSelection.indices(problem.d.shape().elementCount())) {
         const auto coordinates =
-            problem.d.shape().coordinates(logicalIndex, problem.outputSelection.indexOrder());
+            problem.outputSelection.indexOrder().empty()
+                ? problem.d.shape().coordinates(logicalIndex)
+                : problem.d.shape().coordinates(logicalIndex, problem.outputSelection.indexOrder());
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         Accumulator accumulation = Accumulator(0);
