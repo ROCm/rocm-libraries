@@ -169,24 +169,40 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
         constexpr index_t PadElements         = PadBytes / ElementBytes;
         constexpr index_t NumIntervals        = LogicalBytes / IntervalBytes;
 
-        constexpr auto interval_desc = make_naive_tensor_descriptor(
-            make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}),
-            make_tuple(number<ElementsPerInterval + PadElements>{}, number<1>{}),
-            number<AccessElements>{},
-            number<1>{});
+        if constexpr(ElementsPerInterval == Cols)
+        {
+            // One row per interval, so the round trip below is just a padded row stride:
+            // (r * Cols + c) / Cols == r and % Cols == c for c < Cols. Stating it affinely
+            // matters -- the division and modulo made the compiler reach rows by negative
+            // multiples of Pad, which the unsigned ds_load offset cannot hold, so every
+            // transpose load carried its own address VGPR.
+            return make_naive_tensor_descriptor(
+                make_tuple(number<Rows>{}, number<Cols>{}),
+                make_tuple(number<Cols + PadElements>{}, number<1>{}),
+                number<AccessElements>{},
+                number<1>{});
+        }
+        else
+        {
+            constexpr auto interval_desc = make_naive_tensor_descriptor(
+                make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}),
+                make_tuple(number<ElementsPerInterval + PadElements>{}, number<1>{}),
+                number<AccessElements>{},
+                number<1>{});
 
-        constexpr auto flat_desc = transform_tensor_descriptor(
-            interval_desc,
-            make_tuple(make_merge_transform_v3_division_mod(
-                make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}))),
-            make_tuple(sequence<0, 1>{}),
-            make_tuple(sequence<0>{}));
+            constexpr auto flat_desc = transform_tensor_descriptor(
+                interval_desc,
+                make_tuple(make_merge_transform_v3_division_mod(
+                    make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}))),
+                make_tuple(sequence<0, 1>{}),
+                make_tuple(sequence<0>{}));
 
-        return transform_tensor_descriptor(
-            flat_desc,
-            make_tuple(make_unmerge_transform(make_tuple(number<Rows>{}, number<Cols>{}))),
-            make_tuple(sequence<0>{}),
-            make_tuple(sequence<0, 1>{}));
+            return transform_tensor_descriptor(
+                flat_desc,
+                make_tuple(make_unmerge_transform(make_tuple(number<Rows>{}, number<Cols>{}))),
+                make_tuple(sequence<0>{}),
+                make_tuple(sequence<0, 1>{}));
+        }
     }
 }
 
