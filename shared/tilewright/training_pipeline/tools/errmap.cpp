@@ -35,13 +35,25 @@
 // With --bias 1 the epilogue adds a vector of M integers in [-2, 2] to every
 // column of D in every batch.
 //
+// With --fresh 1 every buffer of the problem (A, B, C, a separate D, the
+// scales and the bias) starts an allocation of its own, right after a
+// reserved range that is never mapped (DeviceMemory), so that a read before
+// a buffer's first byte faults. hipMalloc places small buffers next to each
+// other in one block, where such a read lands in another buffer, returns
+// bytes the solution then ignores, and goes unseen. This takes the device's
+// virtual memory management; without it, or when one of its calls fails,
+// the buffers come from hipMalloc, and the ready line says which ("fresh").
+//
 // usage: errmap M N K BATCH --ids I1,I2,... [--reps R] [--alpha A] [--beta B]
 //          [--trans-a T|N] [--trans-b T|N] [--a-type bf16|f32] [--b-type bf16|f32]
 //          [--c-type bf16|f32] [--d-type bf16|f32] [--compute f32|xf32]
 //          [--lda X] [--ldb X] [--ldc X] [--ldd X] [--sep 0|1] [--ws BYTES]
 //          [--seed S] [--maxlist N] [--mt MTMxMTN] [--du DEPTHU]
 //          [--scale-a 0|1|3] [--scale-b 0|1|3] [--bias 0|1] [--bias-type bf16|f32]
-//          [--corrupt-ref I,J,BATCH] [--drop-scale A|B|AB]
+//          [--corrupt-ref I,J,BATCH] [--drop-scale A|B|AB] [--fresh 0|1]
+//        errmap --caps
+// --caps prints {"caps": [...]}, the options of this harness that earlier
+// builds did not take, and exits without calling HIP.
 // --a-type and --b-type also take f8, bf8 and f4, which need scales: f8 and
 // bf8 one f32 scale (1) or block-32 ones (3), f4 block-32 ones; A and B scaled
 // in one format, and K a multiple of 32 with block-32 scales. An f4 operand's
@@ -56,10 +68,11 @@
 // leaves those scales out would and fails wherever a dot product is not 0: a
 // check that the harness sees a scale a solution ignores.
 //
-// On stdout, {"ready": true, "algos": N, "sids": [...]} once the device holds
-// the operands: the N solutions of --ids that were found, in the order of
-// --ids, which they then run in. Then one JSON line per (solution,
-// repetition):
+// On stdout, {"ready": true, "algos": N, "sids": [...], "fresh": F} once the
+// device holds the operands: the N solutions of --ids that were found, in the
+// order of --ids, which they then run in, and whether every buffer of the
+// problem starts an allocation of its own behind an unmapped range (--fresh).
+// Then one JSON line per (solution, repetition):
 //   {"sid", "rep", "supported", "ws_need", "nbad", "nnan", "maxabs",
 //    "bad": [[i, j, batch, got, expected, diff, "K-chunk explanation"], ...],
 //    "per_tile": {...}, "name"}
@@ -156,6 +169,9 @@ struct Options {
   int64_t corrupt_batch = 0;
   bool drop_a           = false;
   bool drop_b           = false;
+  // Every buffer of the problem at the start of an allocation of its own,
+  // behind an unmapped range (DeviceMemory).
+  bool fresh = false;
 };
 
 uint16_t to_bf16(float f) {
@@ -364,6 +380,8 @@ Options parse(int argc, char** argv) {
       }
       o.drop_a = v != "B";
       o.drop_b = v != "A";
+    } else if (a == "--fresh") {
+      o.fresh = std::atoi(v.c_str()) != 0;
     } else {
       std::fprintf(stderr, "unknown argument %s\n", a.c_str());
       std::exit(1);
@@ -654,18 +672,144 @@ void report(const Problem& p, int sid, int rep, size_t need, const std::string& 
   std::fflush(stdout);
 }
 
-// A device copy of `host`, or nullptr when it is empty.
-void* device_copy(const std::vector<uint8_t>& host) {
-  if (host.empty()) return nullptr;
-  void* dev;
-  HIP_CHECK(hipMalloc(&dev, host.size()));
-  HIP_CHECK(hipMemcpy(dev, host.data(), host.size(), hipMemcpyHostToDevice));
-  return dev;
-}
+// The unmapped range reserved before every fresh buffer: at least the block
+// hipMalloc places small buffers in, in whole allocation granules.
+constexpr size_t kGuardBytes = size_t(2) << 20;
+
+// The device buffers of one process. A fresh buffer (`fresh` and the
+// device's virtual memory management) is a physical allocation of its own
+// (hipMemCreate) mapped at the start of what remains of a reserved virtual
+// range after its first kGuardBytes, which stay unmapped: the buffer's first
+// byte is its allocation's, and a read before it faults. A buffer that cannot
+// be mapped so, and every buffer after it, comes from hipMalloc, and `fresh()`
+// is false from then on.
+class DeviceMemory {
+ public:
+  explicit DeviceMemory(bool fresh) {
+    if (!fresh) return;
+    int device = 0, vmm = 0;
+    if (hipGetDevice(&device) != hipSuccess ||
+        hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, device) !=
+            hipSuccess ||
+        vmm == 0)
+      return;
+    prop_.type                = hipMemAllocationTypePinned;
+    prop_.requestedHandleType = hipMemHandleTypeNone;
+    prop_.location.type       = hipMemLocationTypeDevice;
+    prop_.location.id         = device;
+    access_.location          = prop_.location;
+    access_.flags             = hipMemAccessFlagsProtReadWrite;
+    if (hipMemGetAllocationGranularity(&granule_, &prop_, hipMemAllocationGranularityMinimum) !=
+            hipSuccess ||
+        granule_ == 0)
+      return;
+    fresh_ = true;
+  }
+
+  bool fresh() const { return fresh_; }
+
+  // A buffer of `bytes`; a fresh one is zeroed first, which checks that its
+  // mapping takes writes.
+  void* alloc(size_t bytes) {
+    if (fresh_) {
+      void* p = map(bytes);
+      if (p != nullptr && hipMemset(p, 0, bytes) == hipSuccess) return p;
+      if (p != nullptr) unmap_last();
+      fresh_ = false;
+    }
+    return plain(bytes);
+  }
+
+  // A device copy of `host`, or nullptr when it is empty.
+  void* copy(const std::vector<uint8_t>& host) {
+    if (host.empty()) return nullptr;
+    if (fresh_) {
+      void* p = map(host.size());
+      if (p != nullptr &&
+          hipMemcpy(p, host.data(), host.size(), hipMemcpyHostToDevice) == hipSuccess)
+        return p;
+      if (p != nullptr) unmap_last();
+      fresh_ = false;
+    }
+    void* dev = plain(host.size());
+    HIP_CHECK(hipMemcpy(dev, host.data(), host.size(), hipMemcpyHostToDevice));
+    return dev;
+  }
+
+  // A buffer from hipMalloc, also with --fresh (the workspace).
+  void* plain(size_t bytes) {
+    void* dev = nullptr;
+    HIP_CHECK(hipMalloc(&dev, bytes));
+    plain_.push_back(dev);
+    return dev;
+  }
+
+  void release() {
+    while (!mappings_.empty()) unmap_last();
+    for (void* dev : plain_) HIP_CHECK(hipFree(dev));
+    plain_.clear();
+  }
+
+ private:
+  struct Mapping {
+    void* base      = nullptr;
+    size_t reserved = 0;
+    void* buffer    = nullptr;
+    size_t mapped   = 0;
+    hipMemGenericAllocationHandle_t handle{};
+  };
+
+  size_t round_up(size_t bytes) const { return (bytes + granule_ - 1) / granule_ * granule_; }
+
+  // The buffer of a new mapping of `bytes`, or nullptr (nothing left behind).
+  void* map(size_t bytes) {
+    Mapping m;
+    size_t guard = round_up(kGuardBytes);
+    m.mapped     = round_up(std::max<size_t>(bytes, 1));
+    m.reserved   = guard + m.mapped;
+    if (hipMemAddressReserve(&m.base, m.reserved, granule_, nullptr, 0) != hipSuccess)
+      return nullptr;
+    if (hipMemCreate(&m.handle, m.mapped, &prop_, 0) != hipSuccess) {
+      (void)hipMemAddressFree(m.base, m.reserved);
+      return nullptr;
+    }
+    m.buffer = static_cast<char*>(m.base) + guard;
+    if (hipMemMap(m.buffer, m.mapped, 0, m.handle, 0) != hipSuccess) {
+      (void)hipMemRelease(m.handle);
+      (void)hipMemAddressFree(m.base, m.reserved);
+      return nullptr;
+    }
+    mappings_.push_back(m);
+    if (hipMemSetAccess(m.buffer, m.mapped, &access_, 1) != hipSuccess) {
+      unmap_last();
+      return nullptr;
+    }
+    return m.buffer;
+  }
+
+  void unmap_last() {
+    Mapping m = mappings_.back();
+    mappings_.pop_back();
+    (void)hipMemUnmap(m.buffer, m.mapped);
+    (void)hipMemRelease(m.handle);
+    (void)hipMemAddressFree(m.base, m.reserved);
+  }
+
+  bool fresh_     = false;
+  size_t granule_ = 0;
+  hipMemAllocationProp prop_{};
+  hipMemAccessDesc access_{};
+  std::vector<Mapping> mappings_;
+  std::vector<void*> plain_;
+};
 
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--caps") {
+    std::printf("{\"caps\": [\"fresh\"]}\n");
+    return 0;
+  }
   Options o = parse(argc, argv);
   Problem p(o);
 
@@ -673,22 +817,15 @@ int main(int argc, char** argv) {
   LT_CHECK(hipblasLtCreate(&handle));
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  void *dev_a, *dev_b, *dev_c, *dev_d, *dev_ws;
-  HIP_CHECK(hipMalloc(&dev_a, p.a.size()));
-  HIP_CHECK(hipMalloc(&dev_b, p.b.size()));
-  HIP_CHECK(hipMalloc(&dev_c, p.c.size()));
-  HIP_CHECK(hipMalloc(&dev_ws, o.workspace));
-  if (o.separate_d) {
-    HIP_CHECK(hipMalloc(&dev_d, p.d.size()));
-  } else {
-    dev_d = dev_c;
-  }
-  HIP_CHECK(hipMemcpy(dev_a, p.a.data(), p.a.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dev_b, p.b.data(), p.b.size(), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dev_c, p.c.data(), p.c.size(), hipMemcpyHostToDevice));
-  void* dev_scale_a = device_copy(p.scale_a);
-  void* dev_scale_b = device_copy(p.scale_b);
-  void* dev_bias    = device_copy(p.bias);
+  DeviceMemory memory(o.fresh);
+  void* dev_a       = memory.copy(p.a);
+  void* dev_b       = memory.copy(p.b);
+  void* dev_c       = memory.copy(p.c);
+  void* dev_d       = o.separate_d ? memory.alloc(p.d.size()) : dev_c;
+  void* dev_scale_a = memory.copy(p.scale_a);
+  void* dev_scale_b = memory.copy(p.scale_b);
+  void* dev_bias    = memory.copy(p.bias);
+  void* dev_ws      = memory.plain(o.workspace);
 
   hipblasLtMatmulDesc_t desc;
   LT_CHECK(hipblasLtMatmulDescCreate(
@@ -746,7 +883,7 @@ int main(int argc, char** argv) {
   std::printf("{\"ready\": true, \"algos\": %zu, \"sids\": [", found.size());
   for (size_t q = 0; q < found.size(); q++)
     std::printf("%s%d", q ? ", " : "", hipblaslt_ext::getIndexFromAlgo(found[q].algo));
-  std::printf("]}\n");
+  std::printf("], \"fresh\": %s}\n", memory.fresh() ? "true" : "false");
   std::fflush(stdout);
   for (auto& r : found) {
     int sid                    = hipblaslt_ext::getIndexFromAlgo(r.algo);
@@ -796,13 +933,7 @@ int main(int argc, char** argv) {
       report(p, sid, rep, need, name);
     }
   }
-  HIP_CHECK(hipFree(dev_a));
-  HIP_CHECK(hipFree(dev_b));
-  HIP_CHECK(hipFree(dev_c));
-  HIP_CHECK(hipFree(dev_ws));
-  if (o.separate_d) HIP_CHECK(hipFree(dev_d));
-  for (void* dev : {dev_scale_a, dev_scale_b, dev_bias})
-    if (dev != nullptr) HIP_CHECK(hipFree(dev));
+  memory.release();
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_a));
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_b));
   LT_CHECK(hipblasLtMatrixLayoutDestroy(lay_c));

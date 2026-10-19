@@ -49,6 +49,13 @@ tw.supports(model, context, hardware)  # False: a budget below hardware.N_CU
 results = pool.rank(problem, hardware, context=context)  # all unscored
 ```
 
+A library directory's `tilewright_index` can list a model per PCI chip ID:
+
+```python
+# The stem's row for the device's chip ID, else its row without one; None when neither.
+model = tw.load_model_by_index(stem, library_dir, pci_chip_id=device_chip_id)
+```
+
 With `TieBreak.Prior`, configs with equal scores are ordered by ascending
 `prior` (one float per config, non-finite values last), then by input order:
 

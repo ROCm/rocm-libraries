@@ -154,6 +154,38 @@ std::shared_ptr<const Model> read_model_file(const std::string& path, std::strin
   return parse_image(image.data(), image.size(), path, error);
 }
 
+// The PCI chip ID of an index row's optional third field, `chip=0x` and one
+// to four hex digits that are not all zero; 0 for any other field.
+std::uint32_t index_chip_id(const std::string& field) {
+  static const char kPrefix[] = "chip=0x";
+  const std::size_t n         = sizeof kPrefix - 1;
+  if (field.size() <= n || field.size() > n + 4 || field.compare(0, n, kPrefix) != 0) return 0;
+  std::uint32_t id = 0;
+  for (std::size_t i = n; i < field.size(); ++i) {
+    const char c        = field[i];
+    std::uint32_t digit = 0;
+    if (c >= '0' && c <= '9')
+      digit = static_cast<std::uint32_t>(c - '0');
+    else if (c >= 'a' && c <= 'f')
+      digit = static_cast<std::uint32_t>(c - 'a' + 10);
+    else if (c >= 'A' && c <= 'F')
+      digit = static_cast<std::uint32_t>(c - 'A' + 10);
+    else
+      return 0;
+    id = id * 16 + digit;
+  }
+  return id;
+}
+
+// Up to 64 characters of `text`, with every byte that is not graphic ASCII
+// shown as '?'.
+std::string printable(const std::string& text) {
+  std::string out = text.substr(0, 64);
+  for (char& c : out)
+    if (c < 0x21 || c > 0x7E) c = '?';
+  return out;
+}
+
 std::mutex& registry_mutex() {
   static std::mutex m;
   return m;
@@ -263,6 +295,15 @@ ModelPtr load_model_from_memory(const void* data, std::size_t size, std::string*
 ModelPtr load_model_by_index(const std::string& logic_stem,
                              const std::string& dir,
                              std::string* error) noexcept {
+  return load_model_by_index(logic_stem, dir, std::uint32_t{0}, error);
+}
+
+// Every row of the stem is read, so that a row naming the chip ID wins
+// wherever it stands and a malformed row of the stem is never passed over.
+ModelPtr load_model_by_index(const std::string& logic_stem,
+                             const std::string& dir,
+                             std::uint32_t pci_chip_id,
+                             std::string* error) noexcept {
   try {
     if (error != nullptr) error->clear();
     if (dir.empty()) return nullptr;
@@ -274,17 +315,43 @@ ModelPtr load_model_by_index(const std::string& logic_stem,
       detail::set_error(error, index_path.string() + ": cannot open index");
       return nullptr;
     }
-    std::string line;
+    std::string line, any_device, this_device;
+    bool have_any = false, have_this = false;
+    std::size_t line_no = 0;
     while (std::getline(index, line)) {
+      ++line_no;
       const std::size_t hash = line.find('#');
       if (hash != std::string::npos) line.resize(hash);
       std::istringstream fields(line);
-      std::string stem, file;
-      if (!(fields >> stem >> file)) continue;
-      if (stem == logic_stem)
-        return load_model((std::filesystem::path(dir) / file).string(), error);
+      std::string stem, file, chip, extra;
+      if (!(fields >> stem >> file) || stem != logic_stem) continue;
+      if (!(fields >> chip)) {
+        if (!have_any) any_device = file;
+        have_any = true;
+        continue;
+      }
+      const std::uint32_t id = detail::index_chip_id(chip);
+      if (id == 0 || (fields >> extra)) {
+        const std::string why = index_path.string() + ":" + std::to_string(line_no) +
+                                ": malformed row for " + logic_stem + ": '" +
+                                detail::printable(id == 0 ? chip : extra) +
+                                "' where chip=0x<1 to 4 hex digits> or the end of the row belongs";
+        detail::set_error(error, why);
+        detail::diag_failed(why);
+        return nullptr;
+      }
+      if (id == pci_chip_id && !have_this) {
+        this_device = file;
+        have_this   = true;
+      }
     }
-    return nullptr;
+    if (index.bad()) {
+      detail::set_error(error, index_path.string() + ": cannot read index");
+      return nullptr;
+    }
+    if (!have_this && !have_any) return nullptr;
+    return load_model(
+        (std::filesystem::path(dir) / (have_this ? this_device : any_device)).string(), error);
   } catch (const std::bad_alloc&) {
     detail::set_error(error, dir.c_str(), "/tilewright_index", "out of memory");
   } catch (const std::exception& e) {

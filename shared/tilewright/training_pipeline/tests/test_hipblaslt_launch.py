@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 import random
+from collections import Counter
 
 import pytest
 
+from bench_fakes import LIBRARY_STEM, solution, write_logic
+from lib import dat
+from lib import evaluate as ev
 from lib import features as fs
 from lib import hipblaslt_launch as hl
 
@@ -304,6 +308,7 @@ def _random_kernel(rng):
         ("work_group_x", [64, 128, 256]),
         ("work_group_y", [1, 2, 4]),
         ("work_group_z", [1, 2]),
+        ("hand_written", [0, 1]),
     ):
         if rng.random() < 0.9:
             attrs[name] = rng.choice(values)
@@ -456,3 +461,273 @@ def test_launch_plan_reads_the_kernel_only_through_launch_inputs(monkeypatch):
         _Strict(dict(occupancy=2), hl.LAUNCH_CONFIG_FIELDS),
         _Strict(dict(HYBRID), hl.LAUNCH_ATTRIBUTES),
     )
+
+
+# A hand-written Stream-K kernel on a static grid, like the one hipBLASLt's
+# gfx950 TF32 libraries hold: macro tile 256x256x32, 256 threads.
+HAND_WRITTEN_SK = {
+    "tile_processing_strategy": 2,
+    "work_assignment": 0,
+    "work_group_x": 256,
+    "work_group_y": 1,
+    "work_group_z": 1,
+    "hand_written": 1,
+}
+GENERATED_SK = dict(HAND_WRITTEN_SK, hand_written=0)
+
+
+def _sk_plan(m, n, k, context, attrs=HAND_WRITTEN_SK, batch=1):
+    prob = dict(m=m, n=n, k=k, batch=batch, mi_dtype="xfloat32")
+    cfg = dict(mt_m=256, mt_n=256, mt_k=32, occupancy=1)
+    p = hl.launch_plan(prob, cfg, attrs, context, 256, "gfx950")
+    return (p.dynamic_queue, p.grid_wgs, p.partial_reduction)
+
+
+def test_hand_written_stream_k_kernels_reduce_in_a_tree():
+    """TensileLite reduces the partial tiles of a hand-written Stream-K
+    kernel in a tree (getSKReduction) where a generated one takes origami's
+    parallel reduction, on the grid select_grid_size picks for the tree."""
+    excl, sm64 = fs.EXCLUSIVE, fs.ExecutionContext(cu_budget=64)
+    # Four tiles of 256 iterations each.
+    assert _sk_plan(1024, 256, 8192, excl, GENERATED_SK) == (False, 128, "parallel")
+    assert _sk_plan(1024, 256, 8192, excl) == (False, 64, "tree")
+    assert _sk_plan(1024, 256, 8192, sm64, GENERATED_SK) == (False, 64, "parallel")
+    assert _sk_plan(1024, 256, 8192, sm64) == (False, 64, "tree")
+    assert _sk_plan(256, 256, 8192, excl, batch=4) == (False, 64, "tree")
+    hybrid = dict(HAND_WRITTEN_SK, work_assignment=2)
+    assert _sk_plan(1024, 256, 8192, excl, hybrid) == (False, 64, "tree")
+    atomic = dict(HAND_WRITTEN_SK, stream_k_atomic=1)
+    assert _sk_plan(1024, 256, 8192, excl, dict(atomic, hand_written=0)) == (
+        False,
+        128,
+        "atomic",
+    )
+    assert _sk_plan(1024, 256, 8192, excl, atomic) == (False, 64, "atomic")
+    # A tree for the generated kernel as well, no partial tile, a queue.
+    dyn = fs.ExecutionContext(schedule="dynamic")
+    queue = dict(HAND_WRITTEN_SK, work_assignment=1)
+    for m, n, k, ctx, attrs, plan in (
+        (2048, 512, 1024, excl, HAND_WRITTEN_SK, (False, 64, "tree")),
+        (4096, 4096, 8192, excl, HAND_WRITTEN_SK, (False, 256, "none")),
+        (1024, 256, 8192, dyn, hybrid, (True, 4, "none")),
+        (1024, 256, 8192, excl, queue, (True, 4, "none")),
+    ):
+        assert _sk_plan(m, n, k, ctx, attrs) == plan
+        assert _sk_plan(m, n, k, ctx, dict(attrs, hand_written=0)) == plan
+
+
+# TensileLite's plans of the hand-written Stream-K kernel of a gfx950 TF32
+# library (TilewrightLaunchTest.DumpsPoolPlans) next to the rule's plans of
+# the kernel taken for a generated one: (m, n, k, batch, cu_budget,
+# schedule, TensileLite's plan, the generated kernel's plan).
+TENSILELITE_HAND_WRITTEN = [
+    (3, 1201, 3008, 1, 0, "auto", (False, 40, "tree"), (False, 55, "parallel")),
+    (105, 71, 10951, 1, 96, "default", (False, 16, "tree"), (False, 42, "parallel")),
+    (1, 98, 36857, 4, 96, "auto", (False, 64, "tree"), (False, 96, "parallel")),
+    (2, 1202, 44093, 1, 64, "auto", (False, 60, "tree"), (False, 60, "parallel")),
+    (5238, 131, 32009, 1, 0, "auto", (False, 252, "tree"), (False, 252, "parallel")),
+    (3659, 1, 22314, 1, 224, "dynamic", (False, 180, "tree"), (False, 210, "parallel")),
+]
+
+
+@pytest.mark.parametrize("row", TENSILELITE_HAND_WRITTEN)
+def test_hand_written_stream_k_kernels_launch_as_tensilelite_launches_them(row):
+    m, n, k, batch, budget, schedule, tensilelite, generated = row
+    ctx = fs.ExecutionContext(cu_budget=budget, schedule=schedule)
+    assert _sk_plan(m, n, k, ctx, batch=batch) == tensilelite
+    assert _sk_plan(m, n, k, ctx, GENERATED_SK, batch) == generated
+
+
+def test_hand_written_kernels_of_a_library_launch_as_tensilelite_launches_them(
+    tmp_path,
+):
+    """The flag comes from the logic file's customKernel, reaches a library
+    pool's kernels and the engine's launch model."""
+    sk = dict(tileProcessingStrategy="StreamK", workAssignment="StaticGrid")
+    sols = [solution(i, i, (256, 256, 32), **sk) for i in (5, 6, 7)]
+    sols[0]["customKernel"] = {"name": sols[0]["name"], "generated": False}
+    sols[1]["customKernel"] = {"name": sols[1]["name"], "generated": True}
+    write_logic(tmp_path / f"{LIBRARY_STEM}.dat", sols, table=[5, 6, 7])
+    pool = ev.pool_from_kernels(dat.load_library_kernels(tmp_path, LIBRARY_STEM))
+    assert [k["attributes"].get("hand_written") for k in pool] == [1, None, None]
+    prob = dict(m=1024, n=256, k=8192, batch=1, mi_dtype="bfloat16")
+    launch = hl.HipblasltLaunch("gfx950")
+    plans = [launch(prob, k, k["attributes"], fs.EXCLUSIVE, 256) for k in pool]
+    assert [(p.grid_wgs, p.partial_reduction) for p in plans] == [
+        (64, "tree"),
+        (128, "parallel"),
+        (128, "parallel"),
+    ]
+    keys = [launch.launch_key(k, k["attributes"]) for k in pool]
+    assert keys[0] != keys[1] == keys[2]
+    tw = pytest.importorskip("tilewright")
+    engine = ev.engine_launch(tw, pool, launch, 256)
+    problem = tw.Problem(
+        size=tw.Dim3(1024, 256, 8192),
+        a_dtype=tw.DataType.BFloat16,
+        b_dtype=tw.DataType.BFloat16,
+        c_dtype=tw.DataType.BFloat16,
+        d_dtype=tw.DataType.BFloat16,
+        mi_dtype=tw.DataType.BFloat16,
+    )
+    for i, want in enumerate(plans):
+        config = ev.make_config(tw, pool[i], i)
+        got = engine.plan(config, problem, tw.ExecutionContext())
+        assert got.grid_wgs == want.grid_wgs
+        assert got.partial_reduction == ev.make_plan(tw, want).partial_reduction
+        assert engine.launch_key(config) == keys[i]
+
+
+def test_the_hand_written_flag_changes_only_parallel_reductions():
+    """A hand-written kernel launches as the same kernel generated, except
+    that it never reduces in parallel: where the generated kernel splits its
+    tiles for a parallel reduction (or, atomic, adds partial tiles up on
+    that reduction's grid), it launches the tree's grid, which the tree
+    fix-up's bounds can turn back into one workgroup per tile."""
+    rng = random.Random(29)
+    seen = Counter()
+    for _ in range(2000):
+        cfg, attrs = _random_kernel(rng)
+        attrs.pop("hand_written", None)
+        for _ in range(5):
+            prob = _random_problem(rng)
+            ctx = fs.ExecutionContext(
+                cu_budget=rng.choice([0, 64, 96, 200, 224, 256]),
+                schedule=rng.choice(fs.SCHEDULES),
+            )
+            n_cu = rng.choice([0, 64, 256, 304])
+            arch = rng.choice(["gfx950", "gfx942"])
+            plain = hl.launch_plan(prob, cfg, attrs, ctx, n_cu, arch)
+            hand = dict(attrs, hand_written=1)
+            written = hl.launch_plan(prob, cfg, hand, ctx, n_cu, arch)
+            assert written.dynamic_queue == plain.dynamic_queue
+            if plain.partial_reduction == "parallel":
+                assert written.partial_reduction in ("tree", "none")
+            elif plain.partial_reduction == "atomic":
+                assert written.partial_reduction in ("atomic", "none")
+            else:
+                assert written == plain
+            seen[plain.partial_reduction, written.partial_reduction] += 1
+    for pair in (("parallel", "tree"), ("atomic", "atomic"), ("tree", "tree")):
+        assert seen[pair] > 50
+    assert seen["parallel", "none"] + seen["atomic", "none"] > 0
+
+
+def test_hand_written_stream_k_kernels_are_launch_classes_of_their_own():
+    cfg = dict(mt_m=256, mt_n=256, mt_k=32, occupancy=1)
+    for assign in (0, 2):
+        hand = dict(HAND_WRITTEN_SK, work_assignment=assign)
+        generated = dict(hand, hand_written=0)
+        assert hl.launch_inputs(cfg, hand) == hl.launch_inputs(cfg, generated) + (1,)
+        assert hl.launch_key(cfg, hand) != hl.launch_key(cfg, generated)
+    # A queue hands out whole tiles, and other kernels split none.
+    for other in (
+        {"work_assignment": 1},
+        {"tile_processing_strategy": 1},
+        {"tile_processing_strategy": 0},
+    ):
+        hand = dict(HAND_WRITTEN_SK, **other)
+        generated = dict(hand, hand_written=0)
+        assert hl.launch_inputs(cfg, hand) == hl.launch_inputs(cfg, generated)
+        assert hl.launch_key(cfg, hand) == hl.launch_key(cfg, generated)
+
+
+def test_launch_keys_of_generated_kernels_are_those_tensilelite_pins():
+    """TensileLite's TilewrightLaunchTest.LaunchKeysMatchThePipeline pins
+    these keys for its kernels (macro tile 128x128, DepthU 64, 256 threads):
+    a kernel that is not hand-written keeps the key it had."""
+
+    def key(occupancy, **attrs):
+        cfg = dict(mt_m=128, mt_n=128, mt_k=64, occupancy=occupancy)
+        wg = {"work_group_x": 256, "work_group_y": 1, "work_group_z": 1}
+        return hl.launch_key(cfg, dict(wg, **attrs))
+
+    hybrid = {"tile_processing_strategy": 2, "work_assignment": 2}
+    assert key(2, **hybrid) == 0x138281954B1A0008
+    assert key(2, stream_k_atomic=1, **hybrid) == 0x30A54CB3ED1D0E1D
+    assert key(2, tile_processing_strategy=1) == 0x862A415D97FBA99D
+    assert key(2, tile_processing_strategy=1, stream_k_atomic=1) == 0x862A415D97FBA99D
+    assert key(2) == key(5, work_assignment=2, stream_k_atomic=1) == 0x40D69E0CF0F65C45
+    assert key(0, **hybrid) == key(1, **hybrid) == 0x7072D6B06BE7DE6B
+
+
+def _ctx(budget=0, schedule="default"):
+    return fs.ExecutionContext(cu_budget=budget, schedule=schedule)
+
+
+WIDE = {"work_group_x": 1024, "work_group_y": 1024}
+DP = {"tile_processing_strategy": 1, "work_assignment": 0}
+# Every plan the tests above pin with _plan's kernel: (m, n, k, occupancy,
+# attributes, context, arch, batch, plan).
+PINNED = [
+    (128 * 480, 128, 512, 2, HYBRID, _ctx(224), "gfx950", 1, (False, 320, "tree")),
+    (128 * 481, 128, 512, 2, HYBRID, _ctx(224), "gfx950", 1, (True, 481, "none")),
+    (4096, 4096, 512, 3, HYBRID, _ctx(224), "gfx950", 1, (True, 768, "none")),
+    (4096, 4096, 512, 4, HYBRID, _ctx(224), "gfx950", 1, (False, 1024, "none")),
+    (128 * 1883, 128, 512, 4, HYBRID, _ctx(224), "gfx950", 1, (False, 1883, "none")),
+    (128 * 1884, 128, 512, 4, HYBRID, _ctx(224), "gfx950", 1, (True, 768, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(256), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(224), "gfx950", 1, (True, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(240), "gfx950", 1, (True, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(255), "gfx950", 1, (True, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(31), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(0), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(224, "auto"), "gfx950", 1, (True, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(0, "auto"), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(0, "dynamic"), "gfx950", 1, (True, 512, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(224), "gfx942", 1, (False, 1024, "none")),
+    (4096, 4096, 512, 2, HYBRID, _ctx(224, "dynamic"), "gfx942", 1, (True, 512, "none")),
+    (256, 256, 64 * 64, 1, HYBRID, _ctx(), "gfx950", 1, (False, 32, "parallel")),
+    (256, 256, 64 * 32, 1, HYBRID, _ctx(), "gfx950", 1, (False, 16, "tree")),
+    (256, 256, 64 * 32, 1, dict(HYBRID, stream_k_atomic=1), _ctx(), "gfx950", 1,
+     (False, 16, "atomic")),
+    (4096, 4096, 512, 2, DP, _ctx(), "gfx950", 1, (False, 512, "none")),
+    (4096, 4096, 512, 5, QUEUE, _ctx(), "gfx950", 1, (True, 768, "none")),
+    (4096, 4096, 512, 2, {}, _ctx(), "gfx950", 1, (False, 1024, "none")),
+    (128 * 300, 128, 64 * 300, 1, HYBRID, _ctx(), "gfx950", 1, (False, 200, "tree")),
+    (128 * 300, 128, 64 * 300, 1, dict(HYBRID, **WIDE), _ctx(), "gfx950", 1,
+     (False, 300, "none")),
+    (128 * 4500, 128, 512, 9, dict(HYBRID, **WIDE), _ctx(), "gfx950", 1,
+     (False, 2048, "tree")),
+    (1024, 1024, 512, 2, HYBRID, _ctx(), "gfx950", 16, (False, 512, "none")),
+    (128 * 4500, 128, 512, 9, dict(HYBRID, **WIDE), _ctx(0, "dynamic"), "gfx950", 1,
+     (True, 1792, "none")),
+    (128 * 4500, 128, 512, 9, dict(QUEUE, **WIDE), _ctx(), "gfx950", 1,
+     (True, 1792, "none")),
+    (128 * 4500, 128, 512, 9, dict(QUEUE, **WIDE), _ctx(), "gfx942", 1,
+     (True, 1792, "none")),
+    (128 * 4500, 128, 512, 9, dict(QUEUE, **WIDE), _ctx(), "gfx90a", 1,
+     (True, 2048 - 32, "none")),
+    (128 * 4500, 128, 512, 9, dict(HYBRID, **WIDE), _ctx(), "gfx1250", 1,
+     (False, 2048, "tree")),
+    (4096, 4096, 512, 2, QUEUE, _ctx(), "gfx1250", 1, (True, 512, "none")),
+    (4096, 1000, 512, 2, {}, _ctx(), "gfx950", 1, (False, 256, "none")),
+    (4096, 1000, 512, 2, {"tile_processing_strategy": 0, "work_assignment": 2},
+     _ctx(), "gfx950", 1, (False, 256, "none")),
+]  # fmt: skip
+# The plans of PINNED's parallel reductions with the kernel written by hand,
+# by (m, n, k).
+PINNED_IN_A_TREE = {(256, 256, 64 * 64): (False, 32, "tree")}
+
+
+@pytest.mark.parametrize("row", PINNED)
+def test_hand_written_kernels_keep_the_pinned_plans_but_parallel_reductions(row):
+    """The launch fixtures above hold for generated kernels, and for the
+    same kernels written by hand but where they reduce in parallel."""
+    m, n, k, occupancy, attrs, ctx, arch, batch, plan = row
+    for generated in (attrs, dict(attrs, hand_written=0)):
+        assert _plan(m, n, k, occupancy, generated, ctx, arch, batch) == plan
+    hand = dict(attrs, hand_written=1)
+    want = PINNED_IN_A_TREE[(m, n, k)] if plan[2] == "parallel" else plan
+    assert _plan(m, n, k, occupancy, hand, ctx, arch, batch) == want
+
+
+@pytest.mark.parametrize("row", QUEUE_CLAMPED)
+def test_hand_written_dynamic_queues_take_the_head_of_the_flag_region(row):
+    m, n, k, batch, mt_m, mt_n, mt_k, wg, budget, schedule = row
+    prob = dict(m=m, n=n, k=k, batch=batch, mi_dtype="bfloat16")
+    cfg = dict(mt_m=mt_m, mt_n=mt_n, mt_k=mt_k, occupancy=8)
+    attrs = dict(HYBRID, work_group_x=wg[0], work_group_y=wg[1], work_group_z=wg[2])
+    ctx = fs.ExecutionContext(cu_budget=budget, schedule=schedule)
+    hand = hl.launch_plan(prob, cfg, dict(attrs, hand_written=1), ctx, 256, "gfx950")
+    assert hand == hl.launch_plan(prob, cfg, attrs, ctx, 256, "gfx950")

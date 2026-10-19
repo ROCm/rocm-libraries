@@ -532,6 +532,58 @@ def test_the_pool_gaps_come_from_training_benches_without_an_audit_shape(
     assert "no exhaustive training bench" in none["training"]["why"]
 
 
+def test_the_held_out_rows_leave_out_the_kernels_the_audit_set_left_out(
+    tmp_path, monkeypatch
+):
+    """A kernel a blocklist the audit set was built with names is never the
+    true best of an audit GEMM, whatever the bundle's own blocklist says."""
+    from types import SimpleNamespace
+
+    from lib import audit as al
+    from lib import bank_pool
+    from lib import correctness as cx
+    from lib import evaluate as ev
+    from lib import run_analysis as ra
+
+    pool = [
+        dict(kernel(1), kernel_name="Cijk_a"),
+        dict(kernel(2, 128, 128), kernel_name="Cijk_b"),
+    ]
+    held = [gemm(512, 512, 512, 1, [(1, 5.0, False), (2, 4.0, False)])]
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    rec = al.write_blocklist_file(audit, "source", cx.Blocklist([cx.Entry("Cijk_b")]))
+    (audit / al.MANIFEST).write_text(json.dumps({"blocklists": [rec]}))
+    model = SimpleNamespace(
+        library=("libdir", "stem"), library_cfg={}, library_device=0, arch="gfx950"
+    )
+    seen = []
+
+    def benches(run_dir, audit_dir, current):
+        seen.append((audit_dir, sorted(current)))
+        if audit_dir is None:
+            return None, [], "no seed bench"
+        return ws.HELD_OUT_SOURCE, [("audit", "gmap")], None
+
+    monkeypatch.setattr(ra, "final_model", lambda *a, **k: model)
+    monkeypatch.setattr(ra, "library_identity", lambda m: SimpleNamespace(digest="L"))
+    monkeypatch.setattr(ra, "exhaustive_benches", benches)
+    monkeypatch.setattr(ra, "gemm_dicts", lambda dirs, jobs, identity: held)
+    monkeypatch.setattr(ev, "restrict_to_pool", lambda g, p: (g, None, None))
+    monkeypatch.setattr(ev, "pool_from_kernels", lambda k: None)
+    monkeypatch.setattr(
+        bank_pool, "config_pool", lambda *a: SimpleNamespace(kernels=pool)
+    )
+    out = ws.exhaustive_best(tmp_path, audit)
+    assert seen == [(None, [1, 2]), (audit, [1])]
+    (best,) = out["held_out"]["rows"]
+    assert best["best_us"] == 5.0 and best["kernel"]["mt_n"] == 64
+    (audit / rec["file"]).write_text("{}")
+    out = ws.exhaustive_best(tmp_path, audit)
+    assert out["held_out"]["rows"] == []
+    assert "not the one it recorded" in out["held_out"]["why"]
+
+
 def test_analyze_takes_the_rates_given_then_the_runs_then_the_devices(
     tmp_path, monkeypatch
 ):

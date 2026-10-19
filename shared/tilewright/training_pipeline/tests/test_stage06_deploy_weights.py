@@ -81,19 +81,46 @@ def test_parse_index_matches_the_engine():
         "a\tone.bin # trailing comment\r\n"
         "b two.bin extra\n"
         "a\tlater.bin\n"
+        "c\tthree.bin\tchip=0x1A2B\n"
+        "c four.bin chip=0x1a2b\n"
+        "a five.bin chip=0x00ff # for one chip\n"
+        "d six.bin chip=0x0\n"
+        "d seven.bin chip=0x12 more\n"
         "single\n"
         "\n"
         "  # indented comment\n"
     )
-    assert idx.as_dict() == {"a": "one.bin", "b": "two.bin"}
+    assert idx.as_dict() == {"a": "one.bin"}
+    assert idx.chip_rows == [("c", "three.bin", 0x1A2B), ("a", "five.bin", 0xFF)]
     assert idx.comments == ["# header", "  # indented comment"]
-    assert idx.dropped == ["a\tlater.bin", "single"]
+    assert idx.dropped == [
+        "b two.bin extra",
+        "a\tlater.bin",
+        "c four.bin chip=0x1a2b",
+        "d six.bin chip=0x0",
+        "d seven.bin chip=0x12 more",
+        "single",
+    ]
+    assert idx.malformed_rows == [
+        (3, "b", "b two.bin extra"),
+        (8, "d", "d six.bin chip=0x0"),
+        (9, "d", "d seven.bin chip=0x12 more"),
+    ]
 
 
 def test_render_index_sorts_and_keeps_comments():
     text = s6.render_index(["# c"], {"z": "z.bin", "a": "a.bin"})
     assert text == "# c\na\ta.bin\nz\tz.bin\n"
     assert s6.render_index([], {}).startswith("# tilewright per-library weights index")
+    chips = [("z", "z2.bin", 0xABCD), ("a", "a3.bin", 0x12), ("z", "z1.bin", 0x1)]
+    text = s6.render_index(["# c"], {"z": "z.bin", "a": "a.bin"}, chips)
+    assert text == (
+        "# c\na\ta.bin\na\ta3.bin\tchip=0x0012\n"
+        "z\tz.bin\nz\tz1.bin\tchip=0x0001\nz\tz2.bin\tchip=0xabcd\n"
+    )
+    again = s6.parse_index(text)
+    assert again.as_dict() == {"a": "a.bin", "z": "z.bin"}
+    assert sorted(again.chip_rows) == sorted(chips) and again.dropped == []
 
 
 def test_choose_weights_name():
@@ -106,6 +133,78 @@ def test_choose_weights_name():
     )
     with pytest.raises(s6.DeployError):
         s6.choose_weights_name({"T": "S.tilewright.bin"}, "S")
+    own = {"S": "x.tilewright.bin"}
+    assert s6.choose_weights_name(own, "S", ["x.tilewright.bin"]) == "S.tilewright.bin"
+    with pytest.raises(s6.DeployError, match="another row"):
+        s6.choose_weights_name(own, "S", ["x.tilewright.bin", "S.tilewright.bin"])
+
+
+def test_a_deploy_keeps_the_rows_for_one_chip_id(tmp_path, trained, checkout, capsys):
+    """Rows for the devices of one PCI chip ID are other models of the
+    stem: a deploy keeps them, below the row it writes, and never writes
+    over or removes a file one of them names."""
+    wd = weights_dir(checkout, "gfx950")
+    index = wd / "tilewright_index"
+    index.write_text(
+        f"{STEM}\tlegacy.bin\n"
+        f"{STEM}\tchip.tilewright.bin\tchip=0x1a2b\n"
+        f"{STEM}\tlegacy.bin\tchip=0x00cd\n"
+        f"{STEM}\tgone.tilewright.bin\tchip=0x42\n"
+        f"{OTHER}\tother.tilewright.bin\tchip=0xABCD\n"
+    )
+    (wd / "chip.tilewright.bin").write_bytes(b"model of one chip")
+    out = tmp_path / "out"
+    assert deploy(trained, write_cfg(tmp_path / "cfg.yaml"), out, repo=checkout,
+                  apply_patch=True) == 0  # fmt: skip
+    new_name = f"{STEM}.tilewright.bin"
+    assert index.read_text() == (
+        f"{s6.INDEX_HEADER}\n"
+        f"{STEM}\t{new_name}\n"
+        f"{STEM}\tgone.tilewright.bin\tchip=0x0042\n"
+        f"{STEM}\tlegacy.bin\tchip=0x00cd\n"
+        f"{STEM}\tchip.tilewright.bin\tchip=0x1a2b\n"
+        f"{OTHER}\tother.tilewright.bin\tchip=0xabcd\n"
+    )
+    err = capsys.readouterr().err
+    assert f"{STEM} (chip=0x0042) lists missing file gone.tilewright.bin" in err
+    assert f"{OTHER} has rows for PCI chip IDs only; an engine that" in err
+    assert f"{STEM} has rows for PCI chip IDs only" not in err
+    assert (wd / "legacy.bin").read_bytes() == b"old model"
+    assert (wd / "chip.tilewright.bin").read_bytes() == b"model of one chip"
+    rec = json.loads((out / "deploy_record.json").read_text())
+    assert "removed" not in rec["targets"][0]
+    tw = pytest.importorskip("tilewright")
+    assert tw.describe(tw.load_model_by_index(STEM, str(wd))).n_cells == 3
+    assert tw.describe(tw.load_model_by_index(STEM, str(wd), 0x77)).n_cells == 3
+    with pytest.raises(ValueError, match="chip.tilewright.bin"):
+        tw.load_model_by_index(STEM, str(wd), 0x1A2B)
+
+
+@pytest.mark.parametrize("own", [False, True])
+def test_a_deploy_refuses_an_index_with_a_malformed_row(
+    tmp_path, trained, checkout, capsys, own
+):
+    """The engine loads no model for a stem with a malformed row, on any
+    device: a deploy that dropped the row would serve the stem's other rows
+    on the devices it may have been meant for, so it rewrites nothing until
+    the row is corrected."""
+    wd = weights_dir(checkout, "gfx950")
+    index = wd / "tilewright_index"
+    bad = f"{STEM if own else OTHER}\tclassb.tilewright.bin\tchip=0x1a2g"
+    text = f"{OTHER}\tother.tilewright.bin\n{bad}\n{STEM}\tlegacy.bin\n"
+    index.write_text(text)
+    before = {p.name: p.read_bytes() for p in wd.iterdir()}
+    cfg = write_cfg(tmp_path / "cfg.yaml")
+    assert deploy(trained, cfg, tmp_path / "out", repo=checkout, apply_patch=True) == 1
+    err = capsys.readouterr().err
+    assert f"{index} has malformed rows (line 2 for " in err
+    assert f"{bad!r}), for whose stems the engine loads no model" in err
+    assert {p.name: p.read_bytes() for p in wd.iterdir()} == before
+    with pytest.raises(s6.DeployError, match="line 2 for"):
+        s6.plan_targets([("gfx950", STEM)], checkout, warn=False)
+    index.write_text(text.replace("0x1a2g", "0x1a2b"))
+    (target,) = s6.plan_targets([("gfx950", STEM)], checkout, warn=False)
+    assert "chip=0x1a2b" in target.index_text
 
 
 def test_staging_only(tmp_path, trained):

@@ -377,3 +377,22 @@ def test_line_knob_reads_a_value_as_written():
     assert bench_yaml.line_knob(line, "solution_index_list") == "[1, 2]"
     assert bench_yaml.line_knob(line, "transB") == "N"
     assert bench_yaml.line_knob(line, "algo_method") is None
+
+
+def test_a_line_without_blocked_kernels_keeps_its_sacrificial_copy():
+    from lib.bench_yaml import (
+        format_solution_list,
+        line_solution_list,
+        set_line_knob,
+        without_kernels,
+    )
+
+    base = "- {M: 64, N: 64, K: 64, batch_count: 1, solution_index_list: [5, 5, 6, 7]}"
+    assert line_solution_list(without_kernels(base, [6])) == [5, 5, 7]
+    assert line_solution_list(without_kernels(base, [5])) == [6, 6, 7]
+    assert line_solution_list(without_kernels(base, [5, 6, 7])) == []
+    assert without_kernels(base, [9]) == base
+    plain = set_line_knob(base, "solution_index_list", format_solution_list([5, 6]))
+    assert line_solution_list(without_kernels(plain, [5])) == [6]
+    bare = "- {M: 64, N: 64, K: 64, batch_count: 1, algo_method: 1}"
+    assert without_kernels(bare, [5]) == bare

@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -358,18 +359,26 @@ TEST_CASE("every tilewright_index entry resolves to its model", "[real]") {
     const fs::path dir = e.path().parent_path();
     std::ifstream in(e.path());
     std::string line;
+    std::set<std::pair<std::string, std::uint32_t>> seen;
     while (std::getline(in, line)) {
       const std::size_t hash = line.find('#');
       if (hash != std::string::npos) line.resize(hash);
       std::istringstream s(line);
-      std::string stem, file;
+      std::string stem, file, chip;
       if (!(s >> stem >> file)) continue;
-      INFO(e.path().string() << ": " << stem);
+      std::uint32_t id = 0;
+      const bool keyed = static_cast<bool>(s >> chip);
+      INFO(e.path().string() << ": " << stem << " " << chip);
+      if (keyed) {
+        REQUIRE(chip.rfind("chip=0x", 0) == 0);
+        id = static_cast<std::uint32_t>(std::stoul(chip.substr(7), nullptr, 16));
+        REQUIRE(id != 0);
+      }
       REQUIRE(fs::is_regular_file(dir / file));
       ++entries;
-      if (is_lfs_pointer(dir / file)) continue;
+      if (!seen.emplace(stem, id).second || is_lfs_pointer(dir / file)) continue;
       std::string err;
-      const tw::ModelPtr model = tw::load_model_by_index(stem, dir.string(), &err);
+      const tw::ModelPtr model = tw::load_model_by_index(stem, dir.string(), id, &err);
       INFO(err);
       REQUIRE(model);
       CHECK(model == tw::load_model((dir / file).string()));

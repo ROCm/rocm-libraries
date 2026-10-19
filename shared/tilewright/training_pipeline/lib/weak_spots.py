@@ -286,8 +286,10 @@ def exhaustive_best(
     audit set when it is complete for that pool}, each {source, why, rows
     (`best_kernels`)}, the training one also `n_dropped_audit`; with the
     arch, the device its library was read with, the library's digest
-    (lib/kernel_identity.py) and the pool's (`pool_digest`). Rows are empty,
-    with why, where there are none."""
+    (lib/kernel_identity.py) and the pool's (`pool_digest`). The held-out
+    rows leave out every kernel a blocklist the audit set was built with
+    names (`lib.audit.audit_blocklist`), as its evaluations do. Rows are
+    empty, with why, where there are none."""
     from . import audit as al
     from . import evaluate as ev
     from . import run_analysis as ra
@@ -325,13 +327,13 @@ def exhaustive_best(
         library_digest=identity.digest if identity is not None else None,
         pool_digest=pool_digest(digests),
     )
-    pool = ev.pool_from_kernels(kernels)
 
-    def rows(dirs: Sequence[Any]) -> List[Dict[str, Any]]:
+    def rows(dirs: Sequence[Any], kept: Sequence[Any]) -> List[Dict[str, Any]]:
         gemms, _, _ = ev.restrict_to_pool(
-            ra.gemm_dicts(dirs, jobs=jobs, identity=identity), pool
+            ra.gemm_dicts(dirs, jobs=jobs, identity=identity),
+            ev.pool_from_kernels(kept),
         )
-        return best_kernels(gemms, kernels)
+        return best_kernels(gemms, list(kept))
 
     name, dirs, _ = ra.exhaustive_benches(Path(run_dir), None, digests)
     if not dirs:
@@ -339,7 +341,7 @@ def exhaustive_best(
         out["training"]["why"] = none
     else:
         held = al.read_shapes(al.shapes_yaml(audit_dir)) if audit_dir else set()
-        mine = rows(dirs)
+        mine = rows(dirs, kernels)
         kept = [r for r in mine if (r["m"], r["n"], r["k"], r["batch"]) not in held]
         out["training"].update(
             source=name, rows=kept, n_dropped_audit=len(mine) - len(kept)
@@ -347,11 +349,19 @@ def exhaustive_best(
     if audit_dir is None:
         out["held_out"]["why"] = "no audit set is configured (audit.dir)"
         return out
-    name, dirs, why = ra.exhaustive_benches(Path(run_dir), audit_dir, digests)
+    try:
+        built, _ = al.audit_blocklist(Path(audit_dir))
+    except ValueError as e:
+        out["held_out"]["why"] = str(e)
+        return out
+    kept = built.kept(kernels) if built else kernels
+    name, dirs, why = ra.exhaustive_benches(
+        Path(run_dir), audit_dir, al.pool_digests(kept)
+    )
     if name != HELD_OUT_SOURCE:
         out["held_out"]["why"] = why or "the audit set cannot be read"
         return out
-    out["held_out"].update(source=name, rows=rows(dirs))
+    out["held_out"].update(source=name, rows=rows(dirs, kept))
     return out
 
 

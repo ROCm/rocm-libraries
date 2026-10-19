@@ -8,21 +8,29 @@ results (lib/correctness_gate.py).
 The orchestrator runs it before the rounds of an invocation when
 `correctness.enabled`. It checks every kernel of the config's pool (the
 library's table and the bank; a blocklist never shrinks the pool it checks)
-that no list of `correctness.lists` names, the hazard canary did not
-quarantine (--quarantine) and the verdict cache (--cache-dir) holds no
-verdict of, with the exact harness on the GPUs of --devices under
-their leases (lib/gpu_lease.py). With nothing to check it builds nothing and
-takes no GPU. A signal stops the harness processes (lib/procs.py) after the
-verdicts no pass left to run could change are cached.
+that no list of `correctness.lists` names and the hazard canary did not
+quarantine (--quarantine): the hand-written ones statically first (their
+predicates against the vector widths their sources declare, which needs
+the hipBLASLt source of --build-dir or `correctness.custom_kernels`), then
+those the verdict cache (--cache-dir) holds no verdict of for a stage (the
+shapes, and the tiny shapes at fresh allocations) with the exact harness on
+the GPUs of --devices under their leases (lib/gpu_lease.py). With nothing
+to run it builds nothing and takes no GPU. A signal stops the harness
+processes (lib/procs.py) after the verdicts no pass left to run could change
+are cached.
 
 Outputs in --out-dir:
-  blocklist.json     the kernels the run leaves out: those the lists name
-                     and those the gate saw fail, now or before (the cache),
-                     by name, kernel id and signature (lib/correctness.py)
+  blocklist.json     the kernels the run leaves out: those the lists name,
+                     those the static check finds unguarded and those the
+                     gate saw fail or crash, now or before (the cache), by
+                     name, kernel id and signature (lib/correctness.py)
   verdicts.json      every kernel of the pool: its verdict (pass, fail,
-                     crash, untested, listed, unchecked), where it comes from
-                     (gate, cache, list) and what the harness saw
-  gate_summary.json  counts, protocol, device, harness, tasks, GPU seconds
+                     crash, unguarded, untested, listed, unchecked), where it
+                     comes from (gate, cache, list, static check), what the
+                     harness saw (`tiny`: the tiny stage's) and the static
+                     check of a hand-written kernel (`static`)
+  gate_summary.json  counts, protocols, device, harness, tasks, GPU seconds,
+                     the tiny stage (`tiny`) and the static check (`static`)
   runs/gpu<N>.jsonl  the harness's records, one per kernel and repetition
   harness_build.log  the build of the harness, when it was built
 
@@ -160,18 +168,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     if not args.quiet:
         v = summary["verdicts"]
+        tiny = summary.get("tiny") or {}
         ui.ok(
             "gate",
             f"{summary['pool']:,} kernels: "
             + ", ".join(f"{n:,} {k}" for k, n in v.items())
             + f"; {summary['blocked']} blocked"
             + (
-                f"; {summary['checked']:,} checked now in {summary['tasks']} "
-                f"harness processes on GPUs {summary['gpus']}"
-                if summary["checked"]
+                f"; {summary['checked']:,} checked now on the shapes and "
+                f"{tiny.get('checked', 0):,} on the tiny shapes in "
+                f"{summary['tasks']} harness processes on GPUs {summary['gpus']}"
+                if summary["checked"] or tiny.get("checked")
                 else "; nothing to check"
             ),
         )
+        st = summary.get("static") or {}
+        if st.get("hand_written"):
+            ui.info(
+                "gate",
+                f"static check of {st['hand_written']} hand-written kernel(s) "
+                f"({st['where']}): "
+                + ", ".join(f"{n} {k}" for k, n in st["statuses"].items()),
+            )
+        if tiny.get("checked"):
+            ui.info(
+                "gate",
+                f"tiny shapes: {tiny['checked']:,} kernel(s) in {tiny['tasks']} "
+                f"harness processes, {tiny['fresh_tasks']} of them with every "
+                f"operand at a fresh allocation",
+            )
         doc = json.loads((args.out_dir / cx.BLOCKLIST_FILE).read_text())
         for e in doc["entries"]:
             label = e.get("kernel_id") or ki.label_of_name(e["name"])

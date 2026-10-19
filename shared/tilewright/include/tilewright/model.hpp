@@ -41,6 +41,9 @@ struct ModelInfo {
   double min_cu_fraction = 1.0;
   double max_cu_fraction = 1.0;
   std::uint8_t schedules = 1;
+  // MLREC_v3: the fewest usable CUs the model supports on any device (its
+  // CU floor), 0 for a model without one.
+  std::size_t min_effective_cus = 0;
   // Serving options.
   std::size_t cascade_keys = 0;
   bool whitelist_tier      = true;
@@ -103,11 +106,21 @@ ModelPtr load_model_from_memory(const void* data,
                                 std::size_t size,
                                 std::string* error = nullptr) noexcept;
 
-// Looks up `logic_stem` in `<dir>/tilewright_index` and loads the model it
-// lists. Returns nullptr with *error left empty when the index file or the stem
-// is absent, and nullptr with *error set when the listed model fails to load.
+// Looks up `logic_stem` in `<dir>/tilewright_index` and loads the model of
+// the stem's first row without a PCI chip ID. Returns nullptr with *error left
+// empty when the index file or such a row is absent, and nullptr with *error
+// set when the listed model fails to load or a row of the stem is malformed.
 ModelPtr load_model_by_index(const std::string& logic_stem,
                              const std::string& dir,
+                             std::string* error = nullptr) noexcept;
+
+// As above for a device whose PCI chip ID is `pci_chip_id` (0: unknown): the
+// stem's first row naming that chip ID is preferred to its first row without
+// one. A plain literal 0 as the third argument is ambiguous with the overload
+// above; pass a std::uint32_t (a variable, 0u).
+ModelPtr load_model_by_index(const std::string& logic_stem,
+                             const std::string& dir,
+                             std::uint32_t pci_chip_id,
                              std::string* error = nullptr) noexcept;
 
 ModelInfo describe(const Model& model);
@@ -146,7 +159,8 @@ Features compute_features(const Model& model,
 // True when the model was trained for `context` on `hardware`. v2 models cover
 // only every CU (cu_budget 0 or at least hardware.N_CU) with Schedule::Default.
 // v3 models cover the schedules they list and the CU budgets whose usable
-// CUs, as a fraction of hardware.N_CU, lie in their range (ModelInfo).
+// CUs, as a fraction of hardware.N_CU, lie in their range and, for a model
+// with a CU floor, number at least that floor (ModelInfo).
 bool supports(const Model& model,
               const ExecutionContext& context,
               const Hardware& hardware) noexcept;

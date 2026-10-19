@@ -4319,7 +4319,8 @@ def probe_model(
 ) -> bytes:
     """Model file bytes of an untrained one-cell bundle in the format a run
     with these options deploys: its catalog and attribute spec, serving
-    options, clip bounds and weight dtype."""
+    options, clip bounds, weight dtype and, for MLREC_v3, declared contexts
+    with their CU floor (`declared_contexts`, here of a device of one CU)."""
     names = catalog.names()
     student = GenericTwoTower(
         *(len(n) for n in names),
@@ -4348,6 +4349,7 @@ def probe_model(
         meta = {
             "catalog": "v3",
             "attribute_spec": [a.to_dict() for a in catalog.spec],
+            "contexts": declared_contexts([], 1),
             "clip": clip,
         }
         if serving.get("trained_key_gate"):
@@ -4378,7 +4380,15 @@ def engine_round_trip_errors(data: bytes, tw: Any) -> List[str]:
         "inter_dim": parsed["dims"][2],
     }
     if parsed["version"] == 3:
-        want.update(parsed["serving"], clip=parsed["clip"])
+        contexts = parsed["contexts"]
+        want.update(
+            parsed["serving"],
+            clip=parsed["clip"],
+            min_cu_fraction=contexts["min_cu_fraction"],
+            max_cu_fraction=contexts["max_cu_fraction"],
+            schedules=ev.mlrec.schedule_mask(contexts["schedules"]),
+            min_effective_cus=contexts.get("min_effective_cus", 0),
+        )
     out = []
     for key, value in want.items():
         if not hasattr(info, key):
@@ -4678,6 +4688,13 @@ def trained_cu_fraction(gemms: Sequence[Mapping[str, Any]], n_cu: int) -> float:
     )
 
 
+def trained_effective_cus(gemms: Sequence[Mapping[str, Any]], n_cu: int) -> int:
+    """The fewest usable CUs of `gemms` on a device of `n_cu` CUs: the
+    smallest budget a model trained on them saw (`n_cu` when every GEMM had
+    every CU)."""
+    return min((ev.context_of(g).effective_cus(n_cu) for g in gemms), default=n_cu)
+
+
 def declared_contexts(
     gemms: Sequence[Mapping[str, Any]],
     n_cu: int,
@@ -4687,8 +4704,11 @@ def declared_contexts(
     """The contexts an MLREC_v3 model declares: usable-CU fractions from the
     smallest share it trained (`trained_cu_fraction` of `gemms`), or from
     `min_cu_fraction` when that is larger, to 1, so that serving falls back
-    below the lowest trained share; and the `schedules` (default: default
-    plus those in `gemms`)."""
+    below the lowest trained share; the CU floor, the fewest usable CUs it
+    trained (`trained_effective_cus`), so that serving also falls back on a
+    smaller device (a compute partition) for fewer CUs than it trained,
+    where the fraction alone looks in range; and the `schedules` (default:
+    default plus those in `gemms`)."""
     seen = [ev.context_of(g) for g in gemms]
     if min_cu_fraction is not None and not 0.0 < float(min_cu_fraction) <= 1.0:
         raise ValueError(f"min CU fraction {min_cu_fraction} must be in (0, 1]")
@@ -4706,6 +4726,7 @@ def declared_contexts(
         "min_cu_fraction": lo,
         "max_cu_fraction": 1.0,
         "schedules": [x for x in fs.SCHEDULES if x in names],
+        "min_effective_cus": trained_effective_cus(gemms, n_cu),
     }
 
 

@@ -1768,6 +1768,31 @@ def test_the_audit_digests_an_alias_group_once(tmp_path):
     assert al.kernel_digest(plain) == old
 
 
+def test_the_audit_digest_of_a_hand_written_kernel_is_what_it_was():
+    """A kernel written by hand carries the launch rule's hand-written
+    attribute, which its name already tells apart: its identity and audit
+    digest are those it had before the launch rule read the attribute."""
+    import hashlib
+
+    from lib import dat
+    from lib import features as fs
+
+    sol = solution(9, 0, tileProcessingStrategy="StreamK")
+    sol["customKernel"] = {"name": sol["name"], "generated": False}
+    hand = dat.kernel_dat_info(sol)
+    assert hand["attributes"][dat.HAND_WRITTEN] == 1
+    before = {k: v for k, v in hand["attributes"].items() if k != dat.HAND_WRITTEN}
+    assert ki.identity_attributes(hand) == before
+    body = {
+        "name": hand["kernel_name"],
+        "config": fs.config_kwargs_from_row(hand),
+        "attributes": before,
+    }
+    old = hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
+    assert al.kernel_digest(hand) == old
+    assert ki.kernel_id(hand) == ki.kernel_id(dict(hand, attributes=before))
+
+
 LIVE_DIR = os.environ.get("TILEWRIGHT_GFX950_LIBRARY_DIR")
 
 

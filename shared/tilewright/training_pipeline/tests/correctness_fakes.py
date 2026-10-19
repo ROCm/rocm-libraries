@@ -41,6 +41,21 @@ arguments and prints its JSON lines. FAKE_ERRMAP_SPEC names a JSON file:
   delay_shape  "<M>x<N>": it waits on that shape only
   broken       true: every process fails before it reports ready
   broken_ids   [--ids value, ...]: a process of those --ids does
+  reads_before {"<solution index>": {"A": w, "B": w}}: the solution reads A
+               (B) w elements at a time along its leading free dimension
+               (M of A with --trans-a N, N of B with --trans-b T) without a
+               guard: at a smaller free size it reads before the operand,
+               which kills the process (139) when the operands are at fresh
+               allocations (--fresh 1 and `fresh_alloc`) and goes unseen,
+               the result exact, otherwise
+  fresh_alloc  false: a process asked for --fresh 1 cannot place its
+               operands so, as on a device without virtual memory
+               management, and its ready line says so (default true)
+  no_fresh_shapes
+               ["<M>x<N>", ...]: a process of those shapes cannot either,
+               as when one of its virtual memory calls fails
+  caps         the options `--caps` lists (default ["fresh"]); null: the
+               harness refuses --caps, as one built before it existed does
   log          a file each process appends its arguments to, one JSON line
 
 Like the harness, it refuses a leading dimension below the rows its matrix
@@ -149,8 +164,20 @@ def _leading_dimension_error(m: int, n: int, k: int, opts: Dict[str, str]) -> st
 
 def harness_main(argv: Sequence[str]) -> int:
     spec = json.loads(Path(os.environ["FAKE_ERRMAP_SPEC"]).read_text())
+    if list(argv) == ["--caps"]:
+        caps = spec.get("caps", ["fresh"])
+        if caps is None:
+            print(
+                "usage: errmap M N K BATCH --ids I1,I2,... [options]", file=sys.stderr
+            )
+            return 1
+        print(json.dumps({"caps": caps}))
+        return 0
     m, n, k, b = (int(x) for x in argv[:4])
     opts = dict(zip(argv[4::2], argv[5::2]))
+    if "--fresh" in opts and "fresh" not in (spec.get("caps", ["fresh"]) or []):
+        print("unknown argument --fresh", file=sys.stderr)
+        return 1
     ids = [int(x) for x in opts["--ids"].split(",")]
     reps = int(opts.get("--reps", "1"))
     if spec.get("log"):
@@ -167,8 +194,20 @@ def harness_main(argv: Sequence[str]) -> int:
     if len(ids) == 1:
         missing |= set(spec.get("missing_alone", []))
     found = [sid for sid in ids if sid not in missing]
-    print(json.dumps({"ready": True, "algos": len(found), "sids": found}), flush=True)
     here = f"{m}x{n}"
+    fresh = (
+        opts.get("--fresh", "0") != "0"
+        and spec.get("fresh_alloc", True)
+        and here not in spec.get("no_fresh_shapes", [])
+    )
+    print(
+        json.dumps({"ready": True, "algos": len(found), "sids": found, "fresh": fresh}),
+        flush=True,
+    )
+    leading = {
+        "A": (opts.get("--trans-a", "T") == "N", m),
+        "B": (opts.get("--trans-b", "N") == "T", n),
+    }
     delay = float(spec.get("delay", 0)) * (spec.get("delay_shape", here) == here)
     scaled = {op for op in "ab" if opts.get(f"--scale-{op}", "0") != "0"}
     first = True
@@ -183,6 +222,12 @@ def harness_main(argv: Sequence[str]) -> int:
             continue
         if sid in spec.get("crash", []) or (
             sid in spec.get("crash_once", []) and _counted(spec, f"crash_{sid}") == 1
+        ):
+            sys.stdout.flush()
+            os._exit(139)
+        widths = spec.get("reads_before", {}).get(str(sid), {})
+        if fresh and any(
+            leading[op][0] and leading[op][1] < int(w) for op, w in widths.items()
         ):
             sys.stdout.flush()
             os._exit(139)

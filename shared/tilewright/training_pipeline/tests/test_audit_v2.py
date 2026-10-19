@@ -320,6 +320,165 @@ def test_an_increment_plans_only_gemms_whose_sets_lack_a_pick(tmp_path):
         v2.plan(tmp_path, gemms=gemms, lines=lines, parts=parts, new_models=[clash])
 
 
+def test_no_set_holds_a_blocked_kernel_and_a_set_planned_again_drops_one(tmp_path):
+    """The blocklist of a plan (the run's and the audit set's) keeps its
+    kernels out of every set and pick, drops them from a set an earlier
+    generation planned, names itself in the manifest and the generation, and
+    refuses a measurement whose canary it blocks."""
+    a, b = (64, 64, 64, 1), (128, 64, 64, 1)
+    gemms = {
+        (al.EXCLUSIVE, a): _g(a, [(1, 10.0), (2, 10.5), (3, 20.0)]),
+        (al.EXCLUSIVE, b): _g(b, [(1, 8.0), (2, 30.0), (3, 40.0)]),
+    }
+    lines = {
+        s: f"- {{M: {s[0]}, N: {s[1]}, K: {s[2]}, batch_count: {s[3]}}}" for s in (a, b)
+    }
+    parts = {al.EXCLUSIVE: [[a, b]]}
+    picks2 = v2.Model("m1", "1" * 64, "x", {(al.EXCLUSIVE, a): 2, (al.EXCLUSIVE, b): 2})
+    first = tmp_path / "first"
+    rec = {"file": "blocklists/plan_x.json", "sha256": "f" * 64, "kernels": 1}
+    v2.plan(
+        first,
+        gemms=gemms,
+        lines=lines,
+        parts=parts,
+        new_models=[picks2],
+        blocked={2},
+        blocklist=rec,
+    )
+    assert v2.current_sets(first) == {(al.EXCLUSIVE, a): [1], (al.EXCLUSIVE, b): [1]}
+    p0 = json.loads((first / "gen_000" / "plan.json").read_text())
+    assert all(e["picks"] == {} for part in p0["groups"][al.EXCLUSIVE] for e in part)
+    assert all(
+        2 not in line_solution_list(e["line"])
+        for part in p0["groups"][al.EXCLUSIVE]
+        for e in part
+    )
+    assert p0["blocklist"] == rec and v2.manifest(first)["blocklist"] == rec
+    assert v2.manifest(first)["generations"][0]["blocklist"] == rec
+    # A set planned before the blocklist named its kernel drops it when
+    # planned again.
+    d = tmp_path / "again"
+    v2.plan(d, gemms=gemms, lines=lines, parts=parts, new_models=[picks2])
+    assert v2.current_sets(d)[(al.EXCLUSIVE, a)] == [1, 2]
+    picks3 = v2.Model("m3", "3" * 64, "x", {(al.EXCLUSIVE, a): 3})
+    gen = v2.plan(
+        d, gemms=gemms, lines=lines, parts=parts, new_models=[picks3], blocked={2}
+    )
+    assert gen == 1
+    p1 = json.loads((d / "gen_001" / "plan.json").read_text())
+    (entry,) = [e for part in p1["groups"][al.EXCLUSIVE] for e in part]
+    assert entry["kernels"] == [1, 3] and entry["picks"] == {"m3": 3}
+    assert "blocklist" not in p1, "a plan without a blocklist names none"
+    canary = v2.manifest(d)["canary"]["kernel"]
+    with pytest.raises(v2.V2Error, match="canary of the measurement"):
+        v2.plan(
+            d, gemms=gemms, lines=lines, parts=parts, new_models=[], blocked={canary}
+        )
+
+
+def test_a_worker_leaves_out_what_the_latest_blocklist_blocks(tmp_path):
+    """A part planned before its blocklist named a kernel is benched
+    without it: no line lists it, the pick of it is no pick, and the
+    result names the kernels left out and the blocklist by its sha256."""
+    calls = []
+    bench = _bench(tmp_path, {**v2.DEFAULTS, "repetitions": 3}, calls)
+    rec = {"file": "blocklists/plan_x.json", "sha256": "a" * 64, "kernels": 2}
+    bench.m["blocklist"] = rec
+    bench.blocked = frozenset({13, 22})
+    res = bench.bench_part(0, al.EXCLUSIVE, 0, [dict(e) for e in ENTRIES])
+    listed = {k for lines in calls for ln in lines for k in line_solution_list(ln)}
+    assert listed and not listed & {13, 22}
+    assert res["left_out"] == [13, 22] and res["blocklist"] == rec
+    by_shape = {tuple(g["shape"]): g for g in res["gemms"]}
+    assert by_shape[A]["kernels"] == [11, 12, 14, 15]
+    assert by_shape[B]["kernels"] == [21] and by_shape[B]["picks"] == {}
+    assert by_shape[B]["winner"] == 21
+    calls.clear()
+    plain = _bench(tmp_path / "plain", {**v2.DEFAULTS, "repetitions": 3}, calls)
+    res = plain.bench_part(0, al.EXCLUSIVE, 0, [dict(e) for e in ENTRIES])
+    assert "left_out" not in res and "blocklist" not in res
+    with pytest.raises(v2.V2Error, match="canary"):
+        v2.blocked_canary({"canary": {"kernel": 13, "shape": [1, 1, 1, 1]}}, {13})
+    v2.blocked_canary({}, {13})
+
+
+def test_bench_reads_the_blocklist_its_plan_wrote(tmp_path):
+    from lib import correctness as cx
+
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    sols = [bf.solution(i, i, mt=(64, 64, 64)) for i in range(3)]
+    for s in sols:
+        s["name"] = f"Cijk_K{s['index']}"
+    bf.write_logic(lib / f"{bf.LIBRARY_STEM}.dat", sols)
+    d = tmp_path / "v2"
+    rec = al.write_blocklist_file(d, "plan", cx.Blocklist([cx.Entry("Cijk_K1")]))
+    m = {
+        "blocklist": rec,
+        "bench": {"library": {"dir": str(lib), "stems": [bf.LIBRARY_STEM]}},
+    }
+    assert audit_v2_script.bench_blocked(d, m) == {1}
+    assert audit_v2_script.bench_blocked(d, {"bench": m["bench"]}) == set()
+    assert audit_v2_script.bench_blocked(d, {"blocklist": rec}) == set()
+    path = d / rec["file"]
+    kept = path.read_bytes()
+    cx.write_blocklist(path, cx.Blocklist([cx.Entry("Cijk_K2")]))
+    with pytest.raises(v2.V2Error, match="is not the one"):
+        audit_v2_script.bench_blocked(d, m)
+    path.write_bytes(kept)
+    assert audit_v2_script.bench_blocked(d, m) == {1}
+    unsigned = {k: v for k, v in rec.items() if k != "sha256"}
+    with pytest.raises(v2.V2Error, match="is not the one"):
+        audit_v2_script.bench_blocked(d, dict(m, blocklist=unsigned))
+    path.unlink()
+    with pytest.raises(v2.V2Error, match="cannot read the blocklist"):
+        audit_v2_script.bench_blocked(d, m)
+
+
+def test_the_plan_blocklist_holds_the_evaluating_runs_own(tmp_path):
+    """The blocklist plan writes holds what the evaluating run's own config
+    blocks, alone while the audit set recorded none and with the set's
+    recorded ones once it did, each named among its sources, and the bench
+    reads back their union."""
+    from lib import correctness as cx
+    from lib import kernel_identity as ki
+
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    sols = [bf.solution(i, i, mt=(64, 64, 64)) for i in range(4)]
+    for s in sols:
+        s["name"] = f"Cijk_K{s['index']}"
+    bf.write_logic(lib / f"{bf.LIBRARY_STEM}.dat", sols)
+    identity = ki.library_identity(lib, [bf.LIBRARY_STEM])
+    own = tmp_path / "own.tsv"
+    own.write_text("X\tCijk_K1\n")
+    cfg = {"correctness": {"lists": [str(own)]}}
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    alone = tmp_path / "alone"
+    blocked, rec = audit_v2_script.plan_blocklist(alone, cfg, audit, identity)
+    assert blocked == {1} and rec["kernels"] == 1
+    assert cx.read_list(alone / rec["file"]).names == {"Cijk_K1"}
+    built = al.write_blocklist_file(
+        audit, "source", cx.Blocklist([cx.Entry("Cijk_K2")])
+    )
+    (audit / al.MANIFEST).write_text(json.dumps({"blocklists": [built]}))
+    d = tmp_path / "both"
+    blocked, rec = audit_v2_script.plan_blocklist(d, cfg, audit, identity)
+    assert blocked == {1, 2}
+    doc = json.loads((d / rec["file"]).read_text())
+    assert {e["name"] for e in doc["entries"]} == {"Cijk_K1", "Cijk_K2"}
+    assert [s["from"] for s in doc["sources"]] == ["the run's config", "the audit set"]
+    assert doc["sources"][0]["digest"] == cx.names_digest(cx.read_list(own))
+    assert doc["sources"][1]["sha256"] == built["sha256"]
+    m = {
+        "blocklist": rec,
+        "bench": {"library": {"dir": str(lib), "stems": [bf.LIBRARY_STEM]}},
+    }
+    assert audit_v2_script.bench_blocked(d, m) == {1, 2}
+
+
 # ── the kernel order of every repetition, without a bench ────────────────────
 
 
@@ -911,6 +1070,134 @@ def test_v2_records_without_identities_score_by_the_generations_of_their_plan(
             assert gs[label]["status"] == "needs_new_measurement"
             assert "need a new v2 measurement" in gs[label]["reason"]
             assert model["v2"]["groups"][label] is None
+
+
+def test_a_record_without_identities_naming_a_blocked_kernel_is_planned_on(
+    v2world, tmp_path
+):
+    """The v2 measurement as written before kernel identities were recorded,
+    whose sets name a kernel a blocklist the audit set was built with leaves
+    out, planned with a run whose own list leaves out another: the plan
+    reads which kernel each index names from the whole pool, so it does not
+    take the blocked kernel for one of another build, and its blocklist
+    holds both."""
+    import yaml
+
+    from lib import correctness as cx
+    from lib import kernel_identity as ki
+
+    audit = shutil.copytree(v2world["audit"], tmp_path / "audit_set")
+    d = v2.v2_dir(audit)
+    for p in [*d.glob("gen_*/plan.json"), *(d / "models").glob("*.json")]:
+        doc = json.loads(p.read_text())
+        doc.pop(ki.RECORD_KEY)
+        p.write_text(json.dumps(doc))
+    m = v2.manifest(d)
+    m["canary"].pop(ki.RECORD_KEY)
+    (d / v2.MANIFEST).write_text(json.dumps(m))
+    names = {int(k["index"]): k["name"] for k in v2world["kernels"]}
+    canary = names[int(m["canary"]["kernel"])]
+    named = sorted({s for p in v2.plans(d) for s in v2.plan_indices(p)})
+    blocked = next(s for s in named if names[s] != canary)
+    own = next(s for s in sorted(names) if names[s] not in (canary, names[blocked]))
+    rec = al.write_blocklist_file(
+        audit, "source", cx.Blocklist([cx.Entry(names[blocked])])
+    )
+    am = al.manifest(audit)
+    am["blocklists"] = [rec]
+    (audit / al.MANIFEST).write_text(json.dumps(am))
+    listed = tmp_path / "own.tsv"
+    listed.write_text(f"X\t{names[own]}\n")
+    cfg = yaml.safe_load(v2world["cfg_path"].read_text())
+    cfg["correctness"] = {"lists": [str(listed)]}
+    cfg_path = tmp_path / "train.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    proc = subprocess.run(
+        [sys.executable, str(AUDIT_V2), "plan", "--audit-dir", str(audit)]
+        + ["--config", str(cfg_path)],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "cannot mix builds" not in out
+    plan_blocklist = cx.read_list(d / v2.manifest(d)["blocklist"]["file"])
+    assert plan_blocklist.names == {names[blocked], names[own]}
+
+
+def _sustained_entries(sd):
+    return [
+        e
+        for p in v2.plans(sd)
+        for part in (p.get("groups") or {}).get(al.EXCLUSIVE) or []
+        for e in part
+    ]
+
+
+def test_the_sustained_plan_ranks_the_medians_of_the_evaluation_pool_alone(
+    v2world, tmp_path
+):
+    """The v2 measurement as written before kernel identities were recorded,
+    after a rebuild that renumbers the pool, and a blocklist the audit set
+    was built with naming the v2 winner of a power-capped exclusive GEMM:
+    the sustained measurement planned again reads the medians at their
+    kernels' current indices by the audit set's kernel digests, and takes
+    no winner, stratum or near winner from the blocked kernel's median."""
+    from lib import correctness as cx
+
+    names = {int(k["index"]): k["name"] for k in v2world["kernels"]}
+    canary = int(v2.manifest(v2world["v2"])["canary"]["kernel"])
+    before = _sustained_entries(asus.sustained_dir(v2world["audit"]))
+    audit, cfg_path, _, _ = _unrecorded_after_a_rebuild(v2world, tmp_path)
+    moved = {s + 50: n for s, n in names.items()}
+    # Not the canary's kernel, nor the kernel whose index after the rebuild
+    # is the one the canary still records.
+    entry = next(
+        e
+        for e in before
+        if names[int(e["v2_winner"][0])] not in (names[canary], names.get(canary - 50))
+    )
+    won = names[int(entry["v2_winner"][0])]
+    blocked = {s for s, n in moved.items() if n == won}
+    rec = al.write_blocklist_file(audit, "source", cx.Blocklist([cx.Entry(won)]))
+    am = al.manifest(audit)
+    am["blocklists"] = [rec]
+    (audit / al.MANIFEST).write_text(json.dumps(am))
+    sd = asus.sustained_dir(audit)
+    shutil.rmtree(sd)
+    argv = ["plan", "--audit-dir", str(audit), "--config", str(cfg_path)]
+    args = audit_v2_script._parse_args(argv + SETTINGS + SUSTAINED)
+    assert audit_v2_script.plan_sustained(args) == 0
+    again = {tuple(e["shape"]): e for e in _sustained_entries(sd)}
+    assert tuple(entry["shape"]) in again
+    for e in again.values():
+        assert int(e["v2_winner"][0]) in moved, "read at the current indices"
+        assert int(e["v2_winner"][0]) not in blocked, e["shape"]
+        assert not {int(k) for k in e["kernels"] + e["candidates"]} & blocked
+    redone = again[tuple(entry["shape"])]
+    assert redone["v2_winner"][1] >= entry["v2_winner"][1], "the next fastest"
+
+
+def test_bench_refuses_a_blocklist_file_that_is_not_its_plans(v2world, tmp_path):
+    """`audit_v2.py bench` stops with exit status 2, benching nothing, when
+    the file of the blocklist its plan recorded no longer holds what the
+    manifest's sha256 says."""
+    from lib import correctness as cx
+
+    audit = shutil.copytree(v2world["audit"], tmp_path / "audit_set")
+    d = v2.v2_dir(audit)
+    rec = v2.manifest(d)["blocklist"]
+    cx.write_blocklist(d / rec["file"], cx.Blocklist([cx.Entry("Cijk_other")]))
+    proc = subprocess.run(
+        [sys.executable, str(AUDIT_V2), "bench", "--audit-dir", str(audit)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "is not the one" in out and "benched" not in out
 
 
 def test_paired_changes_are_given_per_protocol(v2world):

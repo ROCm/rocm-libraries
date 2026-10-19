@@ -559,6 +559,7 @@ def test_the_bench_launch_rule_matches_the_pipeline(tmp_path, arch, dtype):
             work_group_x=rng.choice([0, 64, 256, 1 << 20]),
             work_group_y=rng.choice([1, 4, 1 << 12]),
             work_group_z=rng.choice([1, 2]),
+            hand_written=rng.choice([0, 1]),
         )
         if attrs["tile_processing_strategy"] == 1:
             attrs["work_assignment"] = 0

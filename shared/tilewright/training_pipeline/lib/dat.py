@@ -19,7 +19,8 @@ order of its kernel pool. The file can hold solutions of other rows too.
 
 `kernel_dat_info` turns one solution into the kernel parameters the runtime
 hands tilewright (`tilewright::Config`, including its named attributes) plus
-its identifiers.
+its identifiers, and marks a kernel written by hand with the attribute
+HAND_WRITTEN, which hipBLASLt's launch rule reads.
 
 TDMInst is a bit mask of the operands the tensor data mover loads (bit 0 A,
 bit 1 B): the solution's `sizeMapping` value where it has one, else the
@@ -449,6 +450,26 @@ def missing_size_mapping_keys(sm: Mapping[str, Any]) -> List[str]:
     ]
 
 
+# The attribute of a kernel written by hand, 1 on such a kernel and absent on
+# every other. It comes from the solution's `customKernel`, not from its
+# sizeMapping, and TensileLite hands it to no engine: only the launch rule
+# (lib/hipblaslt_launch.py) reads it, since TensileLite reduces the partial
+# tiles of a hand-written Stream-K kernel in a tree only.
+HAND_WRITTEN = "hand_written"
+
+
+def is_hand_written(sol: Mapping[str, Any]) -> bool:
+    """Whether a solution's kernel was written by hand: its `customKernel`
+    names a kernel and does not say that it was generated, an absent
+    `generated` being false (ContractionSolution::handwrittenCustomKernel)."""
+    ck = sol.get("customKernel")
+    return (
+        isinstance(ck, Mapping)
+        and bool(ck.get("name"))
+        and not bool(ck.get("generated", False))
+    )
+
+
 def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
     """Identifiers and `tilewright::Config` parameters of one solution:
 
@@ -457,7 +478,8 @@ def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
     occupancy (CUOccupancy clamped to >= 1),
     cache_hints_a, cache_hints_b (0 for a TDM-loaded operand),
     grvw_a, grvw_b, gwvw_d,
-    attributes (`kernel_attributes`),
+    attributes (`kernel_attributes`, with HAND_WRITTEN 1 for a kernel
+      written by hand),
     tdm_inst (`tdm_inst`)
 
     ValueError, naming the solution, when its sizeMapping holds a value
@@ -470,6 +492,8 @@ def kernel_dat_info(sol: Dict[str, Any]) -> Dict[str, Any]:
         tdm = tdm_inst(sol)
     except ValueError as e:
         raise ValueError(f"solution {sol.get('index')}: {e}") from None
+    if is_hand_written(sol):
+        attributes[HAND_WRITTEN] = 1
     return {
         "sol_idx_global": sol.get("index"),
         "sol_idx_local": sol.get("libraryLogicIndex"),
@@ -691,8 +715,9 @@ def write_kernel_attributes(
     extra: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """`kernels.json`: the attributes of each solution index of `kernels`
-    (`kernel_dat_info` entries), as lists in ATTRIBUTE_NAMES order, and the
-    entries of `extra`."""
+    (`kernel_dat_info` entries), as lists in ATTRIBUTE_NAMES order, the
+    ascending solution indices of those written by hand under HAND_WRITTEN
+    when there are any, and the entries of `extra`."""
     doc = {
         "library_stem": library_stem,
         "attribute_names": list(ATTRIBUTE_NAMES),
@@ -702,12 +727,20 @@ def write_kernel_attributes(
         },
         **dict(extra or {}),
     }
+    hand = [
+        int(sid)
+        for sid, info in sorted(kernels.items())
+        if info["attributes"].get(HAND_WRITTEN)
+    ]
+    if hand:
+        doc[HAND_WRITTEN] = hand
     atomic_write_text(Path(path), json.dumps(doc, separators=(",", ":")) + "\n")
 
 
 def kernel_attributes_of_doc(doc: Mapping[str, Any]) -> Dict[int, Dict[str, int]]:
-    """Solution index -> attributes of a parsed `kernels.json`. ValueError
-    when it is malformed."""
+    """Solution index -> attributes of a parsed `kernels.json`, HAND_WRITTEN
+    1 on the kernels it lists as written by hand. ValueError when it is
+    malformed."""
     try:
         names = [str(n) for n in doc["attribute_names"]]
         if not all(names) or len(set(names)) != len(names):
@@ -717,6 +750,13 @@ def kernel_attributes_of_doc(doc: Mapping[str, Any]) -> Dict[int, Dict[str, int]
             if len(values) != len(names):
                 raise ValueError(f"solution {sid} has {len(values)} values")
             out[int(sid)] = {n: _int64(v, n) for n, v in zip(names, values)}
+        hand = doc.get(HAND_WRITTEN, [])
+        if not isinstance(hand, list):
+            raise ValueError(f"{HAND_WRITTEN} is not a list")
+        for sid in hand:
+            if isinstance(sid, bool) or not isinstance(sid, int) or sid not in out:
+                raise ValueError(f"{HAND_WRITTEN} lists {sid!r}, no solution of it")
+            out[sid][HAND_WRITTEN] = 1
     except (KeyError, TypeError, AttributeError, ValueError) as e:
         raise ValueError(f"not a kernel attribute file ({e})") from None
     return out

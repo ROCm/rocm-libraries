@@ -147,10 +147,11 @@ struct KernelInputs {
   std::int64_t assign   = 0;
   bool atomic           = false;
   std::int64_t threads  = 1;
+  bool hand_written     = false;
 
   bool operator==(const KernelInputs& o) const {
     return strategy == o.strategy && assign == o.assign && atomic == o.atomic &&
-           threads == o.threads;
+           threads == o.threads && hand_written == o.hand_written;
   }
 };
 
@@ -161,22 +162,42 @@ inline KernelInputs kernel_inputs(const tilewright::Config& config) {
   in.atomic   = attribute(config, "stream_k_atomic") != 0;
   for (const char* name : {"work_group_x", "work_group_y", "work_group_z"})
     in.threads *= std::max<std::int64_t>(attribute(config, name), 0);
+  in.hand_written = attribute(config, "hand_written") != 0;
   return in;
 }
 
-// launch_inputs: what plan() reads besides the tile sizes, with the values it
-// does not distinguish made equal.
-inline std::array<std::int64_t, 5> launch_inputs(const KernelInputs& in,
-                                                 const tilewright::Config& config) {
-  if (in.strategy != 1 && in.strategy != 2) return {0, 0, 0, 0, 0};
-  return {in.strategy,
-          in.assign,
-          in.atomic && in.strategy == 2 ? 1 : 0,
-          in.threads,
-          std::max<std::int64_t>(config.occupancy, 1)};
+// A hand-written Stream-K kernel that can run on a static grid (any
+// assignment but DynamicWorkQueue): TensileLite reduces its partial tiles in
+// a tree only.
+inline bool tree_only(const KernelInputs& in) {
+  return in.strategy == 2 && in.assign != 1 && in.hand_written;
 }
 
-inline std::array<std::int64_t, 5> launch_inputs(const tilewright::Config& config) {
+// launch_inputs: what plan() reads besides the tile sizes, with the values it
+// does not distinguish made equal, and a sixth value, 1, for a tree-only
+// kernel.
+struct LaunchInputs {
+  std::array<std::int64_t, 6> values{};
+  std::size_t size = 5;
+
+  const std::int64_t* begin() const { return values.data(); }
+  const std::int64_t* end() const { return values.data() + size; }
+};
+
+inline LaunchInputs launch_inputs(const KernelInputs& in, const tilewright::Config& config) {
+  LaunchInputs out;
+  if (in.strategy != 1 && in.strategy != 2) return out;
+  out.values = {in.strategy,
+                in.assign,
+                in.atomic && in.strategy == 2 ? 1 : 0,
+                in.threads,
+                std::max<std::int64_t>(config.occupancy, 1),
+                1};
+  out.size   = tree_only(in) ? 6 : 5;
+  return out;
+}
+
+inline LaunchInputs launch_inputs(const tilewright::Config& config) {
   return launch_inputs(kernel_inputs(config), config);
 }
 
@@ -236,8 +257,8 @@ inline tilewright::LaunchPlan plan(const KernelInputs& in,
       assign == 1 ||
       (assign == 2 &&
        hybrid_dynamic(context.schedule, runtime_choice, tiles, sm_target, n_cu, occupancy));
-  bool parallel =
-      tiles < cu_count && std::max<std::int64_t>(iters, 1) >= 64 && tiles <= cu_count / 4;
+  bool parallel = !tree_only(in) && tiles < cu_count && std::max<std::int64_t>(iters, 1) >= 64 &&
+                  tiles <= cu_count / 4;
 
   std::int64_t grid = tiles;
   if (dynamic) {

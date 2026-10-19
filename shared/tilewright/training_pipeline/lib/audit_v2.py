@@ -46,6 +46,15 @@ A GEMM whose winner or a pick spreads more than `spread_limit`
 (the same scheme) and its new readings replace the old; one that still
 spreads is flagged. Flags are recorded, never dropped.
 
+Blocked kernels. No set holds, and no bench times, a kernel the blocklist
+of the plan names (`blocked`: the evaluating run's blocklist and every one
+the audit set was built with, lib/audit.py `audit_blocklist`): a set planned
+again drops one an earlier generation's held, a pick of one is no pick, a
+canary of one refuses the plan, and a worker leaves out of a part's lines
+every kernel the manifest's latest blocklist (`blocklist`, named by its
+sha256 as each generation's plan names its own) blocks, which the part's
+result names (`left_out`).
+
 Hung lines. A repetition's stage03 run benches a line that hangs once
 more in its retry pass, in a process of its own, and quarantines it in the
 run when that does not bench it to the end, under the measurement's own
@@ -105,7 +114,9 @@ Layout of `<audit>/v2/`:
   bench/<group>/              the context wrappers (hipblaslt-bench,
                               context.json, cotenant_logs/)
   gen_NNN/plan.json           per group, the parts: GEMMs with their sets
-                              and bench lines
+                              and bench lines, and the blocklist planned with
+  blocklists/                 the blocklists of the plans (lib/audit.py
+                              `write_blocklist_file`)
   gen_NNN/<group>/part_NNNN/  a<k>/ per attempt (canary_start/, rep_<r>/,
                               canary_end/: stage03 in- and out-dirs),
                               spread/ for the spread re-bench, and
@@ -134,6 +145,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     Iterator,
     List,
@@ -543,6 +555,19 @@ def require_same_build(
             )
 
 
+def blocked_canary(m: Mapping[str, Any], blocked: Iterable[int]) -> None:
+    """V2Error when the canary of the measurement of manifest `m` is a
+    kernel of `blocked`: no bench may time it."""
+    c = m.get("canary") or {}
+    if c and int(c.get("kernel", -1)) in {int(k) for k in blocked}:
+        raise V2Error(
+            f"the canary of the measurement (solution {c['kernel']} on "
+            f"{'x'.join(str(x) for x in c.get('shape') or [])}) is a kernel the "
+            f"blocklist leaves out, which no bench may time: move the measurement "
+            f"aside to plan one with another canary"
+        )
+
+
 def plan(
     d: Path,
     *,
@@ -555,6 +580,8 @@ def plan(
     part_shapes: int = 32,
     identity: Optional[ki.LibraryIdentity] = None,
     kernels: Optional[AuditKernels] = None,
+    blocked: Iterable[int] = (),
+    blocklist: Optional[Mapping[str, Any]] = None,
 ) -> Optional[int]:
     """Register `new_models` and plan the generation that measures them:
     generation 0 (every GEMM of `gemms`, {(label, shape): exhaustive GEMM},
@@ -564,10 +591,13 @@ def plan(
     `bench` the bench setup (binary, config, wrappers). With `identity`, the
     library the picks and `gemms` index, the kernel ids are recorded and
     earlier records must name the same kernels (`require_same_build`); with
-    `kernels`, earlier records without kernel identities must too.
-    Returns the new generation's index, or None when every set holds every
-    pick."""
+    `kernels`, earlier records without kernel identities must too. No set
+    holds a solution of `blocked` (a set planned again drops it), and
+    `blocklist`, the record of the blocklist they come from, is the
+    manifest's latest and the new generation's. Returns the new
+    generation's index, or None when every set holds every pick."""
     d = Path(d)
+    blocked = {int(k) for k in blocked}
     if identity is not None or kernels is not None:
         require_same_build(d, identity, kernels)
     m = manifest(d)
@@ -598,6 +628,9 @@ def plan(
         }
     elif bench:
         m["bench"] = {**dict(m.get("bench") or {}), **dict(bench)}
+    blocked_canary(m, blocked)
+    if blocklist is not None:
+        m["blocklist"] = dict(blocklist)
     st = settings_of(m)
     have = models(d)
     for mod in new_models:
@@ -633,16 +666,20 @@ def plan(
         cands = candidates(
             g, st["set_tolerance"], st["set_max"], st["set_tolerance_us"]
         )
-        kernels = list(dict.fromkeys([*sets.get(key, []), *cands]))
-        row_ids = {int(c["sol_idx_global"]) for c in g["candidates"]}
-        for sid in (picks.get(key) or {}).values():
+        cands = [k for k in cands if k not in blocked]
+        kernels = [
+            k for k in dict.fromkeys([*sets.get(key, []), *cands]) if k not in blocked
+        ]
+        row_ids = {int(c["sol_idx_global"]) for c in g["candidates"]} - blocked
+        mine = {n: s for n, s in (picks.get(key) or {}).items() if s not in blocked}
+        for sid in mine.values():
             if sid in row_ids and sid not in kernels:
                 kernels.append(sid)
         return {
             "shape": list(key[1]),
             "kernels": kernels,
             "candidates": cands,
-            "picks": dict(sorted((picks.get(key) or {}).items())),
+            "picks": dict(sorted(mine.items())),
             "line": rb.rebench_line(lines[key[1]], kernels),
         }
 
@@ -660,7 +697,7 @@ def plan(
                     have_set = set(sets.get(key, []))
                     row_ids = {
                         int(c["sol_idx_global"]) for c in gemms[key]["candidates"]
-                    }
+                    } - blocked
                     need = {
                         sid
                         for sid in (picks.get(key) or {}).values()
@@ -685,6 +722,8 @@ def plan(
         "models": sorted(models(d)),
         "groups": groups,
     }
+    if blocklist is not None:
+        doc["blocklist"] = dict(blocklist)
     if identity is not None:
         named = {int(m["canary"]["kernel"])}
         for parts_ in groups.values():
@@ -700,6 +739,7 @@ def plan(
             "models": [mod.name for mod in new_models],
             "n_gemms": sum(len(p) for parts_ in groups.values() for p in parts_),
             "n_parts": sum(len(parts_) for parts_ in groups.values()),
+            **({"blocklist": dict(blocklist)} if blocklist is not None else {}),
         }
     )
     _write(d / MANIFEST, m)
@@ -978,6 +1018,9 @@ class Bench:
     # why the run holds the GPU, or the host, as wedged (lib/gpu_health.py
     # `wedge_holds`), else None: a hold no wait ends
     wedged: Callable[[], Optional[str]] = lambda: None
+    # the solutions the manifest's latest blocklist leaves out, which no
+    # line of a part times (`bench_part`)
+    blocked: FrozenSet[int] = frozenset()
 
     @property
     def st(self) -> Dict[str, Any]:
@@ -1175,9 +1218,30 @@ class Bench:
         return False
 
     def bench_part(self, gen: int, label: str, i: int, entries: List[Dict[str, Any]]):
-        """Bench one part and write its result.json."""
+        """Bench one part and write its result.json, every kernel of
+        `blocked` left out of its sets (`left_out` names them)."""
         t0 = time.time()
         root = part_path(self.d, gen, label, i)
+        left_out = sorted(
+            {int(k) for e in entries for k in e["kernels"] if int(k) in self.blocked}
+        )
+        if left_out:
+            self.log(
+                f"g{gen}/{label}/{i}: {len(left_out)} kernel(s) of its sets are "
+                f"blocked and left out: {left_out[:5]}"
+            )
+            entries = [
+                dict(
+                    e,
+                    kernels=[k for k in e["kernels"] if int(k) not in self.blocked],
+                    picks={
+                        n: s
+                        for n, s in (e.get("picks") or {}).items()
+                        if int(s) not in self.blocked
+                    },
+                )
+                for e in entries
+            ]
         main = self.bench_round(root, label, entries, f"g{gen}/{label}/{i}")
         reads, orders = main["readings"], main["orders"]
         dropped = dict(main["dropped"])
@@ -1244,6 +1308,12 @@ class Bench:
             ),
             "n_spread_flagged": sum(1 for g in gemms if g["flagged"]),
             "n_dropped": sum(1 for g in gemms if g.get("dropped")),
+            **(
+                {"blocklist": dict(self.m["blocklist"])}
+                if self.m.get("blocklist")
+                else {}
+            ),
+            **({"left_out": left_out} if left_out else {}),
             "gemms": gemms,
             "wall_s": round(time.time() - t0, 3),
             "finished": datetime.now().isoformat(timespec="seconds"),

@@ -35,10 +35,30 @@ Layout of an audit directory:
   increments/inc_NNN/   a later kernel-pool change: the new kernels only,
                         benched on every audit GEMM, with their own stage04;
                         increment.json lists them with their kernel ids
+  blocklists/           the blocklists the set was built with
+                        (`write_blocklist_file`), named by their sha256
 
 Contexts: every configured context (trained and held out) benches
 `audit.shapes_per_context` of each cell's `audit.shapes_per_cell` shapes
 through the stage03c wrapper; the exclusive context benches all of them.
+
+Blocked kernels: the set never benches a kernel that the runs it is built
+for leave out of their pools, the gate's blocklist and the lists they apply
+and the sidecars their deploys staged (`source_blocklist`: the config's and
+every source run's), but for a kernel a run's hazard canary only kept out
+unchecked and no snapshot of the run names for a finding (`verified_blocks`,
+`run_unchecked`): the set's own canary runs that alone first. Each
+invocation writes their union, with every kernel a blocklist the set applied
+before names (`build_blocklist`), into `blocklists/` and its stages apply it
+as their config's list (`bench_config`): the exhaustive plan lists none of
+its kernels, and a part benched later leaves out what it names then. The
+manifest names every blocklist applied by its sha256 (`blocklists`, and each
+generation's `blocklist`) and the kernels of the pool they left out by
+kernel digest (`left_out`), which the completeness check never waits for
+(`unbenched`), whichever run asks; an evaluation treats every kernel those
+blocklists name as outside the pool (`audit_blocklist`): it is never a
+winner, a ceiling or a candidate, whatever the evaluating run's own
+blocklist says.
 
 Never trained on: rounds draw no audit shape (stage01 --exclude-shapes-yaml,
 which also forbids re-use), and stage05 refuses any input inside an audit
@@ -184,14 +204,19 @@ def context_fraction(st: Mapping[str, Any]) -> float:
     return float(st["shapes_per_context"]) / float(st["shapes_per_cell"])
 
 
-def bench_config(cfg: Mapping[str, Any], devices: Optional[Sequence[int]] = None):
+def bench_config(
+    cfg: Mapping[str, Any],
+    devices: Optional[Sequence[int]] = None,
+    blocklist: Optional[Any] = None,
+):
     """The config the audit's stages run with: the training config with an
     exhaustive planner (no model, no seed bootstrap), every context (trained
     and held out) benching `shapes_per_context` per cell and enriched with
-    the exclusive rows, the near-winner re-reads on, nothing deployed, and no
-    correctness section: the set benches every kernel of the pool, and the
-    runs that share it leave out the kernels their own blocklists name when
-    they evaluate on it (lib/correctness.py)."""
+    the exclusive rows, the near-winner re-reads on, nothing deployed, and a
+    correctness section whose one list is `blocklist`, the blocklist of the
+    runs the set is built for (`source_blocklist`, `write_blocklist_file`;
+    none without it), which every stage of the set then applies
+    (lib/correctness.py): the set runs no gate of its own."""
     from .contexts import contexts_from_config
 
     st = settings(cfg)
@@ -224,9 +249,309 @@ def bench_config(cfg: Mapping[str, Any], devices: Optional[Sequence[int]] = None
     out["stage07"] = {"parity_sample_trained": 0, "bench_yamls": []}
     out["stage08"] = {"datasets": []}
     out.pop("correctness", None)
+    if blocklist is not None:
+        out["correctness"] = {"lists": [str(blocklist)]}
     if devices is not None:
         out["runtime"] = {**dict(out["runtime"]), "devices": [int(d) for d in devices]}
     return out
+
+
+BLOCKLISTS = "blocklists"
+
+
+def write_blocklist_file(
+    directory: Path, prefix: str, blocklist: Any, sources: Sequence[Any] = ()
+) -> Dict[str, Any]:
+    """Write `blocklist` (lib/correctness.py) with where its kernels come
+    from (`sources`) to `<directory>/blocklists/<prefix>_<sha256[:16]>.json`
+    (kept when it exists) and return what a record names it by: the file
+    relative to `directory`, its sha256, the digest of its names
+    (`lib.correctness.names_digest`) and how many kernels it names."""
+    from . import correctness as cx
+    from .fs import atomic_write_text
+
+    doc = blocklist.to_doc(sources=list(sources))
+    text = json.dumps(doc, indent=1, sort_keys=True) + "\n"
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    rel = Path(BLOCKLISTS) / f"{prefix}_{sha[:16]}.json"
+    path = Path(directory) / rel
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, text)
+    return {
+        "file": str(rel),
+        "sha256": sha,
+        "digest": cx.names_digest(blocklist),
+        "kernels": len(blocklist),
+    }
+
+
+def verified_blocks(blocklist: Any, unchecked: Any) -> Tuple[Any, int]:
+    """(`blocklist` without the hazard canary's entries keeping a kernel out
+    of an invocation unchecked, its run alone cut short or never run
+    (lib/hazards.py `kept_out_unchecked`), of the kernels `unchecked` names:
+    those the runs the entries come from never named for a finding
+    (`run_unchecked`); how many it held). Nothing was found against those
+    kernels, and the set's own canary runs them alone before any bench
+    does. A list's entries, the gate's findings (a failure, a crash, an
+    unguarded kernel), the canary's quarantine and the keep-out of any other
+    kernel stay: the gate lists a kernel the canary keeps out with the
+    canary's entry alone, so a keep-out can hide what a run's gate found in
+    another invocation."""
+    from . import correctness as cx
+    from . import hazards as hazlib
+
+    kept = [
+        e
+        for e in blocklist.entries
+        if not (hazlib.kept_out_unchecked(e) and unchecked.blocks_name(e.name))
+    ]
+    return cx.Blocklist(kept), len(blocklist) - len(kept)
+
+
+def _taken(path: Path, unchecked: Any) -> Tuple[Any, Dict[str, Any]]:
+    """(the entries of the blocklist file `path` an audit set takes,
+    `verified_blocks` with `unchecked`; the file as stage markers record it,
+    with the number of entries it holds that the set does not take,
+    `canary_unchecked`). ValueError when it cannot be read."""
+    from . import correctness as cx
+
+    kept, n = verified_blocks(cx.read_list(path), unchecked)
+    rec = cx.blocklist_record(path)
+    if n:
+        rec["canary_unchecked"] = n
+    return kept, rec
+
+
+def _snapshots(run_dir: Path) -> List[Path]:
+    """The config snapshots of the training run `run_dir`, oldest first."""
+    return sorted(
+        p
+        for p in (Path(run_dir) / "configs").glob("*.yaml")
+        if not p.name.endswith(".source.yaml")
+    )
+
+
+def run_blocklist(
+    run_dir: Path, unchecked: Optional[Any] = None
+) -> Tuple[Any, Optional[Path], List[Dict[str, Any]]]:
+    """(the blocklist of the newest invocation of the training run `run_dir`
+    that an audit set built for it takes: the union of the files its newest
+    config snapshot whose files can be read names,
+    `lib.correctness.config_files`, each without the hazard canary's
+    entries keeping out unchecked a kernel no snapshot of the run names for
+    a finding (`verified_blocks`; `unchecked`, default `run_unchecked`);
+    that snapshot; its files as stage markers record them, each with the
+    number of such entries it holds, `canary_unchecked`); (None, None, [])
+    for a run without a snapshot. ValueError when no snapshot's blocklist
+    can be read."""
+    import yaml
+
+    from . import correctness as cx
+
+    if unchecked is None:
+        unchecked = run_unchecked(run_dir)
+    problems = []
+    for snap in reversed(_snapshots(run_dir)):
+        try:
+            cfg = yaml.safe_load(snap.read_text()) or {}
+            out = cx.Blocklist()
+            records = []
+            for f in cx.config_files(cfg):
+                kept, rec = _taken(f, unchecked)
+                out = out.merged(kept)
+                records.append(rec)
+        except (OSError, ValueError, yaml.YAMLError) as e:
+            problems.append(f"{snap.name}: {e}")
+            continue
+        return out, snap, records
+    if problems:
+        raise ValueError(
+            f"no config snapshot of {run_dir} names a blocklist that can be read "
+            f"({'; '.join(problems[:3])})"
+        )
+    return None, None, []
+
+
+def run_sidecars(run_dir: Path, stem: str) -> List[Tuple[Any, Dict[str, Any]]]:
+    """(blocklist, record) of every sidecar the deploys of the training run
+    `run_dir` staged for library `stem` (each bundle's stage06 deploy
+    record, `lib.correctness.deployed_blocklist`): the kernels its runtime
+    left out when it served that bundle. A sidecar that cannot be read is a
+    record with its error and no blocklist."""
+    from . import correctness as cx
+
+    run = Path(run_dir)
+    out: List[Tuple[Any, Dict[str, Any]]] = []
+    records = sorted(run.glob("round_*/stage06/deploy_record.json"))
+    records += sorted(run.glob("final_retrain*/stage06/deploy_record.json"))
+    for path in records:
+        what = {"from": f"source run {run}", "deploy": str(path.relative_to(run))}
+        try:
+            doc = json.loads(path.read_text())
+            found = cx.deployed_blocklist(doc, stem) if isinstance(doc, dict) else None
+        except (OSError, ValueError) as e:
+            out.append((None, dict(what, error=str(e))))
+            continue
+        if found is not None:
+            out.append((found, dict(what, sidecar=True, kernels=len(found))))
+    return out
+
+
+def run_unchecked(run_dir: Path) -> Any:
+    """The kernels the hazard canary of the training run `run_dir` kept out
+    of an invocation unchecked (lib/hazards.py `kept_out_unchecked`) that no
+    other entry of the blocklist files its config snapshots name blocks: no
+    invocation of the run found anything against them (its gate's finding,
+    the canary's quarantine, a list), so its newest blocklist and the
+    sidecars its deploys staged name them for none. A snapshot or a file
+    that cannot be read adds nothing."""
+    import yaml
+
+    from . import correctness as cx
+    from . import hazards as hazlib
+
+    unchecked: List[Any] = []
+    found: List[Any] = []
+    for snap in _snapshots(run_dir):
+        try:
+            cfg = yaml.safe_load(snap.read_text())
+        except (OSError, yaml.YAMLError):
+            continue
+        for f in cx.config_files(cfg) if isinstance(cfg, dict) else []:
+            try:
+                entries = cx.read_list(f).entries
+            except ValueError:
+                continue
+            for e in entries:
+                (unchecked if hazlib.kept_out_unchecked(e) else found).append(e)
+    verified = cx.Blocklist(found)
+    return cx.Blocklist(e for e in unchecked if not verified.blocks_name(e.name))
+
+
+def source_blocklist(
+    train_cfg: Mapping[str, Any], source_runs: Sequence[Any] = ()
+) -> Tuple[Any, List[Dict[str, Any]]]:
+    """(the kernels the runs an audit set is built for leave out of their
+    pools for good, where they come from): the union of the blocklist of
+    the config it is built with (its `correctness.lists` and the gate
+    blocklist a run's snapshot names, `lib.correctness.config_files`), and
+    of each source run's: the blocklist it applied last (`run_blocklist`)
+    and the sidecars its deploys staged (`run_sidecars`), which its runtime
+    served with. None of them holds a kernel the hazard canary of a run only
+    kept out unchecked, its run alone cut short or never run, and no
+    snapshot of the run names for a finding (`run_unchecked`; for the
+    config's files, of any source run): the set's own canary runs such a
+    kernel alone first, and the set benches it once it passes. The config's
+    keep-out of a kernel no source run's snapshots show kept out unchecked
+    alone is taken (`verified_blocks`), and so is every keep-out of the
+    config when the set has no source run. ValueError when the config's or
+    a source run's blocklist cannot be read."""
+    from . import correctness as cx
+
+    out = cx.Blocklist()
+    parts: List[Dict[str, Any]] = []
+    given = list(source_runs)
+    runs = [Path(run) for run in given]
+    unchecked = {run: run_unchecked(run) for run in runs}
+    anywhere = cx.Blocklist()
+    for run in runs:
+        anywhere = anywhere.merged(unchecked[run])
+    for f in cx.config_files(train_cfg):
+        kept, rec = _taken(f, anywhere)
+        out = out.merged(kept)
+        parts.append({"from": "the config", **rec})
+    stem = str((train_cfg.get("hipblaslt") or {}).get("library_stem") or "")
+    for run, shown in zip(runs, given):
+        found, snap, records = run_blocklist(run, unchecked[run])
+        if found is None:
+            parts.append({"from": f"source run {shown}", "snapshot": None})
+        else:
+            out = out.merged(found)
+            for rec in records:
+                parts.append(
+                    {"from": f"source run {shown}", "snapshot": str(snap), **rec}
+                )
+        for side, rec in run_sidecars(run, stem):
+            if side is not None:
+                kept = cx.Blocklist(
+                    e for e in side.entries if not unchecked[run].blocks_name(e.name)
+                )
+                if len(kept) < len(side):
+                    rec = dict(rec, canary_unchecked=len(side) - len(kept))
+                out = out.merged(kept)
+            parts.append(rec)
+    return out, parts
+
+
+def recorded_blocklists(m: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """The blocklist records of an audit manifest (`blocklists` and each
+    generation's `blocklist`), one per sha256."""
+    out: Dict[str, Dict[str, Any]] = {}
+    recs = list(m.get("blocklists") or [])
+    recs += [g.get("blocklist") for g in m.get("generations") or []]
+    for rec in recs:
+        if isinstance(rec, Mapping) and rec.get("file") and rec.get("sha256"):
+            out.setdefault(str(rec["sha256"]), dict(rec))
+    return list(out.values())
+
+
+def audit_blocklist(audit_dir: Optional[Path]) -> Tuple[Any, List[Dict[str, Any]]]:
+    """(the union of the blocklists the audit set in `audit_dir` was built
+    with, their records): every kernel a run it was built for left out of
+    its pool, which an evaluation treats as outside the pool too; (None, [])
+    without an audit set or a recorded blocklist. ValueError when a recorded
+    file is gone or no longer holds what its sha256 says."""
+    from . import correctness as cx
+
+    if audit_dir is None:
+        return None, []
+    m = manifest(Path(audit_dir))
+    recs = recorded_blocklists(m or {})
+    if not recs:
+        return None, []
+    out = cx.Blocklist()
+    for rec in recs:
+        path = Path(audit_dir) / str(rec["file"])
+        try:
+            data = path.read_bytes()
+        except OSError as e:
+            raise ValueError(f"the audit's blocklist {path} cannot be read: {e}")
+        if hashlib.sha256(data).hexdigest() != rec["sha256"]:
+            raise ValueError(f"the audit's blocklist {path} is not the one it recorded")
+        out = out.merged(cx.read_list(path))
+    return out, recs
+
+
+def build_blocklist(
+    train_cfg: Mapping[str, Any],
+    source_runs: Sequence[Any] = (),
+    audit_dir: Optional[Path] = None,
+) -> Tuple[Any, List[Dict[str, Any]]]:
+    """(the blocklist an invocation of the audit set in `audit_dir` applies,
+    where its kernels come from): the blocklist of the runs it is built for
+    (`source_blocklist`) and every kernel a blocklist the set applied before
+    names (`audit_blocklist`) that it does not, as one more source. A kernel
+    the set left out once thus stays out of every part it benches later,
+    also once no run's blocklist names it. ValueError when the runs'
+    blocklist or one the set recorded cannot be read."""
+    from . import correctness as cx
+
+    out, parts = source_blocklist(train_cfg, source_runs)
+    before, _ = audit_blocklist(audit_dir)
+    extra = cx.Blocklist(
+        e for e in (before.entries if before else ()) if not out.blocks_name(e.name)
+    )
+    if extra:
+        out = out.merged(extra)
+        parts.append(
+            {
+                "from": "the blocklists the audit set applied before",
+                "digest": cx.names_digest(extra),
+                "kernels": len(extra),
+            }
+        )
+    return out, parts
 
 
 def context_labels(cfg: Mapping[str, Any]) -> Dict[Tuple[int, str], str]:
@@ -302,10 +627,16 @@ def benched_digests(m: Mapping[str, Any]) -> Set[str]:
     }
 
 
+def left_out_digests(m: Mapping[str, Any]) -> Set[str]:
+    """The kernel digests of the kernels the audit's blocklists left out of
+    its pool (`left_out`), which it never benches."""
+    return {str(d) for d in (m.get("left_out") or {})}
+
+
 def unbenched(m: Mapping[str, Any], current: Mapping[int, str]) -> List[int]:
     """Solutions of `current` ({solution: digest}) whose kernel no
-    generation benched."""
-    have = benched_digests(m)
+    generation benched and no blocklist of the audit left out."""
+    have = benched_digests(m) | left_out_digests(m)
     return sorted(s for s, d in current.items() if d not in have)
 
 
@@ -468,7 +799,10 @@ def state(
     if not planned or u is None:
         return State("incomplete", why)
     if current is not None:
-        missing = unbenched({"generations": [{"kernels": planned}]}, current)
+        missing = unbenched(
+            {"generations": [{"kernels": planned}], "left_out": m.get("left_out")},
+            current,
+        )
         if missing:
             return State(
                 "incomplete",
@@ -1086,9 +1420,11 @@ def _prepare(
 ) -> Tuple[Optional[Dict[str, Any]], Optional[_Prepared]]:
     """(null record, None) when the audit cannot evaluate, else (None, the
     audit GEMMs of the evaluable groups in the pool, trained shapes left
-    out)."""
+    out). The pool is the config's without the kernels of the blocklists
+    the audit set was built with (`evaluation_pool`), and the record names
+    both by digest (`blocklist`)."""
     from . import evaluate as ev
-    from .bank_pool import config_identity, config_pool
+    from .bank_pool import config_identity
 
     base: Dict[str, Any] = {
         "audit_dir": str(spec.audit_dir) if spec.audit_dir else None,
@@ -1099,7 +1435,10 @@ def _prepare(
             null_record("error", "the audit needs the library directory", **base),
             None,
         )
-    pool = config_pool(cfg, spec.library_dir, spec.library_stem, spec.hardware_device)
+    try:
+        pool, base["blocklist"] = evaluation_pool(spec, cfg)
+    except ValueError as e:
+        return null_record("error", str(e), **base), None
     now = state(spec.audit_dir, pool_digests(pool.kernels), spec.enrich_root)
     base["group_status"] = {k: g.to_dict() for k, g in now.groups.items()}
     if now.status not in ("ok", "partial"):
@@ -1123,6 +1462,27 @@ def _prepare(
     return None, _Prepared(
         now, base, pool, library, labels, gemms, n_dropped, leaked, identity
     )
+
+
+def evaluation_pool(spec: Spec, cfg: Mapping[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+    """(the pool an evaluation on the audit set ranks and scores: the
+    config's (`lib.bank_pool.config_pool`, its blocklist applied) without
+    every kernel the blocklists the audit set was built with name
+    (`audit_blocklist`), so that a kernel any of those runs left out is
+    never a winner, a ceiling or a pick; what was applied, by digest: the
+    config's blocklist and the audit set's records). ValueError when a
+    blocklist cannot be read."""
+    from . import correctness as cx
+    from .bank_pool import config_pool, without_blocked
+
+    pool = config_pool(cfg, spec.library_dir, spec.library_stem, spec.hardware_device)
+    extra, recs = audit_blocklist(spec.audit_dir)
+    applied = {
+        "config": cx.applied_record(cx.config_blocklist(cfg)),
+        "audit": [{k: r.get(k) for k in ("file", "sha256", "kernels")} for r in recs],
+        "audit_kernels": len(extra or ()),
+    }
+    return without_blocked(pool, extra), applied
 
 
 class _Scorer:

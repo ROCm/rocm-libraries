@@ -34,8 +34,9 @@ constexpr std::uint8_t kServingFlagsKnown = kNoNonTemporalRule;
 // default), whether the cell whitelists are ignored, whether the pool is
 // grouped by launch key, whether the non-temporal rule keeps one member of a
 // family it would reject whole (needs the rule itself), whether the model
-// was trained on the bank as well as the table, and whether only the keys
-// the header lists as trained are scored while one of them is feasible.
+// was trained on the bank as well as the table, whether only the keys the
+// header lists as trained are scored while one of them is feasible, and
+// whether the header declares the fewest usable CUs the model supports.
 constexpr std::uint32_t kV3SmallBatchedRule  = 0x01;
 constexpr std::uint32_t kV3Dot2Rule          = 0x02;
 constexpr std::uint32_t kV3NonTemporalRule   = 0x04;
@@ -44,9 +45,10 @@ constexpr std::uint32_t kV3LaunchKeys        = 0x10;
 constexpr std::uint32_t kV3NonTemporalFamily = 0x20;
 constexpr std::uint32_t kV3Bank              = 0x40;
 constexpr std::uint32_t kV3TrainedKeyGate    = 0x80;
+constexpr std::uint32_t kV3CuFloor           = 0x100;
 constexpr std::uint32_t kV3ServingFlagsKnown =
     kV3SmallBatchedRule | kV3Dot2Rule | kV3NonTemporalRule | kV3NoWhitelistTier | kV3LaunchKeys |
-    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate;
+    kV3NonTemporalFamily | kV3Bank | kV3TrainedKeyGate | kV3CuFloor;
 constexpr std::uint8_t kScheduleBits     = 0x07;
 constexpr std::uint16_t kMaxAttributes   = 64;
 constexpr std::uint16_t kMaxOneHotValues = 64;
@@ -509,6 +511,7 @@ class Parser {
       spec.push_back(std::move(f));
     }
     if (model_->trained_key_gate && !parse_trained_keys(r)) return false;
+    if ((flags & kV3CuFloor) != 0 && !parse_cu_floor(r)) return false;
     if (r.remaining() != 0 && !parse_provenance(r)) return false;
     if (r.remaining() != 0) return fail("header_size does not match the header contents");
     if (feature_spec_hash(spec) != spec_hash)
@@ -543,6 +546,16 @@ class Parser {
       if (i > 0 && keys[i] <= keys[i - 1])
         return r.fail_at("trained keys are not strictly ascending", at);
     }
+    return true;
+  }
+
+  // `u32` fewest usable CUs the model supports, at least 1.
+  bool parse_cu_floor(Reader& r) {
+    const std::size_t at = r.pos();
+    std::uint32_t cus    = 0;
+    if (!r.u32(&cus, "CU floor")) return false;
+    if (cus == 0) return r.fail_at("the CU floor must be at least 1", at);
+    model_->min_effective_cus = cus;
     return true;
   }
 

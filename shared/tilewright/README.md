@@ -84,7 +84,12 @@ count, or a dynamic or automatic schedule, leaves every kernel unscored, and
 TensileLite then uses its Origami ranking. An MLREC_v3 model declares the range
 of usable-CU fractions (`N_eff / N_CU`, with `N_eff = cu_budget` when
 `0 < cu_budget < N_CU`, else `N_CU`) and the schedules it was trained for, and
-scores every call in them; its features describe the context.
+scores every call in them; its features describe the context. The fraction is
+relative to the device it is given, and a compute partition is a device of its
+own with fewer CUs, so a model may also declare a CU floor: the fewest usable
+CUs it was trained with. It then leaves every kernel unscored for a context of
+fewer usable CUs on any device, a small partition (whose fraction is 1) or a
+small budget inside one included.
 
 **Routing.** A problem maps to one of 96 base cells
 `<M tier>|<N tier>|<K tier>|<batch tier>`: M and N are `Tiny` (≤ 32), `Small`
@@ -308,14 +313,23 @@ width) must be 0. The header tail is:
 | arch | `u16` length + ASCII | |
 | parallel_mi_cu, mi_default_cycles | `f64` each | > 0 |
 | n_mi, MI table | as in v2 | |
-| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate; other bits 0 |
+| serving_flags | `u32` | bit 0 small-batched rule, bit 1 Dot2 rule, bit 2 non-temporal rule (each applied when set), bit 3 no whitelist tier, bit 4 launch keys (the pool is grouped by launch key), bit 5 family-wise non-temporal rule (only with bit 2), bit 6 trained on the integration's bank as well as its table (ranking ignores it; an integration with a bank serves both), bit 7 trained-key gate, bit 8 CU floor; other bits 0 |
 | cascade_keys | `u32` | the cascade width, 0 for none |
 | min_cu_fraction, max_cu_fraction | `f64` each | `0 < min <= max <= 1`: the `N_eff / N_CU` the model supports |
 | schedules | `u8` | bit 0 Default, bit 1 Dynamic, bit 2 Auto; not 0 |
 | clip | `u8` | 1: cells carry feature bounds |
 | n_attributes | `u16` | at most 64, then per attribute: `u16`+name, `i64` default, `u8` transform (0 identity, 1 log2p1, 2 nonzero, 3 onehot) and, for onehot, `u16` value count (1-64) and distinct `i64` values |
 | trained keys | with bit 7 only | `u32` count (at least 1), then that many `u64` view-key hashes, strictly ascending: the view keys with training data |
+| CU floor | with bit 8 only | `u32`, at least 1: the fewest usable CUs (`N_eff`) the model supports on any device; a file without it has no floor |
 | provenance | optional | present when header bytes remain: `u16` entry count (1-5), then per entry a `u16`+key and a `u16`+value (printable ASCII without spaces), the keys `config_id`, `training_data_hash`, `source_revision`, `date` and `launch_model`, each at most once |
+
+A loader refuses a file with a serving flag it does not know (`unknown serving
+flags`). Every MLREC_v3 model the training pipeline writes declares a CU floor,
+so an engine that predates the floor refuses those models, and hipBLASLt then
+ranks with Origami and warns: ship such models only with an engine that has
+the floor. `with_cu_floor(data, None)` of `training_pipeline/lib/mlrec.py`
+removes the floor from a file without retraining; the file then loads in such
+an engine and ranks as a model without a floor.
 
 `i_dim` is 8 plus the attribute features: one per identity, log2p1 and
 nonzero attribute (`x`, `log2(1 + max(x, 0))`, `x != 0`) and one per value of a
@@ -427,12 +441,19 @@ tilewright::ExecutionContext context{cu_budget, tilewright::Schedule::Dynamic};
 if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
 ```
 
-- `load_model(path)`, `load_model_from_memory(data, size)` and
-  `load_model_by_index(logic_stem, dir)` never throw; they return `nullptr` and
-  set the error message on failure. `load_model` returns the already loaded
-  model for a path that resolves to the same file. `load_model_by_index` reads
-  `<dir>/tilewright_index` and returns `nullptr` with an empty error when the
-  index or the stem is absent.
+- `load_model(path)`, `load_model_from_memory(data, size)`,
+  `load_model_by_index(logic_stem, dir)` and
+  `load_model_by_index(logic_stem, dir, pci_chip_id)` never throw; they return
+  `nullptr` and set the error message on failure. `load_model` returns the
+  already loaded model for a path that resolves to the same file.
+  `load_model_by_index` reads `<dir>/tilewright_index` (see Weights) and loads
+  the model of the stem's row for the device's PCI chip ID (`pci_chip_id`, 0
+  when unknown), else of its row without one; it returns `nullptr` with an
+  empty error when the index or such a row is absent, and with an error when
+  a row of the stem is malformed. Pass the chip ID as a `std::uint32_t` (a
+  variable, `0u`, `std::uint32_t{0}`): a third argument of a plain `0` or
+  `NULL` is ambiguous between the overloads, since it also converts to the
+  error pointer.
 - `Config` holds the kernel's numeric parameters, the caller's `index` (not
   interpreted) and `attributes`: further named `int64` properties
   (`Attribute {name, value}`) in any order, with non-empty, unique names. A
@@ -479,7 +500,8 @@ if (!tilewright::supports(*model, context, hw)) { /* use another ranking */ }
 - `route(model, problem)` and `cell_label(model, cell)` expose routing;
   `describe(model)` returns the arch, hash, weight type and sizes, the bytes of
   the packed weights and of the fp32 weights of every cell, and for v3
-  the spec hash, supported contexts, serving flags (with `bank`, which an
+  the spec hash, supported contexts (the CU floor as `min_effective_cus`, 0
+  for none), serving flags (with `bank`, which an
   integration reads to decide whether it serves its bank, and the number of
   view keys the trained-key gate lists), the number of base
   labels without a trained cell and the provenance the file records;
@@ -538,8 +560,10 @@ arguments of the C++ API (`context=None` is exclusive use),
 limit.
 `load_model` and `load_model_from_memory` raise `ValueError` with the loader's
 message when the data is not a valid model, and invalid attribute names or a
-prior of the wrong length raise `ValueError`; `load_model_by_index` returns
-`None` when the index or stem is absent.
+prior of the wrong length raise `ValueError`; `load_model_by_index(logic_stem,
+dir, pci_chip_id=0)` returns `None` when the index or the stem's row is
+absent and raises `ValueError` when the listed model fails to load or a row of
+the stem is malformed.
 
 ## Environment variables
 
@@ -548,7 +572,7 @@ of `0` or an empty value counts as unset.
 
 | Variable | Effect |
 |----------|--------|
-| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4` (the model's dims), and `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails |
+| `TILEWRIGHT_DIAG` | One stderr line per loaded model: `[TILEWRIGHT_DIAG FILE] path=... arch=... qhash=... qdim=55 idim=12 xdim=37 n_cells=N n_splits=N weights=int4` (the model's dims), and `[TILEWRIGHT_DIAG FAIL] <reason>` for a load that fails, a malformed `tilewright_index` row of the stem included |
 | `TILEWRIGHT_PICK_LOG` | One stderr line per ranking that scores a kernel: `[TILEWRIGHT_PICK] m=.. n=.. k=.. b=.. tA=.. tB=.. leaf=<label> top1_sig=(mt_m=..,mt_n=..,mt_k=..,mi_m=..,mi_n=..,mi_k=..,cha=..,chb=..) top1_score=.. top1_index=.. n_configs=..`; `top1_index` is the pool position of the top-ranked kernel |
 | `TILEWRIGHT_FORCE_CELL` | Score every problem with this cell index, for debugging; ignored when it is not a valid index of the model |
 | `TILEWRIGHT_CACHE_MB` | Initial cache limit in MiB (a whole number; anything else leaves the default of 1 GiB); `set_cache_limit` changes it later |
@@ -567,7 +591,23 @@ library stems to model files:
 ```
 # comment
 <TensileLibrary stem>	<model file>
+<TensileLibrary stem>	<model file>	chip=0x<PCI chip ID>
 ```
+
+Fields are separated by blanks and a `#` starts a comment; a line of fewer
+than two fields is skipped. A row may name, as `chip=0x` and one to four hex
+digits that are not all zero, the PCI chip ID of the devices it is for, so that
+device classes that load the same library file (the parts of one
+architecture, each in any compute-partition mode) can ship different models:
+for a device, `load_model_by_index` loads the model of the stem's first row
+naming its chip ID, else of the stem's first row without one, else none. A
+row of the stem whose third field has any other form, or that has a fourth
+field, is malformed and makes the lookup of that stem fail on every device.
+An engine that predates the chip ID reads the first two fields of a stem's
+first row whatever follows them: the row without a chip ID comes first, and
+such an engine serves a stem that has rows for chip IDs only the model of its
+first row on every device, so ship those rows only with an engine that reads
+them.
 
 The model files are ordinary binary files in the repository (marked `binary` in
 `.gitattributes`), so any checkout that includes `shared/tilewright` has them.

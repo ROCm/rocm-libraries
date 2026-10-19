@@ -312,6 +312,10 @@ Image write_model(const ModelSpec& spec) {
         w.u64(spec.trained_keys[i]);
       }
     }
+    if ((spec.v3_serving_flags & 0x100) != 0) {
+      w.mark("min_effective_cus");
+      w.u32(spec.min_effective_cus);
+    }
     if (!spec.provenance.empty()) {
       w.mark("n_provenance");
       w.u16(static_cast<std::uint16_t>(spec.provenance.size()));

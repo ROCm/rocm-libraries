@@ -90,6 +90,24 @@ def _plan(w, **kw):
     )
 
 
+def test_no_sustained_set_holds_a_blocked_kernel(planned_v2):
+    """A kernel the plan's blocklist names is in no set and no pick, even
+    one a planned set held, and the plan names the blocklist; a blocked
+    canary refuses it."""
+    rec = {"file": "blocklists/plan_x.json", "sha256": "b" * 64, "kernels": 1}
+    sd, gen = _plan(planned_v2, peak_tflops=2000.0, blocked={2}, blocklist=rec)
+    assert gen == 0
+    doc = json.loads((sd / "gen_000" / "plan.json").read_text())
+    entries = [e for part in doc["groups"][EX] for e in part]
+    assert entries and all(2 not in e["kernels"] for e in entries)
+    assert all(2 not in e["candidates"] for e in entries)
+    assert all(2 not in line_solution_list(e["line"]) for e in entries)
+    assert doc["blocklist"] == rec and v2.manifest(sd)["blocklist"] == rec
+    canary = v2.manifest(planned_v2["d"])["canary"]["kernel"]
+    with pytest.raises(v2.V2Error, match="canary"):
+        _plan(planned_v2, peak_tflops=2000.0, blocked={canary})
+
+
 def test_the_strata_follow_the_v2_winner_and_the_devices_peak():
     st = {**asus.DEFAULTS, "compute_bound_tflops": 500.0}
     assert asus.stratum(SMALL, 50.0, st) == ""

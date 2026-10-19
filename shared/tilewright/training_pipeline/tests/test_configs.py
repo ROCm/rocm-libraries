@@ -427,8 +427,9 @@ def test_shipped_configs_leave_round0_slack(path, config_env):
 
 # The production recipe's sizing: round 0's shapes per cell, each active
 # round's new shapes per leaf, the rounds before the final retrain, and
-# stage04b's split keys. The configs of the training recipes (the gfx950
-# Origami-only ones and the gfx1250 ones) all take it.
+# stage04b's split keys, with splitting off (max_split_depth 0). The
+# configs of the training recipes (the gfx950 Origami-only ones and the
+# gfx1250 ones) all take it.
 PRODUCTION_SIZING = {
     "seed.target_per_cell": 400,
     "seed.shapes_per_cell": 150,
@@ -438,7 +439,7 @@ PRODUCTION_SIZING = {
     "validate.split_floor": 0.83,
     "validate.split_min_improvement": 0.02,
     "validate.split_after_attempts": 1,
-    "validate.max_split_depth": 6,
+    "validate.max_split_depth": 0,
     "validate.structural_split_min_octaves": 0.0,
 }
 
@@ -595,9 +596,10 @@ def test_gfx1250_configs_budget_the_production_recipe(path, config_env):
     assert get("full.final_retrain.enabled")
     for key in ("target_per_cell", "total_rounds"):
         assert _comment_above(path, key).startswith("The production recipe's"), key
-    # A cell can split: the last round never does, so a split needs its
+    # No cell splits; with splitting on, the split keys would leave a
+    # round to split in: the last round never does, so a split needs its
     # attempts used up by the round before it.
-    assert ro._split_rounds_possible(cfg)
+    assert not ro._split_rounds_possible(cfg)
     assert get("validate.split_after_attempts") <= get("full.total_rounds") - 3
     assert get("planner.top_k") == FIRST_RUN_TOP_K[_datatype(path)]
     assert get("bench.stall_timeout_s") == ro.cfg_get({}, "bench.stall_timeout_s")
@@ -761,12 +763,18 @@ def test_gfx1250_sanity_configs_run_every_stage_through_the_production_rounds(
 ):
     """A sanity config runs every stage of the one command through the
     production recipe's rounds and the final retrain, on budgets below the
-    recipe's, and stages its model only; it validates cleanly."""
+    recipe's, and stages its model only; it validates cleanly. Unlike the
+    training recipes it lets a cell split, one level deep, so that a sanity
+    run still exercises the split code."""
     cfg = _load(path)
     get = lambda dotted: ro.cfg_get(cfg, dotted)  # noqa: E731
     assert ro.validate_config(cfg, "full") == ([], [])
     assert get("full.total_rounds") == PRODUCTION_SIZING["full.total_rounds"]
     assert get("full.final_retrain.enabled") and ro._split_rounds_possible(cfg)
+    assert get("validate.max_split_depth") == 1
+    assert _comment_above(path, "max_split_depth").startswith(
+        "The training configs do not split"
+    )
     assert get("validate.split_after_attempts") <= get("full.total_rounds") - 3
     for key in ("seed.target_per_cell", "seed.shapes_per_cell"):
         assert get(key) < PRODUCTION_SIZING[key], key
@@ -916,15 +924,21 @@ def test_gfx950_has_an_origami_config_of_every_shipped_library():
 )
 def test_training_recipe_configs_size_their_runs_as_production(path, config_env):
     """Every config of a training recipe, gfx950 and gfx1250 alike, plans the
-    production recipe's rounds over its budget with its split keys, so that a
-    cell can split, and none keeps a first run's sizing."""
+    production recipe's rounds over its budget with splitting off, its
+    split keys valid for a run that turns splitting on, and none keeps a
+    first run's sizing."""
     cfg = _load(path)
     assert _sizing(cfg) == PRODUCTION_SIZING
     assert ro.cfg_get(cfg, "full.final_retrain.enabled")
     assert ro.cfg_get(cfg, "gate.repair") is True
     assert ro.cfg_get(cfg, "full.final_retrain.repair") is True
-    assert ro._split_rounds_possible(cfg)
+    assert not ro._split_rounds_possible(cfg)
+    assert _comment_above(path, "max_split_depth").startswith("Cells do not split")
     assert ro.validate_config(cfg, "full") == ([], [])
+    splitting = copy.deepcopy(cfg)
+    splitting["validate"]["max_split_depth"] = 6
+    assert ro._split_rounds_possible(splitting)
+    assert ro.validate_config(splitting, "full") == ([], [])
     assert not re.search(r"first run's|first-run", path.read_text(), re.I)
 
 
@@ -932,6 +946,43 @@ def test_training_recipe_configs_size_their_runs_as_production(path, config_env)
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)
 def test_gfx950_origami_configs_validate_in_full_and_audit_mode(path, mode, config_env):
     assert ro.validate_config(_load(path), mode) == ([], [])
+
+
+# The weak-cell budget the training recipes and the sanity runs take: a
+# leaf the previous round retrained draws twice the round's shapes per
+# leaf, every leaf half as many again as its draw holds with K above
+# 32768, and no leaf fewer than the round's shapes per leaf (no strong-cell
+# factor).
+WEAK_CELL_BUDGET = {
+    "seed.weak_cell_factor": 2.0,
+    "seed.large_k_factor": 1.5,
+    "seed.strong_cell_factor": 1.0,
+}
+
+
+@pytest.mark.parametrize(
+    "path",
+    GFX950_ORIGAMI_CONFIGS + RECIPE_GFX1250_CONFIGS + SANITY_CONFIGS,
+    ids=lambda p: p.name,
+)
+def test_training_recipe_configs_give_weak_cells_more_shapes(path, config_env):
+    """Every training recipe, and the sanity runs that rehearse it, give
+    the leaves a round retrained and the very-large-K stratum more new
+    shapes, and never fewer than the round's shapes per leaf to any leaf:
+    an active round's stage01 gets the two factors and no strong one."""
+    from types import SimpleNamespace
+
+    cfg = _load(path)
+    assert {k: ro.cfg_get(cfg, k) for k in WEAK_CELL_BUDGET} == WEAK_CELL_BUDGET
+    assert ro.validate_config(cfg, "full") == ([], [])
+    assert "Weak cells and very large K" in _comment_above(path, "weak_cell_factor")
+    pipeline = SimpleNamespace(get=lambda dotted: ro.cfg_get(cfg, dotted))
+    assert ro.Pipeline.need_budget_args(pipeline) == [
+        "--weak-cell-factor",
+        "2.0",
+        "--large-k-factor",
+        "1.5",
+    ]
 
 
 @pytest.mark.parametrize("path", GFX950_ORIGAMI_CONFIGS, ids=lambda p: p.name)

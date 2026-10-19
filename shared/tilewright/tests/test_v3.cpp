@@ -371,7 +371,7 @@ TEST_CASE("v3 header defects are rejected", "[v3][loader]") {
   CHECK(mentions(with([](ModelSpec& s) { s.i_dim += 1; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.q_dim = 55; }), "feature dims"));
   CHECK(mentions(with([](ModelSpec& s) { s.x_dim = 37; }), "feature dims"));
-  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x100; }), "unknown serving flags"));
+  CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x200; }), "unknown serving flags"));
   CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x20; }),
                  "without the non-temporal rule"));
   CHECK(mentions(with([](ModelSpec& s) { s.v3_serving_flags = 0x80; }), "no trained key"));
@@ -1322,6 +1322,76 @@ TEST_CASE("v3 models declare the contexts they support", "[v3][context]") {
   CHECK(scored_indices(r16).size() == 2);
   CHECK(scored_indices(r64).size() == 2);
   CHECK_FALSE(same_results(r16, r64));
+}
+
+TEST_CASE("a CU floor refuses every context with fewer usable CUs, on any device",
+          "[v3][context]") {
+  ModelSpec plain       = v3_grid();
+  plain.min_cu_fraction = 0.25;
+  plain.schedules       = 0x3;
+  ModelSpec floored     = plain;
+  floored.v3_serving_flags |= 0x100;
+  floored.min_effective_cus    = 16;
+  const tw::ModelPtr m         = load_spec(floored);
+  const tw::ModelPtr unfloored = load_spec(plain);
+  CHECK(tw::describe(*m).min_effective_cus == 16);
+  CHECK(tw::describe(*unfloored).min_effective_cus == 0);
+
+  const auto device = [](std::size_t n_cu) { return tw::Hardware{n_cu, 65536, 4u << 20}; };
+  for (std::size_t n_cu : {64u, 32u, 17u, 16u, 15u, 12u, 1u}) {
+    const tw::Hardware hw = device(n_cu);
+    for (std::size_t budget = 0; budget <= 80; ++budget)
+      for (tw::Schedule schedule :
+           {tw::Schedule::Default, tw::Schedule::Dynamic, tw::Schedule::Auto}) {
+        const tw::ExecutionContext ctx = context(budget, schedule);
+        const std::size_t usable       = budget > 0 && budget < n_cu ? budget : n_cu;
+        INFO("device " << n_cu << " budget " << budget << " schedule "
+                       << static_cast<int>(schedule));
+        CHECK(tw::supports(*m, ctx, hw) == (tw::supports(*unfloored, ctx, hw) && usable >= 16));
+      }
+  }
+  // The floor reaches below the fraction range only on a smaller device.
+  CHECK(tw::supports(*m, context(16, tw::Schedule::Default), device(64)));
+  CHECK_FALSE(tw::supports(*m, context(15, tw::Schedule::Default), device(64)));
+  CHECK(tw::supports(*m, context(16, tw::Schedule::Dynamic), device(32)));
+  CHECK_FALSE(tw::supports(*m, context(8, tw::Schedule::Default), device(32)));
+  CHECK(tw::supports(*unfloored, context(8, tw::Schedule::Default), device(32)));
+  CHECK(tw::supports(*m, {}, device(16)));
+  CHECK_FALSE(tw::supports(*m, {}, device(15)));
+  CHECK(tw::supports(*unfloored, {}, device(15)));
+  CHECK_FALSE(tw::supports(*m, context(0, tw::Schedule::Auto), device(64)));
+
+  // A supported context ranks as the model without the floor does, bit for
+  // bit; any other leaves every config unscored in input order.
+  std::vector<tw::Config> pool = {make_config(128, 128, 64),
+                                  make_config(64, 64, 64),
+                                  make_config(256, 128, 64),
+                                  make_config(128, 128, 64, 16, 16, 32, 4, 0)};
+  for (std::size_t i = 0; i < pool.size(); ++i) pool[i].index = i;
+  const tw::Problem p = make_problem(1000, 2000, 512);
+  const tw::CandidateSet set(m, pool), unfloored_set(unfloored, pool);
+  std::size_t scored = 0, refused = 0;
+  for (std::size_t n_cu : {64u, 32u, 16u, 15u})
+    for (std::size_t budget : {0u, 8u, 15u, 16u, 20u, 31u, 48u})
+      for (tw::Schedule schedule : {tw::Schedule::Default, tw::Schedule::Dynamic}) {
+        const tw::Hardware hw          = device(n_cu);
+        const tw::ExecutionContext ctx = context(budget, schedule);
+        INFO("device " << n_cu << " budget " << budget);
+        const std::vector<tw::Result> r = set.rank(p, hw, ctx, kAll);
+        CHECK(same_results(r, tw::rank_configs(*m, p, hw, ctx, pool, kAll)));
+        CHECK(same_results(set.rank_top(p, hw, ctx, 2), scored_prefix(set.rank(p, hw, ctx, 2), 2)));
+        if (tw::supports(*m, ctx, hw)) {
+          ++scored;
+          CHECK(same_results(r, unfloored_set.rank(p, hw, ctx, kAll)));
+          CHECK_FALSE(scored_indices(r).empty());
+        } else {
+          ++refused;
+          CHECK(scored_indices(r).empty());
+          for (std::size_t i = 0; i < r.size(); ++i) CHECK(r[i].config_index == i);
+        }
+      }
+  CHECK(scored > 0);
+  CHECK(refused > 0);
 }
 
 TEST_CASE("v3 soft feasibility rules apply only when the model selects them", "[v3][rules]") {

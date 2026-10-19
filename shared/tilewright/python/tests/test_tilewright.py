@@ -340,11 +340,42 @@ def test_load_model_and_index(tmp_path):
     )
     m = tw.load_model(str(tmp_path / "m.tilewright.bin"))
     assert tw.describe(m).n_cells == 1
+    assert tw.describe(m).min_effective_cus == 0
     assert tw.describe(tw.load_model_by_index("Stem", str(tmp_path))).n_cells == 1
     assert tw.load_model_by_index("Absent", str(tmp_path)) is None
     assert tw.load_model_by_index("Stem", str(tmp_path / "nowhere")) is None
     with pytest.raises(ValueError, match="MLRECEND"):
         tw.load_model_by_index("Bad", str(tmp_path))
+
+
+def test_load_model_by_index_prefers_the_device_chip_id(tmp_path):
+    (tmp_path / "any.bin").write_bytes(write_model([_cell(LARGE)], arch="gfxany"))
+    (tmp_path / "chip.bin").write_bytes(write_model([_cell(LARGE)], arch="gfxchip"))
+    (tmp_path / "tilewright_index").write_text(
+        "Stem\tchip.bin\tchip=0xa2b\nStem\tany.bin\nChipOnly chip.bin chip=0x00FF\n"
+    )
+    d = str(tmp_path)
+
+    def arch(stem, **kw):
+        m = tw.load_model_by_index(stem, d, **kw)
+        return None if m is None else tw.describe(m).arch
+
+    assert arch("Stem") == arch("Stem", pci_chip_id=0) == "gfxany"
+    assert arch("Stem", pci_chip_id=0xA2B) == "gfxchip"
+    assert tw.load_model_by_index("Stem", d, 0xA2B) is not None
+    assert arch("Stem", pci_chip_id=0xA2C) == "gfxany"
+    assert arch("ChipOnly", pci_chip_id=0xFF) == "gfxchip"
+    assert arch("ChipOnly") is None and arch("ChipOnly", pci_chip_id=1) is None
+    for bad in (-1, 1 << 32, "0xa2b", 1.5):
+        with pytest.raises(TypeError):
+            tw.load_model_by_index("Stem", d, pci_chip_id=bad)
+
+    for row in ("Stem any.bin chip=0x0", "Stem any.bin chip=6699", "Stem any.bin x y"):
+        (tmp_path / "tilewright_index").write_text(f"Stem\tany.bin\n{row}\n")
+        for kw in ({}, {"pci_chip_id": 0xA2B}):
+            with pytest.raises(ValueError, match=r"tilewright_index:2: malformed row"):
+                tw.load_model_by_index("Stem", d, **kw)
+        assert tw.load_model_by_index("Other", d) is None
 
 
 def test_rank_contract_tiers_and_candidate_set(model):

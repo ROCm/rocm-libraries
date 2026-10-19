@@ -109,7 +109,12 @@ import bench_fakes as bf  # noqa: E402
 
 
 FAKE_HW = "64,65536,4194304"
-CAPABILITIES = ("MLREC_v2", "MLREC_v3", "TENSILE_TILEWRIGHT_BANK")
+CAPABILITIES = (
+    "MLREC_v2",
+    "MLREC_v3",
+    "TENSILE_TILEWRIGHT_BANK",
+    "CU floor",
+)
 
 
 def kernels_grid(twins: bool = False) -> List[Dict[str, object]]:
@@ -308,14 +313,17 @@ def _kernel_files(libdir: Path, stem: str) -> Dict[int, str]:
 
 
 def _indexed_model(libdir: Path, stem: str) -> Optional[Path]:
+    """The model the engine loads for `stem` on a device of unknown chip ID."""
+    from lib import tilewright_index as twi
+
     idx = libdir / "tilewright_index"
     if not idx.is_file():
         return None
-    for line in idx.read_text().splitlines():
-        tok = line.split("#", 1)[0].split()
-        if len(tok) >= 2 and tok[0] == stem:
-            return libdir / tok[1]
-    return None
+    try:
+        name = twi.parse(twi.read_text(idx)).model_of(stem)
+    except ValueError:
+        return None
+    return None if name is None else libdir / name
 
 
 # The problem properties of a Matching library's keys, (M, N, batch, K), as

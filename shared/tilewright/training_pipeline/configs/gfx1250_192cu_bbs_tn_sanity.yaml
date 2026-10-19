@@ -53,6 +53,13 @@ seed:
   # shapes per leaf.
   target_per_cell: 4
   shapes_per_cell: 2
+  # A leaf the previous round's stage04b retrained (below the bar, or for
+  # a held-out collapse) draws twice shapes_per_cell, and a leaf draws half
+  # as many again as its new shapes hold with K above 32768; no leaf draws
+  # fewer than shapes_per_cell (README *Weak cells and very large K
+  # (stage01)*).
+  weak_cell_factor: 2.0
+  large_k_factor: 1.5
   seed: 42
   n_strata: 2
 
@@ -183,6 +190,8 @@ validate:
   split_floor: 0.83
   split_min_improvement: 0.02
   split_after_attempts: 1
+  # The training configs do not split (max_split_depth 0); a sanity run
+  # keeps one level so that it still exercises the split code.
   max_split_depth: 1
   structural_split_min_octaves: 0.0
 

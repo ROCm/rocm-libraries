@@ -25,6 +25,11 @@ come from `lib.planner`; this stage chooses the mode and the ranker:
   auto        planned when the pool and bank hold more than
               `planner.exhaustive_max_kernels` kernels, else exhaustive.
 
+With --listed-only (the audit set's plan) a shape is never benched without
+a list: the stage fails when the pool and bank hold more kernels than one
+line takes while the config's blocklist leaves one of the pool out, since
+`algo_method: 1` would bench that kernel too.
+
 Every mode benches an alias group (lib/kernel_identity.py: kernels whose
 names differ only in the temporal hint of an operand the tensor data mover
 loads) as its first member in pool order (`lib.planner.Catalog`).
@@ -495,6 +500,13 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "must point into <out-dir>/seed, where the seed shapes and plan are "
         "written.",
     )
+    ap.add_argument(
+        "--listed-only",
+        action="store_true",
+        help="fail rather than bench a shape without a kernel list (algo_method "
+        "1) while the config's blocklist leaves a kernel of the pool out: the "
+        "audit set never benches a blocked kernel",
+    )
     ap.add_argument("--quiet", action="store_true")
     return ap.parse_args(argv)
 
@@ -545,6 +557,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ui.err("load", str(e))
         return 1
     catalog = Catalog.build(library.table, library.bank.kernels)
+    if args.listed_only and exhaustive_list(catalog) is None:
+        whole = config_pool(
+            pool_cfg,
+            args.dat_dir,
+            args.library_stem,
+            args.hardware_device,
+            apply_blocklist=False,
+        )
+        n_blocked = len(whole.kernels) - len(library.kernels)
+        if n_blocked:
+            ui.err(
+                "plan",
+                f"the {len(catalog.pool_ids) + len(catalog.bank_ids)} kernels of the "
+                f"pool and bank exceed the {MAX_BENCH_LIST} a bench line lists, so "
+                f"an exhaustive line would bench every kernel of the problem type "
+                f"(algo_method 1), the {n_blocked} the config's blocklist leaves "
+                f"out among them",
+            )
+            return 1
     lines_record = line_record(cfg)
     kernel_record = {
         ki.RECORD_KEY: ki.record(

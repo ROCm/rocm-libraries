@@ -13,6 +13,7 @@ import json
 import math
 import os
 import random
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -623,6 +624,8 @@ def test_the_probe_model_reads_back_as_written(catalog):
     tw = pytest.importorskip("tilewright")
     import types
 
+    from lib import mlrec
+
     args = types.SimpleNamespace(
         catalog=catalog,
         attribute_spec=None,
@@ -641,6 +644,9 @@ def test_the_probe_model_reads_back_as_written(catalog):
     )
     assert data[:8] == f"MLREC_{catalog}".encode()
     assert s5.engine_round_trip_errors(data, tw) == []
+    if catalog == "v3":
+        # Every v3 model a run writes declares a CU floor, the probe too.
+        assert mlrec.read_header(data)["contexts"]["min_effective_cus"] == 1
 
     class Shifted:
         def __init__(self, info, **changes):
@@ -657,6 +663,55 @@ def test_the_probe_model_reads_back_as_written(catalog):
         "n_cells reads back as 2, written 1",
         f"query_dim reads back as 1, written {len(cat.names()[0])}",
     ]
+    if catalog == "v3":
+        contexts = types.SimpleNamespace(
+            load_model_from_memory=tw.load_model_from_memory,
+            describe=lambda m: Shifted(
+                tw.describe(m), max_cu_fraction=0.5, schedules=3, min_effective_cus=0
+            ),
+        )
+        assert s5.engine_round_trip_errors(data, contexts) == [
+            "max_cu_fraction reads back as 0.5, written 1.0",
+            "schedules reads back as 3, written 1",
+            "min_effective_cus reads back as 0, written 1",
+        ]
+
+
+FAKE_ENGINE_WITHOUT_THE_CU_FLOOR = """
+def load_model_from_memory(data):
+    from lib import mlrec
+
+    head = mlrec.read_header(bytes(data))
+    if "min_effective_cus" in head.get("contexts", {}):
+        flags = mlrec.v3_serving_flags(head["serving"]) | mlrec.V3_CU_FLOOR
+        raise ValueError(f"<memory>: unknown serving flags {flags}")
+    return head
+
+
+def describe(model):
+    return object()
+"""
+
+
+def test_an_engine_without_the_cu_floor_stops_at_once(tmp_path):
+    """Every v3 model a run writes declares a CU floor, which an engine that
+    predates it refuses: the run stops before it trains."""
+    data = write_round(tmp_path / "stage04", shapes_for(4, 16, CELLS3[:1]))
+    fake = tmp_path / "fake" / "tilewright"
+    fake.mkdir(parents=True)
+    (fake / "__init__.py").write_text(FAKE_ENGINE_WITHOUT_THE_CU_FLOOR)
+    out = tmp_path / "out"
+    args = train_args(tmp_path, [data], out, "--catalog", "v3")
+    args = [a for a in args if a != "--skip-deployed-eval"]
+    path = os.pathsep.join([str(fake.parent), os.environ.get("PYTHONPATH", "")])
+    proc = run_stage("stage05_train.py", *args, env={"PYTHONPATH": path}, expect_rc=1)
+    err = proc.stdout + proc.stderr
+    assert f"the tilewright module {fake / '__init__.py'} cannot serve" in err
+    flags = re.search(r"unknown serving flags (\d+)", err)
+    assert flags and int(flags.group(1)) & 0x100
+    assert "this checkout's engine first on PYTHONPATH" in err
+    assert "Traceback" not in err
+    assert not (out / "models.pt").exists() and not (out / "metrics.json").exists()
 
 
 # ── kernel identity ───────────────────────────────────────────────────────────
@@ -736,6 +791,29 @@ def test_solutions_with_identical_parameters_stay_separate_candidates(tmp_path):
         a, b = sids.index(pool[i]["sol_idx_global"]), sids.index(500 + i)
         assert (ivec[a] == ivec[b]).all() and (xvec[a] == xvec[b]).all()
         assert us[a] != us[b]
+
+
+def test_kernels_written_by_hand_reach_the_candidates_as_written_by_hand(tmp_path):
+    """kernels.json's hand-written kernels carry the launch rule's attribute
+    into the training pairs, whose launch plans read it."""
+    pool = kernel_pool()
+    data = write_round(tmp_path / "stage04", shapes_for(3, 2, CELLS3[:1]), pool)
+    base = bf.solution(0, 0, tileProcessingStrategy="StreamK")
+    hand = dict(base, customKernel={"name": base["name"], "generated": False})
+    first = pool[0]["sol_idx_global"]
+    listed = {
+        k["sol_idx_global"]: dat.kernel_dat_info(
+            hand if k["sol_idx_global"] == first else base
+        )
+        for k in pool
+    }
+    dat.write_kernel_attributes(data / dat.KERNELS_FILE, listed, bf.LIBRARY_STEM)
+    cells, _stats = s5.load_enriched_chunks(str(data), True)
+    candidates = [c for gemms in cells.values() for g in gemms for c in g["candidates"]]
+    assert candidates
+    for c in candidates:
+        want = 1 if c["sol_idx_global"] == first else None
+        assert c["attributes"].get(dat.HAND_WRITTEN) == want
 
 
 def test_a_signature_costs_its_fastest_solution():
@@ -1449,6 +1527,7 @@ def test_v3_training_smoke(tmp_path):
         "min_cu_fraction": 0.5,
         "max_cu_fraction": 1.0,
         "schedules": ["default", "dynamic"],
+        "min_effective_cus": 50,
     }
     assert bundle["clip"] is True
     assert bundle["serving"] == {
@@ -2558,6 +2637,7 @@ def test_declared_contexts_and_catalog_selection(tmp_path):
         "min_cu_fraction": 0.25,
         "max_cu_fraction": 1.0,
         "schedules": ["default", "auto"],
+        "min_effective_cus": 25,
     }
     assert s5.declared_contexts([{}], 100, 0.5, "dynamic")["schedules"] == ["dynamic"]
     with pytest.raises(ValueError):
@@ -2616,6 +2696,22 @@ def test_a_model_declares_no_share_below_the_smallest_it_trained():
     assert s5.declared_contexts(gemms, 96)["min_cu_fraction"] == 32 / 96
     with pytest.raises(ValueError, match="must be in"):
         s5.declared_contexts(gemms, 256, 1.5)
+
+
+def test_a_model_declares_the_fewest_cus_it_trained_as_its_cu_floor():
+    """The CU floor is the smallest usable CU count of the training GEMMs,
+    whatever --min-cu-fraction says, so that a device smaller than the
+    bench device (a compute partition) serves no fewer CUs than trained."""
+    gemms = [{}, {"cu_budget": 192}, {"cu_budget": 64}, {"cu_budget": 32}]
+    assert s5.trained_effective_cus(gemms, 256) == 32
+    assert s5.declared_contexts(gemms, 256)["min_effective_cus"] == 32
+    assert s5.declared_contexts(gemms, 256, 0.5)["min_effective_cus"] == 32
+    assert s5.declared_contexts(gemms[:3], 256)["min_effective_cus"] == 64
+    every = [{}, {"cu_budget": 256}, {"cu_budget": 300, "schedule": "dynamic"}]
+    assert s5.declared_contexts(every, 256)["min_effective_cus"] == 256
+    assert s5.declared_contexts(gemms, 48)["min_effective_cus"] == 32
+    assert s5.declared_contexts(gemms, 16)["min_effective_cus"] == 16
+    assert s5.trained_effective_cus([], 128) == 128
 
 
 # ── training schedule, targets and checkpoints ───────────────────────────────

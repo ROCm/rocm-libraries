@@ -269,6 +269,54 @@ def test_serving_falls_back_below_the_smallest_trained_share(eighth, parts, conf
     assert lowest == (GRANULE if eighth or parts > 1 else 2 * GRANULE)
 
 
+@pytest.mark.parametrize("eighth", [False, True], ids=["eighth_off", "eighth_on"])
+def test_a_smaller_device_serves_no_fewer_cus_than_the_run_trained(eighth, config_env):
+    """On a compute partition of the bench device, which looks to the model
+    like a whole device of fewer CUs, it serves every budget and the whole
+    partition down to the fewest CUs its run trained (its CU floor) and
+    none below, however large a share of the partition that is. Without
+    the floor only the share would count."""
+    tw = pytest.importorskip("tilewright")
+    from lib import evaluate as ev
+    from lib import features as fs
+    from lib import mlrec
+    from test_v3 import HW, v3_bundle, write
+
+    cfg = _load(CONFIG_DIR / "gfx950_bbs_tn_origami_v3.yaml")
+    cfg = cfg if eighth else _turn_off_the_eighth(cfg)
+    lowest = min(c.cu_budget for c in _trained(cfg, WHOLE))
+    contexts = _declared(cfg, WHOLE)
+    assert (
+        contexts["min_effective_cus"] == lowest == (GRANULE if eighth else 2 * GRANULE)
+    )
+    data = write(v3_bundle(contexts=contexts))
+    model = tw.load_model_from_memory(data)
+    unfloored = tw.load_model_from_memory(mlrec.with_cu_floor(data, None))
+    assert tw.describe(model).min_effective_cus == lowest
+
+    def served(m, n_cu):
+        hw = ev.make_hardware(tw, dataclasses.replace(HW, n_cu=n_cu))
+        return [
+            b
+            for b in range(n_cu + 2)
+            if tw.supports(m, ev.make_context(tw, fs.ExecutionContext(b)), hw)
+        ]
+
+    half, quarter, eighth_cus = WHOLE // 2, WHOLE // 4, WHOLE // 8
+    if eighth:
+        assert served(model, half) == [0] + list(range(GRANULE, half + 2))
+        assert served(model, quarter) == [0] + list(range(GRANULE, quarter + 2))
+        assert served(model, eighth_cus) == [0, GRANULE, GRANULE + 1]
+    else:
+        assert served(model, half) == [0] + list(range(2 * GRANULE, half + 2))
+        assert served(model, quarter) == [0, quarter, quarter + 1]
+        assert served(model, eighth_cus) == []
+    for n_cu in (half, quarter, eighth_cus):
+        share = round(contexts["min_cu_fraction"] * n_cu)
+        assert served(unfloored, n_cu) == [0] + list(range(share, n_cu + 2))
+    assert served(model, WHOLE) == served(unfloored, WHOLE)
+
+
 def _audit_set(cfg, n_cu):
     """The complete audit set in `cfg`'s audit.dir, as `cfg` built it on a
     device of `n_cu` CUs (its manifest and completion marker)."""

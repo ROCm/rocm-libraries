@@ -6,12 +6,13 @@ into a rocm-libraries checkout.
 
 One run targets one Tensile library (`hipblaslt.library_stem`): one data type
 combination and layout on one architecture. GEMM problem space is split into
-96 cells by M, N, K and batch tier, and cells are split further where the
-model needs it; every leaf cell gets its own two-tower network. The pipeline
-benchmarks every kernel of the library on synthetic shapes with
-`hipblaslt-bench`, trains the cell models on the measured latencies, checks
-each round's model on the next round's unseen shapes, and writes the result
-as one model file that hipBLASLt loads next to the library.
+96 cells by M, N, K and batch tier, and a run can split cells further where
+the model needs it (the training recipes do not); every leaf cell gets its
+own two-tower network. The pipeline benchmarks every kernel of the library
+on synthetic shapes with `hipblaslt-bench`, trains the cell models on the
+measured latencies, checks each round's model on the next round's unseen
+shapes, and writes the result as one model file that hipBLASLt loads next
+to the library.
 
 The pipeline does not use origami. The analytical baseline it compares
 against is the kernel hipBLASLt's own ranking puts first in a bench run
@@ -124,7 +125,9 @@ set* and *Final retrain*.
 restricted to chosen cells. Every enhance round runs the active-round stages
 on those cells only: stage01 draws `--shapes-per-cell` new shapes (default
 `seed.shapes_per_cell`) for the leaves under them, including leaves without a
-model of their own; stages 3-4 bench and enrich them; stage04b measures the
+model of their own, without the weak-cell budget or the very-large-K stratum
+(see *Weak cells and very large K (stage01)*); stages 3-4 bench and enrich
+them; stage04b measures the
 current model on them; stage05 retrains them (`--only-cells`) and carries the
 other cells forward, except those trained with other model-shaping options
 than the round's, which it retrains too (see *Stages*). The current model is
@@ -172,13 +175,16 @@ audit`, which runs no stage 7) and runs preflight checks: the bench binary,
 the library directory, the configured library stem, the library subtree each
 bench device loads (for an `arch` whose subtree depends on the device's ASIC
 revision and the runtime's mode, such as gfx1250-strict; any other arch is
-not checked), the tilewright module and its feature catalog, and that no
+not checked), the tilewright module and its feature catalog (with
+`train.catalog: v3`, one that reads the CU floor), and that no
 shape list the config names (`audit.held_out`, `stage07.bench_yamls`,
 `stage08.datasets`) is an external tuning workflow's evaluation set (see
 *Audit set*). Every mode that
 ends with validation also checks what the enabled validation stages need:
 stage 7's build (its bench, and that its TensileLite holds `MLREC_v3`, or
-`MLREC_v2`, the format `train.catalog` trains, when the kernel pool has a
+`MLREC_v2`, the format `train.catalog` trains, with `MLREC_v3` also
+`CU floor`, the name its engine's loader gives the CU floor every v3 model
+declares, when the kernel pool has a
 bank `TENSILE_TILEWRIGHT_BANK`, the setting that serves it, and, when the
 correctness gate is on or `correctness.lists` names a kernel of the pool,
 `.tilewright.blocklist`, the reader of the blocklist sidecar) and every
@@ -201,6 +207,10 @@ when it is set (0: no check), else by the largest complete active round:
 an error when it cannot hold one more such round, a warning when it cannot
 hold the rounds left. With only the initial round complete, whose seed
 benches make it larger than an active round, its size gives a warning only.
+With `seed.weak_cell_factor` above 1, a round with more weak leaves than
+the rounds before it draws more shapes than they did (see *Weak cells and
+very large K (stage01)*), which this estimate does not foresee: a run with
+little space to spare sets `runtime.min_free_gb`.
 Before every round the orchestrator checks the free space the same way and
 stops with 2 on an error. It also resolves the kernel pool the config names
 on the first device (an error when it cannot) and prints what the pool is
@@ -330,10 +340,11 @@ the bundle stage 5 already wrote when the same command runs again with
 `stage05/.untrained_bundle.json`; other arguments, another pin or
 `--from-stage` run stage 5 again). Before it reads
 any GEMM, stage05 packs an untrained one-cell model of the format it trains
-(catalog, serving options, weight dtype) and loads it with the tilewright
-module; a module that cannot load it or reads it back otherwise (for example
-an older build that knows only MLREC_v2) stops the stage at once with 1,
-naming the module and the format.
+(catalog, serving options, weight dtype and, for MLREC_v3, declared contexts
+with a CU floor) and loads it with the tilewright module; a module that
+cannot load it or reads it back otherwise (for example an older build that
+knows only MLREC_v2, or none of the CU floor) stops the stage at once with
+1, naming the module and the format.
 
 A validation stage that passes records in its stage marker what it vouches
 for: stage 7 the deploy record, the model's sha256, its build with the
@@ -405,7 +416,11 @@ that changes what the rounds may not draw is a change the next invocation
 names; an audit directory does not pin it. `contexts.granule` is pinned
 only at a granule other than 32, the one every budget had before the key
 existed (`PREDATING_GRANULE` of `lib/contexts.py`), which a pin without the
-key means whatever the default becomes. Stages
+key means whatever the default becomes. The weak-cell budget's keys
+(`seed.weak_cell_factor`, `strong_cell_factor`, `strong_cell_margin` and
+`large_k_factor`) are pinned only away from their defaults (1, 1, 0.03 and
+1), so that a run produced before them keeps its pin; an audit directory
+does not pin them. Stages
 start from the files on disk, so the orchestrator compares the code and
 engine digests again before every stage starts and before it marks one
 complete: a change while it runs stops the run with 2, and the same command
@@ -994,9 +1009,9 @@ layouts, and FP8 with one f32 scale per tensor (`f8bs`) in TN. They size a
 run as the production recipe does, as the gfx1250 training configs do:
 `seed.target_per_cell` shapes per cell in round 0, `seed.shapes_per_cell`
 new shapes per leaf in each active round, `full.total_rounds` rounds before
-the final retrain, and a cell below the bar split once a retrain has not
-lifted it (`validate.split_after_attempts`, see *Active learning
-(stage04b)*). Like the gfx1250 configs they hold no host value: set
+the final retrain, and no cell split: a cell below the bar is retrained
+(`validate.max_split_depth: 0`, see *Active learning (stage04b)*). Like the
+gfx1250 configs they hold no host value: set
 `TILEWRIGHT_BENCH_ROOT` and `TILEWRIGHT_AUDIT_ROOT`, and list the host's
 devices and evaluation sets in a run config outside the repository. Their
 execution contexts are shares of the bench device's CUs, as in the gfx1250
@@ -1013,7 +1028,11 @@ and the eighth adds one granule below them. The
 non-temporal rule is on for TN and off for the other layouts, where it
 would keep most of the Prediction table from being served;
 `gfx950_bbs_tn_origami_v3.yaml` also sets the distillation keys its shipped
-model was trained with.
+model was trained with. Each active round gives a leaf the round before it
+retrained twice the new shapes per leaf, and every leaf half as many again
+as its draw holds with K above 32,768, without a lower factor for any leaf
+(`seed.weak_cell_factor`, `seed.large_k_factor`; see *Weak cells and very
+large K (stage01)*).
 
 ## Bringing up a new gfx1250 host
 
@@ -1115,9 +1134,10 @@ performance level; that the first device's KFD node and HIP report the
 same CU count, LDS, L2 and wave size (*Device values*); the XCD count of a
 pool with dynamic-queue kernels; the contexts and their co-tenant; the
 bank's stems; the audit set; what the stage 7 build's TensileLite serves;
-the stage08 datasets; the free disk space; and the engine module and its
-feature catalogs. The config check refuses `f4_r`, `f6_r` and `bf6_r`
-operands without a block format in `hipblaslt.scaleA` / `scaleB`.
+the stage08 datasets; the free disk space; and the engine module, its
+feature catalogs and, for v3, its CU floor. The config check refuses
+`f4_r`, `f6_r` and `bf6_r` operands without a block format in
+`hipblaslt.scaleA` / `scaleB`.
 
 ## First run on a new gfx1250 host
 
@@ -1127,13 +1147,17 @@ yet:
 
 - the production budget and rounds: `seed.target_per_cell` shapes per cell
   in round 0, `seed.shapes_per_cell` new shapes per leaf in each active
-  round, `full.total_rounds` rounds, then the final retrain, and a cell
-  below the bar split once a retrain has not lifted it
-  (`validate.split_after_attempts`, see *Active learning (stage04b)*).
+  round, `full.total_rounds` rounds, then the final retrain, and no cell
+  split: a cell below the bar is retrained (`validate.max_split_depth: 0`,
+  see *Active learning (stage04b)*).
   `full.total_rounds` is not pinned: a run whose audit set still climbs
   goes on with more rounds when the same command runs with a larger one
   (see *Final retrain*);
 - planned lists sized to each library's kernel pool (`planner.top_k`);
+- the gfx950 configs' weak-cell budget: twice the new shapes for a leaf
+  the round before retrained, and for every leaf half as many again as its
+  draw holds with K above 32,768 (`seed.weak_cell_factor`,
+  `seed.large_k_factor`; see *Weak cells and very large K (stage01)*);
 - near-winner re-reads in a wide band, twice for a GEMM whose winner is
   below `fast_below_us` and once for the others (`bench.rebench`);
 - the default stall timeout after the long start-up grace of the library
@@ -1219,7 +1243,9 @@ class, the correctness gate, the audit set, the production recipe's
 budgets that still let a cell train, be evaluated and split: a few shapes
 per cell in round 0 and per leaf in each active round, one exhaustive seed
 per cell, short planned lists, an audit set of a few GEMMs per cell, and
-splits at most one level deep. Besides the whole device it benches half
+splits at most one level deep (`validate.max_split_depth: 1`): the training
+configs do not split, but a sanity run keeps one level so that it still
+exercises the split code. Besides the whole device it benches half
 and an eighth of its CUs with a co-tenant, so that its models declare CU
 budgets from an eighth of the device, rounded to the nearest multiple of
 the budget granule (exactly an eighth on a device of a multiple of eight
@@ -1249,7 +1275,7 @@ their audit sets, one per class.
 |---|---|---|
 | 0 | `stage00a_hazard_canary.py` | `hazards/canary/` (written as `canary.new/`, which replaces it when the canary succeeds): `quarantine.json`, `verdicts.json`, `canary_summary.json`, each run's bench yaml and output in `logs/`; once per invocation, before anything else, with `hazards.enabled` (the default) and a kernel of a hazard class in the pool |
 | 0 | `stage00_correctness_gate.py` | `correctness/gate/` (written as `gate.new/`, which replaces it when the gate succeeds): `blocklist.json`, `verdicts.json`, `gate_summary.json`, the harness's records in `runs/`; once per invocation, before the rounds, only with `correctness.enabled` |
-| 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell, none of them in a held-out list; re-used history shapes in `reused_shapes.yaml`; `categorization.json` with each held-out list it left out (`exclusion_sources`); `targeted_shapes.json` with an active round's targeted shapes (see *Targeted shapes (stage01)*) |
+| 1 | `stage01_generate_OOB_shapes.py` | `shapes.yaml`: new shapes per leaf cell, none of them in a held-out list; re-used history shapes in `reused_shapes.yaml`; `categorization.json` with each held-out list it left out (`exclusion_sources`); `targeted_shapes.json` with an active round's targeted shapes (see *Targeted shapes (stage01)*); `per_cell_plan.json` with an active round's per-leaf targets and budget (see *Weak cells and very large K (stage01)*) |
 | 2 | `stage02_plan_benchmarks.py` | `shapes.yaml` with each shape's kernel list, `plan.json`, `plan_summary.json`; only with `planner.enabled` (in `stage01b/` of a run written before the planner became stage 2, see *Resuming*) |
 | 3 | `stage03_load_balance_offline_tuning.py` | `logs/`: hipblaslt-bench logs, one work queue per GPU, every kernel timed adaptively, every bench process led by the discarded warm-up line (`bench.warmup_line`), with `bench.canary` a canary around each block's shapes; `platform.json`, `quarantine/`, `drift/`, `misaligned/`, `aborted/`, `probe/` (device probes), `skipped_gemms.txt`, `stage03_summary.json` |
 | 3.2 | `stage03b_rebench_near_ties.py` | `logs/`: stage03's logs with the near-winners read again and labelled by their median, `rebench.json`, `rebench_summary.json`; only with `bench.rebench.enabled`. GEMMs of other execution contexts (stage03c) keep their single measurement |
@@ -1271,8 +1297,8 @@ trained before it deploys it. Cells that keep missing the bar after
 retraining are split on the eligible axis (a widest tier: Large M or N,
 LargeK K) whose threshold best separates their well- and badly-served GEMMs
 (the largest variance reduction of the per-GEMM log selection-efficiency
-ratios), unless `validate.max_split_depth` is 0: then a cell that misses
-the bar is retrained.
+ratios), unless `validate.max_split_depth` is 0, as in the configs of the
+training recipes: then a cell that misses the bar is retrained.
 
 A cell the round does not retrain is carried forward with the model of its
 latest training round, trained with that round's model-shaping options:
@@ -2325,8 +2351,11 @@ order, the one the runtime serves, and every member keeps its position.
   named attributes of every solution its rows name: the `sizeMapping` values
   TensileLite hands the engine, as int64, with the C++ defaults for absent
   optional keys and the legacy `streamK` keys normalized the way TensileLite
-  reads them (`lib/dat.py`); and their kernel ids and signatures (next
-  section). The engine `Config`s of a kernel pool read from the library, or
+  reads them (`lib/dat.py`); `hand_written` 1 on a solution whose
+  `customKernel` names a kernel that was not generated, which only
+  hipBLASLt's launch rule reads (TensileLite hands it to no engine); and
+  their kernel ids and signatures (next section). The engine `Config`s of a
+  kernel pool read from the library, or
   from data with `kernels.json`, carry them; v2 models do not read them, v3
   models read those of their attribute spec. With the run's config
   (`--config-yaml`, which the orchestrator passes) a tested row whose data
@@ -2425,8 +2454,11 @@ transform, values}` with transforms `identity`, `log2p1`, `nonzero` and
 `DEFAULT_ATTRIBUTE_SPEC` in `lib/features.py` is empty), the launch plans
 hipBLASLt makes for each training pair (`lib/hipblaslt_launch.py`, from the
 kernel's occupancy and its `tile_processing_strategy`, `work_assignment`,
-`stream_k_atomic` and `work_group_x/y/z` attributes; evaluations hand the
-engine the same plans and `launch_key`s as its launch model;
+`stream_k_atomic`, `work_group_x/y/z` and `hand_written` attributes:
+TensileLite reduces the partial tiles of a hand-written Stream-K kernel in a
+tree only, so such a kernel that can run on a static grid is a launch class
+of its own; evaluations hand the engine the same plans and `launch_key`s as
+its launch model;
 `scripts/check_launch_plans.py` compares TensileLite's plans and keys for a
 library's pool with these; a dynamic-queue
 Stream-K launch also needs the queue count hipBLASLt compiles into those
@@ -2443,7 +2475,8 @@ key's first kernel only; the integration's launch model returns the keys
 either way and the model decides, and every evaluation groups as the engine
 does for that model), the declared contexts (the CU fractions from the
 smallest in the data, or `train.min_cu_fraction` when that is larger, to 1;
-`train.schedules`, default the schedules in the data), per-cell clip
+the CU floor, the fewest usable CUs in the data; `train.schedules`, default
+the schedules in the data), per-cell clip
 bounds (the training feature ranges; `train.clip_features`), whitelists keyed
 by `train.whitelist` (`none` by default: every feasible kernel through the
 cascade, `train.cascade_k` default 32, whose first stage ranks by the
@@ -2601,7 +2634,8 @@ file the stage does not read. Then:
   logs stage03 benched with other library files; `scripts/audit_v2.py`
   neither plans on top of nor benches a generation recorded with another
   build (or, written before records, whose indices name other kernels by
-  the audit set's kernel digests as of its plan); `--mode audit` stops when
+  the audit set's kernel digests as of its plan, against every kernel of
+  the pool, those a blocklist leaves out too); `--mode audit` stops when
   the build changed since its generation 0 or an increment not benched yet
   was planned; `choose_shipped_subset.py` refuses bench data whose indices
   name other kernels.
@@ -2751,7 +2785,20 @@ context) is its own GEMM and ranking group in stages 4.5 and 5 and in the run
 history. A model declares the CU fractions from the smallest trained
 budget's to 1 (stage05's `min_cu_fraction`), so that hipBLASLt ranks a call
 of fewer CUs with Origami; `train.min_cu_fraction` can only raise that
-floor. One above the smallest trained budget fraction, or `train.schedules`
+floor. It also declares the fewest usable CUs it trained, its CU floor
+(stage05's `min_effective_cus`, a budget or the bench device's CU count):
+a device of fewer CUs than the bench device, a compute partition for one,
+is a whole device to the engine, so a call there is in the declared range
+of shares whatever its CUs, and the floor makes hipBLASLt rank a call of
+fewer usable CUs than the model trained with Origami there too.
+`train.min_cu_fraction` raises the shares only. An engine that predates the
+CU floor refuses every such model (`unknown serving flags`), so port the
+engine to the deploy checkout and the stage-7 build before such a model
+ships: stage05 stops at once with a module that predates it, and preflight
+refuses one and a stage-7 TensileLite without it. `lib/mlrec.py`'s
+`with_cu_floor(data, None)` removes the floor from a model file without
+retraining; the file then ranks as a model without a floor. One above the
+smallest trained budget fraction, or `train.schedules`
 without a benched schedule, is a config error, and one below 1 without a
 trained context of fewer CUs than the device has is a warning: the models
 then declare every CU only. The
@@ -2821,10 +2868,11 @@ reduces the variance of the cell's per-GEMM log selection-efficiency ratios
 most. Only equal reductions (equal up to rounding) fall to an axis not yet
 in the cell's split path, then M before N before K.
 
-`validate.max_split_depth: 0` turns splitting off: a cell below the
-threshold retrains (reason `splits_off`), and the split keys and the
-structural width trigger have no effect (config validation warns about a
-structural trigger it overrides).
+`validate.max_split_depth: 0` turns splitting off, as the configs of the
+training recipes do (the gfx1250 sanity configs keep one level, see *Sanity
+runs*): a cell below the threshold retrains (reason `splits_off`), and the
+split keys and the structural width trigger have no effect (config
+validation warns about a structural trigger it overrides).
 
 A base cell whose splits a repair revoked (see *Repair on refusal*) never
 splits again: stage04b reads the revocations of its prior rounds and of
@@ -2912,6 +2960,82 @@ context re-plan of stage02 (`--targeted-shapes`) take them among the
 shapes the context draws for their cells (`lib.contexts.select_shapes`,
 `targeted_for`), ahead of the cell's random draw.
 
+### Weak cells and very large K (stage01)
+
+An active round's stage01 sets each leaf's number of new shapes from the
+previous round's stage04b (`decisions.json` of the last prior round,
+`--decisions-from`):
+
+- a leaf that stage04b retrained, for its selection efficiency (decision
+  `retrain`: below `validate.sel_eff_threshold`) or for a held-out collapse
+  (a pass with `collapse_retrain`), is weak: it draws
+  `seed.weak_cell_factor` times `seed.shapes_per_cell` (rounded half up);
+- a leaf that passed with a fresh held-out reading at least
+  `seed.strong_cell_margin` (0.03) above the threshold stage04b applied is
+  strong: it draws `seed.strong_cell_factor` times `seed.shapes_per_cell`,
+  and at least `train.min_cell_gemms`, but the strong leaves together give
+  up no more shapes than the weak leaves gain;
+- every other leaf draws `seed.shapes_per_cell`, and so do the leaves of a
+  split the previous round made (the split gave their region a leaf each).
+  A leaf whose split a repair revoked reads the rows of the leaves it held:
+  weak when one was retrained, strong when all were strong.
+
+The budget rule: a round's target is `seed.shapes_per_cell` per leaf,
+plus the weak leaves' extra, minus the strong leaves' cut, which never
+exceeds that extra. A round's target therefore never falls below
+`seed.shapes_per_cell` per leaf and never exceeds a weak leaf's target per
+leaf (`seed.weak_cell_factor` times `seed.shapes_per_cell`, rounded half
+up); the very-large-K and targeted shapes come on top. A round with more
+weak leaves than the rounds before it is larger than they were (see
+*Running* for the free space it needs). Execution contexts bench a
+fraction of each cell's shapes (see *Execution contexts (stage03c)*), so a
+weak cell's CU budgets grow with it.
+
+The very-large-K stratum: with `seed.large_k_factor` F above 1, a leaf
+whose new shapes hold n with K above 32,768 draws (F - 1) * n more there
+(rounded half up), inside its box and under the same filter, history dedup
+and exclusions as every other shape, from a random stream of its own, so
+its other draws stay as they were; fewer when its box holds no more.
+Batched cells hold none: the filter keeps every dimension of a batched
+shape at or below 8,192. They are new held-out shapes like the others, on
+top of the leaf's target, so the round's stage04b reads such a leaf on F
+times as many GEMMs with K above 32,768 as its draw held. Those GEMMs
+read below the rest of their LargeK cells, so a LargeK leaf near the bar
+can read below it and be retrained.
+
+Round 1, which has no stage04b before it, keeps `seed.shapes_per_cell`
+per leaf, with the stratum; an enhance round (`--only-cells`, see
+*Enhancing chosen cells*) draws `--shapes-per-cell` for each chosen leaf,
+with neither. The round after an enhance round reads that round's
+decisions, in which only the chosen leaves have new GEMMs: only they can
+be weak or strong. With every factor at 1, the default, each leaf draws
+`seed.shapes_per_cell` and no stratum shape, stage01 reads no decisions,
+and the orchestrator passes stage01 only the keys away from their defaults
+(a factor of 1, a margin of 0.03), so a config without them runs the same
+stage01 command as one that sets them to their defaults.
+`per_cell_plan.json` records the round's `budget` (the decisions it read,
+the factors, the threshold, the counts of weak and strong leaves, the
+round's count at `seed.shapes_per_cell` per leaf, the weak leaves' extra,
+the strong leaves' cut and the round's target) and each leaf's `need`
+(`weak`, `strong` or null) and `n_large_k`; `categorization.json` counts
+the stratum's shapes (`large_k`).
+
+A round's readings over all of its new GEMMs weight each leaf by its new
+GEMMs: stage04b's `aggregate` (`global_sel_eff_new`, `all_held_out`), the
+round's `held_out_sel_eff` in its round marker and in `run_status.json`,
+and the deploy gate's overall reading against `deploy.target_sel_eff`,
+whose gate GEMMs are a share of each leaf's. With the budget they lean
+toward the weak leaves and, in LargeK leaves, toward K above 32,768, as
+they leaned toward split regions when cells split, so they do not compare
+as they are with the rounds of a run without the budget: compare runs per
+cell, or with every cell weighted alike.
+
+The training recipes (see *gfx950 configs*) set `seed.weak_cell_factor`
+to 2 and `seed.large_k_factor` to 1.5 and leave `seed.strong_cell_factor`
+at 1: a weak cell draws twice the recipe's new shapes per round, every
+leaf half as many again as its draw holds with K above 32,768, and no
+leaf fewer than the recipe's shapes per leaf.
+
 ### Hazard canary (stage00a)
 
 A kernel can stop its device in a way that no signal to the bench ends: the
@@ -2996,45 +3120,48 @@ invocation's blocklist is the quarantine itself. A quarantined kernel thus
 leaves every plan and pool, stage04's rows and the deployed sidecar, as a
 kernel that computes wrong results does; the audit set does not bench it,
 and its completeness check does not wait for it. A kernel kept out unchecked
-leaves them the same way for its invocation alone. Stage 7 skips the runs in
-which the analytical ranking picks kernels (the ML-off timing runs, and
-with them the timing, the Origami reference, the order parity and the
-production route) while the pool holds one, and every run while the
-validated bundle's blocklist leaves one in (*Validation*); its production
-route also keeps out the kernels of the hazard classes that rows ahead of
-the model hold outside the pool, which the canary never runs. A pool that
-keeps quarantined kernels needs `planner.enabled`, since a bench line
-without a kernel list runs every kernel of the library: the orchestrator
-refuses to go on without it.
+leaves them the same way for its invocation alone; an audit set built for
+the run takes it from neither the run's blocklist nor its sidecars unless a
+config snapshot of the run names it for a finding (the gate lists a kernel
+the canary keeps out with the canary's entry alone, so a keep-out can hide
+what the gate found in another invocation), and the set's own canary runs it
+alone first (*Audit set*). Stage 7 skips the runs in which the analytical
+ranking picks kernels (the ML-off timing runs, and with them the timing, the
+Origami reference, the order parity and the production route) while the pool
+holds one, and every run while the validated bundle's blocklist leaves one
+in (*Validation*); its production route also keeps out the kernels of the
+hazard classes that rows ahead of the model hold outside the pool, which the
+canary never runs. A pool that keeps quarantined kernels needs
+`planner.enabled`, since a bench line without a kernel list runs every
+kernel of the library: the orchestrator refuses to go on without it.
 
 ### Correctness gate (stage00)
 
 Some kernels of a library compute wrong results for some problems. With
 `correctness.enabled` the orchestrator runs stage00 before anything else of
-an invocation (training, enhance and validate modes; the config of an audit
-set, `lib.audit.bench_config`, has no correctness section: the set benches
-every kernel and leaves the blocklist to the runs that evaluate on it). It
-checks the kernels of the pool, the library's Prediction table and the bank,
-with an exact harness, `tools/errmap.cpp`: A, B and C hold small integers,
-so every product and partial sum of the f32 accumulation is exact and a
-correct kernel writes the reference bits into every element of D; any other
-element is wrong, and an element a kernel does not write keeps a NaN
-pattern (the harness prints NaN and infinite values as printf does, and the
-gate reads such a line as the failing repetition it is). The harness picks
-kernels by solution index and links the run's
-hipBLASLt build (`runtime.build_dir`), whose library it checks against the
-names of the logic files the pipeline reads: every line it prints is checked
-as it arrives, and a kernel it names otherwise, or a process that finds none
-of its kernels, stops the gate at once (a first launch, which holds one
-kernel, leaves a kernel the harness finds nowhere untested, and stops the
-gate only when another process found it). It is built the first time a kernel
-needs a check, into the cache directory, with `correctness.compiler`
-(default: `amdclang++` of `ROCM_PATH`, else `hipcc`; it has no device
-code); `correctness.harness` names a prebuilt one instead. It runs bf16 and
-f32 A, B, C and D with f32 or xf32 compute in every layout (a padded leading
-dimension exceeds the rows its matrix is stored with in the config's
-layout), A and B of `f8_r` (E4M3) or `bf8_r` (E5M2) with one f32 scale per
-tensor (`hipblaslt.scaleA` and `scaleB` 1, the libraries'
+an invocation (training, enhance and validate modes; an audit set runs no
+gate of its own: its config, `lib.audit.bench_config`, lists the blocklist
+of the runs it is built for, *Audit set*). It checks the kernels of the
+pool, the library's Prediction table and the bank, with an exact harness,
+`tools/errmap.cpp`: A, B and C hold small integers, so every product and
+partial sum of the f32 accumulation is exact and a correct kernel writes the
+reference bits into every element of D; any other element is wrong, and an
+element a kernel does not write keeps a NaN pattern (the harness prints NaN
+and infinite values as printf does, and the gate reads such a line as the
+failing repetition it is). The harness picks kernels by solution index and
+links the run's hipBLASLt build (`runtime.build_dir`), whose library it
+checks against the names of the logic files the pipeline reads: every line
+it prints is checked as it arrives, and a kernel it names otherwise, or a
+process that finds none of its kernels, stops the gate at once (a first
+launch, which holds one kernel, leaves a kernel the harness finds nowhere
+untested, and stops the gate only when another process found it). It is
+built the first time a kernel needs a check, into the cache directory, with
+`correctness.compiler` (default: `amdclang++` of `ROCM_PATH`, else `hipcc`;
+it has no device code); `correctness.harness` names a prebuilt one instead.
+It runs bf16 and f32 A, B, C and D with f32 or xf32 compute in every layout
+(a padded leading dimension exceeds the rows its matrix is stored with in
+the config's layout), A and B of `f8_r` (E4M3) or `bf8_r` (E5M2) with one
+f32 scale per tensor (`hipblaslt.scaleA` and `scaleB` 1, the libraries'
 `UseScaleAB: Scalar`, gfx950's F8BS problem type among them), and A and B of
 `f8_r`, `bf8_r` or `f4_r` (E2M1) with block-32 E8M0 scales (MX:
 `hipblaslt.scaleA` and `scaleB` 3), with bf16 or f32 C and D; a config of
@@ -3127,6 +3254,68 @@ runs again with K rounded up to that multiple, and a failure is followed up
 on the other kernels of the same macro tile and matrix instruction,
 `trigger_repetitions` times.
 
+Every kernel also runs the tiny shapes (`tiny_shapes_of`), each
+`correctness.repetitions` times: M of 1, 2 and 3 with N of 257, then N of 1,
+2 and 3 with M of 257, K 383 (416, an odd multiple of 32, for block-scaled A
+and B). A kernel that reads A along M (A not transposed) or B along N (B
+transposed) several elements at a time, under predicates that admit a
+smaller free size, reads outside the operand there. When hipMalloc places
+the operands, a small one sits next to the problem's other buffers in one
+block: such a read may land in another buffer, return bytes the kernel then
+leaves out, and go unseen, the result exact. So the tiny shapes run with
+every operand at the start of an allocation of its own (the harness's
+`--fresh 1`): for each of A, B, C, a separate D, the scales and the bias the
+harness reserves a range of virtual addresses (`hipMemAddressReserve`), maps
+a physical allocation of the buffer's own (`hipMemCreate`, `hipMemMap`,
+`hipMemSetAccess`) after its first 2 MiB and leaves those unmapped, so that
+a read before the buffer faults: a crash, which runs again alone and blocks
+the kernel. A read past the end of a buffer is not certain to fault: it may
+land in the rest of the buffer's last granule or in memory mapped after its
+range. Placing the buffers so takes the device's virtual memory management
+(`hipDeviceAttributeVirtualMemoryManagementSupported`); without it, or when
+one of its calls fails, the buffers come from hipMalloc and the harness's
+ready line says so (`"fresh": false`). The gate asks the harness for the
+option first (`errmap --caps`, which calls no HIP function); a prebuilt
+harness built before it (`correctness.harness`), or one whose `--caps`
+fails, runs the tiny shapes on its usual allocations. The gate warns in both
+cases and records per tiny-shape verdict whether every run of it had fresh
+operands (`evidence.fresh`); its summary says whether the harness takes the
+option (`tiny.harness_fresh`) and how many tiny-shape processes had fresh
+operands (`tiny.fresh_tasks` of `tiny.tasks`). A tiny-shape pass or untested
+verdict made without fresh operands is cached but never taken: the next gate
+runs those kernels on the tiny shapes again (`tiny.cached_not_fresh`), so on
+a device without virtual memory management every gate runs them; a crash or
+a failure stands wherever it happened. The tiny shapes are a stage of their
+own (`TINY`), with a protocol that names the stage and cached verdicts of
+their own: a kernel with cached verdicts of the other shapes runs the tiny
+shapes alone, and a kernel's verdict is the worse of the two stages' (its
+row in `verdicts.json` holds the tiny stage's in `tiny`).
+
+Before the harness runs anything, the gate checks every hand-written kernel
+of the pool (a solution whose `customKernel` was not generated) statically,
+unless `correctness.static_check` is false. TensileLite builds such a kernel
+with global-read vector widths of 1 and derives its LeadingFree size
+predicates from those widths, while the kernel reads A and B as wide as the
+`custom.config` of its source declares (`GlobalReadVectorWidthA` and
+`GlobalReadVectorWidthB`). Along a leading free dimension, M of a
+non-transposed A and N of a transposed B, a free size below that width reads
+outside the operand. A kernel whose predicates admit such a size
+(`LeadingFree0SizesGreaterOrEqual` and `Free0SizeMultiple` bound M, their
+`1` twins N, and `SizeEqual`, `SizeMultiple` and `SizeGreaterThan` the size
+of their index) is `unguarded`: blocked with the reason and what the check
+compared (the row's `static`: per operand the width declared and built, the
+least free size and the predicates that set it, the source and its sha256),
+and never run. The source is the kernel's `<name>.s`, found as TensileLite
+finds it (at the top of the directory, else the first of a sorted walk), in
+TensileLite's `CustomKernels` of the hipBLASLt source the build was
+configured from (`CMakeCache.txt`), or below `correctness.custom_kernels`.
+A kernel whose source cannot be found or read is `unchecked` by the static
+check, and one whose `custom.config` declares no width for an operand it
+reads along a leading free dimension `undeclared`; the gate warns, and both
+run on every shape. The check reads the logic files and sources at every
+gate and is not cached, so a rebuilt library or an edited source is checked
+as it is now.
+
 A harness process that prints nothing for `correctness.timeout_s` (before
 it is ready, between two records or after its last one) hangs and is
 killed. When a process crashes or hangs, the first kernel it found that
@@ -3136,7 +3325,7 @@ operator, the OOM killer) blames no kernel and stops the gate. A kernel
 fails (`fail`) when a repetition returns a wrong element, crashes (`crash`)
 when it crashes or hangs also alone, passes when it ran and did neither, and
 is untested when no shape supported it or the harness did not find it.
-Failing and crashing kernels are blocked.
+Failing, crashing and unguarded kernels are blocked.
 
 The gate runs one harness process at a time on each GPU of
 `correctness.devices` (default: `runtime.devices`), with the GPUs leased
@@ -3150,14 +3339,15 @@ library is checked again. A failure holds under any protocol, a later
 harness's too: a kernel that returned a wrong element may do so rarely, and a
 check that missed it would serve it (to check a kernel again, for one after a
 fault of the harness, remove its lines from `verdicts.jsonl`). A crash or a
-pass holds only under the shapes, repetitions, first-launch policy, harness
-and hipBLASLt host libraries it was made with, and a crash whose every lone
-run hung only while `correctness.timeout_s` is no longer than the one it
-hung under (the cache keeps it as `timeout_s`). A verdict is cached as soon
-as no later pass of the gate can change it, and a gate that stops early (an
-error or a signal) still caches the failures it saw. A kernel a list names
-is not checked. When every kernel of the pool has a verdict the gate checks
-nothing, builds nothing and takes no GPU.
+pass holds only under the stage, shapes, repetitions, first-launch policy,
+harness and hipBLASLt host libraries it was made with, and a crash whose
+every lone run hung only while `correctness.timeout_s` is no longer than the
+one it hung under (the cache keeps it as `timeout_s`); a tiny-shape pass or
+untested verdict made without fresh operands holds under none. A verdict is
+cached as soon as no later pass of the gate can change it, and a gate that
+stops early (an error or a signal) still caches the failures it saw. A kernel
+a list names is not checked. When every kernel of the pool has a verdict of
+both stages the gate runs nothing, builds nothing and takes no GPU.
 
 `correctness.lists` names files of kernels known to compute wrong results: a
 list with one kernel per line, `<class><TAB><name>` or the name alone (`#`
@@ -3171,25 +3361,26 @@ integration-side data, and models know a kernel only by its signature. A
 name blocks every kernel of its canonical name, an alias group whole (*Kernel
 identity across hipBLASLt builds*), and the sidecar lists every member.
 
-The gate writes `blocklist.json`, the listed kernels and those that failed
-or crashed by name, kernel id and signature, into `correctness/gate.new/`,
-which replaces `correctness/gate/` only when the gate succeeds, so a gate
-that fails leaves the last one's blocklist in place. The orchestrator copies
-`gate/blocklist.json` to the invocation's own file in
-`correctness/blocklists/`, which the invocation's config snapshot names
-(`correctness.blocklist`) and every stage marker of the invocation records
-(file, sha256 and number of kernels), so an older round read with its own
-snapshot applies the blocklist it ran with. The run pins the contents of
-the `correctness.lists` files (`correctness.lists_sha256`): changing one
-needs `--allow-code-change`, like any pinned value. From there on every
-stage leaves the blocked kernels out (`lib/correctness.py`):
+The gate writes `blocklist.json`, the listed kernels and those that failed,
+crashed or are unguarded, by name, kernel id and signature, into
+`correctness/gate.new/`, which replaces `correctness/gate/` only when the
+gate succeeds, so a gate that fails leaves the last one's blocklist in
+place. The orchestrator copies `gate/blocklist.json` to the invocation's own
+file in `correctness/blocklists/`, which the invocation's config snapshot
+names (`correctness.blocklist`) and every stage marker of the invocation
+records (file, sha256 and number of kernels), so an older round read with
+its own snapshot applies the blocklist it ran with. The run pins the
+contents of the `correctness.lists` files (`correctness.lists_sha256`):
+changing one needs `--allow-code-change`, like any pinned value. From there
+on every stage leaves the blocked kernels out (`lib/correctness.py`):
 
 - every pool built from the config (`lib.bank_pool.config_pool`): the
   planner's kernel lists, stage05's pool and served candidates (a key whose
   served member is blocked is served by its next member, a key whose members
   are all blocked is no candidate), the deploy gate and the audit set's
   evaluations (under protocol v2 the winner is the fastest median of a
-  kernel of the pool);
+  kernel of the pool), which also leave out every kernel a blocklist the
+  audit set was built with names (*Audit set*);
 - stage04 drops their rows, so a blocked kernel is never a GEMM's winner or
   a label, and stage05, stage04b, stage06, stage07, stage08 and the report
   drop the rows of folders enriched before it was blocked (stage05's
@@ -3450,10 +3641,23 @@ ASIC revision 0 loads without the strict switch (devices of other revisions
 load `gfx1250` and the model of a gfx1250 config). For a target whose
 libraries carry another architecture suffix (those of `gfx1250v0` end in
 `_gfx1250`) the stem is rewritten accordingly. The index
-merge keeps every other library's entry, resolves a stem listed twice the
-way the engine does (the first line wins) and removes the duplicates. A
-re-deploy keeps the file name the stem already uses; a file that no index
-entry references any more is removed.
+merge keeps every other library's entry and the rows for the devices of one
+PCI chip ID (`chip=0x<id>`; see the engine README's *Weights*), whose files a
+deploy never writes over or removes; it writes the stem's row without a chip
+ID, first among the stem's rows, and resolves a stem listed twice the
+way the engine does (the first line wins) and removes the duplicates and
+lines of one field, with a warning. It refuses an index with a malformed
+row (a third field that is not a chip ID, or a fourth field) and writes
+nothing: the engine loads no model for that row's stem on any device, and
+a rewrite without the row would serve the stem's other rows on the devices
+it may have been meant for; correct or remove the row first. A stem with
+rows for chip IDs only gets a warning: an engine that predates the chip ID
+serves the model of its first row on every device. A re-deploy keeps the
+file name the stem already uses; a file that no index entry references any
+more is removed. A deploy never writes over a file a row for a chip ID
+names, so a stem whose row for a chip ID names `<stem>.tilewright.bin` is
+not deployed (`... is already used by another row of the index`) until
+that row names a file of its own.
 
 Installation is all-or-nothing: files are written under temporary names,
 synced and renamed, indexes last, and any failure restores the previous files.
@@ -3525,7 +3729,12 @@ C's library, bank, bench settings and contexts (`lib.audit.bench_config`):
   the `--source-run-dir` runs' rounds and every GEMM of the `audit.held_out`
   lists outside the audit directory (an entry inside it is the set's own and
   is skipped);
-- stage02 plans them exhaustively: every pool and bank kernel per shape;
+- stage02 plans them exhaustively: every pool and bank kernel per shape
+  that the blocklist of the runs the set is built for leaves in (below),
+  always in an explicit list (`--listed-only`: when the pool and bank hold
+  more kernels than one bench line lists while that blocklist leaves one of
+  them out, the stage fails rather than bench every kernel of the problem
+  type);
 - the bench runs in resumable parts of `audit.part_shapes` shapes:
   `bench/exclusive/` holds every shape, `bench/<label>/` every configured
   context, trained and held out, with `audit.shapes_per_context` shapes per
@@ -3551,13 +3760,56 @@ member) under any solution index, on every audit GEMM, on generation
 nothing, one that retunes a kernel under its own index benches that kernel.
 Every generation's rows are read at the indices the current pool gives their
 kernels; kernels that left the pool cost nothing, their rows are ignored.
-`--devices` overrides `runtime.devices` for the audit only. An audit
-directory is bound to its seed, counts, arch, library stem and contexts;
-other settings need another directory, and a training run refuses one built
-with other settings, complete or not. The contexts follow the device: a
-config of CU shares resolves other budgets on another CU count or compute
-partition, and turning an entry on or off adds or removes a context, so
-such a run needs an audit set of its own.
+`--devices` overrides `runtime.devices` for the audit only.
+
+The set never benches a kernel the runs it is built for leave out of their
+served pools. Each invocation takes the union of the blocklist of C (its
+`correctness.lists`, and the gate blocklist a run's config snapshot names)
+and, for every `--source-run-dir` run, the blocklist its newest config
+snapshot whose files can be read names (its lists and the invocation's copy
+of its gate's blocklist) and every sidecar its deploys staged (each bundle's
+`stage06/deploy_record.json`; one that cannot be read is noted in the file);
+a training run that builds its set itself gives the child its own snapshot
+and run, so its set leaves out what its gate blocks. The union takes no
+kernel a run's hazard canary only kept out unchecked, its run alone cut
+short or never run (`lib.hazards.kept_out_unchecked`), and that no config
+snapshot of the run names for a finding (`lib.audit.run_unchecked`): not
+from the run's blocklist, not from a sidecar staged meanwhile, and not from
+C's files when a `--source-run-dir` run shows the kernel so. Nothing was
+found against such a kernel, so the set's own canary runs it alone first,
+and the set benches it once it passes. The lists, the gate's findings
+(failed, crashed or unguarded), the canary's quarantine and every other
+keep-out are taken: the gate lists a kernel the canary keeps out with the
+canary's entry alone, so a keep-out can hide what the gate found in another
+invocation. The invocation adds every kernel a blocklist the set applied
+before names (`lib.audit.build_blocklist`), writes the union to
+`blocklists/source_<sha256 prefix>.json` and lists it as the one
+`correctness.lists` entry of the set's config, so every stage applies it
+with the hazard canary's quarantine: the plan lists none of its kernels, a
+part benched in a later invocation leaves out of its lines what the
+blocklist names then (a part whose `shapes.yaml` lists such a kernel and
+whose stage03 is not complete is moved aside and benched again), an
+increment holds none, and a generation records as benched only the kernels
+every line of every part listed. `audit_set.json` names each blocklist an
+invocation applied by its file and sha256 (`blocklists`, the latest in
+`blocklist`, the one a generation was finished with in its `blocklist`) and
+the kernels of the pool it left out by kernel digest (`left_out`): no
+completeness check, of the set's builder or of a run that evaluates on it,
+waits for those, whatever its own blocklist says, and every evaluation
+leaves out of the pool it ranks and scores every kernel those blocklists
+name (`lib.audit.evaluation_pool`), so that none is a winner, a ceiling or a
+pick under any protocol; an evaluation record names what it applied
+(`blocklist`: the run's by the digest of its names, the set's by sha256). A
+kernel those blocklists name is thus never measured again for any run of the
+set, also once no run's blocklist names it: a kernel unblocked later needs a
+new audit set.
+
+An audit directory is bound to its seed, counts, arch, library stem and
+contexts; other settings need another directory, and a training run refuses
+one built with other settings, complete or not. The contexts follow the
+device: a config of CU shares resolves other budgets on another CU count or
+compute partition, and turning an entry on or off adds or removes a context,
+so such a run needs an audit set of its own.
 
 A training config points at it with `audit.dir`. Then:
 
@@ -3597,10 +3849,11 @@ directory holding `stage01/shapes.yaml`), a bench yaml, a file of
   `exclusion_sources`: the entry, the file read and its sha256, the number
   of GEMMs and the digest of their sorted (M, N, K, batch) set
   (`gemms_sha256`, the same for one set of GEMMs in any format), how many
-  of its GEMMs the round's draws hit and left out (`n_dropped`), and how
-  many of its GEMMs the round's history holds (`n_in_history`, with a
-  warning): GEMMs earlier rounds drew before the list was registered, which
-  are training data of those rounds;
+  of its GEMMs the draws of the leaves' targets hit and left out
+  (`n_dropped`; the targeted and very-large-K draws leave them out too,
+  uncounted), and how many of its GEMMs the round's history holds
+  (`n_in_history`, with a warning): GEMMs earlier rounds drew before the
+  list was registered, which are training data of those rounds;
 - every invocation that trains (`full`, `initial`, `active`, `enhance`)
   warns once per list that shares GEMMs with shapes the run's rounds drew,
   naming the rounds: they stay in the training data, also of the final
@@ -3745,13 +3998,23 @@ never touching the audit's own files) measures each audit GEMM's set again:
   readings are kept in each part's `result.json`;
 - scores use per-kernel medians: the winner is the smallest median of a
   kernel of the evaluated run's pool, as in protocol v1 (`lib.audit`
-  `pool_medians`): a kernel the run's blocklist leaves out, or one of a
-  library file the run does not read (a bank an audit set measured for a
-  run without one), takes no part, which can change the winner of a GEMM
-  against what the set measured; a pick's efficiency is winner / pick
-  median. A GEMM whose spread (max - min over the median) exceeds
-  `spread_limit` for the winner or a pick is benched again once, then
-  flagged;
+  `pool_medians`): a kernel the run's blocklist or a blocklist the audit
+  set was built with leaves out, or one of a library file the run does not
+  read (a bank an audit set measured for a run without one), takes no part,
+  which can change the winner of a GEMM against what the set measured; a
+  pick's efficiency is winner / pick median. A GEMM whose spread (max - min
+  over the median) exceeds `spread_limit` for the winner or a pick is
+  benched again once, then flagged;
+- no set holds and no bench times a blocked kernel: `plan` writes the union
+  of the run's blocklist (its config's) and the blocklists the audit set was
+  built with into `v2/blocklists/` (`v2/sustained/blocklists/`), names it by
+  its sha256 in the manifest (`blocklist`) and in the plan of the
+  generation it plans, keeps its kernels out of every set and pick (a set
+  an earlier generation planned drops them), and refuses a measurement
+  whose canary it blocks; a worker leaves out of a part's lines whatever the
+  manifest's latest blocklist blocks, which the part's `result.json` names
+  (`left_out`, `blocklist`), and `bench` refuses a blocklist file that no
+  longer holds what the sha256 the manifest records says;
 - a model whose picks are missing from some sets is an increment: a new
   generation (`gen_NNN/`) benches those GEMMs' whole sets (candidates and
   every pick) the same way, and a GEMM is scored from its latest
@@ -3930,7 +4193,8 @@ A training run whose config sets `audit.dir` builds the audit set itself
 when the set is not complete for the current kernel pool (missing, still
 benching, or lacking new kernels), as `--mode audit` of its config snapshot
 in a child orchestrator: it holds the audit directory's lock, leaves out
-every shape of the run's rounds (the run is its `--source-run-dir`),
+every shape of the run's rounds (the run is its `--source-run-dir`) and
+every kernel the run's blocklist and sidecars leave out of its pool,
 benches on `audit.devices` (default `runtime.devices`) in its resumable
 parts, and writes its own log and snapshot into the audit directory (the
 run keeps a copy of its output in `audit_build.log`). `audit.build` says
@@ -4255,8 +4519,10 @@ serves it:
   (`runtime.build_dir`'s), the staged model under the deploy record's
   weights file name, the blocklist sidecar staged with it (*Correctness
   gate*) in place of any the library holds for the stem, and a
-  `tilewright_index` whose line for the library stem names the model (the
-  other stems' lines kept). That build's bench runs with
+  `tilewright_index` whose one line for the library stem names the model on
+  every device (the other stems' lines kept, those for the devices of one
+  PCI chip ID too, and a malformed one as it stands, with a warning). That
+  build's bench runs with
   `HIPBLASLT_TENSILE_LIBPATH` pointing there, so the kernels and solution
   indices are the run's own, and no checkout or build is written.
 - Without it, stage 7 runs the deploy checkout's build
@@ -4869,7 +5135,8 @@ process tree before the attempt fails; see *GPUs: leases, quarantine and
 platform records*), `exclude_gpus` ([]: GPUs the run never uses, by
 physical index, PCI address or `GPU-<hex>` id; see *Shared hosts*),
 `min_free_gb` (null: the free space a round needs is judged by the rounds
-before it; a number: the GB free the run directory's file system must have
+before it, which a round with more weak leaves can exceed; a number: the GB
+free the run directory's file system must have
 before every round; 0: no check; see *Running*), `stage_retries` (1:
 further attempts of a stage after a transient failure) and
 `stage_retry_backoff_s` (300: the wait before the first of them, doubled for
@@ -4893,7 +5160,16 @@ within a cell, 1), `exclude` (shape regions left out, a list of rules with
 is left out when it meets every bound of a rule), `targeted_per_tail_gemm`
 (4: new shapes near each tail GEMM of the previous round's stage04b, 0 off;
 see *Targeted shapes (stage01)*), `targeted_max_per_leaf` (32: at most that
-many per leaf).
+many per leaf), `weak_cell_factor` (1: the new shapes of a leaf the
+previous round's stage04b retrained, as a multiple of `shapes_per_cell`;
+>= 1), `strong_cell_factor` (1: the same for a leaf that passed at least
+`strong_cell_margin` above the threshold, in (0, 1]; the strong leaves
+give up at most what the weak leaves gain, and config validation refuses a
+factor that leaves a strong leaf fewer new GEMMs than
+`validate.min_cell_gemms`), `strong_cell_margin` (0.03), `large_k_factor`
+(1: a leaf's new shapes with K above 32,768, as a multiple of the number
+its draw holds; >= 1); config validation warns about a `weak_cell_factor`
+or `large_k_factor` above 4; see *Weak cells and very large K (stage01)*.
 
 **`planner`** (stage02): `enabled` (false), `mode` (`exhaustive`;
 `planned`, `auto`), `exhaustive_max_kernels` (512), `seed_per_cell` (8),
@@ -5044,8 +5320,8 @@ set; absent, stage05's default applies (see *Student training (stage05)*):
 
 **`validate`** (stage04b): `sel_eff_threshold` (0.95), `split_floor` (0.85;
 0 disables), both numbers, `min_cell_gemms` (20), `split_min_improvement`
-(0.02), `split_after_attempts` (2), `max_split_depth` (6; 0 turns splitting
-off),
+(0.02), `split_after_attempts` (2), `max_split_depth` (6; 0, the training
+recipes' value, turns splitting off),
 `structural_split_min_octaves` (0 = off), `structural_split_max_depth` (-1),
 `pick_measurement` (`warmup`; `timed`, `any`, see
 *Kernels and execution context*; read by stages 4.5, 5, 6, 7 and 8),
@@ -5148,16 +5424,19 @@ results), `repetitions` (3) and `trigger_repetitions` (10) (at least 3),
 harness process may print nothing), `devices` (null: `runtime.devices`),
 `cache_dir` (null: `<run dir>/correctness/cache`), `harness` (null: build
 `tools/errmap.cpp`), `compiler` (null: `amdclang++` of `ROCM_PATH`, else
-`hipcc`). `blocklist` is set by the orchestrator: the invocation's copy of
-the gate's blocklist (which holds the hazard canary's quarantine), or of the
-quarantine alone without the gate, which the stages apply; a config that
-sets it with the gate off (a run's snapshot with the gate turned off) is
-refused, since such a blocklist names what a gate found: give such a file
-in `lists`. Let through are a blocklist of the hazard canary's entries
+`hipcc`), `static_check` (true: the static check of hand-written kernels),
+`custom_kernels` (null: TensileLite's `CustomKernels` of the hipBLASLt
+source the build was configured from; a directory holding the hand-written
+kernels' sources). `blocklist` is set by the orchestrator: the invocation's
+copy of the gate's blocklist (which holds the hazard canary's quarantine),
+or of the quarantine alone without the gate, which the stages apply; a
+config that sets it with the gate off (a run's snapshot with the gate turned
+off) is refused, since such a blocklist names what a gate found: give such a
+file in `lists`. Let through are a blocklist of the hazard canary's entries
 alone with the canary on (a snapshot of an invocation whose canary ran
 without the gate, whose store keeps those verdicts: the invocation names its
-own) and any blocklist in `--mode audit`, whose config has no correctness
-section.
+own) and any blocklist in `--mode audit`, whose config's correctness
+section lists the blocklist of the runs the set is built for alone.
 
 **`hazards`** (see *Hazard canary*): `enabled` (true), `timeout_s` (300:
 seconds a canary bench may print nothing), `runs` (1: bench processes per

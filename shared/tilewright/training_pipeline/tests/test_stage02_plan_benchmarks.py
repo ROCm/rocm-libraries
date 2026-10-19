@@ -431,6 +431,38 @@ def test_exhaustive_beyond_the_bench_list_limit_lists_every_kernel(monkeypatch):
     assert line_has_prescreen(every)
 
 
+def test_listed_only_never_benches_a_blocked_kernel_without_a_list(
+    round_dir, monkeypatch, capsys
+):
+    """The audit set's plan (--listed-only) lists every kernel the
+    blocklist leaves in; beyond the bench's list limit a line would run
+    every kernel of the problem type (algo_method 1), the blocked one among
+    them, so the stage fails instead, unless nothing is blocked."""
+    rd, pipe, cfg_path = round_dir
+    step = ro.RoundStep(0, "initial", [], None, False)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    blocked = rd.parent / "blocked.tsv"
+    blocked.write_text(f"X\t{_kernels()[2]['name']}\n")
+    cfg["planner"]["mode"] = "exhaustive"
+    cfg["correctness"] = {"lists": [str(blocked)]}
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    args = pipe.args_stage02(rd, step) + ["--quiet", "--listed-only"]
+    assert s02.main(args) == 0
+    lines = read_bench_lines(rd / "stage02" / "shapes.yaml")
+    named = {k for ln in lines for k in line_solution_list(ln)}
+    same = {int(k["index"]) for k in _kernels() if k["name"] == _kernels()[2]["name"]}
+    assert lines and not named & same and named
+    monkeypatch.setattr(s02, "MAX_BENCH_LIST", 2)
+    out = rd / "over"
+    assert s02.main(args[:-2] + ["--out-dir", str(out), "--listed-only"]) == 1
+    assert "algo_method 1" in capsys.readouterr().err
+    assert not (out / "shapes.yaml").exists()
+    assert s02.main(args[:-2] + ["--out-dir", str(rd / "unguarded"), "--quiet"]) == 0
+    del cfg["correctness"]
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    assert s02.main(args[:-2] + ["--out-dir", str(rd / "free"), "--listed-only"]) == 0
+
+
 def test_contexts_are_replanned_with_the_model(round_dir, monkeypatch):
     rd, pipe, cfg_path = round_dir
     seen = []

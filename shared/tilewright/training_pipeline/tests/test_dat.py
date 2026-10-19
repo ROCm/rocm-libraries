@@ -547,3 +547,48 @@ def test_kernel_attribute_file_round_trip(tmp_path):
         path.write_text(bad)
         with pytest.raises(ValueError, match="not a kernel attribute file"):
             dat.read_kernel_attributes(path)
+
+
+@pytest.mark.parametrize(
+    "custom, hand_written",
+    [
+        (None, False),
+        ({}, False),
+        ({"name": ""}, False),
+        ({"name": "Custom_Cijk_K", "generated": True}, False),
+        ({"name": "Custom_Cijk_K", "generated": False}, True),
+        ({"name": "Custom_Cijk_K"}, True),
+    ],
+)
+def test_kernels_written_by_hand_carry_the_launch_attribute(custom, hand_written):
+    """TensileLite takes a solution's kernel for hand-written when its
+    customKernel names one and does not say it was generated (absent: not
+    generated)."""
+    sol = solution(7, 3, tileProcessingStrategy="StreamK")
+    if custom is not None:
+        sol["customKernel"] = custom
+    assert dat.is_hand_written(sol) is hand_written
+    attributes = dat.kernel_dat_info(sol)["attributes"]
+    extra = {dat.HAND_WRITTEN} if hand_written else set()
+    assert set(attributes) == set(dat.ATTRIBUTE_NAMES) | extra
+    assert attributes.get(dat.HAND_WRITTEN) == (1 if hand_written else None)
+
+
+def test_kernel_attribute_files_list_the_kernels_written_by_hand(tmp_path):
+    hand = solution(5, 0, tileProcessingStrategy="StreamK")
+    hand["customKernel"] = {"name": hand["name"], "generated": False}
+    kernels = {5: dat.kernel_dat_info(hand), 7: dat.kernel_dat_info(solution(7, 1))}
+    path = tmp_path / dat.KERNELS_FILE
+    dat.write_kernel_attributes(path, kernels, LIBRARY_STEM)
+    doc = json.loads(path.read_text())
+    assert doc["attribute_names"] == list(dat.ATTRIBUTE_NAMES)
+    assert doc[dat.HAND_WRITTEN] == [5]
+    got = dat.read_kernel_attributes(path)
+    assert got == {sid: info["attributes"] for sid, info in kernels.items()}
+    assert got[5][dat.HAND_WRITTEN] == 1 and dat.HAND_WRITTEN not in got[7]
+    dat.write_kernel_attributes(path, {7: kernels[7]}, LIBRARY_STEM)
+    assert dat.HAND_WRITTEN not in json.loads(path.read_text())
+    for bad in ([9], [True], [5.0], "5", {"5": 1}):
+        path.write_text(json.dumps(dict(doc, **{dat.HAND_WRITTEN: bad})))
+        with pytest.raises(ValueError, match="not a kernel attribute file"):
+            dat.read_kernel_attributes(path)

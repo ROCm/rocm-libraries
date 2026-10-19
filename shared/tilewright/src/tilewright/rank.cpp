@@ -1868,6 +1868,7 @@ ModelInfo describe(const Model& model) {
   info.min_cu_fraction          = model.min_cu_fraction;
   info.max_cu_fraction          = model.max_cu_fraction;
   info.schedules                = model.schedules;
+  info.min_effective_cus        = model.min_effective_cus;
   info.cascade_keys             = model.cascade_keys;
   info.whitelist_tier           = model.whitelist_tier;
   info.launch_keys              = model.launch_keys;

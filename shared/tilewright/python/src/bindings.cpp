@@ -539,6 +539,9 @@ NB_MODULE(_tilewright, m) {
       .def_ro("min_cu_fraction", &tw::ModelInfo::min_cu_fraction)
       .def_ro("max_cu_fraction", &tw::ModelInfo::max_cu_fraction)
       .def_ro("schedules", &tw::ModelInfo::schedules, "A bit per Schedule value.")
+      .def_ro("min_effective_cus",
+              &tw::ModelInfo::min_effective_cus,
+              "The fewest usable CUs the model supports on any device (MLREC_v3), 0 for none.")
       .def_ro("cascade_keys", &tw::ModelInfo::cascade_keys)
       .def_ro("whitelist_tier", &tw::ModelInfo::whitelist_tier)
       .def_ro("launch_keys",
@@ -738,12 +741,14 @@ NB_MODULE(_tilewright, m) {
 
   m.def(
       "load_model_by_index",
-      [](const std::string& logic_stem, const std::string& dir) -> nb::object {
+      [](const std::string& logic_stem,
+         const std::string& dir,
+         std::uint32_t pci_chip_id) -> nb::object {
         std::string error;
         tw::ModelPtr model;
         {
           nb::gil_scoped_release release;
-          model = tw::load_model_by_index(logic_stem, dir, &error);
+          model = tw::load_model_by_index(logic_stem, dir, pci_chip_id, &error);
         }
         if (model) return nb::cast(PyModel{std::move(model)});
         if (!error.empty()) throw std::invalid_argument(error);
@@ -751,8 +756,11 @@ NB_MODULE(_tilewright, m) {
       },
       "logic_stem"_a,
       "dir"_a,
-      "Load the model <dir>/tilewright_index lists for logic_stem. Returns None when the index "
-      "or the stem is absent; raises ValueError when the listed model fails to load.");
+      "pci_chip_id"_a = std::uint32_t{0},
+      "Load the model <dir>/tilewright_index lists for logic_stem: its row naming pci_chip_id, "
+      "else its row without a chip ID (0: unknown, that row only). Returns None when the index "
+      "or such a row is absent; raises ValueError when the listed model fails to load or a row "
+      "of the stem is malformed.");
 
   m.def("describe", [](const PyModel& model) { return tw::describe(model_of(model)); }, "model"_a);
 
@@ -820,7 +828,8 @@ NB_MODULE(_tilewright, m) {
       "context"_a,
       "hardware"_a,
       "True when the model was trained for the context on this hardware (v2 models: every CU "
-      "and Schedule.Default; v3 models: the schedules and CU fractions they declare).");
+      "and Schedule.Default; v3 models: the schedules and CU fractions they declare, and at "
+      "least the usable CUs of their CU floor).");
 
   m.def(
       "rank_configs",

@@ -32,6 +32,13 @@ k_split_aware), with the default TENSILE_PERSISTENT_* settings, no uniform
 summation order and a workspace that holds every partial tile. The SM target
 is `context.cu_budget` rounded down to a multiple of 32 (ContractionProblem.hpp
 setSmCountTarget without TENSILE_PRECISE_SM_TARGET); 0 means none.
+
+TensileLite launches a hand-written kernel (attribute `hand_written`: its
+logic file's customKernel names a kernel that was not generated) through
+resolvePersistentSettings, whose getSKReduction gives a hand-written Stream-K
+kernel the tree reduction whatever select_reduction would choose, so that
+its static grid is select_grid_size's for the tree; its other choices are a
+generated kernel's.
 """
 from __future__ import annotations
 
@@ -49,7 +56,7 @@ from .arch import canonical_arch
 # to TensileLite does not count: TensileLite already gave those plans.
 RULE_VERSION = 1
 
-# Kernel attributes (`lib.dat.kernel_attributes`) the rule reads, 0 when a
+# Kernel attributes (`lib.dat.kernel_dat_info`) the rule reads, 0 when a
 # kernel lacks one (TensileLite's default).
 LAUNCH_ATTRIBUTES = (
     "tile_processing_strategy",
@@ -58,6 +65,7 @@ LAUNCH_ATTRIBUTES = (
     "work_group_x",
     "work_group_y",
     "work_group_z",
+    "hand_written",
 )
 # Config fields the rule reads besides the signature's tile sizes.
 LAUNCH_CONFIG_FIELDS = ("occupancy",)
@@ -135,7 +143,7 @@ def takes_dynamic_queue(
     under the `schedules`, with budgets below the device's CUs when
     `reduced_budget`: a non-atomic StreamK kernel with DynamicWorkQueue, or
     with Hybrid where its dynamic sub-mode can run."""
-    strategy, assign, atomic, _, _ = launch_inputs(config_kwargs, attributes)
+    strategy, assign, atomic = launch_inputs(config_kwargs, attributes)[:3]
     if strategy != 2 or atomic:
         return False
     if assign == 1:
@@ -236,12 +244,16 @@ def _static_grid(
 
 def launch_inputs(
     config_kwargs: Mapping[str, Any], attributes: Optional[Mapping[str, int]]
-) -> Tuple[int, int, int, int, int]:
+) -> Tuple[int, ...]:
     """(strategy, assignment, atomic, threads, occupancy) of a kernel as
-    `launch_plan` uses them: what it reads of LAUNCH_CONFIG_FIELDS and
-    LAUNCH_ATTRIBUTES, with the values it does not distinguish made equal (a
-    non-persistent kernel launches one workgroup per tile whatever the rest,
-    DataParallel ignores the atomic flag)."""
+    `launch_plan` uses them, followed by 1 for a hand-written Stream-K
+    kernel that can run on a static grid (any assignment but
+    DynamicWorkQueue), whose partial tiles TensileLite reduces in a tree
+    only: what it reads of LAUNCH_CONFIG_FIELDS and LAUNCH_ATTRIBUTES, with
+    the values it does not distinguish made equal (a non-persistent kernel
+    launches one workgroup per tile whatever the rest, DataParallel ignores
+    the atomic and hand-written flags, a dynamic queue the hand-written
+    one)."""
     attrs = attributes or {}
     strategy = int(attrs.get("tile_processing_strategy", 0))
     if strategy not in (1, 2):
@@ -249,14 +261,18 @@ def launch_inputs(
     threads = 1
     for name in ("work_group_x", "work_group_y", "work_group_z"):
         threads *= max(int(attrs.get(name, 0)), 0)
+    assign = int(attrs.get("work_assignment", 0))
     atomic = int(attrs.get("stream_k_atomic", 0)) != 0 and strategy == 2
-    return (
+    inputs = (
         strategy,
-        int(attrs.get("work_assignment", 0)),
+        assign,
         int(atomic),
         threads,
         max(int(config_kwargs.get("occupancy", 1)), 1),
     )
+    if strategy == 2 and assign != 1 and int(attrs.get("hand_written", 0)) != 0:
+        return inputs + (1,)
+    return inputs
 
 
 def launch_key(
@@ -285,9 +301,9 @@ def launch_plan(
     ValueError for a kernel TensileLite does not load (DataParallel with a
     work queue) and for a dynamic-queue launch whose flag region depends on
     a `queue_count` that is unknown."""
-    strategy, assign, atomic_flag, threads, occupancy = launch_inputs(
-        config_kwargs, attributes
-    )
+    inputs = launch_inputs(config_kwargs, attributes)
+    strategy, assign, atomic_flag, threads, occupancy = inputs[:5]
+    tree_only = inputs[5:] == (1,)
     if strategy == 1 and assign != 0:
         raise ValueError(
             "a DataParallel kernel takes WorkAssignment StaticGrid only; "
@@ -324,7 +340,12 @@ def launch_plan(
         )
     )
     selected = "tree"
-    if tiles < cu_count and max(iters, 1) >= 64 and tiles <= cu_count // 4:
+    if (
+        not tree_only
+        and tiles < cu_count
+        and max(iters, 1) >= 64
+        and tiles <= cu_count // 4
+    ):
         selected = "parallel"
 
     grid = tiles

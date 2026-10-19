@@ -426,6 +426,68 @@ TEST_CASE("labels, axes and the split tree are validated", "[loader]") {
   }
 }
 
+TEST_CASE("the v3 CU floor is validated", "[loader][v3]") {
+  constexpr std::uint32_t kGate = 0x80, kFloor = 0x100;
+  ModelSpec spec         = as_v3(small_spec());
+  spec.v3_serving_flags  = kFloor;
+  spec.min_effective_cus = 32;
+  const Image good       = write_model(spec);
+  REQUIRE(load_error(good).empty());
+  const tw::ModelPtr m = tw::load_model_from_memory(good.bytes.data(), good.bytes.size());
+  REQUIRE(m);
+  CHECK(tw::describe(*m).min_effective_cus == 32);
+  CHECK(tw::describe(*load_spec(as_v3(small_spec()))).min_effective_cus == 0);
+  CHECK(tw::describe(*load_spec(small_spec())).min_effective_cus == 0);
+
+  SECTION("zero") {
+    ModelSpec zero         = spec;
+    zero.min_effective_cus = 0;
+    CHECK(mentions(load_error(write_model(zero)), "CU floor must be at least 1"));
+  }
+  SECTION("the flag without the field") {
+    Image bad = good;
+    bad.bytes.erase(bad.bytes.begin() + static_cast<long>(bad.at.at("min_effective_cus")),
+                    bad.bytes.begin() + static_cast<long>(bad.at.at("min_effective_cus") + 4));
+    put_u32(bad, bad.at.at("header_size"), static_cast<std::uint32_t>(good.header_size - 4));
+    CHECK(mentions(load_error(bad), "truncated header: CU floor"));
+  }
+  SECTION("the field without the flag") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("v3_serving_flags"), 0);
+    CHECK_FALSE(load_error(bad).empty());
+  }
+  SECTION("an unknown flag beside it") {
+    Image bad = good;
+    put_u32(bad, bad.at.at("v3_serving_flags"), kFloor | 0x200);
+    CHECK(mentions(load_error(bad), "unknown serving flags"));
+  }
+  SECTION("truncated at any byte of the header") {
+    for (std::size_t n = 0; n <= good.header_size; ++n) {
+      INFO("size " << n);
+      REQUIRE_FALSE(load_error(good.bytes, n).empty());
+    }
+  }
+  SECTION("after the trained keys and before the provenance") {
+    ModelSpec all         = spec;
+    all.v3_serving_flags  = kGate | kFloor;
+    all.trained_keys      = {4, 8};
+    all.min_effective_cus = 0xFFFFFFFFu;
+    all.provenance        = {{"config_id", "cfg"}};
+    const Image image     = write_model(all);
+    REQUIRE(image.at.at("trained_key1") < image.at.at("min_effective_cus"));
+    REQUIRE(image.at.at("min_effective_cus") < image.at.at("n_provenance"));
+    const tw::ModelPtr loaded = tw::load_model_from_memory(image.bytes.data(), image.bytes.size());
+    REQUIRE(loaded);
+    const tw::ModelInfo info = tw::describe(*loaded);
+    CHECK(info.min_effective_cus == 0xFFFFFFFFu);
+    CHECK(info.trained_keys == 2);
+    CHECK(info.provenance.config_id == "cfg");
+    Image swapped = image;
+    put_u32(swapped, swapped.at.at("v3_serving_flags"), kFloor);
+    CHECK_FALSE(load_error(swapped).empty());
+  }
+}
+
 TEST_CASE("load_model deduplicates by canonical path", "[loader][registry]") {
   TempDir dir("dedup");
   const Image image   = write_model(small_spec(tw::WeightType::Int4));
@@ -515,4 +577,131 @@ TEST_CASE("load_model_by_index", "[loader][registry]") {
   CHECK(mentions(err, "CRC"));
   CHECK_FALSE(tw::load_model_by_index("StemC", d, &err));
   CHECK(mentions(err, "missing.tilewright.bin"));
+  for (std::uint32_t chip : {0x1234u, 0xFFFFu}) {
+    err = "stale";
+    CHECK(tw::load_model_by_index("StemA", d, chip, &err) == a);
+    CHECK(err.empty());
+  }
+
+  // An index that cannot be read to its end is no index to choose a row from.
+  TempDir odd("index-dir");
+  fs::create_directories(odd.path() / "tilewright_index");
+  err = "stale";
+  CHECK_FALSE(tw::load_model_by_index("StemA", odd.path().string(), 0x1234, &err));
+#if defined(__GLIBCXX__) && !defined(_WIN32)
+  // libstdc++ opens a directory and reports the failed read as badbit.
+  CHECK(mentions(err, "cannot read index"));
+#else
+  if (!err.empty()) CHECK(mentions(err, "cannot"));
+#endif
+}
+
+TEST_CASE("load_model_by_index prefers the row of the device's PCI chip ID", "[loader][registry]") {
+  TempDir dir("index-chip");
+  ModelSpec b = small_spec(tw::WeightType::Int8);
+  ModelSpec c = small_spec(tw::WeightType::Int8);
+  b.arch      = "gfxtestb";
+  c.arch      = "gfxtestc";
+  write_file(dir.path() / "any.bin", write_model(small_spec(tw::WeightType::Int8)).bytes);
+  write_file(dir.path() / "b.bin", write_model(b).bytes);
+  write_file(dir.path() / "c.bin", write_model(c).bytes);
+  write_text(dir.path() / "tilewright_index",
+             "# <stem> <model file> [chip=0x<PCI chip ID>]\n"
+             "Stem\tb.bin\tchip=0x1234\n"
+             "Stem\tany.bin\n"
+             "Stem c.bin chip=0xABCD   # upper-case digits\r\n"
+             "Stem\tc.bin\tchip=0x1234\n"
+             "Stem\tb.bin\n"
+             "OnlyChip\tb.bin\tchip=0x00ab\n"
+             "Other\tany.bin\tchip=0xzz\n");
+  const std::string d = dir.path().string();
+  const auto arch     = [&](const std::string& stem, std::uint32_t chip) {
+    std::string err      = "stale";
+    const tw::ModelPtr m = tw::load_model_by_index(stem, d, chip, &err);
+    INFO(stem << " chip " << chip << ": " << err);
+    CHECK(err.empty());
+    return m ? tw::describe(*m).arch : std::string("<none>");
+  };
+  // The first row naming the chip ID wins wherever it stands, else the first
+  // row without one; another stem's malformed row does not matter.
+  CHECK(arch("Stem", 0) == "gfxtest");
+  CHECK(arch("Stem", 0x1234) == "gfxtestb");
+  CHECK(arch("Stem", 0xABCD) == "gfxtestc");
+  CHECK(arch("Stem", 0x9999) == "gfxtest");
+  CHECK(arch("Stem", 0x11234) == "gfxtest");
+  CHECK(arch("OnlyChip", 0xAB) == "gfxtestb");
+  CHECK(arch("OnlyChip", 0) == "<none>");
+  CHECK(arch("OnlyChip", 0x1234) == "<none>");
+
+  std::string err = "stale";
+  CHECK(tw::load_model_by_index("Stem", d, &err) ==
+        tw::load_model((dir.path() / "any.bin").string()));
+  CHECK(tw::load_model_by_index("Stem", d, 0x1234, &err) ==
+        tw::load_model((dir.path() / "b.bin").string()));
+  CHECK_FALSE(tw::load_model_by_index("OnlyChip", d, &err));
+  CHECK(err.empty());
+  CHECK_FALSE(tw::load_model_by_index("Stem", (dir.path() / "nowhere").string(), 0x1234, &err));
+  CHECK(err.empty());
+  CHECK_FALSE(tw::load_model_by_index("Stem", "", 0x1234, &err));
+  CHECK(err.empty());
+
+  write_text(dir.path() / "tilewright_index", "Stem\tb.bin\tchip=0x1234\nStem\tmissing.bin\n");
+  CHECK(arch("Stem", 0x1234) == "gfxtestb");
+  CHECK_FALSE(tw::load_model_by_index("Stem", d, 0x4321, &err));
+  CHECK(mentions(err, "missing.bin"));
+}
+
+TEST_CASE("a malformed tilewright_index row of a stem makes its lookup fail",
+          "[loader][registry]") {
+  TempDir dir("index-malformed");
+  write_file(dir.path() / "m.bin", write_model(small_spec()).bytes);
+  const std::string d = dir.path().string();
+  for (const char* row : {"Stem m.bin chip=0x",
+                          "Stem m.bin chip=0x0",
+                          "Stem m.bin chip=0x0000",
+                          "Stem m.bin chip=0x12345",
+                          "Stem m.bin chip=0x12g4",
+                          "Stem m.bin chip=0X1234",
+                          "Stem m.bin chip=1234",
+                          "Stem m.bin chip=+0x12",
+                          "Stem m.bin 0x1234",
+                          "Stem m.bin id=0x1234",
+                          "Stem m.bin extra",
+                          "Stem\tm.bin\tchip=0x1234\textra",
+                          "Stem m.bin chip=0x1234 chip=0x1234"}) {
+    INFO(row);
+    for (const std::string& before : {std::string(), std::string("Stem\tm.bin\n")}) {
+      write_text(dir.path() / "tilewright_index", before + row + "\nStem m.bin chip=0x1234\n");
+      const std::string line = before.empty() ? ":1:" : ":2:";
+      for (std::uint32_t chip : {0u, 0x1234u, 0x4321u}) {
+        std::string err;
+        CHECK_FALSE(tw::load_model_by_index("Stem", d, chip, &err));
+        CHECK(mentions(err, "tilewright_index" + line + " malformed row for Stem"));
+      }
+      std::string err;
+      CHECK_FALSE(tw::load_model_by_index("Stem", d, &err));
+      CHECK(mentions(err, "malformed row for Stem"));
+      CHECK(tw::load_model_by_index("Other", d, &err) == nullptr);
+      CHECK(err.empty());
+    }
+  }
+
+  std::string err;
+  write_text(dir.path() / "tilewright_index",
+             "Stem m.bin chip=0x1234\nStem m.bin\nStem m.bin chip=0x1234 # a comment\n"
+             "Stem m.bin chip=0xzz\n");
+  for (std::uint32_t chip : {0u, 0x1234u}) {
+    CHECK_FALSE(tw::load_model_by_index("Stem", d, chip, &err));
+    CHECK(mentions(err, "tilewright_index:4: malformed row for Stem: 'chip=0xzz'"));
+  }
+
+  write_text(dir.path() / "tilewright_index", "Stem m.bin chip=0x\x01\x7f\n");
+  CHECK_FALSE(tw::load_model_by_index("Stem", d, &err));
+  CHECK(mentions(err, "'chip=0x\?\?'"));
+
+  // Rows of one field are skipped, as are malformed rows of other stems.
+  write_text(dir.path() / "tilewright_index", "Other m.bin chip=0xzz\nStem\nStem m.bin\n");
+  err = "stale";
+  CHECK(tw::load_model_by_index("Stem", d, 0x1234, &err));
+  CHECK(err.empty());
 }

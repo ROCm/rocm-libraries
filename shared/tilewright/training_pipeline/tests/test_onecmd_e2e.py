@@ -24,6 +24,7 @@ import onecmd_fakes as of
 import run_orchestrator as ro
 from gpu_fakes import wait_for
 from lib import attempts, pinning, run_layout
+from lib.bench_yaml import parse_shapes_yaml
 
 pytestmark = pytest.mark.e2e
 
@@ -177,6 +178,80 @@ def test_one_command_gives_every_bundle_its_whitelist_tier(world):
     before = [m.stat().st_mtime_ns for m in markers]
     assert ro.main(_argv(cfg, "full", run_dir)) == 0
     assert [m.stat().st_mtime_ns for m in markers] == before
+
+
+def test_one_command_gives_the_cells_a_round_retrains_more_shapes(world):
+    """The weak-cell budget and the very-large-K stratum through the one
+    command: round 1, with no stage04b before it, draws the round's shapes
+    per leaf; round 2 draws twice that for each leaf round 1's stage04b
+    retrained and the round's shapes per leaf for the others; both double
+    each leaf's draws with K above 32768. Every drawn shape is benched,
+    the next stage04b reads the weak leaves on their larger samples, the
+    run pins the factors, and the same command on the finished run runs
+    nothing again."""
+    spc = of.config(world)["seed"]["shapes_per_cell"]
+    cfg = _config(
+        world,
+        **{
+            "seed.weak_cell_factor": 2.0,
+            "seed.large_k_factor": 2.0,
+            "audit.dir": None,
+            "stage08.datasets": [],
+        },
+    )
+    run_dir = world / "run"
+    assert ro.main(_argv(cfg, "full", run_dir)) == 0
+
+    def doc(rd, *parts):
+        return json.loads((run_dir / rd).joinpath(*parts).read_text())
+
+    first = doc("round_1", "stage01", "per_cell_plan.json")
+    assert not first["budget"]["applied"]
+    assert {v["n_target"] for v in first["cells"].values() if v["n_target"]} == {spc}
+    decisions = doc("round_1", "stage04b", "decisions.json")["per_cell"]
+    weak = {
+        r["cell"]
+        for r in decisions
+        if r["decision"] == "retrain" or r.get("collapse_retrain")
+    }
+    plan = doc("round_2", "stage01", "per_cell_plan.json")
+    budget = plan["budget"]
+    assert budget["applied"] and budget["decisions"] == str(
+        run_dir / "round_1" / "stage04b" / "decisions.json"
+    )
+    planned = {c: v for c, v in plan["cells"].items() if v["n_target"]}
+    assert weak & set(planned), "the fake world's bar makes no cell weak"
+    for cell, v in planned.items():
+        assert v["n_target"] == (2 * spc if cell in weak else spc), cell
+        assert (v["need"] == "weak") == (cell in weak), cell
+    assert budget["total_target"] == sum(v["n_target"] for v in planned.values())
+    assert budget["total_target"] == budget["uniform_total"] + budget["weak_extra"]
+    benched = {
+        (int(r["m"]), int(r["n"]), int(r["k"]), int(r["batch_count"]))
+        for r in _rows(run_dir / "round_2" / "stage04")
+    }
+    for r in (1, 2):
+        rd = run_dir / f"round_{r}" / "stage01"
+        cat = json.loads((rd / "categorization.json").read_text())
+        drawn = parse_shapes_yaml(rd / "shapes.yaml")
+        assert len(drawn) == cat["n_final"]
+        stratum = cat["large_k"]
+        assert stratum["factor"] == 2.0 and stratum["above"] == 32768
+        assert stratum["n_shapes"] == sum(stratum["per_cell"].values()) > 0
+        if r == 2:
+            assert set(drawn) <= benched
+    second = {
+        r["cell"]: r for r in doc("round_2", "stage04b", "decisions.json")["per_cell"]
+    }
+    for cell in weak & set(planned) & set(second):
+        assert second[cell]["n_new_gemms"] >= 2 * spc, cell
+    pin = pinning.read_run_pin(run_dir)["pin"]["config"]["values"]
+    assert pin["seed.weak_cell_factor"] == pin["seed.large_k_factor"] == 2.0
+    assert "seed.strong_cell_factor" not in pin
+    markers = _markers(run_dir)
+    before = [m.stat().st_mtime_ns for m in markers]
+    assert ro.main(_argv(cfg, "full", run_dir)) == 0
+    assert [m.stat().st_mtime_ns for m in _markers(run_dir)] == before
 
 
 @pytest.mark.parametrize(

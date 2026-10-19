@@ -57,6 +57,28 @@ filter, history dedup and exclusions as every other shape, so never an
 audit shape; a leaf this round samples nothing in gets none. They are new
 held-out shapes like the others, whatever the cell's mean.
 
+Weak-cell budget (active mode without `--only-cells`; `need_budget`): the
+previous round's stage04b decisions (`--decisions-from`, by default the
+last --prior-round-dir's stage04b/decisions.json) set each leaf's target.
+A leaf that round retrained for its selection efficiency (decision
+`retrain`) or for a held-out collapse (a pass with `collapse_retrain`) is
+weak and gets `--weak-cell-factor` times `--shapes-per-cell`. A leaf that
+passed with a held-out selection efficiency at least
+`--strong-cell-margin` above the threshold that stage04b applied is strong
+and gets `--strong-cell-factor` times it, but the strong leaves give up at
+most the shapes the weak leaves gain: the round's total target never
+falls below `--shapes-per-cell` per leaf and never exceeds that plus the
+weak leaves' extra. A leaf's status reads its own row and the rows of the
+leaves under it; the children of a split that round made read none (the
+split already gave their region a leaf each). Without decisions every leaf
+keeps `--shapes-per-cell`; with both factors at 1 none are read.
+
+Very-large-K stratum (same rounds; `large_k_shapes`): a leaf whose new
+shapes include some with K above LARGE_K_ABOVE draws `--large-k-factor`
+minus one times that many more there, inside its box, under the same
+filter, history dedup and exclusions, from a stream of its own, so its
+other draws stay as they are.
+
 Outputs in `--out-dir`:
 
   shapes.yaml          hipblaslt-bench yaml, shuffled so that stage03's
@@ -64,7 +86,8 @@ Outputs in `--out-dir`:
   reused_shapes.yaml   shapes re-used from earlier rounds (see
                        `lib.shapes.read_reused_shapes`)
   categorization.json  per-cell targets and counts, seeds, filter settings
-  per_cell_plan.json   active mode only: per-cell plan and prior sel_eff
+  per_cell_plan.json   active mode only: per-cell plan, prior sel_eff and
+                       the round's budget (`budget`; per leaf `need`)
   targeted_shapes.json active mode with targeted shapes: per leaf, each
                        tail GEMM and the shapes drawn near it
 """
@@ -73,6 +96,8 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
+import math
 import os
 import random
 import re
@@ -80,7 +105,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 THIS_DIR = Path(__file__).resolve().parent
 PIPELINE_DIR = THIS_DIR.parent
@@ -115,6 +140,11 @@ TARGETED_FILE = "targeted_shapes.json"
 # `--targeted-max-per-leaf`).
 TARGETED_PER_GEMM = 4
 TARGETED_MAX_PER_LEAF = 32
+# The very-large-K stratum: shapes with K above this (`--large-k-factor`).
+LARGE_K_ABOVE = 32768
+# How far above stage04b's threshold a pass must read for its leaf to be
+# strong (`--strong-cell-margin`).
+STRONG_CELL_MARGIN = 0.03
 
 
 def derive_seed(*parts: object) -> int:
@@ -193,6 +223,131 @@ def restrict_plan(
     return out, unknown
 
 
+def _half_up(x: float) -> int:
+    return int(math.floor(x + 0.5))
+
+
+def read_decisions(path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """The stage04b decisions.json at `path`, None without the file;
+    ValueError for a file that holds no per-cell decisions."""
+    if path is None or not Path(path).is_file():
+        return None
+    try:
+        doc = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as e:
+        raise ValueError(f"cannot read the stage04b decisions {path}: {e}") from e
+    if not isinstance(doc, dict) or not isinstance(doc.get("per_cell"), list):
+        raise ValueError(f"{path} holds no per_cell list of stage04b decisions")
+    return doc
+
+
+def _reading(row: Mapping[str, Any]) -> Optional[float]:
+    """A decision row's held-out selection efficiency, when it measured one."""
+    se = row.get("sel_eff_new")
+    if isinstance(se, bool) or not isinstance(se, (int, float)):
+        return None
+    if not math.isfinite(se) or not int(row.get("n_eval") or 0):
+        return None
+    return float(se)
+
+
+def _need_of(rows: List[Mapping[str, Any]], floor: Optional[float]) -> Optional[str]:
+    """`weak` when stage04b retrained a leaf of `rows` (decision retrain, or
+    a pass with collapse_retrain), `strong` when every one passed on
+    held-out GEMMs at `floor` or above, else None."""
+    if not rows:
+        return None
+    if any(r.get("decision") == "retrain" or r.get("collapse_retrain") for r in rows):
+        return "weak"
+    if floor is None:
+        return None
+    for r in rows:
+        se = _reading(r)
+        if r.get("decision") != "pass" or se is None or se < floor:
+            return None
+    return "strong"
+
+
+def need_budget(
+    plan: Dict[str, Dict[str, Any]],
+    decisions: Optional[Mapping[str, Any]],
+    shapes_per_cell: int,
+    *,
+    weak_factor: float = 1.0,
+    strong_factor: float = 1.0,
+    strong_margin: float = STRONG_CELL_MARGIN,
+    min_per_cell: int = 0,
+) -> Dict[str, Any]:
+    """Set the target of every leaf `plan` samples (n_target > 0, each
+    `shapes_per_cell`) from the previous round's stage04b `decisions`, as
+    the module docstring's weak-cell budget says, mark it (`need`: weak,
+    strong or None) and return the round's budget record. A strong leaf's
+    target stays within [`min_per_cell`, `shapes_per_cell`] (the top-up
+    lifts it to `min_per_cell` anyway); the strong leaves' cut, at most the
+    weak leaves' extra, is shared equally (each would give up as many), and
+    what does not divide evenly is a shape more each for the leaves with
+    the highest readings (a leaf's lowest row)."""
+    spc = int(shapes_per_cell)
+    by_cell: Dict[str, List[Mapping[str, Any]]] = {}
+    threshold: Optional[float] = None
+    if decisions is not None:
+        for row in decisions.get("per_cell") or []:
+            if isinstance(row, Mapping) and isinstance(row.get("cell"), str):
+                by_cell.setdefault(row["cell"], []).append(row)
+        t = decisions.get("sel_eff_threshold")
+        if isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t):
+            threshold = float(t)
+    floor = None if threshold is None else threshold + float(strong_margin)
+
+    def rows_of(leaf: str) -> List[Mapping[str, Any]]:
+        under = leaf + "#"
+        return [
+            r
+            for c, rs in by_cell.items()
+            if c == leaf or c.startswith(under)
+            for r in rs
+        ]
+
+    leaves = sorted(c for c, v in plan.items() if int(v.get("n_target") or 0) > 0)
+    rows = {leaf: rows_of(leaf) for leaf in leaves}
+    need = {leaf: _need_of(rows[leaf], floor) for leaf in leaves}
+    weak = [leaf for leaf in leaves if need[leaf] == "weak"]
+    strong = [leaf for leaf in leaves if need[leaf] == "strong"]
+    weak_target = max(spc, _half_up(weak_factor * spc))
+    strong_target = min(spc, max(int(min_per_cell), 1, _half_up(strong_factor * spc)))
+    gain = (weak_target - spc) * len(weak)
+    want = (spc - strong_target) * len(strong)
+    give = min(gain, want)
+    cut = {leaf: 0 for leaf in strong}
+    if give > 0:
+        lowest = {leaf: min(_reading(r) for r in rows[leaf]) for leaf in strong}
+        order = sorted(strong, key=lambda leaf: (-lowest[leaf], leaf))
+        share, rest = divmod(give, len(strong))
+        for i, leaf in enumerate(order):
+            cut[leaf] = share + (1 if i < rest else 0)
+    for cell, info in plan.items():
+        info["need"] = need.get(cell)
+        if need.get(cell) == "weak":
+            info["n_target"] = weak_target
+        elif need.get(cell) == "strong":
+            info["n_target"] = spc - cut[cell]
+    return {
+        "applied": decisions is not None,
+        "weak_cell_factor": float(weak_factor),
+        "strong_cell_factor": float(strong_factor),
+        "strong_cell_margin": float(strong_margin),
+        "sel_eff_threshold": threshold,
+        "n_leaves": len(leaves),
+        "n_weak": len(weak),
+        "n_strong": len(strong),
+        "uniform_total": spc * len(leaves),
+        "weak_extra": gain,
+        "strong_cut_wanted": want,
+        "strong_cut": give,
+        "total_target": sum(int(plan[leaf]["n_target"]) for leaf in leaves),
+    }
+
+
 # ── history ──────────────────────────────────────────────────────────────────
 
 
@@ -254,6 +409,7 @@ class SampleResult:
     reused: List[ShapeTuple] = field(default_factory=list)
     actual_per_cell: Dict[str, int] = field(default_factory=dict)
     reused_per_cell: Dict[str, int] = field(default_factory=dict)
+    fresh_per_cell: Dict[str, List[ShapeTuple]] = field(default_factory=dict)
     n_history_dropped: int = 0
     n_excluded: int = 0
     excluded_hits: Set[ShapeTuple] = field(default_factory=set)
@@ -352,6 +508,7 @@ def sample_shapes(
                 )
         out.shapes.extend(fresh + reused)
         out.reused.extend(reused)
+        out.fresh_per_cell[cell] = list(fresh)
         out.actual_per_cell[cell] = len(fresh) + len(reused)
         out.reused_per_cell[cell] = len(reused)
         out.n_history_dropped += len(history_hits)
@@ -375,6 +532,54 @@ def leaf_box(leaf: str) -> Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, in
             lo, hi = bounds[ax]
             box[i] = (max(box[i][0], lo), min(box[i][1], hi))
     return box[0], box[1], box[2]
+
+
+def large_k_shapes(
+    fresh: Mapping[str, List[ShapeTuple]],
+    factor: float,
+    round_seed: int,
+    shape_filter: ShapeFilter,
+    *,
+    n_strata: int,
+    taken: Set[ShapeTuple],
+) -> Dict[str, List[ShapeTuple]]:
+    """{leaf: shapes}: for each leaf of `fresh` (its new shapes of the
+    round) with n of them above LARGE_K_ABOVE in K, (`factor` - 1) * n more
+    (rounded half up) in the part of its box above LARGE_K_ABOVE, none of
+    them in `taken`, which they join; fewer when the box holds no more.
+    Each leaf draws from its own stream."""
+    out: Dict[str, List[ShapeTuple]] = {}
+    for leaf in sorted(fresh):
+        want = _half_up(
+            (factor - 1.0) * sum(1 for s in fresh[leaf] if s[2] > LARGE_K_ABOVE)
+        )
+        (mlo, mhi), (nlo, nhi), (klo, khi) = leaf_box(leaf)
+        if want <= 0 or khi <= LARGE_K_ABOVE:
+            continue
+        bounds = {
+            "M": (mlo, mhi),
+            "N": (nlo, nhi),
+            "K": (max(klo, LARGE_K_ABOVE + 1), khi),
+        }
+        rng = random.Random(derive_seed(round_seed, "large_k", leaf))
+        drawn = synthesize_cell_shapes(
+            sc.base_cell(leaf),
+            want * 3,
+            rng,
+            shape_filter,
+            axis_bounds=bounds,
+            n_strata=n_strata,
+        )
+        new: List[ShapeTuple] = []
+        for s in drawn:
+            if len(new) >= want:
+                break
+            if s not in taken:
+                taken.add(s)
+                new.append(s)
+        if new:
+            out[leaf] = new
+    return out
 
 
 def read_tails(path: Optional[Path]) -> List[Dict[str, Any]]:
@@ -577,11 +782,66 @@ def main() -> int:
         help="(active mode) the stage04b decisions.json whose tail GEMMs get "
         "targeted shapes (default: the last --prior-round-dir's)",
     )
+    ap.add_argument(
+        "--weak-cell-factor",
+        type=float,
+        default=1.0,
+        help="(active mode) new shapes of a leaf the previous round's stage04b "
+        "retrained (decision retrain, or a pass with collapse_retrain), as a "
+        "multiple of --shapes-per-cell (>= 1; 1: --shapes-per-cell)",
+    )
+    ap.add_argument(
+        "--strong-cell-factor",
+        type=float,
+        default=1.0,
+        help="(active mode) the same for a leaf that passed at least "
+        "--strong-cell-margin above stage04b's threshold (0 < f <= 1); the "
+        "strong leaves give up at most what the weak leaves gain",
+    )
+    ap.add_argument(
+        "--strong-cell-margin",
+        type=float,
+        default=STRONG_CELL_MARGIN,
+        help="(active mode) how far above stage04b's threshold a pass must read "
+        "for its leaf to be strong (>= 0)",
+    )
+    ap.add_argument(
+        "--large-k-factor",
+        type=float,
+        default=1.0,
+        help=f"(active mode) a leaf's new shapes with K above {LARGE_K_ABOVE}, as "
+        "a multiple of the number its draw holds (>= 1; 1: none more)",
+    )
+    ap.add_argument(
+        "--decisions-from",
+        type=Path,
+        default=None,
+        help="(active mode) the stage04b decisions.json the weak-cell budget "
+        "reads (default: the last --prior-round-dir's; without one every "
+        "leaf gets --shapes-per-cell)",
+    )
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
     if args.targeted_per_gemm < 0 or args.targeted_max_per_leaf < 0:
         ui.err("err", "--targeted-per-gemm and --targeted-max-per-leaf are >= 0")
+        return 1
+    bad = False
+    for flag, value, ok, rule in (
+        ("--weak-cell-factor", args.weak_cell_factor, lambda v: v >= 1, ">= 1"),
+        (
+            "--strong-cell-factor",
+            args.strong_cell_factor,
+            lambda v: 0 < v <= 1,
+            "in (0, 1]",
+        ),
+        ("--strong-cell-margin", args.strong_cell_margin, lambda v: v >= 0, ">= 0"),
+        ("--large-k-factor", args.large_k_factor, lambda v: v >= 1, ">= 1"),
+    ):
+        if not (math.isfinite(value) and ok(value)):
+            ui.err("err", f"{flag} must be finite and {rule}, got {value!r}")
+            bad = True
+    if bad:
         return 1
     round_index = _resolve_round_index(args)
     if round_index is None:
@@ -616,6 +876,7 @@ def main() -> int:
     split_tree: Dict[str, "sc.SplitRule"] = {}
     revoked: List[str] = []
     tails_from: Optional[Path] = None
+    plan_budget: Optional[Dict[str, Any]] = None
     if args.mode == "initial":
         per_cell = _build_initial_budget(args.target_per_cell)
         if not args.quiet:
@@ -680,6 +941,42 @@ def main() -> int:
             if unknown:
                 ui.err("err", f"--only-cells: unknown cell label(s) {unknown}")
                 return 1
+            plan_budget = need_budget(plan, None, args.shapes_per_cell)
+            plan_budget.update(decisions=None, not_applied="--only-cells")
+        else:
+            decisions_from = args.decisions_from or (
+                prior_round_dirs[-1] / "stage04b" / "decisions.json"
+                if prior_round_dirs
+                else None
+            )
+            if args.decisions_from is not None and not args.decisions_from.is_file():
+                ui.err("err", f"--decisions-from {args.decisions_from}: no such file")
+                return 1
+            neutral = args.weak_cell_factor == 1 and args.strong_cell_factor == 1
+            decisions = None
+            if not neutral:
+                try:
+                    decisions = read_decisions(decisions_from)
+                except ValueError as e:
+                    ui.err("err", str(e))
+                    return 1
+            plan_budget = need_budget(
+                plan,
+                decisions,
+                args.shapes_per_cell,
+                weak_factor=args.weak_cell_factor,
+                strong_factor=args.strong_cell_factor,
+                strong_margin=args.strong_cell_margin,
+                min_per_cell=int(args.min_cell_gemms or 0),
+            )
+            plan_budget.update(
+                decisions=str(decisions_from) if decisions is not None else None,
+                not_applied=(
+                    None
+                    if decisions is not None
+                    else "every factor at 1" if neutral else "no stage04b decisions"
+                ),
+            )
         per_cell = {cell: int(info["n_target"]) for cell, info in plan.items()}
         args.prior_shapes_yaml = list(args.prior_shapes_yaml or []) + auto_shapes
         args.prior_enriched_csv_dir = (
@@ -713,6 +1010,21 @@ def main() -> int:
                 f"shapes_per_cell={args.shapes_per_cell}  "
                 f"total_target={sum(per_cell.values()):,}",
             )
+            if plan_budget["applied"]:
+                ui.ok(
+                    "budget",
+                    f"weak={plan_budget['n_weak']} (x{plan_budget['weak_cell_factor']:g}, "
+                    f"+{plan_budget['weak_extra']:,})  strong={plan_budget['n_strong']} "
+                    f"(x{plan_budget['strong_cell_factor']:g}, -{plan_budget['strong_cut']:,} of "
+                    f"{plan_budget['strong_cut_wanted']:,})  "
+                    f"total_target={plan_budget['total_target']:,} (uniform "
+                    f"{plan_budget['uniform_total']:,}) from {plan_budget['decisions']}",
+                )
+            else:
+                ui.info(
+                    "budget",
+                    f"{args.shapes_per_cell} per leaf: {plan_budget['not_applied']}",
+                )
 
     if not args.quiet:
         ui.banner("Stage 2/3  Synthesize + filter + dedup", ui.C.BLUE)
@@ -804,6 +1116,37 @@ def main() -> int:
                 f"filter accepts)",
             )
 
+    k_factor = (
+        args.large_k_factor
+        if args.mode == "active" and args.only_cells is None
+        else 1.0
+    )
+    large_k: Dict[str, List[ShapeTuple]] = {}
+    if k_factor > 1:
+        large_k = large_k_shapes(
+            result.fresh_per_cell,
+            k_factor,
+            round_seed,
+            shape_filter,
+            n_strata=args.n_strata,
+            taken=set(history) | excluded | set(result.shapes),
+        )
+    stratum = [s for leaf in sorted(large_k) for s in large_k[leaf]]
+    leaked = set(stratum) & excluded
+    if leaked:
+        ui.err(
+            "exclude",
+            f"{len(leaked)} very-large-K shapes are held out "
+            f"(e.g. {sorted(leaked)[0]}); nothing written",
+        )
+        return 1
+    if not args.quiet and stratum:
+        ui.ok(
+            "large_k",
+            f"{len(stratum):,} more shapes with K above {LARGE_K_ABOVE} in "
+            f"{len(large_k)} leaves (x{k_factor:g})",
+        )
+
     targeted: Dict[str, List[Dict[str, Any]]] = {}
     tails: List[Dict[str, Any]] = []
     if args.mode == "active" and args.targeted_per_gemm > 0:
@@ -817,7 +1160,7 @@ def main() -> int:
                 shape_filter,
                 per_gemm=args.targeted_per_gemm,
                 max_per_leaf=args.targeted_max_per_leaf,
-                taken=set(history) | excluded | set(result.shapes),
+                taken=set(history) | excluded | set(result.shapes) | set(stratum),
             )
     targeted_per_cell = {
         leaf: sum(len(e["shapes"]) for e in entries)
@@ -843,7 +1186,8 @@ def main() -> int:
     if not args.quiet:
         ui.banner("Stage 3/3  Write outputs", ui.C.BLUE)
     shape_objs = [
-        Shape(m=s[0], n=s[1], k=s[2], batch=s[3]) for s in result.shapes + extra
+        Shape(m=s[0], n=s[1], k=s[2], batch=s[3])
+        for s in result.shapes + stratum + extra
     ]
     # stage03 benches contiguous blocks of this file, one process each, and
     # finishes with its slowest block; a shuffled file makes every block a
@@ -864,7 +1208,7 @@ def main() -> int:
             "round_index": round_index,
             "round_seed": round_seed,
             "config_yaml": str(args.config_yaml),
-            "n_final": len(result.shapes) + len(extra),
+            "n_final": len(result.shapes) + len(stratum) + len(extra),
             "n_reused": len(result.reused),
             "n_history_dropped": result.n_history_dropped,
             "exclude_shapes_yaml": [str(p) for p in (args.exclude_shapes_yaml or [])],
@@ -892,6 +1236,12 @@ def main() -> int:
                 "n_tail_gemms": len(tails),
                 "n_shapes": len(extra),
                 "per_cell": targeted_per_cell,
+            },
+            "large_k": {
+                "factor": k_factor,
+                "above": LARGE_K_ABOVE,
+                "n_shapes": len(stratum),
+                "per_cell": {leaf: len(v) for leaf, v in sorted(large_k.items())},
             },
         },
     )
@@ -929,12 +1279,14 @@ def main() -> int:
                     str(p) for p in (args.prior_enriched_csv_dir or [])
                 ],
                 "n_history_shapes": len(history),
+                "budget": plan_budget,
                 "cells": {
                     cell: {
                         **info,
                         "n_actual": result.actual_per_cell.get(cell, 0),
                         "n_reused": result.reused_per_cell.get(cell, 0),
                         "n_targeted": targeted_per_cell.get(cell, 0),
+                        "n_large_k": len(large_k.get(cell, ())),
                     }
                     for cell, info in plan.items()
                 },
@@ -945,7 +1297,10 @@ def main() -> int:
 
     if not args.quiet:
         ui.banner("Done", ui.C.GREEN)
-        ui.ok("done", f"total shapes  : {len(result.shapes) + len(extra):,}")
+        ui.ok(
+            "done",
+            f"total shapes  : {len(result.shapes) + len(stratum) + len(extra):,}",
+        )
         ui.ok("done", f"output dir    : {args.out_dir}")
     return 0
 

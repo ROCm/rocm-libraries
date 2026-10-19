@@ -617,6 +617,22 @@ def line_solution_list(line: str) -> Optional[List[int]]:
     return [int(t) for t in inner.split(",") if t.strip()] if inner else []
 
 
+def without_kernels(line: str, kernels: Iterable[int]) -> str:
+    """`line` with none of `kernels` in its `solution_index_list` (a line
+    without a list as it is); a list that led with a sacrificial copy of its
+    first kernel (its first two entries equal) leads with a copy of its new
+    first kernel."""
+    listed = line_solution_list(line)
+    gone = {int(k) for k in kernels}
+    if listed is None or not gone.intersection(listed):
+        return line
+    copy = len(listed) > 1 and listed[0] == listed[1]
+    kept = [k for k in (listed[1:] if copy else listed) if k not in gone]
+    if copy and kept:
+        kept = [kept[0], *kept]
+    return set_line_knob(line, "solution_index_list", format_solution_list(kept))
+
+
 def line_has_prescreen(line: str) -> bool:
     """The line asks the bench to warm up every candidate before timing any
     (`skip_screen_prepass`)."""

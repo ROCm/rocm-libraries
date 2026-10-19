@@ -604,9 +604,10 @@ def _shape_of(args):
 def test_the_gate_runs_an_f8bs_config_end_to_end(world, tmp_path):
     """gfx950's F8BS problem type (f8 A and B with one f32 scale per tensor,
     bf16 C and D, a bias library) gates its library's table on
-    SCALAR_SHAPES: every command runs f8 data with both scales, K as the
-    shape gives it, the bias epilogue exactly where the shape asks for it;
-    stage 0 writes the blocklist of the failing kernel."""
+    SCALAR_SHAPES and the tiny shapes: every command runs f8 data with both
+    scales, K as the shape gives it, the bias epilogue exactly where the
+    shape asks for it, fresh operands on the tiny shapes alone; stage 0
+    writes the blocklist of the failing kernel."""
     import stage00_correctness_gate as s00
 
     cf.write_f8bs_library(world.lib)
@@ -618,12 +619,15 @@ def test_the_gate_runs_an_f8bs_config_end_to_end(world, tmp_path):
     assert world.blocked() == [names["301"]]
     calls = world.calls()
     shapes = cg.SCALAR_SHAPES
+    assert cg.tiny_shapes_of(cg.harness_problem(cfg)) == cg.TINY_SHAPES
     assert {_shape_of(c["args"]) for c in calls} == {
-        (str(x.m), str(x.n), str(x.k), str(x.batch)) for x in shapes
+        (str(x.m), str(x.n), str(x.k), str(x.batch)) for x in (*shapes, *cg.TINY_SHAPES)
     }
+    tiny = {(str(x.m), str(x.n), str(x.k), str(x.batch)) for x in cg.TINY_SHAPES}
     biased = set()
     for c in calls:
         opts = dict(zip(c["args"][4::2], c["args"][5::2]))
+        assert (opts.get("--fresh") == "1") == (_shape_of(c["args"]) in tiny)
         assert opts["--a-type"] == opts["--b-type"] == "f8"
         assert opts["--scale-a"] == opts["--scale-b"] == "1"
         assert (opts["--c-type"], opts["--d-type"], opts["--compute"]) == (
@@ -818,6 +822,46 @@ def test_listed_kernels_are_blocked_unchecked(world, tmp_path):
     )
 
 
+def test_an_audit_set_takes_a_failure_the_canary_keeps_out_later(world, tmp_path):
+    """The gate finds 101 computing wrong results. In the run's next
+    invocation the hazard canary keeps 101 out unchecked (its run alone
+    killed from outside), and 102 too, which the gate passed; the gate
+    lists both with the canary's entries alone. An audit set built for the
+    run takes 101, from the run's newest blocklist and from that snapshot as
+    its config, since an older snapshot names it for the gate's finding,
+    and leaves 102 to its own canary."""
+    from lib import audit as al
+    from lib import hazards as hz
+
+    world.set(fail={"101": "always"})
+    world.run(out="inv1")
+    why = "its bench was killed by SIGKILL from outside"
+    reason = hz.unchecked_reason(["prefetch_gl2_2"], why)
+    quarantine = tmp_path / "quarantine.json"
+    cuts = [cx.Entry(name(s), reason, source=hz.SOURCE) for s in (101, 102)]
+    cx.write_blocklist(quarantine, cx.Blocklist(cuts))
+    world.run(out="inv2", quarantine=quarantine)
+    first = cx.read_list(world.base / "inv1" / cx.BLOCKLIST_FILE)
+    second = cx.read_list(world.base / "inv2" / cx.BLOCKLIST_FILE)
+    assert [(e.name, e.source) for e in first.entries] == [
+        (name(101), "correctness gate")
+    ]
+    assert {e.name for e in second.entries} == {name(101), name(102)}
+    assert all(hz.kept_out_unchecked(e) for e in second.entries)
+    run = tmp_path / "run"
+    for stamp, out in (("20261019_000001", "inv1"), ("20261019_000002", "inv2")):
+        copy = run / "correctness" / "blocklists" / f"{stamp}_full.json"
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes((world.base / out / cx.BLOCKLIST_FILE).read_bytes())
+        snap = run / "configs" / f"{stamp}_full.yaml"
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        sec = {"enabled": True, "blocklist": str(copy)}
+        snap.write_text(yaml.safe_dump(dict(world.cfg(), correctness=sec)))
+    for cfg in (yaml.safe_load(snap.read_text()), world.cfg()):
+        taken, _ = al.source_blocklist(cfg, [run])
+        assert taken.names == {name(101)}
+
+
 def test_hand_written_kernels_get_a_first_launch_and_k_rounded_up(world):
     world.set(fail={"103": "first"}, depth_u={"103": 64})
     s = world.run()
@@ -888,7 +932,8 @@ def test_a_crash_that_repeats_alone_blocks_its_kernel_and_the_others_go_on(world
     }
     assert "crashed or hung, also alone" in json.dumps(v)
     ids = [c["args"][c["args"].index("--ids") + 1] for c in world.calls()]
-    assert ids.count("101") == len(cg.SHAPES), "each crash again alone"
+    n_shapes = len(cg.SHAPES) + len(cg.TINY_SHAPES)
+    assert ids.count("101") == n_shapes, "each crash again alone, in both stages"
     # A crash holds under its protocol only: another one checks it again.
     s = world.run(out="gate2")
     assert s["checked"] == 0 and world.blocked("gate2") == [name(101)]
@@ -1075,8 +1120,9 @@ def test_verdicts_no_pass_can_change_are_cached_before_the_follow_ups(world):
     world.set(fail={"101": "shape:524287x3"}, broken_ids=["102"])
     with pytest.raises(cg.GateError, match="before it ran a kernel"):
         world.run()
+    records = cg.VerdictCache(world.base / "cache").records()
     cached = {
-        r["name"]: r["verdict"] for r in cg.VerdictCache(world.base / "cache").records()
+        r["name"]: r["verdict"] for r in records if r.get("stage", cg.MAIN) == cg.MAIN
     }
     assert cached == {
         name(100): "pass",
@@ -1085,9 +1131,12 @@ def test_verdicts_no_pass_can_change_are_cached_before_the_follow_ups(world):
         name(200): "pass",
         name(201): "pass",
     }
+    tiny = {r["name"]: r["verdict"] for r in records if r.get("stage") == cg.TINY}
+    assert tiny == {name(s): "pass" for s in (100, 101, 103, 200, 201)}
     world.set(broken_ids=[])
     s = world.run(out="gate2")
     assert s["cached"] == 5 and s["checked"] == 1
+    assert s["tiny"]["cached"] == 5 and s["tiny"]["checked"] == 1
     assert world.blocked("gate2") == [name(101)]
 
 
@@ -1334,6 +1383,34 @@ def test_stage00_writes_the_run_blocklist(world, tmp_path, capsys):
     cfg_path.write_text(yaml.safe_dump(mx))
     argv[argv.index("--out-dir") + 1] = str(tmp_path / "out_vector")
     assert s00.main(argv) == 1
+
+
+def test_stage00_counts_the_tiny_stage_in_its_summary_line(world, tmp_path, capsys):
+    """A gate whose cache holds every kernel's verdict of the shapes but not
+    of the tiny shapes runs the tiny shapes alone, and its summary line
+    says so; with both stages cached it has nothing to check."""
+    import stage00_correctness_gate as s00
+
+    cfg_path = tmp_path / "c.yaml"
+    cfg_path.write_text(yaml.safe_dump(world.cfg(cache_dir=str(tmp_path / "shared"))))
+    argv = ["--config-yaml", str(cfg_path), "--dat-dir", str(world.lib)]
+    argv += ["--devices", "0", "--out-dir"]
+    assert s00.main([*argv, str(tmp_path / "first")]) == 0
+    first = capsys.readouterr().out
+    assert "6 checked now on the shapes and 6 on the tiny shapes" in first
+    cache = tmp_path / "shared" / cg.CACHE_FILE
+    kept = [
+        line
+        for line in cache.read_text().splitlines()
+        if json.loads(line).get("stage") != cg.TINY
+    ]
+    cache.write_text("\n".join(kept) + "\n")
+    assert s00.main([*argv, str(tmp_path / "tiny")]) == 0
+    tiny = capsys.readouterr().out
+    assert "0 checked now on the shapes and 6 on the tiny shapes" in tiny
+    assert "nothing to check" not in tiny
+    assert s00.main([*argv, str(tmp_path / "cached")]) == 0
+    assert "nothing to check" in capsys.readouterr().out
 
 
 def test_stage00_reports_a_busy_lease_with_2(world, tmp_path, monkeypatch):
@@ -1752,15 +1829,21 @@ def test_the_preflight_reads_the_pool_before_the_gate_wrote_a_blocklist(tmp_path
     assert f"unknown for {UNLISTED}: set hardware.num_xcd" in err
 
 
-def test_the_audit_set_benches_every_kernel_whatever_a_run_blocks(tmp_path):
+def test_the_audit_config_lists_the_blocklist_of_the_runs_it_is_built_for(tmp_path):
     from lib import audit as al
 
     cfg = cf.config(lists=["gfx950_bbs_tn"])
     assert "correctness" not in al.bench_config(cfg)
+    built = al.bench_config(cfg, None, tmp_path / "source.json")
+    assert built["correctness"] == {"lists": [str(tmp_path / "source.json")]}
     assert cfg["correctness"]["lists"] == ["gfx950_bbs_tn"]
 
 
-def test_the_audit_set_checks_read_every_kernel_of_the_pool(tmp_path):
+def test_the_audit_set_checks_read_the_kernels_a_run_does_not_block(tmp_path):
+    """The kernels an audit plan's solution indices named are the pool's,
+    blocked kernels too; the kernels the set must hold for a run are those
+    its blocklist leaves in: the lists before the gate wrote the
+    invocation's blocklist, both after."""
     import types
 
     import run_orchestrator as ro
@@ -1775,14 +1858,55 @@ def test_the_audit_set_checks_read_every_kernel_of_the_pool(tmp_path):
     paths = types.SimpleNamespace(library_dir=lib)
     digests = ro.config_pool_digests(cfg, paths)
     assert sorted(digests) == [100, 101, 102, 103, 200, 201]
+    required = ro.config_pool_digests(cfg, paths, required=True)
+    assert sorted(required) == [100, 102, 103, 200, 201]
+    gate = cx.Blocklist([cx.Entry(name(102), source="correctness gate")])
+    cx.write_blocklist(Path(cfg["correctness"]["blocklist"]), gate)
+    required = ro.config_pool_digests(cfg, paths, required=True)
+    assert sorted(required) == [100, 103, 200, 201]
     audit = tmp_path / "audit"
     run_layout.settle(audit)
     (audit / "stage02").mkdir(parents=True)
     (audit / "stage02" / ro.STAGE_MARKER).write_text("{}")
-    planned = {str(s): d for s, d in digests.items()}
+    planned = {str(s): d for s, d in required.items()}
     m = {"schema": al.SCHEMA_VERSION, "generations": [], "planned_kernels": planned}
     (audit / al.MANIFEST).write_text(json.dumps(m))
-    assert ro.audit_build_refusal(audit, ro.config_pool_digests(cfg, paths)) is None
+    assert ro.audit_build_refusal(audit, digests, required) is None
+    m["generations"] = [{"kernels": planned}]
+    (audit / al.MANIFEST).write_text(json.dumps(m))
+    assert ro.audit_build_refusal(audit, digests, required) is None
+    assert al.unbenched(m, digests) == [101, 102]
+    m["left_out"] = {digests[101]: name(101), digests[102]: name(102)}
+    assert al.unbenched(m, digests) == [], "a kernel the set left out is covered"
+
+
+def test_a_run_finds_complete_an_audit_set_that_lacks_only_what_it_blocks(tmp_path):
+    """A kernel the run's blocklist names, which the audit set neither
+    benched nor left out (it entered the pool after the set was built for
+    another run), keeps no run from finding the set complete; one the run
+    does not block does."""
+    import types
+
+    import run_orchestrator as ro
+    from lib import audit as al
+
+    lib = cf.write_library(tmp_path / "lib")
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    lst = tmp_path / "l.tsv"
+    lst.write_text(f"A\t{name(101)}\n")
+    cfg = cf.config(lists=[str(lst)])
+    cfg["audit"] = {"dir": str(audit)}
+    paths = types.SimpleNamespace(library_dir=lib)
+    digests = ro.config_pool_digests(cfg, paths)
+    benched = {str(s): d for s, d in digests.items() if s != 101}
+    m = {"schema": al.SCHEMA_VERSION, "generations": [{"kernels": benched}]}
+    (audit / al.MANIFEST).write_text(json.dumps(m))
+    (audit / al.COMPLETE_MARKER).write_text("{}")
+    assert ro.audit_status(cfg, paths) == ("ok", None)
+    del cfg["correctness"]
+    st, why = ro.audit_status(cfg, paths)
+    assert st == "incomplete" and "1 kernel(s)" in why
 
 
 def test_config_checks_of_the_correctness_section(tmp_path):
@@ -1814,6 +1938,14 @@ def test_config_checks_of_the_correctness_section(tmp_path):
     assert "correctness.enabled: the exact harness does not run scaled" in errors
     cfg["correctness"] = {"repetitions": 2}
     assert any("repetitions" in e for e in ro.validate_config(cfg)[0])
+    cfg["hipblaslt"].update(scaleA=1, scaleB=1)
+    cfg["correctness"] = {"enabled": True, "custom_kernels": str(tmp_path / "gone")}
+    errors = "\n".join(ro.validate_config(cfg)[0])
+    assert "correctness.custom_kernels:" in errors and "is no directory" in errors
+    cfg["correctness"]["custom_kernels"] = str(tmp_path)
+    cfg["correctness"]["static_check"] = False
+    assert not [e for e in ro.validate_config(cfg)[0] if "correctness" in e]
+    assert ro.cfg_get(cf.config(), "correctness.static_check") is True
 
 
 def test_a_gate_blocklist_without_the_gate_is_refused(tmp_path, stubs, env, capsys):
@@ -2171,7 +2303,9 @@ def test_stage07_needs_a_tensilelite_that_reads_blocklists(tmp_path):
     release = tmp_path / "bench" / "projects" / "hipblaslt" / "build" / "release"
     fh.write_fake_build(release, "gfx950", OSTEM)
     v3 = tmp_path / "v3"
-    fh.write_fake_build(v3, "gfx950", OSTEM, capabilities=("MLREC_v3",))
+    fh.write_fake_build(
+        v3, "gfx950", OSTEM, capabilities=("MLREC_v3", ro.CU_FLOOR_MARKER)
+    )
     cfg, _ = ro.load_config(
         make_config(tmp_path, **{"stage07.build_dir": str(v3), "train.catalog": "v3"})
     )
@@ -2192,7 +2326,10 @@ def test_stage07_needs_a_tensilelite_that_reads_blocklists(tmp_path):
     (err,) = ro.stage07_build_errors(gated, paths)
     assert "does not read the blocklist sidecar" in err
     fh.write_fake_build(
-        v3, "gfx950", OSTEM, capabilities=("MLREC_v3", cx.SIDECAR_SUFFIX)
+        v3,
+        "gfx950",
+        OSTEM,
+        capabilities=("MLREC_v3", ro.CU_FLOOR_MARKER, cx.SIDECAR_SUFFIX),
     )
     assert ro.stage07_build_errors(gated, paths) == []
     assert ro.stage07_build_errors(cfg, paths) == []
@@ -2233,3 +2370,511 @@ def test_the_v2_winner_is_the_fastest_median_of_the_pool():
     assert kept.winner_us == 5.0 and mm.winner_us == 4.0
     assert al.pool_medians(None, {1}) is None
     assert al.pool_medians(mm, set()).winner_us is None
+
+
+# ── the static check of hand-written kernels and the tiny shapes ────────────
+
+
+def _custom_source(directory, name, widths=(4, 4), extra=""):
+    """A hand-written kernel's source in `directory` whose custom.config
+    declares global-read vector widths `widths` (None: undeclared)."""
+    keys = "".join(
+        f"  GlobalReadVectorWidth{op}: {w}\n"
+        for op, w in zip("AB", widths)
+        if w is not None
+    )
+    path = Path(directory) / f"{name}.s"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "/* GlobalReadVectorWidthA=1, GlobalReadVectorWidthB=1 */\n"
+        ".amdgpu_metadata\n---\ncustom.config:\n"
+        "  InternalSupportParams:\n    KernArgsVersion: 2\n"
+        f"{keys}{extra}"
+        "amdhsa.version:\n  - 1\n  - 1\n...\n.end_amdgpu_metadata\n"
+    )
+    return path
+
+
+def _with_predicates(lib, sid, predicates, trans=None):
+    """Give solution `sid` of the fake library's table the problem
+    predicates `predicates` (an And of them) and the layout `trans`."""
+    import msgpack
+
+    path = lib / f"{cf.STEM}.dat"
+    doc = msgpack.unpackb(path.read_bytes(), raw=False, strict_map_key=False)
+    for sol in doc["solutions"]:
+        if sol["index"] == sid:
+            sol["problemPredicate"] = {"type": "And", "value": list(predicates)}
+            if trans is not None:
+                sol["problemType"] = {"transA": trans[0], "transB": trans[1]}
+    path.write_bytes(msgpack.packb(doc))
+
+
+def _lf(m, n):
+    return [
+        {"type": "LeadingFree0SizesGreaterOrEqual", "value": m},
+        {"type": "LeadingFree1SizesGreaterOrEqual", "value": n},
+    ]
+
+
+def test_the_custom_config_is_read_from_the_metadata_of_the_source(tmp_path):
+    src = _custom_source(tmp_path, "Custom_k", (4, 8))
+    config = cg.custom_config(src)
+    assert config["GlobalReadVectorWidthA"] == 4
+    assert config["GlobalReadVectorWidthB"] == 8
+    bare = tmp_path / "bare.s"
+    bare.write_text(".amdgpu_metadata\n---\namdhsa.version: [1, 1]\n...\n")
+    with pytest.raises(ValueError, match="no custom.config"):
+        cg.custom_config(bare)
+    broken = tmp_path / "broken.s"
+    broken.write_text("---\ncustom.config: [\n...\n")
+    with pytest.raises(ValueError, match="not YAML"):
+        cg.custom_config(broken)
+
+
+def test_sources_are_found_as_tensilelite_finds_them(tmp_path):
+    root = tmp_path / "CustomKernels"
+    _custom_source(root / "b", "K1", (8, 8))
+    _custom_source(root / "a", "K1", (2, 2))
+    _custom_source(root, "K2")
+    _custom_source(root / "a", "K2", (1, 1))
+    found = cg.custom_kernel_sources(root)
+    assert found["K1"] == root / "a" / "K1.s", "the first of a sorted walk"
+    assert found["K2"] == root / "K2.s", "the top of the directory first"
+    build = tmp_path / "build"
+    build.mkdir()
+    src = tmp_path / "src"
+    (build / "CMakeCache.txt").write_text(f"hipblaslt_SOURCE_DIR:STATIC={src}\n")
+    d, why = cg.custom_kernels_dir({}, build)
+    assert d is None and "has no" in why
+    (src / cg.CUSTOM_KERNELS_DIR).mkdir(parents=True)
+    d, why = cg.custom_kernels_dir({}, build)
+    assert d == src / cg.CUSTOM_KERNELS_DIR and "build's hipBLASLt source" in why
+    given = {"correctness": {"custom_kernels": str(root)}}
+    assert cg.custom_kernels_dir(given, build) == (root, "correctness.custom_kernels")
+    gone = {"correctness": {"custom_kernels": str(tmp_path / "gone")}}
+    assert cg.custom_kernels_dir(gone, build)[0] is None
+    assert cg.custom_kernels_dir({}, None)[0] is None
+
+
+def test_the_least_free_size_counts_every_size_predicate():
+    preds = cg.predicate_leaves(
+        {
+            "type": "And",
+            "value": [
+                {"type": "LeadingFree0SizesGreaterOrEqual", "value": 2},
+                {"type": "And", "value": [{"type": "Free0SizeMultiple", "value": 8}]},
+                {"type": "LeadingFree1SizesGreaterOrEqual", "value": 1},
+                {"type": "SizeGreaterThan", "index": 1, "value": 5},
+                {"type": "BoundSizeMultiple", "index": -1, "value": 64},
+                {"type": "Or", "value": [{"type": "Free1SizeMultiple", "value": 99}]},
+            ],
+        }
+    )
+    assert cg.free_size_floor(preds, 0) == (
+        8,
+        ["LeadingFree0SizesGreaterOrEqual 2", "Free0SizeMultiple 8"],
+    )
+    assert cg.free_size_floor(preds, 1) == (
+        6,
+        ["LeadingFree1SizesGreaterOrEqual 1", "SizeGreaterThan 5"],
+    )
+    assert cg.free_size_floor([], 0) == (1, [])
+    equal = [{"type": "SizeEqual", "index": 0, "value": 256}]
+    assert (
+        cg.free_size_floor(equal, 0)[0] == 256 and cg.free_size_floor(equal, 1)[0] == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "trans, sides",
+    [
+        ((False, False), ["A"]),
+        ((False, True), ["A", "B"]),
+        ((True, False), []),
+        ((True, True), ["B"]),
+    ],
+)
+def test_a_hand_written_kernel_is_unguarded_where_it_reads_along_a_free_size(
+    tmp_path, trans, sides
+):
+    """The TensileLite custom-kernel path builds GlobalReadVectorWidth 1 and
+    LeadingFree predicates of 1, while the kernel's custom.config reads A
+    and B 4 wide: along M of a non-transposed A and N of a transposed B,
+    the predicates admit sizes the kernel reads outside the operand at."""
+    src = _custom_source(tmp_path, "Custom_k")
+    sol = {
+        "problemType": {"transA": trans[0], "transB": trans[1]},
+        "problemPredicate": {"type": "And", "value": _lf(1, 1)},
+        "sizeMapping": {"grvwA": 1, "grvwB": 1},
+    }
+    f = cg.check_custom_kernel(7, sol, "Custom_k", src)
+    assert f.blocks == bool(sides)
+    assert f.status == (cg.UNGUARDED if sides else "guarded")
+    for op in sides:
+        dim = "M" if op == "A" else "N"
+        assert (
+            f"admit {dim} of 1 to 3, below the global-read vector width 4" in f.reason
+        )
+        assert f.sides[op]["declared_width"] == 4 and f.sides[op]["built_width"] == 1
+    assert f.sha256 == cg.sha256_file(src) and f.source == str(src)
+    guarded = dict(sol, problemPredicate={"type": "And", "value": _lf(4, 4)})
+    assert cg.check_custom_kernel(7, guarded, "Custom_k", src).status == "guarded"
+
+
+def test_the_static_check_names_what_it_cannot_check(tmp_path):
+    sol = {"problemType": {"transA": False, "transB": False}}
+    undeclared = _custom_source(tmp_path, "U", (None, 4))
+    f = cg.check_custom_kernel(1, sol, "U", undeclared)
+    assert f.status == "undeclared" and not f.blocks and "for A" in f.reason
+    f = cg.check_custom_kernel(1, sol, "N", None, missing="no sources here")
+    assert (f.status, f.reason) == ("unchecked", "no sources here")
+    broken = tmp_path / "broken.s"
+    broken.write_text("nothing")
+    assert cg.check_custom_kernel(1, sol, "B", broken).status == "unchecked"
+    # The config's layout stands for a solution that records none.
+    tn = cg.check_custom_kernel(
+        1, {}, "U", _custom_source(tmp_path, "T"), (True, False)
+    )
+    assert tn.status == "guarded"
+    nn = cg.check_custom_kernel(1, {}, "T", tmp_path / "T.s", (False, False))
+    assert nn.status == cg.UNGUARDED
+
+
+def test_only_hand_written_kernels_are_checked_statically(world, tmp_path):
+    lib = world.lib
+    _with_predicates(lib, 103, _lf(1, 1), trans=(False, False))
+    root = tmp_path / "ck"
+    _custom_source(root, cf.solution(103, cf.TABLE[103])["name"])
+    sources = cg.custom_kernel_sources(root)
+    found = cg.static_check(lib, [cf.STEM, cf.BANK], [100, 101, 103, 200], sources)
+    assert list(found) == [103] and found[103].blocks
+    generated = {"customKernel": {"name": "x", "generated": True}}
+    assert cg.custom_kernel_name(generated) is None
+    assert cg.custom_kernel_name({"customKernel": {"name": "x"}}) == "x"
+    assert cg.custom_kernel_name({"customKernel": {"generated": False}}) is None
+    nothing = cg.static_check(lib, [cf.STEM], [103], None, missing="why")
+    assert nothing[103].status == "unchecked" and nothing[103].reason == "why"
+
+
+def _nn_world(world, tmp_path, widths=(4, 4), **correctness):
+    """The world's library in NN with the hand-written 103 under
+    LeadingFree predicates of 1 and a source that declares `widths`."""
+    _with_predicates(world.lib, 103, _lf(1, 1), trans=(False, False))
+    root = tmp_path / "CustomKernels"
+    _custom_source(root, name(103), widths)
+    cfg = world.cfg(custom_kernels=str(root), **correctness)
+    cfg["hipblaslt"].update(transA="N", transB="N")
+    return cfg
+
+
+def test_the_gate_blocks_an_unguarded_kernel_statically_and_never_runs_it(
+    world, tmp_path
+):
+    cfg = _nn_world(world, tmp_path)
+    s = world.run(cfg=cfg)
+    assert world.blocked() == [name(103)]
+    assert s["verdicts"] == {"pass": 5, cg.UNGUARDED: 1}
+    assert s["static"]["statuses"] == {cg.UNGUARDED: 1}
+    assert s["static"]["unguarded"] == [{"solution_index": 103, "name": name(103)}]
+    assert s["static"]["sources"] == str(tmp_path / "CustomKernels")
+    assert all(
+        "103" not in c["args"][c["args"].index("--ids") + 1].split(",")
+        for c in world.calls()
+    )
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    row = next(k for k in v["kernels"] if k["solution_index"] == 103)
+    assert row["verdict"] == cg.UNGUARDED and row["source"] == "static check"
+    assert row["static"]["sides"]["A"]["leading_free"] is True
+    assert "below the global-read vector width 4 its custom.config" in row["reason"]
+    doc = json.loads((world.base / "gate" / cx.BLOCKLIST_FILE).read_text())
+    (entry,) = doc["entries"]
+    assert entry["source"] == "correctness gate (static check)"
+    assert entry["reason"].startswith("unguarded in the static check")
+    assert entry["kernel_id"] == row["kernel_id"]
+    # A gate with the check off runs it, and the tiny shapes find it.
+    world.set(reads_before={"103": {"A": 4}}, depth_u={"103": 64})
+    s = world.run(
+        out="gate_off",
+        cache="cache_off",
+        cfg=dict(cfg, correctness=dict(cfg["correctness"], static_check=False)),
+    )
+    assert s["static"]["enabled"] is False and world.blocked("gate_off") == [name(103)]
+    v = json.loads((world.base / "gate_off" / cg.VERDICTS_FILE).read_text())
+    row = next(k for k in v["kernels"] if k["solution_index"] == 103)
+    assert row["verdict"] == "crash" and row["tiny"]["verdict"] == "crash"
+    assert set(row["tiny"]["evidence"]["failing_shapes"]) == {
+        f"tiny_m_{m}_k384" for m in (1, 2, 3)
+    }
+
+
+def test_tiny_shapes_reach_every_free_size_below_a_vector_width():
+    for shapes, k in ((cg.TINY_SHAPES, 383), (cg.MX_TINY_SHAPES, 416)):
+        assert [(s.m, s.n) for s in shapes] == [
+            (1, 257),
+            (2, 257),
+            (3, 257),
+            (257, 1),
+            (257, 2),
+            (257, 3),
+        ]
+        assert all(s.fresh and s.stage == cg.TINY and s.k == k for s in shapes)
+        assert all(s.batch == 1 and not s.trigger for s in shapes)
+    assert cg.MX_TINY_SHAPES[0].k % 32 == 0 and cg.MX_TINY_SHAPES[0].k // 32 % 2 == 1
+    assert all(cg.TINY_SHAPES[0].k % d for d in (2, 16, 32, 64, 128, 256))
+    for shapes in (cg.SHAPES, cg.SCALAR_SHAPES, cg.mx_shapes(8, 4)):
+        assert not any(s.fresh for s in shapes)
+    assert cg.tiny_shapes_of(cg.harness_problem(cf.mx_config())) == cg.MX_TINY_SHAPES
+    assert cg.tiny_shapes_of(cg.harness_problem(cf.config())) == cg.TINY_SHAPES
+    assert cg.tiny_shapes_of(None) == cg.TINY_SHAPES
+    rec = cg.TINY_SHAPES[0].record()
+    assert rec["fresh"] is True and "fresh" not in cg.SHAPES[0].record()
+    assert cg.TINY_SHAPES[0].text() == "1x257x383x1 fresh operands"
+
+
+def test_only_tiny_shapes_ask_for_fresh_operands_and_only_of_a_harness_that_can():
+    p = cg.harness_problem(cf.config())
+    tiny = cg.Task("t", cg.TINY_SHAPES[0], [1], 3)
+    assert tiny.stage == cg.TINY
+    cmd = tiny.command(Path("h"), p, fresh=True)
+    assert cmd[1:5] == ["1", "257", "383", "1"]
+    assert cmd.index("--fresh") < cmd.index("--ids")
+    assert "--fresh" not in tiny.command(Path("h"), p)
+    main = cg.Task("m", cg.SHAPES[0], [1], 3)
+    assert main.stage == cg.MAIN
+    assert main.command(Path("h"), p, fresh=True) == main.command(Path("h"), p)
+    args = tiny.shape.args(True, False, fresh=True)
+    assert args[args.index("--fresh") + 1] == "1"
+
+
+@pytest.mark.parametrize("layout", ["TN", "NN", "NT", "TT"])
+@pytest.mark.parametrize(
+    "make", [cf.config, cf.scalar_config, cf.mx_config, lambda: cf.mx_config("f4_r")]
+)
+def test_the_harness_takes_every_tiny_task_in_every_layout(layout, make):
+    cfg = make()
+    cfg["hipblaslt"].update(transA=layout[0], transB=layout[1])
+    problem = cg.harness_problem(cfg)
+    shapes = cg.tiny_shapes_of(problem)
+    kernels = {7: {"mt_k": 64}, 8: {"mt_k": 256}}
+    tasks = cg.main_tasks([7, 8], cg.Settings(), 1, shapes)
+    unsupported = {s.name: {7, 8} for s in shapes}
+    tasks += cg.roundup_tasks(unsupported, kernels, cg.Settings(), shapes)
+    assert all(t.stage == cg.TINY for t in tasks)
+    for t in tasks:
+        args = t.command(Path("h"), problem, fresh=True)[1:]
+        opts = dict(zip(args[4::2], args[5::2]))
+        m, n, k = (int(x) for x in args[:3])
+        assert not cf._type_error(k, opts), t.tag
+        assert not cf._leading_dimension_error(m, n, k, opts), t.tag
+        assert opts["--fresh"] == "1"
+
+
+def test_tiny_shapes_are_a_stage_with_a_protocol_of_its_own():
+    s = cg.Settings()
+    main = cg.protocol(s, "harness-id", cg.SHAPES)
+    tiny = cg.protocol(s, "harness-id", cg.TINY_SHAPES, cg.TINY)
+    assert main == cg.protocol(s, "harness-id", cg.SHAPES, cg.MAIN)
+    assert main == "629690fa63793e23", "the main stage's protocol is unchanged"
+    assert tiny != cg.protocol(s, "harness-id", cg.TINY_SHAPES) != main
+    assert tiny != cg.protocol(s, "other", cg.TINY_SHAPES, cg.TINY)
+
+
+def test_a_cached_gate_runs_only_the_tiny_shapes(world):
+    """A cache of the shapes before the tiny stage existed (its records
+    without the tiny ones) keeps its verdicts; the next gate runs every
+    kernel on the tiny shapes alone, and no first launch."""
+    world.set(fail={"101": "always"})
+    world.run()
+    cache = world.base / "cache" / cg.CACHE_FILE
+    kept = [
+        line
+        for line in cache.read_text().splitlines()
+        if json.loads(line).get("stage") != cg.TINY
+    ]
+    cache.write_text("\n".join(kept) + "\n")
+    n = len(world.calls())
+    s = world.run(out="gate2")
+    assert s["checked"] == 0 and s["cached"] == 6
+    assert s["tiny"]["checked"] == 5 and s["tiny"]["cached"] == 1, "101's failure"
+    later = world.calls()[n:]
+    tiny = {(str(x.m), str(x.n), str(x.k), str(x.batch)) for x in cg.TINY_SHAPES}
+    assert later and all(
+        _shape_of(c["args"]) in tiny or c["args"][2] == "384" for c in later
+    )
+    assert all(c["args"][c["args"].index("--fresh") + 1] == "1" for c in later)
+    assert world.blocked("gate2") == [name(101)]
+    assert s["tiny"]["harness_fresh"] is True
+    assert s["tiny"]["tasks"] == s["tiny"]["fresh_tasks"] > 0
+
+
+def test_a_kernel_with_a_verdict_of_one_stage_alone_is_unchecked(world):
+    """A kernel whose cached verdicts hold one stage's and not the other's
+    (here the main stage's, of a cache from before the tiny stage, read by
+    a dry run) is unchecked, as one with neither, never passed; a failure of
+    either stage decides it all the same."""
+    world.set(fail={"101": "always"})
+    world.run()
+    cache = world.base / "cache" / cg.CACHE_FILE
+    kept = [
+        line
+        for line in cache.read_text().splitlines()
+        if json.loads(line).get("stage") != cg.TINY
+    ]
+    cache.write_text("\n".join(kept) + "\n")
+    s = world.run(out="dry", dry_run=True)
+    assert s["cached"] == 6 and s["tiny"]["cached"] == 1, "101's failure"
+    v = json.loads((world.base / "dry" / cg.VERDICTS_FILE).read_text())
+    verdicts = {k["solution_index"]: k["verdict"] for k in v["kernels"]}
+    assert verdicts.pop(101) == "fail"
+    assert set(verdicts.values()) == {"unchecked"}
+    assert s["verdicts"] == {"fail": 1, "unchecked": 5}
+    assert world.blocked("dry") == [name(101)]
+    passed, crashed = {"verdict": "pass"}, {"verdict": "crash"}
+    for main, tiny in ((passed, None), (None, passed), (None, None)):
+        assert cg.kernel_verdict(main, tiny) == ("unchecked", None)
+    assert cg.kernel_verdict(None, crashed) == ("crash", crashed)
+    assert cg.kernel_verdict(passed, passed) == ("pass", passed)
+    assert cg.kernel_verdict({"verdict": "untested"}, passed)[0] == "pass"
+
+
+def test_a_read_before_an_operand_is_found_only_at_fresh_allocations(world):
+    """101 reads A 4 wide along M without a guard: at M of 1 to 3 it reads
+    before A. With the operands at fresh allocations the read faults, a
+    crash that blocks it on the tiny shapes; on a harness without --fresh,
+    or a device that cannot place them so, it reads another buffer and
+    passes, and the gate says that the tiny shapes ran on usual
+    allocations."""
+    cfg = world.cfg()
+    cfg["hipblaslt"].update(transA="N", transB="N")
+    world.set(reads_before={"101": {"A": 4}})
+    s = world.run(cfg=cfg)
+    assert world.blocked() == [name(101)]
+    v = json.loads((world.base / "gate" / cg.VERDICTS_FILE).read_text())
+    row = next(k for k in v["kernels"] if k["solution_index"] == 101)
+    assert row["verdict"] == "crash" and row["tiny"]["verdict"] == "crash"
+    assert set(row["tiny"]["evidence"]["failing_shapes"]) == {
+        f"tiny_m_{m}" for m in (1, 2, 3)
+    }
+    assert row["tiny"]["evidence"]["fresh"] is True
+    assert row["evidence"]["failing_shapes"] == {}, "no main shape is below 4"
+    assert s["verdicts"] == {"crash": 1, "pass": 5}
+    for caps, alloc, out in ((None, True, "old"), (["fresh"], False, "novmm")):
+        world.set(caps=caps, fresh_alloc=alloc)
+        s = world.run(out=out, cache=f"cache_{out}", cfg=cfg)
+        assert world.blocked(out) == [], out
+        assert s["tiny"]["harness_fresh"] is (caps is not None)
+        assert s["tiny"]["fresh_tasks"] == 0 and s["tiny"]["tasks"] > 0
+        v = json.loads((world.base / out / cg.VERDICTS_FILE).read_text())
+        row = next(k for k in v["kernels"] if k["solution_index"] == 101)
+        assert row["tiny"]["evidence"]["fresh"] is False
+
+
+def test_the_gate_warns_when_the_tiny_shapes_run_on_usual_allocations(world):
+    warned = []
+    world.set(caps=None)
+    spec = cg.Spec(
+        cfg=world.cfg(),
+        dat_dir=world.lib,
+        library_stem=cf.STEM,
+        out_dir=world.base / "g",
+        cache_dir=world.base / "c",
+        devices=[0],
+    )
+    cg.run_gate(spec, warn=warned.append)
+    assert any("takes no --fresh" in w for w in warned)
+    assert not any("--fresh" in c["args"] for c in world.calls())
+    world.set(caps=["fresh"], fresh_alloc=False)
+    warned.clear()
+    cg.run_gate(
+        replace(spec, out_dir=world.base / "g2", cache_dir=world.base / "c2"),
+        warn=warned.append,
+    )
+    assert any(
+        "could not place their operands at fresh allocations" in w for w in warned
+    )
+    assert any("cannot be checked statically" in w for w in warned)
+
+
+def test_a_tiny_pass_without_fresh_operands_is_checked_again(world):
+    """A tiny-shape pass made without fresh operands is never taken from the
+    cache: where the device could not place them, the harness's --caps
+    failed, or the processes of the tiny M shapes alone could not, 101's
+    read before A goes unseen and it passes; the next gate on the same
+    cache, which can, runs every such kernel on the tiny shapes again and
+    blocks it. 201's crash stands wherever it happened."""
+    cfg = world.cfg()
+    cfg["hipblaslt"].update(transA="N", transB="N")
+    world.set(reads_before={"101": {"A": 4}}, crash=[201])
+    tiny_m = [f"{s.m}x{s.n}" for s in cg.TINY_SHAPES if s.name.startswith("tiny_m")]
+    for cache, before, after in (
+        ("c_novmm", {"fresh_alloc": False}, {"fresh_alloc": True}),
+        ("c_caps", {"caps": None}, {"caps": ["fresh"]}),
+        ("c_mixed", {"no_fresh_shapes": tiny_m}, {"no_fresh_shapes": []}),
+    ):
+        world.set(**before)
+        s = world.run(out=f"{cache}_1", cache=cache, cfg=cfg)
+        assert world.blocked(f"{cache}_1") == [name(201)], cache
+        assert s["tiny"]["fresh_tasks"] < s["tiny"]["tasks"], cache
+        v = json.loads((world.base / f"{cache}_1" / cg.VERDICTS_FILE).read_text())
+        row = next(k for k in v["kernels"] if k["solution_index"] == 101)
+        assert row["tiny"]["verdict"] == "pass", cache
+        assert row["tiny"]["evidence"]["fresh"] is False, cache
+        world.set(**after)
+        n = len(world.calls())
+        s = world.run(out=f"{cache}_2", cache=cache, cfg=cfg)
+        assert world.blocked(f"{cache}_2") == [name(101), name(201)], cache
+        assert s["checked"] == 0 and s["tiny"]["checked"] == 5, cache
+        assert s["tiny"]["cached"] == 1 and s["tiny"]["cached_not_fresh"] == 5
+        ids = [c["args"][c["args"].index("--ids") + 1] for c in world.calls()[n:]]
+        assert ids and not any("201" in i.split(",") for i in ids), cache
+    for verdict in ("pass", "untested"):
+        rec = {"stage": cg.TINY, "verdict": verdict, "evidence": {"fresh": False}}
+        assert cg.unfresh(rec), rec
+        assert cg.unfresh(dict(rec, evidence={})), "its evidence does not say"
+        assert cg.unfresh(dict(rec, evidence="garbled")), "its evidence does not say"
+    for rec in (
+        {"stage": cg.TINY, "verdict": "crash", "evidence": {"fresh": False}},
+        {"stage": cg.TINY, "verdict": "pass", "evidence": {"fresh": True}},
+        {"stage": cg.TINY, "verdict": "untested", "evidence": {"fresh": None}},
+        {"stage": cg.MAIN, "verdict": "pass", "evidence": {"fresh": False}},
+    ):
+        assert not cg.unfresh(rec), rec
+
+
+def test_harness_caps_lists_what_the_harness_takes(world, tmp_path):
+    assert cg.harness_caps(world.harness) == {"fresh"}
+    world.set(caps=None)
+    assert cg.harness_caps(world.harness) == set()
+    world.set(caps=["fresh", "x"])
+    assert cg.harness_caps(world.harness) == {"fresh", "x"}
+    assert cg.harness_caps(tmp_path / "gone") == set()
+
+
+def test_the_harness_source_places_operands_at_fresh_allocations():
+    """The harness's --fresh maps every buffer of the problem at the start
+    of an allocation of its own behind an unmapped reserved range, falls
+    back to hipMalloc without virtual memory management, says which in its
+    ready line, and lists the option in --caps without a HIP call."""
+    text = cg.HARNESS_SOURCE.read_text()
+    assert '"--fresh"' in text and '"--caps"' in text
+    assert '\\"caps\\": [\\"fresh\\"]' in text
+    assert '\\"fresh\\": %s' in text
+    for call in (
+        "hipDeviceAttributeVirtualMemoryManagementSupported",
+        "hipMemGetAllocationGranularity",
+        "hipMemAddressReserve",
+        "hipMemCreate",
+        "hipMemMap",
+        "hipMemSetAccess",
+        "hipMemUnmap",
+        "hipMemRelease",
+        "hipMemAddressFree",
+    ):
+        assert call in text, call
+    main = text[text.index("int main(") :]
+    caps = main.index('"--caps"')
+    assert caps < main.index("parse(argc, argv)") < main.index("hipblasLtCreate")
+    for buf in ("p.a", "p.b", "p.c", "p.scale_a", "p.scale_b", "p.bias"):
+        assert f"memory.copy({buf})" in main, buf
+    assert "memory.alloc(p.d.size())" in main and "hipMalloc(&dev_a" not in main

@@ -162,6 +162,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
@@ -216,6 +217,7 @@ from lib.bench_yaml import (  # noqa: E402
     LONG_KNOB_KEYS,
     WARMUP_LINE_DEFAULTS,
     roofline_us,
+    without_kernels,
 )
 from lib.dat import (  # noqa: E402
     is_tensile_contraction_logic,
@@ -356,6 +358,12 @@ EXCLUDE_KEYS = (
     "min_mn",
     "max_mn",
 )
+# stage01's --strong-cell-margin default (STRONG_CELL_MARGIN there; a test
+# holds them equal).
+STRONG_CELL_MARGIN = 0.03
+# Config validation warns about seed.weak_cell_factor or seed.large_k_factor
+# above this: the shapes it applies to grow that many times every round.
+NEED_BUDGET_FACTOR_WARN = 4.0
 
 SCHEMA = _section(
     {
@@ -416,6 +424,12 @@ SCHEMA = _section(
                 "n_strata": _int(default=1, minimum=1),
                 "targeted_per_tail_gemm": _int(default=4, minimum=0),
                 "targeted_max_per_leaf": _int(default=32, minimum=0),
+                "weak_cell_factor": _num(default=1.0, minimum=1.0),
+                "strong_cell_factor": _num(
+                    default=1.0, minimum=0.0, exclusive_minimum=True, maximum=1.0
+                ),
+                "strong_cell_margin": _num(default=STRONG_CELL_MARGIN, minimum=0.0),
+                "large_k_factor": _num(default=1.0, minimum=1.0),
                 "exclude": _list(
                     _section({key: _int(minimum=0) for key in EXCLUDE_KEYS})
                 ),
@@ -1000,6 +1014,8 @@ SCHEMA = _section(
                 "harness": _str(nullable=True),
                 "compiler": _str(nullable=True),
                 "blocklist": _str(nullable=True),
+                "static_check": _bool(default=True),
+                "custom_kernels": _str(nullable=True),
             }
         ),
         "hazards": _section(
@@ -1512,6 +1528,43 @@ def _train_config_checks(
         errors.append("train.smart_k_min > train.smart_k_max")
 
 
+def _need_budget_config_checks(
+    cfg: Mapping[str, Any], errors: List[str], warnings: List[str]
+) -> None:
+    """The weak-cell budget's cross-key rules (stage01's need_budget): a
+    strong leaf must still get the new GEMMs stage04b evaluates a leaf on,
+    and the strong leaves only give up what the weak leaves gain. A factor
+    above NEED_BUDGET_FACTOR_WARN gets a warning."""
+    for key in ("seed.weak_cell_factor", "seed.large_k_factor"):
+        factor = float(cfg_get(cfg, key))
+        if factor > NEED_BUDGET_FACTOR_WARN:
+            warnings.append(
+                f"{key} {factor:g} is above {NEED_BUDGET_FACTOR_WARN:g}: the new "
+                f"shapes it applies to grow {factor:g}-fold every active round, "
+                f"and the round's bench with them"
+            )
+    spc = cfg_get(cfg, "seed.shapes_per_cell")
+    strong = float(cfg_get(cfg, "seed.strong_cell_factor"))
+    if strong >= 1:
+        return
+    train_min = cfg_get(cfg, "train.min_cell_gemms")
+    val_min = cfg_get(cfg, "validate.min_cell_gemms")
+    per_strong = min(spc, max(int(math.floor(strong * spc + 0.5)), train_min, 1))
+    if per_strong < val_min:
+        errors.append(
+            f"seed.strong_cell_factor {strong:g}: a leaf far above the bar would "
+            f"get {per_strong} new GEMMs (max(seed.strong_cell_factor x "
+            f"seed.shapes_per_cell, train.min_cell_gemms)), fewer than "
+            f"validate.min_cell_gemms ({val_min}): it could not be evaluated"
+        )
+    if float(cfg_get(cfg, "seed.weak_cell_factor")) <= 1:
+        warnings.append(
+            "seed.strong_cell_factor has no effect with seed.weak_cell_factor 1: "
+            "the leaves far above the bar give up only the shapes the weak "
+            "leaves gain, so every leaf keeps seed.shapes_per_cell"
+        )
+
+
 def validate_config(
     cfg: Any, mode: Optional[str] = None
 ) -> Tuple[List[str], List[str]]:
@@ -1632,6 +1685,7 @@ def validate_config(
             f"gets per round ({per_leaf} = max(seed.shapes_per_cell, "
             f"train.min_cell_gemms)): no cell could be evaluated"
         )
+    _need_budget_config_checks(cfg, errors, warnings)
     if _split_rounds_possible(cfg):
         if per_leaf < 2 * val_min:
             errors.append(
@@ -2215,6 +2269,10 @@ AUDIT_UNPINNED_KEYS = (
     "seed.seed",
     "seed.target_per_cell",
     "seed.shapes_per_cell",
+    "seed.weak_cell_factor",
+    "seed.strong_cell_factor",
+    "seed.strong_cell_margin",
+    "seed.large_k_factor",
     "planner.exhaustive_max_kernels",
     "planner.seed_per_cell",
     "planner.neighbors_k",
@@ -2260,15 +2318,23 @@ PINNED_WHEN_SET = ("library", "planner.top_k_round0")
 # Keys pinned only at a value other than the one at which they change
 # nothing, which is what a pin written before they existed means, so that
 # the runs and audit directories produced before them keep their pins: the
-# re-reads' offsets, the canaries' absolute floors (0: none), the held-out
+# re-reads' offsets, the canaries' absolute floors (0: none), the
+# hand-written kernels' sources (none: the build's), the held-out
 # lists (none) and the CU budget granule (32, lib/contexts.py's
-# PREDATING_GRANULE, not its default, which may change).
+# PREDATING_GRANULE, not its default, which may change), and the weak-cell
+# budget's keys at their defaults (factors of 1: every leaf draws
+# seed.shapes_per_cell).
 PINNED_UNLESS_NEUTRAL: Dict[str, Any] = {
     **{f"bench.rebench.{k}": v for k, v in rebenchlib.NEUTRAL_REREADS.items()},
     "bench.canary.tolerance_us": 0.0,
     "audit.canary_tolerance_us": 0.0,
+    "correctness.custom_kernels": None,
     "audit.held_out": [],
     "contexts.granule": ctxlib.PREDATING_GRANULE,
+    "seed.weak_cell_factor": 1.0,
+    "seed.strong_cell_factor": 1.0,
+    "seed.strong_cell_margin": STRONG_CELL_MARGIN,
+    "seed.large_k_factor": 1.0,
 }
 
 
@@ -2506,6 +2572,13 @@ def _tilewright_errors(catalog: str = "v2") -> List[str]:
                 f"train.catalog v3: the tilewright module does not compute the "
                 f"v3 catalog {features.v3_catalog_hash()} (it has {listed}); "
                 f"reinstall it with `pip install shared/tilewright/python`"
+            ]
+        if not hasattr(getattr(tilewright, "ModelInfo", None), "min_effective_cus"):
+            return [
+                "train.catalog v3: the tilewright module predates the CU floor "
+                "(its ModelInfo has no min_effective_cus), so it refuses the "
+                "models stage05 writes, which declare one ('unknown serving "
+                "flags'); reinstall it with `pip install shared/tilewright/python`"
             ]
     try:
         current = evaluate.module_takes_attributes(tilewright)
@@ -3223,6 +3296,9 @@ def _correctness_config_checks(
     harness = cfg_get(cfg, "correctness.harness")
     if harness and not Path(harness).is_file():
         errors.append(f"correctness.harness: {harness} does not exist")
+    sources = cfg_get(cfg, "correctness.custom_kernels")
+    if sources and not Path(sources).is_dir():
+        errors.append(f"correctness.custom_kernels: {sources} is no directory")
     devices = cfg_get(cfg, "correctness.devices") or []
     if len(set(devices)) != len(devices):
         errors.append("correctness.devices: duplicate device indices")
@@ -3570,14 +3646,29 @@ def audit_devices(cfg: Mapping[str, Any]) -> List[int]:
     return [int(d) for d in cfg_get(cfg, "audit.devices") or cfg["runtime"]["devices"]]
 
 
-def config_pool_digests(cfg: Mapping[str, Any], paths: Paths) -> Dict[int, str]:
+def known_blocklist(cfg: Mapping[str, Any]) -> cxlib.Blocklist:
+    """The kernels the config's blocklist files name that exist now: its
+    `correctness.lists`, and the invocation's blocklist once the gate (or
+    the canary) has written it. ValueError when a list cannot be read."""
+    out = cxlib.lists_blocklist(cfg)
+    named = cfg_get(cfg, "correctness.blocklist")
+    if named and Path(str(named)).is_file():
+        out = out.merged(cxlib.read_list(named))
+    return out
+
+
+def config_pool_digests(
+    cfg: Mapping[str, Any], paths: Paths, required: bool = False
+) -> Dict[int, str]:
     """{solution: kernel digest} (lib/audit.py) of the kernel pool the
-    config's library and bank give now, blocked kernels too: the audit set
-    benches every kernel (`lib.audit.bench_config`) but those the hazard
-    canary keeps out, which never run among others (lib/hazards.py
-    `quarantined_names`), and its checks run before the correctness gate
-    writes the invocation's blocklist; OSError, ValueError, RuntimeError or
-    KeyError when it cannot be read."""
+    config's library and bank give now, but those the hazard canary keeps
+    out, which never run among others (lib/hazards.py `quarantined_names`):
+    blocked kernels too, which name the solution indices an audit plan
+    recorded; with `required`, the kernels the audit set must hold for the
+    config, without those its blocklist names (`known_blocklist`), which no
+    audit set benches (the checks of the preflight run before the gate
+    writes the invocation's blocklist, and take the lists alone); OSError,
+    ValueError, RuntimeError or KeyError when it cannot be read."""
     pool = bank_pool.config_pool(
         cfg,
         paths.library_dir,
@@ -3585,25 +3676,35 @@ def config_pool_digests(cfg: Mapping[str, Any], paths: Paths) -> Dict[int, str]:
         int(cfg["runtime"]["devices"][0]),
         apply_blocklist=False,
     )
-    return auditlib.pool_digests(hazlib.without_quarantined(cfg, pool.kernels))
+    kernels = hazlib.without_quarantined(cfg, pool.kernels)
+    if required:
+        kernels = known_blocklist(cfg).kept(kernels)
+    return auditlib.pool_digests(kernels)
 
 
 def audit_status(cfg: Mapping[str, Any], paths: Paths) -> Tuple[str, Optional[str]]:
-    """`lib.audit.status` of the config's audit set for the kernel pool its
-    library gives now; ("error", why) when that pool cannot be read."""
+    """`lib.audit.status` of the config's audit set for the kernels of the
+    pool its library gives now that its blocklist leaves in; ("error", why)
+    when that pool cannot be read."""
     try:
-        current = config_pool_digests(cfg, paths)
+        current = config_pool_digests(cfg, paths, required=True)
     except (OSError, ValueError, RuntimeError, KeyError) as e:
         return "error", f"cannot read the kernel pool in {paths.library_dir}: {e}"
     return auditlib.status(auditlib.config_dir(cfg), current)
 
 
-def audit_build_refusal(audit_dir: Path, current: Mapping[int, str]) -> Optional[str]:
+def audit_build_refusal(
+    audit_dir: Path,
+    current: Mapping[int, str],
+    required: Optional[Mapping[int, str]] = None,
+) -> Optional[str]:
     """Why `--mode audit` refuses to go on building the audit set in
-    `audit_dir` with the kernel pool `current` ({solution: kernel digest}):
-    its first generation, or the increment it would bench next, was planned
-    with another hipBLASLt build, whose solution indices name other kernels
-    now (`AuditRun.run`, `AuditRun.extend`); None when it does not."""
+    `audit_dir` with the kernel pool `current` ({solution: kernel digest},
+    blocked kernels too), of which it must hold `required` (default all of
+    it): its first generation, or the increment it would bench next, was
+    planned with another hipBLASLt build, whose solution indices name other
+    kernels now (`AuditRun.run`, `AuditRun.extend`); None when it does
+    not."""
     m = auditlib.manifest(audit_dir)
     if m is None:
         return None
@@ -3614,7 +3715,7 @@ def audit_build_refusal(audit_dir: Path, current: Mapping[int, str]) -> Optional
         if planned and changed_kernels(planned, current):
             return "its shapes were planned with another hipBLASLt build"
         return None
-    if not auditlib.unbenched(m, current):
+    if not auditlib.unbenched(m, current if required is None else required):
         return None
     k = len(m["generations"])
     path = Path(audit_dir) / "increments" / f"inc_{k:03d}" / "increment.json"
@@ -3756,7 +3857,11 @@ def _audit_build_errors(
     errs = audit_location_errors(d)
     errs += bound
     try:
-        refusal = audit_build_refusal(d, config_pool_digests(cfg, paths))
+        refusal = audit_build_refusal(
+            d,
+            config_pool_digests(cfg, paths),
+            config_pool_digests(cfg, paths, required=True),
+        )
     except (OSError, ValueError, RuntimeError, KeyError):
         refusal = None
     if refusal:
@@ -3809,6 +3914,11 @@ def stage07_build(cfg: Mapping[str, Any], paths: Paths) -> Optional[Stage07Build
     return None
 
 
+# The name the engine's loader gives the MLREC_v3 CU floor
+# (shared/tilewright/src/tilewright/format.cpp), a C string in every build of
+# it; its messages about the floor are built at run time from pieces under
+# some compilers.
+CU_FLOOR_MARKER = "CU floor"
 # Files of a hipBLASLt build that hold TensileLite's host code: its shared
 # TensileLite library, else hipBLASLt's own library (a static TensileLite).
 TENSILELITE_LIBRARIES = (
@@ -3851,14 +3961,21 @@ def stage07_capabilities(
     cfg: Mapping[str, Any], blocks_pool: bool = False
 ) -> Dict[str, str]:
     """{string a stage-7 TensileLite must hold: what it lacks without it}:
-    the loader of the format train.catalog trains, with a bank the setting
-    that serves it and, when the run leaves kernels of the pool out
-    (`blocks_pool`), the reader of the blocklist sidecar stage06 ships."""
+    the loader of the format train.catalog trains (for MLREC_v3, of the CU
+    floor every model declares too), with a bank the setting that serves it
+    and, when the run leaves kernels of the pool out (`blocks_pool`), the
+    reader of the blocklist sidecar stage06 ships."""
     catalog = str(cfg_get(cfg, "train.catalog") or "v2")
     out = {
         f"MLREC_{catalog}": f"cannot load MLREC_{catalog} models (train.catalog "
         f"{catalog})"
     }
+    if catalog == "v3":
+        out[CU_FLOOR_MARKER] = (
+            "cannot load the MLREC_v3 models stage05 writes, which declare a CU "
+            "floor its engine predates ('unknown serving flags'); build hipBLASLt "
+            "from a checkout whose shared/tilewright has the CU floor"
+        )
     if bank_pool.bank_source(cfg).enabled:
         out[TILEWRIGHT_BANK_VAR] = (
             "does not serve a bank of kernels: the runtime would rank the "
@@ -6107,6 +6224,8 @@ class Pipeline:
             ]
             if step.targets is not None:
                 args += ["--only-cells", ",".join(step.targets)]
+            else:
+                args += self.need_budget_args()
         audit = auditlib.config_dir(self.cfg)
         if audit is not None:
             shapes = auditlib.shapes_yaml(audit)
@@ -6120,6 +6239,23 @@ class Pipeline:
                 )
         for entry in auditlib.held_out_entries(self.cfg):
             args += ["--exclude-shapes-yaml", entry]
+        return args
+
+    def need_budget_args(self) -> List[str]:
+        """stage01 options of the weak-cell budget and the very-large-K
+        stratum, each only away from its neutral value (the value that
+        PINNED_UNLESS_NEUTRAL does not pin, stage01's default), so that a
+        config that leaves them out runs the stage01 it always ran."""
+        args: List[str] = []
+        for key, flag in (
+            ("seed.weak_cell_factor", "--weak-cell-factor"),
+            ("seed.strong_cell_factor", "--strong-cell-factor"),
+            ("seed.large_k_factor", "--large-k-factor"),
+            ("seed.strong_cell_margin", "--strong-cell-margin"),
+        ):
+            value = float(self.get(key))
+            if value != PINNED_UNLESS_NEUTRAL[key]:
+                args += [flag, repr(value)]
         return args
 
     def shapes_per_cell(self, step: Optional[RoundStep] = None) -> int:
@@ -6175,10 +6311,11 @@ class Pipeline:
             args += ["--pool-only-library", stem]
         return args
 
-    def pool_digests(self) -> Dict[int, str]:
+    def pool_digests(self, required: bool = False) -> Dict[int, str]:
         """{solution: kernel digest} (lib/audit.py) of the pool the library
-        and the bank give now, blocked kernels too, quarantined ones not
-        (`config_pool_digests`)."""
+        and the bank give now, blocked kernels too, quarantined ones not;
+        with `required` without the kernels the invocation's blocklist
+        names, which no audit set benches (`config_pool_digests`)."""
         pool = bank_pool.config_pool(
             self.cfg,
             self.paths.library_dir,
@@ -6186,7 +6323,29 @@ class Pipeline:
             self.devices[0],
             apply_blocklist=False,
         )
-        return auditlib.pool_digests(hazlib.without_quarantined(self.cfg, pool.kernels))
+        kernels = hazlib.without_quarantined(self.cfg, pool.kernels)
+        if required:
+            kernels = known_blocklist(self.cfg).kept(kernels)
+        return auditlib.pool_digests(kernels)
+
+    def required_digests(self) -> Dict[int, str]:
+        """`pool_digests` of the kernels an audit set must hold."""
+        return self.pool_digests(required=True)
+
+    def blocked_indices(self) -> Set[int]:
+        """The solutions of the pool (library and bank) the invocation's
+        blocklist names (`known_blocklist`): the hazard canary's quarantine,
+        and in an audit set the blocklist it applies
+        (`lib.audit.build_blocklist`)."""
+        pool = bank_pool.config_pool(
+            self.cfg,
+            self.paths.library_dir,
+            self.stem,
+            self.devices[0],
+            apply_blocklist=False,
+        )
+        blocked = known_blocklist(self.cfg)
+        return {int(k["sol_idx_global"]) for k in pool.kernels if blocked.blocks(k)}
 
     def bank_stems(self) -> List[str]:
         """Library files of the planner's bank besides the pool's own
@@ -8144,7 +8303,7 @@ class Pipeline:
                 f"not next to the staged model {model}"
             )
         dst = self.stage07_library_dir(vdir)
-        build_serving_libdir(
+        summary = build_serving_libdir(
             self.paths.library_dir,
             dst,
             str(target["library_stem"]),
@@ -8153,6 +8312,13 @@ class Pipeline:
             rec.get("sha256"),
             blocklist=sidecar,
         )
+        for line in summary["malformed_rows"]:
+            ui.warn(
+                "validate",
+                f"{self.paths.library_dir / 'tilewright_index'} has the malformed "
+                f"row {line!r}: the engine loads no model for its stem (stage 7's "
+                f"library keeps it)",
+            )
         ui.info(
             "validate",
             f"stage 7 serves {model.name} from {dst} (links to {self.paths.library_dir})",
@@ -8953,21 +9119,28 @@ class RunStatus:
 class AuditRun:
     """`--mode audit`: build, resume or extend the audit set in `run_dir`
     with `pipeline` (built on `lib.audit.bench_config` of the training
-    config)."""
+    config), leaving out every kernel its blocklist names: the blocklist of
+    the runs the set is built for with every kernel a blocklist it applied
+    before names (`blocklist`, the record of its file,
+    `lib.audit.build_blocklist`), which its config lists, and the hazard
+    canary's quarantine."""
 
     def __init__(
         self,
         pipeline: Pipeline,
         train_cfg: Mapping[str, Any],
         source_runs: Sequence[Path],
+        blocklist: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.p = pipeline
         self.dir = pipeline.run_dir
         self.train_cfg = train_cfg
         self.st = auditlib.settings(train_cfg)
         self.source_runs = [Path(s).resolve() for s in source_runs]
+        self.blocklist = dict(blocklist) if blocklist is not None else None
         self.started = time.time()
         self.shapes_this_run = 0
+        self._blocked: Optional[Set[int]] = None
 
     # ── bookkeeping ──
 
@@ -8991,7 +9164,66 @@ class AuditRun:
         )
 
     def current_kernels(self) -> Dict[int, str]:
+        """{solution: digest} of the pool, blocked kernels too: what the
+        solution indices of a plan named."""
         return self.p.pool_digests()
+
+    def required_kernels(self) -> Dict[int, str]:
+        """{solution: digest} of the kernels the set must hold: the pool's
+        without those its blocklist names."""
+        return self.p.required_digests()
+
+    def blocked(self) -> Set[int]:
+        """The solutions of the pool its blocklist names, read once."""
+        if self._blocked is None:
+            self._blocked = self.p.blocked_indices()
+        return self._blocked
+
+    def record_blocklist(self, m: Dict[str, Any]) -> None:
+        """Name the blocklist of this invocation in the manifest `m`: its
+        latest (`blocklist`) and every one applied (`blocklists`), by
+        sha256, and add the kernels of the pool it leaves out to `left_out`
+        ({kernel digest: name}), which no completeness check waits for."""
+        if self.blocklist is None:
+            return
+        rec = {k: v for k, v in self.blocklist.items() if k != "sources"}
+        m["blocklist"] = rec
+        have = list(m.get("blocklists") or [])
+        if all(r.get("sha256") != rec["sha256"] for r in have):
+            have.append(dict(rec, applied=datetime.now().isoformat(timespec="seconds")))
+        m["blocklists"] = have
+        blocked = cxlib.read_list(self.dir / str(rec["file"]))
+        pool = bank_pool.config_pool(
+            self.p.cfg,
+            self.p.paths.library_dir,
+            self.p.stem,
+            self.p.devices[0],
+            apply_blocklist=False,
+        )
+        out = dict(m.get("left_out") or {})
+        for k in pool.kernels:
+            if blocked.blocks(k):
+                out.setdefault(auditlib.kernel_digest(k), str(k.get("kernel_name")))
+        m["left_out"] = dict(sorted(out.items()))
+
+    def listed_everywhere(
+        self, root: Path, units: Mapping[str, Any], planned: Mapping[str, str]
+    ) -> Dict[str, str]:
+        """The kernels of `planned` ({solution: digest}) that every line of
+        every part of `units` under `root` listed: those a blocklist left out
+        of a part (one it named after the part was planned) are not benched
+        on its GEMMs, so no generation records them."""
+        from lib.bench_yaml import line_solution_list, read_bench_lines
+
+        keep = {int(s) for s in planned}
+        for label, unit in units.items():
+            for i in range(len(unit["parts"])):
+                own = self.part_dir(root, label, i) / "shapes.yaml"
+                for ln in read_bench_lines(own) if own.is_file() else []:
+                    listed = line_solution_list(ln)
+                    if listed is not None:
+                        keep &= set(listed)
+        return {s: d for s, d in planned.items() if int(s) in keep}
 
     def current_identity(self) -> Optional["ki.LibraryIdentity"]:
         """The kernel identity of the pool's files (lib/kernel_identity.py);
@@ -9095,6 +9327,7 @@ class AuditRun:
             self.p.weight_dtype,
             "--hardware-device",
             str(self.p.devices[0]),
+            "--listed-only",
         ]
 
     def listed_kernels(self) -> set:
@@ -9181,13 +9414,28 @@ class AuditRun:
         """stage03 and stage03b of the bench lines `lines` in `part`; skipped
         when the part is complete, redone from its first incomplete stage
         otherwise."""
+        from lib.bench_yaml import line_solution_list, read_bench_lines
         from lib.fs import atomic_write_text
 
         if stage_complete(part):
             return 0
         part.mkdir(parents=True, exist_ok=True)
-        if not (part / "shapes.yaml").is_file():
-            atomic_write_text(part / "shapes.yaml", "".join(lines))
+        own = part / "shapes.yaml"
+        if own.is_file() and not stage_complete(part / "stage03"):
+            listed = {
+                k for ln in read_bench_lines(own) for k in line_solution_list(ln) or ()
+            }
+            gone = sorted(listed & self.blocked())
+            if gone:
+                ui.warn(
+                    "audit",
+                    f"{part}: its lines list {len(gone)} kernel(s) the blocklist now "
+                    f"leaves out (e.g. solution {gone[0]}); it is benched again "
+                    f"without them",
+                )
+                move_aside(part, part / "stage03", part / "stage03b", own)
+        if not own.is_file():
+            atomic_write_text(own, "".join(lines))
         p = self.p
         bench = p.args_stage03(self.dir, in_dir=part, out_dir=part / "stage03")
         if wrapper is not None:
@@ -9292,7 +9540,10 @@ class AuditRun:
                 if stage_complete(part):
                     continue
                 ui.banner(f"audit {what}  {label}  part {i + 1}/{len(unit['parts'])}")
-                lines = [line_of(label, i, tuple(s)) for s in shapes]
+                lines = [
+                    without_kernels(line_of(label, i, tuple(s)), self.blocked())
+                    for s in shapes
+                ]
                 rc = self.bench_part(part, lines, wrapper)
                 if rc:
                     return rc
@@ -9383,7 +9634,8 @@ class AuditRun:
                 "generations": [],
                 "status": "benching",
             }
-            self.write_manifest(m)
+        self.record_blocklist(m)
+        self.write_manifest(m)
         if not stage_complete(self.dir / "stage01"):
             rc = self.p.run_stage(self.dir, "stage01", self.args_stage01(), None)
             if rc:
@@ -9455,9 +9707,12 @@ class AuditRun:
                     str(auditlib.group_stage04(self.dir, label).relative_to(self.dir))
                     for label in units
                 ],
-                "kernels": dict(m.get("planned_kernels") or {}),
+                "kernels": self.listed_everywhere(
+                    self.dir, units, m.get("planned_kernels") or {}
+                ),
                 "library_digest": identity.digest if identity is not None else None,
                 "finished": datetime.now().isoformat(timespec="seconds"),
+                **({"blocklist": m["blocklist"]} if m.get("blocklist") else {}),
             }
         ]
         self.write_manifest(m)
@@ -9475,7 +9730,8 @@ class AuditRun:
         )
 
         current = self.current_kernels()
-        pending = auditlib.unbenched(m, current)
+        required = self.required_kernels()
+        pending = auditlib.unbenched(m, required)
         removed = auditlib.benched_digests(m) - set(current.values())
         if removed:
             ui.info(
@@ -9488,6 +9744,17 @@ class AuditRun:
             root = self.dir / "increments" / f"inc_{k:03d}"
             rec_path = root / "increment.json"
             rec = _read_json(rec_path)
+            if (
+                isinstance(rec, dict)
+                and not set(int(s) for s in rec.get("kernels") or {}) - self.blocked()
+            ):
+                ui.warn(
+                    "audit",
+                    f"increment {k} ({rec_path}) holds only kernels the blocklist "
+                    f"now leaves out; it is planned again",
+                )
+                move_aside(root.parent, root)
+                rec = None
             if not isinstance(rec, dict):
                 rec = {"kernels": {str(s): current[s] for s in pending}}
                 identity = self.current_identity()
@@ -9513,7 +9780,7 @@ class AuditRun:
                     [],
                 )
                 return 2
-            ids = sorted(int(s) for s in rec["kernels"])
+            ids = sorted(int(s) for s in rec["kernels"] if int(s) not in self.blocked())
             ui.banner(f"audit increment {k}: {len(ids)} kernel(s)", ui.C.HEAD)
             ids_text = format_solution_list(ids)
             cache: Dict[Tuple[str, int], Dict[Any, str]] = {}
@@ -9537,16 +9804,17 @@ class AuditRun:
                 {
                     "index": k,
                     "stage04": str((root / "stage04").relative_to(self.dir)),
-                    "kernels": dict(rec["kernels"]),
+                    "kernels": self.listed_everywhere(root, units, rec["kernels"]),
                     "library_digest": (rec.get(ki.RECORD_KEY) or {}).get("digest"),
                     "finished": datetime.now().isoformat(timespec="seconds"),
+                    **({"blocklist": m["blocklist"]} if m.get("blocklist") else {}),
                 }
             )
             self.write_manifest(m)
-            pending = auditlib.unbenched(m, current)
+            pending = auditlib.unbenched(m, required)
         m["status"] = "complete"
         m["completed"] = datetime.now().isoformat(timespec="seconds")
-        m["n_kernels"] = len(current)
+        m["n_kernels"] = len(required)
         self.write_manifest(m)
         (self.dir / auditlib.COMPLETE_MARKER).write_text(
             json.dumps(
@@ -9562,7 +9830,12 @@ class AuditRun:
         ui.ok(
             "audit",
             f"audit set complete: {sum((m.get('shapes') or {}).values())} GEMMs over "
-            f"{len(m['generations'])} generation(s), {len(current)} kernels",
+            f"{len(m['generations'])} generation(s), {len(required)} kernels"
+            + (
+                f" ({len(current) - len(required)} the blocklist leaves out)"
+                if len(current) > len(required)
+                else ""
+            ),
         )
         return 0
 
@@ -9811,7 +10084,9 @@ class AuditBuild:
         """What a build that exited with `rc` leaves to do."""
         assert self.dir is not None
         try:
-            refusal = audit_build_refusal(self.dir, self.p.pool_digests())
+            refusal = audit_build_refusal(
+                self.dir, self.p.pool_digests(), self.p.required_digests()
+            )
         except (OSError, ValueError, RuntimeError, KeyError):
             refusal = None
         if refusal:
@@ -10950,7 +11225,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=[],
         metavar="DIR",
         help="training run whose round shapes the audit set must not contain "
-        "(repeatable)",
+        "and whose blocklist and sidecars it applies (repeatable)",
     )
     au.add_argument(
         "--devices",
@@ -11501,8 +11776,26 @@ def _main_logged(
         (ui.warn if "unknown" in line else ui.info)("roofline", line)
     resolved += read
     train_cfg = cfg
+    audit_blocklist: Optional[Dict[str, Any]] = None
     if args.mode == "audit":
-        cfg = auditlib.bench_config(cfg, args.devices)
+        try:
+            blocked, parts = auditlib.build_blocklist(cfg, args.source_run_dir, run_dir)
+        except ValueError as e:
+            _print_problems("audit", [f"the blocklist the audit set applies: {e}"], [])
+            return 2
+        audit_blocklist = dict(
+            auditlib.write_blocklist_file(run_dir, "source", blocked, parts),
+            sources=parts,
+        )
+        ui.info(
+            "audit",
+            f"blocklist of the runs it is built for and of its earlier "
+            f"invocations: {len(blocked)} kernel(s) ({audit_blocklist['file']}, "
+            f"sha256 {audit_blocklist['sha256'][:16]})",
+        )
+        cfg = auditlib.bench_config(
+            cfg, args.devices, run_dir / audit_blocklist["file"]
+        )
     cfg = resolve_bench_timing(cfg)
     invocation = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{args.mode}"
     canary = canary_needed(cfg, derive_paths(cfg))
@@ -11582,7 +11875,7 @@ def _main_logged(
         return rc
 
     if args.mode == "audit":
-        return AuditRun(pipeline, train_cfg, args.source_run_dir).run()
+        return AuditRun(pipeline, train_cfg, args.source_run_dir, audit_blocklist).run()
     finish_promotion(pipeline)
 
     if args.mode == "validate":

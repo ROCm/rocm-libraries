@@ -40,6 +40,15 @@ As for v2, a setting asked for that differs from the one the measurement
 was planned with is not applied, with a warning. `bench --sustained`
 benches the sustained parts.
 
+No set holds, and no bench times, a kernel the run's blocklist (the
+config's, lib/correctness.py) or a blocklist the audit set was built with
+leaves out (lib/audit.py `audit_blocklist`): plan writes their union into
+`v2/blocklists/` (`v2/sustained/blocklists/` for the sustained
+measurement), names it by its sha256 in the manifest and the generation it
+plans, and refuses a measurement whose canary it blocks; bench leaves out of
+a part's lines whatever the manifest's latest blocklist blocks, and refuses
+a blocklist file that is not the one the manifest names by its sha256.
+
 bench works through the planned parts no other worker holds on one GPU,
 device D of its environment (scripts/gpu_run.py gives it its GPU alone as
 device 0), and returns when none is left. A line that hangs in a part is
@@ -85,7 +94,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 PIPELINE_DIR = Path(__file__).resolve().parent.parent
 if str(PIPELINE_DIR) not in sys.path:
@@ -361,6 +370,48 @@ def unapplied_settings(
     ]
 
 
+def audit_kernels(audit: Path, spec: Any, cfg: Mapping[str, Any]) -> Any:
+    """The audit set's kernels as the solution indices of the pool name them
+    now (`lib.audit_v2.AuditKernels`), by which a v2 record without kernel
+    identities is checked and read: every kernel of the config's pool, those
+    a blocklist leaves out too. A blocklist leaves an index naming the same
+    kernel, and a record planned before a blocklist named one of its kernels
+    names it still: a view without that kernel would take it for a kernel of
+    another build."""
+    from lib.bank_pool import config_pool
+
+    pool = config_pool(
+        cfg,
+        spec.library_dir,
+        spec.library_stem,
+        spec.hardware_device,
+        apply_blocklist=False,
+    )
+    return v2.AuditKernels.of(
+        auditlib.manifest(audit) or {}, auditlib.pool_digests(pool.kernels)
+    )
+
+
+def plan_blocklist(
+    d: Path, cfg: Mapping[str, Any], audit: Path, identity: Any
+) -> Tuple[Set[int], Dict[str, Any]]:
+    """(the solutions of `identity`'s library that the run's blocklist or one
+    the audit set was built with leaves out, the record of their union,
+    written into `<d>/blocklists/`). V2Error when one cannot be read."""
+    from lib import correctness as cx
+
+    try:
+        own = cx.config_blocklist(cfg) or cx.Blocklist()
+        built, recs = auditlib.audit_blocklist(audit)
+    except ValueError as e:
+        raise v2.V2Error(str(e)) from None
+    both = own.merged(built) if built else own
+    sources = [{"from": "the run's config", **cx.applied_record(own)}]
+    sources += [{"from": "the audit set", **r} for r in recs]
+    rec = auditlib.write_blocklist_file(d, "plan", both, sources)
+    return both.blocked_indices(identity.ids), rec
+
+
 def plan(args: argparse.Namespace) -> Optional[int]:
     """Register the models and plan their generation (see the module
     docstring); returns its index, or None when nothing needs a bench."""
@@ -376,15 +427,10 @@ def plan(args: argparse.Namespace) -> Optional[int]:
     gemms = auditlib.evaluable_gemms(spec, cfg)
     from lib import evaluate as ev
 
-    from lib.bank_pool import config_pool
-
     identity = ev.library_identity(
         spec.library_dir, spec.library_stem, cfg, spec.hardware_device
     )
-    pool = config_pool(cfg, spec.library_dir, spec.library_stem, spec.hardware_device)
-    kernels = v2.AuditKernels.of(
-        auditlib.manifest(audit) or {}, auditlib.pool_digests(pool.kernels)
-    )
+    kernels = audit_kernels(audit, spec, cfg)
     lines: Dict[v2.Shape, str] = {}
     try:
         planned = run_layout.plan_dir(audit) / "shapes.yaml"
@@ -411,6 +457,7 @@ def plan(args: argparse.Namespace) -> Optional[int]:
         ui.info("model", f"{name}: {source} {path} ({len(picks)} picks)")
     d = v2.v2_dir(audit)
     d.mkdir(parents=True, exist_ok=True)
+    blocked, blocklist = plan_blocklist(d, cfg, audit, identity)
     bench = {
         "binary": str(paths.bench_binary),
         "config_yaml": str(Path(args.config).resolve()),
@@ -439,6 +486,8 @@ def plan(args: argparse.Namespace) -> Optional[int]:
         part_shapes=int(auditlib.settings(cfg)["part_shapes"]),
         identity=identity,
         kernels=kernels,
+        blocked=blocked,
+        blocklist=blocklist,
     )
     v2.write_progress(d)
     if gen is None:
@@ -455,7 +504,6 @@ def plan_sustained(args: argparse.Namespace) -> Optional[int]:
     nothing needs a bench."""
     from lib import evaluate as ev
     from lib import hardware as hwlib
-    from lib.bank_pool import config_pool
 
     audit = Path(args.audit_dir)
     cfg, spec, _, _, _, device = _context(args)
@@ -466,10 +514,11 @@ def plan_sustained(args: argparse.Namespace) -> Optional[int]:
     identity = ev.library_identity(
         spec.library_dir, spec.library_stem, cfg, spec.hardware_device
     )
-    pool = config_pool(cfg, spec.library_dir, spec.library_stem, spec.hardware_device)
-    kernels = v2.AuditKernels.of(
-        auditlib.manifest(audit) or {}, auditlib.pool_digests(pool.kernels)
-    )
+    try:
+        pool, _ = auditlib.evaluation_pool(spec, cfg)
+    except ValueError as e:
+        raise v2.V2Error(str(e)) from None
+    kernels = audit_kernels(audit, spec, cfg)
     in_pool = {int(k["sol_idx_global"]) for k in pool.kernels}
     d = v2.v2_dir(audit)
     measured = {
@@ -479,6 +528,8 @@ def plan_sustained(args: argparse.Namespace) -> Optional[int]:
     }
     settings = sustained_first_plan_settings(args, cfg)
     sd = asus.sustained_dir(audit)
+    sd.mkdir(parents=True, exist_ok=True)
+    blocked, blocklist = plan_blocklist(sd, cfg, audit, identity)
     unapplied = unapplied_settings(v2.manifest(sd), settings)
     if unapplied:
         ui.warn(
@@ -501,6 +552,8 @@ def plan_sustained(args: argparse.Namespace) -> Optional[int]:
         peak_tflops=peak,
         peak_note=note,
         identity=identity,
+        blocked=blocked,
+        blocklist=blocklist,
     )
     v2.write_progress(sd)
     m = v2.manifest(sd) or {}
@@ -681,6 +734,8 @@ def bench(args: argparse.Namespace) -> int:
     library = config_library(m)
     try:
         v2.check_bench_library(d, m, auditlib.manifest(args.audit_dir) or {}, library)
+        blocked = bench_blocked(d, m, library)
+        v2.blocked_canary(m, blocked)
     except v2.V2Error as e:
         ui.err("bench", str(e))
         return 2
@@ -715,6 +770,7 @@ def bench(args: argparse.Namespace) -> int:
             poll_s=max(1.0, health.poll_s),
             max_wait_s=health.max_wait_s,
             wedged=wedge_check(args.device, config_yaml),
+            blocked=frozenset(blocked),
         )
         try:
             n = v2.work(worker)
@@ -724,6 +780,42 @@ def bench(args: argparse.Namespace) -> int:
             return 1
     ui.ok("bench", f"GPU {gpu}: benched {n} part(s); {v2.status_line(d, regime)}")
     return 0
+
+
+def bench_blocked(
+    d: Path, m: Mapping[str, Any], library: Optional[Mapping[str, Any]] = None
+) -> Set[int]:
+    """The solutions the latest blocklist of the measurement in `d` (its
+    manifest `m`'s `blocklist`, written by plan) leaves out, in the bench's
+    library (`bench.library`, else `library`); none for a measurement
+    planned before plans recorded one, or without a library, which benches
+    nothing (`lib.audit_v2.check_bench_library`). V2Error when it cannot be
+    read, or its file no longer holds what the sha256 the manifest records
+    says (as `lib.audit.audit_blocklist` checks the audit set's)."""
+    import hashlib
+
+    from lib import correctness as cx
+    from lib import kernel_identity as ki
+
+    rec = m.get("blocklist")
+    lib = (m.get("bench") or {}).get("library") or library
+    if not rec or not lib:
+        return set()
+    try:
+        path = Path(d) / str(rec["file"])
+        data = path.read_bytes()
+        same = hashlib.sha256(data).hexdigest() == rec.get("sha256")
+        blocklist = cx.read_list(path) if same else None
+        identity = ki.library_identity(lib["dir"], lib["stems"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise v2.V2Error(f"cannot read the blocklist of {d / v2.MANIFEST}: {e}")
+    if blocklist is None:
+        raise v2.V2Error(
+            f"the blocklist {path} is not the one {d / v2.MANIFEST} records (its "
+            f"sha256 differs): no bench goes on with another blocklist than its "
+            f"plan's; plan again to record the blocklist that applies now"
+        )
+    return blocklist.blocked_indices(identity.ids)
 
 
 def worker_env(d: Path, environ: Optional[Mapping[str, str]] = None) -> Dict[str, str]:

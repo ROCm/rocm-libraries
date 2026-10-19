@@ -82,6 +82,9 @@ def test_top_up_reuses_history_shapes_and_reports_them():
     assert res.actual_per_cell[TINY_BOX] == 4
     assert len(res.reused) == 4 and set(res.reused) <= box
     assert res.reused_per_cell[TINY_BOX] == 4
+    # a leaf's new shapes, which the very-large-K stratum counts, are its
+    # fresh draws: re-used history shapes are none of them
+    assert res.fresh_per_cell[TINY_BOX] == []
     none = s01.sample_shapes({TINY_BOX: 5}, 3, box, loose)
     assert none.shapes == [] and none.n_history_dropped > 0
 
@@ -441,3 +444,547 @@ def test_a_tail_gemm_goes_to_the_leaf_of_this_rounds_tree(config_path):
     assert list(out) == [rule.hi_label] and len(entries) == 1
     assert all(m > 4096 for m, _, _, _ in entries[0]["shapes"])
     assert s01.leaf_box(rule.hi_label)[0] == (4097, grid.TIER_RANGES_MN["Large"][1])
+
+
+# ── weak-cell budget ─────────────────────────────────────────────────────────
+
+
+def _row(cell, decision="pass", se=0.97, n_eval=40, **kw):
+    return dict(cell=cell, decision=decision, sel_eff_new=se, n_eval=n_eval, **kw)
+
+
+def _plan(*cells, spc=10):
+    return {c: {"n_target": spc, "has_prior_model": True} for c in cells}
+
+
+def _decisions(*rows, threshold=0.95):
+    return {"sel_eff_threshold": threshold, "per_cell": list(rows)}
+
+
+def test_weak_leaves_get_the_factor_and_the_others_keep_the_round():
+    """A leaf stage04b retrained, for its mean or for a held-out collapse,
+    gets the factor; a pass, a row that split and a leaf without a row
+    keep shapes_per_cell; a leaf without a model stays at none."""
+    plan = _plan("A", "B", "C", "D", "E")
+    plan["F"] = {"n_target": 0, "has_prior_model": False}
+    rec = s01.need_budget(
+        plan,
+        _decisions(
+            _row("A", "retrain", 0.91),
+            _row("B", "pass", 0.99, collapse_retrain=True),
+            _row("C", "pass", 0.99),
+            _row("D", "split", 0.90),
+            _row("F", "retrain", 0.5),
+        ),
+        10,
+        weak_factor=2.0,
+    )
+    assert {c: v["n_target"] for c, v in plan.items()} == {
+        "A": 20, "B": 20, "C": 10, "D": 10, "E": 10, "F": 0,
+    }  # fmt: skip
+    assert {c: v["need"] for c, v in plan.items()} == {
+        "A": "weak", "B": "weak", "C": "strong", "D": None, "E": None, "F": None,
+    }  # fmt: skip
+    assert rec["applied"] and rec["n_weak"] == 2 and rec["n_strong"] == 1
+    assert (rec["uniform_total"], rec["weak_extra"], rec["total_target"]) == (
+        50,
+        20,
+        70,
+    )
+    assert rec["strong_cut_wanted"] == rec["strong_cut"] == 0
+    assert rec["sel_eff_threshold"] == 0.95
+    # rounded half up
+    half = _plan("A", spc=5)
+    s01.need_budget(half, _decisions(_row("A", "retrain")), 5, weak_factor=2.5)
+    assert half["A"]["n_target"] == 13
+
+
+def test_a_leaf_reads_the_rows_under_it_and_none_above_it():
+    """The leaves of a split the decisions' round made (the parent's row
+    only) read none; a leaf whose split a repair revoked reads its former
+    children's rows: weak when one was retrained, strong only when all
+    passed far above the bar."""
+    parent = "Large|Large|LargeK|Bnone"
+    plan = _plan(parent + "#M<=4096", parent + "#M>4096", "Mid|Mid|MidK|Bnone")
+    s01.need_budget(
+        plan,
+        _decisions(
+            _row(parent, "split", 0.9), _row("Mid|Mid|MidK|Bnone#K<=99", "retrain")
+        ),
+        10,
+        weak_factor=3.0,
+    )
+    assert [plan[c]["n_target"] for c in sorted(plan)] == [10, 10, 30]
+    # whatever the row above them says
+    s01.need_budget(plan, _decisions(_row(parent, "retrain", 0.9)), 10, weak_factor=3.0)
+    assert [plan[c]["need"] for c in sorted(plan)] == [None, None, None]
+    strong = _plan(parent)
+    rows = [_row(parent + "#M<=4096", se=0.99), _row(parent + "#M>4096", se=0.99)]
+    s01.need_budget(strong, _decisions(*rows), 10)
+    assert strong[parent]["need"] == "strong"
+    rows[1]["sel_eff_new"] = 0.96
+    s01.need_budget(strong, _decisions(*rows), 10)
+    assert strong[parent]["need"] is None
+    # one retrained former leaf makes it weak, whatever the others read
+    rows[1].update(decision="retrain", sel_eff_new=0.9)
+    s01.need_budget(strong, _decisions(*rows), 10, weak_factor=2.0)
+    assert strong[parent]["need"] == "weak" and strong[parent]["n_target"] == 20
+    # a leaf's rows are its own and those under it, not a label it prefixes
+    near = _plan(parent + "#M<=409")
+    s01.need_budget(near, _decisions(*rows), 10, weak_factor=2.0)
+    assert near[parent + "#M<=409"]["need"] is None
+
+
+def test_strong_needs_a_fresh_reading_far_above_the_threshold_stage04b_applied():
+    plan = _plan("A", "B", "C", "D", "E")
+    rows = [
+        _row("A", se=0.98),
+        _row("B", se=0.979),
+        _row("C", se=0.99, n_eval=0, reason="carried_forward_no_new_data"),
+        _row("D", se=float("nan")),
+        _row("E", se=1.0),
+    ]
+    s01.need_budget(plan, _decisions(*rows), 10)
+    assert [plan[c]["need"] for c in "ABCDE"] == ["strong", None, None, None, "strong"]
+    s01.need_budget(plan, _decisions(*rows, threshold=0.97), 10, strong_margin=0.0)
+    assert [plan[c]["need"] for c in "ABCDE"] == [
+        "strong",
+        "strong",
+        None,
+        None,
+        "strong",
+    ]
+    s01.need_budget(plan, {"per_cell": rows}, 10)
+    assert all(plan[c]["need"] is None for c in "ABCDE")
+    # a threshold that is no number is none
+    rec = s01.need_budget(
+        plan, {"sel_eff_threshold": True, "per_cell": rows}, 10, strong_margin=0.0
+    )
+    assert rec["sel_eff_threshold"] is None
+    assert all(plan[c]["need"] is None for c in "ABCDE")
+
+
+def test_strong_leaves_give_up_at_most_what_the_weak_leaves_gain():
+    """The round's target never falls below shapes_per_cell per leaf: the
+    strong leaves' cut pays for the weak leaves' extra and no more, shared
+    in proportion, a remainder shape at a time from the highest reading."""
+    rows = [_row("W", "retrain", 0.9)] + [
+        _row(c, se=se) for c, se in (("S1", 0.99), ("S2", 0.995), ("S3", 0.985))
+    ]
+
+    def run(weak, strong, min_per_cell=0):
+        plan = _plan("W", "S1", "S2", "S3", "U")
+        rec = s01.need_budget(
+            plan,
+            _decisions(*rows, _row("U", se=0.96)),
+            10,
+            weak_factor=weak,
+            strong_factor=strong,
+            min_per_cell=min_per_cell,
+        )
+        targets = {c: v["n_target"] for c, v in plan.items()}
+        assert rec["total_target"] == sum(targets.values())
+        assert rec["uniform_total"] <= rec["total_target"]
+        assert rec["total_target"] <= rec["uniform_total"] + rec["weak_extra"]
+        return targets, rec
+
+    targets, rec = run(1.5, 0.5)
+    assert targets == {"W": 15, "S1": 8, "S2": 8, "S3": 9, "U": 10}
+    assert (rec["weak_extra"], rec["strong_cut_wanted"], rec["strong_cut"]) == (
+        5,
+        15,
+        5,
+    )
+    assert rec["total_target"] == rec["uniform_total"] == 50
+    targets, rec = run(3.0, 0.5)
+    assert targets == {"W": 30, "S1": 5, "S2": 5, "S3": 5, "U": 10}
+    assert rec["total_target"] == 55 == rec["uniform_total"] + 20 - 15
+    targets, rec = run(1.0, 0.5)
+    assert set(targets.values()) == {10} and rec["strong_cut"] == 0
+    targets, _ = run(3.0, 0.5, min_per_cell=8)
+    assert targets == {"W": 30, "S1": 8, "S2": 8, "S3": 8, "U": 10}
+    targets, rec = run(3.0, 0.5, min_per_cell=12)
+    assert targets == {"W": 30, "S1": 10, "S2": 10, "S3": 10, "U": 10}
+    assert rec["strong_cut_wanted"] == rec["strong_cut"] == 0
+
+
+def test_every_factor_at_one_keeps_every_leaf_at_shapes_per_cell():
+    plan = _plan("A", "B", "C", spc=7)
+    rows = [_row("A", "retrain"), _row("B", se=0.999), _row("C", collapse_retrain=True)]
+    rec = s01.need_budget(plan, _decisions(*rows), 7)
+    assert {v["n_target"] for v in plan.values()} == {7}
+    assert rec["total_target"] == rec["uniform_total"] == 21
+    none = _plan("A", spc=7)
+    rec = s01.need_budget(none, None, 7, weak_factor=2.0)
+    assert none["A"] == {"n_target": 7, "has_prior_model": True, "need": None}
+    assert not rec["applied"] and rec["total_target"] == 7
+
+
+def _active_round(tmp_path, monkeypatch, config_path, decisions, planned):
+    prior = tmp_path / "round_0"
+    args = ["--mode", "initial", "--out-dir", prior / "stage01"]
+    args += ["--config-yaml", config_path, "--target-per-cell", 4, "--quiet"]
+    assert _run(monkeypatch, *args) == 0
+    (prior / "stage05").mkdir()
+    (prior / "stage05" / "cells.json").write_text(
+        json.dumps({"cells": [{"label": c, "best_sel_eff": 0.9} for c in planned]})
+    )
+    if decisions is not None:
+        (prior / "stage04b").mkdir()
+        (prior / "stage04b" / "decisions.json").write_text(json.dumps(decisions))
+    base = ["--mode", "active", "--config-yaml", config_path, "--quiet"]
+    base += ["--prior-round-dir", prior, "--shapes-per-cell", 6]
+
+    def run(name, *more, rc=0):
+        out = tmp_path / name / "stage01"
+        assert _run(monkeypatch, *base, "--out-dir", out, *more) == rc
+        return out
+
+    return run
+
+
+def _by_cell(path):
+    counts = {}
+    for s in parse_shapes_yaml(path / "shapes.yaml"):
+        counts[grid.cell_key(*s)] = counts.get(grid.cell_key(*s), 0) + 1
+    return counts
+
+
+def test_a_round_draws_the_factor_for_the_leaves_the_last_round_retrained(
+    tmp_path, monkeypatch, config_path
+):
+    weak, strong, kept = (
+        "Mid|Mid|MidK|Bnone",
+        "Small|Mid|MidK|Bnone",
+        "Mid|Small|MidK|Bnone",
+    )
+    decisions = _decisions(
+        _row(weak, "retrain", 0.9), _row(strong, se=0.99), _row(kept, se=0.96)
+    )
+    run = _active_round(
+        tmp_path, monkeypatch, config_path, decisions, [weak, strong, kept]
+    )
+    out = run("weak", "--weak-cell-factor", 2.5, "--strong-cell-factor", 0.5)
+    assert _by_cell(out) == {weak: 15, strong: 3, kept: 6}
+    plan = json.loads((out / "per_cell_plan.json").read_text())
+    budget = plan["budget"]
+    assert budget["applied"] and budget["not_applied"] is None
+    assert budget["decisions"] == str(
+        tmp_path / "round_0" / "stage04b" / "decisions.json"
+    )
+    assert (budget["weak_extra"], budget["strong_cut"], budget["total_target"]) == (
+        9,
+        3,
+        24,
+    )
+    assert (
+        plan["cells"][weak]["need"] == "weak" and plan["cells"][weak]["n_actual"] == 15
+    )
+    assert plan["cells"][strong]["need"] == "strong"
+    cat = json.loads((out / "categorization.json").read_text())
+    targets = {c: n for c, n in cat["target_per_cell"].items() if n}
+    assert targets == {weak: 15, strong: 3, kept: 6}
+    assert cat["n_final"] == 24
+    # a strong leaf's target is never below the top-up's floor
+    floored = run(
+        "floored", "--weak-cell-factor", 2.5, "--strong-cell-factor", 0.5,
+        "--min-cell-gemms", 5,
+    )  # fmt: skip
+    assert _by_cell(floored) == {weak: 15, strong: 5, kept: 6}
+    budget = json.loads((floored / "per_cell_plan.json").read_text())["budget"]
+    assert (budget["strong_cut"], budget["total_target"]) == (1, 26)
+    # a strong factor alone reads the decisions but cuts nothing: no weak
+    # leaf gains a shape for a strong one to pay for
+    alone = run("alone", "--strong-cell-factor", 0.5)
+    budget = json.loads((alone / "per_cell_plan.json").read_text())["budget"]
+    assert budget["applied"] and budget["n_strong"] == 1
+    assert (budget["strong_cut_wanted"], budget["strong_cut"]) == (3, 0)
+    # the defaults, and every factor at 1, draw the round as it always was
+    plain = run("plain")
+    neutral = run(
+        "neutral",
+        "--weak-cell-factor", 1, "--strong-cell-factor", 1, "--large-k-factor", 1,
+    )  # fmt: skip
+    (tmp_path / "round_0" / "stage04b" / "decisions.json").unlink()
+    without = run("without", "--weak-cell-factor", 2.5, "--strong-cell-factor", 0.5)
+    first = (plain / "shapes.yaml").read_text()
+    for other in (neutral, alone, without):
+        assert (other / "shapes.yaml").read_text() == first
+    assert _by_cell(plain) == {weak: 6, strong: 6, kept: 6}
+    budget = json.loads((without / "per_cell_plan.json").read_text())["budget"]
+    assert not budget["applied"] and budget["not_applied"] == "no stage04b decisions"
+    assert budget["decisions"] is None
+
+
+def test_an_enhance_round_keeps_its_shapes_per_cell(tmp_path, monkeypatch, config_path):
+    """--only-cells draws --shapes-per-cell for each chosen leaf, weak or
+    not, and no very-large-K shapes."""
+    weak, other = "Mid|Small|LargeK|Bnone", "Small|Mid|MidK|Bnone"
+    decisions = _decisions(_row(weak, "retrain", 0.9), _row(other, se=0.99))
+    run = _active_round(tmp_path, monkeypatch, config_path, decisions, [weak, other])
+    more = ["--weak-cell-factor", 3, "--large-k-factor", 2, "--shapes-per-cell", 40]
+    out = run("enhance", "--only-cells", weak, *more)
+    assert _by_cell(out) == {weak: 40}
+    drawn = parse_shapes_yaml(out / "shapes.yaml")
+    assert any(s[2] > s01.LARGE_K_ABOVE for s in drawn)
+    budget = json.loads((out / "per_cell_plan.json").read_text())["budget"]
+    assert budget["not_applied"] == "--only-cells" and budget["n_weak"] == 0
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["large_k"]["factor"] == 1.0 and cat["large_k"]["n_shapes"] == 0
+    full = run("full", *more)
+    assert _by_cell(full)[weak] > 3 * 40
+    stratum = json.loads((full / "categorization.json").read_text())["large_k"]
+    assert stratum["factor"] == 2.0 and stratum["n_shapes"] > 0
+
+
+def test_bad_budget_options_and_decisions_stop_the_round(
+    tmp_path, monkeypatch, config_path, capsys
+):
+    cell = "Mid|Mid|MidK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, _decisions(), [cell])
+    for flag, value in (
+        ("--weak-cell-factor", 0.5),
+        ("--weak-cell-factor", "nan"),
+        ("--strong-cell-factor", 0),
+        ("--strong-cell-factor", 1.5),
+        ("--strong-cell-margin", -0.1),
+        ("--large-k-factor", 0.9),
+        ("--large-k-factor", "inf"),
+        ("--decisions-from", tmp_path / "nowhere.json"),
+    ):
+        out = run(f"bad_{flag}_{value}", flag, value, rc=1)
+        assert not (out / "shapes.yaml").exists(), flag
+    bad = tmp_path / "bad.json"
+    for text in ("{", '{"per_cell": {}}', "[]"):
+        bad.write_text(text)
+        capsys.readouterr()
+        run("bad_doc", "--decisions-from", bad, "--weak-cell-factor", 2, rc=1)
+        assert "stage04b decisions" in capsys.readouterr().err
+        # factors at 1 read no decisions, as stage01 never did
+        out = run("neutral_doc", "--decisions-from", bad)
+        budget = json.loads((out / "per_cell_plan.json").read_text())["budget"]
+        assert budget["not_applied"] == "every factor at 1"
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(_decisions(_row(cell, "retrain"))))
+    out = run("good", "--decisions-from", good, "--weak-cell-factor", 2)
+    assert _by_cell(out) == {cell: 12}
+
+
+# ── very-large-K stratum ─────────────────────────────────────────────────────
+
+
+def test_the_very_large_k_stratum_doubles_a_leafs_draws_above_32768():
+    f = _filter()
+    leaf, batched = "Mid|Mid|LargeK|Bnone", "Mid|Mid|LargeK|Bany"
+    plan = {leaf: 120, batched: 60, "Mid|Mid|MidK|Bnone": 30}
+    res = s01.sample_shapes(plan, 9, set(), f, n_strata=2)
+    big = [s for s in res.fresh_per_cell[leaf] if s[2] > s01.LARGE_K_ABOVE]
+    assert big and not [s for s in res.fresh_per_cell[batched] if s[2] > 32768]
+    taken = set(res.shapes)
+    out = s01.large_k_shapes(
+        res.fresh_per_cell, 2.0, 9, f, n_strata=2, taken=set(taken)
+    )
+    assert list(out) == [leaf] and len(out[leaf]) == len(big)
+    for s in out[leaf]:
+        assert s[2] > s01.LARGE_K_ABOVE and f.accepts(*s) and s not in taken
+        assert grid.cell_key(*s) == leaf
+    again = s01.large_k_shapes(
+        res.fresh_per_cell, 2.0, 9, f, n_strata=2, taken=set(taken)
+    )
+    assert again == out
+    half = s01.large_k_shapes(
+        res.fresh_per_cell, 1.5, 9, f, n_strata=2, taken=set(taken)
+    )
+    assert len(half[leaf]) == int(len(big) * 0.5 + 0.5)
+    assert (
+        s01.large_k_shapes(res.fresh_per_cell, 1.0, 9, f, n_strata=2, taken=set()) == {}
+    )
+
+
+def test_a_split_leaf_draws_its_stratum_inside_its_box():
+    from lib import subcells as sc
+
+    rule = sc.build_split_rule("Mid|Mid|LargeK|Bnone", "K", 40000)
+    f = _filter()
+    fresh = {
+        rule.lo_label: [(300, 300, 33000, 1)],
+        rule.hi_label: [(300, 300, 50000, 1)],
+    }
+    out = s01.large_k_shapes(fresh, 3.0, 4, f, n_strata=1, taken=set())
+    assert len(out[rule.lo_label]) == 2 and len(out[rule.hi_label]) == 2
+    assert all(32768 < s[2] <= 40000 for s in out[rule.lo_label])
+    assert all(40000 < s[2] for s in out[rule.hi_label])
+
+
+def test_each_leaf_draws_its_stratum_from_a_stream_of_its_own(monkeypatch):
+    """The stream a leaf's stratum draws from depends on the round and the
+    leaf: no two leaves, and no two rounds, draw the same sequence."""
+    from lib import subcells as sc
+
+    rule = sc.build_split_rule("Mid|Mid|LargeK|Bnone", "K", 40000)
+    fresh = {
+        rule.lo_label: [(300, 300, 33000, 1)],
+        rule.hi_label: [(300, 300, 50000, 1)],
+    }
+    states = []
+    real = s01.synthesize_cell_shapes
+
+    def spy(base, n, rng, f, **kw):
+        states.append(rng.getstate())
+        return real(base, n, rng, f, **kw)
+
+    monkeypatch.setattr(s01, "synthesize_cell_shapes", spy)
+    for round_seed in (4, 5):
+        s01.large_k_shapes(fresh, 2.0, round_seed, _filter(), n_strata=1, taken=set())
+    assert len(states) == len(set(states)) == 4
+
+
+def test_targeted_shapes_never_repeat_a_very_large_k_shape(
+    tmp_path, monkeypatch, config_path
+):
+    """The stratum's shapes join the shapes the targeted draw must avoid:
+    a shape near a tail GEMM that the stratum drew is not drawn again."""
+    leaf = "Mid|Small|LargeK|Bnone"
+    tail = _tail(300, 100, 40000, 1, 0.4)
+    decisions = _decisions(_row(leaf, se=0.97, tail_gemms=[tail]))
+    run = _active_round(tmp_path, monkeypatch, config_path, decisions, [leaf])
+    drawn = {}
+    real_large_k, real_near = s01.large_k_shapes, s01.synthesize_near
+
+    def large_k(*a, **kw):
+        drawn.update(real_large_k(*a, **kw))
+        return drawn
+
+    def near(shape, n, rng, f, box, **kw):
+        return [s for v in drawn.values() for s in v] + real_near(
+            shape, n, rng, f, box, **kw
+        )
+
+    monkeypatch.setattr(s01, "large_k_shapes", large_k)
+    monkeypatch.setattr(s01, "synthesize_near", near)
+    out = run(
+        "both", "--shapes-per-cell", 40, "--large-k-factor", 2, "--targeted-per-gemm", 3
+    )
+    stratum = {s for v in drawn.values() for s in v}
+    assert stratum
+    targeted = json.loads((out / s01.TARGETED_FILE).read_text())["leaves"][leaf]
+    near_shapes = {tuple(s) for e in targeted for s in e["shapes"]}
+    assert len(near_shapes) == 3 and not near_shapes & stratum
+    written = parse_shapes_yaml(out / "shapes.yaml")
+    assert len(written) == len(set(written))
+    assert stratum | near_shapes <= set(written)
+
+
+def test_a_round_draws_the_stratum_end_to_end(tmp_path, monkeypatch, config_path):
+    leaf, other = "Mid|Small|LargeK|Bnone", "Mid|Mid|MidK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, None, [leaf, other])
+    plain = run("plain", "--shapes-per-cell", 40)
+    out = run("large_k", "--shapes-per-cell", 40, "--large-k-factor", 2)
+    before = [s for s in parse_shapes_yaml(plain / "shapes.yaml")]
+    after = parse_shapes_yaml(out / "shapes.yaml")
+    assert set(before) < set(after)
+    added = set(after) - set(before)
+    n_big = sum(1 for s in before if grid.cell_key(*s) == leaf and s[2] > 32768)
+    assert n_big and len(added) == n_big
+    assert all(s[2] > 32768 and grid.cell_key(*s) == leaf for s in added)
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["large_k"] == {
+        "factor": 2.0, "above": 32768, "n_shapes": n_big, "per_cell": {leaf: n_big},
+    }  # fmt: skip
+    assert cat["n_final"] == len(after) and cat["actual_per_cell"][leaf] == 40
+    plan = json.loads((out / "per_cell_plan.json").read_text())
+    assert plan["cells"][leaf]["n_large_k"] == n_big
+    assert plan["cells"][other]["n_large_k"] == 0
+    assert json.loads((plain / "categorization.json").read_text())["large_k"] == {
+        "factor": 1.0, "above": 32768, "n_shapes": 0, "per_cell": {},
+    }  # fmt: skip
+
+
+def _bench_yaml(path, shapes):
+    path.write_text(
+        "".join(
+            "- {rotating_buffer: 512, transA: T, transB: N, "
+            f"M: {m}, N: {n}, K: {k}, batch_count: {b}}}\n"
+            for m, n, k, b in shapes
+        )
+    )
+    return path
+
+
+def test_the_stratum_never_draws_a_held_out_shape(tmp_path, monkeypatch, config_path):
+    """A held-out list's GEMMs are no stratum shapes: with every shape the
+    stratum drew held out, it draws as many others, and the round's other
+    draws stay as they were."""
+    leaf, other = "Mid|Small|LargeK|Bnone", "Mid|Mid|MidK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, None, [leaf, other])
+    more = ["--shapes-per-cell", 40, "--large-k-factor", 2]
+    plain = run("plain", "--shapes-per-cell", 40)
+    regular = set(parse_shapes_yaml(plain / "shapes.yaml"))
+    first = parse_shapes_yaml(run("first", *more) / "shapes.yaml")
+    stratum = set(first) - regular
+    assert stratum
+    held = _bench_yaml(tmp_path / "held.yaml", sorted(stratum))
+    out = run("held", *more, "--exclude-shapes-yaml", held)
+    again = parse_shapes_yaml(out / "shapes.yaml")
+    assert not set(again) & stratum
+    assert regular < set(again) and len(again) == len(set(again)) == len(first)
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["large_k"]["n_shapes"] == len(stratum)
+    for s in set(again) - regular:
+        assert s[2] > s01.LARGE_K_ABOVE and grid.cell_key(*s) == leaf
+
+
+def test_a_held_out_stratum_shape_stops_the_round(
+    tmp_path, monkeypatch, config_path, capsys
+):
+    """The stratum's shapes are checked against the held-out lists as the
+    round's other draws are: one that is held out stops the round before
+    it writes anything."""
+    leaf = "Mid|Small|LargeK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, None, [leaf])
+    held = (300, 100, 40000, 1)
+    more = ["--shapes-per-cell", 40, "--large-k-factor", 2]
+    more += ["--exclude-shapes-yaml", _bench_yaml(tmp_path / "held.yaml", [held])]
+    assert held not in parse_shapes_yaml(run("ok", *more) / "shapes.yaml")
+    monkeypatch.setattr(s01, "large_k_shapes", lambda *a, **kw: {leaf: [held]})
+    capsys.readouterr()
+    out = run("leaked", *more, rc=1)
+    assert "1 very-large-K shapes are held out" in capsys.readouterr().err
+    assert not (out / "shapes.yaml").exists()
+    assert not (out / "categorization.json").exists()
+
+
+def test_the_stratum_skips_history_held_out_and_this_rounds_shapes(
+    tmp_path, monkeypatch, config_path
+):
+    """The stratum draws under the round's history dedup and held-out lists
+    and never repeats a shape the round drew: offered a shape of an earlier
+    round, a held-out shape and one of the round's own draws before its
+    own candidates, it skips all three and still draws its count."""
+    leaf = "Mid|Small|LargeK|Bnone"
+    run = _active_round(tmp_path, monkeypatch, config_path, None, [leaf])
+    regular = parse_shapes_yaml(run("plain", "--shapes-per-cell", 40) / "shapes.yaml")
+    n_big = sum(1 for s in regular if s[2] > s01.LARGE_K_ABOVE)
+    own = next(s for s in regular if s[2] > s01.LARGE_K_ABOVE)
+    old, held = (300, 100, 40000, 1), (320, 100, 40000, 1)
+    assert n_big and not {old, held} & set(regular)
+    real = s01.synthesize_cell_shapes
+
+    def offer(base, n, rng, f, axis_bounds=None, **kw):
+        drawn = real(base, n, rng, f, axis_bounds=axis_bounds, **kw)
+        if axis_bounds and axis_bounds["K"][0] > s01.LARGE_K_ABOVE:
+            return [old, held, own] + drawn
+        return drawn
+
+    monkeypatch.setattr(s01, "synthesize_cell_shapes", offer)
+    out = run(
+        "offered", "--shapes-per-cell", 40, "--large-k-factor", 2,
+        "--prior-shapes-yaml", _bench_yaml(tmp_path / "old.yaml", [old]),
+        "--exclude-shapes-yaml", _bench_yaml(tmp_path / "held.yaml", [held]),
+    )  # fmt: skip
+    written = parse_shapes_yaml(out / "shapes.yaml")
+    assert len(written) == len(set(written)) and not {old, held} & set(written)
+    assert set(regular) < set(written)
+    assert len(set(written) - set(regular)) == n_big
+    cat = json.loads((out / "categorization.json").read_text())
+    assert cat["large_k"]["n_shapes"] == n_big

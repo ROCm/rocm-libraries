@@ -139,7 +139,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence
@@ -169,6 +169,7 @@ from lib import mlrec  # noqa: E402
 from lib import repeats  # noqa: E402
 from lib import run_bundles  # noqa: E402
 from lib import subcells as sc  # noqa: E402
+from lib import tilewright_index as twi  # noqa: E402
 from lib import ui  # noqa: E402
 from lib import whitelist_tier as wt  # noqa: E402
 from lib.bundle import bundle_file  # noqa: E402
@@ -181,8 +182,11 @@ from run_orchestrator import (  # noqa: E402
 )
 
 WEIGHTS_REL = Path("shared") / "tilewright" / "weights" / "hipblaslt"
-INDEX_NAME = "tilewright_index"
-INDEX_HEADER = "# tilewright per-library weights index: <logic_stem>\\t<weights.bin>"
+INDEX_NAME = twi.INDEX_NAME
+INDEX_HEADER = (
+    "# tilewright per-library weights index: "
+    "<logic_stem>\\t<weights.bin>[\\tchip=0x<PCI chip ID>]"
+)
 BIN_SUFFIX = ".tilewright.bin"
 MODELS_TARGET = "hipblaslt-tilewright-models"
 
@@ -199,38 +203,43 @@ class IndexFile:
     comments: List[str]
     entries: List[Tuple[str, str]]
     dropped: List[str]
+    # Rows for the devices of one PCI chip ID: (stem, file, chip ID).
+    chip_rows: List[Tuple[str, str, int]] = field(default_factory=list)
+    # Rows that make the engine load no model for their stem: (line number
+    # from 1, stem, line).
+    malformed_rows: List[Tuple[int, str, str]] = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, str]:
         return dict(self.entries)
 
 
 def parse_index(text: str) -> IndexFile:
-    """Parse a tilewright_index the way the engine does: a '#' starts a
-    comment, the first two whitespace-separated tokens are stem and file,
-    and the first line naming a stem is the one that counts. Later
-    duplicates and one-token lines are returned in `dropped`."""
-    comments: List[str] = []
-    entries: List[Tuple[str, str]] = []
-    dropped: List[str] = []
-    seen = set()
-    for raw in text.splitlines():
-        line = raw[:-1] if raw.endswith("\r") else raw
-        tokens = line.split("#", 1)[0].split()
-        if not tokens:
-            if line.strip() and line.rstrip() not in comments:
-                comments.append(line.rstrip())
-            continue
-        if len(tokens) < 2 or tokens[0] in seen:
-            dropped.append(line)
-            continue
-        seen.add(tokens[0])
-        entries.append((tokens[0], tokens[1]))
-    return IndexFile(comments, entries, dropped)
+    """Parse a tilewright_index the way the engine does
+    (lib/tilewright_index.py): a '#' starts a comment, the first two
+    whitespace-separated tokens are stem and file, a third `chip=0x<id>`
+    makes the row one for the devices of that PCI chip ID (`chip_rows`),
+    and the first line naming a stem (and chip ID) is the one that counts.
+    Later duplicates, one-token lines and malformed rows are returned in
+    `dropped`, malformed rows also in `malformed_rows`."""
+    idx = twi.parse(text)
+    return IndexFile(
+        idx.comments,
+        [(s, f) for s, f, c in idx.rows if c is None],
+        idx.dropped,
+        [(s, f, c) for s, f, c in idx.rows if c is not None],
+        idx.malformed_rows,
+    )
 
 
-def render_index(comments: List[str], entries: Mapping[str, str]) -> str:
+def render_index(
+    comments: List[str],
+    entries: Mapping[str, str],
+    chip_rows: Sequence[Tuple[str, str, int]] = (),
+) -> str:
     lines = list(comments) or [INDEX_HEADER]
-    lines += [f"{stem}\t{entries[stem]}" for stem in sorted(entries)]
+    lines += twi.render_rows(
+        [(s, f, None) for s, f in entries.items()] + list(chip_rows)
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -238,8 +247,11 @@ def _plain_file_name(name: str) -> bool:
     return bool(name) and "/" not in name and "\\" not in name and name[0] != "."
 
 
-def choose_weights_name(entries: Mapping[str, str], stem: str) -> str:
-    """Keep the file name the stem already maps to unless another stem
+def choose_weights_name(
+    entries: Mapping[str, str], stem: str, chip_files: Sequence[str] = ()
+) -> str:
+    """Keep the file name the stem already maps to unless another stem, or a
+    row for the devices of one chip ID (`chip_files` holds their files),
     shares that file; otherwise `<stem>.tilewright.bin`."""
     old = entries.get(stem)
     if (
@@ -247,11 +259,12 @@ def choose_weights_name(entries: Mapping[str, str], stem: str) -> str:
         and _plain_file_name(old)
         and old.endswith(BIN_SUFFIX)
         and sum(1 for b in entries.values() if b == old) == 1
+        and old not in chip_files
     ):
         return old
     name = stem + BIN_SUFFIX
-    if any(b == name for s, b in entries.items() if s != stem):
-        raise DeployError(f"{name} is already used by another stem in the index")
+    if any(b == name for s, b in entries.items() if s != stem) or name in chip_files:
+        raise DeployError(f"{name} is already used by another row of the index")
     return name
 
 
@@ -620,8 +633,25 @@ def _index_entries(weights_dir: Optional[Path]) -> Tuple[Optional[str], IndexFil
     if weights_dir is None:
         return None, parse_index("")
     path = weights_dir / INDEX_NAME
-    text = path.read_text() if path.is_file() else None
+    text = twi.read_text(path) if path.is_file() else None
     return text, parse_index(text or "")
+
+
+def refuse_malformed_rows(index: Path, idx: IndexFile) -> None:
+    """DeployError while the index file `index` (parsed: `idx`) has a
+    malformed row: the engine loads no model for that stem on any device,
+    and a rewrite without the row would serve the stem's other rows on the
+    devices the row may have been meant for."""
+    if idx.malformed_rows:
+        rows = "; ".join(
+            f"line {n} for {stem}: {line!r}" for n, stem, line in idx.malformed_rows
+        )
+        raise DeployError(
+            f"{index} has malformed rows ({rows}), for whose stems the engine "
+            f"loads no model; a row is '<stem> <file>', optionally followed by "
+            f"'chip=0x<one to four hex digits, not all zero>'. Correct or "
+            f"remove them, then deploy again"
+        )
 
 
 def plan_targets(
@@ -633,22 +663,44 @@ def plan_targets(
         if repo is not None:
             t.weights_dir = repo / WEIGHTS_REL / d / d
         _, idx = _index_entries(t.weights_dir)
+        if t.weights_dir is not None:
+            refuse_malformed_rows(t.weights_dir / INDEX_NAME, idx)
         entries = idx.as_dict()
-        t.weights_name = choose_weights_name(entries, stem)
+        chip_files = [f for _, f, _ in idx.chip_rows]
+        t.weights_name = choose_weights_name(entries, stem, chip_files)
         old = entries.get(stem)
         entries[stem] = t.weights_name
-        t.index_text = render_index(idx.comments, entries)
-        if old and old != t.weights_name and old not in entries.values():
+        t.index_text = render_index(idx.comments, entries, idx.chip_rows)
+        if (
+            old
+            and old != t.weights_name
+            and old not in entries.values()
+            and old not in chip_files
+        ):
             t.superseded = old
         if not warn:
             out.append(t)
             continue
         for line in idx.dropped:
-            ui.warn("index", f"{d}: dropping duplicate or malformed line {line!r}")
+            ui.warn("index", f"{d}: dropping duplicate or one-field line {line!r}")
+        for s in dict.fromkeys(s for s, _, _ in idx.chip_rows):
+            if s not in entries:
+                ui.warn(
+                    "index",
+                    f"{d}: {s} has rows for PCI chip IDs only; an engine that "
+                    f"predates the chip ID serves the model of its first row on "
+                    f"every device",
+                )
         if t.weights_dir is not None:
             for s, b in entries.items():
                 if s != stem and not (t.weights_dir / b).exists():
                     ui.warn("index", f"{d}: {s} lists missing file {b}")
+            for s, b, c in idx.chip_rows:
+                if not (t.weights_dir / b).exists():
+                    ui.warn(
+                        "index",
+                        f"{d}: {s} ({twi.chip_field(c)}) lists missing file {b}",
+                    )
         out.append(t)
     return out
 
@@ -714,9 +766,11 @@ weights), registered for these hipBLASLt libraries:
 
 For every target directory above, copy the `.tilewright.bin` file to the same
 path in the rocm-libraries checkout and add the line of
-`{INDEX_NAME}.fragment` to that directory's `{INDEX_NAME}`, replacing any line
-that names the same library stem. The engine uses the first line that names a
-stem.
+`{INDEX_NAME}.fragment` to that directory's `{INDEX_NAME}`, replacing the
+line that names the same library stem without a chip ID, above the stem's
+lines that end in `chip=0x<id>`: those serve the devices of that PCI chip ID
+and stay. The engine uses a stem's first line for the device's chip ID, else
+its first line without one.
 
 The `.tilewright.bin` files are committed as plain binary files (see
 `shared/tilewright/.gitattributes`).
@@ -856,7 +910,7 @@ def verify_colocated(
         checked.append(t.dir)
         idx_path = lib_dir / INDEX_NAME
         entries = (
-            parse_index(idx_path.read_text()).as_dict() if idx_path.is_file() else {}
+            parse_index(twi.read_text(idx_path)).as_dict() if idx_path.is_file() else {}
         )
         if entries.get(t.stem) != t.weights_name:
             problems.append(f"{idx_path} does not map {t.stem} to {t.weights_name}")

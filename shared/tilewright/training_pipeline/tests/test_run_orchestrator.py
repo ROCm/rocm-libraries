@@ -1982,7 +1982,13 @@ def test_preflight_checks_the_v3_catalog(monkeypatch):
         features.feature_names_hash(),
         features.v3_catalog_hash(),
     ]
+    # A module that computes the v3 catalog but predates the CU floor every
+    # v3 model declares refuses the models stage05 writes.
+    (err,) = ro._tilewright_errors("v3")
+    assert "predates the CU floor" in err and "min_effective_cus" in err
+    tw.ModelInfo = type("ModelInfo", (), {"min_effective_cus": property(lambda i: 0)})
     assert ro._tilewright_errors("v3") == []
+    assert ro._tilewright_errors("v2") == []
 
 
 # ── planner ──────────────────────────────────────────────────────────────────
@@ -2641,11 +2647,13 @@ def test_the_offset_rereads_are_pinned_only_when_they_change_something(tmp_path)
 
     floors = {"bench.canary.tolerance_us", "audit.canary_tolerance_us"}
     assert set(ro.PINNED_UNLESS_NEUTRAL) == floors | {
+        "correctness.custom_kernels",
         "audit.held_out",
         "contexts.granule",
-    } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS}
+    } | {f"bench.rebench.{k}" for k in NEUTRAL_REREADS} | set(NEED_BUDGET)
     assert all(ro.PINNED_UNLESS_NEUTRAL[k] == 0 for k in floors)
     assert ro.PINNED_UNLESS_NEUTRAL["audit.held_out"] == []
+    assert ro.PINNED_UNLESS_NEUTRAL["correctness.custom_kernels"] is None
     assert all(REREAD_DEFAULTS[k] == v for k, v in NEUTRAL_REREADS.items())
     assert all(PREDATING_REREADS[k] == v for k, v in NEUTRAL_REREADS.items())
     cfg = yaml.safe_load(make_config(tmp_path).read_text())
@@ -3714,14 +3722,16 @@ def test_run_status_records_the_rounds_and_the_one_that_failed(
 
 
 def test_stage07_serves_the_staged_model_from_a_library_directory(
-    tmp_path, stubs, env, monkeypatch
+    tmp_path, stubs, env, monkeypatch, capsys
 ):
     release = tmp_path / "bench" / "projects" / "hipblaslt" / "build" / "release"
     lib = release / "Tensile" / "library" / "gfx950"
     lib.mkdir(parents=True)
     (lib / f"{STEM}.dat").write_bytes(b"logic")
     other = "TensileLibrary_HH_HH_Contraction_l_Alik_Bljk_ID75a0_gfx950"
-    (lib / "tilewright_index").write_text(f"{STEM}\tshipped.bin\n{other}\to.bin\n")
+    (lib / "tilewright_index").write_text(
+        f"{STEM}\tshipped.bin\n{other}\to.bin\n{other}\tb.bin\tchip=0x12g4\n"
+    )
     v3 = tmp_path / "v3build"
     cfg = make_config(
         tmp_path,
@@ -3750,9 +3760,13 @@ def test_stage07_serves_the_staged_model_from_a_library_directory(
     assert (libdir / "w.tilewright.bin").read_bytes() == staged
     assert (libdir / f"{STEM}.dat").resolve() == (lib / f"{STEM}.dat").resolve()
     assert (libdir / "tilewright_index").read_text() == (
-        f"{other}\to.bin\n{STEM}\tw.tilewright.bin\n"
+        f"{other}\to.bin\n{other}\tb.bin\tchip=0x12g4\n{STEM}\tw.tilewright.bin\n"
     )
     assert ro.validated_by(run_dir / "validate" / "stage07")["build_dir"] == str(v3)
+    assert (
+        f"has the malformed row '{other}\\tb.bin\\tchip=0x12g4': the engine "
+        f"loads no model for its stem" in capsys.readouterr().err
+    )
 
 
 def test_stage07_times_a_sample_of_the_audit_set(tmp_path):
@@ -3819,18 +3833,30 @@ def test_preflight_checks_what_the_stage07_build_serves(tmp_path):
         make_config(tmp_path, **{"stage07.build_dir": str(v3), "train.catalog": "v3"})
     )
     paths = ro.derive_paths(cfg)
-    (err,) = ro.stage07_build_errors(cfg, paths)
+    err, _floor = ro.stage07_build_errors(cfg, paths)
     assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
     assert "cannot load MLREC_v3 models (train.catalog v3); no 'MLREC_v3'" in err
+    # Every MLREC_v3 model stage05 writes declares a CU floor, which an
+    # engine that predates it refuses.
     fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v3",))
+    (err,) = ro.stage07_build_errors(cfg, paths)
+    assert err.startswith(f"stage07.build_dir {v3}: its TensileLite")
+    assert "which declare a CU floor its engine predates" in err
+    assert err.endswith(f"no {ro.CU_FLOOR_MARKER!r} in it")
+    v3_floor = ("MLREC_v3", ro.CU_FLOOR_MARKER)
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=v3_floor)
     assert ro.stage07_build_errors(cfg, paths) == []
+    v2 = dict(cfg, train=dict(cfg["train"], catalog="v2"))
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=("MLREC_v2",))
+    assert ro.stage07_build_errors(v2, paths) == []
+    fh.write_fake_build(v3, "gfx950", STEM, capabilities=v3_floor)
     cfg["planner"] = {"enabled": True, "bank_library_stems": [STEM + "_bank"]}
     (err,) = ro.stage07_build_errors(cfg, paths)
     assert (
         "does not serve a bank of kernels" in err and "TENSILE_TILEWRIGHT_BANK" in err
     )
     fh.write_fake_build(
-        v3, "gfx950", STEM, capabilities=("MLREC_v3", "TENSILE_TILEWRIGHT_BANK")
+        v3, "gfx950", STEM, capabilities=v3_floor + ("TENSILE_TILEWRIGHT_BANK",)
     )
     assert ro.stage07_build_errors(cfg, paths) == []
     cfg["stage07"]["cpus"] = f"0,{os.cpu_count()}"
@@ -3849,6 +3875,19 @@ def test_preflight_checks_what_the_stage07_build_serves(tmp_path):
     errs = ro.stage07_build_errors(deploy, ro.derive_paths(deploy))
     assert errs[0].startswith("the deploy build hipblaslt-bench not found")
     assert errs[1].startswith("deploy library directory is missing")
+
+
+FORMAT_CPP = Path(ro.__file__).resolve().parent.parent / "src/tilewright/format.cpp"
+
+
+@pytest.mark.skipif(not FORMAT_CPP.is_file(), reason="no engine sources")
+def test_the_cu_floor_marker_is_the_name_the_engines_loader_gives_the_floor():
+    """The preflight tells a TensileLite that loads the CU floor by the C
+    string naming the field in the engine's loader. The reader takes field
+    names as const char*, which every compiler stores whole; a message the
+    loader builds as a std::string some compilers store in pieces."""
+    read = r"\.u32\(&\w+, " + re.escape(f'"{ro.CU_FLOOR_MARKER}"') + r"\)"
+    assert re.search(read, FORMAT_CPP.read_text())
 
 
 def test_preflight_checks_the_stage08_datasets(tmp_path):
@@ -4130,6 +4169,161 @@ def test_the_rounds_get_the_tail_options(tmp_path):
         "seed.targeted_max_per_leaf",
     ):
         assert any(e.startswith(f"{key}:") for e in errors), key
+
+
+# The weak-cell budget's keys (seed section) and their stage01 options.
+NEED_BUDGET = {
+    "seed.weak_cell_factor": "--weak-cell-factor",
+    "seed.strong_cell_factor": "--strong-cell-factor",
+    "seed.strong_cell_margin": "--strong-cell-margin",
+    "seed.large_k_factor": "--large-k-factor",
+}
+
+
+def test_the_rounds_get_the_weak_cell_budget_only_away_from_neutral(tmp_path):
+    """An active round's stage01 gets each budget key away from its neutral
+    value (a factor of 1, the margin stage01 defaults to); round 0 and an
+    enhance round get none of them, so a config that leaves them out runs
+    the stage01 command it always ran. The options are the stage's own."""
+    import stage01_generate_OOB_shapes as s01
+
+    rd = tmp_path / "run" / "round_2"
+    priors = [tmp_path / "run" / "round_0", tmp_path / "run" / "round_1"]
+    initial = ro.RoundStep(0, "initial", [], None, False)
+    active = ro.RoundStep(2, "active", priors, None, False)
+    enhance = ro.RoundStep(2, "active", priors, None, False, targets=["a"])
+    flags = set(NEED_BUDGET.values())
+
+    def args(step, **keys):
+        return _pipeline(tmp_path, make_config(tmp_path, **keys)).args_stage01(rd, step)
+
+    neutral = {k: 1 for k in NEED_BUDGET if "factor" in k}
+    neutral["seed.strong_cell_margin"] = 0.03
+    for step in (initial, active, enhance):
+        assert not flags & set(args(step))
+        assert not flags & set(args(step, **neutral))
+    tuned = {"seed.weak_cell_factor": 2, "seed.large_k_factor": 1.5}
+    s01_args = args(active, **tuned)
+    assert _after(s01_args, "--weak-cell-factor") == ["2.0"]
+    assert _after(s01_args, "--large-k-factor") == ["1.5"]
+    assert not {"--strong-cell-factor", "--strong-cell-margin"} & set(s01_args)
+    for step in (initial, enhance):
+        assert not flags & set(args(step, **tuned))
+    strong = dict(tuned, **{"seed.strong_cell_factor": 0.5})
+    assert _after(args(active, **strong), "--strong-cell-factor") == ["0.5"]
+    assert "--strong-cell-margin" not in args(active, **strong)
+    # the margin also sets which leaves the budget record counts as strong
+    for keys in (strong, tuned, {}):
+        margin = dict(keys, **{"seed.strong_cell_margin": 0.01})
+        assert _after(args(active, **margin), "--strong-cell-margin") == ["0.01"]
+    assert ro.STRONG_CELL_MARGIN == s01.STRONG_CELL_MARGIN
+    script = (
+        Path(ro.__file__).resolve().parent / "stages" / ro.STAGE_DEFS["stage01"].script
+    )
+    proc = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, COLUMNS="80"),
+    )
+    assert flags <= defined_options(proc.stdout)
+
+
+def test_the_weak_cell_budget_keys_are_validated(tmp_path):
+    """Factors of the right range, a strong leaf that stage04b can still
+    evaluate, and a warning for a strong factor nothing pays for and for a
+    factor far above any recipe's."""
+    base = yaml.safe_load(make_config(tmp_path).read_text())
+
+    known = ro.validate_config(base)[1]
+
+    def check(**seed):
+        return ro.validate_config(dict(base, seed=dict(base["seed"], **seed)))
+
+    assert check(weak_cell_factor=2.0, large_k_factor=2) == ([], known)
+    assert check(weak_cell_factor=3, strong_cell_factor=0.5) == ([], known)
+    for key, value in (
+        ("weak_cell_factor", 0.99),
+        ("weak_cell_factor", "2"),
+        ("strong_cell_factor", 0),
+        ("strong_cell_factor", 1.01),
+        ("strong_cell_margin", -0.01),
+        ("large_k_factor", 0.5),
+        ("large_k_factor", True),
+    ):
+        (error,) = check(**{key: value})[0]
+        assert error.startswith(f"seed.{key}:"), (key, error)
+    # make_config: 40 shapes per leaf, train.min_cell_gemms 20, and
+    # validate.min_cell_gemms 10, which a strong leaf's top-up still reaches
+    assert check(weak_cell_factor=2, strong_cell_factor=0.1) == ([], known)
+    low = dict(base, train=dict(base["train"], min_cell_gemms=4))
+    low["seed"] = dict(base["seed"], weak_cell_factor=2, strong_cell_factor=0.2)
+    (error,) = ro.validate_config(low)[0]
+    assert error.startswith("seed.strong_cell_factor 0.2: a leaf far above the bar")
+    assert "would get 8 new GEMMs" in error and "(10)" in error
+    low["seed"]["strong_cell_factor"] = 0.25
+    assert ro.validate_config(low) == ([], known)  # 10 new GEMMs: evaluable
+    errors, warnings = check(strong_cell_factor=0.5)
+    assert errors == [] and sorted(warnings) == sorted(
+        known
+        + [
+            "seed.strong_cell_factor has no effect with seed.weak_cell_factor 1: "
+            "the leaves far above the bar give up only the shapes the weak "
+            "leaves gain, so every leaf keeps seed.shapes_per_cell"
+        ]
+    )
+    # a factor far above any recipe's
+    assert check(weak_cell_factor=4, large_k_factor=4) == ([], known)
+    errors, warnings = check(weak_cell_factor=4.5, large_k_factor=20)
+    assert errors == [] and sorted(warnings) == sorted(
+        known
+        + [
+            f"seed.{key} {f} is above 4: the new shapes it applies to grow "
+            f"{f}-fold every active round, and the round's bench with them"
+            for key, f in (("weak_cell_factor", "4.5"), ("large_k_factor", "20"))
+        ]
+    )
+
+
+def test_the_weak_cell_budget_is_pinned_only_away_from_its_defaults(tmp_path):
+    """A pin written before the budget's keys existed holds none of them,
+    so a config at their defaults keeps it; one that sets a factor pins
+    it. An audit directory never pins them: its benches read none."""
+    from lib import pinning
+
+    cfg = yaml.safe_load(make_config(tmp_path).read_text())
+
+    def pin(values):
+        return {"config": pinning.config_record(values)}
+
+    def seed(**kw):
+        return dict(cfg, seed=dict(cfg["seed"], **kw))
+
+    for audit in (False, True):
+        before = ro.pinned_config(cfg, audit)
+        assert not set(NEED_BUDGET) & set(before)
+        same = ro.pinned_config(
+            seed(
+                weak_cell_factor=1,
+                strong_cell_factor=1.0,
+                strong_cell_margin=ro.STRONG_CELL_MARGIN,
+                large_k_factor=1,
+            ),
+            audit,
+        )
+        assert pinning.differences(pin(before), pin(same), ("config",)) == []
+        on = ro.pinned_config(seed(weak_cell_factor=2.0, large_k_factor=2.0), audit)
+        if audit:
+            assert on == before
+        else:
+            assert on == {
+                **before,
+                "seed.weak_cell_factor": 2.0,
+                "seed.large_k_factor": 2.0,
+            }
+    for key in NEED_BUDGET:
+        assert key in ro.AUDIT_UNPINNED_KEYS
+        assert ro.PINNED_UNLESS_NEUTRAL[key] == ro.cfg_get({}, key)
 
 
 def test_the_tail_guard_keys_reach_stage05_only_with_a_tier(tmp_path):

@@ -33,6 +33,30 @@ top of that:
   follow-ups      when a kernel fails on a shape, the kernels of its family
                   (equal macro tile and matrix instruction) that passed it in
                   this gate run it again `trigger_repetitions` times.
+  tiny shapes     M of 1 to 3 and N of 1 to 3 (`tiny_shapes_of`): a kernel
+                  whose vector reads of A or B its predicates do not keep
+                  within the operand at such a free size reads before or past
+                  it there. Each runs with every operand at the start of an
+                  allocation of its own behind an unmapped range (the
+                  harness's --fresh, when it takes it, `harness_caps`), where
+                  a read before an operand faults, which is a crash, instead
+                  of landing in another buffer unseen. They are a stage of
+                  their own (`TINY`, with its own protocol and cached
+                  verdicts), so that a kernel with cached verdicts of the
+                  other shapes runs only these.
+
+Before the harness runs anything, the static check (`static_check`, on
+unless `correctness.static_check` is false) compares every hand-written
+kernel's predicates with what its source declares: TensileLite builds a
+kernel written by hand with global-read vector widths of 1, and derives its
+LeadingFree size predicates from those, while the kernel reads A and B as
+wide as its custom.config says (GlobalReadVectorWidthA and B); along a
+leading free dimension (M of a non-transposed A, N of a transposed B) a
+smaller free size reads outside the operand. A kernel whose predicates admit
+a free size below the width it declares on such a side is `unguarded`,
+blocked and never run; the source is TensileLite's CustomKernels of the
+hipBLASLt source the build was configured from, or
+`correctness.custom_kernels`.
 
 A harness process that prints nothing for `timeout_s` (before it is ready,
 between two records, after its last one) hangs and is killed. When a process
@@ -46,7 +70,8 @@ the gate.
 A kernel fails (`fail`) when a repetition returned a wrong element, crashes
 (`crash`) when it crashed or hung alone, passes when it ran at least once and
 did neither, and is untested when no shape supported it or the harness did
-not find it. Failing and crashing kernels are blocked.
+not find it; its verdict is the worse of its two stages'. Failing, crashing
+and unguarded kernels are blocked.
 
 The harness runs without TensileLite's launch overrides (lib/bench_env.py),
 so a kernel is checked as the runtime launches it in production, whatever
@@ -65,7 +90,9 @@ a wrong element may do so rarely and a check that missed it would serve it
 pass or untested verdict only under the protocol it was made with
 (`protocol`: the shapes, repetitions, first-launch policy and the harness),
 and a crash of hangs alone only while the timeout is no longer than the one
-it hung under (its `timeout_s`). A verdict is cached as soon as no later
+it hung under (its `timeout_s`); a pass or untested verdict of the tiny
+shapes not when one of its runs lacked fresh operands, where a read before an
+operand may go unseen (`unfresh`). A verdict is cached as soon as no later
 pass of the gate can change it, and a gate that stops early still caches the
 failures it saw. Each line of the harness is checked as it arrives: a kernel
 it names otherwise than the library's logic file does stops the gate at once
@@ -112,7 +139,15 @@ DEFAULTS: Dict[str, Any] = {
     "timeout_s": 600.0,
 }
 MIN_REPETITIONS = 3
-BLOCKING_VERDICTS = ("fail", "crash")
+# The static check's verdict of a hand-written kernel whose predicates admit
+# a free size below the vector width it reads that operand with.
+UNGUARDED = "unguarded"
+BLOCKING_VERDICTS = ("fail", "crash", UNGUARDED)
+# The stages of the harness runs: the shapes of `shapes_of` (with the first
+# launches), and the tiny shapes of `tiny_shapes_of`, each with a protocol
+# and cached verdicts of its own.
+MAIN = "main"
+TINY = "tiny"
 # Problem types the harness runs: hipblaslt-bench names of A/B/C/D types and
 # of the compute type, as the harness's options take them.
 HARNESS_TYPES = {"bf16_r": "bf16", "f32_r": "f32"}
@@ -152,7 +187,9 @@ class Shape:
     """One problem of the gate. `pad_a` .. `pad_d`: how far the leading
     dimension of A, B, C and D exceeds the rows the matrix is stored with
     (0: by none); `bias`: the epilogue adds a bias vector, of the harness's
-    type `bias_type` ("": the type hipBLASLt defaults to)."""
+    type `bias_type` ("": the type hipBLASLt defaults to); `fresh`: every
+    operand starts an allocation of its own behind an unmapped range (the
+    harness's --fresh), a shape of the tiny stage (`TINY`)."""
 
     name: str
     m: int
@@ -169,20 +206,24 @@ class Shape:
     trigger: bool = False
     bias: bool = False
     bias_type: str = ""
+    fresh: bool = False
 
     def __post_init__(self) -> None:
         if self.bias_type and not self.bias:
             raise ValueError(f"shape {self.name}: a bias type without a bias")
 
+    @property
+    def stage(self) -> str:
+        return TINY if self.fresh else MAIN
+
     def record(self) -> Dict[str, Any]:
-        """The shape's fields, `bias` and `bias_type` only when set: the
-        records of a shape without them stay those of the shapes before they
-        existed."""
+        """The shape's fields, `bias`, `bias_type` and `fresh` only when set:
+        the records of a shape without them stay those of the shapes before
+        they existed."""
         out = asdict(self)
-        if not self.bias:
-            del out["bias"]
-        if not self.bias_type:
-            del out["bias_type"]
+        for key in ("bias", "bias_type", "fresh"):
+            if not out[key]:
+                del out[key]
         return out
 
     def rows(
@@ -199,7 +240,12 @@ class Shape:
             self.m,
         )
 
-    def args(self, trans_a: bool, trans_b: bool, stored_k: int = 1) -> List[str]:
+    def args(
+        self, trans_a: bool, trans_b: bool, stored_k: int = 1, fresh: bool = False
+    ) -> List[str]:
+        """The harness's arguments of the shape; with `fresh` (the harness
+        takes --fresh) a fresh shape asks for its operands at fresh
+        allocations."""
         out = [str(self.m), str(self.n), str(self.k), str(self.batch)]
         if self.alpha != 1.0:
             out += ["--alpha", repr(self.alpha)]
@@ -219,6 +265,8 @@ class Shape:
             out += ["--bias", "1"]
         if self.bias_type:
             out += ["--bias-type", self.bias_type]
+        if self.fresh and fresh:
+            out += ["--fresh", "1"]
         return out
 
     def text(self) -> str:
@@ -233,6 +281,8 @@ class Shape:
             t += " bias"
         if self.bias_type:
             t += f" {self.bias_type}"
+        if self.fresh:
+            t += " fresh operands"
         return t
 
 
@@ -456,6 +506,28 @@ SCALAR_SHAPES: Tuple[Shape, ...] = (
     Shape("k_1024_tail", 625, 77, 1031),
 )
 
+# The free sizes of the tiny stage: M and N of 1 to 3, below the vector
+# width of a kernel that reads A along M (A not transposed) or B along N (B
+# transposed) four or more elements at a time, the other free size
+# TINY_OTHER, a partial second tile of every macro tile up to 256.
+TINY_SIZES = (1, 2, 3)
+TINY_OTHER = 257
+
+
+def tiny_shapes(k: int) -> Tuple[Shape, ...]:
+    """The tiny stage's shapes at K `k`: M of 1 to 3 (`tiny_m_<M>`), where a
+    kernel reading A along M is outside A by up to its width less M, then N
+    of 1 to 3 (`tiny_n_<N>`) for B; every operand at a fresh allocation."""
+    return tuple(
+        Shape(f"tiny_m_{s}", s, TINY_OTHER, k, fresh=True) for s in TINY_SIZES
+    ) + tuple(Shape(f"tiny_n_{s}", TINY_OTHER, s, k, fresh=True) for s in TINY_SIZES)
+
+
+# K odd and prime, as in SHAPES and SCALAR_SHAPES; for block-scaled A and B an
+# odd multiple of 32, as in `mx_shapes`.
+TINY_SHAPES = tiny_shapes(383)
+MX_TINY_SHAPES = tiny_shapes(416)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -602,12 +674,24 @@ def shapes_of(problem: Optional[ProblemType]) -> Tuple[Shape, ...]:
     return SHAPES
 
 
+def tiny_shapes_of(problem: Optional[ProblemType]) -> Tuple[Shape, ...]:
+    """The tiny stage's shapes for a problem type: MX_TINY_SHAPES for
+    block-scaled A and B, else TINY_SHAPES."""
+    if problem is not None and any(problem.mx_bits):
+        return MX_TINY_SHAPES
+    return TINY_SHAPES
+
+
 def protocol(
-    settings: Settings, harness_id: str, shapes: Sequence[Shape] = SHAPES
+    settings: Settings,
+    harness_id: str,
+    shapes: Sequence[Shape] = SHAPES,
+    stage: str = MAIN,
 ) -> str:
-    """Digest of what a verdict means: shapes, repetitions, first-launch
-    policy and harness."""
-    body = {
+    """Digest of what a verdict of a stage means: shapes, repetitions,
+    first-launch policy and harness; a stage other than MAIN is named in
+    it, so that the two stages' verdicts never stand for each other."""
+    body: Dict[str, Any] = {
         "shapes": [s.record() for s in shapes],
         "repetitions": settings.repetitions,
         "trigger_repetitions": settings.trigger_repetitions,
@@ -616,6 +700,8 @@ def protocol(
         "first_launch_reps": FIRST_LAUNCH_REPS,
         "harness": harness_id,
     }
+    if stage != MAIN:
+        body["stage"] = stage
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -663,7 +749,311 @@ def hand_written(dat_dir: Any, stems: Iterable[str]) -> Set[int]:
     return out
 
 
+# ── the static check of hand-written kernels ─────────────────────────────────
+
+# Where TensileLite keeps the sources of hand-written kernels, under the
+# hipBLASLt source tree.
+CUSTOM_KERNELS_DIR = Path("tensilelite") / "Tensile" / "CustomKernels"
+# The operands the static check compares: (operand, free size, the index of
+# that free size, the custom.config key of its global-read vector width).
+STATIC_SIDES = (
+    ("A", "M", 0, "GlobalReadVectorWidthA"),
+    ("B", "N", 1, "GlobalReadVectorWidthB"),
+)
+
+
+def custom_kernel_name(sol: Mapping[str, Any]) -> Optional[str]:
+    """The name of a logic file solution's hand-written kernel: its
+    `customKernel`'s, unless that says it was generated (an absent
+    `generated` reads as false, as TensileLite reads it); None for a
+    generated kernel."""
+    ck = sol.get("customKernel")
+    if not isinstance(ck, Mapping) or not ck.get("name"):
+        return None
+    if ck.get("generated") is True:
+        return None
+    return str(ck["name"])
+
+
+def custom_kernels_dir(
+    cfg: Optional[Mapping[str, Any]], build_dir: Optional[Path]
+) -> Tuple[Optional[Path], str]:
+    """(the directory of the hand-written kernels' sources, where it comes
+    from): `correctness.custom_kernels`, else TensileLite's CustomKernels in
+    the hipBLASLt source the build was configured from; (None, why) when
+    there is none."""
+    given = ((cfg or {}).get("correctness") or {}).get("custom_kernels")
+    if given:
+        d = Path(str(given))
+        if d.is_dir():
+            return d, "correctness.custom_kernels"
+        return None, f"correctness.custom_kernels {d} is no directory"
+    src = hipblaslt_source(Path(build_dir)) if build_dir is not None else None
+    if src is None:
+        return None, "the hipBLASLt build names no source tree (its CMakeCache.txt)"
+    d = src / CUSTOM_KERNELS_DIR
+    if not d.is_dir():
+        return None, f"the hipBLASLt source of the build has no {CUSTOM_KERNELS_DIR}"
+    return d, "TensileLite's CustomKernels of the build's hipBLASLt source"
+
+
+def custom_kernel_sources(directory: Path) -> Dict[str, Path]:
+    """{kernel name: its `<name>.s`} below `directory`, as TensileLite finds
+    a kernel's file: at the top of the directory, else the first of a sorted
+    walk."""
+    out: Dict[str, Path] = {}
+    for root, dirs, files in os.walk(directory):
+        dirs.sort()
+        for f in sorted(files):
+            if f.endswith(".s"):
+                top = Path(root) == Path(directory)
+                if top or f[:-2] not in out:
+                    out[f[:-2]] = Path(root) / f
+    return out
+
+
+def custom_config(path: Path) -> Dict[str, Any]:
+    """The `custom.config` of a hand-written kernel's source: the YAML
+    between the `---` and `...` lines of its .amdgpu_metadata, as TensileLite
+    reads it. ValueError when it has none."""
+    import yaml
+
+    lines: List[str] = []
+    inside = False
+    for line in Path(path).read_text(errors="replace").splitlines():
+        if line == "---":
+            inside = True
+            continue
+        if line == "..." and inside:
+            break
+        if inside:
+            lines.append(line)
+    try:
+        doc = yaml.safe_load("\n".join(lines))
+    except yaml.YAMLError as e:
+        raise ValueError(f"{path}: its metadata is not YAML ({e})") from None
+    config = doc.get("custom.config") if isinstance(doc, dict) else None
+    if not isinstance(config, dict):
+        raise ValueError(f"{path} has no custom.config in its .amdgpu_metadata")
+    return config
+
+
+def predicate_leaves(node: Any) -> List[Mapping[str, Any]]:
+    """The predicates of a solution's `problemPredicate` that hold whatever
+    else does: those of its And nodes, depth first."""
+    out: List[Mapping[str, Any]] = []
+    stack: List[Any] = [node]
+    while stack:
+        n = stack.pop()
+        if not isinstance(n, Mapping):
+            continue
+        if n.get("type") == "And":
+            stack.extend(reversed(list(n.get("value") or [])))
+        else:
+            out.append(n)
+    return out
+
+
+def free_size_floor(
+    predicates: Iterable[Mapping[str, Any]], index: int
+) -> Tuple[int, List[str]]:
+    """(the least free size of `index` (0: M, 1: N) the predicates admit, at
+    least 1; the predicates that bound it, as `<type> <value>`):
+    LeadingFree<i>SizesGreaterOrEqual and Free<i>SizeMultiple by their name,
+    SizeEqual, SizeMultiple and SizeGreaterThan by their index."""
+    floor, by = 1, []
+    for p in predicates:
+        kind, value = str(p.get("type")), p.get("value")
+        if not isinstance(value, int) or isinstance(value, bool):
+            continue
+        if kind in (
+            f"LeadingFree{index}SizesGreaterOrEqual",
+            f"Free{index}SizeMultiple",
+        ):
+            low = value
+        elif kind in ("SizeEqual", "SizeMultiple") and p.get("index") == index:
+            low = value
+        elif kind == "SizeGreaterThan" and p.get("index") == index:
+            low = value + 1
+        else:
+            continue
+        by.append(f"{kind} {value}")
+        floor = max(floor, low)
+    return floor, by
+
+
+@dataclass
+class StaticFinding:
+    """The static check of one hand-written kernel: `status` unguarded (its
+    predicates admit a leading free size below the width it reads that
+    operand with: blocked), guarded, undeclared (its custom.config gives no
+    width for an operand read along its leading free dimension) or unchecked
+    (no source or custom.config); per operand what it compared (`sides`);
+    the source file and its sha256."""
+
+    sid: int
+    name: str
+    status: str
+    reason: str = ""
+    source: Optional[str] = None
+    sha256: Optional[str] = None
+    sides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    @property
+    def blocks(self) -> bool:
+        return self.status == UNGUARDED
+
+    def record(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def check_custom_kernel(
+    sid: int,
+    sol: Mapping[str, Any],
+    name: str,
+    source: Optional[Path],
+    trans: Tuple[bool, bool] = (True, False),
+    missing: str = "",
+) -> StaticFinding:
+    """The static check of the hand-written kernel `name` of solution `sol`
+    against its source `source` (None: `missing` says why there is none):
+    along a leading free dimension (M of a non-transposed A, N of a
+    transposed B; the solution's problem type, else `trans`) the least free
+    size its predicates admit must reach the global-read vector width its
+    custom.config declares for that operand."""
+    if source is None:
+        return StaticFinding(sid, name, "unchecked", missing or f"no {name}.s found")
+    try:
+        config = custom_config(source)
+        digest = sha256_file(source)
+    except (OSError, ValueError) as e:
+        return StaticFinding(sid, name, "unchecked", str(e), str(source))
+    pt = sol.get("problemType") or {}
+    trans_a = bool(pt["transA"]) if "transA" in pt else trans[0]
+    trans_b = bool(pt["transB"]) if "transB" in pt else trans[1]
+    built = sol.get("sizeMapping") or {}
+    preds = predicate_leaves(sol.get("problemPredicate"))
+    sides: Dict[str, Dict[str, Any]] = {}
+    unguarded: List[str] = []
+    undeclared: List[str] = []
+    for op, dim, index, key in STATIC_SIDES:
+        raw = config.get(key)
+        width = raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+        width = width if width is not None and width > 0 else None
+        floor, by = free_size_floor(preds, index)
+        leading = not trans_a if op == "A" else trans_b
+        sides[op] = {
+            "free_size": dim,
+            "leading_free": leading,
+            "declared_width": width,
+            "built_width": built.get(f"grvw{op}"),
+            "floor": floor,
+            "predicates": by,
+        }
+        if not leading:
+            continue
+        if width is None:
+            undeclared.append(op)
+        elif width > floor:
+            parts = ", ".join(by) or "no size predicate"
+            low = f"{dim} of {floor}" + (
+                f" to {width - 1}" if width - 1 > floor else ""
+            )
+            unguarded.append(
+                f"its predicates ({parts}) admit {low}, below the global-read "
+                f"vector width {width} its custom.config declares for {op}, which it "
+                f"reads along {dim}: such a {dim} reads outside {op}"
+            )
+    if unguarded:
+        status = UNGUARDED
+        reason = (
+            "unguarded in the static check: "
+            + "; ".join(unguarded)
+            + " (TensileLite builds a hand-written kernel with global-read vector "
+            "widths of 1 and derives its LeadingFree predicates from them)"
+        )
+    elif undeclared:
+        status = "undeclared"
+        reason = (
+            f"its custom.config declares no global-read vector width for "
+            f"{' and '.join(undeclared)}, read along a leading free dimension"
+        )
+    else:
+        status, reason = "guarded", ""
+    return StaticFinding(sid, name, status, reason, str(source), digest, sides)
+
+
+def static_check(
+    dat_dir: Any,
+    stems: Iterable[str],
+    sids: Iterable[int],
+    sources: Optional[Mapping[str, Path]],
+    trans: Tuple[bool, bool] = (True, False),
+    missing: str = "",
+) -> Dict[int, StaticFinding]:
+    """{solution: StaticFinding} of the hand-written kernels among `sids` in
+    the stems' logic files (`check_custom_kernel`), each found in `sources`
+    ({kernel name: source}, `custom_kernel_sources`; None: there are none,
+    `missing` says why)."""
+    wanted = {int(s) for s in sids}
+    out: Dict[int, StaticFinding] = {}
+    for stem in stems:
+        data = read_tensile_logic(library_logic_path(dat_dir, stem)) or {}
+        for sol in data.get("solutions") or []:
+            sid = int(sol.get("index", -1))
+            name = custom_kernel_name(sol)
+            if sid not in wanted or sid in out or name is None:
+                continue
+            src = sources.get(name) if sources is not None else None
+            why = missing if sources is None else f"no {name}.s among the sources"
+            out[sid] = check_custom_kernel(sid, sol, name, src, trans, why)
+    return out
+
+
+def harness_caps(
+    path: Path, env: Optional[Mapping[str, str]] = None, timeout_s: float = 60.0
+) -> Set[str]:
+    """The options the harness at `path` takes beyond the original ones, as
+    its `--caps` lists them (it runs no HIP call); none for a harness built
+    before --caps existed, which refuses it."""
+    try:
+        proc = subprocess.run(
+            [str(path), "--caps"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=dict(env) if env is not None else None,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if proc.returncode != 0:
+        return set()
+    for line in reversed(proc.stdout.splitlines()):
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("caps"), list):
+            return {str(c) for c in doc["caps"]}
+    return set()
+
+
 # ── the verdict cache ────────────────────────────────────────────────────────
+
+
+def unfresh(rec: Mapping[str, Any]) -> bool:
+    """Whether a cached verdict is a pass or untested verdict of the tiny
+    stage whose runs did not all have their operands at fresh allocations
+    (`evidence.fresh` false: the harness took no --fresh, or the device or
+    a process could not place them so), where a read before an operand may
+    land in another buffer unseen, or whose evidence does not say (no
+    `fresh`). A later gate does not take it; a crash or a failure stands
+    wherever it happened."""
+    if rec.get("stage") != TINY or rec.get("verdict") not in ("pass", "untested"):
+        return False
+    evidence = rec.get("evidence")
+    fresh = evidence.get("fresh", False) if isinstance(evidence, Mapping) else False
+    return fresh is False
 
 
 class VerdictCache:
@@ -697,11 +1087,14 @@ class VerdictCache:
         code: str,
         proto: str,
         timeout_s: Optional[float] = None,
+        fresh: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """The verdict that holds for a kernel: a failure under any
         protocol, else a crash, pass or untested verdict under `proto`; a
         crash of hangs alone (its `timeout_s`) not when `timeout_s` is
-        longer, since the kernel may finish within it."""
+        longer, since the kernel may finish within it; with `fresh`, a
+        tiny-stage pass or untested verdict made without fresh operands
+        not (`unfresh`)."""
         found = None
         for rec in self.records():
             if (rec["kernel_id"], rec.get("device"), rec.get("code")) != (
@@ -716,6 +1109,8 @@ class VerdictCache:
                 continue
             hung = rec.get("timeout_s")
             if hung is not None and timeout_s is not None and timeout_s > hung:
+                continue
+            if fresh and unfresh(rec):
                 continue
             found = rec
         return found
@@ -886,10 +1281,19 @@ class Task:
     alone: bool = False
     first_launch: bool = False
 
-    def command(self, harness: Path, problem: ProblemType) -> List[str]:
+    @property
+    def stage(self) -> str:
+        return self.shape.stage
+
+    def command(
+        self, harness: Path, problem: ProblemType, fresh: bool = False
+    ) -> List[str]:
+        """The harness's command; `fresh` when the harness takes --fresh."""
         return [
             str(harness),
-            *self.shape.args(problem.trans_a, problem.trans_b, problem.stored_k),
+            *self.shape.args(
+                problem.trans_a, problem.trans_b, problem.stored_k, fresh=fresh
+            ),
             "--ids",
             ",".join(str(s) for s in self.sids),
             "--reps",
@@ -1077,7 +1481,9 @@ def run_task(
     ready, between two records, or after its last one; it is then killed.
     `check` sees the ready record and every solution's record as it arrives
     and stops the process by raising; `stop` stops it from outside
-    (GateError). A process that exits non-zero, dies or hangs after it
+    (GateError). The records of a tiny-stage task, and its own, name the
+    stage and whether its operands were at fresh allocations (the ready
+    line's `fresh`). A process that exits non-zero, dies or hangs after it
     reported ready makes its culprit, the first solution the harness found
     without all its repetitions, a crash: confirmed when the task runs the
     culprit `alone`, else to be confirmed by the task that runs it alone,
@@ -1113,6 +1519,12 @@ def run_task(
     records: List[Dict[str, Any]] = []
     ready: Optional[Dict[str, Any]] = None
     timed_out = stopped = False
+
+    def stamp(rec: Dict[str, Any]) -> None:
+        if task.stage != MAIN:
+            rec["stage"] = task.stage
+            rec["fresh"] = bool((ready or {}).get("fresh"))
+
     problem: Optional[BaseException] = None
     last = time.monotonic()
     while True:
@@ -1137,6 +1549,7 @@ def run_task(
             ready = rec
         else:
             rec["tag"] = task.tag
+            stamp(rec)
             records.append(rec)
         if check is not None:
             try:
@@ -1181,6 +1594,8 @@ def run_task(
     not_found = sorted(set(task.sids) - set(found))
     if not_found:
         rec["not_found"] = not_found
+    if ready is not None:
+        stamp(rec)
     following: List[Task] = []
     if proc.returncode != 0 or timed_out:
         rec["stderr"] = "".join(err)[-1200:]
@@ -1198,16 +1613,16 @@ def run_task(
             )
         culprit = next((s for s in found if done.get(s, 0) < task.reps), None)
         if culprit is not None:
-            records.append(
-                {
-                    "tag": task.tag,
-                    "sid": culprit,
-                    "crash": True,
-                    "confirmed": task.alone,
-                    "rc": proc.returncode,
-                    "timeout": timed_out,
-                }
-            )
+            crash = {
+                "tag": task.tag,
+                "sid": culprit,
+                "crash": True,
+                "confirmed": task.alone,
+                "rc": proc.returncode,
+                "timeout": timed_out,
+            }
+            stamp(crash)
+            records.append(crash)
             if not task.alone:
                 following.append(replace(task, sids=[culprit], alone=True))
             after = found[found.index(culprit) + 1 :]
@@ -1529,19 +1944,25 @@ def run_passes(
     say: Callable[[str], None],
     settle: Optional[Settle] = None,
     shapes: Sequence[Shape] = SHAPES,
+    tiny: Sequence[Shape] = (),
+    tiny_sids: Sequence[int] = (),
 ) -> Outcome:
-    """The gate's passes over `sids`: `shapes`, the first launches, the
-    shapes again with K rounded up where they were not supported, and the
-    follow-ups of failures (see the module docstring). `settle(outcome,
-    sids, failures_only)` hears of the kernels whose verdicts no later pass
-    can change: before the follow-ups those no follow-up runs, after them the
-    rest; when a pass stops early, with `failures_only`, every kernel
-    (a wrong result stands whatever the passes left to run), unless the
-    harness turned out to run other kernels."""
+    """The gate's passes over `sids`: `shapes`, the first launches, and over
+    `tiny_sids` the tiny stage's shapes `tiny`; then the shapes of both again
+    with K rounded up where they were not supported, and the follow-ups of
+    failures (see the module docstring). `settle(outcome, sids,
+    failures_only)` hears of the kernels whose verdicts no later pass can
+    change: before the follow-ups those no follow-up runs, after them the
+    rest; when a pass stops early, with `failures_only`, every kernel (a
+    wrong result stands whatever the passes left to run), unless the harness
+    turned out to run other kernels."""
     outcome = Outcome()
     tell: Settle = settle or (lambda _o, _s, _f: None)
+    everyone = sorted(set(sids) | set(tiny_sids))
+    every_shape = [*shapes, *tiny]
     try:
         tasks = main_tasks(sids, settings, workers, shapes)
+        tasks += main_tasks(tiny_sids, settings, workers, tiny)
         first = (
             list(sids)
             if settings.first_launch == "all"
@@ -1553,9 +1974,14 @@ def run_passes(
         )
         tasks += first_launch_tasks(kernels, first, settings)
         say(
-            f"{len(sids):,} kernels x {len(shapes)} shapes in {len(tasks)} harness "
-            f"processes ({len(first)} kernels launched first in "
-            f"{settings.repetitions} processes each)"
+            f"{len(sids):,} kernels x {len(shapes)} shapes"
+            + (
+                f" and {len(tiny_sids):,} x {len(tiny)} tiny shapes"
+                if tiny_sids and tiny
+                else ""
+            )
+            + f" in {len(tasks)} harness processes ({len(first)} kernels "
+            f"launched first in {settings.repetitions} processes each)"
         )
         run(tasks, outcome)
         lost = first_launches_lost(outcome)
@@ -1566,17 +1992,17 @@ def run_passes(
                 f"pipeline reads alike in every process"
             )
         _, _, unsupported = tag_results(outcome.records)
-        again = roundup_tasks(unsupported, kernels, settings, shapes)
+        again = roundup_tasks(unsupported, kernels, settings, every_shape)
         if again:
             n = sum(len(t.sids) for t in again)
             say(f"{n:,} unsupported (kernel, shape) pairs again with K rounded up")
             run(again, outcome)
         failed, passed, _ = tag_results(outcome.records)
-        by_tag = {s.name: s for s in shapes}
+        by_tag = {s.name: s for s in every_shape}
         by_tag.update({t.tag: t.shape for t in again})
         follow = followup_tasks(failed, passed, kernels, by_tag, settings)
         waiting = {s for t in follow for s in t.sids}
-        tell(outcome, [s for s in sids if s not in waiting], False)
+        tell(outcome, [s for s in everyone if s not in waiting], False)
         if follow:
             say(f"following up {len(waiting):,} kernels of the families of failures")
             run(follow, outcome)
@@ -1584,9 +2010,41 @@ def run_passes(
     except HarnessMismatch:
         raise
     except BaseException:
-        tell(outcome, list(sids), True)
+        tell(outcome, everyone, True)
         raise
     return outcome
+
+
+def _severity(rec: Optional[Mapping[str, Any]]) -> int:
+    """How much a stage's verdict record weighs in its kernel's verdict."""
+    if rec is None:
+        return -1
+    return {"fail": 3, "crash": 2, "pass": 1}.get(str(rec.get("verdict")), 0)
+
+
+def kernel_verdict(
+    main: Optional[Mapping[str, Any]], tiny: Optional[Mapping[str, Any]]
+) -> Tuple[str, Optional[Mapping[str, Any]]]:
+    """(a kernel's verdict, the stage record that decides it) from its
+    verdicts of the two stages (MAIN, TINY): a failure or a crash of either,
+    the worse of them; else `unchecked` while a stage has no verdict, else
+    pass when either passed, else untested."""
+    worst = max((main, tiny), key=_severity)
+    if worst is not None and worst.get("verdict") in ("fail", "crash"):
+        return str(worst["verdict"]), worst
+    if main is None or tiny is None:
+        return "unchecked", None
+    return ("pass" if _severity(worst) == 1 else "untested"), main
+
+
+def _fresh_runs(outcome: Outcome) -> Dict[int, List[bool]]:
+    """{solution: whether each of its tiny-stage records ran on operands at
+    fresh allocations}."""
+    out: Dict[int, List[bool]] = collections.defaultdict(list)
+    for r in outcome.records:
+        if r.get("stage") == TINY:
+            out[int(r["sid"])].append(bool(r.get("fresh")))
+    return out
 
 
 def run_gate(
@@ -1595,8 +2053,9 @@ def run_gate(
     warn: Callable[[str], None] = lambda _m: None,
     children: Optional[procs.ChildGroups] = None,
 ) -> Dict[str, Any]:
-    """Check every kernel of the pool without a verdict, cache the new
-    verdicts, and write `verdicts.json`, `blocklist.json` and
+    """The static check of the pool's hand-written kernels, then the harness
+    on every other kernel without a verdict of a stage (MAIN, TINY); cache
+    the new verdicts, and write `verdicts.json`, `blocklist.json` and
     `gate_summary.json` into `spec.out_dir`; returns the summary. Harness
     processes start through `children` when given (lib/procs.py)."""
     from . import bench_env as benv
@@ -1634,33 +2093,86 @@ def run_gate(
     codes = code_digests(spec.dat_dir, sorted(set(owner[s] for s in kernels)))
     prebuilt = Path(sec["harness"]) if sec.get("harness") else None
     try:
-        shapes = shapes_of(harness_problem(cfg))
+        problem_type: Optional[ProblemType] = harness_problem(cfg)
     except GateError:
         # Raised again below when a kernel needs a check.
-        shapes = SHAPES
-    proto = protocol(settings, harness_digest(prebuilt, spec.build_dir), shapes)
+        problem_type = None
+    shapes = shapes_of(problem_type)
+    tiny = tiny_shapes_of(problem_type)
+    hid = harness_digest(prebuilt, spec.build_dir)
+    proto = protocol(settings, hid, shapes)
+    tiny_proto = protocol(settings, hid, tiny, TINY)
     cache = VerdictCache(spec.cache_dir)
 
     def code_of(sid: int) -> str:
         return codes[owner[sid]]
 
-    known: Dict[int, Dict[str, Any]] = {}
-    pending: List[int] = []
-    for sid, k in kernels.items():
-        if seeded.blocks(k):
-            continue
-        rec = cache.lookup(
-            ki.kernel_id(k), dkey, code_of(sid), proto, settings.timeout_s
+    unlisted = [s for s, k in kernels.items() if not seeded.blocks(k)]
+    static: Dict[int, StaticFinding] = {}
+    static_on = sec.get("static_check", True) is not False
+    sources_dir: Optional[Path] = None
+    sources_what = "off (correctness.static_check)"
+    if static_on:
+        sources_dir, sources_what = custom_kernels_dir(cfg, spec.build_dir)
+        sources = (
+            custom_kernel_sources(sources_dir) if sources_dir is not None else None
         )
-        if rec is not None:
-            known[sid] = rec
-        else:
-            pending.append(sid)
+        h = dict(cfg.get("hipblaslt") or {})
+        trans = (str(h.get("transA", "T")) == "T", str(h.get("transB", "N")) == "T")
+        static = static_check(
+            spec.dat_dir,
+            sorted(set(owner.values())),
+            unlisted,
+            sources,
+            trans,
+            sources_what,
+        )
+        for status, what in (
+            ("unchecked", "cannot be checked statically"),
+            ("undeclared", "declare no global-read vector width the check needs"),
+        ):
+            found = [f for f in static.values() if f.status == status]
+            if found:
+                warn(
+                    f"{len(found)} hand-written kernel(s) {what} (e.g. {found[0].name}: "
+                    f"{found[0].reason}); the tiny shapes still run them"
+                )
+    unguarded = {s for s, f in static.items() if f.blocks}
+    known: Dict[int, Dict[str, Any]] = {}
+    known_tiny: Dict[int, Dict[str, Any]] = {}
+    pending: List[int] = []
+    pending_tiny: List[int] = []
+    not_fresh = 0
+    for sid in unlisted:
+        if sid in unguarded:
+            continue
+        kid = ki.kernel_id(kernels[sid])
+        for proto_, have, want in (
+            (proto, known, pending),
+            (tiny_proto, known_tiny, pending_tiny),
+        ):
+            rec = cache.lookup(kid, dkey, code_of(sid), proto_, settings.timeout_s)
+            if rec is not None:
+                have[sid] = rec
+                continue
+            want.append(sid)
+            if proto_ == tiny_proto and cache.lookup(
+                kid, dkey, code_of(sid), proto_, settings.timeout_s, fresh=False
+            ):
+                not_fresh += 1
     say(
         f"pool {len(kernels):,} kernels: {len(seeded)} blocked by lists, "
-        f"{len(known):,} with a cached verdict, {len(pending):,} to check "
-        f"(device {dkey}, protocol {proto})"
+        f"{len(unguarded)} unguarded in the static check, {len(known):,} with a "
+        f"cached verdict, {len(pending):,} to check (device {dkey}, protocol "
+        f"{proto}); tiny shapes: {len(known_tiny):,} cached, "
+        f"{len(pending_tiny):,} to check (protocol {tiny_proto})"
     )
+    if not_fresh:
+        say(
+            f"{not_fresh:,} of the kernels to check on the tiny shapes have a "
+            f"cached verdict of them made without fresh operands, which no gate "
+            f"takes: they run the tiny shapes again"
+        )
     summary: Dict[str, Any] = {
         "library_stem": spec.library_stem,
         "library_digest": identity.digest,
@@ -1681,9 +2193,33 @@ def run_gate(
         "not_found": 0,
         "gpu_seconds": 0.0,
         "dry_run": bool(spec.dry_run),
+        "tiny": {
+            "protocol": tiny_proto,
+            "shapes": [dict(s.record(), text=s.text()) for s in tiny],
+            "cached": len(known_tiny),
+            "pending": len(pending_tiny),
+            "cached_not_fresh": not_fresh,
+            "checked": 0,
+            "harness_fresh": None,
+            "tasks": 0,
+            "fresh_tasks": 0,
+        },
+        "static": {
+            "enabled": static_on,
+            "sources": str(sources_dir) if sources_dir is not None else None,
+            "where": sources_what,
+            "hand_written": len(static),
+            "statuses": dict(
+                sorted(collections.Counter(f.status for f in static.values()).items())
+            ),
+            "unguarded": [
+                {"solution_index": s, "name": static[s].name} for s in sorted(unguarded)
+            ],
+        },
     }
     settled: Dict[int, Dict[str, Any]] = {}
-    if pending and not spec.dry_run:
+    settled_tiny: Dict[int, Dict[str, Any]] = {}
+    if (pending or pending_tiny) and not spec.dry_run:
         problem = harness_problem(cfg)
         h = harness(
             Path(spec.cache_dir),
@@ -1701,9 +2237,10 @@ def run_gate(
             raise GateError(f"devices {list(spec.devices)} reach no GPU here")
         summary["gpus"] = gpus
         env = benv.bench_env_with()
+        fresh_ok = [False]
 
         def cmd_of(task: Task) -> List[str]:
-            return task.command(h.path, problem)
+            return task.command(h.path, problem, fresh_ok[0])
 
         def check(line: Mapping[str, Any], task: Task) -> None:
             if line.get("ready") is True:
@@ -1737,33 +2274,50 @@ def run_gate(
                 children=children,
             )
 
+        stages = (
+            (MAIN, set(pending), settled, proto),
+            (TINY, set(pending_tiny), settled_tiny, tiny_proto),
+        )
+
         def settle(outcome: Outcome, sids: Iterable[int], failures_only: bool) -> None:
-            verdicts = verdicts_of(outcome.records)
+            by_stage = {
+                MAIN: verdicts_of(
+                    r for r in outcome.records if r.get("stage", MAIN) == MAIN
+                ),
+                TINY: verdicts_of(r for r in outcome.records if r.get("stage") == TINY),
+            }
+            fresh = _fresh_runs(outcome)
             new = []
             for sid in sids:
-                if sid in settled:
-                    continue
-                v = verdicts.get(sid) or Verdict(sid)
-                if failures_only and v.verdict != "fail":
-                    continue
-                k = kernels[sid]
-                settled[sid] = {
-                    "kernel_id": ki.kernel_id(k),
-                    "name": k["kernel_name"],
-                    "signature": ki.signature_label(k),
-                    "device": dkey,
-                    "code": code_of(sid),
-                    "protocol": proto,
-                    "verdict": v.verdict,
-                    "evidence": v.evidence(),
-                    "reason": (
-                        failure_reason(v) if v.verdict in BLOCKING_VERDICTS else ""
-                    ),
-                    "time": kfd.utc_iso(),
-                }
-                if v.verdict == "crash" and v.hangs == v.crashes:
-                    settled[sid]["timeout_s"] = settings.timeout_s
-                new.append(settled[sid])
+                for stage, wanted, done, stage_proto in stages:
+                    if sid not in wanted or sid in done:
+                        continue
+                    v = by_stage[stage].get(sid) or Verdict(sid)
+                    if failures_only and v.verdict != "fail":
+                        continue
+                    k = kernels[sid]
+                    rec: Dict[str, Any] = {
+                        "kernel_id": ki.kernel_id(k),
+                        "name": k["kernel_name"],
+                        "signature": ki.signature_label(k),
+                        "device": dkey,
+                        "code": code_of(sid),
+                        "protocol": stage_proto,
+                        "verdict": v.verdict,
+                        "evidence": v.evidence(),
+                        "reason": (
+                            failure_reason(v) if v.verdict in BLOCKING_VERDICTS else ""
+                        ),
+                        "time": kfd.utc_iso(),
+                    }
+                    if stage != MAIN:
+                        runs = fresh.get(sid) or []
+                        rec["stage"] = stage
+                        rec["evidence"]["fresh"] = all(runs) if runs else None
+                    if v.verdict == "crash" and v.hangs == v.crashes:
+                        rec["timeout_s"] = settings.timeout_s
+                    done[sid] = rec
+                    new.append(rec)
             cache.add(new)
 
         with gpu_lease.hold_usable(
@@ -1775,6 +2329,20 @@ def run_gate(
         ) as leases:
             gpus = kfd.bench_gpus(leases.devices) or gpus
             summary["gpus"] = gpus
+            if pending_tiny:
+                probe = dict(env, ROCR_VISIBLE_DEVICES=str(gpus[0]))
+                for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+                    probe.pop(var, None)
+                fresh_ok[0] = "fresh" in harness_caps(h.path, probe)
+                summary["tiny"]["harness_fresh"] = fresh_ok[0]
+                if not fresh_ok[0]:
+                    warn(
+                        f"the harness {h.path} takes no --fresh by its --caps (it "
+                        f"was built before the option existed, or --caps failed): "
+                        f"the tiny shapes run on its usual allocations, where a read "
+                        f"before an operand may land in another buffer and go unseen; "
+                        f"the next gate runs them again"
+                    )
             outcome = run_passes(
                 kernels,
                 sorted(pending),
@@ -1785,6 +2353,8 @@ def run_gate(
                 say,
                 settle,
                 shapes,
+                tiny,
+                sorted(pending_tiny),
             )
         summary["tasks"] = len(outcome.tasks)
         summary["harness_crashes"] = sum(
@@ -1802,11 +2372,27 @@ def run_gate(
                 f"the harness finds {len(found_nowhere)} kernel(s) of the pool "
                 f"nowhere (e.g. solution {min(found_nowhere)}); they stay untested"
             )
+        tiny_tasks = [t for t in outcome.tasks if t.get("stage") == TINY]
+        n_fresh = sum(1 for t in tiny_tasks if t.get("fresh"))
+        summary["tiny"].update(tasks=len(tiny_tasks), fresh_tasks=n_fresh)
+        if fresh_ok[0] and n_fresh < len(tiny_tasks):
+            warn(
+                f"{len(tiny_tasks) - n_fresh} of the {len(tiny_tasks)} tiny-shape "
+                f"harness processes could not place their operands at fresh "
+                f"allocations (no virtual memory management on the device?): those "
+                f"ran on its usual allocations, and the next gate runs their "
+                f"kernels on the tiny shapes again"
+            )
         summary["gpu_seconds"] = round(sum(t["wall_s"] for t in outcome.tasks), 1)
         known.update(settled)
+        known_tiny.update(settled_tiny)
         summary["checked"] = len(pending)
-    elif pending:
-        warn(f"dry run: {len(pending):,} kernels left without a verdict")
+        summary["tiny"]["checked"] = len(pending_tiny)
+    elif pending or pending_tiny:
+        warn(
+            f"dry run: {len(set(pending) | set(pending_tiny)):,} kernels left "
+            f"without a verdict"
+        )
 
     rows = []
     blocked: List[cx.Entry] = list(seeded.entries)
@@ -1828,27 +2414,58 @@ def run_gate(
             )
             counts["listed"] += 1
             continue
-        rec = known.get(sid)
-        if rec is None:
-            rows.append(dict(base, verdict="unchecked", source=None))
-            counts["unchecked"] += 1
-            continue
-        source = "gate" if sid in settled else "cache"
-        rows.append(
-            dict(
-                base,
-                verdict=rec["verdict"],
-                source=source,
-                reason=rec.get("reason") or "",
-                evidence=rec.get("evidence"),
+        finding = static.get(sid)
+        if finding is not None:
+            base["static"] = finding.record()
+        if finding is not None and finding.blocks:
+            rows.append(
+                dict(
+                    base,
+                    verdict=UNGUARDED,
+                    source="static check",
+                    reason=finding.reason,
+                )
             )
-        )
-        counts[rec["verdict"]] += 1
-        if rec["verdict"] in BLOCKING_VERDICTS:
+            counts[UNGUARDED] += 1
             blocked.append(
                 cx.Entry(
                     name=str(k["kernel_name"]),
-                    reason=str(rec.get("reason") or "wrong results in the exact check"),
+                    reason=finding.reason,
+                    kernel_id=kid,
+                    signature=ki.signature_label(k),
+                    source="correctness gate (static check)",
+                )
+            )
+            continue
+        main, tiny_rec = known.get(sid), known_tiny.get(sid)
+        verdict, decided = kernel_verdict(main, tiny_rec)
+        if main is None and tiny_rec is None:
+            rows.append(dict(base, verdict="unchecked", source=None))
+            counts["unchecked"] += 1
+            continue
+        own = decided or main or tiny_rec or {}
+        source = "gate" if sid in settled or sid in settled_tiny else "cache"
+        row = dict(
+            base,
+            verdict=verdict,
+            source=source,
+            reason=str(own.get("reason") or "") if decided is not None else "",
+            evidence=(main or {}).get("evidence"),
+        )
+        if tiny_rec is not None:
+            row["tiny"] = {
+                "verdict": tiny_rec["verdict"],
+                "source": "gate" if sid in settled_tiny else "cache",
+                "reason": tiny_rec.get("reason") or "",
+                "evidence": tiny_rec.get("evidence"),
+            }
+        rows.append(row)
+        counts[verdict] += 1
+        if verdict in BLOCKING_VERDICTS:
+            blocked.append(
+                cx.Entry(
+                    name=str(k["kernel_name"]),
+                    reason=str(own.get("reason") or "wrong results in the exact check"),
                     kernel_id=kid,
                     signature=ki.signature_label(k),
                     source="correctness gate",
@@ -1862,6 +2479,7 @@ def run_gate(
         "library_digest": identity.digest,
         "device": dkey,
         "protocol": proto,
+        "tiny_protocol": tiny_proto,
     }
     _write(out_dir / VERDICTS_FILE, dict(head, kernels=rows))
     cx.write_blocklist(out_dir / cx.BLOCKLIST_FILE, cx.Blocklist(blocked), **head)

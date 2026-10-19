@@ -803,12 +803,16 @@ void v3_view_key(const Model& m, const Config& c, const std::int64_t* attrs, std
     out[kV3ViewKeyFields + j] = static_cast<std::uint64_t>(attrs[j]);
 }
 
+// The fraction range is relative to the device; the CU floor (0 for none)
+// bounds the usable CUs on any device, a compute partition or a small budget
+// inside one included.
 bool v3_supports(const Model& m, const ExecutionContext& context, const Hardware& hardware) {
   if (hardware.N_CU == 0) return false;
   const unsigned s = static_cast<unsigned>(context.schedule);
   if (s > 2 || ((m.schedules >> s) & 1u) == 0) return false;
-  const double fraction =
-      static_cast<double>(effective_cus(context, hardware)) / static_cast<double>(hardware.N_CU);
+  const std::size_t usable = effective_cus(context, hardware);
+  if (usable < m.min_effective_cus) return false;
+  const double fraction = static_cast<double>(usable) / static_cast<double>(hardware.N_CU);
   return fraction >= m.min_cu_fraction && fraction <= m.max_cu_fraction;
 }
 

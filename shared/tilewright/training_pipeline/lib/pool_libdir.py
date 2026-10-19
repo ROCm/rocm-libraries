@@ -25,10 +25,12 @@ directory except the weights file of one library stem, its blocklist sidecar
 (`<stem>.tilewright.blocklist`, lib/correctness.py) and the
 `tilewright_index`: the new directory holds a copy of the staged model under
 that weights file name, a copy of the staged sidecar when the model has one,
-and an index whose line for the stem names the model (the other stems' lines
-kept). hipBLASLt pointed at it serves the staged model with the kernels,
-solution indices, blocklist and other models of the library it was built
-from, without a deploy checkout or a model build.
+and an index whose one line for the stem names the model on every device
+(the other stems' lines kept, those for the devices of one PCI chip ID too,
+and a malformed one as it stands, so that the engine still loads no model
+for that stem). hipBLASLt pointed at it serves the staged model with the
+kernels, solution indices, blocklist and other models of the library it was
+built from, without a deploy checkout or a model build.
 """
 from __future__ import annotations
 
@@ -43,13 +45,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import msgpack
 
+from . import tilewright_index as twi
 from .correctness import sidecar_name
 from .dat import LOGIC_SUFFIXES, logic_stem, read_tensile_logic
 
 _SUFFIX = re.compile(r"((?:_ID[0-9a-fA-F-]+)?_gfx[0-9a-z]+(?:-[a-z]+)?)$")
 MARKER = ".pool_libdir.json"
 SERVING_MARKER = ".serving_libdir.json"
-INDEX_NAME = "tilewright_index"
+INDEX_NAME = twi.INDEX_NAME
 
 
 def split_stem(stem: str) -> Tuple[str, str]:
@@ -120,17 +123,11 @@ def build_pool_libdir(src: Path, keep: Sequence[str], dst: Path) -> Dict[str, ob
 
 
 def index_entries(text: str) -> List[Tuple[str, str]]:
-    """(stem, weights file) of a tilewright_index as the engine reads it: a
+    """(stem, weights file) of the rows without a PCI chip ID of a
+    tilewright_index as the engine reads it (lib/tilewright_index.py): a
     '#' starts a comment, the first two tokens of a line are stem and file,
     and the first line naming a stem counts."""
-    out: List[Tuple[str, str]] = []
-    seen = set()
-    for line in text.splitlines():
-        tokens = line.split("#", 1)[0].split()
-        if len(tokens) >= 2 and tokens[0] not in seen:
-            seen.add(tokens[0])
-            out.append((tokens[0], tokens[1]))
-    return out
+    return [(s, f) for s, f, c in twi.parse(text).rows if c is None]
 
 
 def build_serving_libdir(
@@ -147,8 +144,9 @@ def build_serving_libdir(
     with the blocklist sidecar `blocklist` (none: the stem has none, whatever
     `src` holds); returns a summary (also written to
     `dst/.serving_libdir.json`). Another stem of `src`'s index whose line
-    names `weights_name` is left out. ValueError when `model` does not hash
-    to `sha256`."""
+    names `weights_name` is left out; another stem's malformed rows are kept
+    as they stand (`malformed_rows` of the summary). ValueError when `model`
+    does not hash to `sha256`."""
     src, dst = Path(src).resolve(), Path(dst)
     if not weights_name or "/" in weights_name or weights_name.startswith("."):
         raise ValueError(f"{weights_name!r} is not a plain file name")
@@ -175,13 +173,18 @@ def build_serving_libdir(
     if blocked is not None:
         (dst / sidecar).write_bytes(blocked)
     index = src / INDEX_NAME
-    kept, dropped = [], []
+    kept: List[twi.Row] = []
+    dropped: List[twi.Row] = []
+    malformed: List[str] = []
     if index.is_file():
-        for s, w in index_entries(index.read_text()):
+        idx = twi.parse(twi.read_text(index))
+        for s, w, c in idx.rows:
             if s == stem:
                 continue
-            (dropped if w == weights_name else kept).append((s, w))
-    lines = [f"{s}\t{w}" for s, w in kept + [(stem, weights_name)]]
+            (dropped if w == weights_name else kept).append((s, w, c))
+        malformed = [line for _, s, line in idx.malformed_rows if s != stem]
+    lines = [twi.row_line(r) for r in twi.in_stem_order(kept)] + malformed
+    lines.append(twi.row_line((stem, weights_name, None)))
     (dst / INDEX_NAME).write_text("\n".join(lines) + "\n")
     summary = {
         "source": str(src),
@@ -193,8 +196,9 @@ def build_serving_libdir(
         "blocklist_sha256": (
             hashlib.sha256(blocked).hexdigest() if blocked is not None else None
         ),
-        "other_stems": [s for s, _ in kept],
-        "left_out_stems": [s for s, _ in dropped],
+        "other_stems": list(dict.fromkeys(s for s, _, _ in kept)),
+        "left_out_stems": list(dict.fromkeys(s for s, _, _ in dropped)),
+        "malformed_rows": malformed,
     }
     (dst / SERVING_MARKER).write_text(json.dumps(summary, indent=2) + "\n")
     return summary

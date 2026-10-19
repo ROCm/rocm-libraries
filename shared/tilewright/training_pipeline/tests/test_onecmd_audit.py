@@ -3374,7 +3374,9 @@ def test_a_build_refused_for_another_hipblaslt_build_is_named_so(
         ro, "audit_status", lambda cfg, paths: ("incomplete", "1 kernel to bench")
     )
     current = {3: "aaa", 4: "bbb", 5: "eee"}
-    monkeypatch.setattr(ro.Pipeline, "pool_digests", lambda self: current)
+    monkeypatch.setattr(
+        ro.Pipeline, "pool_digests", lambda self, required=False: current
+    )
     run_dir = tmp_path / "run"
     assert run(audit_stubs, cfg, run_dir, "--mode", "full") == 2
     err = capsys.readouterr().err

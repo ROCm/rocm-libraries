@@ -194,8 +194,11 @@ def tdm_operands(kernel: Mapping[str, Any]) -> Tuple[str, ...]:
 
 def identity_attributes(kernel: Mapping[str, Any]) -> Dict[str, int]:
     """A kernel's attributes as the identity rule reads them: the temporal
-    hint of a TDM-loaded operand 0."""
+    hint of a TDM-loaded operand 0, and without `dat.HAND_WRITTEN`, which its
+    name already tells apart and which records written before the launch
+    rule read it lack."""
     out = dict(kernel.get("attributes") or {})
+    out.pop(dat.HAND_WRITTEN, None)
     for operand in tdm_operands(kernel):
         name = f"temporal_hint_{operand.lower()}"
         if name in out:

@@ -42,6 +42,13 @@ seed:
   # shapes per cell and each active round's new shapes per leaf.
   target_per_cell: 400
   shapes_per_cell: 150
+  # A leaf the previous round's stage04b retrained (below the bar, or for
+  # a held-out collapse) draws twice shapes_per_cell, and a leaf draws half
+  # as many again as its new shapes hold with K above 32768; no leaf draws
+  # fewer than shapes_per_cell (README *Weak cells and very large K
+  # (stage01)*).
+  weak_cell_factor: 2.0
+  large_k_factor: 1.5
   seed: 42
   n_strata: 2
 
@@ -182,7 +189,9 @@ validate:
   split_floor: 0.83
   split_min_improvement: 0.02
   split_after_attempts: 1
-  max_split_depth: 6
+  # Cells do not split: a cell below the bar is retrained on every round's
+  # data. The split keys above act only with a max_split_depth above 0.
+  max_split_depth: 0
   structural_split_min_octaves: 0.0
 
 full:

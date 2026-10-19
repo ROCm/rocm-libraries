@@ -46,6 +46,11 @@ then dropped, quarantined under this measurement's own protocol
 (audit_sustained), as in protocol v2; so is a line whose bench leaves its
 GPU wedged, at once.
 
+Blocked kernels. As in protocol v2: no set holds a kernel the plan's
+blocklist names (one a planned set held is dropped), a pick of one is no
+pick, a canary of one refuses the plan, and the plan records the
+blocklist's sha256.
+
 Increments. A plan after the first plans the GEMMs that the current v2
 measurement makes power-capped and no generation has planned, and the
 planned ones whose set lacks a registered pick, each with its whole set:
@@ -66,7 +71,7 @@ import shutil
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from . import audit_v2 as v2
 from . import kernel_identity as ki
@@ -183,6 +188,8 @@ def plan(
     peak_tflops: Optional[float] = None,
     peak_note: str = "",
     identity: Optional[ki.LibraryIdentity] = None,
+    blocked: Iterable[int] = (),
+    blocklist: Optional[Mapping[str, Any]] = None,
 ) -> Optional[int]:
     """Plan the generation of the sustained measurement in `d` that the v2
     measurement in `v2d` asks for now (see the module docstring). `gemms`
@@ -193,11 +200,14 @@ def plan(
     with `settings` over DEFAULTS, the compute-bound rate resolved
     (`compute_bound_rate`) and the v2 measurement's canary and bench setup;
     with `identity`, the library the indices name, kernel ids are recorded
-    and earlier records must name the same kernels. Returns the new
+    and earlier records must name the same kernels. No set holds a solution
+    of `blocked`, and `blocklist`, the record of the blocklist they come
+    from, is the manifest's latest and the new generation's. Returns the new
     generation's index, or None when nothing needs a bench (the manifest is
     written either way: a measurement that plans no GEMM says that none is
     power-capped)."""
     d = Path(d)
+    blocked = {int(k) for k in blocked}
     m2 = v2.manifest(v2d)
     if m2 is None:
         raise v2.V2Error(f"no v2 measurement in {v2d} to plan a sustained one from")
@@ -220,6 +230,9 @@ def plan(
         }
     else:
         m["bench"] = {**dict(m.get("bench") or {}), **dict(m2.get("bench") or {})}
+    v2.blocked_canary(m, blocked)
+    if blocklist is not None:
+        m["blocklist"] = dict(blocklist)
     st = v2.settings_of(m)
     picks: Dict[Shape, Dict[str, int]] = {}
     for name, rec in sorted(v2.models(v2d).items()):
@@ -237,17 +250,19 @@ def plan(
         cls = stratum(s, mm.median[win], st) or str((prev or {}).get("stratum") or "")
         if not cls:
             continue
-        rows = {int(c["sol_idx_global"]) for c in g["candidates"]}
+        rows = {int(c["sol_idx_global"]) for c in g["candidates"]} - blocked
         mine = {n: k for n, k in (picks.get(s) or {}).items() if k in rows}
         if prev is not None and set(mine.values()) <= {int(k) for k in prev["kernels"]}:
             continue
-        near = near_winners(mm.median, cls, st)
-        kernels = list(
-            dict.fromkeys(
+        near = [k for k in near_winners(mm.median, cls, st) if k not in blocked]
+        kernels = [
+            k
+            for k in dict.fromkeys(
                 [*(int(k) for k in (prev or {}).get("kernels") or []), *near]
                 + list(mine.values())
             )
-        )
+            if k not in blocked
+        ]
         line = sus.sustained_line(adaptive_line(lines[s], config), kernels, st)
         entries.append(
             {
@@ -278,6 +293,8 @@ def plan(
         "models": sorted(v2.models(v2d)),
         "groups": {EXCLUSIVE: [order[i::n] for i in range(n)]},
     }
+    if blocklist is not None:
+        doc["blocklist"] = dict(blocklist)
     if identity is not None:
         named = {int(m["canary"]["kernel"])}
         named.update(int(k) for e in entries for k in e["kernels"])
@@ -291,6 +308,7 @@ def plan(
             "n_gemms": len(entries),
             "n_parts": n,
             "strata": dict(Counter(e["stratum"] for e in entries)),
+            **({"blocklist": dict(blocklist)} if blocklist is not None else {}),
         }
     )
     write_json(d / v2.MANIFEST, m)

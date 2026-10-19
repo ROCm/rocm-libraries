@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import dataclasses
 import math
 import random
 import struct
@@ -1429,6 +1430,138 @@ def test_serving_flags_can_be_rewritten_without_retraining():
         mlrec.with_trained_keys(data, [])
     tw = pytest.importorskip("tilewright")
     assert tw.describe(ev.load_model_bytes(gated, tw)).trained_keys == 2
+
+
+FLOORED = {
+    "min_cu_fraction": 0.25,
+    "max_cu_fraction": 1.0,
+    "schedules": ["default", "dynamic"],
+    "min_effective_cus": 64,
+}
+
+
+def test_cu_floor_round_trip_and_rewrite():
+    bundle = v3_bundle(
+        labels=[LARGE], contexts=FLOORED,
+        serving={"trained_key_gate": True, "cascade_keys": 8},
+        trained_view_keys=[9, 5],
+    )  # fmt: skip
+    data = write(bundle, provenance=PROVENANCE)
+    parsed = mlrec.read_model(data)
+    assert parsed["contexts"] == FLOORED
+    assert mlrec.read_header(data)["contexts"] == FLOORED
+    assert parsed["trained_view_keys"] == [5, 9]
+    assert parsed["provenance"] == mlrec.check_provenance(PROVENANCE)
+    assert write(mlrec.bundle_from_model(parsed), provenance=PROVENANCE) == data
+    at = mlrec._v3_header(data, len(data))["serving_offset"]
+    assert struct.unpack_from("<I", data, at)[0] == 0x80 | 0x100
+    # The floor follows the trained keys and precedes the provenance.
+    end = mlrec._v3_header(data, len(data))["header_end"]
+    tail = mlrec._provenance_bytes(mlrec.check_provenance(PROVENANCE))
+    assert data[end - len(tail) - 4 - 16 : end - len(tail)] == struct.pack(
+        "<QQI", 5, 9, 64
+    )
+
+    # Without the floor the file is byte for byte what a writer without it
+    # wrote, and the floor can be added or removed without retraining.
+    plain = {k: v for k, v in FLOORED.items() if k != "min_effective_cus"}
+    old = write(dict(bundle, contexts=plain), provenance=PROVENANCE)
+    assert mlrec.read_model(old)["contexts"] == plain
+    assert struct.unpack_from("<I", old, at)[0] == 0x80
+    assert len(old) == len(data) - 4
+    assert mlrec.with_cu_floor(old, 64) == data
+    assert mlrec.with_cu_floor(data, None) == old
+    assert mlrec.with_cu_floor(mlrec.with_cu_floor(data, 32), 64) == data
+    assert (
+        mlrec.read_model(mlrec.with_cu_floor(data, 1))["contexts"]["min_effective_cus"]
+        == 1
+    )
+    ungated = mlrec.with_trained_keys(data, None)
+    assert mlrec.read_model(ungated)["contexts"] == FLOORED
+    assert mlrec.with_cu_floor(ungated, None) == mlrec.with_trained_keys(old, None)
+    assert (
+        mlrec.read_model(data)["payload_crc32"]
+        == mlrec.read_model(old)["payload_crc32"]
+    )
+    with pytest.raises(mlrec.FormatError, match="MLREC_v3"):
+        mlrec.with_cu_floor(b"MLREC_v2" + data[8:], 64)
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2**32, True, 1.5, "64", None])
+def test_cu_floor_values_are_checked(bad):
+    if bad is None:
+        assert (
+            "min_effective_cus" not in mlrec.read_model(write(v3_bundle()))["contexts"]
+        )
+        return
+    with pytest.raises(ValueError, match="CU floor"):
+        write(v3_bundle(contexts=dict(FLOORED, min_effective_cus=bad)))
+    with pytest.raises(ValueError, match="CU floor"):
+        mlrec.with_cu_floor(write(v3_bundle()), bad)
+
+
+def test_cu_floor_defects_are_rejected_by_reader_and_engine():
+    data = write(v3_bundle(labels=[LARGE], contexts=FLOORED))
+    end = mlrec._v3_header(data, len(data))["header_end"]
+    assert struct.unpack_from("<I", data, end - 4) == (64,)
+    zero = data[: end - 4] + struct.pack("<I", 0) + data[end:]
+    with pytest.raises(mlrec.FormatError, match="at least 1"):
+        mlrec.read_model(zero)
+    at = mlrec._v3_header(data, len(data))["serving_offset"]
+    unflagged = bytearray(data)
+    struct.pack_into("<I", unflagged, at, 0)
+    with pytest.raises(mlrec.FormatError):
+        mlrec.read_model(bytes(unflagged))
+    unknown = bytearray(data)
+    struct.pack_into("<I", unknown, at, 0x300)
+    with pytest.raises(mlrec.FormatError, match="unknown serving flags"):
+        mlrec.read_model(bytes(unknown))
+    tw = pytest.importorskip("tilewright")
+    for bad, why in ((zero, "at least 1"), (bytes(unknown), "unknown serving flags")):
+        with pytest.raises(ValueError, match=why):
+            tw.load_model_from_memory(bad)
+    with pytest.raises(ValueError):
+        tw.load_model_from_memory(bytes(unflagged))
+
+
+def test_cu_floor_through_the_binding():
+    """The engine refuses a context with fewer usable CUs than the floor on
+    any device, a compute partition included, and serves the others as the
+    model without the floor does."""
+    tw = pytest.importorskip("tilewright")
+    floored = write(v3_bundle(labels=[LARGE], contexts=FLOORED))
+    model = ev.load_model_bytes(floored, tw)
+    plain = ev.load_model_bytes(mlrec.with_cu_floor(floored, None), tw)
+    assert tw.describe(model).min_effective_cus == 64
+    assert tw.describe(plain).min_effective_cus == 0
+    pool = [dict(BASE_CFG, sol_idx_global=0), dict(BASE_CFG, mt_m=64, sol_idx_global=1)]
+    prob = dict(BF16_NT, m=4096, n=4096, k=4096, batch=1)
+    p = ev.make_problem(tw, prob)
+    for n_cu in (256, 128, 64, 48, 32):
+        device = dataclasses.replace(HW, n_cu=n_cu)
+        hw = ev.make_hardware(tw, device)
+        cs = ev.candidate_set(tw, model, pool, device)
+        free = ev.candidate_set(tw, plain, pool, device)
+        for budget in (0, 16, 32, 48, 63, 64, 96, 128, 200, 300):
+            for schedule in ("default", "dynamic", "auto"):
+                ctx = fs.ExecutionContext(budget, schedule)
+                tctx = ev.make_context(tw, ctx)
+                usable = ctx.effective_cus(n_cu)
+                want = tw.supports(plain, tctx, hw) and usable >= 64
+                assert tw.supports(model, tctx, hw) == want, (n_cu, budget, schedule)
+                ranked = cs.rank(p, hw, 2, context=tctx)
+                if want:
+                    assert ranked == free.rank(p, hw, 2, context=tctx)
+                    assert any(r.scored for r in ranked)
+                else:
+                    assert not any(r.scored for r in ranked)
+    # A partition of 64 CUs is served whole; one of 32 never.
+    assert tw.supports(model, ev.make_context(tw, fs.EXCLUSIVE),
+                       ev.make_hardware(tw, dataclasses.replace(HW, n_cu=64)))  # fmt: skip
+    assert not tw.supports(model, ev.make_context(tw, fs.EXCLUSIVE),
+                           ev.make_hardware(tw, dataclasses.replace(HW, n_cu=32)))  # fmt: skip
+    assert tw.supports(plain, ev.make_context(tw, fs.EXCLUSIVE),
+                       ev.make_hardware(tw, dataclasses.replace(HW, n_cu=32)))  # fmt: skip
 
 
 def _gate_pool():

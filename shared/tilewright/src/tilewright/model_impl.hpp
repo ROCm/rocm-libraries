@@ -192,10 +192,12 @@ class Model {
   bool trained_key_gate = false;
 
   // Contexts an MLREC_v3 model supports: usable CUs as a fraction of the
-  // device, and a bit per Schedule value.
-  double min_cu_fraction = 1.0;
-  double max_cu_fraction = 1.0;
-  std::uint8_t schedules = 1;
+  // device, a bit per Schedule value, and the fewest usable CUs on any
+  // device (0: no floor).
+  double min_cu_fraction        = 1.0;
+  double max_cu_fraction        = 1.0;
+  std::uint8_t schedules        = 1;
+  std::size_t min_effective_cus = 0;
   Provenance provenance;
 
   std::vector<detail::Cell> cells;

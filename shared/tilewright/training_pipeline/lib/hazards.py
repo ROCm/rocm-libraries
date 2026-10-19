@@ -85,6 +85,9 @@ SUMMARY_FILE = "canary_summary.json"
 DEFAULTS: Dict[str, Any] = {"enabled": True, "timeout_s": 300.0, "runs": 1}
 # The `source` of the canary's blocklist entries (lib/correctness.py).
 SOURCE = "hazard canary"
+# How the reason of an entry starts that keeps a kernel out unchecked
+# (`unchecked_reason`, `kept_out_unchecked`).
+UNCHECKED = f"{SOURCE}: unchecked"
 PROTOCOL_VERSION = 1
 # Verdicts that quarantine a kernel; `interrupted` and `error` close a run
 # without blaming it.
@@ -169,6 +172,24 @@ def hazard_classes(kernel: Mapping[str, Any]) -> Tuple[str, ...]:
 def class_text(names: Iterable[str]) -> str:
     texts = {c.name: c.text for c in HAZARD_CLASSES}
     return ", ".join(texts.get(n, n) for n in names)
+
+
+def unchecked_reason(classes: Iterable[str], why: str) -> str:
+    """The reason of the blocklist entry that keeps a kernel of the hazard
+    classes `classes` out of an invocation unchecked: its run alone was cut
+    short or did not happen (`why`)."""
+    return (
+        f"{UNCHECKED} ({class_text(classes)}): {why}; "
+        f"kept out until a run alone passes"
+    )
+
+
+def kept_out_unchecked(entry: Any) -> bool:
+    """Whether a blocklist entry (lib/correctness.py `Entry`) is the
+    canary's keeping a kernel out of one invocation unchecked
+    (`unchecked_reason`) rather than its quarantine: nothing was found
+    against the kernel, and the next invocation runs it alone again."""
+    return entry.source == SOURCE and entry.reason.startswith(f"{UNCHECKED} (")
 
 
 # ── settings ─────────────────────────────────────────────────────────────────
@@ -1102,10 +1123,7 @@ def run_canary(
                     why = "another invocation was running it alone"
                 else:
                     why = "it did not run"
-                row["reason"] = (
-                    f"hazard canary: unchecked ({class_text(classes[sid])}): {why}; "
-                    f"kept out until a run alone passes"
-                )
+                row["reason"] = unchecked_reason(classes[sid], why)
                 kept_out.append(
                     cx.Entry(
                         name=_name(k),

@@ -40,7 +40,7 @@ replaces the header tail with:
                                    family-wise non-temporal rule (only with
                                    bit 2; lib/feasibility.py), bit 6 trained
                                    on the table plus the bank, bit 7
-                                   trained-key gate
+                                   trained-key gate, bit 8 CU floor
     u32      cascade_keys
     f64      min_cu_fraction, max_cu_fraction
                                    usable CUs / device CUs the model supports,
@@ -53,6 +53,8 @@ replaces the header tail with:
     with bit 7 only: u32 n_trained_keys (>= 1), u64 view_key_hash[n] strictly
              ascending: the view keys with training data; a pool's other keys
              are scored only for a problem none of them suits
+    with bit 8 only: u32 min_effective_cus (>= 1): the fewest usable CUs the
+             model supports on any device, whatever its CU count
     optional provenance, present when header bytes remain:
     u16      n_provenance (1..5), then per entry u16+str key | u16+str value,
              each key of PROVENANCE_KEYS at most once
@@ -151,7 +153,8 @@ V3_LAUNCH_KEYS = 0x10
 V3_NON_TEMPORAL_FAMILY_RULE = 0x20
 V3_BANK = 0x40
 V3_TRAINED_KEY_GATE = 0x80
-_V3_SERVING_FLAGS_KNOWN = 0xFF
+V3_CU_FLOOR = 0x100
+_V3_SERVING_FLAGS_KNOWN = 0x1FF
 SCHEDULE_BITS: Dict[str, int] = {"default": 1, "dynamic": 2, "auto": 4}
 BOUND_KEYS: Tuple[str, ...] = ("q_lo", "q_hi", "i_lo", "i_hi", "x_lo", "x_hi")
 # Where an MLREC_v3 model came from: the training config's id, a hash of the
@@ -604,6 +607,22 @@ def trained_keys_bytes(keys: Iterable[int]) -> bytes:
     return struct.pack(f"<I{len(hashes)}Q", len(hashes), *hashes)
 
 
+def cu_floor_bytes(cus: Any) -> bytes:
+    """The CU-floor section of a model that supports no fewer than `cus`
+    usable CUs. ValueError unless `cus` is a whole number from 1 to
+    2**32 - 1."""
+    if (
+        isinstance(cus, bool)
+        or not isinstance(cus, (int, np.integer))
+        or not 1 <= int(cus) < 2**32
+    ):
+        raise ValueError(
+            f"the CU floor must be a whole number of CUs from 1 to 2**32 - 1, "
+            f"got {cus!r}"
+        )
+    return struct.pack("<I", int(cus))
+
+
 def schedule_mask(schedules: Iterable[str]) -> int:
     mask = 0
     for name in schedules:
@@ -767,6 +786,8 @@ def _v3_tail(
     cascade = int(serving.get("cascade_keys", 32) or 0)
     if not 0 <= cascade < 2**32:
         raise ValueError(f"cascade_keys {cascade} out of range")
+    floor = contexts.get("min_effective_cus")
+    flags = v3_serving_flags(serving) | (V3_CU_FLOOR if floor is not None else 0)
     fhash = fs.v3_catalog_hash()
     tail = [
         _lenstr(fhash),
@@ -774,7 +795,7 @@ def _v3_tail(
         _label(arch, "arch"),
         struct.pack("<dd", pmc, mi_default),
         _mi_table_bytes(constants),
-        struct.pack("<II", v3_serving_flags(serving), cascade),
+        struct.pack("<II", flags, cascade),
         struct.pack("<dd", lo, hi),
         struct.pack(
             "<BB",
@@ -792,6 +813,8 @@ def _v3_tail(
             tail.append(struct.pack(f"<H{len(a.values)}q", len(a.values), *a.values))
     if serving.get("trained_key_gate", False):
         tail.append(trained_keys_bytes(trained_keys or ()))
+    if floor is not None:
+        tail.append(cu_floor_bytes(floor))
     tail.append(_provenance_bytes(check_provenance(provenance)))
     return b"".join(tail)
 
@@ -806,7 +829,9 @@ def write_model_v3(
 ) -> bytes:
     """MLREC_v3 bytes of a trained v3 bundle: as `write_model`, plus
     `attribute_spec` (list of AttributeFeature dicts), `contexts`
-    {min_cu_fraction, max_cu_fraction, schedules}, `clip` and per cell
+    {min_cu_fraction, max_cu_fraction, schedules, and optionally
+    min_effective_cus: the CU floor, written with serving flag bit 8},
+    `clip` and per cell
     `feature_bounds` {q_lo, ..., x_hi} and `view_key_hashes`; `serving`
     holds small_batched_rule / dot2_rule / non_temporal_rule /
     non_temporal_family_rule, launch_keys, bank and trained_key_gate
@@ -1179,6 +1204,11 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
         ]
         if any(b <= a for a, b in zip(trained, trained[1:])):
             raise FormatError("trained keys are not strictly ascending")
+    floor: Optional[int] = None
+    if flags & V3_CU_FLOOR:
+        (floor,) = cur.unpack("<I", "CU floor")
+        if floor == 0:
+            raise FormatError("the CU floor must be at least 1")
     provenance: Dict[str, str] = {}
     if cur.pos < cur.end:
         (n_prov,) = cur.unpack("<H", "n_provenance")
@@ -1212,6 +1242,13 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
     dims = tuple(fields[8:11])
     if dims != tuple(len(n) for n in names):
         raise FormatError(f"feature dims {dims} do not match the v3 catalog and spec")
+    contexts: Dict[str, Any] = {
+        "min_cu_fraction": lo,
+        "max_cu_fraction": hi,
+        "schedules": [n for n, b in SCHEDULE_BITS.items() if schedules & b],
+    }
+    if floor is not None:
+        contexts["min_effective_cus"] = floor
     return {
         "header_end": cur.pos,
         "serving_offset": serving_offset,
@@ -1245,11 +1282,7 @@ def _v3_header(data: bytes, end: int) -> Dict[str, Any]:
             "cascade_keys": cascade,
         },
         "trained_view_keys": trained,
-        "contexts": {
-            "min_cu_fraction": lo,
-            "max_cu_fraction": hi,
-            "schedules": [n for n, b in SCHEDULE_BITS.items() if schedules & b],
-        },
+        "contexts": contexts,
         "clip": bool(clip),
         "provenance": {k: provenance[k] for k in PROVENANCE_KEYS if k in provenance},
     }
@@ -1434,6 +1467,33 @@ def with_trained_keys(data: bytes, keys: Optional[Iterable[int]]) -> bytes:
         if keys is not None
         else flags & ~V3_TRAINED_KEY_GATE
     )
+    struct.pack_into("<I", head, h["serving_offset"], flags)
+    struct.pack_into("<I", head, 12, len(head))
+    return bytes(head) + data[header_size:]
+
+
+def with_cu_floor(data: bytes, cus: Optional[int]) -> bytes:
+    """An MLREC_v3 model file that supports no fewer than `cus` usable CUs
+    on any device (serving flag bit 8; no CU floor when None) and is
+    otherwise `data`: the header changes size, the payload and its CRC do
+    not. An engine that predates the floor refuses a file that has one."""
+    data = bytes(data)
+    if data[:8] != MAGIC_V3:
+        raise FormatError("the CU floor is an MLREC_v3 header field")
+    h = _v3_header(data, len(data))
+    header_size = h["header_size"]
+    flags = struct.unpack_from("<I", data, h["serving_offset"])[0]
+    # The section follows the trained keys and precedes the provenance.
+    at = _attribute_spec_end(
+        _Cursor(data, _V2_FIXED.size, header_size), h["serving_offset"]
+    )
+    if flags & V3_TRAINED_KEY_GATE:
+        (n,) = struct.unpack_from("<I", data, at)
+        at += 4 + 8 * n
+    end = at + 4 if flags & V3_CU_FLOOR else at
+    section = b"" if cus is None else cu_floor_bytes(cus)
+    head = bytearray(data[:at] + section + data[end:header_size])
+    flags = flags | V3_CU_FLOOR if cus is not None else flags & ~V3_CU_FLOOR
     struct.pack_into("<I", head, h["serving_offset"], flags)
     struct.pack_into("<I", head, 12, len(head))
     return bytes(head) + data[header_size:]
@@ -1639,6 +1699,7 @@ __all__: Sequence[str] = (
     "check_label",
     "check_provenance",
     "convert_v1_to_v2",
+    "cu_floor_bytes",
     "decode_weight",
     "encode_weight",
     "feature_spec_hash",
@@ -1646,6 +1707,7 @@ __all__: Sequence[str] = (
     "trained_keys_bytes",
     "weight_dtype_code",
     "with_bank",
+    "with_cu_floor",
     "with_soft_rules",
     "with_trained_keys",
     "write_model",

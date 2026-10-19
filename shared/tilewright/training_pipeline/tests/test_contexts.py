@@ -1008,6 +1008,22 @@ def test_serving_libdir_serves_the_staged_model_with_the_librarys_kernels(tmp_pa
         (pool, "new.tilewright.bin"),
     ]
     assert (src / "tilewright_index").read_text().startswith("# shipped")
+    # Rows for the devices of one PCI chip ID: the stem's give way to the one
+    # row that serves the staged model on every device; other stems' stay,
+    # and so does another stem's malformed row, for which the engine loads
+    # no model.
+    (src / "tilewright_index").write_text(
+        f"{pool}\tchip.tilewright.bin\tchip=0x1a2b\n{pool}\told.tilewright.bin\n"
+        f"{other}\th1.tilewright.bin\tchip=0x00ff\n{other}\th.tilewright.bin\n"
+        f"{other} bad.bin chip=0xzz # typo\n{pool} worse.bin chip=0x12 more\n"
+    )
+    summary = pl.build_serving_libdir(src, dst, pool, "new.tilewright.bin", model, sha)
+    assert summary["other_stems"] == [other] and summary["left_out_stems"] == []
+    assert summary["malformed_rows"] == [f"{other} bad.bin chip=0xzz # typo"]
+    assert (dst / "tilewright_index").read_text() == (
+        f"{other}\th.tilewright.bin\n{other}\th1.tilewright.bin\tchip=0x00ff\n"
+        f"{other} bad.bin chip=0xzz # typo\n{pool}\tnew.tilewright.bin\n"
+    )
     (dst / "leftover").write_text("from the last attempt")
     pl.build_serving_libdir(src, dst, pool, "new.tilewright.bin", model)
     assert not (dst / "leftover").exists()
@@ -1017,6 +1033,11 @@ def test_serving_libdir_serves_the_staged_model_with_the_librarys_kernels(tmp_pa
         pl.build_serving_libdir(src, dst, other, "new.tilewright.bin", model)
     with pytest.raises(ValueError, match="plain file name"):
         pl.build_serving_libdir(src, dst, pool, "../new.bin", model)
+    tw = pytest.importorskip("tilewright")
+    with pytest.raises(ValueError, match=f"malformed row for {other}"):
+        tw.load_model_by_index(other, str(dst))
+    with pytest.raises(ValueError, match="new.tilewright.bin"):
+        tw.load_model_by_index(pool, str(dst), 0x12)
 
 
 # ── orchestrator wiring ──────────────────────────────────────────────────────
