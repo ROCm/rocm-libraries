@@ -19,39 +19,31 @@ def helper():
     return module
 
 
-@pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize(
     "route,missing",
     [("comgr", "llvm-objdump"), ("hip", "llvm-objdump"), ("hip", "hipcc")],
 )
-def test_missing_tools_skip_or_fail(helper, monkeypatch, strict, route, missing):
-    monkeypatch.setenv("ROCKE_REQUIRE_GFX950", "1" if strict else "0")
+def test_missing_tools_skip(helper, monkeypatch, route, missing):
     monkeypatch.setattr(helper, "require_gpu", lambda: None)
     monkeypatch.setattr(
         helper.shutil, "which", lambda name: None if name == missing else name
     )
-    outcome = pytest.fail.Exception if strict else pytest.skip.Exception
-    with pytest.raises(outcome, match=f"{missing} is required"):
+    with pytest.raises(pytest.skip.Exception, match=f"{missing} is required"):
         helper.run_numeric(monkeypatch, "fp8", "bf8", "bf16", route, 32, 64, 128)
 
 
-@pytest.mark.parametrize("strict", [False, True])
-def test_check_isa_missing_objdump(helper, monkeypatch, strict):
-    monkeypatch.setenv("ROCKE_REQUIRE_GFX950", "1" if strict else "0")
+def test_check_isa_missing_objdump(helper, monkeypatch):
     monkeypatch.setattr(helper.shutil, "which", lambda name: None)
-    outcome = pytest.fail.Exception if strict else pytest.skip.Exception
-    with pytest.raises(outcome, match="llvm-objdump is required"):
+    with pytest.raises(pytest.skip.Exception, match="llvm-objdump is required"):
         helper.check_isa(None, None)
 
 
-@pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("route", ["comgr", "hip"])
 def test_available_tools_reach_harness_and_preserve_failures(
-    helper, monkeypatch, strict, route
+    helper, monkeypatch, route
 ):
     from rocke.examples.gfx950.gemm import block_scaled_gemm_verify as verifier
 
-    monkeypatch.setenv("ROCKE_REQUIRE_GFX950", "1" if strict else "0")
     monkeypatch.setattr(helper, "require_gpu", lambda: None)
     # COMGR must remain usable without hipcc.
     available = {"llvm-objdump", "hipcc"} if route == "hip" else {"llvm-objdump"}
@@ -68,7 +60,6 @@ def test_available_tools_reach_harness_and_preserve_failures(
 
 
 def test_objdump_failure_is_not_skipped(helper, monkeypatch):
-    monkeypatch.delenv("ROCKE_REQUIRE_GFX950", raising=False)
     monkeypatch.setattr(helper.shutil, "which", lambda name: name)
     monkeypatch.setattr(
         helper.subprocess,
