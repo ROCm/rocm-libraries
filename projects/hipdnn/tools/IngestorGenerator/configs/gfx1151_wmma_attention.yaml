@@ -1,0 +1,146 @@
+# Source of truth for the shipped hipkernel:Gfx1151WmmaAttention catalog.
+#
+# The rocKE builder emits runtime-shape kernels: batch, sequence lengths,
+# query/KV head counts, diagonal-window bounds, LSE selection and all dense
+# tensor strides are launch arguments. The AOT catalog therefore varies only
+# dtype, head dimension, mask class and algorithm geometry.
+
+dialect: packaged
+authored_subpath: rocKE/gfx1151_wmma_attention
+engine:
+  name: hipkernel:Gfx1151WmmaAttention
+  sdk_version: 1.0.0
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+- name: mask_mode
+  type: string
+- name: transposed_qk
+  type: int
+  default_value: 0
+- name: query_tail
+  type: int
+  default_value: 1
+- name: kv_tail
+  type: int
+  default_value: 1
+- name: block_n
+  type: int
+  default_value: 32
+- name: num_waves
+  type: int
+  default_value: 1
+
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - mask_mode
+  - transposed_qk
+  - query_tail
+  - kv_tail
+  - block_n
+  - num_waves
+  matcher_only_fields: []
+  vocabulary:
+    dtype: {bf16: BF16, fp16: FP16}
+  bindings:
+    dtype: {field: dtype}
+    head_size: {field: head_size}
+    mask_mode: {field: mask_mode}
+    transposed_qk: {field: transposed_qk}
+    query_tail: {field: query_tail}
+    kv_tail: {field: kv_tail}
+    block_n: {field: block_n}
+    num_waves: {field: num_waves}
+
+kernel_source_kind: rocke
+workspace_policy: none
+packs:
+- name: gfx1151_wmma_attention
+  arch: [gfx1151]
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx1151/wmma_fmha_fwd.py
+    builder: build_wmma_fmha_fwd
+  variants:
+  - name: wmma_generic.{dtype}_d{head_size}_{mask_mode}.gfx1151
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype]
+    spec_defaults:
+      name: rocke_wmma_fmha_fwd
+      v_lds_stage: false
+      query_tail: true
+      kv_tail: true
+      use_softcap: false
+      use_sinks: false
+      use_alibi: false
+      use_qq_bias: false
+      layout: dense
+      page_block_size: 0
+      kv_dtype: ""
+      transposed_qk: false
+      block_n: 32
+      num_waves: 1
+      scheduler_strategy: null
+      value_tile_size: 0
+      causal_tile_skip: false
+      v_head_size: 0
+      use_attn_bias: false
+      bias_dtype: f32
+    knob_sets:
+      masks:
+      - {mask_mode: none, tag: none}
+      - {mask_mode: causal, tag: causal}
+      - {mask_mode: window, tag: window}
+    shapes:
+    - {dtype: fp16, head_size: 64, knobs: masks}
+    - {dtype: bf16, head_size: 64, knobs: masks}
+    - {dtype: fp16, head_size: 96, knobs: masks}
+    - {dtype: bf16, head_size: 96, knobs: masks}
+    - {dtype: fp16, head_size: 128, knobs: masks}
+    - {dtype: bf16, head_size: 128, knobs: masks}
+    - {dtype: fp16, head_size: 256, knobs: masks}
+    - {dtype: bf16, head_size: 256, knobs: masks}
+  - name: wmma_swapqk.{dtype}_d{head_size}_{mask_mode}_bn{block_n}_w{num_waves}.gfx1151
+    metadata: [dtype, head_size, mask_mode, transposed_qk, query_tail, kv_tail, block_n, num_waves]
+    vocabulary:
+      dtype: {bf16: BF16, fp16: FP16}
+    spec_order: [head_size, dtype, mask_mode, v_lds_stage, name, query_tail, kv_tail, use_softcap, use_sinks, use_alibi, use_qq_bias, layout, page_block_size, kv_dtype, transposed_qk, block_n, num_waves, scheduler_strategy, value_tile_size, causal_tile_skip, v_head_size, use_attn_bias, bias_dtype]
+    spec_defaults:
+      name: rocke_wmma_fmha_fwd
+      v_lds_stage: false
+      query_tail: false
+      kv_tail: false
+      use_softcap: false
+      use_sinks: false
+      use_alibi: false
+      use_qq_bias: false
+      layout: dense
+      page_block_size: 0
+      kv_dtype: ""
+      transposed_qk: true
+      scheduler_strategy: null
+      value_tile_size: 0
+      causal_tile_skip: false
+      v_head_size: 0
+      use_attn_bias: false
+      bias_dtype: f32
+    knob_sets:
+      fast:
+      - {mask_mode: none, block_n: 32, num_waves: 1, tag: none_bn32_w1}
+      - {mask_mode: causal, block_n: 32, num_waves: 1, tag: causal_bn32_w1}
+      - {mask_mode: none, block_n: 64, num_waves: 2, tag: none_bn64_w2}
+      - {mask_mode: causal, block_n: 64, num_waves: 2, tag: causal_bn64_w2}
+    shapes:
+    - {dtype: fp16, head_size: 64, knobs: fast}
+    - {dtype: bf16, head_size: 64, knobs: fast}
+    - {dtype: fp16, head_size: 128, knobs: fast}
+    - {dtype: bf16, head_size: 128, knobs: fast}

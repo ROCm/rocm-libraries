@@ -39,10 +39,13 @@ retune either decode mode or the GDN prefill path.
 | [`library/dispatch/gdn/gfx950.py`](../../../dispatch/gdn/gfx950.py) | Declare the GDN registry/static default and KDA work-keyed table |
 | [`library/tests/dispatch/gdn/test_gfx950_registry.py`](../../../tests/dispatch/gdn/test_gfx950_registry.py) | CPU GDN registry count, identity, legality, and selection coverage |
 | [`library/tests/test_gdn_decode_spec.py`](../../../tests/test_gdn_decode_spec.py) | CPU validator and IR-emission coverage |
-| [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, pool-index range |
+| [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, devices, pointer alignment, pool-index range, fused-mode inputs |
+| [`library/tests/test_gdn_decode_fused.py`](../../../tests/test_gdn_decode_fused.py) | CPU contract of the fused conv1d / gated-RMSNorm modes: spec rules, ABI, IR alignment claims, tap-shift barrier, fp32 reference |
+| [`library/tests/test_gdn_decode_fused_gfx950_numeric.py`](../../../tests/test_gdn_decode_fused_gfx950_numeric.py) | On-device fused-mode output, state and conv-state correctness |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device GDN output and state correctness |
 | [`library/tests/test_kda_decode_gfx950_numeric.py`](../../../tests/test_kda_decode_gfx950_numeric.py) | On-device KDA output/state correctness and dispatch-to-launch coverage |
-| [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds |
+| [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes in both gate kinds (Python lowering) |
+| [`library/tests/test_gdn_decode_ir_cpp_parity.py`](../../../tests/test_gdn_decode_ir_cpp_parity.py) | The C++ engine lowers every golden case to byte-identical LLVM IR |
 | [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
 | [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
 | [`library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_prefill_wiring.py) | Prefill dispatch: candidate selection, the two-launch guard, launch geometry |
@@ -87,8 +90,10 @@ worst=<largest error> tol=1.0e-02
 
 The driver checks **two results**:
 
-- `out_err`: maximum absolute error in this token's output;
-- `state_err`: maximum absolute error in the updated recurrent state.
+- `out_err`: maximum absolute error in this token's output (for a
+  `fuse_out_norm` spec, relative to `max(1, |ref|)`; see below);
+- `state_err`: maximum absolute error in the updated recurrent state (and, for
+  a `fuse_conv` spec, the conv state).
 
 Both must stay below `TOL`. Checking only `out` is insufficient because a bad
 state write may not affect the visible output until the next decode step.
@@ -109,6 +114,35 @@ python3 library/builders/gfx950/gdn/gdn_decode.py \
 
 `--no-check` skips the fp32 reference and should be used only for focused
 measurement after correctness has already been established.
+
+### f32 state and fused modes
+
+The recurrent state may be `f32` (`GdnDecodeSpec(state_dtype="f32")`); only the
+state widens, and the inputs, output and fp32 reference are unchanged. Two
+optional flags fuse a hybrid layer's neighbours into the kernel: `fuse_conv`
+(causal conv1d + SiLU on the packed q/k/v row) and `fuse_out_norm` (gated
+RMSNorm on the output; SiLU gate for GDN, sigmoid for KDA). What they compute,
+the tensors they add and the spec rules they need are in
+[`ALGORITHM.md` §4.9](ALGORITHM.md#49-optional-fusions-conv1d-and-gated-rmsnorm).
+
+`make_inputs()` draws the extra tensors for a fused spec (`mixed_qkv` replaces
+`query`/`key`/`value`), `ref_fp32()` applies the conv first and the norm last,
+and `check()` also compares the written conv state and the untouched conv-state
+slots. For a `fuse_out_norm` spec `out_err` is **relative to `max(1, |ref|)`**,
+not absolute: the normalised output reaches a few units, where one bf16
+rounding step of an exact answer already exceeds `TOL` in absolute terms. It
+equals the absolute error wherever `|ref| <= 1`:
+
+```python
+from builders.gfx950.gdn.gdn_decode import TOL, check
+from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+spec = GdnDecodeSpec(num_k_heads=16, num_v_heads=16, gate_kind="kda",
+                     state_dtype="f32", num_warps=4, warp_threads_k=16,
+                     blocks_per_v_dim=1, fuse_conv=True, fuse_out_norm=True)
+out_err, state_err = check(spec, batch=8)
+assert max(out_err, state_err) < TOL
+```
 
 ## Benchmark registered candidates
 
@@ -170,12 +204,20 @@ CPU-only coverage:
 ```bash
 python3 -m pytest \
   library/tests/test_gdn_decode_spec.py \
+  library/tests/test_gdn_decode_fused.py \
   library/tests/test_gdn_decode_golden.py \
+  library/tests/test_gdn_decode_prepare.py \
+  library/tests/test_gdn_decode_ir_cpp_parity.py \
   library/tests/dispatch/gdn/test_gfx950_registry.py \
   library/tests/dispatch/gdn/test_gfx950_wiring.py \
   library/tests/test_gdn_decode_tune.py \
   -m "not gpu"
 ```
+
+`test_gdn_decode_ir_cpp_parity.py` needs the `rocke_engine` extension (built
+from `platform/cpp/bindings`) on `PYTHONPATH`. Without it the test skips,
+unless `ROCKE_BACKEND` is `cpp` or `both`: there the engine is expected, so
+its absence fails the test.
 
 On-device numeric coverage:
 
@@ -183,6 +225,7 @@ On-device numeric coverage:
 python3 -m pytest \
   library/tests/test_gdn_decode_gfx950_numeric.py \
   library/tests/test_kda_decode_gfx950_numeric.py \
+  library/tests/test_gdn_decode_fused_gfx950_numeric.py \
   -m gpu
 ```
 
@@ -252,7 +295,9 @@ For GDN, `auto` always uses the static `(2, 16, 8)` registry priority when it
 is legal; batch changes the grid but not the tile. KDA alone changes its
 work-keyed table choice with `batch * num_v_heads`.
 
-`out_err` and `state_err` are maximum absolute errors against the fp32 reference.
+`out_err` and `state_err` are maximum absolute errors against the fp32 reference
+(except `out_err` of a `fuse_out_norm` spec, relative to `max(1, |ref|)`; see
+[f32 state and fused modes](#f32-state-and-fused-modes)).
 In the current coverage, state error is larger than output error. Both remain
 separate because state becomes an input to the next decode step; a correct
 current output cannot prove that the next step will read correct state.
