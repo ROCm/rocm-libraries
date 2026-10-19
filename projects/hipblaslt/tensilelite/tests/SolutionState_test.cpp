@@ -14,14 +14,17 @@
 #include <utility>
 #include <vector>
 
-#include <msgpack.hpp>
-
+// The headers declaring ContractionProblemGemm come before <msgpack.hpp>, which
+// reaches the Windows SDK headers that define the enum name CONST as a macro.
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
+
+#include <msgpack.hpp>
+
 #include <Tensile/msgpack/SolutionState.hpp>
 
 using namespace TensileLite;
