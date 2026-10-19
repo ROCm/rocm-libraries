@@ -257,7 +257,7 @@ runs no heuristics and needs no GPU.
   value-initialized. `time_sorted_plan` collects timed plans in a `std::set` ordered by time, which keeps
   only one of several plans with equal times; it now uses a `std::multiset`. `cudnnFindPlanAndCache`
   reads the front of the sorted plans even when none ran; it now fails with `NOT_SUPPORTED` (a thrown
-  `cudnnException`, or a plan whose status is not `SUCCESS` under `NV_CUDNN_DISABLE_EXCEPTION`). The
+  `cudnnException`, or under `NV_CUDNN_DISABLE_EXCEPTION` an unbuilt plan whose status is `BAD_PARAM`). The
   misspelled alias `EngineHeuristicsBuilde` is kept.
 - FE-enum JSON rendering goes through a shim name table. `describe()` output matches upstream, but the
   shim defines no nlohmann serializer for hipDNN's enums, so serializing a frontend enum directly yields
@@ -296,7 +296,7 @@ runs no heuristics and needs no GPU.
 | Risk | Mitigation |
 |---|---|
 | Compile time | The header-only C API emulation is instantiated in every TU that includes `cudnn.h` (after Phase 3: about +1.5 s per TU). Accepted to keep the shim header-only; measured each phase on single TUs and the v9 sample corpus. The split umbrella remains the fallback for the v0.x builder headers only |
-| Licensing of declared names | Names only, no MIT claim; shim-assigned values; legal review before Phase 1 merges |
+| Licensing of declared names | Names only, no MIT claim; shim-assigned values; legal review still required before any non-POC merge (deferred for the proof of concept) |
 | FALLBACK-only heuristics and missing notes change engine choice | One WARN per mode; documented in `KNOWN_DIVERGENCES.md` |
 | Unsupported by providers: int8, four-op conv fusions, alignment < 16, ragged tensors | Out of scope; expected failures in the corpus harness |
 | Descriptor lifetime bugs | Reference counting, scoped hipDNN descriptors, ASan run |

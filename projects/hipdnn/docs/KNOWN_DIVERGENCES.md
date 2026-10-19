@@ -243,7 +243,7 @@ These differ from cuDNN:
 | Loading a plan without `"payload"` | `NOT_SUPPORTED` at finalize; engines whose plans hipDNN cannot serialize cannot be reloaded |
 | Loaded plans | the engine ID must match the one inside the payload (`BAD_PARAM` otherwise). Engine index, name, behavior notes and knob choices are reported from the JSON as saved; the index refers to the engine set of the process that saved it. The loaded plan's engine has no `OPERATION_GRAPH` or `KNOB_INFO` (`NOT_SUPPORTED`), and its configuration cannot build a new plan (`NOT_SUPPORTED`) |
 | `cudnnBackendExecute` handle | `BAD_PARAM` unless it is the handle the plan was built on (the graph's handle) or, for a loaded plan, the `HANDLE` it was loaded with |
-| `VARIANT_PACK` | the hipDNN variant pack is built at finalize; `DATA_POINTERS` and `UNIQUE_IDS` with different element counts are `BAD_PARAM` at finalize |
+| `VARIANT_PACK` | the hipDNN variant pack is built at finalize; a missing or empty `DATA_POINTERS` or `UNIQUE_IDS`, or the two with different element counts, is `BAD_PARAM` at finalize |
 | Per-call overhead | `VariantPackBuilder::build()` plus `cudnnBackendExecute` costs about 1–3 µs more than building the hipDNN variant pack and calling `hipdnnBackendExecute` on the same plan; `cudnnBackendExecute` alone adds well under 1 µs |
 | `ENGINE_LAYOUT_INFO`, `ENGINECFG_WORKSPACE_SIZE`, `VARIANT_PACK_INTERMEDIATES` | not declared (no supported consumer uses them); code that names them does not compile |
 
@@ -274,7 +274,7 @@ their `build()`. These differ as well:
 | Plan tags | the `_k<type>=<value>` segments of `ExecutionPlan::getTag()` use the shim's knob-type integers, so errata `"knob"` entries written against cuDNN's integers do not match |
 | `time_sorted_plan` timing | measured with hipDNN profiling events on the handle's stream: device time between the start and stop of each timed execution, as upstream's CUDA events |
 | `time_sorted_plan` ties | plans with equal times are all kept; upstream keeps only one of them |
-| `cudnnFindPlanAndCache` with no plan that ran | throws `cudnnException` with `NOT_SUPPORTED` (with `NV_CUDNN_DISABLE_EXCEPTION`, returns a plan whose status is not `SUCCESS`); upstream reads the front of an empty list |
+| `cudnnFindPlanAndCache` with no plan that ran | throws `cudnnException` with `NOT_SUPPORTED`; with `NV_CUDNN_DISABLE_EXCEPTION` it returns an unbuilt plan whose status is `BAD_PARAM` (no `EXECUTION_PLAN_ENGINE_CONFIG`). Upstream reads the front of an empty list |
 | PyTorch quantized operations across threads | PyTorch's quantized convolution, linear and add operations cache plans process-wide, so a plan cached on one thread and executed with another thread's handle is `BAD_PARAM` (see the `cudnnBackendExecute` handle row). PyTorch's `Conv_v8` caches are per-thread and unaffected |
 | `ConvDescBuilder` default mode | upstream's default is `CONVOLUTION`; MIOpen runs only `CROSS_CORRELATION`, so a graph that keeps the default has no engine. Call `setMathMode(CUDNN_CROSS_CORRELATION)` |
 | `PointWiseDescBuilder` Swish | β = 1 is upstream's default and is not sent (see [Parameter descriptors](#parameter-descriptors)), so hipBLASLt's Swish epilogue (which requires β present and equal to 1) is unreachable from v8; MIOpen's fused convolution rejects a Swish β of any value |
