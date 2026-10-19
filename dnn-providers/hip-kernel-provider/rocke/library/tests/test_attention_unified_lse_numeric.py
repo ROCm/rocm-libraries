@@ -64,7 +64,9 @@ def _paged_reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, s
     return torch.cat(outs), torch.cat(lses).unsqueeze(-1)
 
 
-def _case(q_lens, kv_lens, *, hq=32, hkv=8, d=128, dtype="bf16", bs=16, softcap=0.0, seed=0):
+def _case(
+    q_lens, kv_lens, *, hq=32, hkv=8, d=128, dtype="bf16", bs=16, softcap=0.0, seed=0
+):
     g = torch.Generator(device="cuda").manual_seed(seed)
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
     total_q, num_seqs = sum(q_lens), len(q_lens)
@@ -74,9 +76,13 @@ def _case(q_lens, kv_lens, *, hq=32, hkv=8, d=128, dtype="bf16", bs=16, softcap=
     k_cache = torch.randn(num_blocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
     v_cache = torch.randn(num_blocks, bs, hkv, d, device="cuda", dtype=tdt, generator=g)
     # Shuffled physical pages: catches any block-table indexing shortcut.
-    perm = torch.randperm(num_blocks, device="cuda", generator=g)[: num_seqs * max_blocks]
+    perm = torch.randperm(num_blocks, device="cuda", generator=g)[
+        : num_seqs * max_blocks
+    ]
     block_table = perm.view(num_seqs, max_blocks).to(torch.int32).contiguous()
-    cu = torch.tensor([0, *itertools.accumulate(q_lens)], dtype=torch.int32, device="cuda")
+    cu = torch.tensor(
+        [0, *itertools.accumulate(q_lens)], dtype=torch.int32, device="cuda"
+    )
     seqused = torch.tensor(kv_lens, dtype=torch.int32, device="cuda")
     problem = UnifiedAttentionProblem(
         total_q=total_q,
@@ -132,7 +138,9 @@ _SHAPES = [
 @pytest.mark.parametrize("q_lens,kv_lens", _SHAPES)
 def test_split_kv_output_and_lse(dtype, d, q_lens, kv_lens):
     problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, d=d, dtype=dtype)
-    lse = torch.full((problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda")
+    lse = torch.full(
+        (problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda"
+    )
     out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0)
     off = _run(
         dataclasses.replace(problem, emit_lse=False),
@@ -145,7 +153,9 @@ def test_split_kv_output_and_lse(dtype, d, q_lens, kv_lens):
         lse=None,
         softcap=0.0,
     )
-    o_ref, lse_ref = _paged_reference(q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(d), 0.0)
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(d), 0.0
+    )
     tol = _tolerance(dtype)
     assert torch.equal(out, off), "LSE-on changed O"
     assert (out.float() - o_ref).abs().max().item() < tol
@@ -162,7 +172,9 @@ def test_split_kv_lse_with_softcap():
     problem, q, kc, vc, cu, su, bt = _case(q_lens, kv_lens, softcap=30.0)
     lse = torch.empty((problem.total_q, problem.num_query_heads, 1), device="cuda")
     _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=30.0)
-    _, lse_ref = _paged_reference(q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 30.0)
+    _, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(128), 30.0
+    )
     assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
 
 
@@ -194,7 +206,13 @@ def test_auto_backend_refuses_lse_on_a_2d_routed_shape():
 def test_cached_lse_off_2d_graph_never_serves_an_lse_request():
     """Regression: the gfx942 2D graph fast path replays a cache hit before any
     support gate, keyed on a signature without emit_lse. An LSE-off launch on
-    these exact buffers must not be replayed for an LSE-on request."""
+    these exact buffers must not be replayed for an LSE-on request.
+
+    On gfx942 the test first proves the hazard is live: the LSE-off launch must
+    capture a graph whose key the LSE-on request would hit. gfx950 has no 2D
+    graph path, so there it checks only the plain refusal."""
+    from kernels.common import attention_unified as au
+
     problem, q, kc, vc, cu, su, bt = _case([256], [256])
     off_problem = dataclasses.replace(problem, emit_lse=False)
     out = torch.empty_like(q)
@@ -210,10 +228,22 @@ def test_cached_lse_off_2d_graph_never_serves_an_lse_request():
         softcap=0.0,
         backend="auto",
     )
+    before = set(au._2D_GRAPHS)
     run_unified_attention_torch(problem=off_problem, **args)  # warm the 2D graph
+    captured = set(au._2D_GRAPHS) - before
     run_unified_attention_torch(problem=off_problem, **args)  # cache hit: replay
+    if _arch() == "gfx942":
+        assert len(captured) == 1, "LSE-off launch did not capture a 2D graph"
+        (key,) = captured
+        sig = au._cheap_2d_sig(problem)  # the LSE-on request's signature
+        assert key[: len(sig)] == sig and id(out) in key[len(sig) :]
+        assert set(au._2D_GRAPHS) - before == captured, "second launch was not a replay"
+    else:
+        assert not captured, "2D graph replay is expected only on gfx942"
     torch.cuda.synchronize()
-    lse = torch.full((problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda")
+    lse = torch.full(
+        (problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda"
+    )
     with pytest.raises(NotImplementedError, match="LSE"):
         run_unified_attention_torch(problem=problem, lse=lse, **args)
     torch.cuda.synchronize()
