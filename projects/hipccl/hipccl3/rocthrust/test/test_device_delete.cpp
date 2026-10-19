@@ -25,38 +25,35 @@
 
 struct Foo
 {
-  THRUST_HOST_DEVICE Foo()
+  THRUST_DEVICE Foo()
       : set_me_upon_destruction{nullptr}
   {}
 
-  THRUST_HOST_DEVICE ~Foo()
+  Foo(const Foo&)            = delete;
+  Foo& operator=(const Foo&) = delete;
+
+  THRUST_DEVICE ~Foo()
   {
-    _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
-                      (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
+    if (set_me_upon_destruction != nullptr)
+    {
+      *set_me_upon_destruction = true;
+    }
   }
 
   bool* set_me_upon_destruction;
 };
 
-#if !defined(__QNX__)
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
-  // SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-  //
-  // KNOWN_FAILURE;
-  //
-  //  thrust::device_vector<bool> destructor_flag(1, false);
-  //
-  //  thrust::device_ptr<Foo> foo_ptr  = thrust::device_new<Foo>();
-  //
-  //  Foo exemplar;
-  //  exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
-  //  *foo_ptr = exemplar;
-  //
-  //  ASSERT_EQ(false, destructor_flag[0]);
-  //
-  //  thrust::device_delete(foo_ptr);
-  //
-  //  ASSERT_EQ(true, destructor_flag[0]);
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<bool> destructor_flag(1, false);
+
+  thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
+  *thrust::device_ptr<bool*>(&foo_ptr.get()->set_me_upon_destruction) =
+    thrust::raw_pointer_cast(destructor_flag.data());
+
+  ASSERT_EQ(false, destructor_flag[0]);
+  thrust::device_delete(foo_ptr);
+  ASSERT_EQ(true, destructor_flag[0]);
 }
-#endif
