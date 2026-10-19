@@ -111,7 +111,8 @@ the input data; only complex-to-real transforms may overwrite it.  The accuracy 
 this by digesting the whole input allocation before and after the transform, for both the forward
 transform and the round-trip inverse.  Since that costs two copies of the input back to the host,
 only a sampled fraction of the eligible cases is checked - use the --input_preservation_prob
-command-line option to control that fraction.  Multi-device (brick/field) layouts are not covered.
+command-line option to control that fraction.  Transforms with callbacks are subject to the same
+behaviour, and are checked alongside the rest.  Multi-device (brick/field) layouts are not covered.
 
 #### Samples
 

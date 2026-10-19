@@ -317,6 +317,11 @@ output buffers are provided, and the results are written into the output buffer.
 
    Transforms of all other types leave the input buffers of a not in-place transform unmodified.
 
+   Setting :doc:`load or store callbacks <./load-store-callbacks>` does not change any of the
+   above. Note, however, that these statements describe rocFFT's own writes only: a callback is
+   free to write through the ``callback_data`` pointer it is given, so a callback handed the
+   address of an input buffer can modify it.
+
 .. _stridesdistances:
 
 Strides and distances
