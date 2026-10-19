@@ -13,6 +13,7 @@ import copy
 import hashlib
 import json
 from collections import defaultdict
+from pathlib import Path
 
 # --------------------------------------------------------------------------
 # Field policy constants
@@ -309,6 +310,37 @@ def sanitize(s: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Topology directory naming
+# --------------------------------------------------------------------------
+
+
+_SWEEP_MARKER_FILES = ("graph.template.json", "sweep.json", "support.json")
+
+
+def _topology_dir_occupied(op_dir: Path, name: str) -> bool:
+    """A topology folder is occupied if it already holds a bundle marker file."""
+    d = op_dir / name
+    return any((d / marker).exists() for marker in _SWEEP_MARKER_FILES)
+
+
+def next_free_topology_dir(op_dir: Path, preferred: str = "Default") -> str:
+    """An unoccupied topology folder name under an operation directory.
+
+    Mirrors place_bundles.py's Default/Variant2/Variant3/... convention for
+    multiple topologies of one op: ``preferred`` (the layout-derived name, or
+    "Default") is used if free; otherwise the first free ``VariantN`` (N >= 2)
+    wins. A folder counts as occupied only once it holds a template, sweep, or
+    support marker file, so an empty or unrelated directory is still free.
+    """
+    if not _topology_dir_occupied(op_dir, preferred):
+        return preferred
+    n = 2
+    while _topology_dir_occupied(op_dir, f"Variant{n}"):
+        n += 1
+    return f"Variant{n}"
+
+
+# --------------------------------------------------------------------------
 # Case-ID derivation
 # --------------------------------------------------------------------------
 
@@ -515,19 +547,25 @@ def assign_case_ids(sweep_cases: list):
             dtypes.add(json.dumps(dt))
             shapes.add(json.dumps(rep.get("dims")))
             layouts.add(json.dumps([rep.get("dims"), rep.get("strides")]))
-    dtype_varies = len(dtypes) > 1
-    layout_varies = len(layouts) > 1
-    shape_varies = len(shapes) > 1
+    # A lone case has nothing to vary against, but it is still fully identified
+    # by its own shape/dtype/layout/attrs -- treat every field as "varying" so
+    # a brand-new single-case sweep gets a descriptive id instead of the bare
+    # "case" fallback in derive_case_id.
+    solo = len(sweep_cases) == 1
+    dtype_varies = solo or len(dtypes) > 1
+    layout_varies = solo or len(layouts) > 1
+    shape_varies = solo or len(shapes) > 1
 
     # A node attribute is a discriminator when it takes more than one value
-    # across the sweep. Include list-valued attrs (conv pad/stride/dilation) —
-    # they are exactly what distinguishes cases sharing shape/dtype/layout.
+    # across the sweep (or the sweep is the solo case above). Include
+    # list-valued attrs (conv pad/stride/dilation) — they are exactly what
+    # distinguishes cases sharing shape/dtype/layout.
     feature_vals = defaultdict(set)
     for e in sweep_cases:
         for k, v in e["values"].get("attributes", {}).items():
             if v is None or isinstance(v, (bool, int, float, str, list)):
                 feature_vals[k].add(json.dumps(v))
-    feature_keys = sorted(k for k, vs in feature_vals.items() if len(vs) > 1)
+    feature_keys = sorted(k for k, vs in feature_vals.items() if len(vs) > 1 or solo)
 
     # First pass: readable base id for each case.
     bases = [

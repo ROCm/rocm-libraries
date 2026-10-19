@@ -1424,6 +1424,15 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* voffset,
                                           rocke_value_t* soffset,
                                           int dwords);
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
+ * <n x dtype>; out-of-range offsets read zero. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
