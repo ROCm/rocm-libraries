@@ -1,13 +1,18 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <Tensile/msgpack/SolutionState.hpp>
-
+// ContractionProblemGemm declares `enum CONST`, a name the Windows SDK headers
+// define as a macro, and msgpack.hpp reaches those headers. Every header that
+// declares the enum therefore has to be seen before <msgpack.hpp>, which is why
+// this block sits above the one holding SolutionState.hpp. clang-format sorts
+// within an include block and preserves the order of the blocks themselves.
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/ContractionTaskPredicates.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
+
+#include <Tensile/msgpack/SolutionState.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1240,7 +1245,7 @@ namespace TensileLite
             rv.push_back(withValue<UseGradientEqual>(r.useGradient));
             rv.push_back(withValue<UseBiasCheck>(r.useBias));
             rv.push_back(withValue<UseEEqual>(r.useE));
-            rv.push_back(withValue<UseGateResidualEqual>(r.useGateResidual));
+            rv.push_back(withValue<UseGateResidualCheck>(r.useGateResidual));
             rv.push_back(withValue<DataTypeEEqual>(r.eType));
             rv.push_back(withValue<StridedBatchedEqual>(r.stridedBatched));
             rv.push_back(withValue<GroupedGemmEqual>(r.groupedGemm));
