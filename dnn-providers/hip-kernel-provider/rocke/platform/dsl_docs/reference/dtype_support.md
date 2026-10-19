@@ -108,7 +108,7 @@ that the caller wraps as logical TF32.
 
 Native XF32 is available on gfx942, but absent on gfx950 and gfx1250 (§4D);
 gfx950's catalog carries two logical TF32 atoms emulated by three BF16 MFMAs
-([plan](../architecture/xf32_bf16x3_emulation_plan.md)). Production
+([description](../architecture/xf32_bf16x3_emulation.md)). Production
 GEMM/convolution selectors remain outside this support. The [numerical probe](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
 covers raw payloads, explicit RNE preparation, and ordinary FP32 controls.
 
