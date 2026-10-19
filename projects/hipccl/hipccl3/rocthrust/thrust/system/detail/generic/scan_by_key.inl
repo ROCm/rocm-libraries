@@ -38,11 +38,7 @@
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 namespace detail
 {
@@ -232,7 +228,5 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
   return result + n;
 }
 
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

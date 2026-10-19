@@ -36,11 +36,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 namespace detail
 {
@@ -82,7 +78,5 @@ THRUST_HOST_DEVICE ForwardIterator2 swap_ranges(
   return thrust::get<1>(result.get_iterator_tuple());
 } // end swap_ranges()
 
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

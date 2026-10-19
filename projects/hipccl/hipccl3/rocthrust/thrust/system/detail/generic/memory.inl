@@ -34,11 +34,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 
 template <typename DerivedPolicy, typename Size>
@@ -85,7 +81,5 @@ THRUST_HOST_DEVICE void iter_swap(thrust::execution_policy<DerivedPolicy>&, Poin
   static_assert(thrust::detail::depend_on_instantiation<Pointer1, false>::value, "unimplemented for this system");
 }
 
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

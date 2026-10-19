@@ -44,11 +44,7 @@
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 namespace detail
 {
@@ -189,7 +185,5 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
     exec, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, _THRUST_STD::plus<T>());
 } // end reduce_by_key()
 
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
