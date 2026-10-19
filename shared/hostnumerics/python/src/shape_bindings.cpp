@@ -123,16 +123,22 @@ size_t raise TypeError.
             "shape must have a representable element count; an empty selection is a scalar.")
         .def(
             "linear_index",
+            [](const Shape& shape, const std::vector<size_t>& indices) {
+                return shape.linearIndex(indices);
+            },
+            "indices"_a, "Convert coordinates to a logical index using ascending axes.")
+        .def(
+            "linear_index",
             [](const Shape& shape, const std::vector<size_t>& indices,
                const std::vector<size_t>& order) { return shape.linearIndex(indices, order); },
-            "indices"_a, "order"_a = std::vector<size_t>{},
+            "indices"_a, "order"_a,
             R"doc(
 Convert one coordinate per axis to a logical index, independent of storage strides.
 
 Coordinates always use the original axis order. For Shape([2, 3, 5]), axes 0,
 1, and 2 have extents 2, 3, and 5. Order lists axis numbers from slowest to fastest
 (outermost to innermost loop); its last entry changes fastest. It must be a
-permutation of all axes, or empty to select ascending axes (row-major).
+permutation of all axes. Omitting order selects ascending axes (row-major).
 
 For order [1, 2, 0], traversal is equivalent to these three nested loops:
 
@@ -156,10 +162,14 @@ no valid coordinates. Shape().linear_index([]) returns 0 for its one scalar.
 )doc")
         .def(
             "coordinates",
+            [](const Shape& shape, size_t index) { return shape.coordinates(index); },
+            "linear_index"_a, "Convert a logical index to coordinates using ascending axes.")
+        .def(
+            "coordinates",
             [](const Shape& shape, size_t index, const std::vector<size_t>& order) {
                 return shape.coordinates(index, order);
             },
-            "linear_index"_a, "order"_a = std::vector<size_t>{},
+            "linear_index"_a, "order"_a,
             R"doc(
 Invert linear_index using the same slowest-to-fastest axis order.
 
