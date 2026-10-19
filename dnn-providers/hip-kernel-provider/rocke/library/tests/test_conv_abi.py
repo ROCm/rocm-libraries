@@ -1401,6 +1401,11 @@ def _shrink_sweep_grid(monkeypatch):
     monkeypatch.setattr(aj, "_TILE_K", (32,))
     monkeypatch.setattr(aj, "_WARP_MN", (1, 2))
     monkeypatch.setattr(aj, "_VECS", (2, 8))
+    # Shrunk but kept non-empty and disjoint from the base axes, so wgrad's
+    # grid stays wider than fwd's and dgrad's here too -- that asymmetry is
+    # what the per-direction chunk bounds and count have to get right.
+    monkeypatch.setattr(aj, "_WGRAD_EXTRA_TILE_MN", (48,))
+    monkeypatch.setattr(aj, "_WGRAD_EXTRA_WARP_MN", (3,))
     # basic/wavelet are in so the AOT alias filter is exercised.
     monkeypatch.setattr(aj, "_PIPELINES", ("mem", "compv3", "basic", "wavelet"))
     return ks

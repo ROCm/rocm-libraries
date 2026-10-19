@@ -122,7 +122,7 @@ def _enumerate_chunk(
 
 # Per-process geometry lists, so a worker running many chunks rebuilds the
 # grid once rather than once per chunk.
-_WORKER_GEOMETRIES: Dict[Tuple[str, str], List[tuple]] = {}
+_WORKER_GEOMETRIES: Dict[Tuple[str, str, str], List[tuple]] = {}
 
 
 def _enumerate_worker(payload):
@@ -141,9 +141,11 @@ def _enumerate_worker(payload):
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
-    geos = _WORKER_GEOMETRIES.get((arch, dtype))
+    geos = _WORKER_GEOMETRIES.get((arch, dtype, direction))
     if geos is None:
-        geos = _WORKER_GEOMETRIES[(arch, dtype)] = _geometry_list(target, dtype)
+        geos = _WORKER_GEOMETRIES[(arch, dtype, direction)] = _geometry_list(
+            target, dtype, direction
+        )
     return _enumerate_chunk(
         direction,
         arch,
@@ -214,31 +216,30 @@ def enumerate_jobs(
             raise ValueError(f"unknown direction {direction!r}")
 
     flavor = current_llvm_flavor()
-    geos = _geometry_list(target, dtype)
     jobs = max(1, int(jobs))
-    # Enough chunks per direction to keep every worker busy despite uneven
-    # chunk costs, and to give the serial walk regular progress points.
-    n_chunks = max(1, min(len(geos), jobs * 8 if jobs > 1 else 64))
-    bounds = [
-        (len(geos) * i // n_chunks, len(geos) * (i + 1) // n_chunks)
-        for i in range(n_chunks)
-    ]
     streamk = (tuple(streamk_modes), tuple(streamk_reductions))
-    payloads = [
-        (
-            direction,
-            arch,
-            dtype,
-            tuple(split_ks),
-            max_sub_gemms,
-            validate,
-            flavor,
-            streamk,
-        )
-        + bound
-        for direction in directions
-        for bound in bounds
-    ]
+    # Chunk bounds are per direction: wgrad's grid is longer than fwd's and
+    # dgrad's (see _grid_axes), so one shared set of bounds would truncate it.
+    payloads = []
+    for direction in directions:
+        n_geos = len(_geometry_list(target, dtype, direction))
+        # Enough chunks per direction to keep every worker busy despite uneven
+        # chunk costs, and to give the serial walk regular progress points.
+        n_chunks = max(1, min(n_geos, jobs * 8 if jobs > 1 else 64))
+        payloads += [
+            (
+                direction,
+                arch,
+                dtype,
+                tuple(split_ks),
+                max_sub_gemms,
+                validate,
+                flavor,
+                streamk,
+            )
+            + (n_geos * i // n_chunks, n_geos * (i + 1) // n_chunks)
+            for i in range(n_chunks)
+        ]
 
     total = 0
     if log is not None:
@@ -274,8 +275,12 @@ def enumerate_jobs(
 
     if jobs <= 1:
         # In-process, with the caller's target and the module's own grid.
+        grids: Dict[str, List[tuple]] = {}
         for idx, payload in enumerate(payloads):
             direction, lo, hi = payload[0], payload[-2], payload[-1]
+            geos = grids.get(direction)
+            if geos is None:
+                geos = grids[direction] = _geometry_list(target, dtype, direction)
             _done(
                 idx,
                 *_enumerate_chunk(
