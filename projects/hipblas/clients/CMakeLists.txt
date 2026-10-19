@@ -19,8 +19,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 # ########################################################################
 
-# ROCm software requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
-cmake_minimum_required( VERSION 3.5 )
+# CMake 3.17 is required by the CUDA backend's FindCUDAToolkit dependency.
+cmake_minimum_required( VERSION 3.17 )
 
 function( get_lapack lapack_lib lapack_inc )
   if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/liblapack64.a")
@@ -233,7 +233,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     list( APPEND COMMON_LINK_LIBS "Threads::Threads")
   endif()
 
-  set( COMMON_DEFINES HIPBLAS_USE_HIP_HALF HIPBLAS_BFLOAT16_CLASS ROCM_USE_FLOAT16 HIPBLAS_NO_DEPRECATED_WARNINGS ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
+  set( COMMON_DEFINES HIPBLAS_USE_HIP_HALF HIPBLAS_BFLOAT16_CLASS ROCM_USE_FLOAT16 HIPBLAS_NO_DEPRECATED_WARNINGS ${HIPBLAS_CUDA_COMPILER_DEFINES} )
   if (BUILD_FORTRAN_CLIENTS)
     list( APPEND COMMON_DEFINES "HIPBLAS_FORTRAN_CLIENTS" )
   endif()

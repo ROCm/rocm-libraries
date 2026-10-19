@@ -66,7 +66,12 @@ project_map = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
-        "projects_to_test": ["miopen", "miopenprovider"],
+        # "miopen-dbsync" is not a project -- it's the GPU-free rocjitsu dbsync test component (defined
+        # in ROCm/TheRock fetch_test_configurations.py, keyed on this exact token). Listing it here
+        # selects it in the per-PR flow whenever the MIOpen bundle is tested; TheRock's multi-arch
+        # runs select it via projects_to_test="*". It runs on a CPU runner (linux_cpu_runner) and is
+        # gated to gfx942/gfx950 via the component's include_family.
+        "projects_to_test": ["miopen", "miopenprovider", "miopen-dbsync"],
     },
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
@@ -89,7 +94,7 @@ project_map = {
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
             "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
-        "projects_to_test": ["hipkernelprovider"],
+        "projects_to_test": ["hipkernelprovider", "hipdnn-cudnn-samples"],
     },
     "hipthreads": {
         "cmake_options": ["-DTHEROCK_ENABLE_HIPTHREADS=ON"],
@@ -144,6 +149,7 @@ additional_options = {
             "hipdnn",
             "hipdnn_install",
             "hipdnn-samples",
+            "hipdnn-cudnn-samples",
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
@@ -157,7 +163,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
-        "projects_to_test": ["miopenprovider"],
+        "projects_to_test": ["miopenprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "miopen",
     },
     "dnn-provider-integration-tests": {
@@ -166,14 +172,18 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
+        "projects_to_test": [
+            "hipdnn-integration-tests",
+            "miopenprovider",
+            "hipdnn-cudnn-samples",
+        ],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
-        "projects_to_test": ["hipblasltprovider"],
+        "projects_to_test": ["hipblasltprovider", "hipdnn-cudnn-samples"],
         "project_to_add": "blas",
     },
     "rocwmma": {

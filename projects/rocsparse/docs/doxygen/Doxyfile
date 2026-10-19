@@ -1075,6 +1075,7 @@ EXAMPLE_PATH           = ../../clients/samples/documentation_examples/level1/ \
                          ../../clients/samples/documentation_examples/precond/ \
                          ../../clients/samples/documentation_examples/conversion/ \
                          ../../clients/samples/documentation_examples/extra/ \
+                         ../../clients/samples/documentation_examples/auxiliary/ \
                          ../../clients/samples/documentation_examples/generic/
 
 # If the value of the EXAMPLE_PATH tag contains directories, you can use the
@@ -2433,7 +2434,9 @@ PREDEFINED             = __attribute__(x)= \
                          ROCSPARSE_EXPORT= \
                          ROCSPARSE_WITH_SPMAT_SCALE \
                          ROCSPARSE_WITH_SDDMM_BATCHED \
-                         ROCSPARSE_WITH_DIAGONAL_SOLVE
+                         ROCSPARSE_WITH_DIAGONAL_SOLVE \
+                         ROCSPARSE_WITH_SPSORT \
+                         ROCSPARSE_WITH_TRSM_REFACTORING
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

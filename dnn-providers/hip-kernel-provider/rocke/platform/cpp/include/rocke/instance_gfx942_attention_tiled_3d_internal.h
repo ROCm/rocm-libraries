@@ -65,6 +65,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                  */
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t          */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t          */
+#include "rocke/instance_attention_strided_kv_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/ir.h"
 /* The five "new helper" symbols this kernel threads (already ported). */
@@ -180,6 +181,9 @@ bool rocke_gfx942_attn_tiled_3d_reduce_config_from_spec(
  * ===================================================================== */
 typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
 {
+    bool strided_kv;
+    rocke_strided_kv_params_t k_strides;
+    rocke_strided_kv_params_t v_strides;
     /* ---------- inputs / configuration ---------- */
     rocke_ir_builder_t* b; /* the IRBuilder (Python `b`)           */
     rocke_gfx942_attn_tiled_3d_kind_t kind; /* segment or reduce                    */

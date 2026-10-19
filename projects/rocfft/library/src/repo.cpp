@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -197,7 +197,6 @@ std::pair<void*, size_t> Repo::GetTwiddles2D(size_t                     length0,
                                              rocfft_precision           precision,
                                              const hipDeviceProp_t&     deviceProp,
                                              bool                       attach_halfN1,
-                                             bool                       attach_halfN2,
                                              const std::vector<size_t>& radices1,
                                              const std::vector<size_t>& radices2)
 {
@@ -212,7 +211,6 @@ std::pair<void*, size_t> Repo::GetTwiddles2D(size_t                     length0,
                                       precision,
                                       deviceProp,
                                       attach_halfN1,
-                                      attach_halfN2,
                                       radices1,
                                       radices2,
                                       deviceId);

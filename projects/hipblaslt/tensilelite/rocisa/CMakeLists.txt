@@ -61,15 +61,16 @@ target_include_directories(rocisa-cpp
 )
 
 block()
+    # nanobind requires Python to be found first.
+    if(ROCISA_USE_STABLE_ABI)
+        find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
+    else()
+        find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
+    endif()
+
     if(ROCISA_STANDALONE)
         # scikit-build-core pre-installs nanobind (from build-system.requires)
         # and injects its CMake path, so find_package works without FetchContent.
-        # nanobind requires Python to be found first.
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        else()
-            find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
-        endif()
         find_package(nanobind REQUIRED CONFIG)
     else()
         include(FetchContent)
@@ -79,9 +80,6 @@ block()
           GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
         )
         FetchContent_MakeAvailable(nanobind)
-        if(ROCISA_USE_STABLE_ABI)
-            find_package(Python 3.12 COMPONENTS Interpreter Development.Module Development.SABIModule REQUIRED)
-        endif()
     endif()
 
     # HIP is required to build _rocisa (via hip::host).  Set the search prefix
@@ -160,7 +158,9 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        if("gfx1250" IN_LIST GPU_TARGETS)
+        # Both steppings need the bindings, and they are separate entries in
+        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
+        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
             set(STINKYTOFU_BUILD_PYTHON ON)
         else()
             set(STINKYTOFU_BUILD_PYTHON OFF)
@@ -172,7 +172,7 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS)
+            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
                 set(STINKYTOFU_BUILD_PYTHON ON)
             else()
                 set(STINKYTOFU_BUILD_PYTHON OFF)
@@ -356,9 +356,12 @@ block()
 
     if(NOT ROCISA_STANDALONE)
         set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
-        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+        # TheRock computes install RPATHs relative to this target location.
+        set_property(TARGET _rocisa PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_rocisa_install_dir}")
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
-            DESTINATION "${_rocisa_install_dir}" COMPONENT devel)
+            DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

@@ -55,6 +55,8 @@ enum class target_arch : unsigned int
     gfx1101 = 1101,
     gfx1102 = 1102,
     gfx1150 = 1150,
+    gfx1170 = 1170,
+    gfx1171 = 1171,
     gfx1201 = 1201,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
@@ -74,6 +76,8 @@ constexpr target_arch target_architectures[] = {
     target_arch::gfx1101,
     target_arch::gfx1102,
     target_arch::gfx1150,
+    target_arch::gfx1170,
+    target_arch::gfx1171,
     target_arch::gfx1201,
 };
 
@@ -124,6 +128,10 @@ constexpr target_arch get_device_arch()
     return target_arch::gfx1102;
 #elif defined(__gfx1150__)
     return target_arch::gfx1150;
+#elif defined(__gfx1170__)
+    return target_arch::gfx1170;
+#elif defined(__gfx1171__)
+    return target_arch::gfx1171;
 #elif defined(__gfx1201__)
     return target_arch::gfx1201;
 #else
@@ -150,6 +158,8 @@ inline target_arch parse_gcn_arch(const std::string& arch_name)
                                                 "gfx1101",
                                                 "gfx1102",
                                                 "gfx1150",
+                                                "gfx1170",
+                                                "gfx1171",
                                                 "gfx1201"};
     const target_arch target_architectures[] = {
         target_arch::gfx900,
@@ -166,6 +176,8 @@ inline target_arch parse_gcn_arch(const std::string& arch_name)
         target_arch::gfx1101,
         target_arch::gfx1102,
         target_arch::gfx1150,
+        target_arch::gfx1170,
+        target_arch::gfx1171,
         target_arch::gfx1201,
     };
     static_assert(sizeof(target_names) / sizeof(target_names[0])

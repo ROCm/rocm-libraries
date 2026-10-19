@@ -26,7 +26,19 @@ Production tiled matrix-core, paged-KV decode:
 - `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
 RDNA / gfx1250 WMMA forward:
-- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward
+- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward (the hipDNN
+  catalog's kernel; rocKE dispatch now selects the two kernels below)
+- `library/kernels/gfx1151/wmma_fmha_fwd_v2.py` -- gfx11 / gfx12 multi-wave WMMA prefill
+  (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
+  head counts incl. a separate V head count, head widths, masks and bias strides;
+  baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
+  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+- `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
+  decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
+  split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
+  merge as one code object), runtime head counts incl. a separate V head count, head widths,
+  masks and bias strides; the same baked features as the prefill; host helpers for split
+  count, grids and workspace mirrored in C (`instance_gfx1151_wmma_fmha_decode.h`)
 - `library/kernels/gfx1250/wmma_attention_fwd.py`, `library/kernels/gfx1250/_wmma_attention_common.py`
 
 Helpers (all under `platform/python/rocke/helpers/`):
@@ -62,6 +74,11 @@ wave32)** by selecting the atom family from the target's MMA catalog; the
 scalar unified 2D/3D kernels compile across the supported arches.
 
 ## Main Concepts
+
+The gfx942/gfx950 tiled 3D decode kernels also accept non-paged, strided KV
+through `kv_layout="strided"`. See the
+[input contract and adapter usage](../../../docs/strided-kv-decode.md)
+for BHSD/BSHD views, bounded outer strides, per-sequence lengths, and validation.
 
 `UnifiedAttentionProblem` describes the problem and selects between paths.
 
@@ -437,9 +454,9 @@ attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runti
 
 The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
 
-Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window — declare nothing and keep per-shape identity. `library/kernels/gfx942/attention_dense.py` and every other family also declare nothing, so their identity is unchanged.
+Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned, unshifted dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window, and bottom-right causal with unequal Q/K lengths — declare nothing and keep per-shape identity. Equal-length bottom-right adds no extra shape specialization. `library/kernels/gfx942/attention_dense.py` opts in further on both its default and persistent grids (sliding-window included), declaring `("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")`; only ragged, varlen and paged declare nothing. The persistent body also takes a host-computed fast-division magic/shift pair per work-decode divisor, after those five (`runtime_kernarg_fields`); the pairs are derived from the declared fields, so they do not enter the key. Every other family also declares nothing, so its identity is unchanged.
 
-A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
+A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes; the gfx942 spec likewise drops `hq`/`kv`. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
 
 ### Shape validity moves from compile time to launch time
 

@@ -774,7 +774,7 @@ See `rocke/instances/attention_unified.py::_get_3d_pipeline` and
 
 Phase 1 (today):
  - All helpers shipped above are production-quality and used by the
- bake-off generators (`rocke.examples.common.bake_off_*`).
+ bake-off generators (`builders.common.bake_off_*`).
 
 Phase 2:
  - `MfmaAtom` extension for bf16, fp8, and `smfmac` (sparse matmul).
@@ -998,7 +998,7 @@ configs = [
 @functools.lru_cache(maxsize=None) # cache the compiled launcher
 def _build(cfg):
  k = build_universal_gemm(cfg.spec)
- ir = lower_kernel_to_llvm(k)
+ ir = lower_kernel_to_llvm(k, arch="gfx950")
  hsaco, _ = build_hsaco_from_llvm_ir(ir)
  return KernelLauncher(hsaco=hsaco, kernel_name=k.name,
  signature=gemm_args_signature()), cfg.spec
