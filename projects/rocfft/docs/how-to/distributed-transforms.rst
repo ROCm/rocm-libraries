@@ -33,12 +33,6 @@ fields.
    concurrently on the same device set, serialize the calls or use
    distinct device subsets.
 
-   When the library is also built with ``ROCFFT_MPI_ENABLE=ON``, RCCL
-   may be used for the multi-process transpose as well (rocFFT may still
-   fall back to MPI communication). Set
-   ``ROCFFT_RCCL_DISABLE=1`` to force the MPI path. MPI is still used
-   to exchange brick metadata and to bootstrap the RCCL communicator.
-
 Support for single-process multi-device transforms was introduced in
 ROCm 6.0 with rocFFT 1.0.25.
 
@@ -55,8 +49,20 @@ is off. To use Cray MPI, enable the ``ROCFFT_CRAY_MPI_ENABLE`` CMake option.
 Additionally, rocFFT MPI support requires a GPU-aware MPI library
 that supports transferring data to and from HIP devices.
 
-If the library is also built with ``ROCFFT_RCCL_ENABLE=ON``, multi-process
-plans may use RCCL for the transpose.
+If the library is also built with ``ROCFFT_RCCL_ENABLE=ON``, RCCL
+may be used for the multi-process transpose as well (rocFFT may still
+fall back to MPI communication). Set
+``ROCFFT_RCCL_DISABLE=1`` to force the MPI path. MPI is still used
+to exchange brick metadata and to bootstrap the RCCL communicator.
+
+.. warning::
+
+   An RCCL communicator is not safe for concurrent use, so plans that
+   share one must be executed serially. Create plans one at a time as
+   well. Under ``MPI_THREAD_MULTIPLE``, concurrent
+   :cpp:func:`rocfft_plan_create` calls on communicators that share
+   processes can deadlock: plan creation holds a process-wide lock
+   across the collective calls that set up the RCCL communicator.
 
 Support for MPI transforms was introduced in ROCm 6.3 with rocFFT
 1.0.29.
@@ -101,3 +107,10 @@ following additional steps are required:
 
    For in-place transforms, only pass the input pointers and use an
    empty array of output pointers.
+
+#. When the transforms are done and the plans are destroyed, each rank must
+   call :cpp:func:`rocfft_cleanup` before calling ``MPI_Finalize``.
+   In builds with ``ROCFFT_RCCL_ENABLE=ON``, :cpp:func:`rocfft_cleanup`
+   releases RCCL communicators that are shared with other processes, so
+   every rank must call it. A rank that skips it can leave the other ranks
+   waiting, resulting in hangs.

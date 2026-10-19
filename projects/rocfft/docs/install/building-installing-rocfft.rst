@@ -83,19 +83,10 @@ the same ROCm prefix used to compile rocFFT (typically ``$ROCM_PATH/lib/cmake``)
 
 Example: MPI-only on a Cray node (no RCCL)::
 
-   cmake -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_C_COMPILER=hipcc \
-     -DCMAKE_BUILD_TYPE=Release \
-     -DBUILD_CLIENTS=ON -DBUILD_FFTW=ON -DBUILD_GTEST=ON \
-     -DROCFFT_MPI_ENABLE=ON -DROCFFT_CRAY_MPI_ENABLE=ON \
-     -DROCFFT_RCCL_ENABLE=OFF \
-     -DGPU_TARGETS=gfx90a \
-     -DCMAKE_INSTALL_PREFIX=rocFFT_install \
-     -DCMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake;${ROCM_PATH}/lib/cmake/hip;${MPICH_DIR}" \
+   cmake -DROCFFT_MPI_ENABLE=ON -DROCFFT_CRAY_MPI_ENABLE=ON \
+     -DCMAKE_PREFIX_PATH="${MPICH_DIR}" \
      -DCMAKE_SHARED_LINKER_FLAGS="-L${MPICH_DIR}/lib -lmpi ${PE_MPICH_GTL_DIR_amd_gfx90a} ${PE_MPICH_GTL_LIBS_amd_gfx90a} ${CRAY_XPMEM_POST_LINK_OPTS} -lxpmem" \
      ..
-
-
-``AMDGPU_TARGETS`` still works but is deprecated; use ``GPU_TARGETS``.
 
 You can build the clients separately from the main library.
 For example, to build all the clients with an existing rocFFT library, invoke CMake from
