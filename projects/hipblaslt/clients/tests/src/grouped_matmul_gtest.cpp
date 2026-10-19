@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <numeric>
 #include <random>
 #include <string>
@@ -1434,5 +1435,64 @@ namespace
                       HIPBLAS_STATUS_INVALID_VALUE);
         }
         hipblasLtMatmulPreferenceDestroy(pref);
+    }
+
+    // No GPU work: MX calls hipblasLtMatmul rejects before it runs anything.
+    TEST_F(GroupedMatmul, smoke_RejectsInvalidMXMatmul)
+    {
+        auto layK64 = makeLayout(
+            HIP_R_8F_E4M3, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 64, 8);
+        auto layOut = makeLayout(
+            HIP_R_16BF, 3, nullptr, nullptr, nullptr, HIPBLASLT_INTEGER_WIDTH_32, 8, 8);
+        hipblasLtMatmulDesc_t       desc = makeTNDesc(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+        hipblasLtMatmulPreference_t pref = nullptr;
+        ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+        uint64_t wsLimit = kWorkspace;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                      pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsLimit, sizeof(wsLimit)),
+                  HIPBLAS_STATUS_SUCCESS);
+        // Records the hints on desc whether or not an MX kernel exists.
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              count = 0;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      handle, desc, layK64, layK64, layOut, layOut, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        float                 alpha = 1.f, beta = 0.f;
+        void*                 fake = reinterpret_cast<void*>(0x1000);
+        hipblasLtMatmulAlgo_t algo{};
+        auto                  matmul = [&]() {
+            return hipblasLtMatmul(handle,
+                                   desc,
+                                   &alpha,
+                                   fake,
+                                   layK64,
+                                   fake,
+                                   layK64,
+                                   &beta,
+                                   fake,
+                                   layOut,
+                                   fake,
+                                   layOut,
+                                   &algo,
+                                   fake,
+                                   kWorkspace,
+                                   nullptr);
+        };
+        // No scale pointer arrays.
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
+        // An algo that names no solution, so its scale layout is unknown.
+        for(auto attr :
+            {HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER})
+            EXPECT_EQ(hipblasLtMatmulDescSetAttribute(desc, attr, &fake, sizeof(fake)),
+                      HIPBLAS_STATUS_SUCCESS);
+        int32_t noSolution = -1;
+        std::memcpy(algo.data, &noSolution, sizeof(noSolution));
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
+
+        hipblasLtMatmulPreferenceDestroy(pref);
+        hipblasLtMatmulDescDestroy(desc);
+        for(auto l : {layK64, layOut})
+            hipblasLtMatrixLayoutDestroy(l);
     }
 } // namespace
