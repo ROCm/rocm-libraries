@@ -58,9 +58,7 @@
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace complex
+namespace detail::complex
 {
 using thrust::complex;
 
@@ -148,8 +146,7 @@ THRUST_HOST_DEVICE inline complex<float> csinf(complex<float> z)
   z = csinhf(complex<float>(-z.imag(), z.real()));
   return (complex<float>(z.imag(), -z.real()));
 }
-} // namespace complex
-} // namespace detail
+} // namespace detail::complex
 
 template <>
 THRUST_HOST_DEVICE inline complex<float> sin(const complex<float>& z)
