@@ -5,7 +5,7 @@
 {% endblock %}
 
 {% block config_guard scoped %}
-    {{ mk_is_fp_type_check(type.key_type) }} && {{ mk_type_sz_check(type.key_type) }}
+    {{ mk_is_fp_type_check(type.value_type) }} && {{ mk_type_sz_check(type.value_type) }}
 {% endblock %}
 
 {% block config_constructor -%}
