@@ -25,7 +25,11 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/system/detail/generic/tag.h>
+
+#include <thrust/functional.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/scan.h>
+#include <thrust/system/detail/generic/scan.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
@@ -33,20 +37,29 @@ namespace system::detail::generic
 
 template <typename ExecutionPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator inclusive_scan(
-  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result);
+  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
+{
+  // assume plus as the associative operator
+  return thrust::inclusive_scan(exec, first, last, result, _THRUST_STD::plus<>());
+} // end inclusive_scan()
 
-// XXX it is an error to call this function; it has no implementation
+// Note: it is an error to call this function: this should be provided by a backend system
 template <typename ExecutionPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
 THRUST_HOST_DEVICE OutputIterator inclusive_scan(
   thrust::execution_policy<ExecutionPolicy>& exec,
   InputIterator first,
   InputIterator last,
   OutputIterator result,
-  BinaryFunction binary_op);
+  BinaryFunction binary_op) = delete;
 
 template <typename ExecutionPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator exclusive_scan(
-  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result);
+  thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
+{
+  // Use the input iterator's value type per https://wg21.link/P0571
+  using ValueType = thrust::detail::it_value_t<InputIterator>;
+  return thrust::exclusive_scan(exec, first, last, result, ValueType{});
+}
 
 template <typename ExecutionPolicy, typename InputIterator, typename OutputIterator, typename T>
 THRUST_HOST_DEVICE OutputIterator exclusive_scan(
@@ -54,9 +67,13 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan(
   InputIterator first,
   InputIterator last,
   OutputIterator result,
-  T init);
+  T init)
+{
+  // assume plus as the associative operator
+  return thrust::exclusive_scan(exec, first, last, result, init, _THRUST_STD::plus<>());
+}
 
-// XXX it is an error to call this function; it has no implementation
+// Note: it is an error to call this function: this should be provided by a backend system
 template <typename ExecutionPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
 THRUST_HOST_DEVICE OutputIterator exclusive_scan(
   thrust::execution_policy<ExecutionPolicy>& exec,
@@ -64,9 +81,7 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan(
   InputIterator last,
   OutputIterator result,
   T init,
-  BinaryFunction binary_op);
+  BinaryFunction binary_op) = delete;
 
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END
-
-#include <thrust/system/detail/generic/scan.inl>
