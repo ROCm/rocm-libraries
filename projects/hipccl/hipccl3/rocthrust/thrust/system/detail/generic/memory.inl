@@ -29,7 +29,6 @@
 #include <thrust/detail/malloc_and_free_fwd.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
-#include <thrust/system/detail/adl/malloc_and_free.h>
 
 #include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
 
