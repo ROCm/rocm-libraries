@@ -154,9 +154,14 @@ def _missing_prerequisite(validator: Path | None, profile: Path | None) -> str |
     return None
 
 
-_needs_build = pytest.mark.skipif(
-    _missing_prerequisite(_VALIDATOR, _PROFILE) is not None, reason=_NEEDS_BUILD_REASON
-)
+_NEEDS_BUILD_MISSING = _missing_prerequisite(_VALIDATOR, _PROFILE) is not None
+
+
+def _needs_build(obj):
+    """Skip `obj` without a build and a profile; allowed to skip in a strict run, because
+    the profile is an author's input this repo does not ship."""
+    obj = pytest.mark.skipif(_NEEDS_BUILD_MISSING, reason=_NEEDS_BUILD_REASON)(obj)
+    return pytest.mark.allow_skip(reason=_NEEDS_BUILD_REASON)(obj)
 
 
 def _run(*args) -> subprocess.CompletedProcess:

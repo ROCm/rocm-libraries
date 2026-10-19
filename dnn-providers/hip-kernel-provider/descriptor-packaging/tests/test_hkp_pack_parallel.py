@@ -817,9 +817,9 @@ def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
     pool must be built after parent-side path setup, is documented at the
     construction site.
 
-    The pool is pinned to `spawn` because the platform default is not one start
-    method: it is `fork` on Linux up to Python 3.13, where the child inherits
-    `sys.path` with the rest of the parent's memory and a check would prove nothing.
+    The pool is pinned to `spawn`: under `fork`, the Linux default up to Python 3.13,
+    the child inherits `sys.path` with the rest of the parent's memory and the check
+    would prove nothing.
     The path watched is one the test prepends itself, in a directory no `PYTHONPATH`
     carries, so it reaches the child only if the interpreter propagates it.
     """

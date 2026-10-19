@@ -210,9 +210,8 @@ class TestConstructionFailureAbortsRatherThanBuckets:
         assert "no shape resolved" in capsys.readouterr().err
 
 
-#: A repository-relative provider root, as a profile would write it. Spelled out so the
-#: decoy below can reproduce it exactly: under a cwd-relative resolution the decoy is
-#: what binds.
+#: A repository-relative provider root. Spelled out so the decoy below can reproduce it
+#: exactly: under a cwd-relative resolution the decoy is what binds.
 _REPO_RELATIVE_ROOT = "dnn-providers/hip-kernel-provider"
 
 

@@ -47,10 +47,9 @@ def compile_env():
             "this checkout -- cannot attempt a real compile"
         )
 
-    # Header roots for flatbuffers and HIP. A build that wires the gate sets
-    # HIPDNN_INGESTOR_STUB_INCLUDE_FILE to a file of include dirs (one per line, written by
-    # tools/CMakeLists.txt); a bad value fails rather than skips, so a miswired build cannot
-    # pass by skipping. Unset, probe an installed ROCm and skip when it is absent.
+    # HIPDNN_INGESTOR_STUB_INCLUDE_FILE (written by tools/CMakeLists.txt) lists the flatbuffers
+    # and HIP include dirs, one per line; a bad value fails rather than skips. Unset, probe an
+    # installed ROCm and skip when it is absent.
     raw = os.environ.get("HIPDNN_INGESTOR_STUB_INCLUDE_FILE")
     if raw is not None:
         include_file = Path(raw)

@@ -328,6 +328,9 @@ class TestAnInstalledTreeReadsTheProvenanceRoot:
         assert "holds no hkp-packed.marker" in result.stderr
 
 
+@pytest.mark.allow_skip(
+    reason="needs a mined request corpus via HIPDNN_INGESTOR_SHAPES; the repo ships none by design"
+)
 class TestGfx950RealBundle:
     """The shipped gfx950 bundle against the shipped shape corpus. Needs no device and no
     build, and every expectation is derived from the bundle rather than written down, so

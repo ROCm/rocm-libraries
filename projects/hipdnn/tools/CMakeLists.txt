@@ -121,13 +121,9 @@ endif()
     _apply_hipdnn_test_category_labels(hipdnn_list_engines_smoke)
 endif()
 
-# DescriptorGenerator pytest suite, plus the junit directory both tooling suites write to.
-# ctest reports a suite whose every case skips as a pass, so the pytest junit is the only place
-# a skip is visible: .github/scripts/check_pytest_junit.py reads it and fails on any skip
-# tooling-allowed-skips.txt in this directory does not name.
-# Build tree only, like the smoke tests above. The option is OFF by default so TheRock and
-# developer builds are unchanged; when ON, a missing prerequisite fails configure rather than
-# silently skipping.
+# DescriptorGenerator pytest suite, then the IngestorGenerator one below. Build tree only, like
+# the smoke tests above. Both run under the hipdnn_strict_skips plugin: ctest reports a suite
+# whose cases all skip as a pass, so a missing compiler or binary would otherwise go unnoticed.
 if(HIPDNN_ENABLE_TOOLING_TESTS AND HIPDNN_SKIP_TESTS)
     message(STATUS "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS is ignored because HIPDNN_SKIP_TESTS is ON")
 endif()
@@ -135,9 +131,6 @@ if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
     if(NOT Python3_FOUND)
         message(FATAL_ERROR "hipDNN: HIPDNN_ENABLE_TOOLING_TESTS=ON needs a Python3 interpreter")
     endif()
-    # The IngestorGenerator suite is registered below only with the kernel ingestor, whose
-    # hipdnn_validate_descriptors tool its round-trip tests run. Without it the option would
-    # register one suite and leave the other silently absent.
     if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(
             FATAL_ERROR
@@ -160,12 +153,16 @@ if(HIPDNN_ENABLE_TOOLING_TESTS AND NOT HIPDNN_SKIP_TESTS)
                 "with -DHIPDNN_ENABLE_TOOLING_TESTS=OFF."
         )
     endif()
-    set(HIPDNN_TOOLING_JUNIT_DIR "${CMAKE_BINARY_DIR}/tooling-junit")
+    set(HIPDNN_STRICT_SKIPS_PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pytest_plugins")
     add_test(
         NAME hipdnn_descriptor_generator_pytest
-        COMMAND
-            "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/DescriptorGenerator/tests"
-            -v "--junitxml=${HIPDNN_TOOLING_JUNIT_DIR}/hipdnn_descriptor_generator_pytest.xml"
+        COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                "${CMAKE_CURRENT_SOURCE_DIR}/DescriptorGenerator/tests" -v
+    )
+    set_tests_properties(
+        hipdnn_descriptor_generator_pytest
+        PROPERTIES ENVIRONMENT_MODIFICATION
+                   "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
     )
     _apply_hipdnn_test_category_labels(hipdnn_descriptor_generator_pytest)
 endif()
@@ -293,28 +290,22 @@ endif()
 
         _apply_hipdnn_test_category_labels(hipdnn_validate_descriptors_smoke)
 
-        # IngestorGenerator pytest suite. It runs here, not next to the DescriptorGenerator
-        # suite above, because two of its gates need this directory's tool target:
-        #   * tests/test_round_trip.py runs the validator named by HIPDNN_VALIDATE_DESCRIPTORS.
-        #   * tests/test_native_stub.py compiles generated stubs against the flatbuffers and
-        #     HIP headers listed in the file named by HIPDNN_INGESTOR_STUB_INCLUDE_FILE.
-        # Without them those tests skip, and ctest reports a suite of skips as a pass.
+        # IngestorGenerator pytest suite. It is registered here, after the validator target:
+        # tests/test_round_trip.py runs that binary (HIPDNN_VALIDATE_DESCRIPTORS) and
+        # tests/test_native_stub.py needs the include list written below.
         if(HIPDNN_ENABLE_TOOLING_TESTS)
             add_test(
                 NAME hipdnn_ingestor_generator_pytest
-                COMMAND
-                    "${Python3_EXECUTABLE}" -m pytest
-                    "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests" -v
-                    "--junitxml=${HIPDNN_TOOLING_JUNIT_DIR}/hipdnn_ingestor_generator_pytest.xml"
+                COMMAND "${Python3_EXECUTABLE}" -m pytest -p hipdnn_strict_skips
+                        "${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests" -v
             )
 
             set(_hipdnn_ingestor_pytest_env
                 "HIPDNN_VALIDATE_DESCRIPTORS=$<TARGET_FILE:hipdnn_validate_descriptors>"
             )
 
-            # test_native_stub.py compiles generated stubs against the flatbuffers and HIP
-            # headers listed in this file, one directory per line.
-            # TARGET_PROPERTY does not follow ALIAS targets, so resolve to the real target.
+            # Include directories for test_native_stub.py, one per line. TARGET_PROPERTY does not
+            # follow ALIAS targets, so resolve to the real target.
             set(_hipdnn_stub_include_exprs "")
             foreach(_stub_dep flatbuffers::flatbuffers hip::host hip::amdhip64)
                 if(TARGET ${_stub_dep})
@@ -348,25 +339,22 @@ endif()
                                                             "${_hipdnn_ingestor_pytest_env}"
             )
 
-            # PATH prepends (Windows ASAN runtime / ROCm / build DLL dirs) go through
-            # ENVIRONMENT_MODIFICATION so the runtime PATH is extended rather than replaced.
-            set(_hipdnn_ingestor_pytest_env_mod "")
+            # PYTHONPATH makes the plugin named by -p importable.
+            set(_hipdnn_ingestor_pytest_env_mod
+                "PYTHONPATH=path_list_prepend:${HIPDNN_STRICT_SKIPS_PLUGIN_DIR}"
+            )
             if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
                 list(APPEND _hipdnn_ingestor_pytest_env_mod ${TEST_ENVIRONMENT_MODIFICATION})
             endif()
-            if(WIN32)
-                # test_native_stub.py looks for g++ or clang++ on PATH. The ROCm clang++ that
-                # builds this tree lives in lib/llvm/bin, which the lane does not put on PATH.
-                get_filename_component(_hipdnn_stub_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-                list(APPEND _hipdnn_ingestor_pytest_env_mod
-                     "PATH=path_list_prepend:${_hipdnn_stub_cxx_dir}")
-            endif()
-            if(_hipdnn_ingestor_pytest_env_mod)
-                set_tests_properties(
-                    hipdnn_ingestor_generator_pytest
-                    PROPERTIES ENVIRONMENT_MODIFICATION "${_hipdnn_ingestor_pytest_env_mod}"
-                )
-            endif()
+            # Give test_native_stub.py the compiler that builds this tree; its lib/llvm/bin is not
+            # on the lanes' PATH.
+            get_filename_component(_hipdnn_stub_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+            list(APPEND _hipdnn_ingestor_pytest_env_mod
+                 "PATH=path_list_prepend:${_hipdnn_stub_cxx_dir}")
+            set_tests_properties(
+                hipdnn_ingestor_generator_pytest PROPERTIES ENVIRONMENT_MODIFICATION
+                                                            "${_hipdnn_ingestor_pytest_env_mod}"
+            )
 
             _apply_hipdnn_test_category_labels(hipdnn_ingestor_generator_pytest)
         endif()
