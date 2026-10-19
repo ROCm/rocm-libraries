@@ -83,24 +83,26 @@ THRUST_HOST_DEVICE inline complex<float> ctanhf(const complex<float>& z)
       return (complex<float>(x, (y == 0.0f ? y : x * y)));
     }
     set_float_word(x, hx - 0x40000000);
-    return (complex<float>(x, copysignf(0, isinf(y) ? y : sinf(y) * cosf(y))));
+    return (complex<float>(
+      x, _THRUST_STD::copysignf(0, _THRUST_STD::isinf(y) ? y : _THRUST_STD::sinf(y) * _THRUST_STD::cosf(y))));
   }
 
-  if (!isfinite(y))
+  if (!_THRUST_STD::isfinite(y))
   {
     return (complex<float>(y - y, y - y));
   }
 
   if (ix >= 0x41300000)
   { /* x >= 11 */
-    float exp_mx = expf(-fabsf(x));
-    return (complex<float>(copysignf(1.0f, x), 4.0f * sinf(y) * cosf(y) * exp_mx * exp_mx));
+    float exp_mx = _THRUST_STD::expf(-_THRUST_STD::fabsf(x));
+    return (complex<float>(_THRUST_STD::copysignf(1.0f, x),
+                           4.0f * _THRUST_STD::sinf(y) * _THRUST_STD::cosf(y) * exp_mx * exp_mx));
   }
 
-  t     = tanf(y);
+  t     = _THRUST_STD::tanf(y);
   beta  = 1.0f + t * t;
-  s     = sinhf(x);
-  rho   = sqrtf(1.0f + s * s);
+  s     = _THRUST_STD::sinhf(x);
+  rho   = _THRUST_STD::sqrtf(1.0f + s * s);
   denom = 1.0f + beta * s * s;
   return (complex<float>((beta * rho * s) / denom, t / denom));
 }

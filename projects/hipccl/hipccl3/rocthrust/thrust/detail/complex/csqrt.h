@@ -79,16 +79,16 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
   {
     return (complex<double>(0.0, b));
   }
-  if (isinf(b))
+  if (_THRUST_STD::isinf(b))
   {
     return (complex<double>(_THRUST_STD::numeric_limits<double>::infinity(), b));
   }
-  if (isnan(a))
+  if (_THRUST_STD::isnan(a))
   {
     t = (b - b) / (b - b); /* raise invalid if b is not a NaN */
     return (complex<double>(a, t)); /* return NaN + NaN i */
   }
-  if (isinf(a))
+  if (_THRUST_STD::isinf(a))
   {
     /*
      * csqrt(inf + NaN i)  = inf +  NaN i
@@ -96,13 +96,13 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
      * csqrt(-inf + NaN i) = NaN +- inf i
      * csqrt(-inf + y i)   = 0   +  inf i
      */
-    if (signbit(a))
+    if (_THRUST_STD::signbit(a))
     {
-      return (complex<double>(fabs(b - b), copysign(a, b)));
+      return (complex<double>(_THRUST_STD::fabs(b - b), _THRUST_STD::copysign(a, b)));
     }
     else
     {
-      return (complex<double>(a, copysign(b - b, b)));
+      return (complex<double>(a, _THRUST_STD::copysign(b - b, b)));
     }
   }
   /*
@@ -114,14 +114,14 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
   const double low_thresh = 4.450147717014402766180465e-308;
   scale                   = 0;
 
-  if (fabs(a) >= THRESH || fabs(b) >= THRESH)
+  if (_THRUST_STD::fabs(a) >= THRESH || _THRUST_STD::fabs(b) >= THRESH)
   {
     /* Scale to avoid overflow. */
     a *= 0.25;
     b *= 0.25;
     scale = 1;
   }
-  else if (fabs(a) <= low_thresh && fabs(b) <= low_thresh)
+  else if (_THRUST_STD::fabs(a) <= low_thresh && _THRUST_STD::fabs(b) <= low_thresh)
   {
     /* Scale to avoid underflow. */
     a *= 4.0;
@@ -132,13 +132,13 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
   /* Algorithm 312, CACM vol 10, Oct 1967. */
   if (a >= 0.0)
   {
-    t      = sqrt((a + hypot(a, b)) * 0.5);
+    t      = _THRUST_STD::sqrt((a + _THRUST_STD::hypot(a, b)) * 0.5);
     result = complex<double>(t, b / (2 * t));
   }
   else
   {
-    t      = sqrt((-a + hypot(a, b)) * 0.5);
-    result = complex<double>(fabs(b) / (2 * t), copysign(t, b));
+    t      = _THRUST_STD::sqrt((-a + _THRUST_STD::hypot(a, b)) * 0.5);
+    result = complex<double>(fabs(b) / (2 * t), _THRUST_STD::copysign(t, b));
   }
 
   /* Rescale. */
@@ -160,7 +160,7 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> sqrt(const complex<ValueType>& z)
 {
-  return thrust::polar(std::sqrt(thrust::abs(z)), thrust::arg(z) / ValueType(2));
+  return thrust::polar(_THRUST_STD::sqrt(thrust::abs(z)), thrust::arg(z) / ValueType(2));
 }
 
 template <>
