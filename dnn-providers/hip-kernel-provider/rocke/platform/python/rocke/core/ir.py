@@ -1810,12 +1810,18 @@ class IRBuilder:
         ).result
 
     def cvt_f32_to_fp8(self, v: Value) -> Value:
-        """Round + saturate one f32 element to fp8e4m3 (round-to-nearest-even).
+        """Convert one f32 element to fp8e4m3.
+
+        Rounds to nearest even and does NOT saturate: the hardware
+        conversion turns a value that rounds past the largest finite fp8
+        value, and +-inf and NaN, into NaN. The encoding is the target's:
+        FNUZ on gfx942 (largest value 240), OCP on gfx950 (largest 448).
+        Clamp first (``clamp_f32``) for a saturating conversion.
 
         Lowers to AMDGPU's ``llvm.amdgcn.cvt.pk.fp8.f32`` packing
         intrinsic (two f32 per call), with the second slot held at
         +0.0f and the low byte extracted as the single-element
-        result. Out-of-range inputs are clamped to the fp8e4m3 range.
+        result.
         """
         if v.type.name != "f32":
             raise ValueError(f"cvt_f32_to_fp8 expects f32 input, got {v.type.name}")
@@ -1824,8 +1830,9 @@ class IRBuilder:
         ).result
 
     def cvt_pk_fp8_f32x4(self, v: Value) -> Value:
-        """Round + saturate <4 x f32> to <4 x fp8e4m3> with AMDGPU's
-        packed ``v_cvt_pk_fp8_f32`` instruction.
+        """Convert <4 x f32> to <4 x fp8e4m3> with AMDGPU's packed
+        ``v_cvt_pk_fp8_f32`` instruction; out-of-range values as in
+        :meth:`cvt_f32_to_fp8` (no saturation).
 
         The scalar :meth:`cvt_f32_to_fp8` wrapper intentionally exposes a
         simple one-element API but wastes the second conversion lane of
@@ -1850,11 +1857,17 @@ class IRBuilder:
         ).result
 
     def cvt_f32_to_bf8(self, v: Value) -> Value:
-        """Round + saturate one f32 element to bf8e5m2 (round-to-nearest-even).
+        """Convert one f32 element to bf8e5m2.
+
+        Rounds to nearest even and does NOT saturate: a value that rounds
+        past the largest finite bf8 value (57344) becomes NaN on gfx942
+        (FNUZ) and +-inf on gfx950 (OCP); +-inf and NaN keep their class
+        (NaN on gfx942). Clamp first (``clamp_f32``) for a saturating
+        conversion.
 
         Lowers to ``llvm.amdgcn.cvt.pk.bf8.f32``; the e5m2 sibling of
         cvt_f32_to_fp8. ``bf8e5m2`` carries 5 exponent bits so its
-        representable range reaches ~57344 at the cost of 1 mantissa bit.
+        representable range reaches 57344 at the cost of 1 mantissa bit.
         """
         if v.type.name != "f32":
             raise ValueError(f"cvt_f32_to_bf8 expects f32 input, got {v.type.name}")
@@ -1863,7 +1876,8 @@ class IRBuilder:
         ).result
 
     def cvt_pk_bf8_f32x4(self, v: Value) -> Value:
-        """e5m2 sibling of :meth:`cvt_pk_fp8_f32x4`."""
+        """e5m2 sibling of :meth:`cvt_pk_fp8_f32x4`; out-of-range values as
+        in :meth:`cvt_f32_to_bf8` (no saturation)."""
         if (
             not isinstance(v.type, VectorType)
             or v.type.elem.name != "f32"
