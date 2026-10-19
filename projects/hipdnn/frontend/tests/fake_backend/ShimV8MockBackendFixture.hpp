@@ -35,6 +35,8 @@ struct CapturedSetAttribute
     std::int64_t count;
     std::vector<std::byte> payload;
 
+    // T may be a handle or descriptor pointer; its own size is meant.
+    // NOLINTBEGIN(bugprone-sizeof-expression)
     template <typename T>
     std::vector<T> values() const
     {
@@ -59,6 +61,7 @@ struct CapturedSetAttribute
         }
         return result;
     }
+    // NOLINTEND(bugprone-sizeof-expression)
 };
 
 struct CapturedExecute

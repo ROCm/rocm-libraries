@@ -67,8 +67,9 @@ Graphs a hipDNN engine supports run. Everything else compiles and fails at runti
 - Everything else returns `CUDNN_STATUS_NOT_SUPPORTED` with a message naming the operation, attribute or
   value. Builders throw `cudnnException` unless `NV_CUDNN_DISABLE_EXCEPTION` is defined. Nothing is
   silently dropped except the store-and-ignore items listed in §3.4.
-- Per-call overhead of `VariantPackBuilder::build()` + `cudnnBackendExecute`: < 1 µs over the hipDNN
-  equivalent on the same plan.
+- Per-call overhead over the hipDNN equivalent on the same plan: `cudnnBackendExecute` < 1 µs;
+  `VariantPackBuilder::build()` + `cudnnBackendExecute` < 5 µs (measured on gfx1151: p50 about 1.0 µs on an
+  idle host, 1.7–3.0 µs under load; the builder allocates and takes the backend lock several times per call).
 - MIT licensed, with NVIDIA attribution on every derived file. Nothing copied from NVIDIA's proprietary
   cuDNN headers.
 - No behavior change for v9 users.
@@ -182,9 +183,11 @@ runs no heuristics and needs no GPU.
 
 **Other rules**
 
-- **Pointwise defaults are not forwarded.** Upstream sets every parameter of the mode, including
-  defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. Non-default values are
-  narrowed to float.
+- **Pointwise defaults are not forwarded, except the ReLU lower clip.** Upstream sets every parameter
+  of the mode, including defaults; MIOpen rejects a fusion if a lower-clip slope is present at all. The
+  lower clip is always sent unless a slope is set, because hipBLASLt's ReLU epilogue requires it; every
+  engine reads 0 as standard ReLU. Beside a slope a lower clip of 0 is not sent, so hipBLASLt cannot
+  mistake leaky ReLU for plain ReLU. Non-default values are narrowed to float.
 - **Alpha / beta.** Alpha ≠ 1 or beta ≠ 0 on any op → `NOT_SUPPORTED`. No hipDNN engine accepts the
   alternative (an extra scalar multiply).
 - **Store and ignore:** NaN propagation (hipDNN has no equivalent).
@@ -300,8 +303,9 @@ runs no heuristics and needs no GPU.
 | Upstream drift | Pin `static_assert`; re-diff in RFC 0012 §6.1's quarterly upstream review |
 | `hipdnn_frontend` internals change | Same tree and version; GPU-free lowering tests catch breakage |
 | Maintenance of ~10k ported lines | Same owner as the RFC 0012 shim |
-| PyTorch compile check passes on empty files (ROCm wheels compile cuDNN code out) | Shadow headers force the code on; a canary fails an empty file |
-| Corpus and PyTorch harnesses not run by TheRock yet | Run in the superbuild CI Linux job |
+| PyTorch compile check passes on empty files (PyTorch's ROCm build compiles the cuDNN code out) | The probe forces the code on in the PyTorch tree's own hipified files; a canary fails an empty file |
+| Corpus harness not run by TheRock yet (TheRock's `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` is OFF) | The superbuild CI Linux job compiles the v9 and legacy corpus on every run and runs it when a GPU is present (`/dev/kfd`) |
+| PyTorch compile check needs a PyTorch ROCm build | The check is local; a C++20 twin of the PyTorch surface test runs in CI |
 
 ## 6. Execution Plan
 
@@ -334,7 +338,7 @@ Each phase builds and is tested on its own. Each adds its own `KNOWN_DIVERGENCES
 | GPU samples (MIOpen, hipBLASLt) | Numerical results, raw C API, overhead |
 | v9 sample corpus | Existing v9 behavior unchanged |
 | NVIDIA legacy samples | Source compatibility with per-case expectations ([Reference §5](./0021_CuDNN_V8_Shim_Reference.md#5-legacy-sample-catalogue)) |
-| PyTorch compile check | `Conv_v8.cpp` and the quantized cuDNN files compile |
+| PyTorch compile check | `Conv_v8.cpp` and the quantized cuDNN files compile with `torch_hip`'s flags |
 
 ## 8. Future Considerations
 

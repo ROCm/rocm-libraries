@@ -351,7 +351,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseModeSupportFollowsHipdnnMap
 TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseUpstreamDefaultsElided)
 {
     // PointWiseDescBuilder_v8 sends the RELU parameters at their defaults, with
-    // the upper clip clamped to FLT_MAX for FLOAT math.
+    // the upper clip clamped to FLT_MAX for FLOAT math; only the lower clip survives.
     cudnnBackendDescriptor_t relu = pointwise(CUDNN_POINTWISE_RELU_FWD, CUDNN_DATA_FLOAT);
     ASSERT_EQ(set(relu,
                   CUDNN_ATTR_POINTWISE_NAN_PROPAGATION,
@@ -370,7 +370,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseUpstreamDefaultsElided)
     ASSERT_EQ(cudnnBackendFinalize(relu), CUDNN_STATUS_SUCCESS);
     const auto& lowered
         = object<backend::PointwiseDescriptor>(relu, CUDNN_BACKEND_POINTWISE_DESCRIPTOR);
-    EXPECT_FALSE(lowered.reluLowerClip().has_value());
+    EXPECT_EQ(lowered.reluLowerClip(), std::optional<double>(0.0));
     EXPECT_FALSE(lowered.reluUpperClip().has_value());
     EXPECT_FALSE(lowered.reluLowerClipSlope().has_value());
 
@@ -391,6 +391,7 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseUpstreamDefaultsElided)
     ASSERT_EQ(cudnnBackendFinalize(others), CUDNN_STATUS_SUCCESS);
     const auto& defaulted
         = object<backend::PointwiseDescriptor>(others, CUDNN_BACKEND_POINTWISE_DESCRIPTOR);
+    EXPECT_FALSE(defaulted.reluLowerClip().has_value());
     EXPECT_FALSE(defaulted.reluUpperClip().has_value());
     EXPECT_FALSE(defaulted.eluAlpha().has_value());
     EXPECT_FALSE(defaulted.softplusBeta().has_value());
@@ -426,6 +427,20 @@ TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseExplicitParametersRecorded)
     EXPECT_EQ(lowered.softplusBeta(), std::optional<double>(2.0));
     EXPECT_EQ(lowered.swishBeta(), std::optional<double>(3.0));
     EXPECT_EQ(lowered.axis(), std::optional<std::int64_t>(2));
+}
+
+TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseZeroLowerClipElidedBesideSlope)
+{
+    cudnnBackendDescriptor_t leaky = pointwise(CUDNN_POINTWISE_RELU_FWD, CUDNN_DATA_FLOAT);
+    ASSERT_EQ(set(leaky, CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, CUDNN_TYPE_DOUBLE, 0.0),
+              CUDNN_STATUS_SUCCESS);
+    ASSERT_EQ(set(leaky, CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE, CUDNN_TYPE_DOUBLE, 0.01),
+              CUDNN_STATUS_SUCCESS);
+    ASSERT_EQ(cudnnBackendFinalize(leaky), CUDNN_STATUS_SUCCESS);
+    const auto& lowered
+        = object<backend::PointwiseDescriptor>(leaky, CUDNN_BACKEND_POINTWISE_DESCRIPTOR);
+    EXPECT_FALSE(lowered.reluLowerClip().has_value());
+    EXPECT_EQ(lowered.reluLowerClipSlope(), std::optional<double>(0.01));
 }
 
 TEST_F(TestCudnnShimV8ParameterDescriptors, PointwiseNonFiniteParametersRejected)

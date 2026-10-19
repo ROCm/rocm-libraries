@@ -160,6 +160,15 @@ called from another module.
 NaN propagation on pointwise and resample parameter descriptors is stored and ignored; hipDNN has
 no equivalent setting.
 
+### Tensors
+
+Tensor descriptors are validated at `cudnnBackendFinalize`. These differ from cuDNN:
+
+| Case | Shim behavior |
+|---|---|
+| `BYTE_ALIGNMENT` below 16 | forwarded to hipDNN. A graph with such a tensor needs engine-plugin API 1.3.0 or later, which no current provider reports, so the graph has no engine: `ENGINE_GLOBAL_COUNT` is 0 and heuristics return no results, both with `SUCCESS` |
+| `VECTOR_COUNT` other than 1; the vectorized data types `INT8x4`, `INT8x32` and `UINT8x4`; `REORDERING_MODE` other than `NONE` | `NOT_SUPPORTED` at tensor finalize |
+
 ### Operations
 
 Operation descriptors are validated at `cudnnBackendFinalize`. These differ from cuDNN:
@@ -176,6 +185,7 @@ Operation descriptors are validated at `cudnnBackendFinalize`. These differ from
 | Max-pool backward resample without `IDXDESC` | `BAD_PARAM`; hipDNN needs the index tensor |
 | Backward resample `XDESC` / `YDESC` | `NOT_SUPPORTED`; hipDNN's backward resample has no such inputs |
 | Matmul M/N/K override descriptors | `NOT_SUPPORTED` |
+| Matmul `PADDING_VALUE` | `NOT_SUPPORTED` at the matmul descriptor's finalize |
 | A pointwise tensor slot the mode does not use (for example `TDESC` on a non-select mode, or `YDESC` on a backward activation) | `BAD_PARAM`; upstream builders never set these |
 
 ### Operation graphs
@@ -188,7 +198,8 @@ These differ from cuDNN:
 | No `HANDLE` | `BAD_PARAM`; hipDNN needs a handle to build the graph (cuDNN 9.8 and later make it optional) |
 | `IS_DYNAMIC_SHAPE_ENABLED` or `IS_OVERRIDE_SHAPE_ENABLED` set to true | `NOT_SUPPORTED` at finalize; the v8 surface has no variant-pack shape overrides |
 | Norm forward / backward compute type | cuDNN norm operations carry none; the shim sends `FLOAT` to hipDNN |
-| Pointwise `RELU_*_CLIP*`, `ELU_ALPHA`, `SOFTPLUS_BETA`, `SWISH_BETA` | narrowed to `float`; values beyond the float range saturate to ±`FLT_MAX`. Parameters left at their defaults are not sent |
+| Convolution with `HALF` or `BFLOAT16` tensors and `COMP_TYPE` `FLOAT` | forwarded as `FLOAT`, but the engine chooses the accumulation precision: the MIOpen provider may run a reduced-precision kernel (a 3x3 stride-1 `HALF` forward on gfx1151 runs the Winograd solver `ConvWinoFuryRxS<2-3>` with fp16 accumulation), so results can differ from cuDNN by more than fp32 accumulation would. They match PyTorch's own MIOpen convolution |
+| Pointwise `RELU_*_CLIP*`, `ELU_ALPHA`, `SOFTPLUS_BETA`, `SWISH_BETA` | narrowed to `float`; values beyond the float range saturate to ±`FLT_MAX`. Parameters left at their defaults are not sent, except the ReLU lower clip, which is always sent unless a slope is set (hipBLASLt's ReLU epilogue requires it) |
 | `RESAMPLE` without `PADDING_MODE` | `BAD_PARAM` at the resample descriptor's finalize (upstream builders always send it) |
 | Several `TENSOR` descriptors with one UID | accepted when they agree; `BAD_PARAM` naming the UID when data type, dimensions, strides, virtualness, by-value or constant value, or ragged offset differ. Differing byte alignments use the smallest |
 | One UID written by two operations; a cycle | `BAD_PARAM` |
@@ -250,3 +261,7 @@ their `build()`. These differ as well:
 | `time_sorted_plan` ties | plans with equal times are all kept; upstream keeps only one of them |
 | `cudnnFindPlanAndCache` with no plan that ran | throws `cudnnException` with `NOT_SUPPORTED` (with `NV_CUDNN_DISABLE_EXCEPTION`, returns a plan whose status is not `SUCCESS`); upstream reads the front of an empty list |
 | PyTorch quantized operations across threads | PyTorch's quantized convolution, linear and add operations cache plans process-wide, so a plan cached on one thread and executed with another thread's handle is `BAD_PARAM` (see the `cudnnBackendExecute` handle row). PyTorch's `Conv_v8` caches are per-thread and unaffected |
+| `ConvDescBuilder` default mode | upstream's default is `CONVOLUTION`; MIOpen runs only `CROSS_CORRELATION`, so a graph that keeps the default has no engine. Call `setMathMode(CUDNN_CROSS_CORRELATION)` |
+| `PointWiseDescBuilder` Swish | β = 1 is upstream's default and is not sent, so hipBLASLt's Swish epilogue (which requires β present and equal to 1) is unreachable from v8; MIOpen's fused convolution rejects a Swish β of any value |
+| Matmul on gfx115x under Windows | hipBLASLt declines every matmul there (a hipBLASLt GEMM crash workaround), and no other provider runs matmul, so a v8 matmul graph has no engine |
+| Per-call overhead | `VariantPackBuilder::build()` plus `cudnnBackendExecute` costs about 1–3 µs more than building the hipDNN variant pack and calling `hipdnnBackendExecute` on the same plan; `cudnnBackendExecute` alone adds well under 1 µs |
