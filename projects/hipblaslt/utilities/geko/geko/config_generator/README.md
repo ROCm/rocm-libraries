@@ -92,6 +92,7 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |
+| `BUILDABLE_MIS` | `True` (default): MI Designer takes its candidate MIs from the buildable-MI list for this ARCH and GEMM type when one exists (see [Buildable-MI lists](#buildable-mi-lists)); not applied to subtile kernels. `False`: every MI geko's tiling rules allow |
 | `EPILOGUES` | Include epilogues |
 | `MX` | `True` = MX block scaling on the arch's default block (32) with E8 scales. `F4` is always MX; only `F4` and `F8` take MX |
 | `MX_BLOCK` | MX block size, 16 or 32; setting it turns MX on. `0` forces plain non-MX, which `F4` and `MX: True` reject. MXFP8 is `F8` with 32, NVFP4 is `F4` with 16 |
@@ -128,6 +129,31 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 - **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and the Ductile backend raises `NotImplementedError`.
 - **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
 
+### Buildable-MI lists
+
+MI Designer's candidate MatrixInstructions come from geko's tiling rules
+([`mi_candidates.enumerate_candidate_mis`](mi_candidates.py)), which do not know whether TensileLite can
+build a kernel for an MI: large tiles often overflow registers or LDS for every parameter setting, and a
+tuning run then spends its budget on kernels that fail code generation. For GEMM types with a list in
+[`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
+TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
+search space's fork ranges. One list serves the generic and heuristic search spaces (heuristic's ranges
+are narrower, so it can build no MI generic cannot); subtile kernels (the subtile search space and
+gfx950 MX) are not covered and keep every candidate. Without a list MI Designer enumerates every MI and
+logs a warning.
+
+The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
+(search described in [`buildability.py`](buildability.py)). Code generation and fork ranges change, so
+regenerate them regularly and whenever either changes:
+
+```bash
+python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch gfx950 \
+  --types B:B:S H:H:S F8:B:S --layouts TN NN NT TT --workers 64
+```
+
+Each list names the rocm-libraries commit it was generated from, and ends with the unbuildable MIs and why
+the setting closest to fitting failed. `--report-dir` also writes every MI's verdict and witness setting as CSV.
+
 ---
 
 ## Pipeline (high level)
@@ -162,6 +188,8 @@ flowchart LR
 | [`load_input_config.py`](load_input_config.py) | Single place for loaded + normalized config dict |
 | [`sizes.py`](sizes.py) | Size list vs grid sources |
 | [`mi_designer.py`](mi_designer.py) | MI / macro-tile exploration for each size |
+| [`mi_candidates.py`](mi_candidates.py) | Candidate MIs: geko's tiling rules, and the buildable-MI lists MI Designer reads |
+| [`buildability.py`](buildability.py) | TensileLite code-generation check behind the buildable-MI lists (used by `scripts/generate_buildable_mis.py`) |
 | [`fork_params/`](fork_params/) | Per-`ARCH` (and generic vs heuristic) parameter and post-process implementations |
 | [`fork_param_generator.py`](fork_param_generator.py) | Combines MI design, optimization params, post-processor |
 | [`cluster_sizes.py`](cluster_sizes.py), [`config_merger.py`](config_merger.py) | Clustering and merging fork params under kernel limits |
