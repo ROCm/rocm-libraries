@@ -42,7 +42,12 @@ struct FixedVector
     }
   }
 
-  THRUST_HOST_DEVICE FixedVector operator+(const FixedVector& bs) const
+  THRUST_HOST_DEVICE
+#if _CCCL_COMPILER(NVHPC)
+  __attribute__((noinline))
+#endif
+  FixedVector
+  operator+(const FixedVector& bs) const
   {
     FixedVector output;
     for (unsigned int i = 0; i < N; i++)
