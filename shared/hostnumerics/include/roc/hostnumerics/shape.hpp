@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -16,8 +17,7 @@
 
 namespace roc::hostnumerics {
 // The logical shape of a tensor, independent of datatypes and storage strides.
-// A rank-zero Shape represents one scalar. Any zero extent gives zero elements;
-// otherwise the product of the extents must fit size_t. The count is cached.
+// The element count must fit size_t.
 class Shape {
    public:
     Shape() = default;
@@ -36,21 +36,8 @@ class Shape {
     Shape(const Shape&) = default;
     Shape& operator=(const Shape&) = default;
 
-    // A moved-from Shape becomes a rank-zero scalar, preserving the cached count.
-    Shape(Shape&& other) noexcept
-        : m_dimensions(std::move(other.m_dimensions)),
-          m_elementCount(std::exchange(other.m_elementCount, 1)) {
-        other.m_dimensions.clear();
-    }
-
-    Shape& operator=(Shape&& other) noexcept {
-        if (this != &other) {
-            m_dimensions = std::move(other.m_dimensions);
-            m_elementCount = std::exchange(other.m_elementCount, 1);
-            other.m_dimensions.clear();
-        }
-        return *this;
-    }
+    Shape(Shape&&) noexcept = default;
+    Shape& operator=(Shape&&) noexcept = default;
 
     size_t rank() const noexcept {
         return m_dimensions.size();
@@ -63,7 +50,7 @@ class Shape {
     }
 
     size_t operator[](size_t dimension) const {
-        return extent(dimension);
+      return m_dimensions[dimension];
     }
 
     // The returned view remains valid while this Shape is alive and unmodified.
@@ -86,10 +73,10 @@ class Shape {
         return Shape(std::move(dimensions));
     }
 
-    // Convert coordinates to a logical linear index, independent of storage.
-    // Coordinates always use the original axis order: (i0, i1, i2).
-    // Order lists axis numbers from slowest to fastest (outermost to innermost).
-    // For shape (2, 3, 5), order (1, 2, 0) enumerates coordinates as:
+    // Convert coordinates to a logical linear index.
+    //
+    // Parameter `order` lists axis numbers from slowest to fastest. For shape (2, 3, 5),
+    // order (1, 2, 0) enumerates coordinates as:
     //
     //   size_t index = 0;
     //   for (size_t i1 = 0; i1 < 3; ++i1)
@@ -97,30 +84,40 @@ class Shape {
     //           for (size_t i0 = 0; i0 < 2; ++i0)
     //               visit(index++, i0, i1, i2);
     //
-    // Axis 0 changes every step, axis 2 every 2 steps, and axis 1 every 10 steps.
-    // Thus index = (i1 * 5 + i2) * 2 + i0, with logical strides (1, 10, 2),
-    // and coordinates (1, 2, 3) map to index 27.
+    // Axis 0 changes every step, axis 2 every 2 steps, and axis 1 every 2*5=10 steps.
+    // logical strides are therefore (1, 10, 2) for the 3 dimensions.
     //
     // Other orders for the same shape:
     //   (0, 1, 2): last axis fastest, strides (15, 5, 1); (1, 2, 3) maps to 28.
-    //   (0, 2, 1): axis 1 fastest, strides (15, 1, 3); (1, 2, 3) maps to 26.
     //   (2, 1, 0): first axis fastest, strides (1, 2, 6); (1, 2, 3) maps to 23.
+    //   etc.
     //
-    // Empty order selects ascending axes, with the last axis fastest. Empty
-    // Shapes have no valid coordinates; the scalar Shape maps () to index zero.
-    size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order = {}) const {
+    // The linear index is the inner product of `indices` and the logical strides.
+    size_t linearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
         validateLinearIndex(indices, order);
         return computeLinearIndex(indices, order);
+    }
+
+    size_t linearIndex(std::span<const size_t> indices) const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), 0);
+        return linearIndex(indices, order);
     }
 
     // Invert linearIndex with the same traversal order. The result stays in the
     // original axis order: Shape{2, 3, 5}.coordinates(27, (1, 2, 0)) is (1, 2, 3).
     // The index must lie in [0, elementCount()).
-    std::vector<size_t> coordinates(size_t index, std::span<const size_t> order = {}) const {
+    std::vector<size_t> coordinates(size_t index, std::span<const size_t> order) const {
         validateCoordinates(index, order);
         std::vector<size_t> result(rank());
         computeCoordinates(index, order, result);
         return result;
+    }
+
+    std::vector<size_t> coordinates(size_t index) const {
+        std::vector<size_t> order(rank());
+        std::iota(order.begin(), order.end(), 0);
+        return coordinates(index, order);
     }
 
     bool operator==(const Shape& other) const noexcept {
@@ -138,25 +135,18 @@ class Shape {
         for (size_t axis : axes) validateDimension(axis);
     }
 
-    static bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
-        if (order.empty()) return true;
-        if (order.size() != rank) return false;
-        std::vector<bool> seen(rank, false);
-        for (size_t axis : order) {
-            if (axis >= rank || seen[axis]) return false;
-            seen[axis] = true;
-        }
-        return true;
-    }
-
     void validateIndexOrder(std::span<const size_t> order) const {
-        if (order.empty()) return;
         if (order.size() != rank())
             throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
-        if (!isValidIndexOrder(rank(), order))
-            throw std::runtime_error("Tensor index order must be a permutation of [0, " +
-                                     std::to_string(rank()) + ").");
+
+        std::vector<bool> seen(rank(), false);
+        for (size_t axis : order) {
+            if (axis >= rank() || seen[axis])
+                throw std::runtime_error("Tensor index order must be a permutation of [0, " +
+                                         std::to_string(rank()) + ").");
+            seen[axis] = true;
+        }
     }
 
     void validateLinearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
@@ -183,7 +173,7 @@ class Shape {
                               std::span<const size_t> order) const noexcept {
         size_t result = 0;
         for (size_t position = 0; position < rank(); ++position) {
-            const size_t axis = order.empty() ? position : order[position];
+            const size_t axis = order[position];
             result = result * m_dimensions[axis] + indices[axis];
         }
         return result;
@@ -192,7 +182,7 @@ class Shape {
     void computeCoordinates(size_t index, std::span<const size_t> order,
                             std::span<size_t> result) const noexcept {
         for (size_t position = rank(); position > 0; --position) {
-            const size_t axis = order.empty() ? position - 1 : order[position - 1];
+            const size_t axis = order[position - 1];
             result[axis] = index % m_dimensions[axis];
             index /= m_dimensions[axis];
         }

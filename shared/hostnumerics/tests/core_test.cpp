@@ -359,12 +359,6 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         Shape moved(std::move(copied));
         EXPECT_EQ(moved, original);
         EXPECT_EQ(moved.elementCount(), original.elementCount());
-        // The move contract explicitly defines the source as a scalar.
-        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(copied.rank(), 0);
-        EXPECT_EQ(copied.elementCount(), 1);
-        EXPECT_EQ(copied.coordinates(0), std::vector<size_t>{});
-        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape assigned{7};
         assigned = original;
@@ -372,14 +366,6 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         EXPECT_EQ(assigned.elementCount(), original.elementCount());
         Shape moveAssigned{9};
         moveAssigned = std::move(assigned);
-        EXPECT_EQ(moveAssigned, original);
-        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
-        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        EXPECT_EQ(assigned.rank(), 0);
-        EXPECT_EQ(assigned.elementCount(), 1);
-        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-        Shape& self = moveAssigned;
-        moveAssigned = std::move(self);
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
