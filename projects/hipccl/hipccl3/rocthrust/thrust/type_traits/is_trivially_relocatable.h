@@ -118,7 +118,7 @@ constexpr bool is_trivially_relocatable_v = is_trivially_relocatable<T>::value;
  */
 template <typename From, typename To>
 using is_trivially_relocatable_to =
-  integral_constant<bool, _THRUST_STD::is_same<From, To>::value && is_trivially_relocatable<To>::value>;
+  integral_constant<bool, _THRUST_STD::is_same_v<From, To> && is_trivially_relocatable<To>::value>;
 
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c From is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
@@ -217,7 +217,7 @@ namespace detail
 // https://wg21.link/P1144R0#wording-inheritance
 template <typename T>
 struct is_trivially_relocatable_impl
-    : integral_constant<bool, _THRUST_STD::is_trivially_copyable<T>::value || proclaim_trivially_relocatable<T>::value>
+    : integral_constant<bool, _THRUST_STD::is_trivially_copyable_v<T> || proclaim_trivially_relocatable<T>::value>
 {};
 
 template <typename T, _THRUST_STD::size_t N>
