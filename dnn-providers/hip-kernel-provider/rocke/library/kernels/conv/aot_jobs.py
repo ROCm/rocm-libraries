@@ -90,7 +90,7 @@ import itertools
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
-from kernels.common.conv_kernel_identity import KernelIdentity, current_llvm_flavor
+from kernels.conv.kernel_identity import KernelIdentity, current_llvm_flavor
 
 
 # ---------------------------------------------------------------------------

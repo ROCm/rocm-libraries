@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
 from kernels.common.conv_abi import conv_direct_transform_signature
-from kernels.common.conv_direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
+from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
     BLOCK_Q,
     DGRAD_BLOCK_H,
@@ -86,7 +86,7 @@ from kernels.common.conv_direct_aot_jobs import (  # noqa: F401 (the grid and bu
     probe_problem,
     wgrad_waves,
 )
-from kernels.common.conv_direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
+from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
     DIRECT_DGRAD_REORGANIZE as _REORGANIZE,
     DIRECT_DGRAD_REORGANIZE_RTC as _REORGANIZE_RTC,
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
@@ -319,7 +319,7 @@ def plan_for(
     The capability match (:meth:`KernelCache.supports_problem`) is necessary
     but not sufficient: the knobs' own shape rules are re-validated on the
     real problem by
-    :func:`~kernels.common.conv_direct_variants.direct_spec_for_problem`, so a
+    :func:`~kernels.conv.direct_variants.direct_spec_for_problem`, so a
     binary is only offered where a fresh build would accept the shape too.
     """
     from kernels.common import conv_direct_grouped as dc

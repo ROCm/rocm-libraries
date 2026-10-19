@@ -16,9 +16,9 @@ import pytest
 
 from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common.kernel_cache import KernelCache
-from kernels.common.conv_direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
+from kernels.conv.direct_aot_jobs import _DENSE_MFMA_DGRAD_CHANNELS
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.common.conv_direct_variants import direct_mfma_knobs_reason
+from kernels.conv.direct_variants import direct_mfma_knobs_reason
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 

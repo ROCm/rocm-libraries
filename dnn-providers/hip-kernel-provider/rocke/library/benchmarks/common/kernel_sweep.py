@@ -16,7 +16,7 @@ The split exists because AOT kernels are shape-generic: the expensive step
 amortised over every shape the cache is later asked about.
 
 The grid ``--compile-all`` walks, and how one identity is rebuilt and built,
-is :mod:`kernels.common.conv_aot_jobs` (it sits below ``dispatch`` so the
+is :mod:`kernels.conv.aot_jobs` (it sits below ``dispatch`` so the
 dispatcher can build a registered instance too); this module enumerates,
 compiles, caches and launches it.
 """
@@ -48,7 +48,7 @@ from benchmarks.common.kernel_cache import (
     current_emitter_digest,
     current_llvm_flavor,
 )
-from kernels.common.conv_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
+from kernels.conv.aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     CACHE_DGRAD_MAX_SUB_GEMMS,
     CACHE_EPILOGUES,
     CACHE_GROUPED,

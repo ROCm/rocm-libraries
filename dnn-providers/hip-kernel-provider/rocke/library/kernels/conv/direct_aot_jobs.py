@@ -19,8 +19,8 @@ import json
 from dataclasses import dataclass, replace
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
-from kernels.common.conv_aot_jobs import BuildJob
-from kernels.common.conv_direct_variants import (
+from kernels.conv.aot_jobs import BuildJob
+from kernels.conv.direct_variants import (
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     direct_dgrad_weight_transforms,
     direct_mfma_knobs_reason as _mfma_knobs_reason,
@@ -28,7 +28,7 @@ from kernels.common.conv_direct_variants import (
     select_direct_kernel_builder as _build_kernel,
     validate_direct_spec as validate_spec,
 )
-from kernels.common.conv_kernel_identity import KernelIdentity
+from kernels.conv.kernel_identity import KernelIdentity
 
 
 # Operand dtypes the direct kernels build for. The cache is filled for one at a

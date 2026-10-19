@@ -294,7 +294,7 @@ def direct_spec_for_problem(
     """``(spec, "ok")`` when a binary of ``variant``/``knobs`` serves ``problem``.
 
     The capability match
-    (:func:`kernels.common.conv_kernel_identity.identity_supports_problem`)
+    (:func:`kernels.conv.kernel_identity.identity_supports_problem`)
     is necessary but not sufficient: tuning knobs have shape rules of their
     own (groups divisible by block_groups, a persistent grid's cell budget,
     ...). The spec is rebuilt on the real problem and run through the kernel's

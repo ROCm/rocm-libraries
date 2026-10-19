@@ -6,7 +6,7 @@ A benchmark table has to name each kernel it ran, and that name is only
 useful if it pins the kernel down: two binaries that differ in an LDS layout
 or an operand dtype must not print alike, or a result cannot be traced back
 to the kernel that produced it. :func:`encode` therefore turns a
-:class:`~kernels.common.conv_kernel_identity.KernelIdentity` into a string that
+:class:`~kernels.conv.kernel_identity.KernelIdentity` into a string that
 carries *every* identity field, and :func:`decode` turns the string back into
 an equal identity -- ``decode(encode(i)) == i`` for every identity. That
 round trip is what ``reproduce_kernel.py`` builds on: a name copied out of a
@@ -437,11 +437,11 @@ def _match_head(tag: _Tag, token: str, name: str) -> Dict[str, Any]:
 def decode(name: str, cls: Optional[Callable[..., Any]] = None):
     """The identity named ``name`` (as produced by :func:`encode`).
 
-    ``cls`` defaults to :class:`~kernels.common.conv_kernel_identity.KernelIdentity`.
+    ``cls`` defaults to :class:`~kernels.conv.kernel_identity.KernelIdentity`.
     Raises ``ValueError`` on a malformed name.
     """
     if cls is None:
-        from kernels.common.conv_kernel_identity import KernelIdentity as cls
+        from kernels.conv.kernel_identity import KernelIdentity as cls
 
     name = strip_launch_suffix(name)
     tokens = name.split(_SEP)

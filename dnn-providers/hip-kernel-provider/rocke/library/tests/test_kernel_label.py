@@ -23,14 +23,14 @@ import json
 
 import pytest
 
-from kernels.common import conv_aot_jobs as ks
-from kernels.common import conv_direct_aot_jobs as dks
-from kernels.common import conv_kernel_label as kernel_label
-from kernels.common.conv_direct_variants import (
+from kernels.conv import aot_jobs as ks
+from kernels.conv import direct_aot_jobs as dks
+from kernels.conv import kernel_label as kernel_label
+from kernels.conv.direct_variants import (
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE,
 )
-from kernels.common.conv_kernel_identity import KernelIdentity
+from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.arch import ArchTarget
 
 _ARCH = "gfx950"

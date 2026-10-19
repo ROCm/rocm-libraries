@@ -9,7 +9,7 @@ that produced them (see :func:`comgr_input_key`), so identities that emit the
 same code share one binary and a rebuild after an emitter change only
 recompiles the kernels whose code actually changed.
 
-Entries are keyed by :class:`~kernels.common.conv_kernel_identity.KernelIdentity`,
+Entries are keyed by :class:`~kernels.conv.kernel_identity.KernelIdentity`,
 the compile-time tuple that uniquely identifies one HSACO. It lives with the
 kernels because the grouped-convolution dispatcher registers its instances by
 the same identity; it is re-exported here, next to the cache that files
@@ -31,7 +31,7 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from kernels.common.conv_kernel_identity import (  # noqa: F401 (re-exported)
+from kernels.conv.kernel_identity import (  # noqa: F401 (re-exported)
     KernelIdentity,
     current_llvm_flavor,
     identity_supports_problem,
@@ -361,7 +361,7 @@ class KernelCache:
     def supports_problem(identity: KernelIdentity, problem: object) -> Tuple[bool, str]:
         """Can this cached binary be launched on ``problem``?
 
-        :func:`kernels.common.conv_kernel_identity.identity_supports_problem`;
+        :func:`kernels.conv.kernel_identity.identity_supports_problem`;
         the grouped-convolution dispatcher admits its instances with the same
         rule, so the two never disagree on what a binary serves.
         """

@@ -19,7 +19,7 @@ record there spells the :class:`KernelIdentity` of one AOT kernel (format:
 ``benchmarks/common/grouped_conv/instance_list.py``) and becomes one
 :class:`KernelCandidate` of its direction's registry, whose ``name`` and
 ``spec_id`` are the identity's lossless name (:meth:`KernelIdentity.label`,
-format in :mod:`kernels.common.conv_kernel_label`) and whose ``algorithm`` is
+format in :mod:`kernels.conv.kernel_label`) and whose ``algorithm`` is
 the kernel family (``implicit_gemm``, ``direct_nongrouped``,
 ``direct_depthwise_dgrad``, ...). So a request can pin one family
 (``algorithm=``) or one instance (``spec_id=<name>``).
@@ -33,16 +33,17 @@ WHAT DISPATCH DECIDES
 *Whether* an instance can run a request -- and, when several can, which one.
 
 * **Admission** is the AOT binary's own rule,
-  :func:`kernels.common.conv_kernel_identity.identity_supports_problem` (the
+  :func:`kernels.conv.kernel_identity.identity_supports_problem` (the
   one the AOT cache applies before it offers a binary), plus, for the direct
   families, a re-validation of the instance's tuning knobs against the real
-  shape (:func:`kernels.common.conv_direct_variants.direct_spec_for_problem`).
+  shape (:func:`kernels.conv.direct_variants.direct_spec_for_problem`).
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
-  name; a process lowering another flavor admits none of them. Set
-  ``ConvGroupedRequest.llvm_flavor`` to pin the flavor a request is checked
-  against; left at its default (``None``) it falls back to this process's
-  detected flavor (``ROCKE_LLVM_FLAVOR``, or COMGR auto-detection).
+  name, and admission checks it against ``ConvGroupedRequest.llvm_flavor``
+  (default :data:`DEFAULT_LLVM_FLAVOR`, the flavor the registered lists are
+  built for): a request for another flavor admits none of them. Selection is
+  a pure function of the request -- it never probes the process
+  (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
 * **Selection** among admitted instances is the list order: the first listed
   wins. That is a placeholder policy until measured rankings exist; the
   ``ranker`` hook of :func:`dispatch_conv_grouped` is where one plugs in.
@@ -51,8 +52,8 @@ Compiling the instances is not done here: their binaries come from the AOT
 build (``benchmarks/common/grouped_conv/benchmark_grouped_conv.py
 --compile-all``), keyed by the same identity. Every candidate can still build
 its kernel IR (``DispatchResult.build()``): from the job ``--compile-all``
-builds its identity from (:func:`kernels.common.conv_aot_jobs.job_for_identity`,
-:func:`kernels.common.conv_direct_aot_jobs.direct_job_for_identity`), so it is
+builds its identity from (:func:`kernels.conv.aot_jobs.job_for_identity`,
+:func:`kernels.conv.direct_aot_jobs.direct_job_for_identity`), so it is
 the IR of the cached binary. What dispatch hands a launcher is
 a :class:`ConvLaunchPlan` (:func:`launch_plan_for`): the kernels to launch in
 order -- each one's identity, launch geometry, kernarg signature and buffers
@@ -72,25 +73,26 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.common.conv_aot_jobs import job_for_identity, kernel_for_job
-from kernels.common.conv_direct_aot_jobs import (
+from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+from kernels.conv.direct_aot_jobs import (
     direct_job_for_identity,
     direct_kernel_for_job,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.common.conv_direct_variants import (
+from kernels.conv.direct_variants import (
     direct_dgrad_weight_transforms,
     direct_dgrad_workspaces,
     direct_spec_for_problem,
     make_direct_spec,
 )
 from kernels.common.conv_implicit_gemm import ConvProblem
-from kernels.common.conv_kernel_identity import (
+from kernels.conv.kernel_identity import (
     KernelIdentity,
     dgrad_sub_gemms,
     identity_supports_problem,
 )
-from kernels.common.conv_kernel_label import field_baseline
+from kernels.conv.kernel_label import field_baseline
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -112,6 +114,7 @@ __all__ = [
     "CONV_FWD_EXECUTION_REGISTRY",
     "CONV_FWD_REGISTRY",
     "CONV_GROUPED_ABI_VERSION",
+    "DEFAULT_LLVM_FLAVOR",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
@@ -148,6 +151,11 @@ _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
 }
+
+# The LLVM flavor a request is admitted against unless it names its own: the
+# one every registered list is built for (pinned by
+# test_default_llvm_flavor_is_the_registered_one).
+DEFAULT_LLVM_FLAVOR = "llvm22"
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
@@ -189,10 +197,9 @@ class ConvGroupedRequest(OperatorRequest):
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
-    # LLVM flavor to check instance provenance against; None means "detect
-    # from this process" (current_llvm_flavor()). Set explicitly to pin
-    # admission to a flavor without touching ROCKE_LLVM_FLAVOR.
-    llvm_flavor: str | None = None
+    # LLVM flavor the caller lowers to; instances built for another flavor are
+    # not admitted. Part of the request, never read from the process.
+    llvm_flavor: str = DEFAULT_LLVM_FLAVOR
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -326,6 +333,10 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
+    if req.llvm_flavor not in LLVM_FLAVORS:
+        errors.append(
+            f"unknown llvm_flavor {req.llvm_flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
+        )
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
@@ -772,7 +783,7 @@ _RECORD_GROUPS: dict[str, tuple[str, ...]] = {
 _GROUP_OF = {f: key for key, fields in _RECORD_GROUPS.items() for f in fields}
 
 # Spelled in every record of the family, even at the baseline -- the head of
-# the kernel's name (kernels.common.conv_kernel_label), and for direct conv
+# the kernel's name (kernels.conv.kernel_label), and for direct conv
 # every one of them is baked into the binary.
 _RECORD_HEAD = {
     False: ("tile", "warps", "warp_tile", "vector", "pipeline", "epilogue"),
@@ -804,7 +815,7 @@ class InstanceList:
     ``identities`` are in priority order. ``defaults`` are field values every
     record shares unless it spells its own (``llvm_flavor``, ``wave_size``);
     a record spells only the fields that leave the family's baseline
-    (:func:`kernels.common.conv_kernel_label.field_baseline`) or ``defaults``,
+    (:func:`kernels.conv.kernel_label.field_baseline`) or ``defaults``,
     plus its head. ``direction`` is the list's; a direct-conv record's identity
     carries ``direct_<direction>``.
     """

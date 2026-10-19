@@ -37,7 +37,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
-from kernels.common import conv_aot_jobs as aj
+from kernels.conv import aot_jobs as aj
 from kernels.common.conv_args import ConvArgs
 from kernels.common.conv_abi import conv_arg_names, conv_direct_arg_names
 from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signature
@@ -1393,7 +1393,7 @@ def test_aot_wgrad_dgrad_jobs_pick_the_lds_layout_and_split(monkeypatch):
 
 
 def _shrink_sweep_grid(monkeypatch):
-    """Shrink the AOT grid (:mod:`kernels.common.conv_aot_jobs`); return the
+    """Shrink the AOT grid (:mod:`kernels.conv.aot_jobs`); return the
     sweep module that enumerates and compiles it."""
     from benchmarks.common import kernel_sweep as ks
 

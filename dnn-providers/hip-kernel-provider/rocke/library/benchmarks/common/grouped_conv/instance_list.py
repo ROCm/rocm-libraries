@@ -39,7 +39,7 @@ from dispatch.grouped_convolution import (
     format_instance_list,
     load_instance_list,
 )
-from kernels.common.conv_kernel_identity import KernelIdentity
+from kernels.conv.kernel_identity import KernelIdentity
 
 # Fields a new list hoists into its defaults when every instance shares them.
 _HOISTED = ("llvm_flavor", "wave_size")

@@ -66,7 +66,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 # Swept parameter grids
 #
 # All axes are imported from the AOT cache grid (the CACHE_* of
-# kernels.common.conv_aot_jobs) so the two stay in sync: a kernel found fastest
+# kernels.conv.aot_jobs) so the two stay in sync: a kernel found fastest
 # by this JIT sweep will always have a cached counterpart that --run-from-cache
 # can offer.
 #
@@ -79,8 +79,8 @@ from benchmarks.common.early_stop import (  # noqa: E402
     EarlyStop,
     add_early_stop_arg,
 )
-from kernels.common.conv_aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
-from kernels.common.conv_aot_jobs import (  # noqa: E402
+from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
+from kernels.conv.aot_jobs import (  # noqa: E402
     CACHE_EPILOGUES as _EPILOGUES,
     CACHE_PIPELINES as _PIPELINES,
     CACHE_TILE_K as _TILE_K,

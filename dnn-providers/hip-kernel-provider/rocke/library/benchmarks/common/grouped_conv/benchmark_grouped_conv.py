@@ -377,8 +377,12 @@ def _parse_cases(args) -> list:
 
 def _request_for(problem, dtype: str, arch: str, direction: str):
     from dispatch.grouped_convolution import ConvGroupedRequest
+    from kernels.conv.kernel_identity import current_llvm_flavor
 
+    # The flavor this process lowers -- and so loads binaries for -- is the
+    # benchmark's to state; the dispatcher never probes for it.
     fields = dict(
+        llvm_flavor=current_llvm_flavor(),
         direction=direction,
         N=problem.N,
         C=problem.C,
@@ -467,7 +471,7 @@ def _no_instance_reason(req) -> str:
 
 def _check_flavor(specs) -> int:
     """0 when this process lowers the flavor the instances were named for."""
-    from kernels.common.conv_kernel_identity import current_llvm_flavor
+    from kernels.conv.kernel_identity import current_llvm_flavor
 
     wanted = sorted({s.identity.llvm_flavor for s in specs})
     have = current_llvm_flavor()
@@ -495,8 +499,8 @@ def _build_jobs(specs):
     family builds for its identity, so its binary is the one the implicit-GEMM
     and direct-conv caches would hold for that name.
     """
-    from kernels.common.conv_aot_jobs import job_for_identity
-    from kernels.common.conv_direct_aot_jobs import direct_job_for_identity
+    from kernels.conv.aot_jobs import job_for_identity
+    from kernels.conv.direct_aot_jobs import direct_job_for_identity
 
     groups: dict = {}
     seen: set = set()
@@ -517,8 +521,8 @@ def _build_jobs(specs):
 def _compile(cache, specs, arch: str, jobs: int, limit: int | None = None) -> int:
     """Bring ``cache`` up to date for ``specs``; compile only what changed."""
     from benchmarks.common.kernel_sweep import compile_jobs
-    from kernels.common.conv_aot_jobs import build_kernel
-    from kernels.common.conv_direct_aot_jobs import build_direct_job
+    from kernels.conv.aot_jobs import build_kernel
+    from kernels.conv.direct_aot_jobs import build_direct_job
 
     try:
         groups = _build_jobs(specs)

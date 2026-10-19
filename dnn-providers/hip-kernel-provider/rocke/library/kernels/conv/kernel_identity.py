@@ -16,15 +16,13 @@ offers them to shapes, and the grouped-convolution dispatcher
 (``dispatch.grouped_convolution``) registers its instances by identity and
 admits a request with the same predicate -- one rule, so the dispatcher can
 never select an instance the cache would refuse to launch, or the reverse.
-Names are spelled by :mod:`kernels.common.conv_kernel_label`.
+Names are spelled by :mod:`kernels.conv.kernel_label`.
 """
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
-import os
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
@@ -43,16 +41,12 @@ _MAX_GRID_DIM = 65535
 def current_llvm_flavor() -> str:
     """LLVM IR flavor this process lowers to (the one ``compile_kernel`` uses).
 
-    Memoised per ``ROCKE_LLVM_FLAVOR`` value: without the override the flavor
-    is detected from the COMGR library, and resolving that path globs the
-    filesystem -- per cache entry, it was most of a --run-from-cache startup.
-    The library does not change within a process.
+    The platform's resolver owns the choice -- the ``ROCKE_LLVM_FLAVOR``
+    override and COMGR detection -- and caches the loaded compiler's evidence,
+    so this neither reads the environment itself nor memoises. Host tooling
+    (the AOT cache, ``--compile-all``) asks it; dispatch never does: a
+    request carries its own ``llvm_flavor``.
     """
-    return _llvm_flavor_for(os.environ.get("ROCKE_LLVM_FLAVOR", ""))
-
-
-@functools.lru_cache(maxsize=None)
-def _llvm_flavor_for(env_override: str) -> str:
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -221,11 +215,11 @@ class KernelIdentity:
 
         Lossless: it spells every field, so :meth:`from_label` turns it back
         into an equal identity and ``reproduce_kernel.py`` rebuilds the kernel
-        from it. Format: :mod:`kernels.common.conv_kernel_label`. Not the
+        from it. Format: :mod:`kernels.conv.kernel_label`. Not the
         HSACO's entry point -- the AOT cache records that in its metadata under
         ``kernel_name``.
         """
-        from kernels.common.conv_kernel_label import encode
+        from kernels.conv.kernel_label import encode
 
         return encode(self)
 
@@ -237,7 +231,7 @@ class KernelIdentity:
         (``@split_k=4``) are ignored. Raises ``ValueError`` on a malformed
         name.
         """
-        from kernels.common.conv_kernel_label import decode
+        from kernels.conv.kernel_label import decode
 
         return decode(name, cls)
 
@@ -404,7 +398,7 @@ def identity_supports_problem(
 
     The direct kernels' tuning knobs carry shape rules of their own (groups
     divisible by block_groups, ...), which this capability check does not
-    see: :func:`kernels.common.conv_direct_variants.direct_spec_for_problem`
+    see: :func:`kernels.conv.direct_variants.direct_spec_for_problem`
     re-validates those against the real shape.
     """
     flavor = current_llvm_flavor() if llvm_flavor is None else llvm_flavor

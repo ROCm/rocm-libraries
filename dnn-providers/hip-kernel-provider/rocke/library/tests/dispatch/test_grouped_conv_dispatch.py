@@ -32,7 +32,7 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
-from kernels.common.conv_kernel_identity import KernelIdentity
+from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
 
@@ -48,7 +48,11 @@ def _listed_names(path: Path = _LIST) -> list[str]:
 
 @pytest.fixture(autouse=True)
 def _instance_flavor(monkeypatch):
-    """Lower the flavor the instances were named for: admission checks it."""
+    """Lower the flavor the instances were named for.
+
+    Dispatch does not need it (a request carries its flavor); the AOT cache
+    and job builders the tests compare against check the process's own.
+    """
     flavors = {
         s.identity.llvm_flavor
         for direction in ("fwd", "dgrad")
@@ -260,6 +264,34 @@ def test_another_llvm_flavor_admits_nothing():
     other_flavor = next(f for f in LLVM_FLAVORS if f != instance_flavor)
     with pytest.raises(ValueError, match="LLVM flavor"):
         gc.dispatch_conv_grouped(_req(llvm_flavor=other_flavor))
+
+
+def test_default_llvm_flavor_is_the_registered_one():
+    flavors = {
+        s.identity.llvm_flavor
+        for direction in ("fwd", "dgrad")
+        for s in gc.registered_conv_grouped_instances(direction=direction)
+    }
+    assert flavors == {gc.DEFAULT_LLVM_FLAVOR}
+    assert _req().llvm_flavor == gc.DEFAULT_LLVM_FLAVOR
+
+
+def test_dispatch_does_not_read_the_process_flavor(monkeypatch):
+    """Selection is a pure function of the request: ROCKE_LLVM_FLAVOR naming
+    another flavor (or COMGR detecting one) changes nothing."""
+    picks = {}
+    for flavor in LLVM_FLAVORS:
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+        picks[flavor] = [
+            r.spec.name for r in gc.dispatch_conv_grouped_all(_req(direction="dgrad"))
+        ] + [r.spec.name for r in gc.dispatch_conv_grouped_all(_req())]
+    assert len({tuple(v) for v in picks.values()}) == 1
+    assert next(iter(picks.values()))
+
+
+def test_unknown_llvm_flavor_request_is_rejected():
+    with pytest.raises(ValueError, match="unknown llvm_flavor"):
+        gc.dispatch_conv_grouped(_req(llvm_flavor="llvm-other"))
 
 
 def test_unrecognized_llvm_flavor_env_raises(monkeypatch):
