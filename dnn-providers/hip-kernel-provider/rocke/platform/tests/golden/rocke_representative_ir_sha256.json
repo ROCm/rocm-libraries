@@ -42,6 +42,14 @@
           "sha256": "ee77ac990603f5d6e48022f1c7b8e7daa8b295223a7cd013f84a87e567c65dd0",
           "status": "ok"
         },
+        "attention/gfx942/reduce_bf16_d128_own_module": {
+          "arch": "gfx942",
+          "bytes": 9478,
+          "family": "attention",
+          "kernel_name": "rocke_uattn_reduce_tiled_gfx942_d128_h4_seg4_bf16",
+          "sha256": "bb604d95f8af6da11f7fa0bb920f3c3ffb41be935268be37a9dedf3a47460daf",
+          "status": "ok"
+        },
         "attention/gfx942/reduce_fp16_d128": {
           "arch": "gfx942",
           "bytes": 9482,
@@ -1821,12 +1829,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 43,
+          "gfx942": 44,
           "gfx950": 152
         },
         "expected_failures": 4,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -1847,7 +1855,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 224
+        "ok_cases": 225
       }
     },
     "llvm22": {
@@ -1890,6 +1898,14 @@
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_gfx942_d128_h4_seg4_bf16",
           "sha256": "56fdc5c6ac0d76d3b36a292828cedca0c30e88d8cef7cc3ee130a7d4b15a4e6b",
+          "status": "ok"
+        },
+        "attention/gfx942/reduce_bf16_d128_own_module": {
+          "arch": "gfx942",
+          "bytes": 9485,
+          "family": "attention",
+          "kernel_name": "rocke_uattn_reduce_tiled_gfx942_d128_h4_seg4_bf16",
+          "sha256": "273d68e6c5dd6533ceb81cd0bac3415edbbfeb65dd54a926c84463716e2a4776",
           "status": "ok"
         },
         "attention/gfx942/reduce_fp16_d128": {
@@ -3671,12 +3687,12 @@
           "gfx1201": 8,
           "gfx1250": 4,
           "gfx90a": 5,
-          "gfx942": 43,
+          "gfx942": 44,
           "gfx950": 152
         },
         "expected_failures": 4,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -3697,7 +3713,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 224
+        "ok_cases": 225
       }
     },
     "llvm23": {
@@ -3740,6 +3756,14 @@
           "family": "attention",
           "kernel_name": "rocke_uattn_reduce_tiled_gfx942_d128_h4_seg4_bf16",
           "sha256": "5bcb221eff515e9c8c0ddfc5f1763281d0ced149d573568da1af925721d29f67",
+          "status": "ok"
+        },
+        "attention/gfx942/reduce_bf16_d128_own_module": {
+          "arch": "gfx942",
+          "bytes": 9549,
+          "family": "attention",
+          "kernel_name": "rocke_uattn_reduce_tiled_gfx942_d128_h4_seg4_bf16",
+          "sha256": "e438bd7579133cf1beaa4907252173cdd6d6fa3539a3ab19a8bc91f69a7bc2f0",
           "status": "ok"
         },
         "attention/gfx942/reduce_fp16_d128": {
@@ -5536,12 +5560,12 @@
           "gfx1201": 8,
           "gfx1250": 8,
           "gfx90a": 5,
-          "gfx942": 43,
+          "gfx942": 44,
           "gfx950": 152
         },
         "expected_failures": 0,
         "families": {
-          "attention": 35,
+          "attention": 36,
           "attention_d128_swa": 1,
           "attention_d256": 2,
           "attention_dense": 44,
@@ -5562,7 +5586,7 @@
           "moe": 9,
           "nontemporal": 2
         },
-        "ok_cases": 228
+        "ok_cases": 229
       }
     }
   },

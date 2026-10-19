@@ -443,10 +443,18 @@ def build_attention_reduce(
 
 
 def build_attention_reduce_lse(
-    name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
+    name,
+    arch,
+    *,
+    head_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    num_segments,
+    emit_lse=True,
 ):
-    """Split-KV reduce with the optional LSE output, built from ``arch``'s own
-    module (``build_attention_reduce`` above always builds the gfx950 module)."""
+    """Split-KV reduce built from ``arch``'s own module (``build_attention_reduce``
+    above always builds the gfx950 module), with or without the LSE output."""
 
     def _build():
         import importlib
@@ -458,7 +466,7 @@ def build_attention_reduce_lse(
             num_kv_heads=num_kv_heads,
             dtype=dtype,
             num_segments=num_segments,
-            emit_lse=True,
+            emit_lse=emit_lse,
         )
         return mod.build_unified_attention_reduce_tiled(spec, arch=arch)
 
@@ -3125,6 +3133,21 @@ def cases():
             num_kv_heads=2,
             dtype="bf16",
             num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_bf16_d128_own_module",
+        "gfx942",
+        build_attention_reduce_lse(
+            "irhash_attn_942_reduce_bf16_own_module",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+            emit_lse=False,
         ),
     )
 
