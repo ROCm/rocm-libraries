@@ -26,6 +26,7 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sequence.h>
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/universal_vector.h>
 
 #include <algorithm>
@@ -1128,5 +1129,39 @@ TEST(CopyTests, TestCopyIfDevice)
 
       ASSERT_EQ(h_output, d_output);
     }
+  }
+}
+
+// trivial_copy_from_device / trivial_copy_to_device use hipMemcpyDefault, so the runtime determines the copy
+// direction. With explicit directions the copy can fail when a device-accessible pointer is actually host memory.
+TEST(CopyTests, TestTrivialCopyFromDeviceHostSource)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  int src[]  = {0, 10, 20, 30, 40};
+  int dst[5] = {};
+
+  hipError_t status = thrust::hip_rocprim::trivial_copy_from_device(dst, src, 5, hipStreamDefault);
+
+  ASSERT_EQ(status, hipSuccess);
+  for (int i = 0; i < 5; i++)
+  {
+    ASSERT_EQ(dst[i], i * 10);
+  }
+}
+
+TEST(CopyTests, TestTrivialCopyToDeviceHostDest)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  int src[]  = {0, 100, 200, 300, 400};
+  int dst[5] = {};
+
+  hipError_t status = thrust::hip_rocprim::trivial_copy_to_device(dst, src, 5, hipStreamDefault);
+
+  ASSERT_EQ(status, hipSuccess);
+  for (int i = 0; i < 5; i++)
+  {
+    ASSERT_EQ(dst[i], i * 100);
   }
 }
