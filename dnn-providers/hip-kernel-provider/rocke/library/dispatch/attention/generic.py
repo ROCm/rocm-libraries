@@ -53,8 +53,10 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
-    # Unified kernels already shift the causal diagonal by the runtime
-    # difference between each sequence's KV and query lengths.
+    # Unified kernels shift the causal diagonal by the runtime difference
+    # between each sequence's KV and query lengths (bottom-right); top-left
+    # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
     supports_features=ATTENTION_FEATURES,
 )
 
@@ -96,6 +98,9 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             num_kv_heads=problem.num_kv_heads,
             use_fp8=problem.use_fp8,
             fp8_fnuz=problem.fp8_fnuz,
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(
@@ -165,6 +170,9 @@ def _make_d256_decode_candidate() -> KernelCandidate:
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_d256_decode",
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(

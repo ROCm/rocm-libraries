@@ -57,7 +57,11 @@ def run_sweep(
     timed entry, which records the engine ``spec.name``s that mapped to it.
     """
     import torch
-    from dispatch.attention import AttentionRequest, attention_sweep_space
+    from dispatch.attention import (
+        AttentionMaskType,
+        AttentionRequest,
+        attention_sweep_space,
+    )
     from dispatch.attention.bindings import (
         validate_tuning_attention_contract,
         validate_tuning_attention_tensors,
@@ -82,6 +86,10 @@ def run_sweep(
         num_cus=bench.num_sms,
         use_fp8=bool(problem.use_fp8),
         fp8_fnuz=bool(problem.fp8_fnuz),
+        # The paged unified kernels (and this harness' reference) are bottom-right
+        # causal; AttentionRequest defaults to NO_MASK, which now means full
+        # attention on gfx950 and rejects a sliding window.
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
     )
 
     specs = attention_sweep_space(
