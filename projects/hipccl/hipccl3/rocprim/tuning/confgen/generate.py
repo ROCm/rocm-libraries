@@ -204,6 +204,7 @@ def main():
 
             # Add config entry
             algs[alg][target_hash][type_hash] = config
+
     log.info(f"Parsed {len(algs)} different algorithm(s)!")
 
     script_dir = pathlib.Path(__file__).parent.absolute()
@@ -246,7 +247,6 @@ def main():
     output_dir = pathlib.Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
     for alg_name, targets in algs.items():
-
         default_target = min(
             (dict(t) for t in targets.keys() if dict(t)["gen"] != "gcn5"),
             key=lambda t: int(re.sub("gfx", "", t["arch"]), base=16),
