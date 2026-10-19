@@ -40,7 +40,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename ForwardIterator, typename Predicate>
 THRUST_HOST_DEVICE ForwardIterator stable_partition(
   thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, Predicate pred)
@@ -202,6 +201,5 @@ is_partitioned(thrust::execution_policy<DerivedPolicy>& exec, InputIterator firs
                            thrust::make_transform_iterator(first, _THRUST_STD::not_fn(pred)),
                            thrust::make_transform_iterator(last, _THRUST_STD::not_fn(pred)));
 } // end is_partitioned()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END
