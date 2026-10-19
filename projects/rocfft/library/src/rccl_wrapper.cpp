@@ -139,14 +139,18 @@ struct rocfft_rccl_comm_t::Impl
     std::vector<rocfft_location_t>   nccl_rank_to_world_loc;
     std::map<rocfft_location_t, int> world_loc_to_nccl_rank;
     // keyed by device_id (local to this process).
-    std::map<int, device_state_t>    device_to_state;
-    int                              local_world_rank = 0;
-    ncclUniqueId                     uniqueId{};
+    std::map<int, device_state_t> device_to_state;
+    int                           local_world_rank = 0;
+    ncclUniqueId                  uniqueId{};
+    // set once init succeeded on all ranks; otherwise comms are aborted, not finalized
+    bool initialized = false;
 
     // finalize all ranks in one group; each device_state_t then destroys
     // its comm and stream when device_to_state is destroyed
     ~Impl()
     {
+        if(!initialized)
+            return;
         try
         {
             rocfft_rccl_group_t group;
@@ -361,6 +365,7 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create_from_locs(const std::set<rocfft_lo
         }
         group.end();
     });
+    new_comm.pimpl->initialized = true;
 
     comm_cache[world_locs] = new_comm;
     return new_comm;
