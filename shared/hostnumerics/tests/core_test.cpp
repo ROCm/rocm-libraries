@@ -350,6 +350,17 @@ TEST(ShapeCpp, ConstructionAndOwnership) {
     EXPECT_EQ(Shape{}.elementCount(), 1);
 }
 
+TEST(ShapeCpp, DimensionAccess) {
+    const Shape shape{2, 3, 5};
+    const std::array<size_t, 3> expected{2, 3, 5};
+    static_assert(noexcept(shape[0]));
+    for (size_t axis = 0; axis < expected.size(); ++axis) {
+        EXPECT_EQ(shape[axis], expected[axis]);
+        EXPECT_EQ(shape.extent(axis), expected[axis]);
+    }
+    EXPECT_THROW(shape.extent(shape.rank()), std::runtime_error);
+}
+
 TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
     for (const Shape original :
          {Shape{}, Shape{2, 3, 5}, Shape{std::numeric_limits<size_t>::max(), 2, 0}}) {
