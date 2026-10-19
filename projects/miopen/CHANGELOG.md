@@ -100,7 +100,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [LRN][LayerNorm] Fixed grid alignment and out-of-bounds thread access on gfx1250.
 * [Conv] Removed stale gfx950 grouped backward-weights SystemDB entries that caused suboptimal solver selection.
 * [Conv][Windows] Fixed system-database path resolution to use the MIOpen module location.
-* [Conv] Fixed system-database fallback so MI308X (gfx942) resolves to a usable tuned database.
+* [Conv] Fixed system-database fallback so certain gfx942 machines resolve to a usable tuned database.
 * Fixed JSON performance logs (`MIOPEN_PERFORMANCE_LOGS`) dropping the last solver evaluated during Find, so naive convolution solvers are no longer omitted.
 * Fixed a build failure when compiling against GCC 15's libstdc++ under C++20.
 
