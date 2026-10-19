@@ -253,7 +253,6 @@ def test_strided_kv_decode(
         max_seqlen_k=capacity,
         dtype=dtype,
         sliding_window=window,
-        clamp_arch=arch,
         target_ctas=8,
     )
     stream = torch.cuda.default_stream() if default_stream else torch.cuda.Stream()
@@ -261,8 +260,16 @@ def test_strided_kv_decode(
     # Paged cases exercise the direct runtime; strided cases also test dispatch.
     if kv_layout == "strided":
         from dispatch.attention import AttentionRequest, dispatch_attention
+        from dispatch.attention.common import AttentionMaskType
 
+        # A decode window is anchored at the end of the sequence (bottom-right causal);
+        # NO_MASK + sliding_window is the non-causal top-left band.
         request = AttentionRequest(
+            mask_type=(
+                AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+                if window
+                else AttentionMaskType.NO_MASK
+            ),
             batch=batch,
             nhead_q=q_heads,
             nhead_k=kv_heads,
@@ -422,7 +429,6 @@ def test_decode_concurrent_workspace(
         max_seqlen_q=1,
         max_seqlen_k=capacity,
         dtype=dtype,
-        clamp_arch=arch,
         target_ctas=8,
     )
     requests, expected = [], []
@@ -589,7 +595,6 @@ def test_prepared_decode_lifecycle(gpu, monkeypatch, dtype, kv_layout, graph):
             max_seqlen_q=1,
             max_seqlen_k=capacity,
             dtype=dtype,
-            clamp_arch=arch,
             target_ctas=8,
         ),
         q=q_host.cuda(),
