@@ -36,8 +36,21 @@ class Shape {
     Shape(const Shape&) = default;
     Shape& operator=(const Shape&) = default;
 
-    Shape(Shape&&) noexcept = default;
-    Shape& operator=(Shape&&) noexcept = default;
+    // Moving leaves the source as a rank-zero scalar.
+    Shape(Shape&& other) noexcept
+        : m_dimensions(std::move(other.m_dimensions)),
+          m_elementCount(std::exchange(other.m_elementCount, 1)) {
+        other.m_dimensions.clear();
+    }
+
+    Shape& operator=(Shape&& other) noexcept {
+        if (this != &other) {
+            m_dimensions = std::move(other.m_dimensions);
+            m_elementCount = std::exchange(other.m_elementCount, 1);
+            other.m_dimensions.clear();
+        }
+        return *this;
+    }
 
     size_t rank() const noexcept {
         return m_dimensions.size();

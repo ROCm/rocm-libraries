@@ -370,6 +370,10 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         Shape moved(std::move(copied));
         EXPECT_EQ(moved, original);
         EXPECT_EQ(moved.elementCount(), original.elementCount());
+        EXPECT_EQ(copied, Shape{});
+        EXPECT_EQ(copied.elementCount(), 1);
+        EXPECT_TRUE(copied.coordinates(0).empty());
+        EXPECT_THROW(copied.coordinates(1), std::runtime_error);
 
         Shape assigned{7};
         assigned = original;
@@ -377,6 +381,15 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         EXPECT_EQ(assigned.elementCount(), original.elementCount());
         Shape moveAssigned{9};
         moveAssigned = std::move(assigned);
+        EXPECT_EQ(moveAssigned, original);
+        EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
+        EXPECT_EQ(assigned, Shape{});
+        EXPECT_EQ(assigned.elementCount(), 1);
+        EXPECT_TRUE(assigned.coordinates(0).empty());
+        EXPECT_THROW(assigned.coordinates(1), std::runtime_error);
+
+        Shape& alias = moveAssigned;
+        moveAssigned = std::move(alias);
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
     }
