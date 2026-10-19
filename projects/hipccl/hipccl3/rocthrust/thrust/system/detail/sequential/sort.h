@@ -1,5 +1,6 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,18 +30,61 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/reverse.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
+#include <thrust/system/detail/sequential/stable_merge_sort.h>
+#include <thrust/system/detail/sequential/stable_primitive_sort.h>
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
 {
+namespace sort_detail
+{
+template <typename KeyType, typename Compare>
+inline constexpr bool use_primitive_sort =
+  _THRUST_STD::is_arithmetic_v<KeyType>
+  && (_THRUST_STD::is_same_v<Compare, _THRUST_STD::less<KeyType>>
+      || _THRUST_STD::is_same_v<Compare, _THRUST_STD::greater<KeyType>>);
+
+template <typename KeyType, typename Compare>
+inline constexpr bool needs_reverse = _THRUST_STD::is_same_v<Compare, _THRUST_STD::greater<KeyType>>;
+} // end namespace sort_detail
 
 template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
 THRUST_HOST_DEVICE void stable_sort(
   sequential::execution_policy<DerivedPolicy>& exec,
   RandomAccessIterator first,
   RandomAccessIterator last,
-  StrictWeakOrdering comp);
+  [[maybe_unused]] StrictWeakOrdering comp) // GCC 7-9 warn that comp is unused
+{
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (
+      using KeyType = thrust::detail::it_value_t<RandomAccessIterator>;
+      if constexpr (sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering>) {
+        thrust::system::detail::sequential::stable_primitive_sort(exec, first, last);
+
+        // if comp is greater<T> then reverse the keys
+        if constexpr (sort_detail::needs_reverse<KeyType, StrictWeakOrdering>)
+        {
+          thrust::reverse(exec, first, last);
+        }
+      } else { thrust::system::detail::sequential::stable_merge_sort(exec, first, last, comp); }),
+    ( // _THRUST_IS_DEVICE:
+      // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
+      thrust::system::detail::sequential::stable_merge_sort(exec, first, last, comp);));
+#if THRUST_COMPILER(GCC, <, 10)
+  (void) comp; // GCC 7-9 warn that comp is unused
+#endif // THRUST_COMPILER(GCC, <, 10)
+}
 
 template <typename DerivedPolicy,
           typename RandomAccessIterator1,
@@ -51,9 +95,31 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   RandomAccessIterator1 first1,
   RandomAccessIterator1 last1,
   RandomAccessIterator2 first2,
-  StrictWeakOrdering comp);
+  [[maybe_unused]] StrictWeakOrdering comp) // GCC 7-9 warn that comp is unused
+{
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
+    (
+      using KeyType = thrust::detail::it_value_t<RandomAccessIterator1>;
+      if constexpr (sort_detail::use_primitive_sort<KeyType, StrictWeakOrdering>) {
+        // if comp is greater<T> then reverse the keys and values
+        // note, we also have to reverse the (unordered) input to preserve stability
+        if constexpr (sort_detail::needs_reverse<KeyType, StrictWeakOrdering>)
+        {
+          thrust::reverse(exec, first1, last1);
+          thrust::reverse(exec, first2, first2 + (last1 - first1));
+        }
+        thrust::system::detail::sequential::stable_primitive_sort_by_key(exec, first1, last1, first2);
+        if constexpr (sort_detail::needs_reverse<KeyType, StrictWeakOrdering>)
+        {
+          thrust::reverse(exec, first1, last1);
+          thrust::reverse(exec, first2, first2 + (last1 - first1));
+        }
+      } else { thrust::system::detail::sequential::stable_merge_sort_by_key(exec, first1, last1, first2, comp); }),
+    ( // _THRUST_IS_DEVICE:
+      // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
+      thrust::system::detail::sequential::stable_merge_sort_by_key(exec, first1, last1, first2, comp);));
+}
 
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END
-
-#include <thrust/system/detail/sequential/sort.inl>
