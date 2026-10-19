@@ -28,15 +28,6 @@
 
 #include <tensilelitehost/export.h>
 
-#ifdef _WIN32
-
-namespace TensileLite
-{
-    typedef struct Float4{ uint8_t data;} Float4;
-} // end of namespace TensileLite
-
-#else // _WIN32
-
 #include <hip/hip_runtime.h>
 
 #define HIP_HOST_DEVICE __host__ __device__
@@ -149,5 +140,3 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
-
-#endif // _WIN32
