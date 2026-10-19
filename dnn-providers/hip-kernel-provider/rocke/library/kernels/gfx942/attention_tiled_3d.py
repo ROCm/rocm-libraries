@@ -1367,6 +1367,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)

@@ -1387,7 +1387,8 @@ def build_unified_attention_reduce_tiled(
     Grid: ``(total_q, num_query_heads, 1)``.  Each CTA reduces over the
     ``NUM_SEGMENTS`` segments for one (token, head):
 
-      1. overall_max = max(segm_max)
+      1. overall_max = max(segm_max) over segments with segm_expsum > 0 (a
+         segment masked for the row stores max=0, sum=0 and is treated as -inf)
       2. overall_expsum = sum(segm_expsum * exp2(segm_max - overall_max))
       3. acc[d] = sum_s segm_output[s,d] * exp2(segm_max[s] - overall_max)
       4. output[d] = acc[d] / overall_expsum  (with 0/0 -> 0)
@@ -1499,6 +1500,11 @@ def build_unified_attention_reduce_tiled(
         if in_rng is not None:
             ms = b.select(in_rng, ms, neg_inf)
             ls = b.select(in_rng, ls, zero_f)
+        # A segment whose tiles were all masked for this row stores max=0 with
+        # sum=0. Its max carries no mass, so it must not set overall_max (it
+        # would underflow every real segment's factor) nor get a factor here:
+        # treat it as -inf in both passes.
+        ms = b.select(b.fcmp("ogt", ls, zero_f), ms, neg_inf)
         seg_idx_of.append((sv, in_rng, sv_safe))
         seg_max_cache.append(ms)
         seg_l_cache.append(ls)

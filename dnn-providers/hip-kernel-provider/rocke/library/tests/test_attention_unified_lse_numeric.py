@@ -178,6 +178,43 @@ def test_split_kv_lse_with_softcap():
     assert (lse - lse_ref).abs().max().item() < _tolerance("bf16")
 
 
+# (q_len, kv_len): the last KV tile holds only keys row 0 cannot see (bottom-right
+# causal: row 0 sees kv_len - q_len + 1 keys), for any tile of 16, 32 or 64; 5/3
+# also leaves rows 0 and 1 with no visible key at all.
+_MASKED_TILE_SHAPES = [(4, 17), (4, 33), (4, 65), (5, 3)]
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize("emit_lse", [True, False])
+@pytest.mark.parametrize("q_len,kv_len", _MASKED_TILE_SHAPES)
+def test_masked_segment_does_not_underflow_the_merge(q_len, kv_len, emit_lse):
+    """A segment whose tiles are all masked for a row stores max=0, sum=0. With
+    every visible logit at -200 (Q=2, K=-12.5, D=64, scale 1/8), letting that
+    max set the merge max underflows every real segment: O became 0 and LSE
+    -inf for rows that do see keys. Keyless rows must stay O=0, LSE=-inf."""
+    problem, q, kc, vc, cu, su, bt = _case([q_len], [kv_len], d=64)
+    q.fill_(2.0)
+    kc.fill_(-12.5)
+    problem = dataclasses.replace(problem, emit_lse=emit_lse)
+    lse = (
+        torch.full(
+            (problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda"
+        )
+        if emit_lse
+        else None
+    )
+    out = _run(problem, q, kc, vc, cu, su, bt, lse=lse, softcap=0.0)
+    o_ref, lse_ref = _paged_reference(q, kc, vc, [q_len], [kv_len], bt, 0.125, 0.0)
+    assert torch.isfinite(out).all(), "the merge produced a non-finite O"
+    assert (out.float() - o_ref).abs().max().item() < _tolerance("bf16")
+    if emit_lse:
+        assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
+        finite = torch.isfinite(lse_ref)
+        assert finite.any(), "the case has no row with visible keys"
+        assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
+
+
 @requires_cdna3_or_4
 @pytest.mark.gpu
 def test_auto_backend_refuses_lse_on_a_2d_routed_shape():
