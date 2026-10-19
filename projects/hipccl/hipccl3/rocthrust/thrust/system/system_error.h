@@ -171,7 +171,8 @@ private:
    */
 }; // end system_error
 
-/*! \} // end system_diagnostics
+/*!
+ * \} end group system_diagnostics
  */
 
 } // namespace system

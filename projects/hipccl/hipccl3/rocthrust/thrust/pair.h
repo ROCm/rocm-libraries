@@ -93,9 +93,6 @@ using _THRUST_STD::pair;
 using _THRUST_STD::get;
 using _THRUST_STD::make_pair;
 
-/*! \endcond
- */
-
 /*! \} // pair
  */
 

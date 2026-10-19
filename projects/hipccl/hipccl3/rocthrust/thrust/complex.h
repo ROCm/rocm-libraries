@@ -61,11 +61,11 @@ THRUST_NAMESPACE_BEGIN
  */
 
 /*! \addtogroup numerics
- *  \{
+ *!  \{
  */
 
 /*! \addtogroup complex_numbers Complex Numbers
- *  \{
+ *!  \{
  */
 
 /*! \p complex is the Thrust equivalent to <tt>std::complex</tt>. It is
@@ -848,6 +848,11 @@ THRUST_HOST_DEVICE bool operator!=(const T0& x, const complex<T1>& y);
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE bool operator!=(const complex<T0>& x, const T1& y);
 
+/*!
+ * \} end group complex_numbers
+ * \} end group numerics
+ */
+
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/complex/complex.inl>
@@ -855,9 +860,3 @@ THRUST_NAMESPACE_END
 #undef THRUST_STD_COMPLEX_REAL
 #undef THRUST_STD_COMPLEX_IMAG
 #undef THRUST_STD_COMPLEX_DEVICE
-
-/*! \} // complex_numbers
- */
-
-/*! \} // numerics
- */
