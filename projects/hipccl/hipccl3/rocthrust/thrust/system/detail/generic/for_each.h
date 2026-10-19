@@ -38,7 +38,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename InputIterator, typename UnaryFunction>
 THRUST_HOST_DEVICE InputIterator
 for_each(thrust::execution_policy<DerivedPolicy>&, InputIterator first, InputIterator, UnaryFunction)
@@ -54,6 +53,5 @@ for_each_n(thrust::execution_policy<DerivedPolicy>&, InputIterator first, Size, 
   static_assert(thrust::detail::depend_on_instantiation<InputIterator, false>::value, "unimplemented for this system");
   return first;
 } // end for_each_n()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

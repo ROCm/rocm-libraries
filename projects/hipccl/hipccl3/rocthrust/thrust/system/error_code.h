@@ -44,7 +44,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
-
 /*! \addtogroup system_diagnostics
  *  \{
  */
@@ -67,7 +66,6 @@ struct is_error_condition_enum : public _THRUST_STD::false_type
 // XXX N3092 prefers enum class errc { ... }
 namespace errc
 {
-
 /*! An enum containing common error codes.
  */
 enum errc_t
@@ -151,7 +149,6 @@ enum errc_t
   value_too_large                    = detail::eoverflow,
   wrong_protocol_type                = detail::eprototype
 }; // end errc_t
-
 } // end namespace errc
 
 /*! Specialization of \p is_error_condition_enum for \p errc::errc_t
@@ -490,7 +487,6 @@ inline bool operator!=(const error_condition& lhs, const error_condition& rhs);
 
 /*! \} // end system_diagnostics
  */
-
 } // namespace system
 
 // import names into thrust::
