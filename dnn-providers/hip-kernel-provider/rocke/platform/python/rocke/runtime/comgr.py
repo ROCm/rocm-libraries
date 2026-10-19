@@ -11,6 +11,12 @@ The chain we drive:
       -> AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE     -> ELF relocatable
       -> AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE -> HSA code object
 
+Several kernels destined for one code object (`build_hsaco_from_llvm_modules`)
+enter as one SOURCE each and are joined by AMD_COMGR_ACTION_LINK_BC_TO_BC
+before codegen, so a single module -- and a single AMDGPU metadata note
+listing every kernel -- reaches the backend. Linking relocatables instead
+would leave one metadata note per object, and the HIP runtime reads only one.
+
 The resulting HSACO bytes are returned to Python and can be handed
 straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
@@ -28,10 +34,17 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from ._ctypes_bind import _LazyFn
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from .runtime_coexistence import (
+    _IS_WINDOWS,
+    _add_dll_dir,
+    _candidate_lib_paths,
+    _in_rocm_sdk_core,
+    _mapped_lib,
+    _rocm_sdk_core_release,
+)
 
 
 # Status codes.
@@ -68,6 +81,33 @@ def _load_lib() -> ctypes.CDLL:
     # tried, in order, is the whole diagnosis when resolution lands somewhere
     # unexpected, and the interesting failure is usually the first -- the library
     # that was supposed to load -- not the last.
+    # A different explicit COMGR beside an already mapped one can load a
+    # second LLVM and abort the process before COMGR can return an error.
+    # Only the single-copy case identifies that conflict without choosing a
+    # policy for multiple mappings. A non-ELF override cannot load as COMGR;
+    # let the existing candidate fallback handle invalid or unreadable files.
+    override = os.environ.get("ROCKE_COMGR_LIB")
+    if override and not _IS_WINDOWS and os.path.isfile(override):
+        mapped = _mapped_lib("amd_comgr", require_unique=True)
+        if mapped is not None:
+            try:
+                same_file = os.path.samefile(override, mapped)
+            except OSError:
+                pass
+            else:
+                if not same_file:
+                    try:
+                        with open(override, "rb") as candidate:
+                            is_elf = candidate.read(4) == b"\x7fELF"
+                    except OSError:
+                        is_elf = False
+                    if is_elf:
+                        raise ComgrError(
+                            f"ROCKE_COMGR_LIB={override!r} differs from the only "
+                            f"mapped COMGR {mapped!r}; opening a second COMGR can "
+                            "abort LLVM. Point ROCKE_COMGR_LIB at the mapped file "
+                            "or compile in a separate process before loading torch."
+                        )
     failures: List[Tuple[str, OSError]] = []
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
@@ -147,9 +187,16 @@ def _read_rocm_version_file(path: str) -> Optional[Tuple[int, int]]:
 def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     """Best-effort package metadata for diagnostics, not LLVM compatibility.
 
-    Reads torch.version.hip for a torch-bundled library or .info/version near
-    the resolved COMGR path, with the historical /opt/rocm metadata fallback.
-    Compiler selection and validation use loaded_compiler_info instead.
+    Derived from the resolved COMGR path (:func:`resolved_lib_path`):
+
+      * a path under the imported torch package -> ``torch.version.hip``;
+      * a path under TheRock's ``_rocm_sdk_core`` wheel -> the wheel's ROCm
+        release (``rocm_sdk.__version__`` or ``rocm-sdk-core`` metadata);
+      * a ROCm install tree -> its root ``.info/version``, with
+        ``/opt/rocm/.info/version`` as a final fallback.
+
+    Returns ``None`` if no usable path or version is found. Compiler selection
+    and validation use :func:`loaded_compiler_info` instead.
     """
     path = resolved_lib_path()
     if not path:
@@ -171,6 +218,11 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
+    # TheRock wheel comgr -> the wheel's ROCm release. Without this the climb
+    # below finds no .info/version inside site-packages and falls back to
+    # /opt/rocm, reporting the host's release for the wheel's LLVM.
+    if _in_rocm_sdk_core(rp):
+        return _rocm_sdk_core_release()
     # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
     # dir collecting every ``.info/version`` we pass. This is deliberately a
     # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps
@@ -345,30 +397,38 @@ def loaded_compiler_info() -> CompilerInfo | None:
         return info
 
 
+def _require_compiler_info() -> CompilerInfo:
+    """Require version evidence before automatic lowering or compilation."""
+    info = loaded_compiler_info()
+    if info is None or info.llvm_version is None:
+        reason = "COMGR could not be loaded" if info is None else info.describe()
+        raise ComgrError(
+            f"Cannot determine LLVM flavor: {reason}. "
+            "Select a queryable COMGR library for compilation, or set an explicit "
+            "LLVM flavor for offline IR emission."
+        )
+    return info
+
+
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     """Reject a known p8-generation mismatch against the loaded compiler.
 
     The guard is independent of emission overrides: selecting a flavor does
     not change the compiler that will consume it. Unknown compiler evidence
-    or an unrecognised input layout leaves validation to COMGR.
+    is an error; with a known compiler, unrecognised IR layouts are left to COMGR.
     """
-    try:
-        from ..core.lower_llvm import (
-            _datalayout_kind_for_flavor,
-            _datalayout_kind_from_ir,
-            _flavor_for_llvm,
-        )
+    from ..core.lower_llvm import (
+        _datalayout_kind_for_flavor,
+        _datalayout_kind_from_ir,
+        _flavor_for_llvm,
+    )
 
-        ir_kind = _datalayout_kind_from_ir(ir_text)
-        if ir_kind is None:
-            return
-        info = loaded_compiler_info()
-        if info is None or info.llvm_version is None:
-            return
-        lib_flavor = _flavor_for_llvm(info.llvm_version[0])
-        lib_kind = _datalayout_kind_for_flavor(lib_flavor)
-    except Exception:  # noqa: BLE001 - leave unknown compatibility to COMGR
+    info = _require_compiler_info()
+    ir_kind = _datalayout_kind_from_ir(ir_text)
+    if ir_kind is None:
         return
+    lib_flavor = _flavor_for_llvm(info.llvm_version[0])
+    lib_kind = _datalayout_kind_for_flavor(lib_flavor)
     if lib_kind is None or lib_kind is ir_kind:
         return
     raise ComgrError(
@@ -463,6 +523,16 @@ _do_action = _bind(
     "amd_comgr_do_action", ctypes.c_int, ctypes.c_int, _ActionInfo, _DataSet, _DataSet
 )
 
+_get_isa_count = _bind(
+    "amd_comgr_get_isa_count", ctypes.c_int, ctypes.POINTER(ctypes.c_size_t)
+)
+_get_isa_name = _bind(
+    "amd_comgr_get_isa_name",
+    ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_char_p),
+)
+
 
 def _check(s: int, where: str) -> None:
     if s != AMD_COMGR_STATUS_SUCCESS:
@@ -473,15 +543,42 @@ def _check(s: int, where: str) -> None:
         )
 
 
+def supported_isas() -> List[str]:
+    """Every ISA name the loaded comgr can target, e.g. ``amdgcn-amd-amdhsa--gfx950``.
+
+    :func:`build_hsaco_from_llvm_ir` raises the same :class:`ComgrError` for a
+    target comgr does not know and for IR that fails to compile; asking first
+    is how a caller tells the two apart. Raises :class:`ComgrError` when the
+    library cannot be loaded.
+    """
+    count = ctypes.c_size_t(0)
+    _check(_get_isa_count(ctypes.byref(count)), "get_isa_count")
+    names = []
+    for i in range(count.value):
+        name = ctypes.c_char_p()
+        _check(_get_isa_name(i, ctypes.byref(name)), "get_isa_name")
+        names.append(name.value.decode("utf-8"))
+    return names
+
+
 @dataclass
 class ComgrTimings:
+    """Per-stage COMGR wall time in seconds, in pipeline order.
+
+    ``bc`` compiles each IR module to bitcode, ``link`` links several bitcode
+    modules into one (``LINK_BC_TO_BC``; 0.0 for a single module),
+    ``relocatable`` code-generates and ``executable`` links the code object.
+    Construct it by keyword: ``link`` sits between ``bc`` and ``relocatable``.
+    """
+
     bc: float = 0.0
+    link: float = 0.0
     relocatable: float = 0.0
     executable: float = 0.0
 
     @property
     def total(self) -> float:
-        return self.bc + self.relocatable + self.executable
+        return self.bc + self.link + self.relocatable + self.executable
 
 
 def _extract_first(data_set: _DataSet, kind: int) -> bytes:
@@ -589,22 +686,75 @@ def build_hsaco_from_llvm_ir(
     Returns the (hsaco_bytes, timings) tuple. `hsaco_bytes` can be passed
     directly to `hipModuleLoadData`.
     """
+    return _build_hsaco((ir_text,), isa=isa, options=options)
+
+
+def build_hsaco_from_llvm_modules(
+    ir_texts: Sequence[str],
+    *,
+    isa: str = "amdgcn-amd-amdhsa--gfx950",
+    options: Optional[List[str]] = None,
+) -> Tuple[bytes, ComgrTimings]:
+    """Compile several LLVM IR modules into ONE loadable HSACO blob.
+
+    Each text is compiled to bitcode on its own, exactly as
+    :func:`build_hsaco_from_llvm_ir` would, then the bitcode modules are linked
+    (``LINK_BC_TO_BC``) and the linked module is code-generated once. The
+    object therefore carries one AMDGPU metadata note naming every kernel.
+    ``options`` are module-wide codegen options, shared by every kernel.
+
+    Internal-linkage globals (rocKE's LDS pools) are renamed by the linker
+    when two modules spell the same name; two external definitions of one
+    name -- two kernels sharing a symbol -- fail the link.
+    """
+    ir_texts = tuple(ir_texts)
+    if len(ir_texts) < 2:
+        raise ValueError(
+            "build_hsaco_from_llvm_modules links two or more modules; use "
+            "build_hsaco_from_llvm_ir for one"
+        )
+    return _build_hsaco(ir_texts, isa=isa, options=options)
+
+
+def _require_count(data_set: _DataSet, kind: int, expected: int, where: str) -> None:
+    count = ctypes.c_size_t(0)
+    _check(_action_data_count(data_set, kind, ctypes.byref(count)), "action_data_count")
+    if count.value != expected:
+        raise ComgrError(
+            f"{where}: produced {count.value} outputs, expected {expected}"
+        )
+
+
+def _build_hsaco(
+    ir_texts: Tuple[str, ...],
+    *,
+    isa: str,
+    options: Optional[List[str]],
+) -> Tuple[bytes, ComgrTimings]:
+    """The one comgr pipeline behind both public entry points.
+
+    A single module takes exactly the historical path (one SOURCE named
+    ``kernel.ll``, no link stage), so single-kernel objects are unchanged.
+    """
     options = list(options or ["-O3"])
+    linking = len(ir_texts) > 1
 
     # Query the loaded compiler before submitting IR: a known p8-generation
     # mismatch can abort inside codegen. The guard reports version provenance
     # and raises a catchable error instead.
     _resolve_lib()
-    _assert_ir_flavor_matches_lib(ir_text)
+    for ir_text in ir_texts:
+        _assert_ir_flavor_matches_lib(ir_text)
 
     # Handles are created lazily below; declare them up front so the
     # ``finally`` block can release whatever was successfully created even
     # when an intermediate ``_check`` raises (the common case during a
     # validity/heuristics sweep over borderline specs).
     in_set = None
-    src = None
+    sources = []
     info = None
     bc_set = None
+    linked_set = None
     reloc_set = None
     exe_set = None
 
@@ -612,15 +762,18 @@ def build_hsaco_from_llvm_ir(
         # Input data set (LLVM IR text wrapped as SOURCE).
         in_set = _DataSet()
         _check(_create_data_set(ctypes.byref(in_set)), "create_data_set(in)")
-        src = _Data()
-        _check(
-            _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)),
-            "create_data(src)",
-        )
-        payload = ir_text.encode("utf-8")
-        _check(_set_data(src, len(payload), payload), "set_data(src)")
-        _check(_set_data_name(src, b"kernel.ll"), "set_data_name(src)")
-        _check(_data_set_add(in_set, src), "data_set_add(src)")
+        for index, ir_text in enumerate(ir_texts):
+            src = _Data()
+            _check(
+                _create_data(AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(src)),
+                "create_data(src)",
+            )
+            sources.append(src)
+            payload = ir_text.encode("utf-8")
+            name = f"kernel_{index}.ll" if linking else "kernel.ll"
+            _check(_set_data(src, len(payload), payload), "set_data(src)")
+            _check(_set_data_name(src, name.encode("utf-8")), "set_data_name(src)")
+            _check(_data_set_add(in_set, src), "data_set_add(src)")
 
         # Action info.
         info = _ActionInfo()
@@ -634,7 +787,7 @@ def build_hsaco_from_llvm_ir(
 
         timings = ComgrTimings()
 
-        # Stage 1: LLVM IR (text/source) -> BC
+        # Stage 1: LLVM IR (text/source) -> BC, one per module.
         bc_set = _DataSet()
         _check(_create_data_set(ctypes.byref(bc_set)), "create_data_set(bc)")
         t0 = time.perf_counter()
@@ -644,13 +797,33 @@ def build_hsaco_from_llvm_ir(
         )
         timings.bc = time.perf_counter() - t0
 
+        codegen_input = bc_set
+        if linking:
+            # Stage 1b: every BC -> one linked BC.
+            _require_count(
+                bc_set, AMD_COMGR_DATA_KIND_BC, len(ir_texts), "COMPILE_SOURCE_TO_BC"
+            )
+            linked_set = _DataSet()
+            _check(_create_data_set(ctypes.byref(linked_set)), "create_data_set(link)")
+            t0 = time.perf_counter()
+            _check(
+                _do_action(AMD_COMGR_ACTION_LINK_BC_TO_BC, info, bc_set, linked_set),
+                "do_action(LINK_BC_TO_BC)",
+            )
+            timings.link = time.perf_counter() - t0
+            _require_count(linked_set, AMD_COMGR_DATA_KIND_BC, 1, "LINK_BC_TO_BC")
+            codegen_input = linked_set
+
         # Stage 2: BC -> relocatable ELF
         reloc_set = _DataSet()
         _check(_create_data_set(ctypes.byref(reloc_set)), "create_data_set(reloc)")
         t0 = time.perf_counter()
         _check(
             _do_action(
-                AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, info, bc_set, reloc_set
+                AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
+                info,
+                codegen_input,
+                reloc_set,
             ),
             "do_action(CODEGEN_BC_TO_RELOCATABLE)",
         )
@@ -679,11 +852,13 @@ def build_hsaco_from_llvm_ir(
             _destroy_data_set(exe_set)
         if reloc_set is not None:
             _destroy_data_set(reloc_set)
+        if linked_set is not None:
+            _destroy_data_set(linked_set)
         if bc_set is not None:
             _destroy_data_set(bc_set)
         if info is not None:
             _destroy_action_info(info)
-        if src is not None:
+        for src in reversed(sources):
             _release_data(src)
         if in_set is not None:
             _destroy_data_set(in_set)

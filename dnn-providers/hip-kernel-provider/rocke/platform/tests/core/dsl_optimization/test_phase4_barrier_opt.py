@@ -51,7 +51,7 @@ def test_sync_in_unrolled_loop():
 
     # Lower to LLVM IR
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     # Count barrier calls (not declarations)
     barrier_count = llvm_ir.count("call void @llvm.amdgcn.s.barrier()")
@@ -92,7 +92,7 @@ def test_final_barrier_elision_opportunity():
         b.scf_yield(new_acc)
 
     kernel = b.kernel
-    llvm_ir = lower_kernel_to_llvm(kernel)
+    llvm_ir = lower_kernel_to_llvm(kernel, arch="gfx950")
 
     barrier_count = llvm_ir.count("call void @llvm.amdgcn.s.barrier()")
 
@@ -133,7 +133,7 @@ def test_loop_vs_unrolled_barriers():
             b.scf_yield(new_acc)
 
         kernel = b.kernel
-        return lower_kernel_to_llvm(kernel)
+        return lower_kernel_to_llvm(kernel, arch="gfx950")
 
     llvm_unrolled = build_with_unroll(True)
     llvm_loop = build_with_unroll(False)

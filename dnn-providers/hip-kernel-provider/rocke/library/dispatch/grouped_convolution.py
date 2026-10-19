@@ -154,6 +154,7 @@ from kernels.common.conv_implicit_gemm import (
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     _DEFAULT_WS_REPLICAS as _WGRAD_WS_REPLICAS,
+    _GROUP_MERGE_DEGREES,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
     wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
 )
@@ -205,6 +206,26 @@ _GFX942_WARP_N = 2
 _GFX942_WARP_TILE_MN = 16
 _GFX942_WARP_TILE_K = 16
 
+# gfx942 wgrad, wide variant — wave64, MFMA 16x16x16, 16 waves per CTA.
+#
+# Taken when the wgrad GEMM divides the tile exactly in both M and N (see
+# :func:`_gfx942_wgrad_wide_tile`). The 64x64 default is sized to be safe on
+# any shape, which means it pays a partial tile on most of them: wgrad's M
+# (``kpg``) and N (``Y*X*cpg``) are filter-sized, so a tile that does not
+# divide them leaves masked lanes in every CTA for the whole K reduction, and
+# the K reduction (``N*Ho*Wo``) is the long axis. When the division is exact
+# there is no masking to trade away, so the wider tile is free CTA-side and
+# buys the usual things: each operand row loaded into LDS feeds four times the
+# MFMA work, and the per-CTA K-loop address decode is amortised over four
+# times the output. Gated on exactness rather than on size because a 128-wide
+# tile on an indivisible shape is strictly worse than the 64 one.
+_GFX942_WGRAD_WIDE_TILE_MN = 128
+_GFX942_WGRAD_WIDE_TILE_K = 16
+_GFX942_WGRAD_WIDE_WARP_M = 4
+_GFX942_WGRAD_WIDE_WARP_N = 4
+_GFX942_WGRAD_WIDE_WARP_TILE_MN = 16
+_GFX942_WGRAD_WIDE_WARP_TILE_K = 16
+
 # gfx950 wgrad, scalar-B variant — wave64, MFMA 16x16x32, 8 waves per CTA.
 #
 # Taken when the X (B-operand) free-axis load cannot vectorise at all, i.e.
@@ -227,6 +248,10 @@ _GFX950_WGRAD_SCALARB_WARP_TILE_K = 32
 # nothing on the vectorised one, which is why it rides with the variant rather
 # than replacing _PIPELINE.
 _GFX950_WGRAD_SCALARB_PIPELINE = "compv3"
+
+# There is deliberately no tuned constant for depthwise wgrad group merging:
+# :func:`_wgrad_merge_degree` is the kernel's own admissibility rule and nothing
+# more. See its docstring for why no knob survived the fit.
 
 # gfx1250 — wave32, WMMA 16x16x32; pipeline must be "mem", groups=1 only
 _GFX1250_TILE_M = 32
@@ -493,6 +518,8 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
+    lds_k_pad: Optional[int] = None  # wgrad only; None = spec default
+    group_merge: int = 1  # wgrad only, depthwise only
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -509,13 +536,22 @@ class ConvGroupedSpec:
         ]
         if self.direction in ("wgrad", "dgrad") and self.split_k != 1:
             parts.append(f"spk{self.split_k}")
-        # These two change the emitted body, so they have to reach the name --
+        # These three change the emitted body, so they have to reach the name --
         # this is the layer whose names key the host-side compile cache, and the
-        # instance-level WgradConvSpec.kernel_name() already tags both.
+        # instance-level WgradConvSpec.kernel_name() already tags all of them.
         #   lds_k_outer: different LDS tile shape and a transpose-read operand
         #     fetch rather than a transpose-on-store.
+        #   lds_k_pad: a different LDS row stride, so different operand-fetch
+        #     addressing. Only tagged when set, so specs that take the layout
+        #     default keep their historical name.
+        #   group_merge: a different GEMM entirely -- Gm groups folded into one
+        #     tile, with a diagonal mask in the epilogue.
         if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
             parts.append("kouter")
+        if self.direction in ("wgrad", "dgrad") and self.lds_k_pad is not None:
+            parts.append(f"kpad{self.lds_k_pad}")
+        if self.direction == "wgrad" and self.group_merge > 1:
+            parts.append(f"gm{self.group_merge}")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -558,6 +594,7 @@ class ConvGroupedSpec:
             problem=problem,
             name=self.name,
             lds_k_outer=self.lds_k_outer,
+            lds_k_pad=self.lds_k_pad,
             data=ConvDataSpec(
                 dtype_a=self.dtype,
                 dtype_b=self.dtype,
@@ -578,6 +615,7 @@ class ConvGroupedSpec:
             epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
+            group_merge=self.group_merge,
             # Pin the replica count explicitly rather than inheriting the
             # dataclass default: _resolve_wgrad_split_k caps the scratch against
             # the i32 ws_bytes ABI using this same constant, and a cap computed
@@ -682,25 +720,33 @@ def _resolve_wgrad_split_k(
     spatial = (p.Z if p.is_3d else 1) * p.Y * p.X
     wg_M = p.K // p.groups
     wg_N = spatial * (p.C // p.groups)
+    # Group merging folds Gm groups into one GEMM: the tile covers Gm times the
+    # per-group dims, and there are Gm times fewer of them on the grid. Both
+    # the CK formula and the gridDim.z clamp below are sized off the *launched*
+    # geometry, so feed them the merged numbers -- sizing a degree off the
+    # unmerged grid is how the pre-merge formula came to ask for a z extent the
+    # launch could not express.
+    gm = max(1, int(spec.group_merge))
+    grid_groups = max(1, p.groups // gm)
     if spec.split_k != -1:
         requested = spec.split_k
     else:
         from rocke.helpers.split_k import select_split_k_wgrad
 
         requested = select_split_k_wgrad(
-            wg_M=wg_M,
-            wg_N=wg_N,
+            wg_M=wg_M * gm,
+            wg_N=wg_N * gm,
             wg_K=p.N * p.Ho * p.Wo * (p.Do if p.is_3d else 1),
             tile_m=spec.tile_m,
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
-            groups=p.groups,
+            groups=grid_groups,
             block_size=_block(spec)[0],
         ).split_k
     # The helper already keeps groups*split_k inside the z limit on the auto
     # path; this clamp still has to run for an explicitly requested split_k.
-    split_k = max(1, min(requested, _MAX_GRID_DIM_Z // max(1, p.groups)))
+    split_k = max(1, min(requested, _MAX_GRID_DIM_Z // grid_groups))
     # When the packed 16-bit atomic cannot represent this problem, the f32
     # scratch path is the only way to keep split_k > 1. Delegate rather than
     # re-deriving the rule: a local copy is exactly how the dispatcher came to
@@ -708,10 +754,35 @@ def _resolve_wgrad_split_k(
     # vector_size_c is None here by construction: to_wgrad_spec never sets it,
     # so the epilogue derives the store width from the channel dims.
     _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
-    two_stage = (not _atomic_ok) and split_k > 1
+    # A merged tile cannot use the packed-atomic split-K epilogue at all: that
+    # epilogue has no way to drop an off-diagonal group pair, so it would
+    # accumulate garbage into a live dW element. Route any merged split_k > 1
+    # through two-stage, whose scratch atomic carries the diagonal mask. This
+    # mirrors the kernel-side gate in ``wgrad_group_merge_available``; keeping
+    # the dispatcher's answer inside it is what stops select() from handing the
+    # builder a spec the builder then rejects.
+    #
+    # As written today the ``gm > 1`` term is subsumed and never flips the
+    # result: dispatch admits only fp16/bf16, merging is depthwise-only, and a
+    # depthwise cpg == 1 forces a store-vector width of 1, so _atomic_ok is
+    # already False on every shape that can merge. It is kept because it is the
+    # term that stays true if any of those three premises moves -- an fp32 dW,
+    # or merging extended past depthwise -- and in that world it is the only
+    # thing between a merged tile and a silently wrong gradient. Deriving the
+    # invariant from the merge degree directly is also simply what the rule
+    # means. ``test_merged_split_k_never_takes_the_packed_atomic`` asserts the
+    # subsumption explicitly, so it reports when it lifts.
+    two_stage = ((not _atomic_ok) or gm > 1) and split_k > 1
     # The scratch carries no split_k factor, but it does carry the replica
     # factor -- R copies of dW per group. Use the same R this module hands the
     # spec in to_wgrad_spec, or the cap bounds an allocation nobody makes.
+    #
+    # Deliberately *unmerged*: this mirrors wgrad_two_stage_workspace_nbytes,
+    # which sizes off WgradConvSpec.wg_M/wg_N -- the true per-group dims, kept
+    # separate from grid_M/grid_N for exactly this reason. The scratch is R
+    # copies of dW, and merging does not change how much dW there is; it only
+    # changes how many CTAs write it. Scaling these by gm would overstate the
+    # allocation by gm**2 and start refusing two-stage on problems that fit.
     ws_bytes = p.groups * _WGRAD_WS_REPLICAS * wg_M * wg_N * 4
     if two_stage and ws_bytes > _MAX_WGRAD_WS_BYTES:
         two_stage = False
@@ -727,15 +798,22 @@ def _wgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, 
     # wg_N=spatial*C.
     kpg = p.K // p.groups
     cpg = p.C // p.groups
-    wg_M = kpg  # per-group output channels
-    wg_N = spatial * cpg  # per-group filter spatial × input channel
+    # Group merging folds Gm groups into one GEMM, so the tile covers Gm times
+    # the per-group dims and the grid carries Gm times fewer groups. Both
+    # factors have to land, and together: scaling the dims without shrinking z
+    # would launch Gm times the work, and shrinking z without scaling the dims
+    # would leave (Gm-1)/Gm of the merged GEMM uncomputed.
+    gm = max(1, int(spec.group_merge))
+    wg_M = kpg * gm  # merged output channels
+    wg_N = spatial * cpg * gm  # merged filter spatial × input channel
     gx = (wg_N + spec.tile_n - 1) // spec.tile_n
     gy = (wg_M + spec.tile_m - 1) // spec.tile_m
     split_k, _two_stage, _requested = _resolve_wgrad_split_k(spec, p)
-    # The group index rides on block_id_z alongside the K-slice: z = groups*
-    # split_k, decoded in-kernel as group = z // split_k, slice = z % split_k.
-    # For G==1 this reduces to (gx, gy, split_k); for split_k==1 to (gx, gy, groups).
-    return (gx, gy, p.groups * split_k)
+    # The merged-group index rides on block_id_z alongside the K-slice: z =
+    # (groups/Gm)*split_k, decoded in-kernel as group = z // split_k, slice =
+    # z % split_k. For G==1 this reduces to (gx, gy, split_k); for split_k==1
+    # to (gx, gy, groups/Gm); for Gm==1 to the unmerged groups*split_k.
+    return (gx, gy, (p.groups // gm) * split_k)
 
 
 def _dgrad_grid(spec: ConvGroupedSpec, req: OperatorRequest) -> Tuple[int, int, int]:
@@ -1086,17 +1164,49 @@ def _make_gfx942_fwd_candidate() -> KernelCandidate:
 # ---------------------------------------------------------------------------
 
 
+def _gfx942_wgrad_wide_tile(req: "ConvGroupedRequest") -> bool:
+    """Whether the wgrad GEMM divides the wide gfx942 tile exactly in M and N.
+
+    The wgrad GEMM is ``M = kpg``, ``N = Z*Y*X*cpg``; both are filter-sized, so
+    a tile that does not divide them is masked lanes in every CTA for the whole
+    K reduction. Exact division is what makes the wider tile free -- see the
+    ``_GFX942_WGRAD_WIDE_*`` constants.
+    """
+    p = _problem(req)
+    z = int(p.Z) if getattr(p, "Z", None) else 1
+    wg_M = int(p.kpg)
+    wg_N = z * int(p.Y) * int(p.X) * int(p.cpg)
+    t = _GFX942_WGRAD_WIDE_TILE_MN
+    return wg_M % t == 0 and wg_N % t == 0
+
+
 def _make_gfx942_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx942: 64×64×64, 2×2, 16×16×16 MFMA.
 
     Epilogue derived from vec_size_c (cshuffle when >1, default otherwise).
     Split-K forwarded from request (1=disabled, -1=auto CK formula, >1=fixed).
+
+    Two geometries, selected per request by :func:`_gfx942_wgrad_wide_tile`:
+    the 64×64 default, and the 128×128 / 16-wave variant for the shapes that
+    divide it exactly. One candidate rather than two for the same reason the
+    gfx950 pair is one (see :func:`_make_gfx950_wgrad_candidate`): the choice
+    is a pure function of the request with no overlap.
     """
     name = "implicit_gemm_conv_wgrad_gfx942"
     spec_id = "igemm_conv_wgrad_gfx942_64x64"
     algorithm = "implicit_gemm_wgrad_gfx942"
 
     def _tile(req: ConvGroupedRequest):
+        if _gfx942_wgrad_wide_tile(req):
+            return (
+                _GFX942_WGRAD_WIDE_TILE_MN,
+                _GFX942_WGRAD_WIDE_TILE_MN,
+                _GFX942_WGRAD_WIDE_TILE_K,
+                _GFX942_WGRAD_WIDE_WARP_M,
+                _GFX942_WGRAD_WIDE_WARP_N,
+                _GFX942_WGRAD_WIDE_WARP_TILE_MN,
+                _GFX942_WGRAD_WIDE_WARP_TILE_K,
+            )
         return (
             _GFX942_TILE_M,
             _GFX942_TILE_N,
@@ -1105,6 +1215,15 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             _GFX942_WARP_N,
             _GFX942_WARP_TILE_MN,
             _GFX942_WARP_TILE_K,
+        )
+
+    def _pad(req: ConvGroupedRequest, tile_k: int) -> Optional[int]:
+        return WgradConvSpec.default_lds_k_pad(
+            arch=req.arch,
+            tile_k=tile_k,
+            dtype_a=req.dtype.lower(),
+            dtype_b=req.dtype.lower(),
+            wave_size=ArchTarget.from_gfx(req.arch).wave_size,
         )
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
@@ -1126,6 +1245,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             pipeline=_PIPELINE,
             epilogue=_ep,
             split_k=_sk,
+            lds_k_pad=_pad(req, tk),
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1166,6 +1286,7 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
+            lds_k_pad=_pad(req, tk),
             name=name,
         )
 
@@ -1243,9 +1364,15 @@ def _wgrad_b_is_scalar(req: "ConvGroupedRequest") -> bool:
     Depthwise (``cpg == kpg == 1`` with real groups) is excluded even though it
     is the extreme of the scalar-B case. There the CTA count comes from the
     group axis, not from the tile, so the "fewer B elements per thread" argument
-    the variant rests on does not drive it -- and measurement agrees: the
-    narrow tile is a win on some depthwise shapes and a loss on others, with no
-    predictor separating them. Depthwise keeps the tile it was tuned on.
+    the variant rests on does not drive it -- and measurement agreed: the
+    narrow tile was a win on some depthwise shapes and a loss on others, with
+    no predictor separating them.
+
+    The predictor turned out not to be the tile at all but the merge degree:
+    see :func:`_wgrad_merge_degree`, which fixes the depthwise scalar run by
+    packing several groups into one tile at the shipped width, rather than by
+    narrowing the tile to cut per-thread B work. So depthwise keeps the shipped
+    geometry and changes only how many groups share it.
     """
     p = _problem(req)
     cpg = p.C // max(int(p.groups), 1)
@@ -1253,6 +1380,72 @@ def _wgrad_b_is_scalar(req: "ConvGroupedRequest") -> bool:
         return False
     _va, vec_b, _vc = WgradConvSpec.default_vector_sizes(cpg, p.kpg, req.dtype.lower())
     return vec_b == 1
+
+
+def _wgrad_merge_degree(req: "ConvGroupedRequest") -> int:
+    """``group_merge`` for a gfx950 wgrad request: as much as the gate allows.
+
+    Depthwise wgrad is the degenerate case of the wgrad GEMM. ``wg_M = kpg = 1``
+    and ``wg_N = Y*X*cpg = Y*X``, so the tile covers a handful of filter taps
+    and the GEMM free axis is one element per group -- every dY/X load is
+    scalar. Merging ``Gm`` groups into one tile makes that run ``Gm`` elements
+    long, which is the whole reason merging helps: ``Gm`` *is* the load vector
+    width.
+
+    The policy is the kernel's own admissibility rule and nothing else, which
+    is worth being explicit about because it is the result of a fit rather than
+    an assumption. Measured across a depthwise wgrad corpus, merging to the
+    maximum admissible degree at the shipped tile was the best degree available
+    at that tile on four shapes in five, and within a couple of percent of the
+    best on all but one of the rest. Three candidate knobs were fitted on top
+    and all three were rejected:
+
+    * **A tile_n ladder.** Widening the tile is the only way a large filter
+      merges at all -- at the shipped 64 a 7x7 stage cannot merge, since
+      ``49 * 2 > 64``. It does raise the typical speedup, but it buys that with
+      a tail of shapes that regress by up to half, concentrated on the widest
+      rung. The exchange is bad for a dispatch default, which has to serve
+      shapes nobody measured: the upside is bounded and the downside is not.
+    * **A vectorisation cap** (stop merging once the run reaches the widest
+      buffer load). It only ever binds together with the ladder, since at a
+      fixed tile the ``spatial * Gm <= tile_n`` bound bites first on nearly
+      every shape.
+    * **A grid-occupancy floor** (refuse to merge past some number of surviving
+      CTAs). Merging divides the group axis of the grid by ``Gm``, but split-K
+      is resolved *after* merging and simply refills it, so the floor mostly
+      declines free speedup.
+
+    What is left needs no tuned constant, and that is the point: the rule is
+    the gate, so it cannot drift away from the gate.
+
+    Mirrors the three request-dependent clauses of
+    :func:`kernels.common.conv_implicit_gemm_wgrad.wgrad_group_merge_available`
+    -- the degree ladder, group divisibility, and ``grid_N <= tile_n``. The
+    remaining clauses of the gate (depthwise, wave64, split-K/two-stage) are
+    properties of the candidate rather than of the request and are checked by
+    the caller. ``grid_M <= tile_m`` is not re-derived: depthwise is
+    ``kpg == 1`` so ``grid_M == Gm``, and the ladder already stops at
+    64 == ``tile_m``.
+
+    This re-derives rather than probing the gate, because the gate takes a
+    built :class:`WgradConvSpec` and building one per degree to answer a
+    closed-form question is a lot of work to learn ``spatial * Gm <= tile_n``.
+    The cost is that the two can drift, which
+    ``TestWgradMergeDegree.test_every_choice_is_admissible`` is there to catch:
+    it runs the choice back through the real gate across a grid of shapes, so a
+    clause that moves in the kernel and not here fails there.
+    """
+    p = _problem(req)
+    groups = max(int(p.groups), 1)
+    # Merging is depthwise-only in the kernel, and pointless with one group.
+    if p.cpg != 1 or p.kpg != 1 or groups <= 1:
+        return 1
+    spatial = p.Y * p.X * ((p.Z or 1) if p.is_3d else 1)
+    best = 1
+    for gm in _GROUP_MERGE_DEGREES:
+        if gm <= groups and groups % gm == 0 and spatial * gm <= _GFX950_TILE_N:
+            best = gm
+    return best
 
 
 def _make_gfx950_wgrad_candidate() -> KernelCandidate:
@@ -1298,10 +1491,22 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
     def _pipeline(req: ConvGroupedRequest) -> str:
         return _GFX950_WGRAD_SCALARB_PIPELINE if _wgrad_b_is_scalar(req) else _PIPELINE
 
+    def _group_merge(req: ConvGroupedRequest) -> int:
+        # The scalar-B variant pins its own narrower tile, which the degree
+        # rule's tile bound was not derived against; rather than re-derive it
+        # for a second geometry, that path keeps the unmerged behaviour it was
+        # tuned with. The two do not overlap in practice -- _wgrad_b_is_scalar
+        # excludes depthwise, and merging is depthwise-only -- so this is
+        # belt-and-braces, not a policy choice.
+        if _wgrad_b_is_scalar(req):
+            return 1
+        return _wgrad_merge_degree(req)
+
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
         _ep, _sk = _wgrad_grouped_overrides(req)
         return WgradConvSpec(
+            group_merge=_group_merge(req),
             problem=_problem(req),
             name=name,
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
@@ -1359,6 +1564,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
+            group_merge=_group_merge(req),
             name=name,
         )
 
@@ -1830,6 +2036,21 @@ def launch_values_for(
                 + " kernel; ws_ptr/ws_bytes must be passed exactly when it is "
                 "two-stage"
             )
+        # Deliberately the TRUE problem, not spec.group_merge's merged one.
+        # Two separate reasons, and both have to hold:
+        #   - The problem kernargs (p_C/p_K/p_cpg/p_kpg/p_wg_M/p_wg_N/...)
+        #     describe the unmerged problem by contract: the kernel scales the
+        #     ones the merged load side needs by Gm itself, since Gm is a
+        #     build-time constant there. Handing it pre-merged dims would apply
+        #     the factor twice.
+        #   - p_num_pid_m/n are launch geometry, so they would have to be
+        #     merged -- but wgrad_group_merge_available admits a merged spec
+        #     only when grid_M <= tile_m and grid_N <= tile_n, i.e. the merged
+        #     GEMM is exactly one tile. Both counts are therefore 1, and the
+        #     unmerged dims (which are smaller still) also ceil to 1. The two
+        #     agree by that gate, not by luck.
+        # test_merged_tile_counts_are_single_tile pins the second one, so if
+        # the gate ever admits a multi-tile merge this stops being true loudly.
         return ConvArgs.from_problem(
             p, direction="wgrad", tile_m=tile_m, tile_n=tile_n, tile_k=spec.tile_k
         ).to_launch_values(

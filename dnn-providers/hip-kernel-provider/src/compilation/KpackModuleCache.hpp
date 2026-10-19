@@ -15,14 +15,18 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider::compilation
 {
@@ -55,21 +59,31 @@ private:
     KpackLoadStage _stage;
 };
 
-/// The first entry of @p arches that @p deviceArch matches by prefix, or nullptr when none
-/// does. Run it before the entry lookup: a bare KERNEL_NOT_FOUND cannot tell a wrong GPU
-/// from a wrong toc_key, and those two send a reader to different places.
+/// The best-tier entry of @p arches serving @p deviceArch (an explicit entry beats a
+/// generic one containing the device; ties: archive order), or nullptr when none does.
+/// Points into @p arches. Run it before the entry lookup: a bare KERNEL_NOT_FOUND cannot
+/// tell a wrong GPU from a wrong toc_key, and those two send a reader to different places.
 inline const std::string* selectKpackArchiveArch(const std::vector<std::string>& arches,
-                                                 const std::string& deviceArch)
+                                                 std::string_view deviceArch)
 {
+    const std::string* best = nullptr;
+    std::optional<hipdnn_plugin_sdk::ArchTier> bestTier;
     for(const auto& candidate : arches)
     {
-        if(hipdnn_plugin_sdk::archMatches(
-               deviceArch, candidate, hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
+        const auto tier = hipdnn_plugin_sdk::entryTier(candidate, deviceArch);
+        if(tier && (!bestTier || *tier < *bestTier))
         {
-            return &candidate;
+            best = &candidate;
+            bestTier = tier;
         }
     }
-    return nullptr;
+    if(bestTier == hipdnn_plugin_sdk::ArchTier::GENERIC)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("kpack: device arch '"
+                               << deviceArch << "' is served by generic archive key '" << *best
+                               << "'");
+    }
+    return best;
 }
 
 using CachedKpackModule = std::shared_ptr<const KpackModule>;
@@ -360,8 +374,9 @@ public:
     /// The arch component is feature-stripped: flags like ":sramecc+:xnack-" describe the
     /// device, not the code object, and archMatches already gates on the bare name, so
     /// "gfx90a" and "gfx90a:xnack-" must reach one entry rather than load the same blob
-    /// twice. load() keeps the decorated string -- it feeds archMatches and names the
-    /// device arch in its diagnostics.
+    /// twice. load() keeps the decorated string -- it feeds the entry selection in
+    /// readVerifiedKpackCodeObject (selectKpackArchiveArch, which ranks entries by
+    /// entryTier), and names the device arch in its diagnostics.
     ///
     /// `expectedSha256` is in the key so that no cache hit can bypass the digest check: a
     /// hit answers from the key alone, so a digest outside it would hand a second
@@ -377,6 +392,13 @@ public:
         return archivePath + "::" + tocKey
                + "::" + std::string(hipdnn_plugin_sdk::stripArchFeatures(deviceArch))
                + "::" + std::to_string(deviceOrdinal) + "::" + expectedSha256;
+    }
+
+    /// The archive key load() selects for @p deviceArch; see selectKpackArchiveArch.
+    static const std::string* selectArch(const std::vector<std::string>& archiveArches,
+                                         std::string_view deviceArch)
+    {
+        return selectKpackArchiveArch(archiveArches, deviceArch);
     }
 
     /// @throws KpackModuleLoadFailure on any stage that fails. Never returns a null

@@ -9,21 +9,17 @@
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
 # Team specific CI ownership
-/.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-core
+/.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-reviewers
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
 
 # Project-specific ownership
-/dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
-/dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
-/dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/                                     @ROCm/hipdnn-reviewers
 # Shared rocke root (docs, build glue, tools) -- must precede the platform/style/library
 # lines below, since CODEOWNERS is last-match-wins and this would otherwise swallow them.
-/dnn-providers/hip-kernel-provider/rocke/           @ROCm/rocke-platform @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
-/dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
-/dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
+/dnn-providers/hip-kernel-provider/rocke/           @ROCm/rocke-platform @ROCm/rocke-lib
+/dnn-providers/hip-kernel-provider/rocke/platform/  @ROCm/rocke-platform
+/dnn-providers/hip-kernel-provider/rocke/style/     @ROCm/rocke-platform
+/dnn-providers/hip-kernel-provider/rocke/library/   @ROCm/rocke-lib
 /projects/composablekernel/                         @ROCm/ck-reviewers
 /projects/composablekernel/**/*conv_*               @ROCm/ck-convolution @ROCm/ck-reviewers
 /projects/composablekernel/**/*conv_*/**            @ROCm/ck-convolution @ROCm/ck-reviewers
@@ -66,7 +62,7 @@
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
 /projects/hipccl/                                   @ROCm/prims-rands-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
-/projects/hipdnn/                                   @ROCm/hipdnn-core
+/projects/hipdnn/                                   @ROCm/hipdnn-reviewers
 /projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
 /projects/hipsolver/                                @ROCm/solvers-reviewers
@@ -85,6 +81,7 @@
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
+/shared/hostnumerics/                               @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -102,6 +99,10 @@
 
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+
+/shared/hostnumerics/**/*.cmake                     @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/*.cmake.in                  @ROCm/rocm-math-lib-build-infra
+/shared/hostnumerics/**/CMakeLists.txt              @ROCm/rocm-math-lib-build-infra
 
 /shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
 /shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
@@ -145,8 +146,8 @@
 /projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 
 # Internal engineering decision logs, not user-facing docs: skip the docs-reviewers group.
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
-/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/DECISIONS.md   @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/adr/           @ROCm/hipblaslt-reviewers
 
 /projects/hipccl/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipccl/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
