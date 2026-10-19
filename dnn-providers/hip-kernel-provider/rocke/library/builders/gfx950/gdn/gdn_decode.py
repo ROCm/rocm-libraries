@@ -71,17 +71,22 @@ _F32_MIN_NORMAL = 2.0**-126
 def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
     """Compile ``spec`` and wrap it in a launcher, memoised per spec.
 
+    The spec is validated before the cache is read. A flag of the wrong type
+    (``dpp_reduce="false"`` is truthy) gets the same ``kernel_name()`` as the
+    valid spec it imitates, so a cache hit would hand it that spec's launcher
+    instead of raising.
+
     Keyed on ``kernel_name()`` because that string is what the compiled code
     object is identified by; every field that changes emitted code is encoded
-    in it, so two specs cannot collide on one cache entry.
+    in it, so two valid specs cannot collide on one cache entry.
     """
+    ok, why = is_valid_spec(spec, arch=arch)
+    if not ok:
+        raise ValueError(f"invalid gdn_decode spec for {arch}: {why}")
     key = (spec.kernel_name(), arch)
     cached = _LAUNCHER_CACHE.get(key)
     if cached is not None:
         return cached
-    ok, why = is_valid_spec(spec, arch=arch)
-    if not ok:
-        raise ValueError(f"invalid gdn_decode spec for {arch}: {why}")
     artifact = compile_kernel(build_gdn_decode(spec, arch=arch), arch=arch)
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,

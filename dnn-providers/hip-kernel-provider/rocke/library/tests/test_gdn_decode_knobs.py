@@ -86,6 +86,35 @@ def test_non_bool_flag_is_rejected(field, value):
     assert f"{field} must be a bool" in why
 
 
+@pytest.mark.parametrize("field", BOOL_KNOBS)
+@pytest.mark.parametrize("value", ["false", "True", 1, 0, None])
+def test_launcher_cache_hit_does_not_bypass_flag_validation(field, value, monkeypatch):
+    # A malformed flag shares its kernel name with the valid spec it imitates
+    # ("false" and 1 with the knob on, 0 and None with it off). Warm the cache
+    # under both names: ``launcher_for`` must still raise, never hand back the
+    # cached launcher.
+    pytest.importorskip("torch", reason="the builder module imports torch")
+    from builders.gfx950.gdn import gdn_decode as builder
+
+    def spec_for(flag):
+        # f32 state: ``interleave_cols`` is inert (and unnamed) with a 2-byte one.
+        deps = {"conv_once": True, field: flag}
+        return _spec(
+            **_FUSED, state_dtype="f32", fuse_conv=True, fuse_out_norm=True, **deps
+        )
+
+    cached = object()
+    cache = {(spec_for(flag).kernel_name(), ARCH): cached for flag in (True, False)}
+    assert len(cache) == 2  # the knob changes the name, so both keys are distinct
+    monkeypatch.setattr(builder, "_LAUNCHER_CACHE", cache)
+
+    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+        builder.launcher_for(spec_for(value), arch=ARCH)
+    # the valid specs keep hitting the cache
+    assert builder.launcher_for(spec_for(True), arch=ARCH) is cached
+    assert builder.launcher_for(spec_for(False), arch=ARCH) is cached
+
+
 @pytest.mark.parametrize("field", ["state_load_hint", "state_store_hint"])
 @pytest.mark.parametrize("value", ["nontemporal", "STREAMING", "", None, True])
 def test_unknown_state_hint_is_rejected(field, value):
