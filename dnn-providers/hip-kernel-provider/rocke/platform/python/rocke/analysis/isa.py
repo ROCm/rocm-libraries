@@ -96,9 +96,10 @@ class ResourceInfo:
     """Resource metadata from AMDHSA code-object notes or disassembly.
 
     ``max_flat_workgroup_size`` is the largest workgroup the compiler budgeted
-    registers for. When it exceeds the kernel's real launch size the register
-    budget is smaller than necessary; rocKE's ``"64,N"`` attribute with N < 64
-    is invalid, so LLVM falls back to 1024 (findings §4).
+    registers for. When it exceeds the kernel's real launch size, the register
+    budget is smaller than necessary; LLVM falls back to 1024 when the
+    ``amdgpu-flat-work-group-size`` attribute is missing or its range is
+    invalid (min > max).
     """
 
     vgpr_count: Optional[int] = None

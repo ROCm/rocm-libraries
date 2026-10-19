@@ -421,8 +421,9 @@ define amdgpu_kernel void @k() {
         self.assertEqual(rows[0]["llvm_mfma"], 1)
 
     def test_resources_and_report_expose_compiled_workgroup_bound(self):
-        # Verbatim llvm-readelf --notes lines from a one-wave gfx1201 kernel
-        # emitted with the invalid "64,32" attribute: LLVM fell back to 1024.
+        # Verbatim llvm-readelf --notes lines from a one-wave (32-thread) gfx1201
+        # kernel whose flat-work-group-size range was invalid, so LLVM budgeted
+        # registers for its 1024-thread default.
         notes = """
     .max_flat_workgroup_size: 1024
     .private_segment_fixed_size: 216
