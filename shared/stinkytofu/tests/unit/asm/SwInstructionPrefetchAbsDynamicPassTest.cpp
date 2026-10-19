@@ -161,6 +161,12 @@ int countSPrefetchInst(const Function& func) {
     return c;
 }
 
+int countSWaitXcnt(const Function& func) {
+    int c = 0;
+    for (const BasicBlock& bb : func) c += countInstructions(bb, "s_wait_xcnt");
+    return c;
+}
+
 int countSGetpc(const Function& func) {
     int c = 0;
     for (const BasicBlock& bb : func) c += countInstructions(bb, "s_getpc_b64");
@@ -246,12 +252,15 @@ class SwInstructionPrefetchAbsDynamicPassTest : public ::testing::Test {
         gemmConfig.NumGRM = 1;
     }
 
-    PassManager makePm(int baseSgpr = 64, bool cpCover = false, bool afterSgprCompact = false) {
+    PassManager makePm(int baseSgpr = 64, bool cpCover = false, bool afterSgprCompact = false,
+                       bool xnackReplay = false) {
         PassManager pm;
         registerAllAnalyses(pm.getAnalysisManager());
         pm.setGemmTileConfig(gemmConfig);
-        pm.addPass(
-            createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover, afterSgprCompact));
+        AsmCapsConfig caps;
+        caps.enableXnackReplay = xnackReplay;
+        pm.setAsmCapsConfig(caps);
+        pm.addPass(createSwInstructionPrefetchAbsDynamicPass(baseSgpr, {}, cpCover, afterSgprCompact));
         return pm;
     }
 
@@ -919,4 +928,31 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CoverBoundary_OptN
     EXPECT_EQ(countSGetpc(*func), 4);
     EXPECT_EQ(countSPrefetchInst(*func), 3 + 15);  // OptNLL_End boundary -> coverN=3, armN=5
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
+}
+
+
+// The CP-cover insert upper bound carries the pre-boundary drains' bytes, so
+// dropping them can move coverN across a 4 KiB boundary. At tail 36404 the two
+// modes land either side of it, which pins the bound from the outside --
+// hard-coding it to either 320 or 336 fails one of these two.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, XnackDrain_Tail36404_ModesDiffer) {
+    buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,
+                     /*xnackReplay=*/true);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 2 + 18);  // coverN=2, armN=6
+    EXPECT_EQ(countSWaitXcnt(*func), 4);           // 1 cover burst + 3 ladder arms
+}
+
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, NoXnackDrain_Tail36404_ModesDiffer) {
+    buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,
+                     /*xnackReplay=*/false);
+    pm.run(*func);
+
+    EXPECT_EQ(countSPrefetchInst(*func), 1 + 18);  // coverN=1, armN=6
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }
