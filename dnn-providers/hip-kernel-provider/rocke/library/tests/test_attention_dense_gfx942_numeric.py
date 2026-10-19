@@ -1219,7 +1219,8 @@ def test_codegen_knob_is_bit_identical_to_default(dtype, d, persistent, override
     )
 
 
-# Persistent grid size for the CFVST / KDB-VPF tests. At the shipped NP (304) every
+# Persistent grid size for independent CFVST, KDB and VPF tests. At the shipped
+# NP (304) every
 # shape below has fewer work items than workgroups, so no workgroup ever runs a
 # second item and the LDS hand-off between items (the next item's prologue writing
 # K slot 0 and V_lds after the previous item's epilogue) is never exercised.
@@ -1281,9 +1282,12 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
 
     variants = (
         [
-            {"use_cfvst": False, "lds_num_buffers": 1},
-            {"use_cfvst": True, "lds_num_buffers": 1},
-            {"use_cfvst": True, "lds_num_buffers": 2},
+            # Original BF16 baseline plus the independently selectable pipeline modes.
+            {"use_cfvst": False, "lds_num_buffers": 1, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": False},
+            {"use_cfvst": True, "lds_num_buffers": 1, "v_reg_prefetch": True},
+            {"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True},
         ]
         if dtype == "bf16"
         else [{}]  # Preserve the existing FP16 path
@@ -1313,10 +1317,10 @@ def test_cfvst_pipeline_strict_numeric(dtype, persistent, sq, skv):
         )
 
 
-# Representative BF16 D128 CFVST numeric tests covering selected tile,
-# scheduling, output-store, and persistent-grid configurations, with and
-# without KDB/VPF. This is not an exhaustive sweep of supported knobs.
-# Each row is (id, (Hq, Hkv), Skv, persistent, knobs).whe
+# Representative BF16 D128 CFVST numeric tests covering tile, scheduling,
+# output-store, and persistent-grid configurations with independently enabled
+# K double buffering and V register prefetch. Not an exhaustive sweep.
+# Each row is (id, (Hq, Hkv), Skv, persistent, knobs).
 _CFVST_KNOB_ROWS = [
     ("bn32", (16, 4), 512, False, {"block_n": 32}),
     ("bm128", (16, 4), 512, False, {"block_m": 128}),
@@ -1338,22 +1342,31 @@ _CFVST_KNOB_ROWS = [
 ]
 
 
-# lds_num_buffers=2 is gated to block_n=64, so a row that sets another block_n runs at
-# nbuf=1 only.
+# KDB and VPF each require block_n=64, so the block_n=32 row exercises
+# CFVST only; the others cover the two individual knobs and their combination.
+_CFVST_PIPELINE_MODES = (
+    (1, False, "cfvst_only"),
+    (2, False, "kdb_only"),
+    (1, True, "vpf_only"),
+    (2, True, "kdb_vpf"),
+)
 _CFVST_KNOB_CASES = [
-    pytest.param(*row[1:], nbuf, id=f"{row[0]}-{nbuf_id}")
+    pytest.param(*row[1:], nbuf, vpf, id=f"{row[0]}-{mode}")
     for row in _CFVST_KNOB_ROWS
-    for nbuf, nbuf_id in ((1, "nbuf1"), (2, "kdbvpf"))
-    if nbuf == 1 or row[4].get("block_n", 64) == 64
+    for nbuf, vpf, mode in _CFVST_PIPELINE_MODES
+    if (nbuf == 1 and not vpf) or row[4].get("block_n", 64) == 64
 ]
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "heads,skv,persistent,knobs,lds_num_buffers", _CFVST_KNOB_CASES
+    "heads,skv,persistent,knobs,lds_num_buffers,v_reg_prefetch",
+    _CFVST_KNOB_CASES,
 )
-def test_cfvst_knob_matrix_numeric(heads, skv, persistent, knobs, lds_num_buffers):
+def test_cfvst_knob_matrix_numeric(
+    heads, skv, persistent, knobs, lds_num_buffers, v_reg_prefetch
+):
     import torch
 
     hq, hkv = heads
@@ -1373,6 +1386,7 @@ def test_cfvst_knob_matrix_numeric(heads, skv, persistent, knobs, lds_num_buffer
         seqlen_kv=skv,
         use_cfvst=True,
         lds_num_buffers=lds_num_buffers,
+        v_reg_prefetch=v_reg_prefetch,
         **knobs,
     )
     if persistent:
@@ -1383,7 +1397,10 @@ def test_cfvst_knob_matrix_numeric(heads, skv, persistent, knobs, lds_num_buffer
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()
     max_abs = (out.float() - ref).abs().max().item()
-    assert max_abs < 1e-2, f"{knobs} nbuf={lds_num_buffers}: max_abs={max_abs:.3e}"
+    assert max_abs < 1e-2, (
+        f"{knobs} nbuf={lds_num_buffers} vpf={v_reg_prefetch}: "
+        f"max_abs={max_abs:.3e}"
+    )
 
 
 @requires_gfx942_gpu
@@ -1423,17 +1440,27 @@ class TestDenseLseNumericGfx942:
     @pytest.mark.parametrize(
         "sq,skv", [(256, 64), (512, 512)], ids=["zero_trip", "multi_tile"]
     )
-    def test_kdbvpf_pipeline_lse(self, persistent, sq, skv):
-        """The K-double-buffer pipeline folds its LAST tile in after the loop, so the
-        LSE must use that final row max, not the loop's. A stale max shifts LSE by
-        (m_new - m_old) * ln2 on every row the diagonal tile raises; at n_up == 1
-        (``zero_trip``) the loop never runs and the stale max is the -inf seed."""
+    @pytest.mark.parametrize(
+        "lds_num_buffers,v_reg_prefetch",
+        [(1, False), (2, False), (1, True), (2, True)],
+        ids=["cfvst_only", "kdb_only", "vpf_only", "kdb_vpf"],
+    )
+    def test_cfvst_pipeline_lse_modes(
+        self, persistent, sq, skv, lds_num_buffers, v_reg_prefetch
+    ):
+        """LSE uses the final tile's row max in all independent pipeline modes.
+
+        A stale max shifts LSE by (m_new - m_old) * ln2; at n_up=1
+        (zero_trip) the pipeline loop does not run at all. Both grids are
+        exercised, including the persistent multi-work-item handoff.
+        """
         spec = dataclasses.replace(
             _lse_spec("bf16", 128, 8, 2, persistent, batch=1, sq=512),
             seqlen_q=sq,
             seqlen_kv=skv,
             use_cfvst=True,
-            lds_num_buffers=2,
+            lds_num_buffers=lds_num_buffers,
+            v_reg_prefetch=v_reg_prefetch,
         )
         if persistent:
             spec = _multi_item_persistent(spec)

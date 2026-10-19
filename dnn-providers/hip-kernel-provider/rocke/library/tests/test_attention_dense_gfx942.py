@@ -54,7 +54,8 @@ from kernels.gfx942.attention_dense import (
     _k_group_pad_active,
     _k_group_stride,
     _lds_bytes,
-    _use_kdb_vpf,
+    _use_kdb,
+    _use_vpf,
     _use_exp2_fast,
     _v_row_pad,
     _v_swizzle_width,
@@ -322,7 +323,8 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
-    "lds_num_buffers": (2,),  # BF16 D128 CFVST enables the KDB/VPF pipeline
+    "lds_num_buffers": (2,),  # BF16 D128 CFVST enables KDB
+    "v_reg_prefetch": (True,),  # independent V register prefetch
     "iglp_mode": (1,),  # legal only with iglp=True -> the *_iglp base
     "pv_loop_order": ("k_major",),
     "o_store_width": (1, 2),
@@ -342,8 +344,9 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous,
 # and the runtime-shape claim would be checked on the default grid only.
 # The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
-# The *_kdbvpf bases start with the K-double-buffer + V-prefetch pipeline already on
-# (lds_num_buffers=2), so every other knob is also perturbed inside the pipeline body,
+# The *_kdbvpf bases enable BOTH independent pipeline levers explicitly; changing
+# lds_num_buffers no longer implicitly enables V prefetch. Every other knob is
+# also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
@@ -351,10 +354,12 @@ _INJECTIVITY_BASES = {
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d128_bf16_cfvst": dict(head_size=128, dtype="bf16", use_cfvst=True),
     "d128_bf16_kdbvpf": dict(
-        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2
+        head_size=128, dtype="bf16", use_cfvst=True,
+        lds_num_buffers=2, v_reg_prefetch=True
     ),
     "d128_bf16_kdbvpf_iglp": dict(
-        head_size=128, dtype="bf16", use_cfvst=True, lds_num_buffers=2, iglp=True
+        head_size=128, dtype="bf16", use_cfvst=True,
+        lds_num_buffers=2, v_reg_prefetch=True, iglp=True
     ),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
@@ -372,6 +377,7 @@ _INJECTIVITY_BASES = {
         dtype="bf16",
         use_cfvst=True,
         lds_num_buffers=2,
+        v_reg_prefetch=True,
         persistent=True,
         num_persistent=228,
         seqlen_q=4096,
@@ -999,30 +1005,43 @@ def test_lds_budget_boundary_is_accepted_at_exactly_capacity():
 def test_bf16_cfvst_kdb_vpf_are_separate_opt_in_variants():
     baseline = _spec()
     cfvst_only = _spec(use_cfvst=True)
-    pipeline = _spec(use_cfvst=True, lds_num_buffers=2)
+    kdb_only = _spec(use_cfvst=True, lds_num_buffers=2)
+    vpf_only = _spec(use_cfvst=True, v_reg_prefetch=True)
+    combined = _spec(use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True)
     fp16 = _spec(dtype="fp16")
 
     assert not baseline.resolved_use_cfvst()
-    assert not _use_kdb_vpf(baseline)
-    assert cfvst_only.resolved_use_cfvst() and not _use_kdb_vpf(cfvst_only)
-    assert pipeline.resolved_use_cfvst() and _use_kdb_vpf(pipeline)
-    assert fp16.resolved_use_cfvst() and not _use_kdb_vpf(fp16)
+    assert not _use_kdb(baseline) and not _use_vpf(baseline)
+    assert cfvst_only.resolved_use_cfvst()
+    assert not _use_kdb(cfvst_only) and not _use_vpf(cfvst_only)
+    assert _use_kdb(kdb_only) and not _use_vpf(kdb_only)
+    assert not _use_kdb(vpf_only) and _use_vpf(vpf_only)
+    assert _use_kdb(combined) and _use_vpf(combined)
+    assert fp16.resolved_use_cfvst()
+    assert not _use_kdb(fp16) and not _use_vpf(fp16)
 
     assert baseline.resolved_v_row_pad() == 8
-    assert cfvst_only.resolved_v_row_pad() == 0
-    assert pipeline.resolved_v_row_pad() == 0
-    assert cfvst_only.resolved_use_v_swizzle()
-    assert pipeline.resolved_use_v_swizzle()
+    for spec in (cfvst_only, kdb_only, vpf_only, combined):
+        assert spec.resolved_v_row_pad() == 0
+        assert spec.resolved_use_v_swizzle()
 
-    names = {gfx942_kernel_name(s) for s in (baseline, cfvst_only, pipeline)}
-    assert len(names) == 3, "distinct codegen variants must not share a cache name"
-    assert "cfvst1" not in gfx942_kernel_name(baseline)
-    assert "cfvst1" in gfx942_kernel_name(cfvst_only)
-    assert "kdbvpf1" not in gfx942_kernel_name(cfvst_only)
-    assert "kdbvpf1" in gfx942_kernel_name(pipeline)
-    assert "kdbvpf1" not in gfx942_kernel_name(fp16)
+    cases = (baseline, cfvst_only, kdb_only, vpf_only, combined, fp16)
+    names = {gfx942_kernel_name(spec) for spec in cases}
+    assert len(names) == len(cases), "distinct variants must not share a cache name"
+    assert "_cfvst1" not in gfx942_kernel_name(baseline)
+    assert "_cfvst1" in gfx942_kernel_name(cfvst_only)
+    assert "_kdb1" not in gfx942_kernel_name(cfvst_only)
+    assert "_vpf1" not in gfx942_kernel_name(cfvst_only)
+    assert "_kdb1" in gfx942_kernel_name(kdb_only)
+    assert "_vpf1" not in gfx942_kernel_name(kdb_only)
+    assert "_kdb1" not in gfx942_kernel_name(vpf_only)
+    assert "_vpf1" in gfx942_kernel_name(vpf_only)
+    assert "_kdb1" in gfx942_kernel_name(combined)
+    assert "_vpf1" in gfx942_kernel_name(combined)
+    assert "_kdb1" not in gfx942_kernel_name(fp16)
+    assert "_vpf1" not in gfx942_kernel_name(fp16)
 
-    for spec in (baseline, cfvst_only, pipeline, fp16):
+    for spec in cases:
         ok, reason = supports_attention_dense(spec, arch="gfx942")
         assert ok, reason
         built = build_attention_dense(spec, arch="gfx942")
@@ -1035,9 +1054,11 @@ def test_bf16_cfvst_kdb_vpf_are_separate_opt_in_variants():
         ({}, 34816),  # naive V, K[1, 64, 136] + V[1, 64, 136]
         ({"use_cfvst": True}, 33792),  # K[1, 64, 136] + V^T[128, 64]
         ({"use_cfvst": True, "lds_num_buffers": 2}, 51200),
+        ({"use_cfvst": True, "v_reg_prefetch": True}, 33792),
+        ({"use_cfvst": True, "lds_num_buffers": 2, "v_reg_prefetch": True}, 51200),
         ({"dtype": "fp16"}, 33792),  # unchanged upstream FP16 CFVST
     ],
-    ids=["bf16-naive", "bf16-cfvst", "bf16-kdb-vpf", "fp16-upstream"],
+    ids=["bf16-naive", "bf16-cfvst", "bf16-kdb", "bf16-vpf", "bf16-kdb-vpf", "fp16-upstream"],
 )
 def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
     spec = _spec(**overrides)
@@ -1053,8 +1074,12 @@ def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
         {"use_cfvst": 1},
         {"lds_num_buffers": 2.0},
         {"lds_num_buffers": True},
+        {"v_reg_prefetch": "false"},
+        {"v_reg_prefetch": 1},
+        {"v_reg_prefetch": None},
     ],
-    ids=["cfvst-str", "cfvst-int", "nbuf-float", "nbuf-bool"],
+    ids=["cfvst-str", "cfvst-int", "nbuf-float", "nbuf-bool",
+         "vpf-str", "vpf-int", "vpf-none"],
 )
 def test_cfvst_kdb_vpf_knobs_reject_non_exact_types(overrides):
     """The spec rejects a knob of the wrong type instead of coercing it into a
@@ -1092,7 +1117,9 @@ def test_cfvst_kdb_vpf_rejects_over_budget_lds():
     "overrides",
     [
         {"lds_num_buffers": 2},  # no CFVST
+        {"v_reg_prefetch": True},  # no CFVST
         {"dtype": "fp16", "lds_num_buffers": 2},
+        {"dtype": "fp16", "v_reg_prefetch": True},
         {"use_cfvst": True, "lds_num_buffers": 2, "causal": False},
         {"use_cfvst": True, "lds_num_buffers": 2, "sliding_window": 128},
         {"use_cfvst": True, "lds_num_buffers": 2, "causal_diag_split": True},
@@ -1107,6 +1134,9 @@ def test_cfvst_kdb_vpf_rejects_over_budget_lds():
             "num_persistent": 304,
         },
         {"use_cfvst": True, "lds_num_buffers": 2, "block_n": 32},  # gated to 64
+        {"use_cfvst": True, "v_reg_prefetch": True, "block_n": 32},
+        {"use_cfvst": True, "v_reg_prefetch": True, "sliding_window": 128},
+        {"use_cfvst": True, "v_reg_prefetch": True, "causal_diag_split": True},
         {"use_cfvst": True, "lds_num_buffers": 3},
     ],
 )
@@ -1287,7 +1317,10 @@ _CONTRACT_GRID = [
     # --- private: performance-only codegen knobs ---
     dict(lds_num_buffers=1),  # accepted: upstream single K buffer
     dict(lds_num_buffers=2),  # REJECTED: BF16 without CFVST
-    dict(use_cfvst=True, lds_num_buffers=2),  # ACCEPTED: BF16 D128 KDB/VPF
+    dict(use_cfvst=True, lds_num_buffers=2),  # ACCEPTED: KDB alone
+    dict(use_cfvst=True, v_reg_prefetch=True),  # ACCEPTED: VPF alone
+    dict(use_cfvst=True, lds_num_buffers=2, v_reg_prefetch=True),  # ACCEPTED: both
+    dict(v_reg_prefetch=True),  # REJECTED: BF16 without CFVST
     dict(dtype="fp16", lds_num_buffers=2),  # REJECTED: pipeline is BF16-only
     dict(iglp=True, iglp_mode=1),  # accepted
     dict(iglp_mode=1),  # REJECTED: needs iglp=True
@@ -2047,6 +2080,7 @@ def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
 # --------------------------------------------------------------------------- #
 _CODEGEN_KNOB_DEFAULTS = {
     "lds_num_buffers": 1,
+    "v_reg_prefetch": False,
     "iglp_mode": 0,
     "pv_loop_order": "d_major",
     "o_store_width": 4,
@@ -2054,7 +2088,9 @@ _CODEGEN_KNOB_DEFAULTS = {
     "pv_sched_fence_mask": None,
     "causal_diag_split": False,
 }
-_CODEGEN_KNOB_TOKENS = ("_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit")
+_CODEGEN_KNOB_TOKENS = (
+    "_kdb1", "_vpf1", "_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit"
+)
 
 
 def _mfma_calls(ir: str) -> int:
@@ -2168,6 +2204,7 @@ def test_lazy_rescale_is_inert_on_gfx942():
     "overrides, reason",
     [
         (dict(lds_num_buffers=2), "lds_num_buffers"),
+        (dict(v_reg_prefetch=True), "v_reg_prefetch"),
         (dict(lds_num_buffers=0), "lds_num_buffers"),
         (dict(iglp_mode=1), "iglp_mode only applies with iglp=True"),
         (dict(iglp=True, iglp_mode=2), "iglp_mode must be 0 or 1"),
