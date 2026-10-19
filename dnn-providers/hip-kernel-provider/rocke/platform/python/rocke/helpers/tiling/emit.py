@@ -27,6 +27,7 @@ from .fragments import Fragment, TileDesc
 __all__ = [
     "emit_tensor_coordinates",
     "fill_fragment",
+    "lds_element_span",
     "load_fragment",
     "store_fragment",
 ]
@@ -252,14 +253,20 @@ def _address(
     return address
 
 
-def _check_lds_buffer(verb: str, buffer: Any, tensor: TensorDesc) -> None:
+def _check_lds_buffer(
+    verb: str,
+    buffer: Any,
+    tensor: TensorDesc,
+    lds_swizzle: bool | Callable[[Any, list], list],
+) -> None:
     """Fail fast unless ``buffer`` can hold ``tensor``: an LDS buffer is flat (rank 1), holds the
-    tensor's dtype, and holds at least the tensor's :attr:`~TensorDesc.element_span` elements. The
-    descriptor is the one home of the buffer's layout; the allocation only gives it room, so a
-    buffer that disagrees with it is refused here rather than read or written out of range (LDS
-    accesses are unclipped). Window origins are trusted, as for every LDS access."""
+    tensor's dtype, and holds at least :func:`lds_element_span` elements (the descriptor's span, or
+    the built-in swizzle's reach). The descriptor is the one home of the buffer's layout; the
+    allocation only gives it room, so a buffer that disagrees with it is refused here rather than
+    read or written out of range (LDS accesses are unclipped). Window origins are trusted, as for
+    every LDS access."""
     buffer_type = buffer.type
-    span = tensor.element_span
+    span = lds_element_span(tensor, lds_swizzle)
     if len(buffer_type.shape) != 1:
         raise ValueError(
             f"{verb}: the LDS buffer {buffer_type.name} has rank {len(buffer_type.shape)} -- an LDS "
@@ -273,7 +280,7 @@ def _check_lds_buffer(verb: str, buffer: Any, tensor: TensorDesc) -> None:
     if span > buffer_type.shape[0]:
         raise ValueError(
             f"{verb}: the LDS tensor spans {span} elements but the buffer holds "
-            f"{buffer_type.shape[0]} -- size the allocation from the descriptor"
+            f"{buffer_type.shape[0]} -- size the allocation with lds_element_span"
         )
 
 
@@ -502,22 +509,69 @@ def _swizzle_lds_positions(b: Any, positions: list) -> list:
     return positions[:-1] + [m_swz]
 
 
-def _check_builtin_swizzle(strides: tuple[int, ...]) -> None:
+# The built-in swizzle flips bits [3:6) of the last position (8-element blocks, 8 of them), so an
+# element moves only within its aligned group of 64 elements.
+_SWIZZLE_GROUP = 64
+
+
+def _swizzled_row_length(tensor: TensorDesc) -> int:
+    """How far a row of the last axis reaches under the built-in swizzle: its length rounded up to
+    the swizzle's 64-element group. A row of 48 f16 reaches element 63 of its group::
+
+        position (outer = 7)   0..7    8..15   ...  40..47
+        swizzled               56..63  48..55  ...  16..23     <- 56..63 lies past the 48
+    """
+    length = tensor.lengths[-1]
+    return -(-length // _SWIZZLE_GROUP) * _SWIZZLE_GROUP
+
+
+def lds_element_span(
+    tensor: TensorDesc, lds_swizzle: bool | Callable[[Any, list], list] = False
+) -> int:
+    """The elements an LDS buffer for ``tensor`` needs:
+    ``b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])``, with the ``lds_swizzle`` the
+    verbs are given.
+
+    Without a swizzle it is ``tensor.element_span``. The built-in swizzle (``lds_swizzle=True``)
+    moves an element of the last axis within its 64-element group, so the last row reaches the end
+    of its group: the span counts the last axis at :func:`_swizzled_row_length`. A row of length
+    48 with a padded stride of 64, 8 rows, spans 496 elements but needs 512 swizzled. A swizzle
+    callable must keep every position inside the descriptor's lengths; its span is the
+    descriptor's.
+    """
+    if lds_swizzle is not True:
+        return tensor.element_span
+    lengths = tensor.lengths[:-1] + (_swizzled_row_length(tensor),)
+    return TensorDesc(lengths, tensor.strides, tensor.dtype).element_span
+
+
+def _check_builtin_swizzle(tensor: TensorDesc) -> None:
     """The built-in swizzle (``lds_swizzle=True``) permutes the LAST position inside 8-element
-    blocks, which keeps each block contiguous only when the last axis is the buffer's stride-1 axis.
-    Refuse any other layout instead of scattering a vector run; a swizzle callable states its own
-    rule."""
-    if strides[-1] == 1:
-        return
-    where = (
-        f"put it at axis {strides.index(1)}"
-        if 1 in strides
-        else "have no stride-1 axis"
-    )
-    raise ValueError(
-        f"lds_swizzle=True needs the stride-1 axis last -- strides {tuple(strides)} {where}; "
-        f"describe the buffer with its contiguous axis last or pass a swizzle callable"
-    )
+    blocks, which keeps each block contiguous only when the last axis is the buffer's stride-1 axis,
+    and moves it within a 64-element group, so every other axis must step past a whole swizzled
+    row (:func:`_swizzled_row_length`) or two rows would share elements. Refuse any other layout
+    instead of scattering a vector run or overwriting a neighbouring row; a swizzle callable states
+    its own rule."""
+    strides = tensor.strides
+    if strides[-1] != 1:
+        where = (
+            f"put it at axis {strides.index(1)}"
+            if 1 in strides
+            else "have no stride-1 axis"
+        )
+        raise ValueError(
+            f"lds_swizzle=True needs the stride-1 axis last -- strides {tuple(strides)} {where}; "
+            f"describe the buffer with its contiguous axis last or pass a swizzle callable"
+        )
+    row = _swizzled_row_length(tensor)
+    for axis, (length, stride) in enumerate(zip(tensor.lengths[:-1], strides[:-1])):
+        if length > 1 and stride < row:
+            raise ValueError(
+                f"lds_swizzle=True moves elements of the last axis within groups of "
+                f"{_SWIZZLE_GROUP}, so a row of {tensor.lengths[-1]} reaches {row} elements, but "
+                f"axis {axis} steps by {stride} -- rows would overlap; pad that stride to at least "
+                f"{row} or pass a swizzle callable"
+            )
 
 
 def _lds_index(
@@ -563,9 +617,9 @@ def _checked_lds_base_index(
     """Check the LDS buffer (and the built-in swizzle's layout rule), then return the lane base
     index the unswizzled runs add their offsets to (``None`` when a swizzle is active).
     """
-    _check_lds_buffer(verb, buffer, window.tensor)
     if lds_swizzle is True:
-        _check_builtin_swizzle(window.tensor.strides)
+        _check_builtin_swizzle(window.tensor)
+    _check_lds_buffer(verb, buffer, window.tensor, lds_swizzle)
     if lds_swizzle:
         return None
     return _lane_base_index(b, window, tile_desc, thread)[1]
@@ -611,8 +665,9 @@ def load_fragment(
     element past its bound), OOB elements are filled with `pad` (`masked_global_load`); otherwise the
     plain `global_load` fast path (byte-identical to no-clip). In both spaces an element's index is
     ``sum(position * stride)`` over the window's descriptor. An LDS buffer is flat
-    (``b.smem_alloc(td.dtype, [td.element_span])``) and the descriptor is its layout: the buffer must
-    be rank 1, hold the tensor's dtype and hold its span (refused otherwise); LDS loads are unclipped.
+    (``b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])``) and the descriptor is its
+    layout: the buffer must be rank 1, hold the tensor's dtype and hold that span (refused
+    otherwise); LDS loads are unclipped.
     `pad` default `0`; a non-zero `constant(value)` fill is reserved. `coherency` reserved.
 
     A rank-t tile covers the window's last t axes (t <= the window's rank, refused otherwise); each

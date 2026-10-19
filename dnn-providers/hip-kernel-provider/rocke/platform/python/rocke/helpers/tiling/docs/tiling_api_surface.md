@@ -203,7 +203,11 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   width follows the same rule as global: a register run on a stride-1 axis is consecutive elements.
 - **`TensorDesc.element_span`** is `1 + sum((length - 1) * stride)`: the elements from the first to the
   last element the description can address. Static (int lengths and strides); a negative stride is
-  refused. The LDS budget stays a byte count: `element_span` times the element size.
+  refused. The LDS budget stays a byte count: the span times the element size.
+- **`lds_element_span(td, lds_swizzle)`** is the size to allocate: `element_span`, except that the
+  built-in `lds_swizzle=True` moves an element of the last axis within its 64-element group, so the last
+  row reaches the end of its group. A `(8, 48)` buffer with strides `(64, 1)` spans 496 elements but
+  needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
 - **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
   `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
 - **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
@@ -214,8 +218,10 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
   index.
 - **Checks.** Before emitting, the verbs refuse an LDS buffer that is not rank 1, whose element type is
-  not the tensor's dtype, or that holds fewer than `element_span` elements; the built-in
-  `lds_swizzle=True` needs the stride-1 axis last (otherwise pass a swizzle callable). LDS accesses are
+  not the tensor's dtype, or that holds fewer than `lds_element_span` elements; the built-in
+  `lds_swizzle=True` needs the stride-1 axis last and every other stride at least the swizzled row
+  (the last length rounded up to 64), so rows cannot overlap (otherwise pad the stride or pass a
+  swizzle callable). LDS accesses are
   unclipped, so a disagreement is refused rather than masked. Window origins are trusted, as for every
   LDS access.
 - **The cooperative-load bridge** (`memory.py`, toolbox). `lds_tile_desc(coop_desc, dtype, *, buffers,

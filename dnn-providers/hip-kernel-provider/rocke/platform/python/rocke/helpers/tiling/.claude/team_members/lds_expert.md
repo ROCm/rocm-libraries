@@ -169,7 +169,8 @@ AND whether TFLOPS actually moved (they don't always move together).
 
 ### The LDS buffer is flat; its descriptor is its layout
 
-In the tiling layer an LDS buffer is a flat, typed allocation, `b.smem_alloc(td.dtype, [td.element_span])`,
+In the tiling layer an LDS buffer is a flat, typed allocation, `b.smem_alloc(td.dtype, [lds_element_span(td, lds_swizzle)])`
+(the descriptor's span, or the built-in swizzle's reach into the last row's padding),
 and its layout lives only in the tensor descriptor `td` the verbs address it through (one home:
 `docs/tiling_api_surface.md` sec 3, "LDS buffers"). Read every LDS fact off that descriptor, never off an
 allocation shape:

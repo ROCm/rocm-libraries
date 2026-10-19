@@ -39,6 +39,7 @@ from rocke.helpers.tiling import (
     cooperative_load_desc,
     cooperative_load_width,
     fill_fragment,
+    lds_element_span,
     lds_read,
     lds_store,
     lds_tile_desc,
@@ -225,14 +226,14 @@ def test_a_buffer_of_another_element_type_is_refused() -> None:
 def test_a_buffer_smaller_than_the_descriptor_span_is_refused() -> None:
     assert _refusal([200]) == (
         "load_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation from the descriptor"
+        "allocation with lds_element_span"
     )
 
 
 def test_the_store_verb_runs_the_same_checks() -> None:
     assert _refusal([200], verb="store") == (
         "store_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation from the descriptor"
+        "allocation with lds_element_span"
     )
 
 
@@ -249,6 +250,105 @@ def test_builtin_swizzle_needs_the_stride_1_axis_last() -> None:
         "lds_swizzle=True needs the stride-1 axis last -- strides (1, 32) put it at axis 0; "
         "describe the buffer with its contiguous axis last or pass a swizzle callable"
     )
+
+
+# ---- the built-in swizzle's reach ------------------------------------------------------------------
+
+# A row of 48 f16 padded to a stride of 64: the swizzle moves the run at column 0 of row 7 to column
+# 56, inside the row's padding, so the last row reaches element 7 * 64 + 63 = 511, past the
+# descriptor's span of 7 * 64 + 48 = 496.
+_PADDED_ROWS = make_tensor_desc((8, 48), (64, 1), F16)
+_TILE_8X48 = make_tile_desc(
+    shape=[8, 48], thread_tile=[1, 6], thread_dist=[8, 8], wave_size=_WAVE
+)
+
+
+def _swizzled_access_ends(kernel) -> list[int]:
+    """One past the last element of every LDS access the kernel emits, over every lane."""
+    widths = [
+        op.attrs.get("vec", 1)
+        for op in kernel.body.ops
+        if op.name.startswith("tile.smem_") and op.name != "tile.smem_alloc"
+    ]
+    ends = []
+    for lane in range(_WAVE):
+        for (_, (index,)), width in zip(
+            _lds_indices(kernel, lane), widths, strict=True
+        ):
+            ends.append(index + width)
+    return ends
+
+
+def test_lds_element_span_counts_the_builtin_swizzle_reach() -> None:
+    assert _PADDED_ROWS.element_span == 496
+    assert lds_element_span(_PADDED_ROWS) == 496
+    assert lds_element_span(_PADDED_ROWS, True) == 512
+    # A row that already fills its 64-element groups reaches no further.
+    full_rows = make_tensor_desc((8, 128), (128, 1), F16)
+    assert lds_element_span(full_rows, True) == full_rows.element_span == 1024
+
+
+@pytest.mark.parametrize("verb", ["load", "store"])
+def test_a_swizzled_buffer_sized_by_element_span_is_refused(verb) -> None:
+    b = IRBuilder("lds_swizzle_reach")
+    tid = b.thread_id_x()
+    lds = b.smem_alloc(F16, [_PADDED_ROWS.element_span])
+    window = make_window(_PADDED_ROWS, (0, 0))
+    with pytest.raises(ValueError) as info:
+        if verb == "load":
+            load_fragment(b, lds, window, _TILE_8X48, tid, lds_swizzle=True)
+        else:
+            fragment = make_fragment(_TILE_8X48, F16)
+            fill_fragment(b, fragment, 0)
+            store_fragment(b, lds, window, fragment, tid, lds_swizzle=True)
+    assert str(info.value) == (
+        f"{verb}_fragment: the LDS tensor spans 512 elements but the buffer holds 496 -- size the "
+        "allocation with lds_element_span"
+    )
+
+
+def test_every_swizzled_access_fits_lds_element_span() -> None:
+    # Loads and stores both reach the last row's padding, and stay inside the span.
+    size = lds_element_span(_PADDED_ROWS, True)
+    kernel = _load_then_store(
+        make_window(_PADDED_ROWS, (0, 0)),
+        _TILE_8X48,
+        buffer_elements=size,
+        swizzle=True,
+    )
+    ends = _swizzled_access_ends(kernel)
+    assert max(ends) == size == 512
+
+
+def test_builtin_swizzle_refuses_rows_that_would_overlap() -> None:
+    # Unpadded rows of 48: the swizzled columns 48..63 of a row are the next row's elements.
+    td = make_tensor_desc((8, 48), (48, 1), F16)
+    with pytest.raises(ValueError) as info:
+        _load_then_store(make_window(td, (0, 0)), _TILE_8X48, swizzle=True)
+    assert str(info.value) == (
+        "lds_swizzle=True moves elements of the last axis within groups of 64, so a row of 48 "
+        "reaches 64 elements, but axis 0 steps by 48 -- rows would overlap; pad that stride to at "
+        "least 64 or pass a swizzle callable"
+    )
+
+
+def test_swizzled_demo_buffers_hold_every_access() -> None:
+    from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
+        build_interleaved_gemm,
+    )
+
+    small = dict(arch="gfx90a", tile_m=16, tile_n=16, tile_k=16, lds_swizzle=True)
+    # Rows of 32 padded to 64: the descriptor spans 992 elements, the swizzle reaches 1024.
+    kernel = build_interleaved_gemm(32, 32, 32, lds_pad=32, **small)[0]
+    allocs = [
+        op.results[0].type.name
+        for op in kernel.body.ops
+        if op.name == "tile.smem_alloc"
+    ]
+    assert allocs == ["smem<f16, [1024]>", "smem<f16, [1024]>"]
+    # Unpadded rows of 32 would overlap under the swizzle.
+    with pytest.raises(ValueError, match="rows would overlap"):
+        build_interleaved_gemm(32, 32, 32, **small)
 
 
 # ---- element_span ------------------------------------------------------------------------------------

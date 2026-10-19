@@ -79,7 +79,8 @@ class TensorDesc:
         ``1 + sum((length - 1) * stride)`` over every axis. It is the size an LDS buffer needs --
         ``b.smem_alloc(td.dtype, [td.element_span])`` -- so the descriptor stays the one home of the
         buffer's layout. Padding (a larger outer stride) is counted up to the last element; the dead
-        space after it is not. Static: every length and stride is an int.
+        space after it is not. Static: every length and stride is an int. The LDS verbs' built-in
+        swizzle reaches further; size a swizzled buffer with ``lds_element_span``.
         """
         for axis, stride in enumerate(self.strides):
             if stride < 0:

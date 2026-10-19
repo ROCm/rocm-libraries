@@ -25,6 +25,7 @@ from .. import (
     Tiling,
     check_gemm_shapes,
     fill_fragment,
+    lds_element_span,
     load_fragment,
     make_fragment,
     make_tensor_desc,
@@ -418,9 +419,13 @@ def build_interleaved_gemm(
         _pa, _pb = _bufs * tile_m + lds_pad, _bufs * tile_n + lds_pad
         lds_a_td = make_tensor_desc((tile_k, _bufs * tile_m), (_pa, 1), F16)
         lds_b_td = make_tensor_desc((tile_k, _bufs * tile_n), (_pb, 1), F16)
-        # Each LDS buffer is flat and sized from its descriptor: the descriptor is the layout.
-        lds_a = b.smem_alloc(lds_a_td.dtype, [lds_a_td.element_span], name_hint="lds_a")
-        lds_b = b.smem_alloc(lds_b_td.dtype, [lds_b_td.element_span], name_hint="lds_b")
+        # Each LDS buffer is flat and sized from its descriptor (and the swizzle's reach).
+        lds_a = b.smem_alloc(
+            lds_a_td.dtype, [lds_element_span(lds_a_td, lds_swizzle)], name_hint="lds_a"
+        )
+        lds_b = b.smem_alloc(
+            lds_b_td.dtype, [lds_element_span(lds_b_td, lds_swizzle)], name_hint="lds_b"
+        )
         a_st_t, b_st_t = _transpose_desc(a_coop_st), _transpose_desc(b_coop_st)
         a_rd_t, b_rd_t = _transpose_desc(a_pf), _transpose_desc(b_pf)
 
@@ -477,8 +482,12 @@ def build_interleaved_gemm(
         _pk = tile_k + lds_pad
         lds_a_td = make_tensor_desc((_bufs * tile_m, tile_k), (_pk, 1), F16)
         lds_b_td = make_tensor_desc((_bufs * tile_n, tile_k), (_pk, 1), F16)
-        lds_a = b.smem_alloc(lds_a_td.dtype, [lds_a_td.element_span], name_hint="lds_a")
-        lds_b = b.smem_alloc(lds_b_td.dtype, [lds_b_td.element_span], name_hint="lds_b")
+        lds_a = b.smem_alloc(
+            lds_a_td.dtype, [lds_element_span(lds_a_td, lds_swizzle)], name_hint="lds_a"
+        )
+        lds_b = b.smem_alloc(
+            lds_b_td.dtype, [lds_element_span(lds_b_td, lds_swizzle)], name_hint="lds_b"
+        )
 
         def _store_buf(frags, row_a, row_b):
             store_fragment(

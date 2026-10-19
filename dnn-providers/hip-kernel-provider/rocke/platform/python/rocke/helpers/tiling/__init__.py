@@ -61,6 +61,7 @@ from .descriptors import (
 from .emit import (
     emit_tensor_coordinates,
     fill_fragment,
+    lds_element_span,
     load_fragment,
     store_fragment,
 )
@@ -114,6 +115,7 @@ __all__ = [
     "check_gemm_shapes",
     "make_tile_desc",
     "make_fragment",
+    "lds_element_span",
     "load_fragment",
     "store_fragment",
     "fill_fragment",

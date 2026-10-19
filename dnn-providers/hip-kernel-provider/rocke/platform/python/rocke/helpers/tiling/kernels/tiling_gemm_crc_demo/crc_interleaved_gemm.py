@@ -45,6 +45,7 @@ from ... import (
     Tiling,
     check_gemm_shapes,
     fill_fragment,
+    lds_element_span,
     load_fragment,
     make_fragment,
     make_tensor_desc,
@@ -262,9 +263,13 @@ def build_crc_gemm(
     # (store desc == load desc) and the wave read reaches K-contiguous by a _transpose_desc relabel.
     lds_a_td = make_tensor_desc((tile_k, _bufs * tile_m), (_bufs * tile_m, 1), F16)
     lds_b_td = make_tensor_desc((tile_k, _bufs * tile_n), (_bufs * tile_n, 1), F16)
-    # Each LDS buffer is flat and sized from its descriptor: the descriptor is the layout.
-    lds_a = b.smem_alloc(lds_a_td.dtype, [lds_a_td.element_span], name_hint="lds_a")
-    lds_b = b.smem_alloc(lds_b_td.dtype, [lds_b_td.element_span], name_hint="lds_b")
+    # Each LDS buffer is flat and sized from its descriptor (and the swizzle's reach).
+    lds_a = b.smem_alloc(
+        lds_a_td.dtype, [lds_element_span(lds_a_td, lds_swizzle)], name_hint="lds_a"
+    )
+    lds_b = b.smem_alloc(
+        lds_b_td.dtype, [lds_element_span(lds_b_td, lds_swizzle)], name_hint="lds_b"
+    )
 
     # The coop store/read address the LDS buffer described (K, free) -- the free dim is its stride-1
     # axis -> wide ds_write/ds_read. The coop desc's own X-dims are (free, K); _transpose_desc gives the

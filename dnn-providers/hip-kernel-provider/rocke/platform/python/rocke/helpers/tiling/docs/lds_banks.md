@@ -228,7 +228,8 @@ stride against the bank count.
 **Where the row stride lives.** An LDS buffer is flat; its layout is the tensor descriptor the verbs address
 it through (`tiling_api_surface.md` sec 3, "LDS buffers"). The row stride is that descriptor's outer stride,
 so a **pad is a larger outer stride**: a `(rows, cols)` tile padded by `pad` elements per row is
-`make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`, allocated `smem_alloc(dtype, [td.element_span])`.
+`make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`, allocated `smem_alloc(dtype, [lds_element_span(td, lds_swizzle)])`
+(the built-in swizzle reaches into the last row's padding).
 Read the stride off the kernel's LDS descriptor, never off an allocation shape.
 
 **The general form — and it applies only under a DIFFERENT lane→address map.** The opening statement covers

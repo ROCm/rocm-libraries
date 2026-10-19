@@ -529,7 +529,7 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
     )
 
     if lds_swizzle is True:
-        _check_builtin_swizzle(tensor.strides)
+        _check_builtin_swizzle(tensor)
     window = make_window(tensor, tuple(origin))
     vw = access_width(tile_desc, tensor, lds_swizzle)
     swizzle = _swizzle_lds_positions if lds_swizzle is True else lds_swizzle
@@ -692,6 +692,7 @@ def build_probe(
     """
     from rocke.core.ir import I32, IRBuilder, PtrType
     from rocke.helpers.tiling import (
+        lds_element_span,
         load_fragment,
         make_fragment,
         make_tensor_desc,
@@ -737,8 +738,11 @@ def build_probe(
     band_td = make_tensor_desc((coop_free, tile_k), (tile_k, 1), dt)
     stride = tile_free + lds_pad
     lds_td = make_tensor_desc((tile_k, tile_free), (stride, 1), dt)
-    # The LDS buffer is flat and sized from its descriptor: the descriptor is the layout.
-    lds = b.smem_alloc(lds_td.dtype, [lds_td.element_span], name_hint="lds_probe")
+    # The LDS buffer is flat and sized from its descriptor (and the swizzle's reach): the descriptor
+    # is the layout.
+    lds = b.smem_alloc(
+        lds_td.dtype, [lds_element_span(lds_td, swz)], name_hint="lds_probe"
+    )
 
     def _load_band():
         return load_fragment(
