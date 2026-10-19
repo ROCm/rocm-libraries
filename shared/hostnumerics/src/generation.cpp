@@ -321,7 +321,9 @@ Tensor generate(ScalarType type, Shape shape, const GenerationRecipe& recipe) {
 
 void generateAt(Tensor destination, size_t logicalIndex, const GenerationRecipe& recipe) {
     const std::vector<size_t> indices =
-        destination.shape().coordinates(logicalIndex, recipe.indexOrder());
+        recipe.indexOrder().empty()
+            ? destination.shape().coordinates(logicalIndex)
+            : destination.shape().coordinates(logicalIndex, recipe.indexOrder());
     detail::generateElement(destination, recipe, indices, logicalIndex);
 }
 }  // namespace roc::hostnumerics

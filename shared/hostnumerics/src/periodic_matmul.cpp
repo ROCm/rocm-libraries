@@ -330,7 +330,7 @@ PeriodicMatmulCheck PeriodicMatmulPlan::checkRegion(const Tensor& observed,
     result.absoluteTolerance = comparison.absoluteTolerance;
     for (auto& mismatch : result.comparison.reportedMismatches) {
         for (size_t d = 0; d < 2; ++d) mismatch.coordinates[d] += origin[d];
-        mismatch.index = shape().linearIndex(mismatch.coordinates, std::vector<size_t>{});
+        mismatch.index = shape().linearIndex(mismatch.coordinates);
     }
     return result;
 }
