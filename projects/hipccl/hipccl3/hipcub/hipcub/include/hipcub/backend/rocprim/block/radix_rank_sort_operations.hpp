@@ -43,7 +43,9 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
-#include _HIPCUB_LIBCXX_INCLUDE(bit)
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #include _HIPCUB_LIBCXX_INCLUDE(bit)
+#endif
 
 #include <type_traits>
 
