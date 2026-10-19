@@ -297,12 +297,13 @@ Selection pins a spec the same way for dense and unified:
   another variant is rejected before the search.
 - `tuning_id="auto"` selects the candidate's base spec.
 - `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
-  normalizer). It is the `lse` request feature. The dense candidates and the
-  unified **split-KV (3D)** candidates declare it; the unified 2D candidates do
-  not. The split-KV support check then refuses LSE on arches other than
-  gfx942/gfx950 and with sinks. So an LSE request that cannot be served is
-  refused instead of reaching a kernel without the output. To launch unified LSE
-  through `bind_torch`, pin a split-KV tuning spec (`algorithm="unified_tuning"`,
+  normalizer). It is the `lse` request feature. The dense candidates, the RDNA
+  WMMA candidates, and the unified **split-KV (3D)** candidates declare it; the
+  unified 2D candidates do not. The split-KV support check then refuses LSE on
+  arches other than gfx942/gfx950 and with sinks. So an LSE request that cannot
+  be served is refused instead of reaching a kernel without the output. To
+  launch unified LSE through `bind_torch`, pin a split-KV tuning spec
+  (`algorithm="unified_tuning"`,
   `spec_id="<arch>_u3d_..."`): like any unpinned unified request, the
   `attention_unified_3d` result routes but cannot be bound. It is a dense output
   field (`DENSE_OUTPUT_FIELDS`) and a unified semantic field (`_SEMANTIC_FIELDS`),
