@@ -2957,16 +2957,18 @@ Tests:
   function:
     matmul:
     - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   M: 256
   N: 256
   K: 1024
   transA: T
   transB: N
   alpha: 2.0
-  beta: 0.0
+  beta: [0.0, 1.0]
   bias_vector: 1
   bias_type: f32_r
-  device_scalar_alpha: 1
+  # Keep host-alpha coverage for the device-scalar-capable SAV logic.
+  device_scalar_alpha: [0, 1]
   initialization: hpl
   unit_check: 0
   norm_check: 1
@@ -2978,6 +2980,7 @@ Tests:
   function:
     matmul:
     - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   M: 256
   N: 256
   K: 1024
