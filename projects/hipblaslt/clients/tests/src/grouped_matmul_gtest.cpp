@@ -483,16 +483,19 @@ namespace
         }
     };
 
+    // The 1 x 1 x 1 group comes first, so a kernel that needs a minimum M would read before
+    // the start of A. Skips where every NN kernel needs one (gfx950 FP16 needs M >= 8).
     TEST_F(GroupedMatmul, smoke_Fp16NN)
     {
         Case tc;
-        tc.groups = {{64, 48, 32}, {17, 5, 64}, {128, 96, 16}, {1, 1, 1}, {33, 70, 40}};
+        tc.groups = {{1, 1, 1}, {64, 48, 32}, {17, 5, 64}, {128, 96, 16}, {33, 70, 40}};
         run(tc);
     }
 
     TEST_F(GroupedMatmul, smoke_EmptyGroupsAndZeroK)
     {
         Case tc;
+        tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{0, 16, 16}, {32, 32, 0}, {24, 0, 8}, {40, 20, 24}, {16, 16, 0}, {8, 0, 8}};
         run(tc);
     }
@@ -506,6 +509,7 @@ namespace
         run(tc);
     }
 
+    // Skips where every TT kernel needs a minimum N (gfx950 FP16 does).
     TEST_F(GroupedMatmul, smoke_Fp16TT)
     {
         Case tc;
@@ -529,6 +533,7 @@ namespace
     TEST_F(GroupedMatmul, smoke_ShapesChangeBetweenCalls)
     {
         Case tc;
+        tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{64, 64, 32}, {48, 32, 64}, {96, 80, 16}, {32, 16, 32}};
         tc.rerun  = {{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}};
         run(tc);
@@ -536,10 +541,9 @@ namespace
 
     // All groups share M: the rows arrays of A, C and D are null so the scalar ROWS applies,
     // and every ld array is null with LD = 0 (packed).
-    TEST_F(GroupedMatmul, smoke_Fp16NTFixedMPacked)
+    TEST_F(GroupedMatmul, smoke_Fp16NNFixedMPacked)
     {
         Case tc;
-        tc.opB    = HIPBLAS_OP_T;
         tc.fixedM = true;
         tc.groups = {{64, 10, 32}, {64, 0, 32}, {64, 77, 16}, {64, 3, 64}};
         run(tc);
@@ -560,6 +564,7 @@ namespace
     TEST_F(GroupedMatmul, smoke_TotalColsHintRedistributed)
     {
         Case tc;
+        tc.opA           = HIPBLAS_OP_T;
         tc.totalColsHint = true;
         tc.groups        = {{80, 70, 32}, {80, 70, 32}, {80, 70, 32}, {80, 70, 32}};
         tc.rerun         = {{80, 0, 32}, {80, 270, 32}, {80, 3, 32}, {80, 7, 32}};
@@ -574,6 +579,7 @@ namespace
         {
             SCOPED_TRACE(int(s));
             Case tc;
+            tc.opA     = HIPBLAS_OP_T;
             tc.scalars = s;
             tc.groups  = {{32, 32, 32}, {16, 48, 8}, {40, 8, 24}, {8, 8, 0}};
             run(tc);

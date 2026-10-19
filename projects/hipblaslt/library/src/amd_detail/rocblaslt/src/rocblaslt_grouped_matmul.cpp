@@ -351,28 +351,25 @@ namespace
         return status;
     }
 
-    // The group shapes are never checked on the host, so an algo must also accept sizes
-    // that are no multiple of a power of two: the largest odd size within the max hints in
-    // each dimension set by a device array. Kernels that assume a size multiple reject
-    // these.
-    rocblaslt_status buildOddData(rocblaslt_handle               handle,
-                                  rocblaslt_matmul_desc          desc,
-                                  rocblaslt_matrix_layout        matA,
-                                  rocblaslt_matrix_layout        matB,
-                                  rocblaslt_matrix_layout        matC,
-                                  rocblaslt_matrix_layout        matD,
-                                  const rocblaslt_grouped_hints& h,
-                                  std::shared_ptr<void>&         gemmData)
+    // The group shapes are never checked on the host, so an algo must also accept the
+    // smallest ones the layouts allow: 1 in each dimension set by a device array. Kernels
+    // that assume a minimum size or a size multiple reject these; a group below a kernel's
+    // minimum M or N makes it read before the group's A or B.
+    rocblaslt_status buildSmallestData(rocblaslt_handle               handle,
+                                       rocblaslt_matmul_desc          desc,
+                                       rocblaslt_matrix_layout        matA,
+                                       rocblaslt_matrix_layout        matB,
+                                       rocblaslt_matrix_layout        matC,
+                                       rocblaslt_matrix_layout        matD,
+                                       const rocblaslt_grouped_hints& h,
+                                       std::shared_ptr<void>&         gemmData)
     {
-        auto    odd = [](int64_t v) { return std::max<int64_t>(v % 2 ? v : v - 1, 1); };
         int64_t maxRows, maxCols;
         maxGroupShape(matD, h, maxRows, maxCols);
         Placeholders p;
-        p.rows0 = p.rows = matD->rows_array == nullptr ? maxRows : odd(maxRows);
-        p.cols0 = p.cols = matD->cols_array == nullptr ? maxCols : odd(maxCols);
-        p.k              = placeholderK(desc, matA, h);
-        if(!kIsUniform(desc, matA))
-            p.k |= 1;
+        p.rows0 = p.rows = matD->rows_array == nullptr ? maxRows : 1;
+        p.cols0 = p.cols = matD->cols_array == nullptr ? maxCols : 1;
+        p.k              = kIsUniform(desc, matA) ? placeholderK(desc, matA, h) : 1;
         size_t gemmCount = 0;
         return buildGroupedData(handle, desc, matA, matB, matC, matD, p, gemmData, gemmCount);
     }
@@ -598,8 +595,8 @@ rocblaslt_status
             handle, desc, matA, matB, matC, matD, bound, boundData, gemmCount);
         if(status != rocblaslt_status_success)
             return status;
-        std::shared_ptr<void> oddData;
-        status = buildOddData(handle, desc, matA, matB, matC, matD, h, oddData);
+        std::shared_ptr<void> smallestData;
+        status = buildSmallestData(handle, desc, matA, matB, matC, matD, h, smallestData);
         if(status != rocblaslt_status_success)
             return status;
 
@@ -615,7 +612,7 @@ rocblaslt_status
                                                nullptr,
                                                ws)
                    != rocblaslt_status_success
-               || ws > tensileMax || !algoSupports(handle, oddData, candidate.algo))
+               || ws > tensileMax || !algoSupports(handle, smallestData, candidate.algo))
                 continue;
             auto& out                     = heuristicResultsArray[*returnAlgoCount];
             out                           = candidate;
@@ -720,12 +717,12 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
                 log_error(__func__, "workspace too small", required + recBytes);
                 return rocblaslt_status_invalid_value;
             }
-            std::shared_ptr<void> oddData;
-            status
-                = buildOddData(handle, desc, matA, matB, matC, matD, desc->grouped_hints, oddData);
+            std::shared_ptr<void> smallestData;
+            status = buildSmallestData(
+                handle, desc, matA, matB, matC, matD, desc->grouped_hints, smallestData);
             if(status != rocblaslt_status_success)
                 return status;
-            if(!algoSupports(handle, oddData, *algo))
+            if(!algoSupports(handle, smallestData, *algo))
             {
                 log_error(__func__,
                           "the algo does not support every group shape the layouts allow");
