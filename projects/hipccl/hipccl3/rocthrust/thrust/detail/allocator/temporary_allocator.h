@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,11 +26,25 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/allocator/tagged_allocator.h>
+#include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/execution_policy.h>
+#include <thrust/detail/temporary_buffer.h>
 #include <thrust/memory.h>
 #include <thrust/pair.h>
+#include <thrust/system/detail/bad_alloc.h>
+
+#include _THRUST_STD_INCLUDE(cassert)
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  if _CCCL_DEVICE_COMPILATION()
+#    include <thrust/system/cuda/detail/terminate.h>
+#  endif // _CCCL_DEVICE_COMPILATION()
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  include <thrust/system/hip/detail/terminate.h>
+#endif // CUDA
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -60,9 +75,43 @@ public:
       , m_system(thrust::detail::derived_cast(system))
   {}
 
-  THRUST_HOST_DEVICE pointer allocate(size_type cnt);
+  THRUST_HOST_DEVICE pointer allocate(size_type cnt)
+  {
+    pointer_and_size result = thrust::get_temporary_buffer<T>(system(), cnt);
 
-  THRUST_HOST_DEVICE void deallocate(pointer p, size_type n) noexcept;
+    // handle failure
+    if (result.second < cnt)
+    {
+      // deallocate and throw
+      // note that we pass cnt to deallocate, not a value derived from result.second
+      deallocate(result.first, cnt);
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      _THRUST_IF_TARGET(
+        _THRUST_IS_HOST,
+        (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
+        ( // _THRUST_IS_DEVICE
+          thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: "
+                                                               "get_temporary_buffer failed");));
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+      _THRUST_IF_TARGET(
+        _THRUST_IS_HOST,
+        (throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");),
+        ( // _THRUST_IS_DEVICE
+          thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: "
+                                                              "get_temporary_buffer failed");));
+#else
+      throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
+#endif
+    } // end if
+
+    return result.first;
+  }
+
+  THRUST_HOST_DEVICE void deallocate(pointer p, size_type n) noexcept
+  {
+    return thrust::return_temporary_buffer(system(), p, n);
+  }
 
   THRUST_HOST_DEVICE inline System& system()
   {
@@ -75,5 +124,3 @@ private:
 
 } // namespace detail
 THRUST_NAMESPACE_END
-
-#include <thrust/detail/allocator/temporary_allocator.inl>
