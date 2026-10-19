@@ -57,9 +57,7 @@
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace complex
+namespace detail::complex
 {
 using thrust::complex;
 
@@ -157,8 +155,7 @@ THRUST_HOST_DEVICE inline complex<double> csqrt(const complex<double>& z)
     return (result);
   }
 }
-} // namespace complex
-} // namespace detail
+} // namespace detail::complex
 
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> sqrt(const complex<ValueType>& z)
