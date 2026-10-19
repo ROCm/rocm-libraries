@@ -58,9 +58,7 @@
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
-{
-namespace complex
+namespace detail::complex
 {
 using thrust::complex;
 
@@ -766,8 +764,7 @@ THRUST_HOST_DEVICE inline complex<double> catan(complex<double> z)
   complex<double> w = catanh(complex<double>(z.imag(), z.real()));
   return (complex<double>(w.imag(), w.real()));
 }
-} // namespace complex
-} // namespace detail
+} // namespace detail::complex
 
 template <typename ValueType>
 THRUST_HOST_DEVICE inline complex<ValueType> acos(const complex<ValueType>& z)
