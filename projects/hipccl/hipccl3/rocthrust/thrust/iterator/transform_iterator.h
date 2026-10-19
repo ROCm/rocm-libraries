@@ -65,12 +65,11 @@ class transform_iterator;
 
 namespace detail
 {
-
 template <class UnaryFunc, class Iterator>
 struct transform_iterator_reference
 {
   // by default, dereferencing the iterator yields the same as the function.
-  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<it_value_t<Iterator>>()));
+  using type = _THRUST_STD::invoke_result_t<UnaryFunc&, it_value_t<Iterator>>;
 };
 
 // for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
@@ -83,8 +82,8 @@ struct transform_iterator_reference<_THRUST_STD::identity, Iterator>
 template <typename Eval, class Iterator>
 struct transform_iterator_reference<functional::actor<Eval>, Iterator>
 {
-  using type = _THRUST_STD::remove_reference_t<decltype(_THRUST_STD::declval<functional::actor<Eval>>()(
-    _THRUST_STD::declval<it_value_t<Iterator>>()))>;
+  using type =
+    _THRUST_STD::remove_reference_t<_THRUST_STD::invoke_result_t<functional::actor<Eval>&, it_value_t<Iterator>>>;
 };
 
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
@@ -100,11 +99,10 @@ public:
     iterator_adaptor<transform_iterator<UnaryFunc, Iterator, Reference, Value>,
                      Iterator,
                      value_type,
-                     use_default,
-                     typename _THRUST_STD::iterator_traits<Iterator>::iterator_category,
+                     use_default, // pick system from Iterator
+                     use_default, // pick traversal from Iterator
                      reference>;
 };
-
 } // namespace detail
 
 //! \addtogroup iterators
@@ -275,18 +273,18 @@ public:
   THRUST_HOST_DEVICE transform_iterator& operator=(transform_iterator const& other)
   {
     super_t::operator=(other);
-    if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_assignable, AdaptableUnaryFunction))
+    if constexpr (_THRUST_STD::is_copy_assignable_v<AdaptableUnaryFunction>)
     {
       m_f = other.m_f;
     }
-    else if constexpr (THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction))
+    else if constexpr (_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>)
     {
       ::internal::__destroy_at(&m_f);
       ::internal::__construct_at(&m_f, other.m_f);
     }
     else
     {
-      static_assert(THRUST_TRAIT(_THRUST_STD::is_copy_constructible, AdaptableUnaryFunction),
+      static_assert(_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>,
                     "Cannot use thrust::transform_iterator with a functor that is neither copy constructible nor "
                     "copy assignable");
     }

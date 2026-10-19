@@ -631,8 +631,10 @@ private:
   //! \endcond
 };
 
+#ifndef THRUST_DOXYGEN_INVOKED
 template <class... Iterators>
 THRUST_HOST_DEVICE zip_iterator(Iterators...) -> zip_iterator<_THRUST_STD::tuple<Iterators...>>;
+#endif // THRUST_DOXYGEN_INVOKED
 
 //! \p make_zip_iterator creates a \p zip_iterator from a \p tuple of iterators.
 //!

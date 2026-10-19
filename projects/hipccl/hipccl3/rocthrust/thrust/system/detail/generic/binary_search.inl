@@ -36,24 +36,20 @@
 #include <thrust/system/detail/generic/scalar/binary_search.h>
 #include <thrust/system/detail/generic/select_system.h>
 
+#include _THRUST_STD_INCLUDE(functional)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 // XXX WAR circular #inclusion with this forward declaration
 template <typename, typename>
 class temporary_array;
-
 } // namespace detail
-namespace system
-{
-namespace detail
-{
-namespace generic
-{
-namespace detail
-{
 
+namespace system::detail::generic
+{
+namespace detail
+{
 // short names to avoid nvcc bug
 struct lbf
 {
@@ -188,20 +184,6 @@ THRUST_HOST_DEVICE OutputType binary_search(
 
   return output;
 }
-
-// this functor differs from _THRUST_STD::less<T>
-// because it allows the types of lhs & rhs to differ
-// which is required by the binary search functions
-// XXX use C++14 _THRUST_STD::less<> when it's ready
-struct binary_search_less
-{
-  template <typename T1, typename T2>
-  THRUST_HOST_DEVICE bool operator()(const T1& lhs, const T2& rhs) const
-  {
-    return lhs < rhs;
-  }
-};
-
 } // end namespace detail
 
 //////////////////////
@@ -213,7 +195,7 @@ THRUST_HOST_DEVICE ForwardIterator
 lower_bound(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value)
 {
   namespace p = thrust::placeholders;
-  return thrust::lower_bound(exec, begin, end, value, detail::binary_search_less());
+  return thrust::lower_bound(exec, begin, end, value, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
@@ -234,7 +216,7 @@ THRUST_HOST_DEVICE ForwardIterator
 upper_bound(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value)
 {
   namespace p = thrust::placeholders;
-  return thrust::upper_bound(exec, begin, end, value, detail::binary_search_less());
+  return thrust::upper_bound(exec, begin, end, value, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
@@ -254,7 +236,7 @@ template <typename DerivedPolicy, typename ForwardIterator, typename T>
 THRUST_HOST_DEVICE bool
 binary_search(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator begin, ForwardIterator end, const T& value)
 {
-  return thrust::binary_search(exec, begin, end, value, detail::binary_search_less());
+  return thrust::binary_search(exec, begin, end, value, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
@@ -282,7 +264,7 @@ THRUST_HOST_DEVICE OutputIterator lower_bound(
   OutputIterator output)
 {
   namespace p = thrust::placeholders;
-  return thrust::lower_bound(exec, begin, end, values_begin, values_end, output, detail::binary_search_less());
+  return thrust::lower_bound(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy,
@@ -312,7 +294,7 @@ THRUST_HOST_DEVICE OutputIterator upper_bound(
   OutputIterator output)
 {
   namespace p = thrust::placeholders;
-  return thrust::upper_bound(exec, begin, end, values_begin, values_end, output, detail::binary_search_less());
+  return thrust::upper_bound(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy,
@@ -342,7 +324,7 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
   OutputIterator output)
 {
   namespace p = thrust::placeholders;
-  return thrust::binary_search(exec, begin, end, values_begin, values_end, output, detail::binary_search_less());
+  return thrust::binary_search(exec, begin, end, values_begin, values_end, output, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy,
@@ -369,7 +351,7 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
   ForwardIterator last,
   const LessThanComparable& value)
 {
-  return thrust::equal_range(exec, first, last, value, detail::binary_search_less());
+  return thrust::equal_range(exec, first, last, value, _THRUST_STD::less<>{});
 }
 
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
@@ -384,8 +366,5 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
   ForwardIterator ub = thrust::upper_bound(exec, first, last, value, comp);
   return thrust::make_pair(lb, ub);
 }
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

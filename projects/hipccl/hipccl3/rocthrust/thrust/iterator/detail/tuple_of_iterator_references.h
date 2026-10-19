@@ -43,7 +43,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 template <typename... Ts>
 class tuple_of_iterator_references;
 
@@ -142,7 +141,6 @@ public:
   }
 #endif
 };
-
 } // namespace detail
 
 THRUST_NAMESPACE_END
@@ -155,8 +153,8 @@ THRUST_NAMESPACE_BEGIN
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Ts>
-struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
-{};
+inline constexpr bool
+  __is_tuple_of_iterator_references_v<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> = true;
 #endif
 
 // define tuple_size, tuple_element, etc.
@@ -184,7 +182,6 @@ THRUST_NAMESPACE_END
 #if !THRUST_COMPILER(NVRTC)
 namespace std
 {
-
 template <class... Ts>
 struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
     : integral_constant<size_t, sizeof...(Ts)>
@@ -198,6 +195,5 @@ struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_referenc
     : THRUST_NS_QUALIFIER::tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>>
 #  endif
 {};
-
 } // namespace std
 #endif // !THRUST_COMPILER(NVRTC)

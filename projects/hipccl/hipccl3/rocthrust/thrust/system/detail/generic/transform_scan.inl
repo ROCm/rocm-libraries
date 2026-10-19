@@ -35,13 +35,8 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename ExecutionPolicy,
           typename InputIterator,
           typename OutputIterator,
@@ -114,8 +109,5 @@ THRUST_HOST_DEVICE OutputIterator transform_exclusive_scan(
 
   return thrust::exclusive_scan(exec, _first, _last, result, init, binary_op);
 } // end transform_exclusive_scan()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

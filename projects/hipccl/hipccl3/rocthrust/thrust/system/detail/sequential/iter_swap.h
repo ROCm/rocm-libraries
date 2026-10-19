@@ -33,13 +33,8 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::sequential
 {
-namespace detail
-{
-namespace sequential
-{
-
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
 THRUST_HOST_DEVICE void iter_swap(sequential::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
 {
@@ -50,8 +45,5 @@ THRUST_HOST_DEVICE void iter_swap(sequential::execution_policy<DerivedPolicy>&, 
 #endif
   swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));
 } // end iter_swap()
-
-} // namespace sequential
-} // namespace detail
-} // namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END

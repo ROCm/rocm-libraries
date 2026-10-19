@@ -32,13 +32,8 @@
 #include <thrust/transform.h>
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename DerivedPolicy, typename ForwardIterator, typename UnaryOperation>
 THRUST_HOST_DEVICE void tabulate(
   thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, UnaryOperation unary_op)
@@ -53,8 +48,5 @@ THRUST_HOST_DEVICE void tabulate(
 
   thrust::transform(exec, iter, iter + _THRUST_STD::distance(first, last), first, unary_op);
 } // end tabulate()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

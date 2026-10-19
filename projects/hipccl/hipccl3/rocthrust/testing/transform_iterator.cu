@@ -35,7 +35,7 @@
 #  include <type_traits>
 #endif
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::transform_iterator from _THRUST_STD
 void TestTransformIteratorTraits()
 {
   using func    = _THRUST_STD::negate<int>;

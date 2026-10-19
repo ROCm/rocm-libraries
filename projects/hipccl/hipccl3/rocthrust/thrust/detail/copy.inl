@@ -26,9 +26,22 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/copy.h>
-#include <thrust/system/detail/adl/copy.h>
-#include <thrust/system/detail/generic/copy.h>
 #include <thrust/system/detail/generic/select_system.h>
+
+// Include all active backend system implementations (generic, sequential, host and device)
+#include <thrust/system/detail/generic/copy.h>
+#include <thrust/system/detail/sequential/copy.h>
+#include __THRUST_HOST_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(copy.h)
+#include __THRUST_DEVICE_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(copy.h)
+
+// Some build systems need a hint to know which files we could include
+#if 0
+#  include <thrust/system/cpp/detail/copy.h>
+#  include <thrust/system/cuda/detail/copy.h>
+#  include <thrust/system/hip/detail/copy.h>
+#  include <thrust/system/omp/detail/copy.h>
+#  include <thrust/system/tbb/detail/copy.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -55,7 +68,6 @@ THRUST_HOST_DEVICE OutputIterator copy_n(
 
 namespace detail
 {
-
 THRUST_EXEC_CHECK_DISABLE // because we might call e.g. std::ostream_iterator's constructor
 template <typename System1, typename System2, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator two_system_copy(
@@ -93,7 +105,6 @@ THRUST_HOST_DEVICE OutputIterator two_system_copy_n(
     n,
     result);
 } // end two_system_copy_n()
-
 } // namespace detail
 
 template <typename InputIterator, typename OutputIterator>

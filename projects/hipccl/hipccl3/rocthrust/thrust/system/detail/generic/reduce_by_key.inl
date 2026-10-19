@@ -44,15 +44,10 @@
 #include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
 namespace detail
 {
-namespace generic
-{
-namespace detail
-{
-
 template <typename ValueType, typename TailFlagType, typename AssociativeOperator>
 struct reduce_by_key_functor
 {
@@ -70,7 +65,6 @@ struct reduce_by_key_functor
                        thrust::get<1>(a) | thrust::get<1>(b));
   }
 };
-
 } // end namespace detail
 
 template <typename ExecutionPolicy,
@@ -188,8 +182,5 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   return thrust::reduce_by_key(
     exec, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, _THRUST_STD::plus<T>());
 } // end reduce_by_key()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
