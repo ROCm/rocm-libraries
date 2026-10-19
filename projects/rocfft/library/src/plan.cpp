@@ -2681,7 +2681,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
 
 #ifdef ROCFFT_RCCL_ENABLE
     // prefer RCCL when a communicator is available; on any failure
-    // (e.g. mismatch between brick locations and the RCCL world) fall
+    // (e.g. mismatch between brick locations and the RCCL communicator's locations) fall
     // through to the P2P / A2A paths below.
     if(rccl)
     {
