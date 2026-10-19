@@ -9,15 +9,17 @@ hipDNN contains source code derived from the following third-party project.
 - **Version:** v1.24.0 (commit c4a97621eca52fa0c3a1862a411a16be580b25c6)
 - **License:** MIT
 - **Project:** https://github.com/NVIDIA/cudnn-frontend
-- **Use:** Portions of the cuDNN-compatibility shim (`include/hipdnn_compatibility/`)
-  and of `hipdnn_frontend/Types.hpp` and `hipdnn_frontend/Error.hpp` are derived
-  from cuDNN frontend. The cuDNN-shim samples (`samples/cudnn_shim/ConvFprop.cpp`,
-  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp`, `Pointwise.cpp`) mirror upstream samples, and
-  `tests/TestCudnnShimV8CApiStandalone.cpp` and
+- **Use:** Paths are relative to `projects/hipdnn/`. Portions of the
+  cuDNN-compatibility shim (`frontend/include/hipdnn_compatibility/`) and of
+  `frontend/include/hipdnn_frontend/Types.hpp` and
+  `frontend/include/hipdnn_frontend/Error.hpp` are derived from cuDNN frontend.
+  The cuDNN-shim samples `samples/cudnn_shim/ConvFprop.cpp`,
+  `HipifyConvFprop.cpp`, `Layernorm.cpp`, `Matmul.cpp` and `Pointwise.cpp` mirror upstream samples, and
+  `frontend/tests/TestCudnnShimV8CApiStandalone.cpp` and
   `samples/cudnn_shim/RawBackendApiV8.cpp` mirror part of upstream
   `samples/legacy_samples/test_list.cpp`. Each such file carries a "Portions
   derived from NVIDIA cuDNN frontend" header naming its upstream sources.
-  `projects/hipdnn/tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are
+  `tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are
   substituted copies of upstream `samples/legacy_samples/utils/` and keep
   upstream's license header.
 
