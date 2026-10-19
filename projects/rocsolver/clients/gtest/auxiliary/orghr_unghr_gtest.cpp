@@ -42,24 +42,8 @@ using orghr_tuple = vector<I>;
 // (null handle, null pointers and invalid values)
 
 // for checkin_lapack tests
-const vector<vector<int>> size_range = {
-    // quick return
-    {0, 1, 1, 0},
-    // invalid
-    {-1, 1, 1, 1},
-    {5, 5, 0, 3},
-    {5, 5, 3, 6},
-    {5, 5, 3, 2},
-    {5, 3, 2, 5},
-    // normal (valid) samples
-    {1, 1, 1, 1},
-    {5, 5, 3, 3},
-    {5, 5, 1, 5},
-    {10, 10, 3, 10},
-    {20, 25, 1, 20},
-    {50, 50, 10, 45}};
-
-const vector<vector<int64_t>> size_range_64 = {
+template <typename I>
+const vector<vector<I>> size_range = {
     // quick return
     {0, 1, 1, 0},
     // invalid
@@ -77,10 +61,8 @@ const vector<vector<int64_t>> size_range_64 = {
     {50, 50, 10, 45}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_size_range
-    = {{192, 192, 1, 192}, {500, 600, 50, 450}, {640, 640, 100, 540}, {1000, 1024, 1, 1000}};
-
-const vector<vector<int64_t>> large_size_range_64
+template <typename I>
+const vector<vector<I>> large_size_range
     = {{192, 192, 1, 192}, {500, 600, 50, 450}, {640, 640, 100, 540}, {1000, 1024, 1, 1000}};
 
 template <typename I>
@@ -179,18 +161,18 @@ TEST_P(UNGHR_64, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR, ValuesIn(large_size_range));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR, ValuesIn((large_size_range<rocblas_int>)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR, ValuesIn(size_range));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR, ValuesIn((size_range<rocblas_int>)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR, ValuesIn(large_size_range));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR, ValuesIn((large_size_range<rocblas_int>)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR, ValuesIn(size_range));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR, ValuesIn((size_range<rocblas_int>)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR_64, ValuesIn(large_size_range_64));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGHR_64, ValuesIn((large_size_range<int64_t>)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR_64, ValuesIn(size_range_64));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, ORGHR_64, ValuesIn((size_range<int64_t>)));
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR_64, ValuesIn(large_size_range_64));
+INSTANTIATE_TEST_SUITE_P(daily_lapack, UNGHR_64, ValuesIn((large_size_range<int64_t>)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR_64, ValuesIn(size_range_64));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, UNGHR_64, ValuesIn((size_range<int64_t>)));
