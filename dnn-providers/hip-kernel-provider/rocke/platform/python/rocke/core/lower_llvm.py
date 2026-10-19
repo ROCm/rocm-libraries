@@ -4402,8 +4402,10 @@ class _Lowerer:
         # wave_all(p) = (ballot(p) == full-wave mask). ``ballot.i64`` sets
         # only the low ``wave_size`` bits, so the full mask is -1 on wave64
         # but 0xffffffff on wave32 (comparing against -1 there is never
-        # true). Like HIP's ``__all(p)`` this assumes the full-EXEC launch
-        # profile every rocKE kernel uses.
+        # true). Unlike HIP's ``__all(p)``, which counts only active lanes,
+        # this requires full EXEC: under partial EXEC (a divergent region or
+        # a sub-wave workgroup) it returns 0. Every rocKE kernel launches
+        # with full EXEC.
         (pred,) = op.operands
         self._need("ballot.i64")
         b_name = self._fresh("ballot")

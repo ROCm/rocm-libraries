@@ -2972,6 +2972,10 @@ class IRBuilder:
         (``-1`` on wave64, ``0xffffffff`` on wave32) — no ds_bpermute,
         no LDS round-trip.
 
+        Precondition: every lane of the wave is active (full EXEC). Unlike
+        HIP's ``__all``, which counts only active lanes, this returns 0
+        under partial EXEC (a divergent region or a sub-wave workgroup).
+
         Pairs naturally with adaptive online-softmax rescaling: when
         ``wave_all(max_diff < THRESHOLD)`` is 1, the workgroup can skip
         the rescale path entirely.
