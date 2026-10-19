@@ -740,6 +740,14 @@ StinkyTofu's side, three things are worth doing before a release:
 Ordered by value per unit of effort. Each item is a proposal for the StinkyTofu team to accept,
 reshape or reject.
 
+The hipBLASLt testing plan proposes how kernel testing is divided across StinkyTofu, TensileLite, a
+new kernel corpus layer, and hipBLASLt; see *Who tests what* under
+[hipBLASLt's Improvement Roadmap](../../projects/hipblaslt/TESTING.md#improvement-roadmap). Under that
+split, StinkyTofu owns one question: does its transformation preserve what a kernel computes, and
+protect every hazard on the hardware it targets? Testing GEMM results across shapes belongs to the
+corpus layer, which tests every shipped kernel however it was generated. The corpus would also be the
+natural set of kernels for the differential execution and hazard-checker items below.
+
 ### Near term, cheap and unblocking
 
 1. **Test the production configuration.** Add FileCheck fixtures that run through `-O<N>` with the
@@ -765,7 +773,8 @@ reshape or reject.
    pair has a covering wait or enough distance. It needs no hardware and catches timing-dependent
    hazards without the timing having to happen. It could run over the kernels TensileLite builds in
    CI.
-2. **Differential execution.** Build a fixed set of kernels with and without StinkyTofu's scheduling
+2. **Differential execution.** Build a set of kernels (the kernel corpus, once it exists) with and
+   without StinkyTofu's scheduling
    and expert mode, run both on identical integer inputs, and require bitwise-identical output. The
    check needs no reference implementation, and it is the experiment that confirmed ROCM-31905, done
    by hand.
