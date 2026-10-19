@@ -144,7 +144,7 @@ def _decode_all(decode, spec, make_shape):
     gx, gy, gz = decode.grid(spec)
     out = {}
     for bz, by, bx in itertools.product(range(gz), range(gy), range(gx)):
-        d = decode.emit_decode(B_, spec, bx, by, bz, make_shape(spec))
+        d = decode.emit_decode(make_shape(spec), bx, by, bz)
         out[bx + gx * (by + gy * bz)] = (d.qb, d.hq, d.bt)
     return out
 
@@ -209,8 +209,8 @@ def test_nonpersist_decode_reads_the_shape_from_the_runtime_params(name, window)
         )
         gx, gy, gz = decode.grid(launched)
         for bz, by, bx in itertools.product(range(gz), range(gy), range(gx)):
-            got = decode.emit_decode(B_, built, bx, by, bz, _runtime(built, launched))
-            want = decode.emit_decode(B_, launched, bx, by, bz, _baked(launched))
+            got = decode.emit_decode(_runtime(built, launched), bx, by, bz)
+            want = decode.emit_decode(_baked(launched), bx, by, bz)
             assert got == want, (name, (Hq, Hkv, B, S), (bx, by, bz))
 
 
@@ -257,7 +257,7 @@ def test_persist_decode_is_a_bijection(spec):
     work = nqb * spec.num_query_heads * spec.batch
     items = set()
     for wi in range(work):
-        d = decode.emit_decode(B_, spec, wi, _baked(spec))
+        d = decode.emit_decode(_baked(spec), wi)
         assert 0 <= d.qb < nqb and 0 <= d.hq < spec.num_query_heads
         assert 0 <= d.bt < spec.batch
         assert d.hkv is None or d.hkv == d.hq // gqa
@@ -286,7 +286,7 @@ def test_bt_hkv_minor_follows_its_documented_order():
         )
         gqa, nqb = Hq // Hkv, S // 256
         for wi in range(nqb * Hq * B):
-            d = PERSIST_DECODES["bt_hkv_minor"].emit_decode(B_, spec, wi, _baked(spec))
+            d = PERSIST_DECODES["bt_hkv_minor"].emit_decode(_baked(spec), wi)
             hkv, hql = d.hq // gqa, d.hq % gqa
             assert d.hkv == hkv
             assert ((d.qb * gqa + hql) * Hkv + hkv) * B + d.bt == wi
@@ -353,10 +353,8 @@ def test_runtime_persist_decode_matches_the_launched_baked_decode(
         shape = _runtime(
             built, launched, _fastdiv(launched, dividends), {"nqb": nqb, "w": work}
         )
-        got = [decode.emit_decode(B_, built, wi, shape) for wi in range(work)]
-        want = [
-            decode.emit_decode(B_, launched, wi, _baked(launched)) for wi in range(work)
-        ]
+        got = [decode.emit_decode(shape, wi) for wi in range(work)]
+        want = [decode.emit_decode(_baked(launched), wi) for wi in range(work)]
         assert got == want, (name, (Hq, Hkv, B, S))
         assert len({(d.qb, d.hq, d.bt) for d in got}) == work
         assert max(dividends, default=0) <= decode.fastdiv_dividend_bound(launched)
@@ -392,7 +390,7 @@ def test_sliding_window_orders_blocks_as_without_causal_masking(persistent):
         decode = registry[name]
         if persistent:
             orders = [
-                [decode.emit_decode(B_, s, wi, _baked(s)) for wi in range(nqb * Hq * B)]
+                [decode.emit_decode(_baked(s), wi) for wi in range(nqb * Hq * B)]
                 for s in (swa, plain, full, long)
             ]
         else:

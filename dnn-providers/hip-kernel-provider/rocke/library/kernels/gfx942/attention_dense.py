@@ -2248,7 +2248,7 @@ def _build_attention_dense_single_buffer(
             b.s_waitcnt(vmcnt=0)
             b.s_barrier_bare()
             d = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-                b, spec, wi, work_shape
+                work_shape, wi
             )
             # The kv head from the decode where it is a digit, else hq // gqa through
             # the gqa fastdiv pair: no runtime division in the grid-stride loop.
@@ -2256,12 +2256,10 @@ def _build_attention_dense_single_buffer(
             _run_work_item(d.qb, d.hq, d.bt, hkv=hkv_v)
     else:
         d = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
-            b,
-            spec,
+            DecodeShape(b, spec, shape_values),
             b.block_id_x(),
             b.block_id_y(),
             b.block_id_z(),
-            DecodeShape(b, spec, shape_values),
         )
         _run_work_item(d.qb, d.hq, d.bt)
     b.ret()

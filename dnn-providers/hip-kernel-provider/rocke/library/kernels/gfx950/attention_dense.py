@@ -885,7 +885,7 @@ def build_attention_dense(
     # Heads are baked here; NQB comes from the seqlen_q param.
     grid_shape = DecodeShape(b, spec, {"seqlen_q": seqlen_q_p})
     qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
-        b, spec, b.block_id_x(), b.block_id_y(), b.block_id_z(), grid_shape
+        grid_shape, b.block_id_x(), b.block_id_y(), b.block_id_z()
     )
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
@@ -1884,7 +1884,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         # No shape params on this body: the decode reads the baked shape.
         qb, hq, bt, hkv = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-            b, spec, wi, DecodeShape(b, spec)
+            DecodeShape(b, spec), wi
         )
         if hkv is None:
             hkv = b.div(hq, b.const_i32(gqa))
@@ -2545,7 +2545,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 b.const_f32(0.0),
             )
         _, hq_e, bt_e, _ = PERSIST_DECODES[spec.resolved_persist_decode].emit_decode(
-            b, spec, wi, DecodeShape(b, spec)
+            DecodeShape(b, spec), wi
         )
         o_base = b.add(
             b.mul(b.mul(bt_e, b.const_i32(Sq)), b.const_i32(stride_q_tok)),

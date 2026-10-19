@@ -17,8 +17,8 @@ balancing under a window, the pair fold) is a compile-time branch when baked and
 a ``select`` on a CTA-uniform flag when runtime, so one binary serves every shape
 of a runtime-shape kernel.
 
-The classes read spec attributes and the shape, and emit through the IR builder
-``b``.
+A decode takes only the shape and the block or work index: the shape carries the
+spec and the IR builder ``b`` the decode emits through.
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ class NonpersistDecode:
         """Launch grid, from the spec's actual (host-side) shape."""
         raise NotImplementedError
 
-    def emit_decode(self, b, spec, bx, by, bz, shape: DecodeShape) -> Decoded:
+    def emit_decode(self, shape: DecodeShape, bx, by, bz) -> Decoded:
         raise NotImplementedError
 
 
@@ -225,7 +225,7 @@ class NonpersistQbMinor(NonpersistDecode):
     def grid(self, spec):
         return (_spec_nqb(spec), spec.num_query_heads, spec.batch)
 
-    def emit_decode(self, b, spec, bx, by, bz, shape):
+    def emit_decode(self, shape, bx, by, bz):
         return Decoded(bx, by, bz)
 
 
@@ -241,7 +241,8 @@ class NonpersistBtHkvMinor(NonpersistDecode):
     def grid(self, spec):
         return (spec.batch, spec.num_query_heads, _spec_nqb(spec))
 
-    def emit_decode(self, b, spec, bx, by, bz, shape):
+    def emit_decode(self, shape, bx, by, bz):
+        b = shape.b
         hq = b.add(
             b.mul(shape.mod(by, "num_kv_heads"), shape.val("gqa")),
             shape.div(by, "num_kv_heads"),
@@ -274,7 +275,8 @@ class NonpersistHqMinorSwz(NonpersistDecode):
         M = spec.chiplet_num_xcds
         return (M * _spec_nqb(spec), spec.num_query_heads // M, spec.batch)
 
-    def emit_decode(self, b, spec, bx, by, bz, shape):
+    def emit_decode(self, shape, bx, by, bz):
+        b, spec = shape.b, shape.spec
         M = spec.chiplet_num_xcds
         # Head band of Hq/M heads per XCD.
         hq = b.add(
@@ -376,7 +378,7 @@ class PersistDecode:
         """An upper bound on every runtime fastdiv dividend: the work count."""
         return _spec_nqb(spec) * spec.num_query_heads * spec.batch
 
-    def emit_decode(self, b, spec, wi, shape: DecodeShape) -> Decoded:
+    def emit_decode(self, shape: DecodeShape, wi) -> Decoded:
         raise NotImplementedError
 
 
@@ -391,7 +393,8 @@ class PersistQbMajor(PersistDecode):
     name = "qb_major"
     fastdiv_divisors = ("batch", "num_query_heads", "gqa")
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b, spec = shape.b, shape.spec
         bt = shape.mod(wi, "batch")
         rem = shape.div(wi, "batch")
         hq = shape.mod(rem, "num_query_heads")
@@ -432,7 +435,8 @@ class PersistHkvMajor(PersistDecode):
         hq = b.add(b.mul(hkv, shape.val("gqa")), hql)
         return bt, hq, blk, hkv
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b, spec = shape.b, shape.spec
         NP = spec.num_persistent
 
         def paired():
@@ -463,7 +467,8 @@ class PersistBtHkvMinor(PersistDecode):
             spec.num_queries_per_kv * spec.num_query_heads,
         )
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b = shape.b
         # rem = blk*Hq + t with t = hql*Hkv + hkv < Hq, so the head digits split
         # on Hq: hql = (gqa*t) // Hq exactly (gqa*hkv < gqa*Hkv = Hq), and no
         # divide by Hkv is needed.
@@ -511,7 +516,8 @@ class PersistHqMinorSwz(PersistDecode):
             )
         return None
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b, spec = shape.b, shape.spec
         M, NP = spec.chiplet_num_xcds, spec.num_persistent
 
         def paired():
@@ -572,7 +578,8 @@ class PersistGqaPair(PersistDecode):
             )
         return None
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b, spec = shape.b, shape.spec
         nqb = _baked_only(shape, self.name)
         NP, B, Hkv = spec.num_persistent, spec.batch, spec.num_kv_heads
         gqa = spec.num_queries_per_kv
@@ -618,7 +625,8 @@ class PersistGqaPair2Phase(PersistDecode):
             )
         return None
 
-    def emit_decode(self, b, spec, wi, shape):
+    def emit_decode(self, shape, wi):
+        b, spec = shape.b, shape.spec
         nqb = _baked_only(shape, self.name)
         NP, B, Hkv = spec.num_persistent, spec.batch, spec.num_kv_heads
         gqa = spec.num_queries_per_kv
