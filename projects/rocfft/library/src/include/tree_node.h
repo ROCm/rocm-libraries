@@ -1400,7 +1400,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
         return false;
     }
 
-    // ncclAllToAll is collective: every rank that owns a world
+    // ncclAllToAll is collective: every rank that owns a participating
     // location must launch its local participant(s).
     bool ExecutesOnRank(int) const override
     {
