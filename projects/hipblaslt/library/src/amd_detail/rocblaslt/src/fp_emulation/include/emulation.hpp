@@ -139,7 +139,7 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a);
 /* Resolved emulation gate-result and per-call execution settings.
  * Produced by fixedPointEmulationDecision(); passed directly to fp{32,64}EmulatedGemm().
  * All fields carry fully resolved concrete values once status == rocblaslt_status_success. */
-struct FixedPointEmulationDecision
+struct FixedPointEmulationSettings
 {
     rocblaslt_status                         status;      /* invalid_value on bad env            */
     bool                                     apply;       /* true -> use emulation; false -> native path */
@@ -167,7 +167,7 @@ struct FixedPointEmulationDecision
  * desc may be nullptr when called from code that has no matmul desc
  * (e.g. workspace size query with no attached desc).
  * Always selects ADP (dynamic) mode; num_moduli is always S_MAX.          */
-FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*      h,
+FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*      h,
                                                         const _rocblaslt_matmul_desc* desc,
                                                         hipDataType                   type_a,
                                                         hipblasOperation_t            opA,
@@ -203,7 +203,7 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
                                         int64_t                            m,
                                         int64_t                            n,
                                         int64_t                            k,
-                                        const FixedPointEmulationDecision& decision);
+                                        const FixedPointEmulationSettings& decision);
 
 /* Run an emulated FP64 GEMM using Ozaki Scheme II (accurate mode).
  *
@@ -233,7 +233,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                   double*                            D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationDecision& decision);
+                                  const FixedPointEmulationSettings& decision);
 
 /* Run an emulated FP32 GEMM using Ozaki Scheme II (accurate mode).
  *
@@ -263,4 +263,4 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                   float*                             D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationDecision& decision);
+                                  const FixedPointEmulationSettings& decision);

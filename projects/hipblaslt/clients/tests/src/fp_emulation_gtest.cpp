@@ -68,7 +68,7 @@ namespace
         const auto*                   _h = reinterpret_cast<const _rocblaslt_handle*>(h);
         const _rocblaslt_matmul_desc* _dp
             = reinterpret_cast<const _rocblaslt_matmul_desc*>(_tmpDesc);
-        const FixedPointEmulationDecision d = fixedPointEmulationDecision(
+        const FixedPointEmulationSettings d = fixedPointEmulationDecision(
             _h, _dp, HIP_R_64F, HIPBLAS_OP_N, HIPBLAS_OP_N, 16, 16, 16, 1, ~size_t{0});
         hipblasLtEmulationDescDestroy(_ed);
         hipblasLtMatmulDescDestroy(_tmpDesc);
@@ -192,7 +192,7 @@ namespace
 
         bool would_apply(hipDataType t, int64_t m, int64_t n, int64_t k, int32_t batch)
         {
-            const FixedPointEmulationDecision decision = fixedPointEmulationDecision(
+            const FixedPointEmulationSettings decision = fixedPointEmulationDecision(
                 m_roc,
                 reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
                 t,
@@ -220,7 +220,7 @@ namespace
         const int64_t m = 1024, n = 1024, k = 1024;
 
         // ── Uncapped: always ADP mode (S_MAX moduli), return the full optimal size ──
-        FixedPointEmulationDecision d{};
+        FixedPointEmulationSettings d{};
         d.workspace_bytes = ~size_t{0}; // no cap
 
         const size_t ws = fixedPointEmulationWorkspaceSize(
@@ -334,7 +334,7 @@ namespace
         ASSERT_EQ(hipMemset(dC, 0, bytes), hipSuccess);
 
         const double                alpha = 1.0, beta = 0.0;
-        FixedPointEmulationDecision settings{};
+        FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; // skip Inf/NaN check (faster, inputs are finite)
@@ -656,7 +656,7 @@ namespace
             GTEST_SKIP() << "No native FP64 DGEMM algorithm found on this device";
         }
 
-        FixedPointEmulationDecision emu_settings{};
+        FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy             = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
         emu_settings.adp_mantissa_bits = p.mantissa_bits;
         emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
@@ -1053,7 +1053,7 @@ namespace
         ASSERT_EQ(hipMemcpy(dB, h_B.data(), bytes, hipMemcpyHostToDevice), hipSuccess);
         ASSERT_EQ(hipMemset(dC, 0, bytes), hipSuccess);
 
-        FixedPointEmulationDecision emu_settings{};
+        FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* skip Inf/NaN detection */
@@ -1191,7 +1191,7 @@ namespace
         /* emulation enabled by attaching the emulation descriptor */
         /* emulation strategy=HIPBLASLT_EMULATION_STRATEGY_EAGER now set on matmul desc; see emulSetStrategy() */
 
-        FixedPointEmulationDecision emu_settings{};
+        FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
@@ -1613,7 +1613,7 @@ namespace
             GTEST_SKIP() << "No native FP64 DGEMM algorithm found on this device";
         }
 
-        FixedPointEmulationDecision emu_settings{};
+        FixedPointEmulationSettings emu_settings{};
         emu_settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         emu_settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
@@ -1812,7 +1812,7 @@ namespace
 
         /* ── Step 1: ADP triggers at the fp64EmulatedGemm level ────────────── */
         {
-            FixedPointEmulationDecision emu{};
+            FixedPointEmulationSettings emu{};
             emu.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
             emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
@@ -2109,7 +2109,7 @@ namespace
             (void)hipFree(dA);
         };
 
-        FixedPointEmulationDecision settings{};
+        FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* inputs are finite — no Inf/NaN flag needed */
@@ -2439,7 +2439,7 @@ namespace
                         nullptr);
 
         /* Emulated */
-        FixedPointEmulationDecision emu{};
+        FixedPointEmulationSettings emu{};
         emu.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
@@ -2534,7 +2534,7 @@ namespace
             (void)hipFree(dA);
         };
 
-        FixedPointEmulationDecision settings{};
+        FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY; /* enable Inf detection */
@@ -2660,7 +2660,7 @@ namespace
                         nullptr);
 
         /* Emulated with ADP, num_moduli=8 upper bound */
-        FixedPointEmulationDecision emu{};
+        FixedPointEmulationSettings emu{};
         emu.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         emu.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE;
@@ -2853,7 +2853,7 @@ namespace
             ASSERT_EQ(hipMalloc(&d_ws, ws_sz), hipSuccess);
 
         const float                 alpha = 1.f, beta = 0.f;
-        FixedPointEmulationDecision settings{};
+        FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_NONE; /* no NaN check in this test */
@@ -2923,7 +2923,7 @@ namespace
      * fixedPointEmulationDecision return value.  After the call, dynamic mode
      * should be set and adp_mantissa_bits should be 23 (the FP32 default).  */
         auto*                             h = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
-        const FixedPointEmulationDecision d = fixedPointEmulationDecision(
+        const FixedPointEmulationSettings d = fixedPointEmulationDecision(
             h,
             reinterpret_cast<const _rocblaslt_matmul_desc*>(m_emul_desc),
             HIP_R_32F,
@@ -2972,7 +2972,7 @@ namespace
             ASSERT_EQ(hipMalloc(&d_ws, ws_sz), hipSuccess);
 
         const float                 alpha = 1.f, beta = 0.f;
-        FixedPointEmulationDecision settings{};
+        FixedPointEmulationSettings settings{};
         settings.strategy = HIPBLASLT_EMULATION_STRATEGY_EAGER; /* bypass perf gate in direct test calls */
 
         settings.sv_support = HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT; /* NaN + Inf detection enabled */

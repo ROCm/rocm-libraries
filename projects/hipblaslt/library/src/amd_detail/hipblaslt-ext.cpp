@@ -1076,7 +1076,7 @@ namespace hipblaslt_ext
              * Used by algoGetHeuristic / isAlgoSupported to report the true
              * total workspace so callers can pre-allocate it.                */
             const auto* h = reinterpret_cast<const _rocblaslt_handle*>(m_handle);
-            const FixedPointEmulationDecision emulDecision =
+            const FixedPointEmulationSettings emulDecision =
                 fixedPointEmulationDecision(h, nullptr, problemtype.getTypeA(),
                                       problemtype.getOpA(), problemtype.getOpB(),
                                       m, n, k, batch_count, ~size_t{0});
@@ -1134,7 +1134,7 @@ namespace hipblaslt_ext
                                      ? static_cast<int64_t>(A_layout->n)
                                      : static_cast<int64_t>(A_layout->m);
             const int32_t batch = A_layout->batch_count;
-            const FixedPointEmulationDecision emulDecision =
+            const FixedPointEmulationSettings emulDecision =
                 fixedPointEmulationDecision(h, desc_ptr, A_layout->type,
                                       desc_ptr->op_A, desc_ptr->op_B,
                                       m_sz, n_sz, k_sz, batch, ~size_t{0});

@@ -1014,7 +1014,7 @@ namespace FixedPointEmulation
                                                T*                                 D,
                                                int64_t                            ldd,
                                                hipStream_t                        stream,
-                                               const FixedPointEmulationDecision& decision,
+                                               const FixedPointEmulationSettings& decision,
                                                ProfileAccum*                      prof)
     {
         static_assert(std::is_same_v<T, double> || std::is_same_v<T, float>,
@@ -1832,7 +1832,7 @@ FixedPointEmulationEnvValue fixedPointEmulationParseNumModuliEnv(const char* val
     return {FIXED_POINT_EMULATION_ENV_VALID, static_cast<unsigned>(n)};
 }
 
-FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*      h,
+FixedPointEmulationSettings fixedPointEmulationDecision(const _rocblaslt_handle*      h,
                                                         const _rocblaslt_matmul_desc* desc,
                                                         hipDataType                   type_a,
                                                         hipblasOperation_t            opA,
@@ -1852,7 +1852,7 @@ FixedPointEmulationDecision fixedPointEmulationDecision(const _rocblaslt_handle*
      * A sentinel means "inherit from env var"; a non-sentinel means "use this
      * value", disabling the env-var fallback for that setting.               */
     using namespace FixedPointEmulation;
-    FixedPointEmulationDecision result{};
+    FixedPointEmulationSettings result{};
     result.status    = rocblaslt_status_success;
     result.apply     = false;
     result.workspace = nullptr;
@@ -1931,7 +1931,7 @@ size_t fixedPointEmulationWorkspaceSize(const _rocblaslt_handle*           h,
                                         int64_t                            m,
                                         int64_t                            n,
                                         int64_t                            k,
-                                        const FixedPointEmulationDecision& decision)
+                                        const FixedPointEmulationSettings& decision)
 {
     using namespace FixedPointEmulation;
     assert(h != nullptr && "fixedPointEmulationWorkspaceSize requires a valid handle");
@@ -2007,7 +2007,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
                                   double*                            D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationDecision& decision)
+                                  const FixedPointEmulationSettings& decision)
 {
     using namespace FixedPointEmulation;
     /* ── Change 4: Workspace Graceful Degradation ────────────────────────────
@@ -2088,7 +2088,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasLtHandle_t                  handle,
             if(t_emul_opt <= t_native_g
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
-                FixedPointEmulationDecision ws_dec{};
+                FixedPointEmulationSettings ws_dec{};
                 ws_dec.workspace_bytes = ~size_t{0};
                 const size_t opt_ws
                     = fixedPointEmulationWorkspaceSize(h, HIP_R_64F, opA, opB, m, n, k, ws_dec);
@@ -2380,7 +2380,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
                                   float*                             D,
                                   int64_t                            ldd,
                                   hipStream_t                        stream,
-                                  const FixedPointEmulationDecision& decision)
+                                  const FixedPointEmulationSettings& decision)
 {
     using namespace FixedPointEmulation;
 
@@ -2451,7 +2451,7 @@ rocblaslt_status fp32EmulatedGemm(hipblasLtHandle_t                  handle,
             if(t_emul_opt <= t_native_g
                && s_ws_small_warns.fetch_add(1, std::memory_order_relaxed) < 5)
             {
-                FixedPointEmulationDecision ws_dec{};
+                FixedPointEmulationSettings ws_dec{};
                 ws_dec.workspace_bytes = ~size_t{0};
                 const size_t opt_ws
                     = fixedPointEmulationWorkspaceSize(h, HIP_R_32F, opA, opB, m, n, k, ws_dec);

@@ -155,7 +155,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT)
     {
-        FixedPointEmulationDecision emulDecision =
+        FixedPointEmulationSettings emulDecision =
             fixedPointEmulationDecision(handle, matmul_descr, type_a, opA, opB, m, n, k, num_batches_a, workspaceSizeInBytes);
         if(emulDecision.status != rocblaslt_status_success)
             return emulDecision.status;
