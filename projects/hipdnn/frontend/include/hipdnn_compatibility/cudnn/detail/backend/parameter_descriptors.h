@@ -172,9 +172,10 @@ public:
         return _computeType;
     }
 
-    // Mode parameters that differ from upstream's defaults. Upstream sets every
-    // parameter of the mode, defaults included, and MIOpen rejects a fusion that
-    // carries one at all, so lowering forwards only these.
+    // Mode parameters that differ from upstream's defaults, plus the ReLU lower
+    // clip unless a slope is set. Upstream sets every parameter of the mode,
+    // defaults included, and MIOpen rejects a fusion that carries the others at
+    // all, so lowering forwards only these.
     std::optional<double> reluLowerClip() const noexcept
     {
         return _reluLowerClip;
@@ -234,11 +235,15 @@ protected:
         _mode = requireLowerable(rawMode, CUDNN_ATTR_POINTWISE_MODE);
         _computeType = requireLowerable(rawComputeType, CUDNN_ATTR_POINTWISE_MATH_PREC);
         // Defaults from PointWiseDesc_v8 (cudnn_frontend_PointWiseDesc.h).
-        _reluLowerClip = nonDefault(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, 0.0);
         _reluLowerClipSlope = nonDefault(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE, 0.0);
         _eluAlpha = nonDefault(CUDNN_ATTR_POINTWISE_ELU_ALPHA, 1.0);
         _softplusBeta = nonDefault(CUDNN_ATTR_POINTWISE_SOFTPLUS_BETA, 1.0);
         _swishBeta = nonDefault(CUDNN_ATTR_POINTWISE_SWISH_BETA, 1.0);
+        // Every engine reads a lower clip of 0 as standard ReLU, and hipBLASLt's ReLU
+        // epilogue requires it present. Beside a slope it stays elided: hipBLASLt
+        // would take {0, slope} for plain ReLU and drop the slope.
+        _reluLowerClip = _reluLowerClipSlope ? nonDefault(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP, 0.0)
+                                             : realAttribute(CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
         // The upper-clip default is DBL_MAX, which upstream clamps to FLT_MAX for
         // FLOAT math; any bound at or above FLT_MAX clips nothing once narrowed.
         const std::optional<double> upperClip = realAttribute(CUDNN_ATTR_POINTWISE_RELU_UPPER_CLIP);

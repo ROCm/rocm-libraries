@@ -749,13 +749,16 @@ TEST_F(TestCudnnShimV8OperationGraph, PointwiseBackwardSlotsMapGradientFirst)
     EXPECT_EQ(slotUid(op, HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT), 22);
 }
 
-TEST_F(TestCudnnShimV8OperationGraph, DefaultReluSendsNoClipOrSlope)
+TEST_F(TestCudnnShimV8OperationGraph, DefaultReluSendsOnlyLowerClip)
 {
     finalizedGraph({pointwise(
         CUDNN_POINTWISE_RELU_FWD, tensor({1, {2, 3, 4, 5}}), nullptr, tensor({2, {2, 3, 4, 5}}))});
 
     hipdnnBackendDescriptor_t op = onlyCreated(HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR);
-    EXPECT_FALSE(callOn(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP));
+    const auto lowerClip = callOn(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP);
+    ASSERT_TRUE(lowerClip);
+    EXPECT_EQ(lowerClip->type, HIPDNN_TYPE_FLOAT);
+    EXPECT_EQ(lowerClip->value<float>(), 0.0F);
     EXPECT_FALSE(callOn(op, HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP));
     EXPECT_FALSE(callOn(op, HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE));
     EXPECT_TRUE(callOn(op, HIPDNN_ATTR_POINTWISE_MODE));

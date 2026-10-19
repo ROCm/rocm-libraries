@@ -171,6 +171,15 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     add_hipdnn_sample(hipdnn_sample_cudnn_shim_hipify_conv_fprop cudnn_shim/HipifyConvFprop.cpp)
 endif()
 
+# GPU samples written against the cuDNN v8 API: the v0.x frontend builders and the raw backend API.
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_fprop_v8 cudnn_shim/ConvFpropV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_conv_bias_relu_v8 cudnn_shim/ConvBiasReluV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_matmul_bias_act_v8 cudnn_shim/MatmulBiasActV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_pointwise_relu_v8 cudnn_shim/PointwiseReluV8.cpp)
+    add_hipdnn_sample(hipdnn_sample_cudnn_shim_raw_backend_api_v8 cudnn_shim/RawBackendApiV8.cpp)
+endif()
+
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
 
 add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
@@ -352,6 +361,57 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     # The only shim sample that executes on a GPU; report the no-device path as Skipped.
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_hipify_conv_fprop
         SKIP_REGULAR_EXPRESSION "SKIPPED: No GPU devices available")
+endif()
+
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
+    # Only the whole-binary tokens match; a per-variant skip does not, so a sample that validated
+    # nothing reports Skipped rather than Passed.
+    set(HIPDNN_CUDNN_V8_SKIP_REGEX "SKIPPED: (No GPU devices available|no applicable engine)")
+    # Registers a v8 sample test that reports Skipped when no variant found an engine.
+    function(add_hipdnn_cudnn_v8_sample_test TARGET_NAME)
+        add_hipdnn_sample_test(${TARGET_NAME})
+        set_tests_properties(${TARGET_NAME} PROPERTIES SKIP_REGULAR_EXPRESSION
+                                                       "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
+        )
+        file(APPEND "${INSTALLED_CTEST_FILE}"
+             "set_tests_properties(${TARGET_NAME} PROPERTIES"
+             " SKIP_REGULAR_EXPRESSION \"${HIPDNN_CUDNN_V8_SKIP_REGEX}\")\n"
+        )
+    endfunction()
+    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_conv_fprop_v8)
+    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_matmul_bias_act_v8)
+    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_pointwise_relu_v8)
+    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_raw_backend_api_v8)
+    add_hipdnn_cudnn_v8_sample_test(hipdnn_sample_cudnn_shim_conv_bias_relu_v8)
+
+    # Timing gate: build tree only (not installed), serial, never under sanitizers.
+    if(NOT BUILD_ADDRESS_SANITIZER AND NOT BUILD_THREAD_SANITIZER AND NOT THEROCK_SANITIZER)
+        set(HIPDNN_CUDNN_V8_OVERHEAD_TEST hipdnn_sample_cudnn_shim_conv_fprop_v8_overhead)
+        add_test(NAME ${HIPDNN_CUDNN_V8_OVERHEAD_TEST}
+                 COMMAND hipdnn_sample_cudnn_shim_conv_fprop_v8 --overhead --dtype fp32 --layout nchw
+        )
+        set_property(GLOBAL APPEND PROPERTY HIPDNN_SAMPLE_TEST_TARGETS ${HIPDNN_CUDNN_V8_OVERHEAD_TEST})
+        set_tests_properties(
+            ${HIPDNN_CUDNN_V8_OVERHEAD_TEST}
+            PROPERTIES RUN_SERIAL TRUE SKIP_REGULAR_EXPRESSION "${HIPDNN_CUDNN_V8_SKIP_REGEX}"
+        )
+        if(TEST_ENVIRONMENT)
+            set_tests_properties(${HIPDNN_CUDNN_V8_OVERHEAD_TEST} PROPERTIES ENVIRONMENT
+                                                                             "${TEST_ENVIRONMENT}"
+            )
+        endif()
+        if(TEST_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(
+                ${HIPDNN_CUDNN_V8_OVERHEAD_TEST}
+                PROPERTIES ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}"
+            )
+        endif()
+        if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
+            set_tests_properties(${HIPDNN_CUDNN_V8_OVERHEAD_TEST}
+                                 PROPERTIES FIXTURES_REQUIRED hipdnn_clear_miopen_test_cache
+            )
+        endif()
+    endif()
 endif()
 
 # Register knobs sample

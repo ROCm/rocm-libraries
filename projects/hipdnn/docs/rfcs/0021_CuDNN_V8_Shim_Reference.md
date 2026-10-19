@@ -174,7 +174,7 @@ Evidence: conv ops route the parameter attributes to `setConvolutionAttribute`
 | `CUDNN_ATTR_POINTWISE_MODE` (PW.h:231) | `=`, on the op | translated by name; `COS`, `MOD`, `POW` have no hipDNN mode and fail closed |
 | `CUDNN_ATTR_POINTWISE_MATH_PREC` (PW.h:253) | `=`, on the op | forwarded |
 | `CUDNN_ATTR_POINTWISE_NAN_PROPAGATION` (PW.h:267) | **MISSING** | stored and ignored (divergence) |
-| `CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP` / `RELU_UPPER_CLIP` / `RELU_LOWER_CLIP_SLOPE` / `ELU_ALPHA` / `SOFTPLUS_BETA` / `SWISH_BETA` (PW.h:280-362, double) | `=`, T! (hipDNN requires float) | value equal to cuDNN's default for the mode → not set; otherwise narrowed to float, clips saturate at ±`FLT_MAX`, non-finite slope/beta → `BAD_PARAM` |
+| `CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP` / `RELU_UPPER_CLIP` / `RELU_LOWER_CLIP_SLOPE` / `ELU_ALPHA` / `SOFTPLUS_BETA` / `SWISH_BETA` (PW.h:280-362, double) | `=`, T! (hipDNN requires float) | value equal to cuDNN's default for the mode → not set, except `RELU_LOWER_CLIP`, which is always sent unless a slope is set (hipBLASLt's ReLU epilogue requires it); otherwise narrowed to float, clips saturate at ±`FLT_MAX`, non-finite slope/beta → `BAD_PARAM` |
 | `CUDNN_ATTR_POINTWISE_AXIS` (PW.h:372) | `=` | default (−1) not set; otherwise forwarded |
 | `CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR` (:455) | **MISSING** | consumed by the shim |
 | `CUDNN_ATTR_OPERATION_POINTWISE_XDESC` / `BDESC` / `TDESC` / `YDESC` (:468, :552, :567, :482) | `≈` `HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT` / `IN_1_EXT` / `IN_2_EXT` / `OUT_0_EXT` | X→IN_0, B→IN_1, T→IN_2, Y→OUT_0 |
@@ -663,12 +663,13 @@ CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 | Dependency | Where | Harness treatment (RFC 0021 Phase 9) |
 |---|---|---|
 | `cuda_runtime.h` | `conv_sample.h:30`, `fusion_sample.h:30`, `fp8_sample.h:30`, `utils/helpers.h:29` | existing overlay |
-| `driver_types.h`, `cuda_fp16.h`, `cuda_runtime_api.h` | `fp16_emu.h:26-30` | legacy-only overlay adds `driver_types.h` |
+| `driver_types.h`, `cuda_fp16.h`, `cuda_runtime_api.h` | `utils/fp16_emu.h:26-30` | shared overlay; adds `driver_types.h` |
+| `cudnn_frontend_find_plan.h`, `cudnn_frontend_get_plan.h` | `conv_sample.cpp:24-25` | shared overlay forwards to the shim headers |
 | `cudaMalloc` / `cudaMemcpy` / `cudaFree` / `cudaDeviceSynchronize` | `utils/helpers.h:244-306`, `test_list.cpp` | overlay |
-| `cudaGetDeviceProperties`, `prop.major` arch gating | `helpers.cpp:28`; catch blocks (`fusion_sample.cpp:331`, `fp8_sample.cpp:169`, `norm_samples.cpp:249`) | struct-compatible `cudaDeviceProp` reporting 8.0 |
-| `cudaDeviceReset` (via `FatalError`) | `utils/error_util.h` | overlay |
-| `CudnnHandleDeleter`, `create_cudnn_handle` | `utils/helpers.h:70-86` | substituted helpers (ODR clash with the v9 shim's `cudnn.h`) |
-| `throw_if` in a reopened `namespace cudnn_frontend` | `utils/error_util.h:54,62` | substituted |
+| `struct cudaDeviceProp`, `cudaGetDeviceProperties`, `prop.major` arch gating | `helpers.cpp:27-28`; catch blocks (`fusion_sample.cpp:330-331`, `fp8_sample.cpp:168-169`, `norm_samples.cpp:248-249`) | shared overlay maps `cudaDeviceProp` to `hipDeviceProp_t`; the substituted `utils/helpers.h` prologue redefines `cudaGetDeviceProperties` to report compute capability 8.0 for the legacy binary only |
+| `cudaDeviceReset` (via `FatalError`) | `utils/error_util.h:39` | shared overlay maps it to `hipDeviceReset` |
+| `CudnnHandleDeleter`, `create_cudnn_handle` | `utils/helpers.h:69-86` | deleted from the substituted `utils/helpers.h`; the shim's `cudnn.h` defines both |
+| `throw_if` in a reopened `namespace cudnn_frontend` | `utils/error_util.h:52-69` | substituted `utils/error_util.h` reopens `hipdnn_frontend::compatibility::cudnn_frontend` instead; the bodies are upstream's |
 | CPU references | `cpu_references.h` | kept |
 
 ### 5.2 Test cases
@@ -676,60 +677,71 @@ CUDA-only dependencies (all under `upstream:samples/legacy_samples/`):
 Caption: `upstream:samples/legacy_samples/test_list.cpp`. Driver functions are in `conv_sample.cpp`
 (C), `fusion_sample.cpp` (F), `fp8_sample.cpp` (P) or `norm_samples.cpp` (N).
 
-Expected-outcome tiers (RFC 0021 Phase 9): **RUN_CLEAN** must pass; **RUN** must not crash, outcome
-reported; **XFAIL_RUN** must still fail on its anchor. Seeds below are adjusted after the first real
-run.
+Tiers (RFC 0021 Phase 9): each case runs in its own process and is judged against its manifest
+entry. **RUN_CLEAN** must end `ran-clean`; **RUN** must not crash; **XFAIL_RUN** must end with a
+listed outcome and print that outcome's anchor. Outcomes below are for a gfx1151 Windows host with
+the MIOpen and hipBLASLt providers and the 8.0 compute capability of §5.1. Every `crashed` case is
+upstream undefined behaviour: with no applicable engine the shim returns an empty heuristics or plan
+list with SUCCESS, as hipDNN does, and the sample reads element 0 of it. "Alignment 4" means the
+graph's tensors use a `BYTE_ALIGNMENT` below 16, which leaves the graph with no engine
+([Known divergences](../KNOWN_DIVERGENCES.md#tensors)).
 
-| # | Test case (line) | Gate | Pattern | Data type | Driver and key APIs | Expected shim outcome |
+No legacy case executes a kernel on gfx1151: #1 and #32 never reach a device, and every other case
+stops before `cudnnBackendExecute` or crashes in the sample.
+
+| # | Test case (line) | Gate | Pattern | Data type | Driver and key APIs | Tier and expected outcome |
 |---:|---|---|---|---|---|---|
-| 1 | "Tensor creation comparison" :33 | — | raw backend tensor vs `TensorBuilder` | FLOAT | raw `cudnnBackendCreateDescriptor` / `SetAttribute` / `Finalize` / `DestroyDescriptor` (:68-86), `TensorBuilder` | RUN_CLEAN: no engine involved |
-| 2 | "Use global(index) for execution" :92 | — | conv backward-filter | FLOAT + CPU ref | C `run_from_global_index`: `EngineBuilder.setGlobalEngineIdx(0)`, knobs, `EngineConfigBuilder`, plan, variant pack | XFAIL_RUN: tensors use alignment 4 (`conv_sample.cpp:179-227`); no provider reports plugin API ≥ 1.3.0 |
-| 3 | "Use heuristics for execution" :165 | — | conv forward | FLOAT + CPU ref | C `run_from_heuristics`: static `ExecutionPlanCache`, `EngineConfigGenerator`, `cudnnFindPlanAndCache<MEDIAN_OF_THREE>` | XFAIL_RUN: alignment 4 |
-| 4 | "Use DNN based heuristics for execution" :241 | — | conv forward | FLOAT | C `run_from_heuristics` (mode argument ignored) | XFAIL_RUN: alignment 4 |
-| 5 | "Use fallback for execution" :317 | — | conv backward-data | FLOAT + CPU ref | C `run_with_external_config`: `get_heuristics_list<2>({"heuristics_instant","heuristics_fallback"})`, plan from a raw `ManagedOpaqueDescriptor` | XFAIL_RUN: alignment 4 |
-| 6 | "ConvBiasAct sample" :393 | — | conv → add(z) → add(bias) → ReLU | FLOAT | C `run_conv_add_bias_activation`: 4 `OperationBuilder`s, `getEngineCount`, `get_heuristics_list<2>` | XFAIL_RUN: alignment 4 (`conv_sample.cpp:90-178`); the 4-op fusion also has no engine |
-| 7 | "Use cudnnFindPlan for execution" :447 | — | conv forward | FLOAT + CPU ref | C `run_from_cudnn_find`: `cudnnFindPlan<MEDIAN_OF_THREE>` with predicate | XFAIL_RUN: alignment 4 |
-| 8 | "ConvBiasAct sample with cudnnFindPlan" :522 | — | conv → add → add → ReLU | HALF | C `run_conv_add_bias_activation_with_cudnn_find` | XFAIL_RUN: alignment 4; 4-op fusion |
-| 9 | "Use cudnnGetPlan for execution" :576 | — | conv forward | FLOAT + CPU ref | C `run_from_cudnn_get`: `cudnnGetPlan`, max-workspace scan | XFAIL_RUN: alignment 4 |
-| 10 | "ConvScaleBiasAddAct sample" :651 | — | conv → mul → add → add → leaky ReLU | HALF | F `run_conv_scale_bias_add_leaky_relu` | RUN |
-| 11 | "ConvScaleBiasAddAct sample_float" :711 | — | same | FLOAT | same | RUN |
-| 12 | "ConvBiasScaleAct sample" :771 | — | conv → add → mul → ReLU | HALF | F `run_conv_bias_scale_relu` | RUN |
-| 13 | "ConvBiasScaleActSerialization sample" :826 | — | same + plan serialization | HALF | F `run_serialization_conv_bias_scale_relu`: `getJsonRepresentation`, `loadFromJson` | RUN: the JSON carries `payload` only when the engine's plan serialization succeeds; without it `loadFromJson` is `NOT_SUPPORTED` |
-| 14 | "ConvScaleBiasActGenIndexSelection sample" :881 | — | conv → mul → add → ReLU → GEN_INDEX → CMP_LT / CMP_GT → LOGICAL_OR → BINARY_SELECT | HALF, INT32, BOOLEAN | F `run_conv_scale_bias_relu_gen_index_selection`: `setAxis`, `settDesc` | RUN |
-| 15 | "ConvScaleBiasAct_int8 sample" :954 | — | conv (int32 compute) → mul → add → ReLU | INT8 I/O | F `run_conv_scale_bias_relu_int8` | XFAIL_RUN: no int8 conv engine (provider gap) |
-| 16 | "PoolScaleBiasAct_int8 sample" :1009 | — | resample fwd (avgpool) → mul → add → ReLU | INT8 I/O, FLOAT compute | F `run_pool_scale_bias_relu_int8`: `ResampleDescBuilder` | XFAIL_RUN: int8 (provider gap) |
-| 17 | "MatmulBiasAct sample" :1086 | — | matmul → add(bias) → GELU_APPROX_TANH_FWD | HALF | F `run_matmul_bias_gelu` | RUN |
-| 18 | "MatmulBiasAct sample_float" :1130 | — | same | FLOAT | same | RUN |
-| 19 | "MatmulDGeluDBias sample" :1174 | — | matmul → GELU_APPROX_TANH_BWD → reduction ADD | HALF | F `run_matmul_dgelu_dbias` | RUN |
-| 20 | "ConvDrelu sample" :1219 | — | conv → RELU_BWD | HALF | F `run_conv_drelu` | XFAIL_RUN: alignment 4 (`fusion_sample.cpp:1898-1931`) |
-| 21 | "DgradDrelu sample" :1285 | — | conv backward-data → RELU_BWD | HALF | F `run_dgrad_drelu` | XFAIL_RUN: alignment 4 (`fusion_sample.cpp:2062-2095`) |
-| 22 | "ConvColReduction sample" :1352 | — | conv → reduction ADD | HALF | F `run_conv_reduction` | RUN |
-| 23 | "Use errata to block global(index) for execution" :1405 | — | conv backward-filter, engine index 20 | FLOAT | C `block_using_errata`: `setGlobalEngineIdx(20)`, `check_errata` ×3 (tag, tag + shape, wildcard) | XFAIL_RUN: NVIDIA engine 20 has no shim counterpart (dense index, N ≪ 20); alignment 4 |
-| 24 | "DP4A execution with cudnnFindPlan" :1456 | — | conv forward, INT8x4 vectorized | INT8, INT32 compute | C `run_dp4a`: `setVectorCountAndDimension` | XFAIL_RUN: `VECTOR_COUNT` ≠ 1 and `INT8x4` → `NOT_SUPPORTED` |
-| 25 | "IMMA execution with manual autotuning" :1514 | — | conv forward, INT8x32 | INT8, INT32 compute | C `run_imma`: `setReorderType(INT8x32)`, `filter` ×2, `cudnnReorderFilterAndBiasInt8x32`, `check_errata` | XFAIL_RUN: reordering and reorder helper → `NOT_SUPPORTED` |
-| 26 | "Use Plan cache for rerunning the same convolution" :1572 | — | conv forward, twice | FLOAT | C `run_from_heuristics` ×2; second run hits `ExecutionPlanCache` | XFAIL_RUN: alignment 4 (see note) |
-| 27 | "Scale Bias Conv BNGenstats" :1669 | — | mul → add → leaky ReLU → conv → GEN_STATS | HALF, FLOAT stats | F `run_bn_conv_gen_stat` | XFAIL_RUN: GEN_STATS → `NOT_SUPPORTED` |
-| 28 | "Dual Scale Bias Act Relu" :1714 | — | (mul → add) ×2 → add → ReLU | HALF | F `run_dsbar` | RUN |
-| 29 | "Dual Scale Bias Act Relu with CPU Reference" :1744 | — | same | FLOAT | same | RUN |
-| 30 | "Scale Bias Conv BNGenstats with CPU Reference" :1818 | — | as #27 | HALF, FLOAT stats | same; arch-gated (`is_ampere_arch` / `is_hopper_arch`) | XFAIL_RUN: GEN_STATS |
-| 31 | "BN Finalize" :1953 | — | BN_FINALIZE_STATISTICS (training) | FLOAT stats, DOUBLE, INT64 by-value scalars | F `run_bn_finalize` | XFAIL_RUN: BN finalize → `NOT_SUPPORTED` |
-| 32 | "Tensor cloning" :2027 | — | `cloneFrom` + data type / virtual changes | FLOAT → HALF | `TensorBuilder().cloneFrom(...)` (2 sections) | RUN_CLEAN: no engine involved |
-| 33 | "Max pooling idx tensor dump" :2154 | ≥ 8600 | resample fwd maxpool with index tensor | HALF, INT8 index | F `run_maxpool_with_idx` | RUN |
-| 34 | "Backward pooling" :2234 | ≥ 8600 | resample bwd avgpool and maxpool (2 sections) | HALF, INT8 index | F `run_backward_avgpool`, `run_backward_maxpool` | RUN |
-| 35 | "Conv two global scales" :2351 | ≥ 8300 | conv → mul → mul | HALF, FLOAT compute | F `run_conv_two_global_scales` | RUN |
-| 36 | "Conv Scale" :2425 | ≥ 8600 | conv → mul(scale) | FP8_E4M3 | P `run_fp8_conv_scale`: deprecated `ConvDescBuilder` setters, `setAlpha`/`setBeta` | XFAIL_RUN: FP8 |
-| 37 | "Conv Descale Descale Amax Scale sample" :2482 | ≥ 8600 | conv → mul ×3 + reduction AMAX | FP8_E4M3 | P `run_fp8_conv_descale_descale_amax_scale` | XFAIL_RUN: FP8 |
-| 38 | "Scale transpose convert amax sample" :2549 | ≥ 8600 | mul → IDENTITY (transpose/convert) + AMAX | FP16 → FP8_E4M3 | P `run_tranpose_scale_convert_fp16_fp8_amax` | XFAIL_RUN: FP8 |
-| 39 | "Dgrad Descale Descale Amax Scale sample" :2596 | ≥ 8700 | conv backward-data → mul ×3 + AMAX | FP8_E4M3 | P `run_fp8_dgrad_descale_descale_amax_scale` | XFAIL_RUN: FP8 |
-| 40 | "BN BWD Weights sample" :2669 | ≥ 90800 | pointwise + RELU_BWD → conv backward-data → BN_BWD_WEIGHTS | HALF, FLOAT stats | F `run_bn_bwd_weight`: `setEqScalesAndBias` | XFAIL_RUN: BN backward weights → `NOT_SUPPORTED` |
-| 41 | "Batch normalization" :2744 | ≥ 8800 | NORM_FORWARD / NORM_BACKWARD batch norm with 2 peer-stat tensors (2 sections) | HALF, FLOAT stats | N `run_batch_norm_forward`, `execute_batch_norm_forward`, `run_batch_norm_backward`; caches copyable plans by feature vector | XFAIL_RUN: peer statistics → `NOT_SUPPORTED` |
+| 1 | "Tensor creation comparison" :33 | — | raw backend tensor vs `TensorBuilder` | FLOAT | raw `cudnnBackendCreateDescriptor` / `SetAttribute` / `Finalize` / `DestroyDescriptor` (:68-86), `TensorBuilder` | RUN_CLEAN, `ran-clean`: no engine involved |
+| 2 | "Use global(index) for execution" :92 | — | conv backward-filter | FLOAT + CPU ref | C `run_from_global_index`: `EngineBuilder.setGlobalEngineIdx(0)`, knobs, `EngineConfigBuilder`, plan, variant pack | XFAIL_RUN, `ran-with-assertion-failures`: alignment 4 (`conv_sample.cpp:179-227`) leaves zero engines, so engine index 0 is out of range |
+| 3 | "Use heuristics for execution" :165 | — | conv forward | FLOAT + CPU ref | C `run_from_heuristics`: static `ExecutionPlanCache`, `EngineConfigGenerator`, `cudnnFindPlanAndCache<MEDIAN_OF_THREE>` | XFAIL_RUN, `ran-with-assertion-failures`: zero engines, so `cudnnFindPlanAndCache` throws because no plan ran |
+| 4 | "Use DNN based heuristics for execution" :241 | — | conv forward | FLOAT | C `run_from_heuristics` (mode argument ignored) | XFAIL_RUN, `ran-with-assertion-failures`: as #3 |
+| 5 | "Use fallback for execution" :317 | — | conv backward-data | FLOAT + CPU ref | C `run_with_external_config`: `get_heuristics_list<2>({"heuristics_instant","heuristics_fallback"})`, plan from a raw `ManagedOpaqueDescriptor` | XFAIL_RUN, `ran-with-assertion-failures`: zero configurations; the driver returns SUCCESS and only the numerics check fails |
+| 6 | "ConvBiasAct sample" :393 | — | conv → add(z) → add(bias) → ReLU | FLOAT | C `run_conv_add_bias_activation`: 4 `OperationBuilder`s, `getEngineCount`, `get_heuristics_list<2>` | XFAIL_RUN, `ran-with-assertion-failures`: `ALPHA2` = 0.5 → `NOT_SUPPORTED` at operation build |
+| 7 | "Use cudnnFindPlan for execution" :447 | — | conv forward | FLOAT + CPU ref | C `run_from_cudnn_find`: `cudnnFindPlan<MEDIAN_OF_THREE>` with predicate | XFAIL_RUN, `crashed`: zero plans, then the sample reads the front of the empty list |
+| 8 | "ConvBiasAct sample with cudnnFindPlan" :522 | — | conv → add → add → ReLU | HALF | C `run_conv_add_bias_activation_with_cudnn_find` | XFAIL_RUN, `ran-with-assertion-failures`: as #6 |
+| 9 | "Use cudnnGetPlan for execution" :576 | — | conv forward | FLOAT + CPU ref | C `run_from_cudnn_get`: `cudnnGetPlan`, max-workspace scan | XFAIL_RUN, `crashed`: as #7 |
+| 10 | "ConvScaleBiasAddAct sample" :651 | — | conv → mul → add → add → leaky ReLU | HALF | F `run_conv_scale_bias_add_leaky_relu` | XFAIL_RUN, `crashed`: no engine for the 5-op fusion |
+| 11 | "ConvScaleBiasAddAct sample_float" :711 | — | same | FLOAT | same | XFAIL_RUN, `crashed`: as #10 |
+| 12 | "ConvBiasScaleAct sample" :771 | — | conv → add → mul → ReLU | HALF | F `run_conv_bias_scale_relu` | XFAIL_RUN, `crashed`: no engine for conv → add → mul → ReLU |
+| 13 | "ConvBiasScaleActSerialization sample" :826 | — | same + plan serialization | HALF | F `run_serialization_conv_bias_scale_relu`: `getJsonRepresentation`, `loadFromJson` | XFAIL_RUN, `crashed`: no engine, so it crashes before serialization. With an engine, `loadFromJson` would still be `NOT_SUPPORTED`: no provider serializes plans |
+| 14 | "ConvScaleBiasActGenIndexSelection sample" :881 | — | conv → mul → add → ReLU → GEN_INDEX → CMP_LT / CMP_GT → LOGICAL_OR → BINARY_SELECT | HALF, INT32, BOOLEAN | F `run_conv_scale_bias_relu_gen_index_selection`: `setAxis`, `settDesc` | XFAIL_RUN, `crashed`: no engine for the 9-op graph |
+| 15 | "ConvScaleBiasAct_int8 sample" :954 | — | conv (int32 compute) → mul → add → ReLU | INT8 I/O | F `run_conv_scale_bias_relu_int8` | XFAIL_RUN, `crashed`: no int8 conv engine |
+| 16 | "PoolScaleBiasAct_int8 sample" :1009 | — | resample fwd (avgpool) → mul → add → ReLU | INT8 I/O, FLOAT compute | F `run_pool_scale_bias_relu_int8`: `ResampleDescBuilder` | XFAIL_RUN, `crashed`: no int8 pool engine |
+| 17 | "MatmulBiasAct sample" :1086 | — | matmul → add(bias) → GELU_APPROX_TANH_FWD | HALF | F `run_matmul_bias_gelu` | XFAIL_RUN, `crashed`: no matmul engine (hipBLASLt is not applicable on gfx115x Windows); `ran-clean` is also accepted where hipBLASLt matmul + bias + GELU applies |
+| 18 | "MatmulBiasAct sample_float" :1130 | — | same | FLOAT | same | XFAIL_RUN, `crashed`: as #17 |
+| 19 | "MatmulDGeluDBias sample" :1174 | — | matmul → GELU_APPROX_TANH_BWD → reduction ADD | HALF | F `run_matmul_dgelu_dbias` | XFAIL_RUN, `crashed`: no backward-GELU or dbias engine |
+| 20 | "ConvDrelu sample" :1219 | — | conv → RELU_BWD | HALF | F `run_conv_drelu` | XFAIL_RUN, `crashed`: alignment 4 (`fusion_sample.cpp:1898-1931`) leaves zero engines |
+| 21 | "DgradDrelu sample" :1285 | — | conv backward-data → RELU_BWD | HALF | F `run_dgrad_drelu` | XFAIL_RUN, `crashed`: alignment 4 (`fusion_sample.cpp:2062-2095`) leaves zero engines |
+| 22 | "ConvColReduction sample" :1352 | — | conv → reduction ADD | HALF | F `run_conv_reduction` | XFAIL_RUN, `crashed`: no conv + reduction engine |
+| 23 | "Use errata to block global(index) for execution" :1405 | — | conv backward-filter, engine index 20 | FLOAT | C `block_using_errata`: `setGlobalEngineIdx(20)`, `check_errata` ×3 (tag, tag + shape, wildcard) | XFAIL_RUN, `ran-with-assertion-failures`: engine index 20 is out of range (see note) |
+| 24 | "DP4A execution with cudnnFindPlan" :1456 | — | conv forward, INT8x4 vectorized | INT8, INT32 compute | C `run_dp4a`: `setVectorCountAndDimension` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 4 (`conv_sample.cpp:1192-1193`) → `NOT_SUPPORTED` at tensor finalize |
+| 25 | "IMMA execution with manual autotuning" :1514 | — | conv forward, INT8x32 | INT8, INT32 compute | C `run_imma`: `setReorderType(INT8x32)`, `filter` ×2, `cudnnReorderFilterAndBiasInt8x32`, `check_errata` | XFAIL_RUN, `ran-with-assertion-failures`: `CUDNN_DATA_INT8` with `VECTOR_COUNT` 32 (`conv_sample.cpp:1308-1309`) → `NOT_SUPPORTED` at tensor finalize; the reorder helper is `NOT_SUPPORTED` too |
+| 26 | "Use Plan cache for rerunning the same convolution" :1572 | — | conv forward, twice | FLOAT | C `run_from_heuristics` ×2; second run hits `ExecutionPlanCache` | XFAIL_RUN, `ran-with-assertion-failures`: zero engines, so the first run throws and the cache check fails (see note) |
+| 27 | "Scale Bias Conv BNGenstats" :1669 | — | mul → add → leaky ReLU → conv → GEN_STATS | HALF, FLOAT stats | F `run_bn_conv_gen_stat` | XFAIL_RUN, `ran-with-assertion-failures`: GEN_STATS → `NOT_SUPPORTED` |
+| 28 | "Dual Scale Bias Act Relu" :1714 | — | (mul → add) ×2 → add → ReLU | HALF | F `run_dsbar` | XFAIL_RUN, `crashed`: no engine for the 6-op pointwise chain |
+| 29 | "Dual Scale Bias Act Relu with CPU Reference" :1744 | — | same | FLOAT | same | XFAIL_RUN, `crashed`: as #28 |
+| 30 | "Scale Bias Conv BNGenstats with CPU Reference" :1818 | — | as #27 | HALF, FLOAT stats | same; arch-gated (`is_ampere_arch` / `is_hopper_arch`) | XFAIL_RUN, `ran-with-assertion-failures`: GEN_STATS; compute capability 8.0 keeps the case from skipping |
+| 31 | "BN Finalize" :1953 | — | BN_FINALIZE_STATISTICS (training) | FLOAT stats, DOUBLE, INT64 by-value scalars | F `run_bn_finalize` | XFAIL_RUN, `ran-with-assertion-failures`: BN finalize → `NOT_SUPPORTED` |
+| 32 | "Tensor cloning" :2027 | — | `cloneFrom` + data type / virtual changes | FLOAT → HALF | `TensorBuilder().cloneFrom(...)` (2 sections) | RUN_CLEAN, `ran-clean`: no engine involved |
+| 33 | "Max pooling idx tensor dump" :2154 | ≥ 8600 | resample fwd maxpool with index tensor | HALF, INT8 index | F `run_maxpool_with_idx` | XFAIL_RUN, `crashed`: hipDNN accepts the INT8 index, but no provider does |
+| 34 | "Backward pooling" :2234 | ≥ 8600 | resample bwd avgpool and maxpool (2 sections) | HALF, INT8 index | F `run_backward_avgpool`, `run_backward_maxpool` | XFAIL_RUN, `crashed`: no engine for the INT8-index max-pool backward |
+| 35 | "Conv two global scales" :2351 | ≥ 8300 | conv → mul → mul | HALF, FLOAT compute | F `run_conv_two_global_scales` | XFAIL_RUN, `ran-with-assertion-failures`: zero configurations, so the sample throws `NOT_SUPPORTED` |
+| 36 | "Conv Scale" :2425 | ≥ 8600 | conv → mul(scale) | FP8_E4M3 | P `run_fp8_conv_scale`: deprecated `ConvDescBuilder` setters, `setAlpha`/`setBeta` | RUN, `ran-clean` vacuously: the sample's own pre-Hopper gate throws `ARCH_MISMATCH`, which its catch accepts; the shim is never reached |
+| 37 | "Conv Descale Descale Amax Scale sample" :2482 | ≥ 8600 | conv → mul ×3 + reduction AMAX | FP8_E4M3 | P `run_fp8_conv_descale_descale_amax_scale` | RUN: as #36 |
+| 38 | "Scale transpose convert amax sample" :2549 | ≥ 8600 | mul → IDENTITY (transpose/convert) + AMAX | FP16 → FP8_E4M3 | P `run_tranpose_scale_convert_fp16_fp8_amax` | RUN: as #36 |
+| 39 | "Dgrad Descale Descale Amax Scale sample" :2596 | ≥ 8700 | conv backward-data → mul ×3 + AMAX | FP8_E4M3 | P `run_fp8_dgrad_descale_descale_amax_scale` | RUN, `ran-clean` with the case reported skipped: the sample skips before Hopper |
+| 40 | "BN BWD Weights sample" :2669 | ≥ 90800 | pointwise + RELU_BWD → conv backward-data → BN_BWD_WEIGHTS | HALF, FLOAT stats | F `run_bn_bwd_weight`: `setEqScalesAndBias` | XFAIL_RUN, `ran-with-assertion-failures`: BN backward weights → `NOT_SUPPORTED` |
+| 41 | "Batch normalization" :2744 | ≥ 8800 | NORM_FORWARD / NORM_BACKWARD batch norm with 2 peer-stat tensors (2 sections) | HALF, FLOAT stats | N `run_batch_norm_forward`, `execute_batch_norm_forward`, `run_batch_norm_backward`; caches copyable plans by feature vector | XFAIL_RUN, `ran-with-assertion-failures`: peer statistics → `NOT_SUPPORTED` |
 
-Seed tally: 2 RUN_CLEAN, 14 RUN, 25 XFAIL_RUN.
+Tally: 2 RUN_CLEAN, 4 RUN, 35 XFAIL_RUN (16 `ran-with-assertion-failures`, 19 `crashed`).
 
 Note on #23 and #26: plan-cache and errata cases would be natural RUN_CLEAN candidates, but both build
-their graph with `create_common_descriptors` (alignment 4), and #23 also needs NVIDIA engine 20; they
-are seeded XFAIL_RUN. A RUN_CLEAN errata or plan-cache check would need a 16-byte-aligned
-variant, which the upstream corpus does not have.
+their graph with `create_common_descriptors` (alignment 4), which has no engine, and #23 also needs
+NVIDIA engine 20. #26 would fail even with engines: its second run executes the cached plan on a new
+handle, which the shim rejects with `BAD_PARAM` (the `cudnnBackendExecute` handle row of
+[Known divergences](../KNOWN_DIVERGENCES.md#engines-plans-and-execution)). A RUN_CLEAN errata or
+plan-cache check would need a 16-byte-aligned variant that reuses one handle, which the upstream
+corpus does not have.
 
 Filter predicates the samples use: `isNonDeterministic`, `isReducedPrecisionReduction`,
 `isDownConvertingInputs` (`hasNumericalNote<>`, `conv_sample.cpp:30-47`); `allowAll`

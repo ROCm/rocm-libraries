@@ -404,7 +404,7 @@ TEST_F(TestCudnnShimV8DescriptorBuilders, PointwiseBuilderDefaultsElideAtLowerin
             calls.begin(), calls.end(), [name](const auto& call) { return call.name == name; });
     };
     EXPECT_TRUE(has(HIPDNN_ATTR_POINTWISE_MODE));
-    EXPECT_FALSE(has(HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP));
+    EXPECT_TRUE(has(HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP));
     EXPECT_FALSE(has(HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP));
     EXPECT_FALSE(has(HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE));
 

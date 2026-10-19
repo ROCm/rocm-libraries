@@ -376,9 +376,12 @@ protected:
         {
             return std::nullopt;
         }
+        // T is a handle or descriptor pointer for handle-typed attributes; its own size is meant.
+        // NOLINTBEGIN(bugprone-sizeof-expression)
         requireElementSize(name, *value, sizeof(T));
         T result;
         std::memcpy(static_cast<void*>(&result), value->bytes.data(), sizeof(T));
+        // NOLINTEND(bugprone-sizeof-expression)
         return result;
     }
 
