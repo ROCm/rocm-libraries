@@ -35,14 +35,18 @@ Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
 
 - **Dispatcher tiles (114 tile and state-dtype pairs):** GDN at `Hk/Hv = 16/32`,
   every tile in `CONFIGURED_TILES`; KDA at `32/32`, the three tiles in
-  `_TUNED_TILES_KDA`; each with bf16 and `f32` state. Dispatch accepts only a
-  16-bit state today, so the `f32` half is not reachable from a request yet.
+  `_TUNED_TILES_KDA`; each with bf16 and `f32` state. This table was collected
+  before dispatch accepted `f32` state, so the `f32` half was built as specs
+  directly. Dispatch can now request an `f32` state but still uses the same
+  auto tile as the 16-bit state.
 - **Auto-route fallback (4):** GDN `(1,1,1)` at `DK = DV = 64` and `192`, where
   `DEFAULT_TILE` `(2,16,8)` is illegal (ALGORITHM.md §4.6).
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
   `(NW, WTK)` with `NW` in 1–16 and `WTK` in 1–32, with `fuse_conv`,
-  `fuse_out_norm` (`rn` below) or both (`cv+rn`). The registry never builds a
-  fused spec; callers pick these tiles themselves.
+  `fuse_out_norm` (`rn` below) or both (`cv+rn`). This table was collected
+  before dispatch had fusion request fields, so these were built as specs
+  directly. Dispatch can now request fusion, but `auto` only routes the interim
+  `(4,16,1)` fused tile; the wider tile sweep remains spec-only.
 
 The merge base is `153bf493555`, the interleaved order; the head is the
 load-first emitter.
@@ -118,9 +122,9 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
   `(4,16,1)` bf16 gains a wave on ROCm 7.1, loses one on ROCm 7.13 and does not
   change on ROCm 10).
 - **The exemption stays keyed on `NW == 1`.** The tiles that start to spill are
-  multi-wave `fuse_conv` tiles, which dispatch never builds. Which ones spill
-  differs per compiler, so a footprint-keyed exemption would encode one
-  compiler's register allocator.
+  multi-wave `fuse_conv` tiles outside the interim `(4,16,1)` fused default.
+  Which ones spill differs per compiler, so a footprint-keyed exemption would
+  encode one compiler's register allocator.
 - **The scratch test holds the stable subset.**
   `test_lowers_and_compiles_without_scratch` lowers all 228 fused cases and
   compiles and holds at 0 B the 116 that ROCm 7.1, 7.13 and 10 all keep there:

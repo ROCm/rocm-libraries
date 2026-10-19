@@ -531,8 +531,9 @@ GDN's default `(2, 16, 8)` is not `BPV = 1`, and every fused KDA request with it
 `(2, 16, 1)`. `auto` therefore prefers one interim static fused tile, `(4, 16, 1)`, for both gate
 kinds and every state width. It is the tile the fused numeric suite is built around, not a
 measured winner; per-mode fused defaults are a separate measurement. It needs `DK` a multiple of
-`WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4 deployments meet; otherwise, e.g. a
-fused GDN request at `DK = 64`, `auto` still falls back to `(1, 1, 1)`. KDA registers the tile as
+`WTK · VPT = 128` and `DV` a multiple of 16, which both §1.4 deployments meet. If it is illegal,
+`auto` falls back to the first legal candidate; for example, fused GDN at `DK = 64` falls back to
+`(1, 1, 1)`, and at `DV = 8` to `(1, 8, 1)`. KDA registers the tile as
 one extra candidate (`kda_nw4_wtk16_bpv1`) outside its work table, at the lowest priority. The
 fused flags must be real bools and the dims real ints in the request, and `fuse_conv` with
 `num_k_heads ≠ num_v_heads` is a request error (§4.9).

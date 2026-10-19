@@ -120,7 +120,7 @@ def _gate_kind_for_spec_id(spec_id: str) -> str:
 
 
 def is_fused(req: GdnDecodeRequest) -> bool:
-    return bool(req.fuse_conv or req.fuse_out_norm)
+    return req.fuse_conv or req.fuse_out_norm
 
 
 def auto_tile(req: GdnDecodeRequest) -> Tuple[int, int, int]:

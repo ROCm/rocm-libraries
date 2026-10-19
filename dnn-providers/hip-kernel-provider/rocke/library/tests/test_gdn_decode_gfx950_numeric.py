@@ -602,6 +602,34 @@ def test_request_fields_reach_the_launch(harness, gate, state_dtype, flags, head
 
 
 @requires_gfx950
+@pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
+@pytest.mark.parametrize(
+    "flags",
+    [
+        pytest.param((True, False), id="cv"),
+        pytest.param((True, True), id="cv_rn"),
+    ],
+)
+def test_kda_fused_request_reaches_kimi_head_shape(harness, state_dtype, flags):
+    """KDA's real fused-conv deployment shape has Hk == Hv == 32, not 16.
+
+    The generic dispatch matrix above proves the fused ABI at a smaller MHA
+    shape; this pins the request-routed KDA/Kimi head count that the docs name.
+    """
+    conv, norm = flags
+    _check_dispatched_launch(
+        harness,
+        expect_tile=(4, 16, 1),
+        gate_kind="kda",
+        num_k_heads=32,
+        num_v_heads=32,
+        state_dtype=state_dtype,
+        fuse_conv=conv,
+        fuse_out_norm=norm,
+    )
+
+
+@requires_gfx950
 @pytest.mark.parametrize("gate", ["gdn", "kda"])
 @pytest.mark.parametrize("state_dtype", ["bf16", "f32"])
 def test_request_fields_reach_the_launch_without_qk_l2norm(harness, gate, state_dtype):

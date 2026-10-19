@@ -86,9 +86,22 @@ def test_dispatched_prep_matches_the_builder_prep_spec():
         expected = dataclasses.replace(
             prep_spec_of(scan, raw=True),
             gate_kind="gdn",
-            kv_group=int(req.kv_group),
+            kv_group=req.kv_group,
         )
         assert _prep_spec(req) == expected, f"prep drift at kv_group={req.kv_group}"
+
+
+def test_scan_state_flags_reach_the_spec():
+    """Valid non-default state flags must pass through unchanged."""
+    spec = dispatch_gdn_prefill(
+        _req(
+            algorithm="chunk_scan",
+            has_initial_state=True,
+            store_final_state=False,
+        )
+    ).spec
+    assert spec.has_initial_state is True
+    assert spec.store_final_state is False
 
 
 @pytest.mark.parametrize(
