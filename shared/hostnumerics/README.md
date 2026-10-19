@@ -183,10 +183,11 @@ unsupported specializations, including sub-byte formats whose `Storage` is
 `void`; the explicit `size_t` return type also covers the throwing branch.
 An empty buffer returns zero for the three accepted formats.
 
-`scalar_type.hpp` documents the full visitor contract, including forwarding,
-reference returns, and rejecting invalid enum values. Use `scalarTypeInfo`
-directly when only runtime metadata is needed. A visitor can access metadata
-at compile time through `scalarTypeInfo(Tag::type)`.
+See [`scalar_type.hpp`](include/roc/hostnumerics/scalar_type.hpp) for visitor
+requirements and [`ScalarDispatchSqrt`](tests/scalar_type_test.cpp) for a compiled
+vector square-root example. Use `scalarTypeInfo` directly when only runtime
+metadata is needed. A visitor can access metadata at compile time through
+`scalarTypeInfo(Tag::type)`.
 
 Rank-zero tensors represent runtime-typed numerical values without a parallel
 scalar container. Operations also accept ordinary native C++ numbers where that
