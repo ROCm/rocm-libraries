@@ -208,9 +208,9 @@ detail::TwoOfFourMetadataWorkCounts encodeTwoOfFourMetadataInvocation(
     const Shape metadataShape = detail::validateTwoOfFourMetadataRequest(problem);
     const size_t sparsityGroups = problem.retainedIndices.shape()[problem.axis] / 2;
     const size_t metadataGroups = metadataShape[problem.axis];
+    if (problem.retainedIndices.elementCount() == 0) return {};
     const size_t lineCount =
         detail::projectWithoutAxis(problem.retainedIndices.shape(), problem.axis).elementCount();
-    if (problem.retainedIndices.elementCount() == 0) return {};
 
     std::vector<size_t> retainedCoordinates(problem.retainedIndices.shape().rank(), 0);
     const ptrdiff_t retainedAxisStride = problem.retainedIndices.layout().strides()[problem.axis];

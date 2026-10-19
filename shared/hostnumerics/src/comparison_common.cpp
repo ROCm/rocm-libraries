@@ -109,11 +109,6 @@ bool elementwiseStatisticsOnlyComparison(const ComparisonOptions& options) {
            !options.maximumUlpTolerance;
 }
 
-void coordinatesForLinearIndex(size_t logicalIndex, const Shape& shape,
-                               std::span<const size_t> order, std::span<size_t> coordinates) {
-    shape.coordinates(logicalIndex, order, coordinates);
-}
-
 bool advanceCoordinates(std::span<size_t> coordinates, const Shape& shape,
                         std::span<const size_t> order, std::span<const ptrdiff_t> observedStrides,
                         std::span<const ptrdiff_t> expectedStrides, ptrdiff_t& observedOffset,

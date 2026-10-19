@@ -5,6 +5,34 @@ from _hostnumerics_test_support import *  # noqa: F403
 
 
 class StructuredSparsityTests(unittest.TestCase):  # noqa: F405
+    def test_oversized_empty_shapes_do_no_sparsity_or_metadata_work(self):
+        maximum = int(np.iinfo(np.intp).max)
+        for shape in ([maximum, 3, 0], [3, maximum, 0]):
+            with self.subTest(shape=shape):
+                # Excluding the zero axis would overflow even though no work exists.
+                tensor = hv.Tensor.from_storage(
+                    hv.ScalarType.Float32, shape, b"", strides=[0, 0, 0]
+                )
+                pattern = hv.StructuredSparsityPattern()
+                pattern.axis = 2
+                pattern.fixed_positions = [1, 3]
+                result = hv.apply_structured_sparsity(tensor, pattern, True)
+                for output in (
+                    result.pruned,
+                    result.compressed,
+                    result.retained_indices,
+                    result.two_of_four_metadata,
+                    hv.encode_two_of_four_metadata(result.retained_indices, 2),
+                ):
+                    self.assertEqual(output.shape, shape)
+                    self.assertEqual(output.size, 0)
+                    self.assertEqual(output.storage, b"")
+                pattern.fixed_positions = [1, 4]
+                with self.assertRaisesRegex(RuntimeError, "fixed position"):
+                    hv.apply_structured_sparsity(tensor, pattern, True)
+                with self.assertRaisesRegex(RuntimeError, "input type must be UInt8"):
+                    hv.encode_two_of_four_metadata(tensor, 2)
+
     def test_structured_sparsity_all_fixed_two_of_four_patterns(self):
         values = np.arange(1, 17, dtype=np.float32).reshape(2, 8)
         retained_position_sets = (

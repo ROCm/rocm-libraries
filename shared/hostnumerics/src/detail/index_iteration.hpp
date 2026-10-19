@@ -33,7 +33,7 @@ inline Shape projectWithoutAxis(const Shape& shape, size_t excluded) {
     std::vector<size_t> axes;
     for (size_t axis = 0; axis < shape.rank(); ++axis)
         if (axis != excluded) axes.push_back(axis);
-    return shape.project(axes);
+    return shape.fromDimensions(axes);
 }
 
 // Built at an invocation boundary. Subsequent methods require a valid index or
