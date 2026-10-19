@@ -465,11 +465,13 @@
         "verified_on": "llvm22"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm22"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_bf8)",
+        "status": "arch_absent",
         "verified_on": "llvm22"
       },
       "gfx950": {
@@ -504,11 +506,13 @@
         "verified_on": "llvm22"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm22"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "assembler: instruction not supported on this GPU (v_cvt_scalef32_pk_f32_fp8)",
+        "status": "arch_absent",
         "verified_on": "llvm22"
       },
       "gfx950": {
