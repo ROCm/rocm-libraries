@@ -39,8 +39,9 @@ endfunction()
 #   cannot be derived, e.g. a kept KDP references a standalone UKD, or a listed UKD is
 #   kept nowhere) and re-run configure when a source file or the derive tooling
 #   changes. Each <ukd> is passed as one --ukd; with none, derive selects per compile
-#   group (one UKD, or a value sweep for kinds with a sweep field). The tool writes <out_dir>/../expect.json, the list of kept UKDs the
-#   assertion expects; <expect_var> receives its path. FATAL when that list is empty: no
+#   group (one UKD, or a value sweep for kinds with a sweep field). The tool writes
+#   <out_dir>/../expect.json, the list of kept UKDs the assertion expects, each with the
+#   pass it packs under (<arch>, or a generic target containing it); <expect_var> receives its path. FATAL when that list is empty: no
 #   KDP under <from_dir> ships for <arch>, so the pack would prune everything. Deriving
 #   is idempotent, so a reconfigure leaves the derived root's mtimes alone and does not
 #   re-pack.
@@ -50,7 +51,8 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
                  PROPERTY CMAKE_CONFIGURE_DEPENDS ${_derive_inputs}
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
-                          "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py")
+                          "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
+                          "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
     get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_ukd_args "")
     foreach(_ukd IN LISTS ARGN)
@@ -60,6 +62,7 @@ function(_hkp_probe_derive_root name from_dir arch out_dir expect_var)
         COMMAND "${Python3_EXECUTABLE}"
                 "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
                 --from "${from_dir}"
+                --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 --arch "${arch}"
                 --out "${out_dir}"
                 ${_filter_args}
@@ -290,11 +293,16 @@ endfunction()
 #   UKD under HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT that is a concrete
 #   target (hkp_is_concrete_arch), minus the build's own targets (hkp_selected_arches).
 #   Descriptors with no `arch` (wildcards) name no arch: they ship for every build
-#   target, so the build's own production pack covers them. A non-concrete entry
-#   (gfx9-4-generic) is skipped with a STATUS line: no build packs for it, because
-#   GPU_TARGETS drops it and the packer matches arch names exactly.
-#   FATAL with the tool's stderr when the packer's loader rejects the root. Configure
-#   re-runs when a file under the root or the derive tooling changes.
+#   target, so the build's own production pack covers them. A generic target in
+#   HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON is probed through its first member (the
+#   packer compiles the generic for any member and merges it into the member's folder),
+#   unless the build targets one of its members, whose production pack compiles it
+#   already; the STATUS line shows each generic -> member mapping. A TheRock family name
+#   is skipped with a STATUS line: no build packs for it, because GPU_TARGETS drops it.
+#   FATAL with the tool's stderr when the packer's loader rejects the root, including a
+#   `*-generic` entry absent from the table. Configure
+#   re-runs when a file under the root, the generic target table or the derive tooling
+#   changes.
 # ---------------------------------------------------------------------------
 function(_hkp_probe_automatic_arches out_var)
     get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
@@ -303,11 +311,20 @@ function(_hkp_probe_automatic_arches out_var)
     set_property(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" APPEND
                  PROPERTY CMAKE_CONFIGURE_DEPENDS ${_root_inputs}
                           "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
-                          "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py")
+                          "${HKP_PKG_DIR}/tools/hkp_probe_kinds.py"
+                          "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
+    hkp_selected_arches(_targets _targets_source)
+    set(_exclude_args "")
+    foreach(_target IN LISTS _targets)
+        list(APPEND _exclude_args --exclude "${_target}")
+    endforeach()
     execute_process(
         COMMAND "${Python3_EXECUTABLE}"
                 "${HKP_PKG_DIR}/tools/hkp_probe_derive_root.py"
-                --list-arches --from "${_root}" ${_filter_args}
+                --list-arches --from "${_root}"
+                --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
+                ${_exclude_args}
+                ${_filter_args}
         RESULT_VARIABLE _rc
         OUTPUT_VARIABLE _out
         ERROR_VARIABLE _err)
@@ -317,19 +334,32 @@ function(_hkp_probe_automatic_arches out_var)
             "failed (exit ${_rc}).\n${_err}")
     endif()
     string(REGEX REPLACE "\n+$" "" _out "${_out}")
-    string(REPLACE "\n" ";" _named "${_out}")
+    string(REPLACE "\n" ";" _lines "${_out}")
 
-    hkp_selected_arches(_targets _targets_source)
+    # Each line is an arch followed by the generic targets it stands for.
+    set(_named "")
     set(_auto "")
     set(_skipped "")
-    foreach(_arch IN LISTS _named)
+    set(_mapped "")
+    foreach(_line IN LISTS _lines)
+        separate_arguments(_words UNIX_COMMAND "${_line}")
+        list(POP_FRONT _words _arch)
+        list(APPEND _named "${_arch}")
         hkp_is_concrete_arch(_concrete "${_arch}")
         if(_concrete)
             list(APPEND _auto "${_arch}")
+            foreach(_generic IN LISTS _words)
+                list(APPEND _mapped "${_generic} -> ${_arch}")
+            endforeach()
         else()
             list(APPEND _skipped "${_arch}")
         endif()
     endforeach()
+    if(_mapped)
+        list(JOIN _mapped ", " _mapped_text)
+        message(STATUS
+            "hkp: generic targets probed through their first member: [${_mapped_text}]")
+    endif()
     if(_skipped)
         list(JOIN _skipped ", " _skipped_text)
         message(STATUS
@@ -343,8 +373,8 @@ function(_hkp_probe_automatic_arches out_var)
     list(JOIN _named ", " _named_text)
     list(JOIN _targets ", " _targets_text)
     message(STATUS
-        "hkp: automatic probe arches: [${_auto_text}] (explicit arches under ${_root}: "
-        "[${_named_text}]; build targets: [${_targets_text}])")
+        "hkp: automatic probe arches: [${_auto_text}] (probe arches of the explicit "
+        "arches under ${_root}: [${_named_text}]; build targets: [${_targets_text}])")
     set(${out_var} "${_auto}" PARENT_SCOPE)
 endfunction()
 
@@ -375,8 +405,9 @@ endfunction()
 #   probed as usual; an arch left with no content names no probe. Load the named
 #   probes from probes/probes.cmake, then declare one automatic probe per architecture the production
 #   root names that the build does not target: the explicit `arch` entries of its KDPs
-#   and UKDs (hkp_probe_derive_root.py --list-arches; wildcard descriptors name none)
-#   minus hkp_selected_arches(), each as hkp_add_packaging_probe(ARCH <arch>). Register
+#   and UKDs (hkp_probe_derive_root.py --list-arches; wildcard descriptors name none,
+#   generic targets map to a member, see _hkp_probe_automatic_arches) minus
+#   hkp_selected_arches(), each as hkp_add_packaging_probe(ARCH <arch>). Register
 #   the probe tooling tests, write the manifest of ctest names
 #   (${CMAKE_BINARY_DIR}/hkp-probes/manifest.txt) and define the aggregate target
 #   hkp_packaging_probes. Zero probes is valid: every explicit arch is a build target,

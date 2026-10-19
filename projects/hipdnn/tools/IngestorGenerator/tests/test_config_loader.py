@@ -5,6 +5,10 @@
 configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-key
 rejection, and the kernel_source_kind rejections."""
 
+import copy
+import sys
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -187,6 +191,77 @@ class TestKernelArchSubsetOfPackCheck:
         pack = make_pack(arch=[], kernels=[kernel])
         config = make_minimal_config(packs=[pack])
         _check_kernel_arch_subset_of_pack(config)  # does not raise
+
+
+class TestGenericArchRules:
+    """Generic-target rules; ``gfx11-generic`` holds gfx1100..gfx1153, ``gfx12-generic`` gfx1200/gfx1201."""
+
+    @staticmethod
+    def _config(pack_arch, kernel_arch, kind=None):
+        extra = {"kernel_source": KernelSource(kind=kind)} if kind else {}
+        kernel = make_kernel(arch=kernel_arch, **extra)
+        return make_minimal_config(packs=[make_pack(arch=pack_arch, kernels=[kernel])])
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx11-generic"], ["gfx11-generic"]),
+            (["gfx942", "gfx11-generic"], ["gfx942", "gfx11-generic"]),
+        ],
+    )
+    def test_accepted_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx9-4-generic"], []),
+            ([], ["gfx9-4-generic"]),
+            (["gfx11-generic", "gfx1151"], []),
+            (["gfx1151", "gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], ["gfx1151", "gfx11-generic"]),
+            ([], ["gfx11-generic"]),
+            (["gfx942"], ["gfx11-generic"]),
+            (["gfx11-generic"], ["gfx1151"]),
+            (["gfx11-generic", "gfx12-generic"], ["gfx11-generic"]),
+        ],
+    )
+    def test_rejected_shapes(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch))
+
+    @pytest.mark.parametrize(
+        ("pack_arch", "kernel_arch"),
+        [
+            (["gfx11-generic"], []),
+            (["gfx942", "gfx11-generic"], []),
+            ([], ["gfx11-generic"]),
+        ],
+    )
+    def test_rocke_under_a_generic_is_rejected(self, pack_arch, kernel_arch):
+        from codegen.config_loader import _check_generic_arch
+
+        with pytest.raises(ConfigError):
+            _check_generic_arch(self._config(pack_arch, kernel_arch, kind="rocke"))
+
+    def test_known_generic_produces_no_unrecognised_arch_warning(self):
+        from codegen.config_loader import _check_arch_shape
+
+        assert _check_arch_shape(self._config(["gfx11-generic"], [])) == []
+
+    def test_an_expanded_subset_is_accepted_by_the_coverage_check(self):
+        from codegen.config_loader import _check_kernel_arch_subset_of_pack
+
+        _check_kernel_arch_subset_of_pack(self._config(["gfx11-generic"], ["gfx1151"]))
+        with pytest.raises(ConfigError):
+            _check_kernel_arch_subset_of_pack(
+                self._config(["gfx11-generic"], ["gfx1250"])
+            )
 
 
 class TestArchShapeCheck:
@@ -1208,11 +1283,11 @@ class TestShippedExampleConfigsLoad:
     """Every config under `configs/` is a worked example a reader copies, so a retired
     key they still set would make each copy a config the loader refuses.
 
-    `configs/` holds TWO schemas. `*.profile.yaml` is a dispatch profile: it names the
-    dispatcher, request class and predicate the tools import, and carries none of the
-    keys `load_config` requires. Selecting it by extension alone feeds the wrong schema
-    into the generator loader, so it is selected out here and checked through the loader
-    that owns it.
+    `configs/` holds TWO schemas. `*.engine.yaml` is an engine manifest: it states the
+    engine's identity and the registry slice it ships, and `registry_enumerator.py`
+    expands it into a generator config. It carries no `packs`, so selecting it by
+    extension alone would feed the wrong schema into the generator loader; it is
+    selected out here and checked through the loader that owns it.
     """
 
     @staticmethod
@@ -1220,7 +1295,11 @@ class TestShippedExampleConfigsLoad:
         return sorted(
             path
             for path in configs_dir.glob("*.yaml")
-            if not path.name.endswith(".profile.yaml")
+            if not path.name.endswith(".engine.yaml")
+            # A .profile.yaml describes an engine that has no manifest: no `packs`, no
+            # `enumerate:`. Neither loader takes it; tests/test_launch_surface.py
+            # checks its `launch_surface:` block.
+            and not path.name.endswith(".profile.yaml")
         )
 
     def test_every_shipped_generator_config_loads(self, configs_dir):
@@ -1229,41 +1308,29 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             assert load_config(path).engine.name
 
-    def test_every_shipped_dispatch_profile_loads_through_its_own_loader(
+    def test_every_shipped_engine_manifest_loads_through_its_own_loader(
         self, configs_dir
     ):
-        """The profiles are shipped worked examples too, so leaving them unchecked
-        would just move the gap rather than close it."""
-        # Imported here rather than at module scope: this suite is about
-        # codegen.config_loader, and `tools/` is not otherwise on its path.
         import sys
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-        import dispatch_parity
+        import registry_enumerator
 
-        paths = sorted(configs_dir.glob("*.profile.yaml"))
-        assert paths, f"no dispatch profiles found under {configs_dir}"
+        paths = sorted(configs_dir.glob("*.engine.yaml"))
+        assert paths, f"no engine manifests found under {configs_dir}"
         for path in paths:
-            profile = dispatch_parity._load_profile(str(path))
-            # The blocks every profile tool dereferences; `_required` is the tool's
-            # own check, so this cannot drift from what the tools demand.
-            for scope, keys in (
-                ("dispatch", ("module", "function")),
-                ("request", ("module", "class")),
-                ("predicate", ("module", "function")),
-            ):
-                dispatch_parity._required(profile[scope], scope, *keys)
-            assert profile["provider_root"], path
+            manifest = registry_enumerator.load_manifest(str(path))
+            assert manifest["engine"]["name"], path
+            assert manifest["enumerate"]["max_kernels"] > 0, path
+            assert manifest["provider_root"], path
 
-    def test_a_dispatch_profile_is_not_a_generator_config(self, configs_dir):
-        """The control for the selection above: if `load_config` ever accepted a
-        profile, the split would be silently unnecessary and the next reader would
-        re-merge it."""
-        profiles = sorted(configs_dir.glob("*.profile.yaml"))
-        assert profiles, f"no dispatch profiles found under {configs_dir}"
-        assert not [p for p in self._generator_configs(configs_dir) if p in profiles]
-        for path in profiles:
+    def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
+        """The control: if `load_config` ever accepted a manifest, the split would be
+        silently unnecessary and the next reader would re-merge it."""
+        manifests = sorted(configs_dir.glob("*.engine.yaml"))
+        assert manifests
+        for path in manifests:
             with pytest.raises(ConfigError):
                 load_config(path)
 
@@ -2819,3 +2886,83 @@ class TestHsacoKernelSource:
         }
         with pytest.raises(ConfigError, match="compiled specialization"):
             self._load(tmp_path, raw)
+
+
+class TestReductionBlockAndDefaultMarker:
+    REDUCTION = {
+        "fields": {
+            "feature": ["dtype"],
+            "performance": [{"name": "block_m", "divides": "seqlen_q"}],
+            "ignored": ["lds_k_row_pad"],
+        },
+        "aot_budget_per_arch": 1000,
+    }
+
+    def _load(self, tmp_path, reduction=REDUCTION, marker=True):
+        raw = TestExpandedKernelsAreKeyChecked()._variants_raw()
+        raw["reduction"] = copy.deepcopy(reduction)
+        raw["kmd_fields"].append(
+            {"name": "seqlen_q", "type": "int", "default_value": 512}
+        )
+        raw["packs"][0]["variants"][0]["knob_sets"]["pinned"] = [
+            {"block_m": 256, "tag": "a", "default": marker},
+            {"block_m": 128, "tag": "b"},
+        ]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_both_are_carried_and_neither_reaches_the_spec(self, tmp_path):
+        config = self._load(tmp_path)
+        assert config.reduction == self.REDUCTION
+        kernels = config.packs[0].kernels
+        assert [k.default for k in kernels] == [True, False]
+        assert all("default" not in k.kernel_source.spec for k in kernels)
+
+    @pytest.mark.parametrize(
+        "reduction, marker, message",
+        [
+            (REDUCTION, "yes", "'default' must be true or false"),
+            ({**REDUCTION, "budget": 1}, True, r"'reduction' declares \['budget'\]"),
+            (
+                {"fields": {**REDUCTION["fields"], "ignored": ["block_m"]}},
+                True,
+                r"lists \['block_m'\] more than once",
+            ),
+            (
+                {
+                    "fields": {
+                        "performance": [{"name": "x", "unset_resolves_by": "a b"}]
+                    }
+                },
+                True,
+                "not an identifier",
+            ),
+            ({**REDUCTION, "aot_budget_per_arch": True}, True, "positive integer"),
+            (
+                {
+                    "fields": {
+                        **REDUCTION["fields"],
+                        "performance": [{"name": "block_m", "divides": "not_a_field"}],
+                    }
+                },
+                True,
+                "not_a_field",
+            ),
+        ],
+    )
+    def test_a_bad_marker_or_block_is_refused(
+        self, tmp_path, reduction, marker, message
+    ):
+        with pytest.raises(ConfigError, match=message):
+            self._load(tmp_path, reduction, marker)
+
+    @pytest.mark.parametrize("key", ["single_round_epsilon", "drift_multiplier"])
+    @pytest.mark.parametrize(
+        "value", [True, -0.1, float("nan"), float("inf"), "0.1"], ids=repr
+    )
+    def test_a_noise_policy_key_must_be_a_finite_non_negative_number(
+        self, tmp_path, key, value
+    ):
+        with pytest.raises(ConfigError, match=key):
+            self._load(tmp_path, {**self.REDUCTION, key: value})
