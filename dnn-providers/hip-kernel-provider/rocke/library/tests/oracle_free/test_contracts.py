@@ -1,11 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only contracts for the P3 generators, checker, and subject adapter."""
+"""CPU-only contracts for the P3 checker and dense subject adapter."""
 
 from __future__ import annotations
 
 import ast
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,166 +15,348 @@ import pytest
 
 from ._analytical import (
     P3_BASIS_OFFSETS,
+    P3_CALIBRATION,
     P3_CAUSAL_FP16,
-    P3_TOLERANCES,
     P3_WINDOW_BF16,
+    CalibrationEntry,
     P3Case,
-    analyze_p3,
+    P3Mutation,
+    P3Observation,
+    P3SpecFingerprint,
+    analyze_p3_policy,
+    correct_p3_observation,
+    decode_bits,
     legal_keys,
-    p3_expected,
+    p3_expected_bits,
     p3_inputs,
-    p3_tolerance,
-    round_to_storage,
+    p3_inputs_folded,
+    residue_count,
+    target_bits,
+    ulp_distance,
 )
 from ._gfx942_subject import (
     _resolve_tuning_spec,
     _validate_supported_case,
     _validate_tensors,
     _verify_resolved_spec,
+    resolve_dense_subject,
 )
 
 
-def _small_case(mask: str, *, window: int = 0) -> P3Case:
-    return P3Case(1, 8, 8, 2, 2, 4, "fp16", mask, window)
+def _small_case(mask: str, *, window: int = 0, seqlen_k: int = 8) -> P3Case:
+    return P3Case(1, 8, seqlen_k, 2, 2, 4, "fp16", mask, window)
 
 
-def test_legal_key_sets_pin_causal_and_window_semantics() -> None:
+def _replace_bits(
+    observation: P3Observation,
+    exposure: str,
+    coordinate: tuple[int, int, int, int],
+    bits: int,
+) -> P3Observation:
+    outputs: list[tuple[str, np.ndarray]] = []
+    for name, values in observation.exposures:
+        copy = values.copy()
+        if name == exposure:
+            copy[coordinate] = np.uint16(bits)
+        outputs.append((name, copy))
+    return P3Observation(tuple(outputs))
+
+
+def _fraction_from_bits(bits: int, dtype: str) -> Fraction:
+    fraction_bits, exponent_bits, bias = {
+        "fp16": (10, 5, 15),
+        "bf16": (7, 8, 127),
+    }[dtype]
+    exponent_mask = (1 << exponent_bits) - 1
+    exponent = (bits >> fraction_bits) & exponent_mask
+    fraction = bits & ((1 << fraction_bits) - 1)
+    if exponent == 0:
+        significand = fraction
+        power = 1 - bias - fraction_bits
+    else:
+        significand = (1 << fraction_bits) | fraction
+        power = exponent - bias - fraction_bits
+    return (
+        Fraction(significand << power, 1)
+        if power >= 0
+        else Fraction(significand, 1 << -power)
+    )
+
+
+def test_legal_key_sets_pin_causal_window_and_mutation_semantics() -> None:
     causal = _small_case("causal")
     window = _small_case("window", window=4)
 
     assert legal_keys(causal, 0) == (0,)
     assert legal_keys(causal, 7) == tuple(range(8))
-    assert legal_keys(window, 2) == (0, 1, 2)
+    assert legal_keys(causal, 3, P3Mutation.INCLUDE_FUTURE_KEY) == (0, 1, 2, 3, 4)
+    assert legal_keys(causal, 3, P3Mutation.EXCLUDE_LAST_KEY) == (0, 1, 2)
     assert legal_keys(window, 4) == (1, 2, 3, 4)
-
-
-def test_wrong_membership_rules_change_p3_expected_values() -> None:
-    causal = _small_case("causal")
-    window = _small_case("window", window=4)
-
-    assert not np.array_equal(
-        p3_expected(causal, 0),
-        p3_expected(causal, 0, rule="causal_exclusive"),
-    )
-    assert not np.array_equal(
-        p3_expected(window, 0),
-        p3_expected(window, 0, rule="window_inclusive_lower"),
-    )
+    assert legal_keys(window, 4, P3Mutation.INCLUDE_OLD_WINDOW_KEY) == (0, 1, 2, 3, 4)
+    assert legal_keys(window, 4, P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY) == (2, 3, 4)
 
 
 @pytest.mark.parametrize(
-    "case,wrong_rule",
+    "dtype,numerator,denominator,expected",
     [
-        (_small_case("causal"), "causal_exclusive"),
-        (_small_case("window", window=4), "window_inclusive_lower"),
+        ("fp16", 1, 3, 0x3555),
+        ("bf16", 1, 3, 0x3EAB),
+        ("fp16", 1, 128, 0x2000),
+        ("bf16", 1, 128, 0x3C00),
+        ("fp16", 1, 129, 0x1FF0),
+        ("bf16", 1, 129, 0x3BFE),
+        ("fp16", 1, 32768, 0x0200),
     ],
 )
-def test_p3_checker_rejects_wrong_mask_model(case: P3Case, wrong_rule: str) -> None:
-    offsets = (0, 4)
-    correct = {offset: p3_expected(case, offset) for offset in offsets}
-    positive = analyze_p3(case, correct, offsets=offsets, focused_rows=(0, 3, 4, 7))
-    wrong = analyze_p3(
-        case,
-        correct,
-        offsets=offsets,
-        focused_rows=(0, 3, 4, 7),
-        rule=wrong_rule,
-    )
-
-    assert positive.invalid_count == 0
-    assert positive.zero_leakage_count == 0
-    assert positive.row_mass_error < 1e-15
-    assert max(item.maximum_error for item in positive.elements.values()) == 0.0
-    assert max(item.maximum_error for item in wrong.elements.values()) > p3_tolerance(
-        "element", case.dtype
-    )
+def test_target_bits_pinned_values(
+    dtype: str, numerator: int, denominator: int, expected: int
+) -> None:
+    assert target_bits(numerator, denominator, dtype) == expected
 
 
-def test_p3_generators_expose_each_key_once_across_four_windows() -> None:
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_target_bits_are_nearest_with_ties_to_even(dtype: str) -> None:
+    for denominator in range(1, 4097):
+        bits = target_bits(1, denominator, dtype)
+        exact = Fraction(1, denominator)
+        error = abs(_fraction_from_bits(bits, dtype) - exact)
+        neighbors = [candidate for candidate in (bits - 1, bits + 1) if candidate >= 0]
+        neighbor_errors = [
+            abs(_fraction_from_bits(candidate, dtype) - exact)
+            for candidate in neighbors
+        ]
+        assert all(error <= neighbor for neighbor in neighbor_errors)
+        if any(error == neighbor for neighbor in neighbor_errors):
+            assert bits & 1 == 0
+
+
+def test_ulp_distance_coalesces_signed_zero() -> None:
+    assert ulp_distance(0x0000, 0x8000) == 0
+    assert ulp_distance(0x3C00, 0x3C01) == 1
+    assert ulp_distance(0xBC00, 0xBC01) == 1
+
+
+def test_p3_generators_cover_basis_and_folded_profiles() -> None:
     exposed: list[int] = []
     for offset in P3_BASIS_OFFSETS:
         q, k, v = p3_inputs(P3_CAUSAL_FP16, offset)
         assert not np.any(q)
         assert np.isfinite(k).all()
         assert np.unique(k).size > 1
-        assert set(np.unique(v)) == {0.0, 1.0}
         locations = np.argwhere(v[0, :, 0, :] == 1.0)
         exposed.extend(int(key) for key, _ in locations)
         assert all(key == offset + dim for key, dim in locations)
     assert exposed == list(range(256))
 
+    q, k, folded = p3_inputs_folded(P3_CAUSAL_FP16)
+    assert not np.any(q)
+    assert np.isfinite(k).all()
+    locations = np.argwhere(folded[0, :, 0, :] == 1.0)
+    assert len(locations) == P3_CAUSAL_FP16.seqlen_k
+    assert all(dim == key % P3_CAUSAL_FP16.head_dim for key, dim in locations)
 
-@pytest.mark.parametrize("case", [P3_CAUSAL_FP16, P3_WINDOW_BF16])
-def test_fixed_tolerances_cover_unavoidable_storage_rounding(case: P3Case) -> None:
-    rounded = {
-        offset: round_to_storage(p3_expected(case, offset), case.dtype)
-        for offset in P3_BASIS_OFFSETS
-    }
-    result = analyze_p3(case, rounded)
 
-    assert result.invalid_count == 0
-    assert result.zero_leakage_count == 0
-    assert max(item.maximum_error for item in result.elements.values()) < p3_tolerance(
-        "element", case.dtype
+@pytest.mark.parametrize(
+    "case",
+    [
+        P3_CAUSAL_FP16,
+        P3_WINDOW_BF16,
+        _small_case("causal"),
+        _small_case("window", window=1),
+        _small_case("window", window=3),
+        _small_case("window", window=4),
+    ],
+)
+def test_correctly_rounded_synthetic_observations_pass(case: P3Case) -> None:
+    result = analyze_p3_policy(
+        case,
+        correct_p3_observation(case),
+        budget=0,
+        focused_rows=range(case.seqlen_q),
     )
-    assert result.row_mass_error < p3_tolerance("row_mass", case.dtype)
+    assert result.violations == ()
+    assert result.max_ulp == 0
+    assert result.exact_count == result.compared_count
+    assert result.max_stored_sum_residual == 0.0
 
 
-def test_checker_detects_element_error_exact_leakage_and_nan_sentinel() -> None:
-    case = _small_case("causal")
-    offsets = (0, 4)
-    outputs = {offset: p3_expected(case, offset) for offset in offsets}
-
-    element_mutation = {offset: values.copy() for offset, values in outputs.items()}
-    element_mutation[0][0, 7, 0, 0] += 2.0 * p3_tolerance("element", case.dtype)
-    element_result = analyze_p3(case, element_mutation, offsets=offsets)
-    assert element_result.elements[0].maximum_error > p3_tolerance(
-        "element", case.dtype
+@pytest.mark.parametrize(
+    "case,mutation,required",
+    [
+        (P3_CAUSAL_FP16, P3Mutation.INCLUDE_FUTURE_KEY, ("target_ulp=",)),
+        (
+            P3_CAUSAL_FP16,
+            P3Mutation.EXCLUDE_LAST_KEY,
+            ("masked_max=", "masked_mass="),
+        ),
+        (
+            P3_CAUSAL_FP16,
+            P3Mutation.DENOMINATOR_PLUS_ONE,
+            ("target_ulp=",),
+        ),
+        (
+            P3_WINDOW_BF16,
+            P3Mutation.INCLUDE_OLD_WINDOW_KEY,
+            ("target_ulp=",),
+        ),
+        (
+            P3_WINDOW_BF16,
+            P3Mutation.EXCLUDE_OLDEST_WINDOW_KEY,
+            ("masked_max=", "masked_mass="),
+        ),
+        (
+            P3_WINDOW_BF16,
+            P3Mutation.DENOMINATOR_PLUS_ONE,
+            ("target_ulp=",),
+        ),
+    ],
+)
+def test_mutations_are_detected_on_the_shipped_matrix(
+    case: P3Case, mutation: P3Mutation, required: tuple[str, ...]
+) -> None:
+    result = analyze_p3_policy(
+        case,
+        correct_p3_observation(case),
+        budget=0,
+        mutation=mutation,
     )
-
-    leakage_mutation = {offset: values.copy() for offset, values in outputs.items()}
-    leakage_mutation[4][0, 0, 0, 0] = np.nextafter(0.0, 1.0)
-    leakage_result = analyze_p3(case, leakage_mutation, offsets=offsets)
-    assert leakage_result.zero_leakage_count == 1
-
-    sentinel_mutation = {offset: values.copy() for offset, values in outputs.items()}
-    sentinel_mutation[0][0, 0, 0, 0] = np.nan
-    sentinel_result = analyze_p3(case, sentinel_mutation, offsets=offsets)
-    assert sentinel_result.invalid_count == 1
-    assert sentinel_result.elements[0].maximum_error == float("inf")
+    for prefix in required:
+        assert any(item.startswith(prefix) for item in result.violations)
 
 
-def test_checker_detects_accumulated_row_mass_below_element_ceiling() -> None:
+def test_one_bf16_ulp_passes_old_ceiling_but_fails_exact_policy() -> None:
     case = P3_WINDOW_BF16
-    outputs = {offset: p3_expected(case, offset).copy() for offset in P3_BASIS_OFFSETS}
-    per_element = 5e-4
-    assert per_element < p3_tolerance("element", case.dtype)
-    query = 255
-    for key in legal_keys(case, query):
-        offset = P3_BASIS_OFFSETS[key // case.head_dim]
-        dim = key - offset
-        outputs[offset][:, query, :, dim] += per_element
-
-    result = analyze_p3(case, outputs)
-    assert max(item.maximum_error for item in result.elements.values()) < p3_tolerance(
-        "element", case.dtype
+    observation = correct_p3_observation(case)
+    name = "basis@192"
+    coordinate = (0, 255, 0, 0)
+    original = int(observation.by_name[name][coordinate])
+    mutated = _replace_bits(observation, name, coordinate, original + 1)
+    delta = abs(
+        float(decode_bits(original + 1, "bf16")) - float(decode_bits(original, "bf16"))
     )
-    assert result.row_mass_error > p3_tolerance("row_mass", case.dtype)
+    assert delta < 4e-3
+    result = analyze_p3_policy(case, mutated, budget=0)
+    assert any(item.startswith("target_ulp=") for item in result.violations)
 
 
-def test_basis_partition_must_cover_every_key_exactly_once() -> None:
+def test_basis_and_folded_blind_spots_are_explicit() -> None:
+    assert target_bits(1, 190, "bf16") == target_bits(1, 191, "bf16")
+    assert target_bits(2, 190, "bf16") != target_bits(3, 191, "bf16")
+    assert [residue_count(0, 7, d, 4) for d in range(4)] == [2, 2, 2, 2]
+    assert [residue_count(4, 11, d, 4) for d in range(4)] == [2, 2, 2, 2]
+
+
+def test_nonzero_budget_is_rejected_until_calibrated() -> None:
+    with pytest.raises(ValueError, match="only budget=0"):
+        analyze_p3_policy(
+            _small_case("causal"),
+            correct_p3_observation(_small_case("causal")),
+            budget=1,
+        )
+
+
+def test_vacuous_partial_observation_is_a_policy_violation() -> None:
     case = _small_case("causal")
-    outputs = {0: p3_expected(case, 0), 3: p3_expected(case, 3)}
-    with pytest.raises(ValueError, match="every key exactly once"):
-        analyze_p3(case, outputs, offsets=(0, 3))
+    observation = P3Observation(
+        (("basis@8", np.zeros(case.output_shape, dtype=np.uint16)),)
+    )
+    result = analyze_p3_policy(
+        case, observation, budget=0, require_complete=False, focused_rows=()
+    )
+    assert "no_legal_coordinate_observed" in result.violations
 
 
-def test_tolerance_table_is_complete_fixed_and_structural_checks_are_exact() -> None:
-    assert set(P3_TOLERANCES) == {"element", "row_mass"}
-    assert P3_TOLERANCES["element"].fp16 == 5e-4
-    assert P3_TOLERANCES["element"].bf16 == 4e-3
-    assert P3_TOLERANCES["row_mass"].fp16 == 5e-3
-    assert P3_TOLERANCES["row_mass"].bf16 == 2e-2
+def test_observation_validation_rejects_missing_duplicate_and_bad_shape() -> None:
+    case = _small_case("causal")
+    basis = p3_expected_bits(case, "basis@0")
+    with pytest.raises(ValueError, match="duplicate"):
+        P3Observation((("basis@0", basis), ("basis@0", basis)))
+    with pytest.raises(ValueError, match="shape"):
+        analyze_p3_policy(
+            case,
+            P3Observation((("basis@0", basis[:, :-1]), ("folded", basis))),
+            budget=0,
+        )
+    with pytest.raises(ValueError, match="folded"):
+        analyze_p3_policy(case, P3Observation((("basis@0", basis),)), budget=0)
+
+
+def test_exact_zero_invalid_negative_and_masked_contracts() -> None:
+    case = _small_case("causal")
+    correct = correct_p3_observation(case)
+    masked = (0, 0, 0, 0)
+    leak = _replace_bits(correct, "basis@4", masked, 0x0001)
+    leak_result = analyze_p3_policy(case, leak, budget=0)
+    assert any(item.startswith("masked_max=") for item in leak_result.violations)
+    assert any(item.startswith("masked_mass=") for item in leak_result.violations)
+
+    negative_zero = _replace_bits(correct, "basis@4", masked, 0x8000)
+    assert analyze_p3_policy(case, negative_zero, budget=0).violations == ()
+
+    legal = (0, 0, 0, 0)
+    negative = _replace_bits(correct, "basis@0", legal, 0xBC00)
+    negative_result = analyze_p3_policy(case, negative, budget=0)
+    assert any(item.startswith("negative_max=") for item in negative_result.violations)
+
+    nan = _replace_bits(correct, "basis@0", legal, 0x7E00)
+    nan_result = analyze_p3_policy(case, nan, budget=0)
+    assert any(item.startswith("invalid=") for item in nan_result.violations)
+    assert nan_result.invalid_count == 1
+
+
+def test_nonzero_trailing_coordinate_is_rejected() -> None:
+    case = _small_case("causal", seqlen_k=6)
+    correct = correct_p3_observation(case)
+    trailing = _replace_bits(correct, "basis@4", (0, 0, 0, 2), 0x0001)
+    result = analyze_p3_policy(case, trailing, budget=0)
+    assert any(item.startswith("trailing_max=") for item in result.violations)
+
+
+def _fingerprint() -> P3SpecFingerprint:
+    return P3SpecFingerprint(
+        path="dense",
+        persistent=False,
+        runtime_shape=True,
+        head_dim=64,
+        block_m=256,
+        block_n=64,
+        use_exp2_fast=True,
+        use_sinks=False,
+        emit_lse=False,
+    )
+
+
+def test_calibration_entries_are_zero_budget_ratified_and_scoped() -> None:
+    entry = CalibrationEntry(
+        ulp_budget=0,
+        source_revision="0123456789abcdef",
+        case_ids=(P3_CAUSAL_FP16.case_id,),
+        spec=_fingerprint(),
+        ratified=True,
+    )
+    assert entry.covers(P3_CAUSAL_FP16, _fingerprint())
+    assert not entry.covers(P3_WINDOW_BF16, _fingerprint())
+    with pytest.raises(ValueError, match="ulp_budget=0"):
+        CalibrationEntry(1, "revision", (P3_CAUSAL_FP16.case_id,), _fingerprint(), True)
+    with pytest.raises(ValueError, match="ratified"):
+        CalibrationEntry(
+            0, "revision", (P3_CAUSAL_FP16.case_id,), _fingerprint(), False
+        )
+    assert set(P3_CALIBRATION) == {
+        ("gfx942", "attention_gfx942_dense", "fp16"),
+        ("gfx942", "attention_gfx942_dense", "bf16"),
+    }
+    for key, installed in P3_CALIBRATION.items():
+        assert len(key) == 3
+        assert installed.ulp_budget == 0
+        assert installed.ratified
+        assert installed.source_revision == "bf8ab4fc093979d7d9ae54d0934bf8e0fc38baf2"
+    assert P3_CALIBRATION[("gfx942", "attention_gfx942_dense", "fp16")].covers(
+        P3_CAUSAL_FP16, _fingerprint()
+    )
+    assert P3_CALIBRATION[("gfx942", "attention_gfx942_dense", "bf16")].covers(
+        P3_WINDOW_BF16, _fingerprint()
+    )
 
 
 class _FakeTensor:
@@ -245,35 +428,17 @@ def test_subject_tensor_validation_rejects_bad_abi(mutation, match: str) -> None
     tensors = _fake_tensors(P3_CAUSAL_FP16)
     mutation(tensors)
     with pytest.raises(ValueError, match=match):
-        _validate_tensors(
-            P3_CAUSAL_FP16, **tensors, expected_dtype=P3_CAUSAL_FP16.dtype
-        )
+        _validate_tensors(P3_CAUSAL_FP16, **tensors, expected_dtype="fp16")
 
 
-def test_subject_accepts_the_two_shipped_p3_cases() -> None:
+def test_subject_accepts_only_the_shipped_p3_cases() -> None:
     _validate_supported_case(P3_CAUSAL_FP16)
     _validate_supported_case(P3_WINDOW_BF16)
+    with pytest.raises(ValueError, match="D64"):
+        _validate_supported_case(P3Case(1, 256, 256, 4, 4, 128, "fp16", "causal"))
 
 
-@pytest.mark.parametrize(
-    "case,match",
-    [
-        (P3Case(2, 256, 256, 4, 4, 64, "fp16", "causal"), "batch 1"),
-        (P3Case(1, 256, 256, 8, 4, 64, "fp16", "causal"), "Hq=Hkv=4"),
-        (P3Case(1, 256, 256, 4, 4, 128, "fp16", "causal"), "D64"),
-        (P3Case(1, 128, 256, 4, 4, 64, "fp16", "causal"), "query length"),
-        (P3Case(1, 256, 128, 4, 4, 64, "fp16", "causal"), "key length"),
-        (P3Case(1, 256, 256, 4, 4, 64, "bf16", "window", 63), "window 64"),
-    ],
-)
-def test_subject_rejects_cases_outside_shipped_p3_matrix(
-    case: P3Case, match: str
-) -> None:
-    with pytest.raises(ValueError, match=match):
-        _validate_supported_case(case)
-
-
-def test_subject_requires_dispatch_resolved_nonpersistent_runtime_spec() -> None:
+def test_subject_requires_the_proof_pinned_resolved_spec() -> None:
     kernel_spec = SimpleNamespace(
         batch=1,
         seqlen_q=256,
@@ -288,6 +453,9 @@ def test_subject_requires_dispatch_resolved_nonpersistent_runtime_spec() -> None
         runtime_shape=True,
         block_m=256,
         block_n=64,
+        use_sinks=False,
+        emit_lse=False,
+        resolved_use_exp2_fast=lambda: True,
     )
     tuning_spec = SimpleNamespace(
         path="dense",
@@ -295,9 +463,9 @@ def test_subject_requires_dispatch_resolved_nonpersistent_runtime_spec() -> None
         candidate_name="attention_gfx942_dense",
         kernel_spec=kernel_spec,
     )
-    _verify_resolved_spec(P3_CAUSAL_FP16, tuning_spec)
-    kernel_spec.persistent = True
-    with pytest.raises(AssertionError, match="persistent"):
+    assert _verify_resolved_spec(P3_CAUSAL_FP16, tuning_spec) == _fingerprint()
+    kernel_spec.resolved_use_exp2_fast = lambda: False
+    with pytest.raises(AssertionError, match="fast exp2"):
         _verify_resolved_spec(P3_CAUSAL_FP16, tuning_spec)
 
 
@@ -307,8 +475,9 @@ def test_subject_resolves_real_shipped_spec_without_torch(case: P3Case) -> None:
     assert tuning_spec.path == "dense"
     assert tuning_spec.arch == "gfx942"
     assert tuning_spec.candidate_name == "attention_gfx942_dense"
-    assert tuning_spec.kernel_spec.persistent is False
-    assert tuning_spec.kernel_spec.runtime_shape is True
+    subject = resolve_dense_subject(case)
+    assert subject.case_id == case.case_id
+    assert subject.fingerprint == _verify_resolved_spec(case, tuning_spec)
 
 
 def _dotted_name(node: ast.AST) -> str:

@@ -10,11 +10,21 @@ CPU collection and the analytical contracts remain independent of ROCm Torch.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
-from ._analytical import P3Case
-
+from ._analytical import P3Case, P3SpecFingerprint
 
 _POINTER_ALIGNMENT = 16
+
+
+@dataclass(frozen=True)
+class ResolvedDenseSubject:
+    """Dispatch-resolved dense subject plus its proof-relevant fingerprint."""
+
+    case_id: str
+    tuning_spec: object
+    candidate_name: str
+    fingerprint: P3SpecFingerprint
 
 
 def _tensor_span(tensor) -> tuple[int, int]:
@@ -90,8 +100,8 @@ def _validate_supported_case(case: P3Case) -> None:
         raise ValueError("P3 gfx942 tranche requires window 64")
 
 
-def _verify_resolved_spec(case: P3Case, tuning_spec) -> None:
-    """Assert that dispatch returned the requested nonpersistent dense subject."""
+def _verify_resolved_spec(case: P3Case, tuning_spec) -> P3SpecFingerprint:
+    """Assert the requested dense path and return its proof fingerprint."""
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
     if tuning_spec.arch != "gfx942":
@@ -123,6 +133,23 @@ def _verify_resolved_spec(case: P3Case, tuning_spec) -> None:
         raise AssertionError("oracle-free cases require the runtime-shape kernel")
     if spec.block_m != 256 or spec.block_n != 64:
         raise AssertionError(f"unexpected shipped tile {spec.block_m}x{spec.block_n}")
+    if not spec.resolved_use_exp2_fast():
+        raise AssertionError("oracle-free quick cases require the fast exp2 path")
+    if spec.use_sinks:
+        raise AssertionError("oracle-free P3 requires attention sinks to be disabled")
+    if spec.emit_lse:
+        raise AssertionError("oracle-free P3 requires the direct non-LSE epilogue")
+    return P3SpecFingerprint(
+        path=tuning_spec.path,
+        persistent=bool(spec.persistent),
+        runtime_shape=bool(spec.runtime_shape),
+        head_dim=int(spec.head_size),
+        block_m=int(spec.block_m),
+        block_n=int(spec.block_n),
+        use_exp2_fast=bool(spec.resolved_use_exp2_fast()),
+        use_sinks=bool(spec.use_sinks),
+        emit_lse=bool(spec.emit_lse),
+    )
 
 
 def _resolve_tuning_spec(case: P3Case):
@@ -147,28 +174,49 @@ def _resolve_tuning_spec(case: P3Case):
     return tuning_spec
 
 
+def resolve_dense_subject(case: P3Case) -> ResolvedDenseSubject:
+    """Resolve one supported quick case and expose its calibration identity."""
+    _validate_supported_case(case)
+    tuning_spec = _resolve_tuning_spec(case)
+    return ResolvedDenseSubject(
+        case_id=case.case_id,
+        tuning_spec=tuning_spec,
+        candidate_name=str(tuning_spec.candidate_name),
+        fingerprint=_verify_resolved_spec(case, tuning_spec),
+    )
+
+
 def run_dense_case(
     case: P3Case,
     q,
     k,
     v,
     out,
+    *,
+    subject: ResolvedDenseSubject | None = None,
 ):
-    """Launch and synchronize one validated production dense-attention case."""
+    """Launch one validated subject, leaving numerical judgment to the analyzer."""
     import torch
-
     from kernels.gfx942.attention_dense import run_attention_dense_torch
 
     _validate_supported_case(case)
     for name, tensor in (("q", q), ("k", k), ("v", v), ("out", out)):
         if not isinstance(tensor, torch.Tensor):
-            raise ValueError(f"{name} must be a torch.Tensor")
+            raise TypeError(f"{name} must be a torch.Tensor")
     expected_dtype = {
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
     }[case.dtype]
     _validate_tensors(case, q, k, v, out, expected_dtype=expected_dtype)
-    tuning_spec = _resolve_tuning_spec(case)
+    resolved = resolve_dense_subject(case) if subject is None else subject
+    if resolved.case_id != case.case_id:
+        raise ValueError(
+            f"resolved subject case {resolved.case_id!r} != {case.case_id!r}"
+        )
+    tuning_spec = resolved.tuning_spec
+    fingerprint = _verify_resolved_spec(case, tuning_spec)
+    if fingerprint != resolved.fingerprint:
+        raise AssertionError("resolved subject fingerprint changed before launch")
 
     stream = torch.cuda.current_stream(device=q.device)
     returned = run_attention_dense_torch(
@@ -183,15 +231,4 @@ def run_dense_case(
     if returned is not out:
         raise AssertionError("dense runner did not return the caller-owned output")
     stream.synchronize()
-    invalid_positions = torch.nonzero(~torch.isfinite(out), as_tuple=False)
-    invalid = int(invalid_positions.shape[0])
-    if invalid:
-        batch, query, head, dim = (
-            int(value) for value in invalid_positions[0].cpu().tolist()
-        )
-        raise AssertionError(
-            f"P3 {case.dtype} {case.mask} subject output contains {invalid} "
-            f"non-finite elements; first at "
-            f"b:q:h:d={batch}:{query}:{head}:{dim}"
-        )
     return out
