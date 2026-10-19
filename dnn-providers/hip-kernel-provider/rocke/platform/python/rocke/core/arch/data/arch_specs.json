@@ -158,7 +158,7 @@
       ]
     },
     "gfx1201": {
-      "_comment": "RDNA4 (gfx1201). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. The f16/bf16 A/B/C lane maps are exercised on gfx1200/gfx1201 hardware by the WMMA attention numeric suite (library/tests/test_wmma_fmha_fwd_numeric.py); examples/gfx1201/wmma_probe.py remains the per-atom probe.",
+      "_comment": "RDNA4 (gfx1201). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. The f16/bf16 A/B/C lane maps are exercised on gfx1200/gfx1201 hardware by the WMMA attention numeric suite (library/tests/test_wmma_fmha_fwd_v2_numeric.py); examples/gfx1201/wmma_probe.py remains the per-atom probe.",
       "family": "rdna",
       "target_family": "gfx12_rdna",
       "wave_size": 32,
