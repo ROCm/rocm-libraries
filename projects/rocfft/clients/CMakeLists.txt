@@ -59,7 +59,10 @@ set(CMAKE_CXX_STANDARD 20)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 if( NOT ROCmCMakeBuildTools_FOUND )
-  find_package( ROCmCMakeBuildTools REQUIRED )
+  find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+  if( NOT ROCmCMakeBuildTools_FOUND )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/build-rocmcmake.cmake )
+  endif()
 endif()
 
 include( ROCMInstallTargets )
