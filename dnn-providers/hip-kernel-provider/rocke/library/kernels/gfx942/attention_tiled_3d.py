@@ -167,6 +167,8 @@ class UnifiedAttention3DTiledSpec:
     use_wave_page_id_load: bool = False
 
     def __post_init__(self):
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
         if self.kv_layout == "strided" and (
@@ -1243,6 +1245,10 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
+
+    def __post_init__(self):
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
 
     @property
     def dtype_ir(self) -> Type:

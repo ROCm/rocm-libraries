@@ -201,6 +201,8 @@ class UnifiedAttention3DTiledSpec:
     right_bound: int = 0
 
     def __post_init__(self):
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
             raise ValueError("kv_layout must be 'paged' or 'strided'")
         if self.kv_layout == "strided" and (
@@ -1336,6 +1338,10 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
+
+    def __post_init__(self):
+        if self.num_segments < 1:
+            raise ValueError("num_segments must be >= 1")
 
     @property
     def dtype_ir(self) -> Type:

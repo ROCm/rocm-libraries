@@ -561,9 +561,13 @@ class TestNumCusResolver(unittest.TestCase):
         try:
             p.attr(hipm, "get_device_arch", _unexpected)
             p.attr(AC, "_device_num_cus", _unexpected)
-            fallback = AC._tuning_problem(_req(num_cus=0, arch="gfx950"))
+            # Without num_cus: the arch's full-part count; no guess off the table.
+            for arch, cus in (("gfx950", 256), ("gfx942", 304)):
+                fallback = AC._tuning_problem(_req(num_cus=0, arch=arch))
+                self.assertEqual(fallback.num_cus, cus, arch)
+            with self.assertRaisesRegex(ValueError, "pass num_cus"):
+                AC._tuning_problem(_req(num_cus=0, arch="gfx1250"))
             explicit = AC._tuning_problem(_req(num_cus=208, arch="gfx950"))
-            self.assertEqual(fallback.num_cus, 120)
             self.assertEqual(explicit.num_cus, 208)
         finally:
             p.restore()

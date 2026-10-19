@@ -94,6 +94,24 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         self.assertEqual(segment.num_segments, 32)
         self.assertEqual(reduce.num_segments, 32)
 
+    def test_3d_segments_take_any_count_or_the_split_rule(self):
+        decode = _problem(max_seqlen_q=1, total_q=64, num_seqs=64, num_cus=256)
+        for arch in ("gfx950", "gfx942"):
+            rule = au._num_segments(decode, arch)
+            for num_segments, want in ((0, rule), (4, 4), (9, 9)):
+                with self.subTest(arch=arch, num_segments=num_segments):
+                    segment, reduce = make_explicit_attention_3d_specs(
+                        decode,
+                        ExplicitAttention3DConfig(num_segments=num_segments),
+                        arch=arch,
+                    )
+                    self.assertEqual(segment.num_segments, want)
+                    self.assertEqual(reduce.num_segments, want)
+            with self.subTest(arch=arch), self.assertRaisesRegex(ValueError, ">= 1"):
+                make_explicit_attention_3d_specs(
+                    decode, ExplicitAttention3DConfig(num_segments=-1), arch=arch
+                )
+
     def test_gfx950_3d_multipage_tile_policy(self):
         decode = _problem(max_seqlen_q=1, total_q=4, num_seqs=4)
         segment, _ = make_explicit_attention_3d_specs(

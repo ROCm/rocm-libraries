@@ -812,10 +812,18 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     A tuning candidate already fixes path and geometry, so it does not consume
     the live-device CU heuristic used by production routing. Keep its base a
     pure function of the request: honor an explicit ``num_cus`` and otherwise
-    use the deterministic cross-compile fallback.
+    take the arch's full-part CU count (the static table the split-K heuristics
+    use). Only the split-rule segment count and the dispatcher's K/V layout
+    knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
+    from rocke.helpers.split_k import _ARCH_NUM_CUS
+
     num_cus = int(req.num_cus)
-    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
+    if num_cus <= 0:
+        if req.arch not in _ARCH_NUM_CUS:
+            raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
+        num_cus = _ARCH_NUM_CUS[req.arch]
+    return _problem_with_num_cus(req, num_cus)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch

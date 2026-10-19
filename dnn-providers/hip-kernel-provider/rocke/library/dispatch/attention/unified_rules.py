@@ -15,7 +15,12 @@ from dataclasses import MISSING, dataclass, fields as _dataclass_fields
 from functools import lru_cache
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Tuple
 
-from kernels.common.attention_unified import _kv_cache_policy_3d
+from kernels.common.attention_unified import (
+    _enable_gfx942_3d_wide_kv_load,
+    _kv_cache_policy_3d,
+    _kv_lds_swizzle_3d,
+    _wave_page_id_load_3d,
+)
 
 from .axes import (
     DEAD_END_KNOBS,
@@ -29,6 +34,7 @@ from .axes import (
     _PRODUCTION_STACKS,
     _TRANSPOSED_ONLY_KNOBS,
     _items,
+    axis_knob_names,
     tuning_axes,
 )
 from .common import (
@@ -42,6 +48,7 @@ from .tuning_specs import (
     ExplicitAttention3DConfig,
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
+    resolve_num_segments,
 )
 from .waves import FULL_WAVES, PRODUCTION_WAVES, WavesPerEuSpace
 
@@ -57,6 +64,7 @@ class AttentionGeometryVariant:
     tile_policy: str
     num_warps: int = 1
     block_m_per_warp: int = 16
+    # 3D: a count, or 0 for the split rule's; unused on 2D.
     num_segments: int = 0
     compile_backend: str = "llvm"
 
@@ -69,7 +77,8 @@ class AttentionGeometryVariant:
                 f"{self.block_m_per_warp}_t{tile}_{self.compile_backend}"
             )
         tile = self.tile_policy.replace("x", "xb")
-        return f"{self.codepath}_seg{self.num_segments}_t{tile}"
+        seg = self.num_segments or "auto"
+        return f"{self.codepath}_seg{seg}_t{tile}"
 
     @property
     def candidate_name(self) -> str:
@@ -122,6 +131,18 @@ def _explicit_2d_spec(problem, variant, knobs, wpe):
 _3D_POLICY_FIELDS: Mapping[str, Callable[..., object]] = {
     "kv_cache_policy": _kv_cache_policy_3d,
 }
+
+
+def _dispatch_3d_knobs(problem, arch: str) -> dict:
+    """The K/V layout knobs the dispatcher's 3D spec builder turns on for
+    ``problem`` (``_spec_generic_3d``)."""
+    knobs = {
+        "use_kv_lds_swizzle": _kv_lds_swizzle_3d(problem, arch),
+        "use_wave_page_id_load": _wave_page_id_load_3d(problem, arch),
+    }
+    if arch == "gfx942":
+        knobs["use_wide_kv_load"] = _enable_gfx942_3d_wide_kv_load(problem, arch)
+    return {name: True for name, on in knobs.items() if on}
 
 
 def _variant_axes(variant: AttentionGeometryVariant):
@@ -324,10 +345,27 @@ class UnifiedSpace(WavesPerEuSpace):
     def fixed(self, base):
         return _CODEPATH_KNOBS.get((self.arch, self.variant.codepath), {})
 
+    def _rule_segments(self) -> bool:
+        """Whether the variant takes the split rule's segment count."""
+        return self.path == "3d" and self.variant.num_segments == 0
+
+    def known_knobs(self, base):
+        known = axis_knob_names(self.axes(base))
+        # A rule variant's id records the count the rule resolved to.
+        return known | {"num_segments"} if self._rule_segments() else known
+
     def refuse(self, base, knobs):
         wrong = sorted(k for k in KNOWN_WRONG_KNOBS.get(self.arch, ()) if knobs.get(k))
         if wrong:
             return f"{wrong} are known to produce wrong output on {self.arch}"
+        if self._rule_segments() and "num_segments" in knobs:
+            # A recorded count replays only while the rule still resolves to it.
+            want = resolve_num_segments(base, 0, arch=self.arch)
+            if knobs["num_segments"] != want:
+                return (
+                    f"{self.candidate_name} takes the split rule's segment count, "
+                    f"{want} for this problem, not {knobs['num_segments']!r}"
+                )
         return None
 
     def prefilter(self, base, knobs):
@@ -360,7 +398,10 @@ class UnifiedSpace(WavesPerEuSpace):
         }
 
     def recorded(self, base):
-        return frozenset(_3D_POLICY_FIELDS) if self.path == "3d" else frozenset()
+        if self.path != "3d":
+            return frozenset()
+        rule = {"num_segments"} if self._rule_segments() else set()
+        return frozenset(_3D_POLICY_FIELDS) | rule
 
     def base_value(self, base, kernel, name):
         policy = _3D_POLICY_FIELDS.get(name) if self.path == "3d" else None
@@ -389,7 +430,11 @@ class UnifiedSpace(WavesPerEuSpace):
         return FULL_WAVES
 
     def production(self, base, axes, is_valid):
-        return _production_knob_sets(self.variant)
+        # 3D leads with the dispatcher's knobs for this problem, so a variant's
+        # default spec is the shipped kernel at the variant's geometry.
+        if self.path == "3d":
+            yield _dispatch_3d_knobs(base, self.arch)
+        yield from _production_knob_sets(self.variant)
 
     def is_valid(self, base, knobs):
         if _policy_conflict(self.arch, knobs):
