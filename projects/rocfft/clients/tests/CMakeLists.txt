@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 # #############################################################################
 
-cmake_minimum_required( VERSION 3.16 )
+cmake_minimum_required( VERSION 3.25 )
 
 # This should appear before the project command, because it does not
 # use FORCE
@@ -42,7 +42,7 @@ endif()
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   project( rocfft-clients-tests LANGUAGES CXX C )
-  include( ../cmake/buildopts.cmake )
+  include( ../../cmake/buildopts.cmake )
 endif()
   
 set(CMAKE_CXX_STANDARD 20)
@@ -58,7 +58,10 @@ if( NOT HIP_FOUND )
 endif()
 
 if( NOT ROCmCMakeBuildTools_FOUND )
-  find_package( ROCmCMakeBuildTools REQUIRED )
+  find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+  if( NOT ROCmCMakeBuildTools_FOUND )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+  endif()
 endif()
 
 if( USE_HIPRAND AND NOT hiprand_FOUND )
