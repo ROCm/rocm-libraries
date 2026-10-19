@@ -24,6 +24,8 @@ import numpy as np
 import pytest
 
 from rocke.core.ir import F32, I8, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.passes import optimize_kernel
 from rocke.helpers import compile_kernel
 from rocke.helpers.i4_dequant import (
     _FP4_CODEBOOK,
@@ -134,14 +136,16 @@ def gpu_arch():
     return arch
 
 
-def _decode_on_gpu(arch):
+def _decode_on_gpu(arch, optimize_ir):
     """Run all 64 codes through the select chain; return the f32 results as bits."""
     from rocke.runtime.hip_module import Runtime
 
     # With the C++ engine present, backend="both" lowers through both engines
     # and requires identical LLVM IR.
     backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
-    artifact = compile_kernel(_decode_kernel(), arch=arch, backend=backend)
+    artifact = compile_kernel(
+        _decode_kernel(), arch=arch, backend=backend, optimize_ir=optimize_ir
+    )
     codes = _packed_codes()
     out_bytes = 2 * _FP6_CODES * 4
     rt = Runtime()
@@ -168,8 +172,18 @@ def _decode_on_gpu(arch):
         module.unload()
 
 
-def test_all_fp6_codes_decode_to_the_spec_value_on_gpu(gpu_arch):
-    got = _decode_on_gpu(gpu_arch)
+def test_optimized_decode_keeps_negative_zero():
+    # Code 32 decodes to -0.0, a different constant from code 0's +0.0, so the
+    # optimizer must not merge them (Python's 0.0 == -0.0).
+    kernel = _decode_kernel()
+    optimize_kernel(kernel)
+    assert "0x8000000000000000" in lower_kernel_to_llvm(kernel, arch="gfx942")
+
+
+# The optimizer runs only when asked; run the codes through both paths.
+@pytest.mark.parametrize("optimize_ir", [False, True], ids=["plain", "optimized"])
+def test_all_fp6_codes_decode_to_the_spec_value_on_gpu(gpu_arch, optimize_ir):
+    got = _decode_on_gpu(gpu_arch, optimize_ir)
     for code in range(_FP6_CODES):
         want = _f32_bits(_spec_e3m2(code))
         for slot in range(2):
