@@ -126,7 +126,7 @@ struct make_shuffle_iterator_base
 //! \see make_shuffle_iterator
 template <class IndexType, class BijectionFunc = thrust::detail::random_bijection<IndexType>>
 class shuffle_iterator
-#ifndef THRUST_DOXYGEN_INVOKED // Do not document
+#ifndef THRUST_DOXYGEN_INVOKED // Doxygen breaks here for whatever reason
     : public detail::make_shuffle_iterator_base<IndexType, BijectionFunc>::type
 #endif // THRUST_DOXYGEN_INVOKED
 {
@@ -155,9 +155,8 @@ public:
       , bijection(std::move(bijection))
   {}
 
-  //! \cond
-
 private:
+#ifndef THRUST_DOXYGEN_INVOKED // Do not document
   THRUST_HOST_DEVICE IndexType dereference() const
   {
     assert(this->base() < bijection.size());
@@ -165,8 +164,7 @@ private:
   }
 
   BijectionFunc bijection;
-
-  //! \endcond
+#endif // THRUST_DOXYGEN_INVOKED
 };
 
 //! \p make_shuffle_iterator creates a \p shuffle_iterator from an \c IndexType and \c URBG.
