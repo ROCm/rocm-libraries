@@ -1350,15 +1350,17 @@ def build_streaming_copy(arch):
     return _build
 
 
-def build_f8f6f4_16x16x128(kind):
+def build_f8f6f4_16x16x128(kind, fmt=None):
     """One-wave K=128 f8f6f4 MFMA on gfx950. ``hero`` is the unscaled fp8 atom
-    (both scales literal 0); ``mx`` is the MX op with unit E8M0 scales. The
-    golden pins the shared declaration and the full call text at every flavor."""
+    (both scales literal 0); ``mx`` is the MX op with unit E8M0 scales. ``fmt``
+    sets the data type of A and B on the MX op (default fp8e4m3), so the golden
+    pins the shared declaration and each format's selectors at every flavor."""
 
     def _build():
         from rocke.core.ir import F32, I32, IRBuilder, PtrType
 
-        b = IRBuilder(f"irhash_f8f6f4_16x16x128_{kind}")
+        suffix = f"_{fmt}" if fmt else ""
+        b = IRBuilder(f"irhash_f8f6f4_16x16x128_{kind}{suffix}")
         b.kernel.attrs["max_workgroup_size"] = 64
         pa = b.param("A", PtrType(I32, "global"), align=32)
         pb = b.param("B", PtrType(I32, "global"), align=32)
@@ -1371,8 +1373,9 @@ def build_f8f6f4_16x16x128(kind):
         if kind == "hero":
             r = b.mma("mfma_f32_16x16x128_fp8", a, bb, acc)
         else:
+            kw = {"a_format": fmt, "b_format": fmt} if fmt else {}
             r = b.mfma_scale_f32_16x16x128_f8f6f4(
-                a, bb, acc, b.const_i32(127), b.const_i32(127)
+                a, bb, acc, b.const_i32(127), b.const_i32(127), **kw
             )
         b.global_store_vN(pc, b.mul(tid, b.const_i32(4)), r, 4, align=16)
         b.ret()
@@ -4239,6 +4242,13 @@ def cases():
             f"mma_atom/gfx950/f8f6f4_16x16x128_{_kind}",
             "gfx950",
             build_f8f6f4_16x16x128(_kind),
+        )
+    for _fmt in ("bf8e5m2", "fp6e2m3", "fp6e3m2", "fp4e2m1"):
+        add(
+            "mma_atom",
+            f"mma_atom/gfx950/f8f6f4_16x16x128_mx_{_fmt}",
+            "gfx950",
+            build_f8f6f4_16x16x128("mx", _fmt),
         )
 
     # warp_shuffle_xor_dpp (tile.dpp_xor): gfx9 CDNA picks the base-DPP

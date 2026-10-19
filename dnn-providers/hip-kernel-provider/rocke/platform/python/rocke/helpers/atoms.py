@@ -583,18 +583,26 @@ class MfmaAtom:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        *,
+        a_format: str = "fp8e4m3",
+        b_format: str = "fp8e4m3",
     ) -> Value:
-        """Issue the existing 16x16x128 scaled MFMA wrapper (P15).
+        """Issue a scaled MX MFMA (P15).
 
-        This always calls ``mfma_scale_f32_16x16x128_f8f6f4``;
-        it does not select an instruction from this atom's shape or dtype.
-        For gfx950 32x32x64 with independent A/B formats and K32 E8M0
-        scales, resolve ``family="mfma_scaled"`` through
-        ``ArchTarget.mma.op_for_shape`` and pass that ``MmaOp`` and both
-        scale operands to ``IRBuilder.mma``. See the field manual's
-        ``reference/mma_metadata.md`` for the two paths.
+        Currently routes every shape through the
+        ``mfma_scale_f32_16x16x128_f8f6f4`` intrinsic; the
+        per-output-row scale broadcast happens inside the
+        instruction. Future expansion: dedicated scaled intrinsics
+        for the 32x32 hero shape if AMDGPU exposes them.
+
+        ``a_format`` and ``b_format`` pass through to
+        :meth:`IRBuilder.mfma_scale_f32_16x16x128_f8f6f4`. A and B must use
+        the same format in this version; see that method for the formats and
+        the operand width.
         """
-        return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
+        return b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, c, a_scale, b_scale, a_format=a_format, b_format=b_format
+        )
 
     def zero_acc(self, b: IRBuilder) -> Value:
         """Allocate a fresh `<c_per_lane x float>` accumulator (all zeros).

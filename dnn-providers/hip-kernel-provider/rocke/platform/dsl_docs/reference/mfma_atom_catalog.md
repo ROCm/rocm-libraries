@@ -40,6 +40,34 @@ the scaled intrinsic with constant in-instruction scales. The gfx950 FP8
 fused-MoE dispatcher uses that atom and applies its FP32 block scales outside
 the MFMA. The 32x32x64 family currently has direct GEMM examples.
 
+### 16x16x128 MX op formats
+
+`IRBuilder.mfma_scale_f32_16x16x128_f8f6f4(a, b, c, a_scale, b_scale, *, a_format, b_format)`
+and `MfmaAtom.emit_scaled(...)` take the data type of A and B. The default is
+`fp8e4m3`. The C API function `rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt` takes
+the same two arguments.
+
+**A and B must use the same format in this version.** A call with different
+formats raises `ValueError`. The interface keeps both arguments, so a later change
+can allow mixed formats without a signature change. The 32x32x64 family above
+already allows mixed formats.
+
+Every operand has 256 bits per lane for every format: an `<8 x i32>`, or any type
+of that width. Any other width raises `ValueError`. The instruction reads only the
+low dwords of fp6 and fp4 operands and ignores the rest.
+
+| Format | `cbsz` and `blgp` | Dwords with data |
+|---|---|---|
+| `fp8e4m3` | 0 | 8 |
+| `bf8e5m2` | 1 | 8 |
+| `fp6e2m3` | 2 | 6 |
+| `fp6e3m2` | 3 | 6 |
+| `fp4e2m1` | 4 | 4 |
+
+The instruction multiplies by `2^(e - 127)` for each E8M0 scale byte `e`. The value
+`e = 0` gives `2^-127`, not 1.0. If both scale operands are literal 0, the backend
+selects the unscaled instruction instead.
+
 See [MMA selection, emission and dispatcher paths](mma_metadata.md#selection-ir-emission-and-dispatch),
 the [gfx950 GEMM contract](../instances/gfx950_block_scaled_gemm.md), and
 [runnable scaled-GEMM examples](../../python/rocke/examples/gfx950/gemm/README.md).

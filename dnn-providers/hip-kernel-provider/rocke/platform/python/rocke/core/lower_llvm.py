@@ -4247,11 +4247,13 @@ class _Lowerer:
         b_scale: str,
         a_name: str,
         b_name: str,
+        cbsz: int = 0,
+        blgp: int = 0,
     ) -> None:
         """Emit the K=128 f8f6f4 MFMA call shared by the MX op and the hero atom.
 
-        A and B are bit-cast to ``<8 x i32>`` (32 fp8e4m3 bytes per lane). The
-        call passes the format selectors ``cbsz = blgp = 0`` (fp8e4m3) and the
+        A and B are bit-cast to ``<8 x i32>`` (256 bits per lane). The call
+        passes the format selectors ``cbsz`` and ``blgp`` (0 = fp8e4m3) and the
         opsel operands 0. ``a_scale`` and ``b_scale`` are the scale operand
         texts: the MX op passes its scale values, the hero atom passes ``"0"``.
         The backend selects the unscaled instruction only when both scale
@@ -4279,22 +4281,39 @@ class _Lowerer:
             f"@llvm.amdgcn.{_F8F6F4_16X16X128_KEY}("
             f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
             f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 {a_scale}, i32 0, i32 {b_scale})"
+            f"i32 {cbsz}, i32 {blgp}, i32 0, i32 {a_scale}, i32 0, i32 {b_scale})"
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """Lower the MX op: the f8f6f4 MFMA with in-instruction E8M0 scales.
 
-        Operands ``a`` and ``b`` hold 32 fp8e4m3 bytes per lane and arrive as
-        any type of that width. ``a_scale`` and ``b_scale`` are i32 values; the
-        instruction reads one E8M0 byte from each and multiplies by
-        ``2^(e - 127)``. The value ``e = 0`` gives ``2^-127``, not 1.0. If both
-        scale operands are literal 0, the backend drops the scales and selects
-        the unscaled instruction instead.
+        ``a`` and ``b`` hold 256 bits per lane and arrive as any type of that
+        width. The optional attributes ``a_format`` and ``b_format`` name the
+        data type (default ``fp8e4m3``); they must be equal in this version.
+        ``a_scale`` and ``b_scale`` are i32 values; the instruction reads one
+        E8M0 byte from each and multiplies by ``2^(e - 127)``. The value
+        ``e = 0`` gives ``2^-127``, not 1.0. If both scale operands are literal
+        0, the backend drops the scales and selects the unscaled instruction.
+
+        The checks run here as well as in the builder, because serialized IR
+        reaches the lowerer without passing through the builder.
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
+        from .arch.mfma_scale import (
+            DEFAULT_MATRIX_FORMAT,
+            f8f6f4_16x16x128_operand_error,
+            f8f6f4_16x16x128_selectors,
+        )
+
         a, b, c, a_scale, b_scale = op.operands
+        cbsz, blgp = f8f6f4_16x16x128_selectors(
+            op.attrs.get("a_format", DEFAULT_MATRIX_FORMAT),
+            op.attrs.get("b_format", DEFAULT_MATRIX_FORMAT),
+        )
+        error = f8f6f4_16x16x128_operand_error(a, b)
+        if error:
+            raise ValueError(error)
         self._emit_f8f6f4_16x16x128(
             op,
             a,
@@ -4304,6 +4323,8 @@ class _Lowerer:
             self._operand(b_scale),
             "mxa",
             "mxb",
+            cbsz,
+            blgp,
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
