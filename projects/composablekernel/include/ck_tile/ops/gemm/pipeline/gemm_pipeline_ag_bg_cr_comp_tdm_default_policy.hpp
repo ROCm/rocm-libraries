@@ -172,8 +172,110 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         }
     }
 
+    /// LDS rows the K-contiguous LDS tensor descriptor groups before one pad (MLdsLayer /
+    /// NLdsLayer in MakeA/BLdsBlockDescriptor).
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetKLdsLayer()
+    {
+        using DataType =
+            remove_cvref_t<std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>>;
+        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+        constexpr index_t KLdsLayerRequired = get_n_lds_banks() * get_n_dwords_per_128b() /
+                                              KPerBlock / sizeof(DataType) *
+                                              numeric_traits<DataType>::PackedSize;
+        return max(1, KLdsLayerRequired);
+    }
+
+    /// Pad interval, in elements, of an LDS padding config (only meaningful when it pads).
+    template <typename Problem, bool IsA, index_t PadInterval>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetLdsPadIntervalElems()
+    {
+        using DataType =
+            remove_cvref_t<std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>>;
+        constexpr index_t BytesPerDword = sizeof(int32_t);
+        constexpr index_t DataTypeSize  = sizeof(DataType);
+        return (1 << (PadInterval + 1)) * BytesPerDword / DataTypeSize *
+               numeric_traits<DataType>::PackedSize;
+    }
+
+    /// Whether a K-contiguous LDS tensor descriptor with this pad interval pads after every
+    /// interval within each row (MakeKChunkPaddedLdsBlockDescriptor): the interval divides the K
+    /// tile but is not the MLdsLayer / NLdsLayer row group, after which it pads otherwise.
+    template <typename Problem, bool IsA, index_t PadInterval>
+    CK_TILE_HOST_DEVICE static constexpr bool IsKLdsIntervalPerChunk()
+    {
+        constexpr index_t KPerBlock      = Problem::BlockGemmShape::kK;
+        constexpr index_t interval_elems = GetLdsPadIntervalElems<Problem, IsA, PadInterval>();
+        return interval_elems != KPerBlock * GetKLdsLayer<Problem, IsA>() &&
+               KPerBlock % interval_elems == 0;
+    }
+
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr bool IsKLdsPaddedPerChunk()
+    {
+        constexpr auto config = GetLdsPaddingConfig<Problem, IsA>();
+        if constexpr(!config[Base::I0])
+        {
+            return false;
+        }
+        else
+        {
+            return IsKLdsIntervalPerChunk<Problem, IsA, config[Base::I2]>();
+        }
+    }
+
     /**
-     * @brief Whether the TDM and the LDS tensor descriptors place the LDS padding alike.
+     * @brief K-contiguous LDS tensor descriptor padded after every pad interval within a row.
+     *
+     * For pad intervals other than the MLdsLayer / NLdsLayer row group: each row of KPerBlock
+     * elements is KPerBlock / interval chunks, each followed by its pad, which is where a TDM
+     * load that starts at a row places its pads.
+     */
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKChunkPaddedLdsBlockDescriptor()
+    {
+        using DataType =
+            remove_cvref_t<std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>>;
+        constexpr auto config          = GetLdsPaddingConfig<Problem, IsA>();
+        constexpr index_t PackedSize   = numeric_traits<DataType>::PackedSize;
+        constexpr index_t DataTypeSize = sizeof(DataType);
+        constexpr index_t MNPerBlock =
+            IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock     = Problem::BlockGemmShape::kK;
+        constexpr index_t VectorLen     = VecByteSize / DataTypeSize * PackedSize;
+        constexpr index_t PaddingStride = GetLdsPadIntervalElems<Problem, IsA, config[Base::I2]>();
+        constexpr index_t PaddingDataAmount =
+            (config[Base::I1] + 1) * sizeof(int32_t) / DataTypeSize * PackedSize;
+        static_assert(KPerBlock % PaddingStride == 0, "LDS pad interval must divide the K tile");
+        static_assert(PaddingStride % VectorLen == 0,
+                      "LDS pad interval must be a multiple of the LDS vector length");
+        constexpr index_t KChunks = KPerBlock / PaddingStride;
+
+        constexpr auto lds_block_desc_0 = make_naive_tensor_descriptor(
+            make_tuple(number<MNPerBlock>{},
+                       number<KChunks>{},
+                       number<PaddingStride / VectorLen>{},
+                       number<VectorLen>{}),
+            make_tuple(number<KChunks*(PaddingStride + PaddingDataAmount)>{},
+                       number<PaddingStride + PaddingDataAmount>{},
+                       number<VectorLen>{},
+                       number<1>{}),
+            number<VectorLen>{},
+            number<1>{});
+
+        return transform_tensor_descriptor(
+            lds_block_desc_0,
+            make_tuple(
+                make_pass_through_transform(number<MNPerBlock>{}),
+                make_merge_transform_v3_division_mod(make_tuple(
+                    number<KChunks>{}, number<PaddingStride / VectorLen>{}, number<VectorLen>{}))),
+            make_tuple(sequence<0>{}, sequence<1, 2, 3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    /**
+     * @brief Whether the TDM and the LDS tensor descriptors place LDS padding with this
+     *        pad_interval alike.
      *
      * Each loading wave copies one box of the tile, num_rows / warp_num consecutive LDS rows,
      * with one TDM load. The load starts at the address the LDS tensor descriptor gives the
@@ -181,104 +283,100 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
      * itself: it skips pad_amount + 1 dwords after every 2^(pad_interval + 1) dwords it writes,
      * counted from the box's first element. The block GEMM reads LDS through the LDS tensor
      * descriptors (MakeA/BLdsBlockDescriptor, or Base::MakeA/BLdsBlockDescriptorForTrLoad for
-     * transposed loads), which put the pad after every group of LDS rows or, in one transposed
-     * branch, within a row. For the padding Base::GetLdsPaddingConfig proposes, the two layouts
-     * agree only if
+     * transposed loads), which put the pad after every group of LDS rows or after every pad
+     * interval within a row. The two layouts agree only if
      *   1. pad_interval fits its 3-bit field in the TDM descriptor, and
      *   2. every box gets the same pads strictly inside it from both: none at all, or the box
      *      starts on a pad boundary and the LDS tensor descriptor's pad period equals the TDM
-     *      pad interval (Base::GetLdsPaddingConfig makes them equal when the LDS row is a
-     *      power of two).
+     *      pad interval.
      *
-     * @tparam Problem  Gemm pipeline problem.
-     * @tparam IsA      true for operand A, false for operand B.
-     * @return Whether the two agree; trivially true without padding.
+     * @tparam Problem      Gemm pipeline problem.
+     * @tparam IsA          true for operand A, false for operand B.
+     * @tparam PadInterval  pad_interval field of a padded LDS padding config.
+     * @return Whether the two agree.
      * @pre Call only in the gfx125 device compilation pass (GetLdsPaddingConfig guards its call
      *      with __gfx125__): its target-dependent inputs, is_a/b_load_tr, the LDS bank count
      *      and the wave size, have their gfx1250 values together only there. CK_TILE_DEVICE
      *      keeps it out of the host pass but not out of other device targets.
      */
-    template <typename Problem, bool IsA>
+    template <typename Problem, bool IsA, index_t PadInterval>
     CK_TILE_DEVICE static constexpr bool IsTDMLdsPaddingConsistent()
     {
-        constexpr auto config = Base::template GetLdsPaddingConfig<Problem, IsA>();
-        if constexpr(!config[Base::I0])
+        using DataType =
+            remove_cvref_t<std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>>;
+        constexpr index_t PackedSize    = numeric_traits<DataType>::PackedSize;
+        constexpr index_t DataTypeSize  = sizeof(DataType);
+        constexpr index_t BytesPerDword = sizeof(int32_t);
+
+        constexpr index_t MNPerBlock =
+            IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
+        constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
+        constexpr bool is_tr_load =
+            IsA ? Base::template is_a_load_tr<Problem> : Base::template is_b_load_tr<Problem>;
+
+        // LDS rows are contiguous along MN for transposed loads and along K otherwise
+        constexpr index_t row_elems = is_tr_load ? MNPerBlock : KPerBlock;
+        constexpr index_t num_rows  = is_tr_load ? KPerBlock : MNPerBlock;
+
+        constexpr index_t pad_interval = PadInterval;
+        if constexpr(pad_interval < 0 || pad_interval > TDMPadIntervalMax)
         {
-            return true;
+            return false;
         }
         else
         {
-            using DataType = remove_cvref_t<
-                std::conditional_t<IsA, LdsADataType<Problem>, LdsBDataType<Problem>>>;
-            constexpr index_t PackedSize    = numeric_traits<DataType>::PackedSize;
-            constexpr index_t DataTypeSize  = sizeof(DataType);
-            constexpr index_t BytesPerDword = sizeof(int32_t);
+            constexpr index_t interval_elems =
+                (1 << (pad_interval + 1)) * BytesPerDword / DataTypeSize * PackedSize;
 
-            constexpr index_t MNPerBlock =
-                IsA ? Problem::BlockGemmShape::kM : Problem::BlockGemmShape::kN;
-            constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
-            constexpr bool is_tr_load =
-                IsA ? Base::template is_a_load_tr<Problem> : Base::template is_b_load_tr<Problem>;
+            // Pad period of the LDS tensor descriptor, in elements: after every group_rows
+            // rows, or after every interval within a row (the transposed PaddingStride
+            // branch, and MakeKChunkPaddedLdsBlockDescriptor). Mirrors MLdsLayer / NLdsLayer
+            // in MakeA/BLdsBlockDescriptor, and the PaddingStride branch and KLdsLayer in
+            // Base::MakeA/BLdsBlockDescriptorForTrLoad; keep in sync.
+            constexpr bool pads_within_row =
+                is_tr_load ? interval_elems <= row_elems
+                           : IsKLdsIntervalPerChunk<Problem, IsA, pad_interval>();
+            constexpr index_t lds_bytes_per_group =
+                is_tr_load ? get_n_lds_banks() * BytesPerDword
+                           : get_n_lds_banks() * get_n_dwords_per_128b();
+            constexpr index_t group_rows =
+                pads_within_row
+                    ? 1
+                    : max(1, lds_bytes_per_group / row_elems / DataTypeSize * PackedSize);
+            constexpr index_t period_elems =
+                pads_within_row ? interval_elems : group_rows * row_elems;
+            constexpr index_t vector_elems = VecByteSize / DataTypeSize * PackedSize;
 
-            // LDS rows are contiguous along MN for transposed loads and along K otherwise
-            constexpr index_t row_elems = is_tr_load ? MNPerBlock : KPerBlock;
-            constexpr index_t num_rows  = is_tr_load ? KPerBlock : MNPerBlock;
-
-            constexpr index_t pad_interval = config[Base::I2];
-            if constexpr(pad_interval < 0 || pad_interval > TDMPadIntervalMax)
+            if constexpr(num_rows % group_rows != 0 ||
+                         (pads_within_row && row_elems % interval_elems != 0) ||
+                         (pads_within_row && !is_tr_load && interval_elems % vector_elems != 0))
             {
                 return false;
             }
             else
             {
-                constexpr index_t interval_elems =
-                    (1 << (pad_interval + 1)) * BytesPerDword / DataTypeSize * PackedSize;
-
-                // Pad period of the LDS tensor descriptor, in elements: after every group_rows
-                // rows, or within a row (only the transposed descriptor does that). Mirrors
-                // MLdsLayer / NLdsLayer in MakeA/BLdsBlockDescriptor, and the PaddingStride branch
-                // and KLdsLayer in Base::MakeA/BLdsBlockDescriptorForTrLoad; keep in sync.
-                constexpr bool pads_within_row = is_tr_load && interval_elems <= row_elems;
-                constexpr index_t lds_bytes_per_group =
-                    is_tr_load ? get_n_lds_banks() * BytesPerDword
-                               : get_n_lds_banks() * get_n_dwords_per_128b();
-                constexpr index_t group_rows =
-                    pads_within_row
-                        ? 1
-                        : max(1, lds_bytes_per_group / row_elems / DataTypeSize * PackedSize);
-                constexpr index_t period_elems =
-                    pads_within_row ? interval_elems : group_rows * row_elems;
-
-                if constexpr(num_rows % group_rows != 0 ||
-                             (pads_within_row && row_elems % interval_elems != 0))
+                // Box w holds the elements [w * box_elems, (w + 1) * box_elems) of the tile's
+                // LDS rows laid one after another without padding (the row split of
+                // MakeA/BDramTileDistribution; keep in sync). The LDS tensor descriptor pads
+                // that sequence after every period_elems elements; the TDM pads each box
+                // after every interval_elems of its own elements. The layouts agree when
+                // every box gets the same pads strictly inside it: none from either, or the
+                // box starts on a pad boundary and the two periods are equal. (A pad at a
+                // box's end moves nothing in it.)
+                constexpr index_t warp_num  = GetTDMLoadWarpNum<Problem>();
+                constexpr index_t box_elems = num_rows / warp_num * row_elems;
+                for(index_t w = 0; w < warp_num; ++w)
                 {
-                    return false;
-                }
-                else
-                {
-                    // Box w holds the elements [w * box_elems, (w + 1) * box_elems) of the tile's
-                    // LDS rows laid one after another without padding (the row split of
-                    // MakeA/BDramTileDistribution; keep in sync). The LDS tensor descriptor pads
-                    // that sequence after every period_elems elements; the TDM pads each box
-                    // after every interval_elems of its own elements. The layouts agree when
-                    // every box gets the same pads strictly inside it: none from either, or the
-                    // box starts on a pad boundary and the two periods are equal. (A pad at a
-                    // box's end moves nothing in it.)
-                    constexpr index_t warp_num  = GetTDMLoadWarpNum<Problem>();
-                    constexpr index_t box_elems = num_rows / warp_num * row_elems;
-                    for(index_t w = 0; w < warp_num; ++w)
+                    const index_t phase         = (w * box_elems) % period_elems;
+                    const bool desc_pads_in_box = period_elems - phase < box_elems;
+                    const bool tdm_pads_in_box  = interval_elems < box_elems;
+                    const bool same_pads        = phase == 0 && period_elems == interval_elems;
+                    if((desc_pads_in_box || tdm_pads_in_box) && !same_pads)
                     {
-                        const index_t phase         = (w * box_elems) % period_elems;
-                        const bool desc_pads_in_box = period_elems - phase < box_elems;
-                        const bool tdm_pads_in_box  = interval_elems < box_elems;
-                        const bool same_pads        = phase == 0 && period_elems == interval_elems;
-                        if((desc_pads_in_box || tdm_pads_in_box) && !same_pads)
-                        {
-                            return false;
-                        }
+                        return false;
                     }
-                    return true;
                 }
+                return true;
             }
         }
     }
@@ -302,7 +400,8 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
     {
         constexpr auto config = Base::template GetLdsPaddingConfig<Problem, IsA>();
 #if defined(__gfx125__)
-        if constexpr(IsTDMLdsPaddingConsistent<Problem, IsA>())
+        if constexpr(!config[Base::I0] ||
+                     IsTDMLdsPaddingConsistent<Problem, IsA, config[Base::I2]>())
         {
             static_assert(!config[Base::I0] ||
                               (config[Base::I1] >= 0 && config[Base::I1] <= TDMPadAmountMax &&
@@ -325,6 +424,10 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         if constexpr(Base::template is_a_load_tr<Problem>)
         {
             return Base::template MakeALdsBlockDescriptorForTrLoad<Problem>();
+        }
+        else if constexpr(IsKLdsPaddedPerChunk<Problem, true>())
+        {
+            return MakeKChunkPaddedLdsBlockDescriptor<Problem, true>();
         }
         else
         {
@@ -386,6 +489,10 @@ struct GemmPipelineAgBgCrCompTDMDefaultPolicy
         if constexpr(Base::template is_b_load_tr<Problem>)
         {
             return Base::template MakeBLdsBlockDescriptorForTrLoad<Problem>();
+        }
+        else if constexpr(IsKLdsPaddedPerChunk<Problem, false>())
+        {
+            return MakeKChunkPaddedLdsBlockDescriptor<Problem, false>();
         }
         else
         {
