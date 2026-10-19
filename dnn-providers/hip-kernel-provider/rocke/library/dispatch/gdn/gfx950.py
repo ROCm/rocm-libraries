@@ -109,17 +109,23 @@ def _gate_kind_for_spec_id(spec_id: str) -> str:
 
 
 def make_spec(req: GdnDecodeRequest, tile: Tuple[int, int, int]) -> GdnDecodeSpec:
-    """Map a request plus a chosen tile onto a concrete kernel spec."""
+    """Map a request plus a chosen tile onto a concrete kernel spec.
+
+    Fields that ``is_valid_spec`` type-checks pass through unconverted, so a
+    malformed request (``use_qk_l2norm="false"``, ``num_k_heads=True``) is
+    rejected by that validator instead of being coerced into a different valid
+    spec. ``normalize_dtype`` stays: it maps documented dtype aliases.
+    """
     num_warps, warp_threads_k, blocks_per_v_dim = tile
     return dc.replace(
         GdnDecodeSpec(),
-        num_k_heads=int(req.num_k_heads),
-        num_v_heads=int(req.num_v_heads),
-        head_k_dim=int(req.head_k_dim),
-        head_v_dim=int(req.head_v_dim),
+        num_k_heads=req.num_k_heads,
+        num_v_heads=req.num_v_heads,
+        head_k_dim=req.head_k_dim,
+        head_v_dim=req.head_v_dim,
         dtype=normalize_dtype(req.dtype),
         state_dtype=normalize_dtype(req.state_dtype),
-        use_qk_l2norm=bool(req.use_qk_l2norm),
+        use_qk_l2norm=req.use_qk_l2norm,
         gate_kind=str(req.gate_kind),
         num_warps=num_warps,
         warp_threads_k=warp_threads_k,

@@ -17,6 +17,23 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
   spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED` when `librocfft.so.0` cannot be loaded; all other
   functions are unaffected
 
+## RPP for ROCm 10.2.0
+
+### Added
+
+- Support for building RPP on non-x86 architectures using the SIMDE (SIMD Everywhere) library for portable SIMD intrinsics; x86 builds are unchanged.
+- `rppGetStatusString()` helper that maps an `RppStatus` code to its enumerator name string.
+- Support for the `gfx1250-strict` GPU target in HIP builds.
+- `RPP_RETURN_IF_ERROR` macro in `rppdefs.h` for propagating nested `RppStatus` failures from the enclosing function.
+
+### Changed
+
+- On non-x86 architectures, `simde` (found via `pkg-config`) is now a required RPP build dependency and is propagated to consumers of the `rpp` CMake package.
+
+### Resolved issues
+
+- Corrected `rppt_log` to return `RPP_ERROR_INVALID_SRC_DATATYPE` instead of the misleading `RPP_ERROR_INVALID_DST_DATATYPE` for unsupported source datatypes.
+- Fixed error propagation through the HIP kernel dispatcher: kernel launch failures now return `RPP_ERROR_HIP_LAUNCH` instead of `RPP_SUCCESS`, which previously masked launch errors as pixel mismatches on GPUs with no matching kernel binary.
 
 ## RPP 3.2.0 ROCm 10.1.0
 

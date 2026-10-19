@@ -100,8 +100,9 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
     The cohort is the single source of truth
     ``kernels.common.attention_unified._d256_gfx950_cohort`` — the same predicate
     the orchestrator's ``_d256_gfx950_fast`` override uses — so dispatch selection
-    and the built spec cannot drift. Only the arch gate differs (request arch
-    here vs resolved device arch there).
+    and the built spec cannot drift. Since AICK-2146 the arch gate does not differ
+    either: ``_d256_gfx950_fast`` takes ``arch`` as an explicit argument, and the
+    value it receives is the request's, so both sides gate on the same arch.
     """
     spec_id = "gfx950_d256"
     name = "attention_gfx950_d256"
@@ -143,6 +144,9 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx950_d256",
             tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
+            causal_top_left=problem.causal_top_left,
+            right_bound=problem.right_bound,
+            sliding_window=problem.sliding_window,
         )
 
     candidate = KernelCandidate(

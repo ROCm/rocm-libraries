@@ -1,17 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""FP16/BF16 WMMA attention forward for gfx1151.
+"""FP16/BF16 WMMA attention forward for RDNA (gfx11 and gfx12) targets.
 
-RDNA has no MFMA, so the QK^T and PV matmuls are built around the gfx11
-``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` with a **wave32** mapping.
+RDNA has no MFMA, so the QK^T and PV matmuls are built around the
+``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` family with a **wave32**
+mapping: the gfx11 atom (operands duplicated across lane halves) or the gfx12
+split-K atom, whichever the target's MMA catalog lists. Generic processors
+(``gfx11-generic``, ``gfx12-generic``) build one code object per generation.
 
 The wave32 QK -> online-softmax -> PV loop lives in the common FMHA-forward inner
 bodies of :mod:`rocke.helpers.mfma_attention`
 (:func:`~rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body`, and
-``wmma_swapqk_fwd_inner_body`` for the transposed-QK specialization). Those bodies
-read the lane layout from the per-arch MMA contract and emit the matmul through
-the target-neutral ``b.mma``. This module is a thin **adapter**: it owns the
-gfx1151 kernel ABI, the ``(ceil(seqlen_q / q_rows_per_cta), num_query_heads,
+``wmma_swapqk_fwd_inner_body`` for the gfx11-only transposed-QK specialization).
+Those bodies read the lane layout from the per-arch MMA contract and emit the
+matmul through the target-neutral ``b.mma``. This module is a thin **adapter**:
+it owns the kernel ABI, the ``(ceil(seqlen_q / q_rows_per_cta), num_query_heads,
 batch * value_tiles)`` grid decode, and the per-batch pointer arithmetic, and hands
 the rest to the common body.
 
@@ -64,17 +67,11 @@ __all__ = [
     "wmma_fmha_fwd_grid",
     "wmma_fmha_fwd_signature",
     "is_valid_spec",
+    "uses_gfx11_operand_layout",
 ]
 
 _BLOCK_M = 16  # Q rows per wave per CTA
 _BLOCK_K = 16  # K positions per K-tile (WMMA N dim of QK^T)
-
-
-def _wmma_op_id_for_arch(arch: str, dtype: str) -> str:
-    """Select the dtype-matched WMMA atom, including the gfx1201 split-K layout."""
-    elem = "bf16" if dtype == "bf16" else "f16"
-    prefix = "wmma_gfx12" if arch == "gfx1201" else "wmma"
-    return f"{prefix}_f32_16x16x16_{elem}"
 
 
 @dataclass(frozen=True)
@@ -83,9 +80,10 @@ class WmmaFmhaFwdSpec:
 
     ``head_size`` and the optional distinct ``v_head_size`` are the only
     problem dimensions specialized into the code object; both are multiples of
-    16 in ``[16, 256]``. Batch, sequence lengths, query/KV head counts, tensor
-    strides, bottom-right alignment, LSE selection, and window bounds are
-    kernel arguments so one AOT object serves all matching runtime shapes.
+    16 in ``[16, 256]`` (maxima under ``runtime_head_dims``). Batch, sequence
+    lengths, query/KV head counts, tensor strides, bottom-right alignment, LSE
+    selection, and window bounds are kernel arguments so one AOT object serves
+    all matching runtime shapes.
     ``mask_mode`` selects unmasked, causal, or arbitrary diagonal-band masking;
     the latter consumes runtime ``window_left``/``window_right``.
     """
@@ -120,6 +118,12 @@ class WmmaFmhaFwdSpec:
     # runtime args (0 broadcasts). ``bias_dtype`` is "f32" or "q" (the Q dtype).
     use_attn_bias: bool = False
     bias_dtype: str = "f32"
+    # Serve runtime head widths inside one compiled bucket: ``head_size`` and the
+    # V width become maxima, and ``head_dim_q``/``head_dim_v``/``num_v_heads``
+    # I32 arguments follow the LSE strides. Head-dim tiles past ``head_dim_q``
+    # contribute zero to QK; V/O columns past ``head_dim_v`` are never stored.
+    # V heads are ``head / (num_query_heads / num_v_heads)``.
+    runtime_head_dims: bool = False
 
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
@@ -210,6 +214,11 @@ class WmmaFmhaFwdSpec:
                 )
         elif self.block_n != 32 or self.num_waves != 1:
             raise ValueError("block_n and num_waves are transposed-QK options")
+        if self.runtime_head_dims and (self.transposed_qk or self.value_tile_size):
+            raise ValueError(
+                "runtime_head_dims requires the standard path without "
+                "output-column tiling"
+            )
 
     @property
     def v_dim(self) -> int:
@@ -226,6 +235,12 @@ class WmmaFmhaFwdSpec:
     @property
     def q_rows_per_cta(self) -> int:
         return _BLOCK_M * (self.num_waves if self.transposed_qk else 1)
+
+    def resolved_scheduler_strategy(self) -> str:
+        """The machine scheduler the object compiles with; ``"default"`` when
+        ``scheduler_strategy`` is unset (LLVM's generic scheduler). Lets a
+        catalog record the knob as a non-null value."""
+        return self.scheduler_strategy or "default"
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -258,26 +273,39 @@ class WmmaFmhaFwdSpec:
                 "alibi": self.use_alibi,
                 "qqbias": self.use_qq_bias,
                 "cskip": self.causal_tile_skip,
+                "rtdim": self.runtime_head_dims,
             },
         )
 
 
-def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
-    """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target."""
-    from rocke.core.arch import ArchTarget
+def uses_gfx11_operand_layout(arch: str, dtype: str = "fp16") -> bool:
+    """True when ``arch`` multiplies with the gfx11 WMMA atom.
 
-    if spec.transposed_qk and arch != "gfx1151":
-        return False, "transposed QK requires gfx1151"
-    if spec.value_tile_size and arch != "gfx1151":
-        return False, "output-column tiling requires gfx1151"
-    if spec.v_head_size and arch != "gfx1151":
-        return False, "a distinct V head size requires gfx1151"
+    That atom duplicates the A/B operands across the two lane halves, which the
+    transposed-QK body relies on; gfx12 rows use the split-K atom instead.
+    """
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.mfma_attention import _wmma_attn_op_id
+
+    return not _wmma_attn_op_id(ArchTarget.from_gfx(arch), dtype).startswith(
+        "wmma_gfx12_"
+    )
+
+
+def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target.
+
+    Every gfx11 or gfx12 catalog row qualifies, concrete or generic; the atom
+    comes from the row's MMA catalog rather than from the processor name.
+    """
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.mfma_attention import _wmma_attn_op_id
 
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
-    op_id = _wmma_op_id_for_arch(arch, spec.dtype)
+    op_id = _wmma_attn_op_id(target, spec.dtype)
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         return False, (
@@ -285,6 +313,10 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
             f"(WMMA is an RDNA gfx11/gfx12 instruction; this kernel needs a "
             f"wave32 RDNA target)"
         )
+    # The transposed-QK body relies on the gfx11 operand duplication across
+    # lane halves; gfx12 rows run the standard body only.
+    if spec.transposed_qk and op_id.startswith("wmma_gfx12_"):
+        return False, "transposed QK requires the gfx11 WMMA operand layout"
     if target.wave_size != op.wave_size:
         return False, (
             f"arch wave size {target.wave_size} != WMMA atom wave size "
@@ -349,6 +381,9 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     params["stride_lse_batch"] = b.param("stride_lse_batch", I32)
     params["stride_lse_token"] = b.param("stride_lse_token", I32)
     params["stride_lse_head"] = b.param("stride_lse_head", I32)
+    if spec.runtime_head_dims:
+        for name in ("head_dim_q", "head_dim_v", "num_v_heads"):
+            params[name] = b.param(name, I32)
     if spec.use_softcap:
         params["softcap"] = b.param("softcap", F32)
     if spec.use_sinks:
@@ -560,13 +595,13 @@ def _window_tiles(
     return start, stop
 
 
-def _paged_rows(b, spec, params, batch, kv_head):
+def _paged_rows(b, spec, params, batch, kv_head, v_head):
     page_log2 = b.const_i32(spec.page_block_size.bit_length() - 1)
     page_mask = b.const_i32(spec.page_block_size - 1)
     table_row = b.mul(batch, params["block_table_stride"])
 
-    def rows(stride_block, stride_token, stride_head):
-        head_offset = b.mul(kv_head, stride_head)
+    def rows(head, stride_block, stride_token, stride_head):
+        head_offset = b.mul(head, stride_head)
 
         def row(b, token):
             logical_block = b.lshr(token, page_log2)
@@ -586,11 +621,40 @@ def _paged_rows(b, spec, params, batch, kv_head):
 
     return (
         rows(
-            params["stride_k_block"], params["stride_k_token"], params["stride_k_head"]
+            kv_head,
+            params["stride_k_block"],
+            params["stride_k_token"],
+            params["stride_k_head"],
         ),
         rows(
-            params["stride_v_block"], params["stride_v_token"], params["stride_v_head"]
+            v_head,
+            params["stride_v_block"],
+            params["stride_v_token"],
+            params["stride_v_head"],
         ),
+    )
+
+
+def _bounded_kv_rsrcs(b, params, K, V, seqlen_k):
+    """Dense runtime-head-dim K/V buffer resources spanning this batch's rows.
+
+    The extent ends at the last live element, ``(seqlen_k - 1) * stride_token
+    + (heads - 1) * stride_head + head_dim`` (strides are non-negative), so
+    constant-offset tile loads past a runtime head width either stay inside
+    the caller's tensor or read zero. Element offsets fit I32, so the flagless
+    byte shift fits the unsigned 32-bit ``num_records``.
+    """
+    one = b.const_i32(1)
+
+    def rsrc(pointer, tensor, heads, head_dim):
+        rows = b.mul(b.sub(seqlen_k, one), params[f"stride_{tensor}_token"])
+        head_span = b.mul(b.sub(heads, one), params[f"stride_{tensor}_head"])
+        elems = b.add(b.add(rows, head_span), head_dim)
+        return b.buffer_rsrc(pointer, b.shl(elems, one))
+
+    return (
+        rsrc(K, "k", params["num_kv_heads"], params["head_dim_q"]),
+        rsrc(V, "v", params["num_v_heads"], params["head_dim_v"]),
     )
 
 
@@ -628,12 +692,31 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         value_tile = b.mod(batch_tile, tiles)
         value_offset = b.mul(value_tile, b.const_i32(spec.value_tile_size))
 
+    q_step = b.const_i32(spec.q_rows_per_cta) if spec.transposed_qk else c16
+    if spec.layout == "dense":
+        # Head-interleaved K/V (BSHD-like strides): decode heads fastest so the
+        # CTAs in flight read whole token rows together, instead of one head's
+        # rows spaced a full token apart (lost cache reuse and translation
+        # locality at long sequence lengths). Contiguous heads keep the
+        # q-tile-fastest order. The grid itself is unchanged.
+        q_tiles = b.div(b.add(p["seqlen_q"], b.sub(q_step, b.const_i32(1))), q_step)
+        linear = b.add(q_tile, b.mul(head, q_tiles))
+        interleaved = b.cmp_ge(
+            p["stride_k_token"], b.mul(p["stride_k_head"], p["num_kv_heads"])
+        )
+        heads = p["num_query_heads"]
+        head = b.select(interleaved, b.mod(linear, heads), head)
+        q_tile = b.select(interleaved, b.div(linear, heads), q_tile)
     # Runtime GQA: one AOT object serves every integral Hq/Hkv ratio.
     group_size = b.div(p["num_query_heads"], p["num_kv_heads"])
     kv_head = b.div(head, group_size)
+    v_head = kv_head
+    if spec.runtime_head_dims:
+        # V may carry its own head count (any Hv dividing Hq).
+        v_group = b.div(p["num_query_heads"], p["num_v_heads"])
+        v_head = b.div(head, v_group)
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    q_step = b.const_i32(spec.q_rows_per_cta) if spec.transposed_qk else c16
     q_row0 = b.mul(q_tile, q_step)
 
     Q, K, V, O, LSE = p["Q"], p["K"], p["V"], p["O"], p["LSE"]
@@ -713,7 +796,10 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         )
     k_row, v_row = (None, None)
     if spec.layout == "paged":
-        k_row, v_row = _paged_rows(b, spec, p, batch, kv_head)
+        k_row, v_row = _paged_rows(b, spec, p, batch, kv_head, v_head)
+    k_rsrc = v_rsrc = None
+    if spec.runtime_head_dims and spec.layout == "dense" and not spec.kv_dtype:
+        k_rsrc, v_rsrc = _bounded_kv_rsrcs(b, p, K, V, seqlen_k)
 
     common_lse = {
         "lse": LSE,
@@ -794,6 +880,11 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         wmma_value_tile_size=spec.value_tile_size,
         wmma_value_offset=value_offset,
         wmma_v_head_size=spec.v_head_size,
+        wmma_v_head_idx=v_head if spec.runtime_head_dims else None,
+        wmma_head_dim_q=p.get("head_dim_q"),
+        wmma_head_dim_v=p.get("head_dim_v"),
+        wmma_k_rsrc=k_rsrc,
+        wmma_v_rsrc=v_rsrc,
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,

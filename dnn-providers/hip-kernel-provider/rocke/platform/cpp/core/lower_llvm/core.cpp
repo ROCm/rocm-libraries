@@ -195,6 +195,8 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACK
 static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
+static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
+    = {.gfx = "gfx12-generic", LL_BACKEND_RDNA_DEFAULTS};
 
 /* gfx1250 (Python Gfx1250Backend, which derives from Gfx12RdnaBackend). It is a
  * CDNA part programmed on the GFX12 model: wave32, WMMA-only, with the K=32
@@ -231,7 +233,18 @@ static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
     const rocke_isa_backend_t* base = NULL;
-    if(arch == NULL || strcmp(arch, "gfx950") == 0)
+    /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
+     * that forgot the target lowered for one arch and compiled for another.
+     * Mirrors the Python lowerer, which raises on `arch=None`. */
+    if(arch == NULL)
+    {
+        if(st)
+        {
+            *st = ROCKE_ERR_VALUE;
+        }
+        return NULL;
+    }
+    if(strcmp(arch, "gfx950") == 0)
     {
         base = &LL_BACKEND_GFX950;
     }
@@ -258,6 +271,10 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
     else if(strcmp(arch, "gfx11-generic") == 0)
     {
         base = &LL_BACKEND_GFX11_GENERIC;
+    }
+    else if(strcmp(arch, "gfx12-generic") == 0)
+    {
+        base = &LL_BACKEND_GFX12_GENERIC;
     }
     else if(strcmp(arch, "gfx1250") == 0)
     {
@@ -1875,6 +1892,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
             any_need = true;
         }
     }
+    /* dict.update appends override-only keys after the base keys. */
+    for(int i = 0; i < novr; ++i)
+    {
+        bool in_base = false;
+        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
+            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
+        if(!in_base && ll_need_has(L, ovr[i].key))
+        {
+            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            any_need = true;
+        }
+    }
     /* Dynamic decls not in either static table. */
     for(size_t i = 0; i < L->dyn_decls.len; i++)
     {
@@ -2037,10 +2066,14 @@ static void ll_lower_into(rocke_lower_t* L,
     L->backend = rocke_ll_backend_for(arch, &bst);
     if(L->backend == NULL || bst != ROCKE_OK)
     {
-        rocke_ll_fail(L,
-                      bst != ROCKE_OK ? bst : ROCKE_ERR_KEY,
-                      "unknown arch backend %s",
-                      arch ? arch : "(null)");
+        if(arch == NULL)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "lowering requires an explicit gfx target "
+                          "(there is no default)");
+        }
+        rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
      * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
