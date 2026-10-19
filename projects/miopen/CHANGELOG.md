@@ -10,6 +10,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue` returned the first config
   unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and the first applicable CK
   instance was never tuned.
+* [Conv] Fixed TF32 grouped CK xdlops convolutions (2D/3D forward/backward-data/backward-weights)
+  silently computing in FP32 whenever the perf config came from the perf-db or a heuristic instead
+  of an in-process search. The CK perf config serializes only its `kernel_id`, so a reloaded config
+  lost its `use_tf32` flag and `GetSolution` built the FP32 instance with the same name. TF32 is now
+  recomputed from the problem (which already encodes it in the key) at solution build time.
 * [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
   and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
   elements, which produced incorrect results. Such tensors are now rejected with
