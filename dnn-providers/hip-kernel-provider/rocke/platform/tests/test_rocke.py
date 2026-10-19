@@ -2115,8 +2115,9 @@ class TestTorchPackageComgrVersion(unittest.TestCase):
 
         from rocke.runtime import comgr
 
-        with mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}), mock.patch.object(
-            comgr, "_lib", None
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_COMGR_LIB": lib}),
+            mock.patch.object(comgr, "_lib", None),
         ):
             return comgr.resolved_lib_rocm_version()
 
