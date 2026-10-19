@@ -8,8 +8,8 @@ SPDX-License-Identifier:  MIT
 Built once for each of two LLVM generic targets -- `gfx11-generic` (RDNA3 /
 RDNA3.5: gfx1100–gfx1103, gfx1150–gfx1153) and `gfx12-generic` (RDNA4: gfx1200,
 gfx1201) -- and shipped to every member, and once for each of the CDNA targets
-gfx90a, gfx942 and gfx950: **RMSNorm forward** (25 kernel objects per target,
-§1–§4). Every graph a pack accepts is
+gfx90a, gfx942 and gfx950: **RMSNorm forward**, inference and training (90 kernel
+objects per target, §1–§2), and **RMSNorm backward** (63 per target, §2a). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -22,55 +22,38 @@ silently; one that declines it costs a fallback.
 
 ---
 
-## 1. The 25 instances
+## 1. The 90 forward instances
 
 Generated from [`generators/_instances.py`](generators/_instances.py), which is
 the single source of truth — the compiler, the packer and the descriptor emitter
 all read it, so adding an instance is a row there rather than an edit in three
-places that can disagree.
+places that can disagree. The rows are the product of four axes:
 
-| Instance | Tier | x/y dtype | gamma dtype | `N` | `block_threads` | priority |
-|---|---|---|---|---|---|---|
-| `rmsnorm_bf16_ngeneric_bt256` | generic | bf16 | bf16 | runtime | 256 | 10 |
-| `rmsnorm_f16_ngeneric_bt256` | generic | f16 | f16 | runtime | 256 | 10 |
-| `rmsnorm_f32_ngeneric_bt256` | generic | f32 | f32 | runtime | 256 | 10 |
-| `rmsnorm_bf16_n3072_bt256` | specialized | bf16 | bf16 | 3072 | 256 | 100 |
-| `rmsnorm_bf16_n3584_bt256` | specialized | bf16 | bf16 | 3584 | 256 | 100 |
-| `rmsnorm_bf16_n4096_bt256` | specialized | bf16 | bf16 | 4096 | 256 | 100 |
-| `rmsnorm_bf16_n5120_bt256` | specialized | bf16 | bf16 | 5120 | 256 | 100 |
-| `rmsnorm_bf16_n8192_bt256` | specialized | bf16 | bf16 | 8192 | 256 | 100 |
-| `rmsnorm_f16_n3072_bt256` | specialized | f16 | f16 | 3072 | 256 | 100 |
-| `rmsnorm_f16_n3584_bt256` | specialized | f16 | f16 | 3584 | 256 | 100 |
-| `rmsnorm_f16_n4096_bt256` | specialized | f16 | f16 | 4096 | 256 | 100 |
-| `rmsnorm_f16_n5120_bt256` | specialized | f16 | f16 | 5120 | 256 | 100 |
-| `rmsnorm_f16_n8192_bt256` | specialized | f16 | f16 | 8192 | 256 | 100 |
-| `rmsnorm_bf16_ngeneric_bt256_f32scale1` | generic | bf16 | f32 | runtime | 256 | 10 |
-| `rmsnorm_f16_ngeneric_bt256_f32scale1` | generic | f16 | f32 | runtime | 256 | 10 |
-| `rmsnorm_bf16_n3072_bt256_f32scale1` | specialized | bf16 | f32 | 3072 | 256 | 100 |
-| `rmsnorm_bf16_n3584_bt256_f32scale1` | specialized | bf16 | f32 | 3584 | 256 | 100 |
-| `rmsnorm_bf16_n4096_bt256_f32scale1` | specialized | bf16 | f32 | 4096 | 256 | 100 |
-| `rmsnorm_bf16_n5120_bt256_f32scale1` | specialized | bf16 | f32 | 5120 | 256 | 100 |
-| `rmsnorm_bf16_n8192_bt256_f32scale1` | specialized | bf16 | f32 | 8192 | 256 | 100 |
-| `rmsnorm_f16_n3072_bt256_f32scale1` | specialized | f16 | f32 | 3072 | 256 | 100 |
-| `rmsnorm_f16_n3584_bt256_f32scale1` | specialized | f16 | f32 | 3584 | 256 | 100 |
-| `rmsnorm_f16_n4096_bt256_f32scale1` | specialized | f16 | f32 | 4096 | 256 | 100 |
-| `rmsnorm_f16_n5120_bt256_f32scale1` | specialized | f16 | f32 | 5120 | 256 | 100 |
-| `rmsnorm_f16_n8192_bt256_f32scale1` | specialized | f16 | f32 | 8192 | 256 | 100 |
+| Axis | Values | Knob |
+|---|---|---|
+| x/y dtype | bf16, f16, f32 | `dtype` |
+| gamma | x's dtype, or f32 beside bf16/f16 | `scale_f32` 0 / 1 |
+| phase | inference, or training that also writes inv_rms | `store_rstd` 0 / 1 |
+| width | generic (`N` read at run time), or baked at 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 12288, 16384 | `N` |
 
-Two gamma forms × 2 dtypes × (1 generic + 5 specialized widths), plus a generic f32
-object. The second form reads gamma as f32 beside bf16/f16 x and y (`scale_f32: 1`,
-the kernel's `weight_dtype_str="f32"`): the mixed form cuDNN and PyTorch commonly
-send. f32 has no specialized tier because the kernel's 128-bit fast path (below) is
-for 16-bit elements only: an f32 object with `N` baked in runs the same scalar loop
-the generic one does. `block_threads` is single-valued
+Per phase: 3 + 2 generic objects (one per dtype and gamma form) and 2 dtypes × 2 gamma
+forms × 10 baked widths, so 45; doubled for training, 90. Names gain `_f32scale1` and
+`_rstd1` only when those knobs are set, so the inference objects keep their names. The
+f32-gamma form reads gamma as f32 beside bf16/f16 x and y (the kernel's
+`weight_dtype_str="f32"`): the mixed form cuDNN and PyTorch commonly send. f32 has no
+baked tier because the kernel's 128-bit fast path (below) is for 16-bit elements only:
+an f32 object with `N` baked in runs the same scalar loop the generic one does.
+`block_threads` is single-valued
 today: it is launch geometry, not correctness, so a second value only earns its
 6 extra objects once benchmarking says it wins somewhere. It stays in the knob
 dict so the descriptors and the matcher already carry the axis when it grows.
 
-### Why these five widths
+### Why these widths
 
-3072 / 4096 / 5120 / 8192 are Llama-family hidden sizes; 3584 is Qwen2-7B. This
-is a list of what the targeted models actually run, not a sweep.
+By measurement. Each candidate width was timed baked against the generic tier (kernel
+time from the profiler, bf16, M = 4096 and 16384) on gfx90a, gfx942, gfx950, gfx1201 and
+gfx1100, and kept where baking gained at least 15% on at least two of them. Every baked
+width gained on all five, by 1.2–4.2×. 3584 (Qwen2-7B) predates the measurement.
 
 **Widening it is cheap, and is not a coverage fix** — every other `N` is already
 served, by the generic tier. Adding a width buys speed on that width, nothing
@@ -131,7 +114,7 @@ Evaluated once per graph. Every one of these is a hard refusal.
 |---|---|
 | Exactly **one node**, and its attributes are `RMSNormAttributes` | Each kernel serves one complete graph. `RMSNormAttributes` is its own union arm, so matching it is the whole node-type test — there is no mode enum to disambiguate it from layer norm. |
 | No `bias_tensor_uid` | Every instance was compiled with no bias term and adds nothing after scaling. |
-| No `inv_rms_tensor_uid`, and `forward_phase != TRAINING` | All 25 were built `store_rstd=False`. A TRAINING graph wants the statistic even when it forgot to name the tensor, so the phase is refused too. |
+| `inv_rms_tensor_uid` present exactly when `forward_phase == TRAINING`; otherwise NOT_SET or INFERENCE | A training graph wants the statistic even when it forgot to name the tensor, and one that names it outside training asks for an output cuDNN's semantics do not produce: both decline. inv_rms must be FLOAT, x's rank, x's extent on every row axis and 1 on every normalised one, packed, 4-byte aligned: the `store_rstd` objects write one f32 per row. The kernel matcher pairs `store_rstd` with it. |
 | x, scale, y all present and all **device operands** | Not virtual, not pass-by-value: the kernel reads each through a pointer. |
 | x and y one dtype, in {`BFLOAT16`, `HALF`, `FLOAT`}; gamma in that dtype, or `FLOAT` beside `BFLOAT16`/`HALF` | Each object reads x and writes y in one element type, and reads gamma in that type or, for the `scale_f32` objects, as f32. |
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
@@ -186,6 +169,45 @@ object serves every value: PyTorch's 1e-5, vLLM's and HF's 1e-6, and `eps=None`
 
 ---
 
+## 2a. The backward pack — `hipkernel:flydsl_rmsnorm_bwd`
+
+[`FlydslRmsNormBwdNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormBwdNative.cpp),
+63 objects per target from the vendored two-stage builder
+([`kernels_src/kernels/norm/rmsnorm_bwd_kernel.py`](kernels_src/kernels/norm/rmsnorm_bwd_kernel.py),
+two recorded modifications). Each object holds two kernels: the partial kernel walks
+the rows with `programs` blocks of 512 threads, writes dx, and leaves one f32 dgamma row
+per program in the workspace; the reduce kernel, named by `reduce_symbol`, sums those
+rows into dgamma in gamma's dtype. **dgamma is deterministic**: no atomics, and the same
+program count and row order on every launch of a plan.
+
+| Axis | Values |
+|---|---|
+| x/dy/dx dtype; gamma | as the forward: bf16, f16, f32; gamma in x's dtype or f32 beside bf16/f16 |
+| width | baked at 1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 12288, 16384 (16-bit), or a **bounded** generic tier: `n_max` 1024, 8192, 16384 |
+
+The generic tiers bound the width instead of taking any: the partial kernel holds each
+thread's dgamma columns in registers across rows, so `n_max` sizes them. 1024 → ~22
+VGPRs, 8192 → ~115, 16384 → ~240, none spilling; 32768 spills, so wider graphs are
+declined. The narrower tier ranks first. Baked widths were chosen by the same
+measurement as the forward's and gained 1.2–8.4× on all five archs; 128, 512 and 1024
+stay generic (within ~25%).
+
+**Program count** follows upstream's selector: one per CU below 2048 rows on the vec8
+path (1024 otherwise), 1.5 per CU above it on the vec8 path, 2 per CU otherwise, never
+more than the rows. The workspace is programs × N × 4 bytes. Measured against a flat 2
+per CU on gfx90a/gfx942/gfx950: within 2% almost everywhere, up to 10% faster at
+4096 × 8192. An **atomic** dgamma (upstream's other builder) was measured and not
+shipped: 2.6–90× slower at large M from contention, and its small-M edge was inside
+host launch overhead.
+
+**The graph matcher** takes one RMSNormBackward node: no dbias; x, dy, dx one dtype;
+gamma and dgamma one dtype, x's or f32 beside 16-bit x; inv_rms one f32 per row (the
+forward's rule); every row operand packed and 16-byte aligned; gamma encoding the
+normalised shape; not override-shape. **The kernel matcher** pairs dtype and gamma
+form, and serves a baked width exactly or a generic one up to its `n_max`.
+
+---
+
 ## 3. Out of scope
 
 Not gaps to be filled before this ships — each is something the shipped objects
@@ -193,9 +215,8 @@ do not compute, declined rather than approximated.
 
 | | Why, and what handles it |
 |---|---|
-| **RMSNorm backward** | Forward-only. The vendored copy deliberately drops the `rmsnorm_bwd_kernel` re-export (modification 2). |
-| **Training phase / saved `inv_rms`** | `store_rstd=False` in all 25. |
-| **Bias** | No instance has the term. |
+| **Bias, dbias** | No instance has the term; neither upstream backward builder computes dbias. |
+| **Backward wider than 16384** | The bounded generic tiers stop there (§2a). |
 | **dtypes other than bf16 / f16 / f32** | fp8 and the rest are not built. Declined on dtype in both matchers. |
 | **Other mixed dtypes** (y unlike x; a 16-bit gamma unlike x; a 16-bit gamma beside f32 x) | Only an f32 gamma beside bf16/f16 x and y has objects. |
 | **Non-packed / padded / transposed operands** | Innermost stride is a literal 1 with no descriptor slot, and the launch passes the width as the row stride. Unit axes are exempt (§2). |
@@ -203,7 +224,7 @@ do not compute, declined rather than approximated.
 | **Gamma that does not encode a normalised shape** (e.g. `[1,2,1,3]` against `[1,2,3,3]`) | Not a broadcast the kernel performs; the frontend rejects it too. |
 | **Multi-node graphs, fused add+RMSNorm** | One node per kernel. Fusion would be its own pack. |
 | **Architectures outside gfx11-generic, gfx12-generic, gfx90a, gfx942 and gfx950** | Objects are checked in for the gfx11 generic family (gfx1100–gfx1103, gfx1150–gfx1153), the gfx12 one (gfx1200, gfx1201), and the CDNA targets gfx90a, gfx942 and gfx950. gfx1170/gfx1171 belong to `gfx11-7-generic`. With `GPU_TARGETS` naming no arch we ship kernels for, the integration reports dormant at configure time and stages nothing — it does not fail, and it does not silently produce an empty shard. Adding a family is a regeneration ([REGEN.md](REGEN.md) §3), not a code change. |
-| **Ops other than RMSNorm** | `OPS` in `_instances.py` has one entry. |
+| **Ops other than RMSNorm** | `OPS` in `_instances.py` has RMSNorm forward and backward only. |
 
 ---
 
@@ -211,10 +232,11 @@ do not compute, declined rather than approximated.
 
 | Claim | Checked by |
 |---|---|
-| The 25 objects per target are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — SHA256 against `manifest.json`, currently 25/25 |
+| The 153 objects per target (90 forward, 63 backward) are what the pinned toolchain produces | [REGEN.md](REGEN.md) §2 — SHA256 against `manifest.json` |
 | Descriptors agree with the objects they describe | `gen_descriptors.py --check`, run by the build before staging |
 | Each object is built for the target its directory names | `gen_descriptors.py --check` reads `amdhsa.target` and, for a generic target, the ELF machine |
 | Every member arch's shard holds exactly the checked-in objects | `tools/check_shards.py`, run by the build after the product pack |
 | The vendored sources match upstream but for recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
 | The pack ships the generic tier for every dtype and gamma form and the specialized tier for the 16-bit ones, every kernel declares the 9-slot signature (epsilon last), and the engine's schema admits runtime epsilons | `TestFlydslRmsNormPacks` — and the shard census that runs it, which fails when the suite is green against an empty shard |
-| The accept/refuse rules above hold | The matcher-acceptance suites in `TestFlydslRmsNormEngine.cpp` |
+| The pack ships the backward tiers per form, each object names its reduce kernel, and every kernel declares the 15-slot partial signature | `TestFlydslRmsNormBwdPacks` and its shard census |
+| The accept/refuse rules above hold | The matcher suites in `TestFlydslRmsNormEngine.cpp` and `TestFlydslRmsNormBwdEngine.cpp`; the GPU suites there check y, inv_rms, dx and dgamma against host references and dgamma's determinism |

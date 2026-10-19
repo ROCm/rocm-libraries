@@ -37,7 +37,7 @@ way to check it, or it is just bytes someone once vouched for.
 
 ## What ships
 
-One op -- RMSNorm, 25 kernel objects per target. For RDNA it is built once for each
+One op -- RMSNorm, forward and backward, 153 kernel objects per target. For RDNA it is built once for each
 of two LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -49,17 +49,24 @@ Each member's shard carries its family's bytes (see [REGEN.md §3](REGEN.md) for
 why one object set per family is enough, and what it needs). For CDNA it is built
 for each of gfx90a, gfx942 and gfx950.
 
-**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 25 objects: bf16, f16 and f32, and bf16
-and f16 with an f32 gamma; epsilon is a kernel argument, so any value is served:
+**RMSNorm forward** (`hipkernel:flydsl_rmsnorm`), 90 objects: bf16, f16 and f32, and bf16
+and f16 with an f32 gamma; inference, and training that also saves inv_rms; epsilon is
+a kernel argument, so any value is served:
 
-- a **specialized** tier with `N` baked in at 3072 / 3584 / 4096 / 5120 / 8192
+- a **specialized** tier with `N` baked in at 2560 / 3072 / 3584 / 4096 / 5120 / 6144 /
+  7168 / 8192 / 12288 / 16384, chosen by measurement (each 1.2–4.2× over the generic
+  tier on five GPUs)
 - a **generic** tier that reads `N` from the tensor descriptor at runtime, so
   every other width is served too — more slowly, but served. f32 ships this tier
   only, since the kernel's fast path is for 16-bit elements.
 
-Widths outside the specialized list are a **performance** boundary, not a
-coverage one. The things that are genuinely out of scope — backward, training
-phase, bias, other dtypes, non-packed operands — are enumerated in
+**RMSNorm backward** (`hipkernel:flydsl_rmsnorm_bwd`), 63 objects: dx and dgamma, the same
+dtypes and gamma forms, a deterministic two-stage dgamma reduction, baked widths from
+1536 to 16384 and generic tiers bounded at 1024 / 8192 / 16384 ([COVERAGE.md §2a](COVERAGE.md)).
+
+Widths outside the specialized lists are a **performance** boundary, not a
+coverage one (bar backward above 16384). The things that are genuinely out of scope —
+bias and dbias, other dtypes, non-packed operands, fusion — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
 

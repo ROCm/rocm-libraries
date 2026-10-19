@@ -723,6 +723,9 @@ TEST(TestGpuFlydslRmsNormBwdDispatch, ComputesAtABakedWidth)
         DataType::BFLOAT16, "bf16", 4096, 4096, 64, 4096, 2e-2);
     expectBackwardMatchesReference<hipdnn_data_sdk::types::half>(
         DataType::HALF, "f16", 3072, 3072, 37, 3072, 5e-3);
+    // A baked width below the forward's small-N threshold, which the backward can bake.
+    expectBackwardMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", 2048, 2048, 300, 2048, 2e-2);
 }
 
 TEST(TestGpuFlydslRmsNormBwdDispatch, ComputesThroughTheGenericTiers)

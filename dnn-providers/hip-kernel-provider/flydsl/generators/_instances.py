@@ -167,16 +167,18 @@ def _abbrev(key: str) -> str:
 # than hiding inside this one. Until then small N is served by the generic tier.
 RMSNORM_SMALL_N_THRESHOLD = 2048
 
-# The specialized widths: the hidden sizes that dominate the models this release
-# targets, not a sweep. 3072/4096/5120/8192 are Llama-family, 3584 is Qwen2-7B.
-# Every other N -- and every N a future model introduces -- is served by the
-# generic tier, which is the point of having one. Widening this list is cheap; it
-# is not a coverage fix.
+# The specialized widths. Chosen by measurement: each baked width was timed against the
+# generic tier (kernel time, bf16, M = 4096 and 16384) on gfx90a, gfx942, gfx950,
+# gfx1201 and gfx1100, and kept where baking gained at least 15% on at least two of them.
+# Every width listed gained on all five: 1.2-4.2x forward. 3584 (Qwen2-7B) predates the
+# measurement. Every other N -- and every N a future model introduces -- is served by the
+# generic tier.
 #
-# 2048 was in the original plan and is deliberately absent: `N <= threshold` is
-# the small-N branch above, so asking for it here would not produce a
-# specialization of this kernel at all.
-RMSNORM_SPECIALIZED_N = (3072, 3584, 4096, 5120, 8192)
+# N <= 2048 is absent on purpose: `N <= threshold` is the small-N branch above, so asking
+# for it here would not produce a specialization of this kernel at all. That family
+# measured 1.3-5x over the generic tier at 128 (QK-norm) on four of five archs; it is a
+# follow-up with its own launch record.
+RMSNORM_SPECIALIZED_N = (2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 12288, 16384)
 
 # The kernel's `BLOCK_THREADS`. Single-valued today: it is a launch-geometry
 # knob, not a correctness one, so the second value only earns its instances once
@@ -271,6 +273,24 @@ def _assert_unique(instances: list[Instance]) -> None:
 # 16384 are declined until a variant that accumulates elsewhere exists. The narrower
 # tier ranks first, so a graph runs on the least masked-off work that serves it.
 RMSNORM_BWD_GENERIC_N_MAX = {1024: 30, 8192: 20, 16384: 10}
+# Baked backward widths, chosen as the forward's are: each gained 1.2-8.4x over the
+# generic tier at M >= 4096 on all five measured archs. 128, 512 and 1024 stay generic:
+# within ~25% there, and above 15% on at most two archs. The partial kernel takes any
+# baked N (the vec8 path from 4096), unlike the forward, so the list reaches below 2560.
+RMSNORM_BWD_SPECIALIZED_N = (
+    1536,
+    2048,
+    2560,
+    3072,
+    3584,
+    4096,
+    5120,
+    6144,
+    7168,
+    8192,
+    12288,
+    16384,
+)
 RMSNORM_BWD_REDUCE_SYMBOL = "rmsnorm_bwd_dweight_reduce_kernel_1"
 
 
@@ -295,7 +315,7 @@ def rmsnorm_bwd_instances() -> list[Instance]:
                     )
                 )
         for dtype in DTYPES:
-            for n in RMSNORM_SPECIALIZED_N:
+            for n in RMSNORM_BWD_SPECIALIZED_N:
                 instances.append(
                     Instance(
                         op="rmsnorm_bwd",

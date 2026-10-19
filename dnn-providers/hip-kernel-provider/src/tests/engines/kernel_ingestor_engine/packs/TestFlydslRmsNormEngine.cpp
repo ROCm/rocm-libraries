@@ -1318,6 +1318,9 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesF16AtABakedWidth)
 
     expectRmsNormMatchesReference<hipdnn_data_sdk::types::half>(
         DataType::HALF, "f16", 4096, 4, 4096, 5e-3);
+    // DeepSeek-V3's hidden size, one of the widths baked by measurement.
+    expectRmsNormMatchesReference<hipdnn_data_sdk::types::half>(
+        DataType::HALF, "f16", 7168, 4, 7168, 5e-3);
 }
 
 TEST(TestGpuFlydslRmsNormDispatch, ComputesF32WithTheGenericKernel)

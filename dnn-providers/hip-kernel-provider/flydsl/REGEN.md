@@ -105,15 +105,15 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm` | 25 |
-| `gfx12-generic` | `rmsnorm` | 25 |
-| `gfx90a` | `rmsnorm` | 25 |
-| `gfx942` | `rmsnorm` | 25 |
-| `gfx950` | `rmsnorm` | 25 |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
+| `gfx12-generic` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
+| `gfx90a` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
+| `gfx942` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
+| `gfx950` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
 
 ```bash
 cd dnn-providers/hip-kernel-provider/flydsl
-ARCH=gfx11-generic OPS="rmsnorm"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
@@ -186,6 +186,7 @@ cd dnn-providers/hip-kernel-provider/flydsl
 #     for each op.
 for ARCH in gfx11-generic gfx12-generic gfx90a gfx942 gfx950; do
   $PY -m generators.gen_rmsnorm --arch $ARCH
+  $PY -m generators.gen_rmsnorm_bwd --arch $ARCH
 
   # (2) Descriptors. Every field is derived from the manifest and the objects it
   #     names, so a descriptor cannot disagree with the object it describes.
