@@ -1,0 +1,48 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Pre-commit security gate: fast, PR-side security scanners that run on
+# every pull request. The security counterpart to `pre-commit.yml`. The
+# set of scanners lives in `security-baseline.yml`, so scanners coming
+# online are picked up here without touching this file.
+#
+# Requests human-readable reports only: findings are uploaded as a build
+# artifact and printed to the job summary, never to the Security tab, so
+# fork PRs (which never receive elevated tokens) behave identically to
+# same-repo PRs. See the scheduled counterpart (weekly-security-scan.yml)
+# for the SARIF / code-scanning upload.
+name: ROCm PR Bot Scan
+
+on:
+  # SECURITY: base-repo context so secrets work for fork PRs. The called
+  # workflow never checks out/executes PR head code.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  check_run:
+    types: [completed]
+
+# Caller must grant what the reusable workflow needs (callee cannot exceed it).
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+
+concurrency:
+  group: rocm-pr-bot-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.check_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  rocm-pr-bot:
+    # Skip the bot's own completed check_run to avoid loops. endsWith() matches
+    # the reusable job name ("rocm-pr-bot / therock-pr-bot"). The legacy local
+    # workflow was removed in this PR, so no other bot reacts to this check.
+    if: >-
+      github.event_name != 'check_run' ||
+      !endsWith(github.event.check_run.name, 'therock-pr-bot')
+    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@3ae33a370e0eaf5d305a736f7d775cc93cc95b98
+    with:
+      repo_name: therock-ci-config
+    secrets:
+      THEROCK_PR_BOT_APPID: ${{ secrets.THEROCK_PR_BOT_APPID }}
+      THEROCK_PRBOT_KEY: ${{ secrets.THEROCK_PRBOT_KEY }}
