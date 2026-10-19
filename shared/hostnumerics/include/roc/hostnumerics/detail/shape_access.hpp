@@ -13,7 +13,14 @@ struct ShapeAccess {
     }
 
     static bool isValidIndexOrder(size_t rank, std::span<const size_t> order) {
-        return Shape::isValidIndexOrder(rank, order);
+        if (order.empty()) return true;
+        if (order.size() != rank) return false;
+        std::vector<bool> seen(rank, false);
+        for (size_t axis : order) {
+            if (axis >= rank || seen[axis]) return false;
+            seen[axis] = true;
+        }
+        return true;
     }
 };
 }  // namespace roc::hostnumerics::detail
