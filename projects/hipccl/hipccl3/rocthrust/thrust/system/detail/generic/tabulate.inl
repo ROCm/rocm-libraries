@@ -34,7 +34,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename ForwardIterator, typename UnaryOperation>
 THRUST_HOST_DEVICE void tabulate(
   thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last, UnaryOperation unary_op)
@@ -49,6 +48,5 @@ THRUST_HOST_DEVICE void tabulate(
 
   thrust::transform(exec, iter, iter + _THRUST_STD::distance(first, last), first, unary_op);
 } // end tabulate()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END
