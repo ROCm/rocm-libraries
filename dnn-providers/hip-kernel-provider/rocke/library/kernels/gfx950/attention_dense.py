@@ -2537,7 +2537,8 @@ _DENSE_LAUNCHER_CACHE: dict = {}
 
 def align_up(n: int, mult: int) -> int:
     """Round ``n`` up to the next multiple of ``mult`` (kernel tile alignment;
-    :func:`rocke.helpers.spec.align_up` of ``int(n)``)."""
+    :func:`rocke.helpers.spec.align_up` of ``int(n)``). ``mult`` must be
+    integer-like: a ``float`` raises ``TypeError``."""
     return _align_up(int(n), mult)
 
 
