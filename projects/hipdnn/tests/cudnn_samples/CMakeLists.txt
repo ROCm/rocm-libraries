@@ -1,8 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 #
-# Compiles NVIDIA's unmodified cudnn-frontend samples/cpp corpus against the *installed*
-# hipDNN cuDNN-compatibility shim, and runs what compiles.
+# Compiles NVIDIA's unmodified cudnn-frontend samples/cpp and samples/legacy_samples corpora
+# against the *installed* hipDNN cuDNN-compatibility shim, and runs what compiles.
 #
 # This is a standalone project configured against an install tree, not a subdirectory of
 # the hipDNN build. It installs to share/hipdnn/cudnn_samples/ and is configured at test
@@ -63,7 +63,10 @@ if(NOT hipdnn_frontend_cudnn_compatibility_FOUND)
     add_test(NAME cudnn_samples_skipped
              COMMAND ${Python3_EXECUTABLE} -c
                      "import sys; print('cuDNN sample corpus skipped: hipDNN was built without HIPDNN_ENABLE_CUDNN_COMPATIBILITY'); sys.exit(77)")
-    set_tests_properties(cudnn_samples_skipped PROPERTIES SKIP_RETURN_CODE 77)
+    # Every label a driver may filter on, so a label-filtered run still reports the skip.
+    set_tests_properties(cudnn_samples_skipped PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "cudnn_samples;compile;run")
     return()
 endif()
 
@@ -91,7 +94,15 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" MANIFEST)
 
 string(JSON CORPUS_REPO GET "${MANIFEST}" corpus repo)
 string(JSON CORPUS_TAG GET "${MANIFEST}" corpus tag)
-string(JSON CORPUS_SPARSE_PATH GET "${MANIFEST}" corpus sparse_path)
+string(JSON CORPUS_CPP_PATH GET "${MANIFEST}" corpus cpp_path)
+string(JSON _sparse_len LENGTH "${MANIFEST}" corpus sparse_paths)
+math(EXPR _last "${_sparse_len} - 1")
+set(CORPUS_SPARSE_PATHS "")
+foreach(i RANGE 0 ${_last} 1)
+    string(JSON _sparse GET "${MANIFEST}" corpus sparse_paths ${i})
+    list(APPEND CORPUS_SPARSE_PATHS "${_sparse}")
+endforeach()
+string(JSON LEGACY_PATH GET "${MANIFEST}" legacy path)
 string(JSON CORPUS_FE_VERSION GET "${MANIFEST}" corpus frontend_version)
 string(JSON EXPECT_CUDART_VERSION GET "${MANIFEST}" environment CUDART_VERSION)
 string(JSON EXPECT_CUDNN_VERSION GET "${MANIFEST}" environment CUDNN_VERSION)
@@ -105,7 +116,15 @@ if(HIPDNN_CUDNN_SAMPLES_CORPUS_DIR)
     message(STATUS "Using the supplied cudnn-frontend checkout: ${CORPUS_ROOT}")
 else()
     set(CORPUS_ROOT "${CMAKE_BINARY_DIR}/corpus")
-    if(NOT EXISTS "${CORPUS_ROOT}/${CORPUS_SPARSE_PATH}")
+    set(_corpus_complete TRUE)
+    foreach(_sparse IN LISTS CORPUS_SPARSE_PATHS)
+        if(NOT EXISTS "${CORPUS_ROOT}/${_sparse}")
+            set(_corpus_complete FALSE)
+        endif()
+    endforeach()
+    # A cached clone from before a sparse path was added is re-cloned rather than re-sparsed:
+    # one code path, and a depth-1 blob-less clone is cheap.
+    if(NOT _corpus_complete)
         message(STATUS "Cloning ${CORPUS_REPO} ${CORPUS_TAG} (sparse)")
         file(REMOVE_RECURSE "${CORPUS_ROOT}")
         execute_process(
@@ -115,10 +134,10 @@ else()
         if(NOT _rc EQUAL 0)
             message(FATAL_ERROR "E22 CORPUS: clone of ${CORPUS_REPO} ${CORPUS_TAG} failed\n${_out}")
         endif()
-        # `include` is not staged or compiled against; it is here only so the version pin
+        # `include` is not staged or compiled against; it is listed only so the version pin
         # below can be checked against the corpus's own declaration.
         execute_process(
-            COMMAND git -C "${CORPUS_ROOT}" sparse-checkout set ${CORPUS_SPARSE_PATH} include
+            COMMAND git -C "${CORPUS_ROOT}" sparse-checkout set ${CORPUS_SPARSE_PATHS}
             RESULT_VARIABLE _rc ERROR_VARIABLE _out OUTPUT_VARIABLE _out)
         if(NOT _rc EQUAL 0)
             message(FATAL_ERROR "E22 CORPUS: sparse-checkout failed\n${_out}")
@@ -126,9 +145,12 @@ else()
     endif()
 endif()
 
-set(CORPUS_CPP "${CORPUS_ROOT}/${CORPUS_SPARSE_PATH}")
+set(CORPUS_CPP "${CORPUS_ROOT}/${CORPUS_CPP_PATH}")
 if(NOT EXISTS "${CORPUS_CPP}")
     message(FATAL_ERROR "E22 CORPUS: ${CORPUS_CPP} does not exist")
+endif()
+if(NOT EXISTS "${CORPUS_ROOT}/${LEGACY_PATH}/test_list.cpp")
+    message(FATAL_ERROR "E22 CORPUS: ${CORPUS_ROOT}/${LEGACY_PATH}/test_list.cpp does not exist")
 endif()
 
 # The shim static_asserts on this version, so a drifted corpus would otherwise fail deep
@@ -243,6 +265,10 @@ endif()
 # Used by the EXCLUDED rot checks to confirm a header the shim is supposed to lack is
 # still absent from the installed tree.
 get_target_property(_fe_includes hipdnn_frontend INTERFACE_INCLUDE_DIRECTORIES)
+
+# The superbuild test launcher stages an app-local amd_comgr.dll into <build>/bin; without
+# it the MIOpen JIT loads the system copy, so executables must sit beside it.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 set(SEEN_SOURCES "")
 if(NOT SAMPLE_COUNT MATCHES "^[1-9][0-9]*$")
@@ -361,7 +387,9 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
              COMMAND ${Python3_EXECUTABLE} "${PROBE}"
                      --mode compile --tu "${tu}" --tier "${tier}" --sidecar "${sidecar}"
                      -- ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target ${target})
-    set_tests_properties(compile_${tu_id} PROPERTIES FIXTURES_SETUP fx_${tu_id})
+    set_tests_properties(compile_${tu_id} PROPERTIES
+        FIXTURES_SETUP fx_${tu_id}
+        LABELS "cudnn_samples;compile")
 
     if(tier STREQUAL "XFAIL_COMPILE")
         string(JSON anchor GET "${entry}" anchor)
@@ -386,7 +414,8 @@ foreach(i RANGE 0 ${LAST_SAMPLE} 1)
         # until the workflow-level timeout kills it and reports nothing about anything.
         set_tests_properties(run_${tu_id} PROPERTIES
             FIXTURES_REQUIRED fx_${tu_id}
-            TIMEOUT 300)
+            TIMEOUT 300
+            LABELS "cudnn_samples;run")
     endif()
 endforeach()
 
@@ -399,3 +428,199 @@ endforeach()
 
 list(LENGTH CORPUS_SOURCES _staged_count)
 message(STATUS "cuDNN sample corpus: ${_staged_count} staged, ${SAMPLE_COUNT} manifest entries")
+
+# ---------------------------------------------------------------------------------------
+# Legacy samples
+# ---------------------------------------------------------------------------------------
+# Upstream links samples/legacy_samples into one Catch2 binary. Each TEST_CASE runs in its
+# own process against its manifest entry: most of them crash in upstream code on an empty
+# engine list, and one crash must not hide the other outcomes.
+set(LEGACY_SRC "${CORPUS_ROOT}/${LEGACY_PATH}")
+# Never on the same include path as staged/cpp: both trees include their own
+# utils/helpers.h file-relatively, so each keeps the upstream layout in its own root.
+set(LEGACY_STAGE "${CMAKE_BINARY_DIR}/staged/legacy")
+set(_legacy_subst utils/helpers.h utils/error_util.h)
+file(GLOB_RECURSE _legacy_files RELATIVE "${LEGACY_SRC}" "${LEGACY_SRC}/*.cpp" "${LEGACY_SRC}/*.h")
+list(REMOVE_ITEM _legacy_files ${_legacy_subst})
+foreach(rel IN LISTS _legacy_files)
+    configure_file("${LEGACY_SRC}/${rel}" "${LEGACY_STAGE}/${rel}" COPYONLY)
+endforeach()
+foreach(rel IN LISTS _legacy_subst)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/legacy/${rel}" "${LEGACY_STAGE}/${rel}" COPYONLY)
+endforeach()
+
+string(JSON _len LENGTH "${MANIFEST}" legacy sources)
+if(NOT _len MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "E26 LEGACY: legacy.sources is empty")
+endif()
+math(EXPR _last "${_len} - 1")
+set(_legacy_sources "")
+set(_legacy_tu_paths "")
+foreach(j RANGE 0 ${_last} 1)
+    string(JSON _src GET "${MANIFEST}" legacy sources ${j})
+    list(APPEND _legacy_sources "${_src}")
+    list(APPEND _legacy_tu_paths "${LEGACY_STAGE}/${_src}")
+endforeach()
+set(_legacy_accounted ${_legacy_sources})
+string(JSON _len ERROR_VARIABLE _ignored LENGTH "${MANIFEST}" legacy excluded_sources)
+if(_len MATCHES "^[1-9][0-9]*$")
+    math(EXPR _last "${_len} - 1")
+    foreach(j RANGE 0 ${_last} 1)
+        string(JSON _src MEMBER "${MANIFEST}" legacy excluded_sources ${j})
+        list(APPEND _legacy_accounted "${_src}")
+    endforeach()
+endif()
+# A corpus that grew a TU, or a manifest naming one that is gone, must not go unnoticed.
+file(GLOB _legacy_top RELATIVE "${LEGACY_SRC}" "${LEGACY_SRC}/*.cpp" "${LEGACY_SRC}/*.cu")
+set(_seen "")
+foreach(_src IN LISTS _legacy_accounted)
+    if(_src IN_LIST _seen)
+        message(FATAL_ERROR "E26 LEGACY: source '${_src}' is listed more than once")
+    endif()
+    list(APPEND _seen "${_src}")
+    if(NOT _src IN_LIST _legacy_top)
+        message(FATAL_ERROR "E26 LEGACY: listed source '${_src}' is not in ${LEGACY_SRC}")
+    endif()
+endforeach()
+foreach(_src IN LISTS _legacy_top)
+    if(NOT _src IN_LIST _legacy_accounted)
+        message(FATAL_ERROR "E26 LEGACY: '${_src}' is in neither legacy.sources nor legacy.excluded_sources")
+    endif()
+endforeach()
+
+set(_legacy_scraped "")
+foreach(_src IN LISTS _legacy_sources)
+    file(READ "${LEGACY_SRC}/${_src}" _text)
+    string(REGEX MATCHALL "TEST_CASE\\(\"[^\"]+\"" _found "${_text}")
+    foreach(_m IN LISTS _found)
+        string(REGEX REPLACE "^TEST_CASE\\(\"(.*)\"$" "\\1" _name "${_m}")
+        if(_name IN_LIST _legacy_scraped)
+            message(FATAL_ERROR "E26 LEGACY: TEST_CASE \"${_name}\" is defined more than once")
+        endif()
+        list(APPEND _legacy_scraped "${_name}")
+    endforeach()
+endforeach()
+
+file(MAKE_DIRECTORY "${REPORT_DIR}/legacy")
+add_executable(tu_legacy_samples ${_legacy_tu_paths})
+target_include_directories(tu_legacy_samples PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/overlay" "${LEGACY_STAGE}")
+target_link_libraries(tu_legacy_samples PRIVATE hipdnn_frontend Catch2::Catch2WithMain)
+add_test(NAME compile_legacy_samples
+         COMMAND ${Python3_EXECUTABLE} "${PROBE}"
+                 --mode compile --tu legacy_samples --tier RUN
+                 --sidecar "${REPORT_DIR}/legacy/legacy_samples.json"
+                 -- ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target tu_legacy_samples)
+set_tests_properties(compile_legacy_samples PROPERTIES
+    FIXTURES_SETUP fx_legacy_samples
+    LABELS "cudnn_samples;compile")
+
+string(JSON _case_count LENGTH "${MANIFEST}" legacy cases)
+if(NOT _case_count MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "E26 LEGACY: legacy.cases is empty")
+endif()
+math(EXPR _last "${_case_count} - 1")
+set(_legacy_names "")
+set(_legacy_ids "")
+foreach(_t RUN_CLEAN RUN XFAIL_RUN EXCLUDED)
+    set(_n_${_t} 0)
+endforeach()
+foreach(i RANGE 0 ${_last} 1)
+    string(JSON name MEMBER "${MANIFEST}" legacy cases ${i})
+    # A ';' would split the name in every CMake list below.
+    string(FIND "${name}" ";" _semicolon)
+    if(NOT _semicolon EQUAL -1)
+        message(FATAL_ERROR "E26 LEGACY: case name '${name}' contains ';'")
+    endif()
+    # The id names both the ctest case and the sidecar, so a collision would make two cases
+    # report as one.
+    string(MAKE_C_IDENTIFIER "${name}" id)
+    if(id IN_LIST _legacy_ids)
+        message(FATAL_ERROR "E26 LEGACY: case '${name}' maps to id '${id}', which is already taken")
+    endif()
+    list(APPEND _legacy_ids "${id}")
+    list(APPEND _legacy_names "${name}")
+
+    string(JSON _case GET "${MANIFEST}" legacy cases "${name}")
+    string(JSON tier GET "${_case}" tier)
+    if(NOT tier MATCHES "^(RUN_CLEAN|RUN|XFAIL_RUN|EXCLUDED)$")
+        message(FATAL_ERROR "E26 LEGACY: case '${name}' has unknown tier '${tier}'")
+    endif()
+    math(EXPR _n_${tier} "${_n_${tier}} + 1")
+    string(JSON reason ERROR_VARIABLE _ignored GET "${_case}" reason)
+    if(reason MATCHES "NOTFOUND$" OR reason STREQUAL "")
+        message(FATAL_ERROR "E26 LEGACY: case '${name}' has no reason")
+    endif()
+    string(JSON _forbid ERROR_VARIABLE _ignored GET "${_case}" forbid)
+    if(NOT _forbid MATCHES "NOTFOUND$" AND NOT tier STREQUAL "RUN_CLEAN")
+        message(FATAL_ERROR "E26 LEGACY: case '${name}' has a case-level forbid but is ${tier}")
+    endif()
+    # The probe owns the regex semantics; configure only rejects a shape it cannot judge.
+    string(JSON _expect_len ERROR_VARIABLE _ignored LENGTH "${_case}" expect)
+    if(tier STREQUAL "XFAIL_RUN")
+        if(NOT _expect_len MATCHES "^[1-9][0-9]*$")
+            message(FATAL_ERROR "E26 LEGACY: XFAIL_RUN case '${name}' has no expect entries")
+        endif()
+        math(EXPR _elast "${_expect_len} - 1")
+        set(_has_failure FALSE)
+        foreach(j RANGE 0 ${_elast} 1)
+            string(JSON _outcome GET "${_case}" expect ${j} outcome)
+            string(JSON _anchor GET "${_case}" expect ${j} anchor)
+            if(NOT _outcome MATCHES "^(ran-with-assertion-failures|crashed|ran-clean|ran-no-assertions)$")
+                message(FATAL_ERROR "E26 LEGACY: case '${name}' expects unknown outcome '${_outcome}'")
+            endif()
+            if(_anchor STREQUAL "")
+                message(FATAL_ERROR "E26 LEGACY: case '${name}' has an empty anchor")
+            endif()
+            if(NOT _outcome STREQUAL "ran-clean")
+                set(_has_failure TRUE)
+            endif()
+        endforeach()
+        if(NOT _has_failure)
+            message(FATAL_ERROR "E26 LEGACY: XFAIL_RUN case '${name}' expects only ran-clean")
+        endif()
+    elseif(NOT _expect_len MATCHES "NOTFOUND$")
+        message(FATAL_ERROR "E26 LEGACY: case '${name}' is ${tier} but has expect entries")
+    endif()
+
+    set(sidecar "${REPORT_DIR}/legacy/${id}.json")
+    if(tier STREQUAL "EXCLUDED")
+        set(_json_name "${name}")
+        set(_json_reason "${reason}")
+        foreach(_v _json_name _json_reason)
+            string(REPLACE "\\" "\\\\" ${_v} "${${_v}}")
+            string(REPLACE "\"" "\\\"" ${_v} "${${_v}}")
+        endforeach()
+        file(WRITE "${sidecar}" "{\n  \"tu\": \"legacy_samples::${_json_name}\",\n  \"case\": \"${_json_name}\",\n  \"tier\": \"EXCLUDED\",\n  \"outcome\": \"excluded\",\n  \"verdict\": \"expected\",\n  \"reason\": \"${_json_reason}\"\n}\n")
+        continue()
+    endif()
+
+    # --warn UnmatchedTestSpec turns a renamed case into exit 3 rather than "No tests ran";
+    # --allow-running-no-tests keeps a case that SKIPs from exiting 4.
+    add_test(NAME run_legacy_${id}
+             COMMAND ${Python3_EXECUTABLE} "${PROBE}" --mode case
+                     --manifest "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" --case "${name}"
+                     --sidecar "${sidecar}"
+                     -- $<TARGET_FILE:tu_legacy_samples> "${name}"
+                        --warn UnmatchedTestSpec --allow-running-no-tests)
+    set_tests_properties(run_legacy_${id} PROPERTIES
+        FIXTURES_REQUIRED fx_legacy_samples
+        TIMEOUT 300
+        LABELS "cudnn_samples;run")
+endforeach()
+# After the loop, so an id collision is reported as one even when a colliding name is
+# itself stale.
+foreach(_name IN LISTS _legacy_names)
+    if(NOT _name IN_LIST _legacy_scraped)
+        message(FATAL_ERROR "E26 LEGACY: case '${_name}' is not a TEST_CASE in legacy.sources")
+    endif()
+endforeach()
+foreach(_name IN LISTS _legacy_scraped)
+    if(NOT _name IN_LIST _legacy_names)
+        message(FATAL_ERROR "E26 LEGACY: TEST_CASE \"${_name}\" has no legacy.cases entry")
+    endif()
+endforeach()
+
+message(STATUS
+    "cuDNN legacy samples: ${_case_count} cases (${_n_RUN_CLEAN} RUN_CLEAN, ${_n_RUN} RUN, "
+    "${_n_XFAIL_RUN} XFAIL_RUN, ${_n_EXCLUDED} EXCLUDED)")

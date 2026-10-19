@@ -2,7 +2,12 @@
   "corpus": {
     "repo": "https://github.com/NVIDIA/cudnn-frontend.git",
     "tag": "v1.24.0",
-    "sparse_path": "samples/cpp",
+    "cpp_path": "samples/cpp",
+    "sparse_paths": [
+      "samples/cpp",
+      "samples/legacy_samples",
+      "include"
+    ],
     "frontend_version": 12400
   },
   "environment": {
@@ -339,5 +344,408 @@
         ]
       }
     }
-  ]
+  ],
+  "legacy": {
+    "path": "samples/legacy_samples",
+    "sources": [
+      "test_list.cpp",
+      "conv_sample.cpp",
+      "fusion_sample.cpp",
+      "fp8_sample.cpp",
+      "norm_samples.cpp",
+      "helpers.cpp",
+      "fp16_emu.cpp"
+    ],
+    "excluded_sources": {
+      "fp16_dev.cu": "CUDA kernel source; upstream's legacy_samples target does not build it"
+    },
+    "cases": {
+      "Tensor creation comparison": {
+        "tier": "RUN_CLEAN",
+        "reason": "no engine involved; the builder catch only prints (test_list.cpp:45-55), hence the forbid",
+        "forbid": "Exception in tensor creation"
+      },
+      "Use global(index) for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (conv_sample.cpp:179-227); index 0 is out of range and the catch does CHECK(false) (conv_sample.cpp:439-442); KNOWN_DIVERGENCES Tensors: BYTE_ALIGNMENT, Engine indices",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_ENGINE_GLOBAL_INDEX = 0 is outside \\[0, 0\\)"
+          }
+        ]
+      },
+      "Use heuristics for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); cudnnFindPlanAndCache throws, then CHECK(false) and the numerics REQUIRE (test_list.cpp:236); KNOWN_DIVERGENCES cudnnFindPlanAndCache with no plan that ran",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "cudnnFindPlanAndCache: no execution plan ran"
+          }
+        ]
+      },
+      "Use DNN based heuristics for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "as 'Use heuristics for execution': same driver, the heuristics mode is ignored (conv_sample.cpp:294)",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "cudnnFindPlanAndCache: no execution plan ran"
+          }
+        ]
+      },
+      "Use fallback for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); zero fallback configs, the driver returns SUCCESS (conv_sample.cpp:504-506) and only the numerics REQUIRE (test_list.cpp:388) fails",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "No plan found implementing the operation graph"
+          }
+        ]
+      },
+      "ConvBiasAct sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "setAlpha2(0.5) (conv_sample.cpp:624) is rejected; KNOWN_DIVERGENCES Operations: alpha/beta. The case has no result assertion, so a lowering alpha2 would surface as ran-clean",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2 = 0.5 is not supported"
+          }
+        ]
+      },
+      "Use cudnnFindPlan for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); options.front() on the empty plan list (conv_sample.cpp:769) is upstream UB. The anchor is printed before cudnnFindPlan runs, so it cannot tell a crash inside the shim's cudnnFindPlan from the front() UB; 'Use heuristics for execution', 'Use DNN based heuristics for execution' and 'Use Plan cache for rerunning the same convolution' cover that path with an anchor printed after it returns",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "variantPack",
+            "forbid": "Plan tag:"
+          }
+        ]
+      },
+      "ConvBiasAct sample with cudnnFindPlan": {
+        "tier": "XFAIL_RUN",
+        "reason": "setAlpha2(0.5) (conv_sample.cpp:866) is rejected before front() (:924); KNOWN_DIVERGENCES Operations: alpha/beta",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_OPERATION_POINTWISE_ALPHA2 = 0.5 is not supported"
+          }
+        ]
+      },
+      "Use cudnnGetPlan for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); options.front() on the empty plan list (conv_sample.cpp:1008) is upstream UB",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Max workspace size required 0",
+            "forbid": "Plan tag:"
+          }
+        ]
+      },
+      "ConvScaleBiasAddAct sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no engine for the 5-op conv fusion; filtered_configs[0] on the empty list (fusion_sample.cpp:81) is upstream UB",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvScaleBiasAddAct sample_float": {
+        "tier": "XFAIL_RUN",
+        "reason": "as 'ConvScaleBiasAddAct sample'",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvBiasScaleAct sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "conv-add-mul-relu matches no MIOpen fusion (MIOPEN_ENGINE.toml conv-bias-activation); filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvBiasScaleActSerialization sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "crashes before serialization: no engine, filtered_configs[0] (fusion_sample.cpp:81). With an engine loadFromJson would still be NOT_SUPPORTED; KNOWN_DIVERGENCES Loading a plan without payload",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvScaleBiasActGenIndexSelection sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no engine for the 9-op graph; filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvScaleBiasAct_int8 sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no int8 conv engine; filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "PoolScaleBiasAct_int8 sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no int8 pooling engine; filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "MatmulBiasAct sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no applicable matmul engine: hipBLASLt is disabled on gfx115x Windows (hipblaslt-provider Workarounds.hpp); filtered_configs[0] (fusion_sample.cpp:81). Where hipBLASLt applies the case may run clean",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          },
+          {
+            "outcome": "ran-clean",
+            "anchor": "Plan tag:"
+          }
+        ]
+      },
+      "MatmulBiasAct sample_float": {
+        "tier": "XFAIL_RUN",
+        "reason": "as 'MatmulBiasAct sample'",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          },
+          {
+            "outcome": "ran-clean",
+            "anchor": "Plan tag:"
+          }
+        ]
+      },
+      "MatmulDGeluDBias sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no backward-GELU or dbias engine in any provider; filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvDrelu sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (fusion_sample.cpp:1898-1931); filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "DgradDrelu sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0) (fusion_sample.cpp:2062-2095); filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "ConvColReduction sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "no conv+reduction engine; filtered_configs[0] (fusion_sample.cpp:81)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "Use errata to block global(index) for execution": {
+        "tier": "XFAIL_RUN",
+        "reason": "NVIDIA engine 20 has no counterpart and the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0); KNOWN_DIVERGENCES Engine indices, Engine indices in errata",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_ENGINE_GLOBAL_INDEX = 20 is outside \\[0, 0\\)"
+          }
+        ]
+      },
+      "DP4A execution with cudnnFindPlan": {
+        "tier": "XFAIL_RUN",
+        "reason": "the INT8 tensors set vector count 4 (conv_sample.cpp:1193), NOT_SUPPORTED at tensor finalize; the catch does CHECK(false) (conv_sample.cpp:1271); KNOWN_DIVERGENCES Tensors: vectorized tensors",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported"
+          }
+        ]
+      },
+      "IMMA execution with manual autotuning": {
+        "tier": "XFAIL_RUN",
+        "reason": "vector count 32 (conv_sample.cpp:1309) is NOT_SUPPORTED at tensor finalize, before the INT8x32 reorder type (:1325) or the reorder helper is reached; CHECK(false) (conv_sample.cpp:1442); KNOWN_DIVERGENCES Tensors: vectorized tensors, cudnnReorderFilterAndBiasInt8x32",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_ATTR_TENSOR_VECTOR_COUNT other than 1 is not supported"
+          }
+        ]
+      },
+      "Use Plan cache for rerunning the same convolution": {
+        "tier": "XFAIL_RUN",
+        "reason": "the alignment-4 graph has no engine (no provider reports engine-plugin API >= 1.3.0), so call 1 throws and call 2's REQUIRE(false == expect_in_cache) fails (conv_sample.cpp:338). With engines it still fails: the cached plan runs on a new handle; KNOWN_DIVERGENCES cudnnBackendExecute handle",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "cudnnFindPlanAndCache: no execution plan ran"
+          }
+        ]
+      },
+      "Scale Bias Conv BNGenstats": {
+        "tier": "XFAIL_RUN",
+        "reason": "GEN_STATS is rejected at op build and the catch does CHECK(false) (fusion_sample.cpp:2800); KNOWN_DIVERGENCES Operations: operation types the shim does not lower",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR is not supported"
+          }
+        ]
+      },
+      "Dual Scale Bias Act Relu": {
+        "tier": "XFAIL_RUN",
+        "reason": "no engine for the 6-op pointwise chain; filtered_configs[0] (fusion_sample.cpp:3230)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "Dual Scale Bias Act Relu with CPU Reference": {
+        "tier": "XFAIL_RUN",
+        "reason": "as 'Dual Scale Bias Act Relu'",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "Scale Bias Conv BNGenstats with CPU Reference": {
+        "tier": "XFAIL_RUN",
+        "reason": "the 8.0 device pin keeps the Ampere gate open (test_list.cpp:1822-1823); GEN_STATS is rejected, the driver's CHECK(false) fires and the REQUIREs (test_list.cpp:1948-1949) fail on unwritten Y; KNOWN_DIVERGENCES Operations: operation types the shim does not lower",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR is not supported"
+          }
+        ]
+      },
+      "BN Finalize": {
+        "tier": "XFAIL_RUN",
+        "reason": "BN_FINALIZE_STATISTICS is rejected at op build; CHECK(false) (fusion_sample.cpp:2978); KNOWN_DIVERGENCES Operations: operation types the shim does not lower",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_BACKEND_OPERATION_BN_FINALIZE_STATISTICS_DESCRIPTOR is not supported"
+          }
+        ]
+      },
+      "Tensor cloning": {
+        "tier": "RUN_CLEAN",
+        "reason": "no engine involved; both SECTIONs catch and only print (test_list.cpp:2086-2088, :2147-2149), hence the forbid",
+        "forbid": "Exception in tensor creation"
+      },
+      "Max pooling idx tensor dump": {
+        "tier": "XFAIL_RUN",
+        "reason": "hipDNN accepts the INT8 index but no provider does; filtered_configs[0] (fusion_sample.cpp:3582)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "Backward pooling": {
+        "tier": "XFAIL_RUN",
+        "reason": "no engine for either SECTION (the max SECTION has an INT8 index); filtered_configs[0] (fusion_sample.cpp:3715, :3861)",
+        "expect": [
+          {
+            "outcome": "crashed",
+            "anchor": "Filter config list has 0 configurations"
+          }
+        ]
+      },
+      "Conv two global scales": {
+        "tier": "XFAIL_RUN",
+        "reason": "zero configs, so the sample throws NOT_SUPPORTED (fusion_sample.cpp:3436-3441) and CHECK(false) fires",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "run_conv_two_global_scales: No plan found"
+          }
+        ]
+      },
+      "Conv Scale": {
+        "tier": "RUN",
+        "reason": "vacuous: the sample's Hopper gate throws ARCH_MISMATCH (fp8_sample.cpp:47-50), which the catch accepts for major < 9 (fp8_sample.cpp:166-178); never reaches the shim"
+      },
+      "Conv Descale Descale Amax Scale sample": {
+        "tier": "RUN",
+        "reason": "vacuous, as 'Conv Scale' (fp8_sample.cpp:203, :372-384)"
+      },
+      "Scale transpose convert amax sample": {
+        "tier": "RUN",
+        "reason": "vacuous, as 'Conv Scale' (fp8_sample.cpp:401, :533-544)"
+      },
+      "Dgrad Descale Descale Amax Scale sample": {
+        "tier": "RUN",
+        "reason": "SKIPs: not Hopper or Blackwell (fp8_sample.cpp:569-571)"
+      },
+      "BN BWD Weights sample": {
+        "tier": "XFAIL_RUN",
+        "reason": "the 8.0 device pin avoids ARCH_MISMATCH (fusion_sample.cpp:3932-3938); BN_BWD_WEIGHTS is rejected at op build and the catch does CHECK(false) (fusion_sample.cpp:4111-4123); KNOWN_DIVERGENCES Operations: operation types the shim does not lower",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "CUDNN_BACKEND_OPERATION_BN_BWD_WEIGHTS_DESCRIPTOR is not supported"
+          }
+        ]
+      },
+      "Batch normalization": {
+        "tier": "XFAIL_RUN",
+        "reason": "peer statistics are rejected at op build in both SECTIONs; with major == 8 the catches do CHECK(false) (test_list.cpp:2814-2820, norm_samples.cpp:465-471); KNOWN_DIVERGENCES Operations: norm peer statistics",
+        "expect": [
+          {
+            "outcome": "ran-with-assertion-failures",
+            "anchor": "NORM_(FWD|BWD)_PEER_STAT_DESCS is not supported"
+          }
+        ]
+      }
+    }
+  }
 }
