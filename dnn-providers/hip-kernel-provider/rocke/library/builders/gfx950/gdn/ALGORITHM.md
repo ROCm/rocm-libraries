@@ -37,6 +37,7 @@
   - [4.6 Registry and tile selection](#46-registry-and-tile-selection)
   - [4.7 The reference path](#47-the-reference-path)
   - [4.8 Spec validation](#48-spec-validation)
+  - [4.9 Optional fusions: conv1d and gated RMSNorm](#49-optional-fusions-conv1d-and-gated-rmsnorm)
 - [5. Prefill kernel](#5-prefill-kernel)
   - [5.1 Chunkwise factorization](#51-chunkwise-factorization)
   - [5.2 The triangular solve](#52-the-triangular-solve)
@@ -66,6 +67,13 @@
 | `q̂`, `k̂` | L2-normalised query/key |
 | `Γ_i` | cumulative in-chunk decay up to row `i`; `γ_C` is the whole-chunk decay |
 | `EV` | per-band value extent, `DV / value_splits` — the scan's working V rows (§5.5) |
+| `B` | decode batch: sequences in one launch |
+| `pool` | depth of a decode state pool: slots addressed by `read_indices` / `write_indices` |
+| `C_conv` | channels of the packed `[q \| k \| v]` row the fused conv reads, `2 × Hk × DK + Hv × DV` (`GdnDecodeSpec.conv_dim`, §4.9) |
+| `W` | causal conv1d width of the fused conv, `CONV_WIDTH = 4`; a channel keeps `W − 1` history taps |
+| `NORM_EPS` | compile-time `1e-6` of the `q`/`k` L2 norms; the fused output norm's eps is the separate runtime `norm_eps` |
+| `x · y` | dot product of two vectors (a scalar); integer extents and other scalar products use `×` |
+| `x ⊙ y` | elementwise product; a scalar operand broadcasts (written `*` inside code blocks) |
 
 Ownership vocabulary: a **workgroup** is one thread block; a **wave** is 64 lanes; a **lane** is
 one thread. `WTK = warp_threads_k`, `WTV = wave_size / WTK`, `NW = num_warps`,
@@ -168,6 +176,22 @@ published `config.json`.
 Qwen3-Next reads `linear_num_value_heads`, `linear_num_key_heads` and
 `linear_key_head_dim = linear_value_head_dim`; Kimi Linear reads `linear_attn_config.num_heads`
 and `linear_attn_config.head_dim`, and KDA has no head grouping, so `Hk = Hv`.
+
+The layer neighbours that §4.9 can fuse are pinned the same way. Widths and eps come from
+`config.json`; the conv layout and the gate activation come from each model's published modeling
+code (`modeling_qwen3_next.py` in Hugging Face Transformers; `modeling_kimi.py` in the
+Kimi-Linear checkpoint repository):
+
+| Model | conv width `W` | conv state | output-norm gate | output-norm eps |
+| --- | --- | --- | --- | --- |
+| Qwen3-Next | 4 (`linear_conv_kernel_dim`) | ONE depthwise conv over the packed `[q \| k \| v]` row, `C_conv = 2 × Hk × DK + Hv × DV` channels | `SiLU` (`Qwen3NextRMSNormGated`) | `1e-6` (`rms_norm_eps`) |
+| Kimi Linear | 4 (`short_conv_kernel_size`) | THREE separate convs (`q_conv1d`, `k_conv1d`, `v_conv1d`) with three states | `sigmoid` (`FusedRMSNormGated(activation='sigmoid')`) | `1e-5` (`rms_norm_eps`) |
+
+So `fuse_out_norm` derives its gate activation from `gate_kind` (`OUT_GATE_ACTIVATION`: GDN →
+SiLU, KDA → sigmoid), and the eps is a runtime argument because the two models differ. Kimi
+Linear's three conv states are one packed `[q | k | v]` state to `fuse_conv`: a host that serves
+Kimi Linear through it lays its three states (and weights) out as one `[pool, C_conv, W − 1]`
+tensor. That packing is an assumption of this kernel, not of the model.
 
 > **Out of scope: Qwen3-Next's other 12 layers.** The same model interleaves gated *full*
 > attention every fourth layer (`full_attention_interval = 4`), and those layers are
@@ -284,8 +308,9 @@ serving infrastructure.
 
 ### 4.1 Tensor contract
 
-All tensors are contiguous row-major. `gate_kind` changes the extent and type
-of the gate inputs, not the recurrent-state layout or the rest of the ABI:
+Every tensor below is contiguous row-major (the fused-mode rows of §4.9 are the one exception:
+they may be strided row slices). `gate_kind` changes the extent and type of the gate inputs, not
+the recurrent-state layout or the rest of the ABI:
 
 | Tensor | GDN shape/type | KDA shape/type | Direction |
 | --- | --- | --- | --- |
@@ -298,9 +323,17 @@ of the gate inputs, not the recurrent-state layout or the rest of the ABI:
 | `read_indices`, `write_indices` | `[B]`, `i32` | same | in |
 | `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]`, `state_dtype` | same | in-place |
 
+`state_dtype` is `bf16`, `f16` or `f32`; the I/O `dtype` is `bf16` or `f16`. The kernel
+updates the state in f32 registers either way, so `f32` only widens the state loads and
+stores (two 16-byte accesses per 8 elements instead of one). With a 2-byte state the
+emitted code is exactly what it was before `f32` was admitted.
+
 The launch also passes a trailing `batch_size` `i32` scalar (not a tensor).
 `prepare()` validates the gate-kind-dependent shapes, dtypes, devices and
-contiguity before launch, in addition to the state-pool checks in §4.5.
+contiguity before launch, in addition to the state-pool checks in §4.5. It also
+checks every pointer's base address against the alignment the emitted vector
+accesses assume (`gdn_decode_pointer_alignment`: 16 B for the vector-loaded
+tensors, 32 B for KDA's f32 `dt_bias`), because nothing on the device does.
 
 ### 4.2 Parallel decomposition
 
@@ -321,7 +354,9 @@ three ways:
 | across k-lanes | `WTK` | `WTK` lanes cover a row, `VPT = 8` contiguous channels each, repeated `WTK_ITERS = DK / (WTK × VPT)` times |
 
 Live state per lane is `WTV_ITERS × WTK_ITERS × VPT` values, held **in registers**. The design is
-deliberately register-resident: the kernel allocates **no LDS and issues no barriers**.
+deliberately register-resident: in the unfused mode the kernel allocates **no LDS and issues no
+barriers**. The fused-norm mode of §4.9 adds, when `NW > 1`, one `NW`-float LDS reduction and its
+barrier; fused conv alone adds one barrier when `NW > 1`. With `NW = 1` neither adds either.
 
 `BPV` is a parallelism-manufacturing knob, not a work-reducing one — each of the `BPV` workgroups
 re-loads `q` and `k` and re-runs the normalisation reductions. It buys occupancy at small batch and
@@ -362,7 +397,7 @@ XOR is chosen over a shift-down tree deliberately: the pattern is symmetric, so 
 holding the full sum**. That is what each lane needs — it must scale its own channels — so no
 broadcast step is required afterwards. Offsets 1 and 2 lower to `quad_perm`, a lane-read modifier
 on the arithmetic instruction itself; wider offsets use `ds_swizzle`. Neither allocates shared
-memory, which is why the kernel has no LDS and no `lgkmcnt` barrier stalls on the narrow steps.
+memory, which is why the unfused kernel has no LDS and no `lgkmcnt` barrier stalls on the narrow steps.
 
 ### 4.5 State pool addressing
 
@@ -378,6 +413,11 @@ guard in §8, dispatch selects a *spec*, not tensors, so a caller that launches 
 without going through `prepare()` gets neither this host validation nor a device bounds-check. A
 production launch path must call `prepare()`, or replicate its shape and index-range checks,
 before launch.
+
+Slot aliasing has one more rule that the host does not check: a sequence may write the slot it
+read, but not a slot that another active sequence reads in the same launch. Those are different
+workgroups, and nothing orders one's write after the other's read; the same holds for the fused
+conv-state pool of §4.9, which uses the same indices.
 
 ### 4.6 Registry and tile selection
 
@@ -418,15 +458,74 @@ warp-tiled path, selected only by naming the spec directly.
 
 ### 4.8 Spec validation
 
-`is_valid_spec(spec, arch)` rejects a configuration before any IR is built. It refuses an
+`is_valid_spec(spec, arch)` rejects a configuration before any IR is built. It first refuses a
+field of the wrong type — a flag that is not a real `bool` (`fuse_conv="false"` is truthy and
+would select the fused ABI), or a size that is not an integer — so no rule below can coerce a
+malformed spec into a different valid one. It then refuses an
 unsupported activation or state dtype, `num_v_heads` not divisible by `num_k_heads`, a head
 dimension that is not a multiple of `VPT = 8`, a workgroup over the target's thread limit, a
 `wave_size` not divisible by `WTK`, a `DK` that is not a multiple of the warp's key tile
 (`WTK × VPT`), a `BPV` that does not divide `DV`, and a resulting value tile that does not divide
-across the workgroup's value lanes.
+across the workgroup's value lanes. The three §4.9 fusion rules are emitter limits, not hardware
+ones, and carry the family's `NOT_YET_IMPLEMENTED:` marker.
 
 The dispatcher's support check ends by calling this same validator, so "the spec the kernel can
 emit" and "the spec dispatch may select" are one rule rather than two copies that can drift.
+
+### 4.9 Optional fusions: conv1d and gated RMSNorm
+
+A hybrid model runs two neighbours around this decode step: a causal conv1d (width `W = 4`) +
+SiLU on `q`, `k` and `v` before it, and a gated RMSNorm on its output after it (§1.4 pins both
+per model). Two spec flags fuse them into the warp-tiled kernel, independently:
+
+| Flag | Computes, per channel `c` / per head | Extra arguments |
+| --- | --- | --- |
+| `fuse_conv` | `x'_c = silu(h0_c w0_c + h1_c w1_c + h2_c w2_c + x_c w3_c)` (scalars; `h0` oldest); the taps shift in place to `(h1, h2, x)` | `mixed_qkv [B, ≥ C_conv]`, rows `qkv_stride` elements apart (replaces `query`/`key`/`value`); `conv_state [pool, C_conv, W − 1]` (I/O dtype, same read/write slots as the recurrent state); `conv_weight [C_conv, W]` f32 |
+| `fuse_out_norm` | `y = o ⊙ rsqrt(mean(o ⊙ o) + norm_eps) ⊙ norm_weight ⊙ act(out_gate)` over the head's `DV` outputs, `act` = SiLU for GDN, sigmoid for KDA | `out_gate [B, ≥ Hv × DV]`, rows `og_stride` elements apart; `norm_weight [DV]` f32, shared by every head; runtime `norm_eps` |
+
+Each row of `mixed_qkv` / `out_gate` must be contiguous; the rows may be slices of a wider
+buffer, so only the first `C_conv` / `Hv × DV` elements of a row are read. `qkv_stride` must keep
+every row on a 16-byte boundary, since `q`/`k` chunks are vector loads.
+
+Both flags off emit exactly the unfused kernel: the name gains `_cv` / `_rn` only when a flag is
+on, and every pre-existing golden IR hash is unchanged. The flags compose with either gate kind,
+either I/O dtype and any state dtype.
+
+**One workgroup per head (not yet implemented beyond).** Three rules, all limits of this emitter's
+in-place, one-workgroup-per-head design, rejected as `NOT_YET_IMPLEMENTED` (§8, follow-up 7): both
+flags require the warp-tiled path and `blocks_per_v_dim == 1`, and `fuse_conv` also requires
+`Hk == Hv`. The norm needs all `DV` outputs of a head in one workgroup, and with `BPV > 1` several
+workgroups would read the q/k conv taps while one shifts them in place. With `Hv > Hk` the `Hv/Hk`
+workgroups of one k-head share the q/k conv channels, and shifting them in place would race across
+workgroups — a workgroup barrier cannot order that. For `fuse_conv`, an out-of-place conv state
+(read one slot, write another) removes both races and is the planned way to lift its `BPV` and
+`Hk == Hv` rules. `fuse_out_norm` with `BPV > 1` needs a cross-workgroup norm instead: a reduction
+of `Σ o²` across the head's workgroups. Until then a GQA model (Qwen3-Next) fuses only the norm and
+keeps a separate conv kernel; a model with `Hk == Hv` (Kimi Linear, with its three conv states
+packed as §1.4 states) can fuse both.
+
+**Dataflow.** The fused steps slot into the emission order of §4.3 without moving the unfused
+steps. With `fuse_conv`, step 4 loads each `q`/`k` chunk from the packed row together with its
+`W − 1` taps and `W` weights and applies conv + SiLU before the L2 norms; step 8 does the same for
+each owned V row's `v`. The raw (pre-conv) values are kept, since they become the newest tap. With
+the norm on, step 8 holds each row's output instead of storing it; afterwards each wave reduces its
+`Σ o²` (k-lane 0 only, since every k-lane holds the row's output). When `NW > 1` each wave writes
+one float to LDS and a workgroup barrier separates those writes from the reads that finish the
+sum; the gated store follows. That barrier comes after every wave's tap reads (taps → outputs →
+partial sums), so it also orders the tap shift; with conv on and the norm off, one barrier is
+emitted for that alone when `NW > 1`. With `NW = 1` there is no LDS and no barrier: one wave reads
+its taps before it writes them. Each conv channel is written once: q/k channels by wave 0 v-lane 0,
+a V row's channel by its k-lane-0 owner. The norm runs on the fp32 output (a reference
+implementation that rounds `o` to bf16 first differs by up to one bf16 step).
+
+**Cost.** `fuse_conv` with a single wave owns all `DV` rows plus their taps and weights, so it is a
+register-heavy (legal) tile, like the unfused `(1,1,1)`. The fused modes are an enablement path and
+recompute shared work instead of sharing it. A q/k conv channel depends only on its k-lane, so
+every `(wave, v-lane)` pair of the workgroup recomputes it: `NW × WTV = NW × 64 / WTK` times per
+head, each time re-loading its taps and weights (16 times at the `(4, 16, 1)` tile). A V channel's
+conv and an output's gate activation are computed by all `WTK` k-lanes of the row and stored by
+one: `WTK`-fold. This trades occupancy and redundant loads for fewer launches. Tile selection for
+the fused modes is not part of this emitter.
 
 ---
 
@@ -459,7 +558,7 @@ Each block step is two halves:
    column.
 
 The per-block serial work scales as the *square* of the block size, but there are `C / solve_block`
-blocks, so the total serial substitution work is **linear** in `solve_block` (`≈ C · solve_block / 2`):
+blocks, so the total serial substitution work is **linear** in `solve_block` (`≈ C × solve_block / 2`):
 a smaller block moves more of the cubic work onto the matrix unit at the cost of one more block
 step; `solve_block` is the knob.
 
@@ -608,13 +707,26 @@ Both kernels are validated against **independent oracles**, not against each oth
 - **Decode** — a token-serial `f32` reference, checking *both* the output and the written state
   pages, across the decode batch range, mixed state dtype, determinism, negative-index padding, and
   a deep-pool case that crosses the 32-bit offset boundary on device.
+- **Fused decode (§4.9)** — the same reference with the conv1d + SiLU applied to the packed row
+  first and the gated RMSNorm (SiLU for GDN, sigmoid for KDA, written from the models rather than
+  read from the kernel) applied to the `f32` output last. The written conv-state slots are checked
+  against the shifted taps, and every untouched slot of both pools against its pre-launch
+  contents. Under `fuse_out_norm` the output is RMS-normalised to `|o|` of a few units, so one bf16
+  rounding step of an exact answer exceeds the absolute tolerance; the output error is then taken
+  relative to `max(1, |ref|)`, which equals the absolute error wherever `|ref| ≤ 1`. CPU tests show
+  that metric still rejects a dropped gate and a norm over the wrong length. The barrier that orders
+  the in-place tap shift is checked twice: on silicon by a read-slot = write-slot case with 16 waves
+  (with the barrier removed, 2-8 waves stayed correct but 16 waves corrupted the taps on every run),
+  and in the IR, where a barrier must sit between the last tap read and the first tap write.
+- **IR stability** — GDN golden IR entries are pinned and SHA-stable across the supported lowerer
+  flavours, while **all pre-existing KDA golden hashes remain unchanged**, which is what makes the
+  "byte-identical" claim in §2.3 testable rather than asserted. The golden lowers through the
+  Python engine only; `test_gdn_decode_ir_cpp_parity.py` lowers the same cases through the C++
+  engine and requires byte-identical IR.
 - **Prefill** — an `f64` oracle, checking output and final state across head shapes
   `(Hv, Hk) = (4, 4)` (MHA), `(8, 4)` (`kv_group = 2`, the shipping grouping) and `(32, 8)`
   (`kv_group = 4`, a stress point above any deployed config), the gate range, and with and
   without an initial state.
-- **IR stability** — GDN golden IR entries are pinned and SHA-stable across the supported lowerer
-  flavours, while **all pre-existing KDA golden hashes remain unchanged**, which is what makes the
-  "byte-identical" claim in §2.3 testable rather than asserted.
 - **Dispatch** — CPU wiring tests assert the correct kernel and spec are selected for both
   operators, with GPU parity confirmed through the dispatcher.
 
@@ -639,5 +751,11 @@ Widening the range needs nested chunking or per-token rescaling.
 4. Scan-side parallelism beyond the current `value_splits` cap, or a shorter serial chain — the scan
    is the critical path at small `BH` (§5.4).
 5. Host-struct consolidation of the GDN and KDA request lineage.
-6. Machine-checked byte-identity for the cross-engine surfaces this family touches — currently
-   reasoned and Python-verified.
+6. Machine-checked byte-identity for the prefill-side cross-engine surfaces this family touches —
+   currently reasoned and Python-verified. (Decode is checked: the golden cases lower identically
+   through both engines.)
+7. A fast fused decode path (§4.9): compute each conv channel and gate once and share it through
+   LDS instead of recomputing it per lane; and lifting the three `NOT_YET_IMPLEMENTED` rules of
+   §4.9 — `fuse_conv` with `Hk ≠ Hv` (GQA, e.g. Qwen3-Next) and `BPV > 1` for small-batch
+   parallelism, through an out-of-place conv state, with `fuse_out_norm` at `BPV > 1` also needing
+   a cross-workgroup norm; and the fusions on the `simple` reference path.

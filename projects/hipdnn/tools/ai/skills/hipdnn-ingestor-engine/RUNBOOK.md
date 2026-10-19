@@ -18,20 +18,21 @@ BUILD=/absolute/path/to/build
 INSTALL=/absolute/path/to/future-install
 SWEEP_ROOT=/existing/device-visible/writable/experiment-root
 GENERATED=/absolute/path/to/empty-generation-destination
-CONFIG=/absolute/path/to/generator-config.yaml
-PROFILE=/absolute/path/to/authoring.profile.yaml
+CONFIG=/absolute/path/to/generator-config.yaml  # a registry-backed engine's authored selection, configs/<slug>.yaml
+MANIFEST=/absolute/path/to/<slug>.engine.yaml   # rocKE registry-backed engines
 SHAPES=/absolute/path/to/request-shapes.json
 CORPUS_DIR=/absolute/path/to/graph-corpora
-ARCH=gfx942
+SCRATCH=/absolute/path/to/scratch-dir          # disposable tool output
+EVIDENCE=/absolute/path/to/per-run-evidence-dir
+ARCH=gfx950
 ENGINE=<your-bundle-engine-id>
 ```
 
 Replace `<your-bundle-engine-id>` with your bundle's engine ID; it is consumed verbatim
-as `--expect-engine` below. A gfx942 dense attention bundle would spell it
-`hipkernel:Gfx942AttentionDense`; the name is an illustration, not an engine to look for.
+as `--expect-engine` below. The worked example's is `hipkernel:Gfx950AttentionDense`.
 
 Follow the **Setup** section of `$GEN/README.md`. Authoring and mining imports need the
-profile's rocKE library environment; production packaging uses its own selected
+rocKE library environment (`$PROVIDER/rocke/library`); production packaging uses its own selected
 compiler/wheel interpreter. Full artifact checking also needs `rocm_kpack` and its
 dependencies (`zstandard`, `msgpack`) importable from `$PY`; `--kpack-python-dir`
 supplies an import root, not missing dependencies.
@@ -43,8 +44,13 @@ work on a shared login node: use shared source, or stage the exact checkout and
 artifacts to the execution host through your scheduler or remote-execution tooling.
 Record commands and source/artifact, machine and device identities, plus allocation
 identity when applicable. Follow a configured local evidence policy when one exists;
-otherwise retain logs, manifests and outcomes in a user-selected per-run evidence
-directory outside product source.
+otherwise retain logs, manifests, reports and outcomes in `$EVIDENCE`, a user-selected
+per-run evidence directory outside product source. `$SCRATCH` holds regenerable tool
+output; create both before the first command that writes there:
+
+```bash
+mkdir -p "$SCRATCH" "$EVIDENCE"
+```
 
 ## 1. Entry and early feasibility
 
@@ -71,22 +77,37 @@ needs source investigation. A packaged engine whose kernel is a prebuilt per-arc
 object plus its symbol is authored as `hsaco`, not mined for a rocKE builder; see the
 authored-source table in [SKILL.md](SKILL.md).
 
+**rocKE: find the registry candidate.** In the family's dispatch module (attention:
+`$PROVIDER/rocke/library/dispatch/attention/`), find the candidate that builds the user's
+spec. Its `KernelCandidate` tuple function, the family's `OperatorRequest` class and the
+attributes selecting exactly that candidate become the manifest's `enumerate.candidates`,
+`enumerate.request` and `enumerate.pin`. Author `source`/`builder` by hand: no candidate
+exposes them.
+
 **Gate:** feasible target/workspace, representable scope and capable reference. A
 missing dependency blocks its gate; host-only research may continue while a device
 allocation is pending but cannot discharge device proof.
 
-## 2. Contracts, corpus and baseline approval
+## 2. Contracts, corpus and the variant space
 
 Record [graph-contract.md](graph-contract.md)'s topology/UID edges and field
 dispositions, then [rocke-mining.md](rocke-mining.md)'s applicability, specialization,
 layout, geometry/workspace and ABI evidence. Direct-load engines take these facts from
-HIP source without inventing a profile. Reuse unchanged extension contracts; reopen any
+HIP source without inventing an engine manifest. Reuse unchanged extension contracts; reopen any
 topology or feature the addition changes.
+
+This stage mines a rocKE registry family; gfx950 dense attention
+(`configs/gfx950_attention_dense.engine.yaml`) is the worked example. A hand-authored
+source (`hip`, `hsaco`, a hand-written rocKE selection) writes its selection, `reduction:`
+block and each cell's `default: true` arm directly and continues at stage 3.
+
+### Corpus
 
 Inventory owner-published results, owner benchmark shapes and external graphs per
 [workloads.md](workloads.md). `$SHAPES` is a JSON list of semantic requests; the
-benchmark consumes actual graph JSON under `$CORPUS_DIR/<corpus>`. For the attention
-miner:
+benchmark consumes actual graph JSON under `$CORPUS_DIR/<corpus>`. `mine_shapes.py`
+mines attention only; another family hand-authors `$SHAPES` and its graph corpus. For
+the attention miner:
 
 ```bash
 "$PY" "$GEN/tools/mine_shapes.py" \
@@ -99,8 +120,8 @@ Add `--rocke-bench <actual-benchmark-tree>` when applicable. A dense prefill
 benchmark (`benchmark_dense_prefill_live.py`) keeps its shapes in Python, so the tree
 alone misses them. `--rocke-bench` takes one tree, and a repeated flag keeps only the
 last one, so copy the benchmark tree, emit the dense shapes into the copy and mine the
-copy in place of the original tree. Emitting needs no GPU and no torch, only an
-interpreter that imports the rocKE library (numpy):
+copy in place of the original tree. Emitting needs no GPU, torch or numpy, only an
+interpreter that imports the rocKE library:
 
 ```bash
 OWNER_BENCH=/absolute/path/to/owner-bench-tree   # a new directory; cp creates it
@@ -116,29 +137,103 @@ counted. Reconcile each source's
 total, parsed, servable, covered and excluded counts; do not discard window/sink or
 independent operand dimensions to fit the request schema.
 
-For rocKE, resolve the provisional baseline through its actual dispatcher:
+### Engine manifest and shapes report
+
+The engine manifest (`$MANIFEST`) states what the dispatcher registry cannot: engine
+identity, KMD schema, metadata mapping, native symbols, the builder, the request space
+(`enumerate:`) and how it is reduced (`reduction:`). The README's *Config surface*
+documents every key. Choose `enumerate.cells` from `$SHAPES`, then report how the corpus
+falls on them:
 
 ```bash
-"$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" \
-  --shapes "$SHAPES" --out "$CONFIG" --report-knobs --report-gaps
-"$PY" "$GEN/tools/reconcile_applicability.py" \
-  --profile "$PROFILE" --shapes "$SHAPES"
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" \
+  --out "$SCRATCH/registry.yaml" --shapes "$SHAPES"
 ```
 
-The second command is **offline applicability**, not runtime coverage or numerics. Scope
-reference candidates to the kernel family/algorithm and required opt-in selector. API
-failures are operational errors, never unsupported-shape evidence.
+Each shape lands in the first category that applies: `outside cell axes` (it sets a field
+neither `fixed` nor in `cells`), `declined by registry` (with the candidate's reason),
+`covered`, or `GAP` (admitted, but its cell is not listed). This is offline applicability
+against the registry, not runtime coverage
+([workloads.md](workloads.md#applicability-and-reference-contract)).
 
-Present the feature/shape boundary, per-source coverage and exclusions, architecture,
-engine identity, knobs and provisional baseline for approval. A legal cross-product is
-not a measured shipping set; a single-candidate engine needs no extra variants.
+### User checkpoints
 
-**Gate:** approved baseline and scope, with no unresolved semantic loss or reference
-assumption.
+Ask each question and record the answer in `$EVIDENCE`; accepting what was presented is a
+valid answer.
+
+- **Corpus:** present the sources, distinct shapes and graphs per source, and the
+  `--shapes` categories; ask for shapes or graphs to add or drop. Rerun the report if the
+  corpus changed.
+- **Ground truth:** always ask, never block on the answer: does the user have the kernel
+  owner's performance or accuracy data? If not, record "no ground truth supplied".
+- **Knobs:** after enumerating the variant space below, ask whether to exclude or
+  prioritise knobs or narrow cells, using `--plan-space`'s exact instance counts; above
+  `reduction.aot_budget_per_arch` the user narrows them before any pack. Estimate compile
+  time as instances × seconds per kernel compile, measured on the build machine.
+
+**Owner data.** Set `OWNER_DATA` to the owner's file (CSV with a header, or a JSON list
+of rows) and convert each row into a graph of a separate `ground_truth` corpus. Pass one
+`--map <request-field>=<owner-column>` for each `graph_template` placeholder and
+`value_map` key, and no other field (gfx950: `batch, seqlen_q, seqlen_k, nhead_q, nhead_k,
+hdim_q, hdim_v, dtype, mask_type`); an unconvertible value exits 2, so rewrite other
+spellings first. Set `<owner-time-column>` and drop other architectures' rows with
+`--filter <column>=<value>`:
+
+```bash
+GT="$EVIDENCE/ground_truth.json"
+"$PY" "$GEN/tools/ground_truth.py" ingest --input "$OWNER_DATA" --manifest "$MANIFEST" \
+  --map <request-field>=<owner-column> --map <request-field>=<owner-column> \
+  --time-col <owner-time-column> --time-unit ms --device "$ARCH" --out "$GT"
+"$PY" "$GEN/tools/ground_truth.py" graphs --gt "$GT" --manifest "$MANIFEST" \
+  --out "$CORPUS_DIR/ground_truth"
+```
+
+Set `GT_MARGIN` to the comparison margin the user confirms, as a fraction (`0.05` accepts
+hipDNN up to 5% slower than the owner). Keep unpublished owner data, `$GT`, its graphs and
+reports local unless the owner allows publication.
+
+### The registry variant space
+
+Populate from the whole registry: `space: full` keeps, per cell, every production-sweep
+spec sharing the cell's `select_spec` feature fields, projecting each varying performance
+knob into the spec, KMD, metadata, bindings and kernel name. A varying field in no
+`reduction.fields` list is held at its registry default with a `WARN`. The shipped gfx950
+manifest stays `space: slice` until a full-derived selection ships with the flip; set
+`space: full` in a copy beside it in `configs/` (`graph_template` is manifest-relative).
+
+Print the space by knob first, for the knob checkpoint. Nothing is written:
+
+```bash
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --plan-space
+```
+
+Set `KNOBS` to the comma-separated names it lists under `varying spec fields` as
+`(performance)`, in `reduction.fields.performance` order. A performance name the registry
+does not vary in this space is not a knob, and `factorise_config.py` refuses it. Set
+`VOCABULARY` to the manifest's `specialization.vocabulary` as `field:from=to,from=to`,
+fields separated by `;` (gfx950 dense: `dtype:bf16=BF16,fp16=FP16`). Then enumerate and
+compact into the selection:
+
+```bash
+"$PY" "$GEN/tools/registry_enumerator.py" --manifest "$MANIFEST" --out "$SCRATCH/registry.yaml"
+"$PY" "$GEN/tools/factorise_config.py" --config "$SCRATCH/registry.yaml" \
+  --out "$CONFIG" --knobs "$KNOBS" --vocabulary "$VOCABULARY"
+```
+
+`registry_enumerator.py` marks each cell's `select_spec` arm `default: true`;
+`factorise_config.py` keeps it and refuses output that does not re-expand. Nothing
+compiles here. Record the knob answer in `$MANIFEST`
+(`reduction.fields.performance` in priority order, `reduction.fields.ignored`,
+`enumerate.cells`) and rerun all three commands if it changed.
+
+**Gate:** every GAP cell added to `enumerate.cells` or excluded with its reason; recorded
+checkpoint answers; a round-tripped `$CONFIG`. A shipped engine's selection is also gated
+per the README's *Updating the captured catalog*.
 
 ## 3. Generate, implement and splice
 
-Generate into an empty scratch directory, never over the live engine:
+Generate from the selection `$CONFIG` into an empty scratch directory, never over the live
+engine:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
@@ -166,10 +261,12 @@ descriptor index expands as the recursive glob `/**/*.json` — a walk of the wh
 filesystem.
 
 Review the finalized inventory after deduplication. Resolve KDP → UED → KMD by UUID;
-tuple identity includes schema types/defaults and effective architecture overlap.
+tuple identity includes schema types/defaults and the arch tier at which kernels compete.
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with unrun
-checks. `--profile` optionally selects the bundle and supplies vocabulary, never
-compiler evidence. Full artifact checking belongs after packing.
+checks. `--manifest "$MANIFEST"` optionally names the bundles to gate (the KDPs whose
+UED name equals the manifest's `engine.name`; every pack of that engine is gated) and
+supplies the matcher vocabulary (`specialization.vocabulary`), never compiler evidence. Full artifact checking belongs
+after packing.
 
 Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
 Extensions remap scratch references and copy only additions per [extend.md](extend.md),
@@ -300,17 +397,24 @@ roots all fail, and an unrelated same-basename file cannot satisfy it. Read the 
 count of located shippable files — an unfilled-placeholder exit and a could-not-locate
 exit are both `1`.
 
-If the profile declares a launch-surface audit, also run:
+If the manifest declares a `launch_surface:` block, also run:
 
 ```bash
-"$PY" "$GEN/tools/launch_surface.py" "$PROFILE" --check
+"$PY" "$GEN/tools/launch_surface.py" "$MANIFEST" --check
 ```
+
+The audit never compares what the C++ and Python compute: record every rule the native
+pack restates by hand as an unchecked agreement ([rocke-mining.md](rocke-mining.md)).
 
 **Gate:** a current-revision dry-run and render, final authored inventory, completed hooks
 and source/test splices, no selected-path placeholders, and reviewed structural/field/ABI
 results. None proves native loading or numerical dispatch.
 
 ## 4. Build, pack, install and prove the host boundary
+
+**Build and sweep plan approval comes first.** Before packing, get the user's approval of
+the instances per architecture, corpus sizes, sweep rounds and estimated compile and sweep
+time, and of the job envelope for any remote or cluster run; record both in `$EVIDENCE`.
 
 Configure from `$REPO` using `hipdnn-superbuild`, with
 `CMAKE_INSTALL_PREFIX="$INSTALL"`, `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
@@ -346,6 +450,8 @@ stale output tree is removed, and one STATUS line says why. That is never an err
 whether the root was named or inherited. A root set but not a directory is fatal at configure. A KDP is
 what arch pruning consumes, so standalone UKDs, kernel sources, READMEs and hidden-path
 KDPs alone do not make a pack.
+
+The large rocKE bundle files under that root (KDPs, kernel objects, heuristic model files) are DVC outputs (a `<file>.dvc` or `<folder>.dvc` pointer beside the output, remote `ingestor`), not git files: run `dvc pull -r ingestor <pointer>` before a production configure with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. Without the pull, configure warns and the shipped bundle is not packed; `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` makes it an error. See `descriptors/README.md`.
 
 The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
 defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
@@ -397,8 +503,8 @@ for `FINAL_DESCRIPTOR_ROOT=<engines>/arch_content/hip-kernel-provider/$ARCH`.
 
 **The tree says whether it is packed.** The packer writes an empty `hkp-packed.marker`
 into every directory it writes a packed descriptor into; it holds no provenance and
-installs with the runtime tree. `hkp_desk_check.py`, `verify_variant_sets.py`,
-`coverage_gate.py` and `variant_reachability.py` read a descriptor as packed exactly when
+installs with the runtime tree. `hkp_desk_check.py`, `verify_variant_sets.py` and
+`coverage_gate.py` read a descriptor as packed exactly when
 its own directory holds the marker. A packed descriptor must have its sidecar, so an
 installed shard read without `--provenance-root` fails, naming the first descriptor
 whose sidecar is missing. A descriptor without the marker is authored: its sidecar is not
@@ -433,7 +539,7 @@ not today's imported producer:
 
 ```bash
 "$PY" "$GEN/tools/verify_variant_sets.py" --mode full --arch "$ARCH" \
-  --profile "$PROFILE" final "$FINAL_DESCRIPTOR_ROOT" \
+  --manifest "$MANIFEST" final "$FINAL_DESCRIPTOR_ROOT" \
   --provenance-root final="$FINAL_PROVENANCE_ROOT"
 ```
 
@@ -441,10 +547,10 @@ not today's imported producer:
 repeatable. For a staged build-tree root, whose sidecars sit beside the descriptors,
 drop it.
 `hkp_desk_check.py` takes `--provenance-root DIR` with `--descriptor-root` (the root
-the provenance root mirrors, holding the KDP), and `coverage_gate.py` and
-`variant_reachability.py` take `--provenance-root DIR` mirroring their `--tree`.
+the provenance root mirrors, holding the KDP), and `coverage_gate.py` takes
+`--provenance-root DIR` mirroring its `--tree`.
 
-Omit `--profile` when neither bundle selection nor extra vocabulary needs it. Add
+Omit `--manifest` when neither bundle selection nor extra vocabulary needs it. Add
 `--kpack-python-dir <dir>` if the reader environment requires it. Interpret outcomes
 separately:
 
@@ -515,7 +621,12 @@ ctest --test-dir "$PROVIDER_BUILD" --no-tests=error -V \
 
 Those entries bind the build-tree shard. For **final installed packaged evidence**, run
 the same suite against the installed shard with the same explicit environment, including
-the pin that the CTest entries get from `EXPECTED_CASES`:
+the pin that the CTest entries get from `EXPECTED_CASES`. Set `EXPECTED_CASES` to the
+same reviewed comma-separated case-name list the build-tree registration pins. **Do not
+derive it from the installed binary under test**: such a list agrees by construction and
+pins nothing. Omitting it is silent — the listener returns early on an empty expected
+list and the census still reports complete. Adjust the binary path for a nondefault
+install bindir:
 
 ```bash
 HIPDNN_TEST_CENSUS_SUITE="$CENSUS_SUITE" \
@@ -524,12 +635,6 @@ HIPDNN_TEST_CENSUS_EXPECTED_CASES="$EXPECTED_CASES" \
 HIPDNN_DESCRIPTOR_DIR="$FINAL_DESCRIPTOR_ROOT" \
 "$INSTALL/bin/hip_kernel_provider_census_tests" --gtest_filter="${CENSUS_SUITE}.*"
 ```
-
-Set `EXPECTED_CASES` to the same reviewed comma-separated case-name list the build-tree
-registration pins. **Do not derive it from the installed binary under test**: such a
-list agrees by construction and pins nothing. Omitting it is silent — the listener
-returns early on an empty expected list and the census still reports complete. Adjust
-the binary path for a nondefault install bindir.
 
 A nonempty `HIPDNN_TEST_CENSUS_SUITE` activates the native strict guard: before
 default-root setup it rejects an empty expected arch, a missing/empty/nonexistent
@@ -561,9 +666,10 @@ its inventory through its ordinary host suite, which invoked directly still requ
 explicit expected arch and descriptor root. Check retained extension inventory and
 heuristic-disabled score absence per [native-pack.md](native-pack.md).
 
-**Gate:** current installation, artifact checks at their stated strength, and real
-registration/loading plus applicable inventory/census checks. Report `NOT VERIFIED HERE`
-separately. Neither the structural validator's stubs nor host loading proves dispatch.
+**Gate:** an approved build and sweep plan, current installation, artifact checks at
+their stated strength, and real registration/loading plus applicable inventory/census
+checks. Report `NOT VERIFIED HERE` separately. Neither the structural validator's stubs
+nor host loading proves dispatch.
 
 ## 5. Baseline device proof from the installation
 
@@ -630,93 +736,134 @@ default-FLOAT pass nor this smoke proves arbitrary-size coverage.
 **Gate:** intended-engine dispatch, capable-reference numerics and complete case
 accounting on `$ARCH`.
 
-## 6. Tune the runnable baseline and rebuild the final selection
+## 6. Reduce the variant selection
 
-For rocKE, propose bounded candidates with the actual profile:
+Every packaged engine whose selection carries a `reduction:` block runs this loop. An
+explicitly untuned engine (a single candidate, or an extension retaining its approved
+baseline) has none, skips it, and still needs stage 7's proof. Every feature cell keeps
+its floor: its `default: true` variant plus the smallest `divides` values (e.g. tiles)
+among variants sharing its other knobs, which divide every shape a larger tile divides.
 
-```bash
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" --plan
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --isolate --out-dir "$ARM_CONFIG_ROOT"
-```
+1. **Build, pack and install the selection** through stages 3–5. Set `INSTALLED_KDP` to
+   the installed `<slug>.kdp.json` under `$FINAL_DESCRIPTOR_ROOT`.
+2. **Sweep it.** Populate `configs/reduction.sweep.yaml.example`: one arm (the selection's
+   install; recount `expected_descriptors` after every reinstall), every approved corpus
+   plus `ground_truth` when supplied, at least 2 `rounds`, `correctness.enabled: true`.
+   Set `SWEEP_CONFIG` to its absolute path and `SWEEP_OUTPUT` to its `output_dir`, then
+   run it to `SWEEP_DONE` under [workloads.md](workloads.md)'s *Installed measurement
+   contract*:
 
-Set `ARM_CONFIG_ROOT` to an experiment-owned directory. Generate, implement/splice,
-build, pack, install and check every supported arm before measurement. Keep separate
-install/output trees; never mutate the baseline and call it a comparison.
+   ```bash
+   "$PY" "$GEN/tools/sweep.py" --config "$SWEEP_CONFIG"
+   ```
 
-Populate `configs/sweep-isolation.sweep.yaml.example` using actual corpus counts,
-installed KDP-entry counts and proven engine identity. YAML paths resolve relative to
-the YAML file; there is no shell or environment interpolation. Set `SWEEP_CONFIG` to its
-absolute path, then run:
+3. **Check correctness first.** Apply no reduction while a correctness failure is
+   uninvestigated. Only each graph's autotune winner is numerically checked.
+4. **Reduce and present the proposal.** The report holds the ε-versus-instances curve,
+   each variant's keep/drop reason and numerics tag, the cells with no corpus evidence,
+   and proposed rules (`drop knob X`, `drop X=v`, `keep X=v only for <cells>`) with their
+   saving and cost. Exit 2 is unusable or stale input. Exit 3: the sweep cannot support a
+   reduction of this arm, because `summary.json` or its `expected_phases` is missing or unusable (the
+   sweep did not finish), an expected timing or correctness phase of the arm has no
+   record, or a timing phase ranked nothing (nothing is written), or timing phases are
+   missing for some (round, corpus), or a correctness attempt failed (the report is
+   written). No selection is written, so investigate or rerun the
+   sweep. A single round warns
+   that the noise floor is assumed (`reduction.single_round_epsilon`, default 0.05), not
+   measured; with two or more rounds the floor is `reduction.drift_multiplier` (default
+   2) times the measured drift. Exit 1: floor plus coverage alone exceed the budget; with
+   the user's approval raise it (`reduction.aot_budget_per_arch` or `--budget`) or narrow
+   cells, corpus or knobs and rerun from stage 2:
 
-```bash
-"$PY" "$GEN/tools/sweep.py" --config "$SWEEP_CONFIG"
-```
+   ```bash
+   "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
+     --sweep-output "$SWEEP_OUTPUT" --out "$SCRATCH/reduced.yaml" \
+     --report "$EVIDENCE/variant_reduce.md"
+   ```
 
-[workloads.md](workloads.md)'s *Installed measurement contract* owns every rule this run
-must satisfy — session and arm ordering, warmup, rounds, cache isolation, separate
-correctness, and the sweep's ownership of the benchmark's `--engine` and other
-phase-owned arguments. This page owns only the commands and their order.
+5. **Apply what the user picks.** Set `RULES` to the comma-separated rule ids the user
+   chose from the report's rule table (`R` and six hex digits, derived from the rule
+   text, so an id is stable while the rule's text is; a `keep X=v only for <cells>` rule
+   names cells chosen with the budget's ε, so its text and id can change with
+   `--budget`; a rule the sweep no longer proposes exits 2), then write and adopt that
+   selection (or copy `$SCRATCH/reduced.yaml` if the user accepts the ε keep-set). The
+   report gives the applied rules' combined worst gain lost and the graphs that lose
+   their best kernel; above the rules' ε it exits 1 and writes no selection, so choose
+   fewer rules:
 
-For rocKE, investigate measured survivors. Set `PAIRWISE_KNOBS` to comma-separated
-surviving knob names and `PAIRWISE_CONFIG_ROOT` to their config output directory, then
-generate, build and install the supported pairwise arms:
+   ```bash
+   "$PY" "$GEN/tools/variant_reduce.py" --selection "$CONFIG" --kdp "$INSTALLED_KDP" \
+     --sweep-output "$SWEEP_OUTPUT" --out "$SCRATCH/selection.rules.yaml" \
+     --report "$EVIDENCE/variant_reduce.rules.md" --apply-rules "$RULES" &&
+     cp "$SCRATCH/selection.rules.yaml" "$CONFIG"
+   ```
 
-```bash
-"$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --pairwise "$PAIRWISE_KNOBS" --out-dir "$PAIRWISE_CONFIG_ROOT"
-```
+6. **Repeat stages 3–6** with a new empty generation destination and a fresh sweep
+   `output_dir`. With ground truth, compare it every iteration; its report lists every row
+   outside the margin, failing correctness, with no usable reference, or missing:
 
-Obtain selection approval from coverage, correctness and per-corpus measurements. For
-the rocKE shipping cross, `APPROVED_KNOBS_JSON` contains the approved JSON object of
-knob value lists, **not a filename**:
+   ```bash
+   "$PY" "$GEN/tools/ground_truth.py" compare --gt "$GT" --sweep-output "$SWEEP_OUTPUT" \
+     --margin "$GT_MARGIN" --report "$EVIDENCE/ground_truth.md"
+   ```
 
-```bash
-"$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --knobs "$APPROVED_KNOBS_JSON" --out "$FINAL_CONFIG"
-```
+   This iteration's `compare` exits 0 whatever the comparison finds: its report is for
+   review, and an outside-the-margin row is expected while the selection is still being
+   reduced. It exits 2 when a ground-truth row, or the graph a sweep ran for it, no longer
+   matches what `graphs` recorded; rerun `graphs` and the sweep. Stage 7 reruns it with
+   `--strict` as the gate.
 
-Repeat **stages 3–5** with the final config and a new empty generation destination.
-Neither an isolation arm nor an old install certifies the regenerated shipping set. An
-explicitly untuned extension may retain its approved baseline selection but still needs
-final installed artifact and corpus proof.
+7. **Stop when the user accepts the instance count.** No served graph may lose coverage
+   or regress beyond the chosen ε or the applied rules' reported worst gain lost (`inf`:
+   a graph lost every ranked kernel), and the last iteration's stages 3–5 ran on exactly the
+   selection being shipped. A `space: full` selection ships with the manifest's flip, per
+   the README's *Updating the captured catalog*.
 
-**Gate:** justified selection and revalidated final installation.
+**Gate:** a user-accepted selection with its applied rules recorded in `$EVIDENCE`, no
+open correctness failure, and a revalidated installation of exactly that selection.
 
 ## 7. Final corpus proof and runtime reconciliation
 
-Run the final installed artifact through a fresh-output YAML sweep with
-`correctness.enabled: true`, and require the exact phase key set.
+Run the final installed selection through a fresh-output YAML sweep across the whole
+corpus, plus `ground_truth` when supplied, with `correctness.enabled: true`, and require
+the exact phase key set; stage 6 checked only each graph's winner.
 [workloads.md](workloads.md)'s *Installed measurement contract* owns what each terminal
 status means — `SWEEP_DONE`, `SWEEP_TIMING_ONLY`, `SWEEP_INCOMPLETE` — and what resume
-does and does not make a single cohort.
+does and does not make a single cohort. With ground truth, rerun stage 6's `compare` on
+this output with `--strict`: exit 1 means a row is outside the margin, missing, declined
+in any timing round, failing correctness or without a passing correctness verdict, so fix
+it or record the user's acceptance of that row in `$EVIDENCE`. Check the budget the same way; a dry run writes
+nothing, and exit 1 means a pack arch is over `reduction.aot_budget_per_arch`, so reduce
+further or justify the count in `$EVIDENCE`:
+
+```bash
+"$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED" --dry-run --strict
+```
 
 Harvest final phase results and available engine logs into the per-input outcome ledger,
-then join within each corpus/phase before making its graph-name-to-reason JSON.
+then join within each corpus/phase.
 [workloads.md](workloads.md)'s *Complete final runtime join* owns the ledger fields, the
 join scope and every rejection rule. This is an explicit evidence review, not an
 automatic matcher-reason extractor.
 
-For rocKE, set `CORPUS_SHAPES` and `RUNTIME_DECLINES` to that corpus's requests and
-complete runtime-derived mapping, then reconcile:
+No tool reconciles declines against a reference library: the runtime ledger is the
+evidence, and without the complete join the accounting is **incomplete**. Investigate
+every unexplained decline and obtain explicit scope decisions for exclusions. Direct-load
+pointwise instead uses its explicit one-element corpus, installed engine results and
+independent arithmetic/reference correctness, with `exclude_tensors: none`.
 
-```bash
-"$PY" "$GEN/tools/reconcile_applicability.py" --profile "$PROFILE" \
-  --shapes "$CORPUS_SHAPES" --declines "$RUNTIME_DECLINES"
-```
-
-Without the complete join, label reconciliation **offline only**. Investigate
-reference-only supported rows and obtain explicit scope decisions for exclusions; escape
-flags cannot excuse broken reference APIs or unexplained gaps. Direct-load pointwise
-instead uses its explicit one-element corpus, installed engine results and independent
-arithmetic/reference correctness, with `exclude_tensors: none`.
+No tool checks offline that every shipped variant is reachable from some corpus shape
+(the retired `variant_reachability` check): `variant_reduce` reports a variant as "never
+ranked" only after a GPU sweep, and `registry_enumerator.py --shapes` classifies shapes,
+not shipped variants.
 
 Report exactly the populations and statistics [workloads.md](workloads.md)'s *Required
 reporting statistics* requires; timing is reported separately from the outcome
 accounting.
 
-**Gate:** zero wrong answers, complete final-runtime accounting, and no missing,
-ambiguous, erroneous or unexplained in-scope outcomes. Changed installed artifacts
+**Gate:** zero wrong answers, complete final-runtime accounting, no missing, ambiguous,
+erroneous or unexplained in-scope outcomes, every ground-truth row (when supplied) within
+the margin or accepted, and no unjustified budget WARN. Changed installed artifacts
 invalidate old evidence and return to stages 3–5.
 
 **Final step: packaging probe.** The architecture probe is automatic and needs no edit:
@@ -739,6 +886,9 @@ Report [SKILL.md](SKILL.md)'s completion evidence and exact limitations. Keep ex
 copies and probes disposable and retain their inputs/results in the evidence directory
 defined under **Paths and interpreters**. For blocked work, name the last completed
 stage and missing prerequisite; do not substitute a proposed command or queued job for proof.
+
+Record every checkpoint answer, the build and sweep plan approval and the applied
+reduction rules; cite the local ground-truth report instead of quoting owner numbers.
 
 Open the handoff with a scope/proof cover sheet that binds each claim to the reports
 proving it:
