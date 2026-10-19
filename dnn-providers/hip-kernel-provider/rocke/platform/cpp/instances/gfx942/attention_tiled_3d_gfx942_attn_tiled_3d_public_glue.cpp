@@ -272,7 +272,9 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
      *   "wkv" if use_wide_kv_load else "",
      *   "dg" if use_decode_grid else "",
-     *   "kvcp<policy>" if kv_cache_policy != "all" else "")
+     *   "kvcp<policy>" if kv_cache_policy != "all" else "",
+     *   "kvswz" if use_kv_lds_swizzle else "",
+     *   "wpid" if use_wave_page_id_load else "")
      *
      * The whole thing is a positional parts list (NOT flags=...): empty parts
      * are skipped by kernel_name_join. We materialise each part string and feed
