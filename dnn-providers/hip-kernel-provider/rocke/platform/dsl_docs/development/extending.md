@@ -135,7 +135,7 @@ def test_my_op_lowers_to_llvm(self):
     b.param("A", PtrType(F32, "global"))
     v = b.const_f32(1.0)
     _ = b.my_op(v)
-    ll = lower_kernel_to_llvm(b.kernel)
+    ll = lower_kernel_to_llvm(b.kernel, arch="gfx950")
     self.assertIn("@llvm.amdgcn.my.op", ll)
 ```
 
@@ -316,7 +316,7 @@ Add to `TestInstances`:
 def test_my_op_builds(self):
     spec = MyOpSpec(n_per_block=4096)
     kernel = build_my_op(spec)
-    ll = lower_kernel_to_llvm(kernel)
+    ll = lower_kernel_to_llvm(kernel, arch="gfx950")
     self.assertIn("@my_op", ll)
 ```
 
