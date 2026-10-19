@@ -401,7 +401,10 @@ lane can have at `(1,16,1)`, so it would spill; at `WTK = 8` only bf16 state wit
 would fit. The exception covers every single-wave `fuse_conv` tile. Those tiles load these inputs
 where the parent order did: each row's `v` inputs and its conv in the step-8 row loop, each state
 chunk at step 7, and `out_gate` / `norm_weight` at the norm. Their `q`, `k` and gate inputs still
-load first.
+load first. The exception is keyed on the wave count only. A multi-wave `fuse_conv` tile hoists
+everything, and its per-lane cap is `512 / ceil(NW / 4)` VGPRs, so tiles with a small `WTK` (wide
+`q`/`k` slices with their taps and weights) or many waves can still spill; the Cost list below
+names the ones that start to.
 
 Cost: holding the raw state, `q`, `k` and `v` (and, fused, their taps and weights) live at once
 changes the register count, up for some tiles and down for others. Where that crosses a
@@ -416,13 +419,22 @@ Against the interleaved order (Python lowerer, ROCm 7.13 comgr, bf16 I/O, `DK = 
   the norm (GDN), and the KDA norm alone (bf16 and `f32` state);
 - one wave per SIMD gained: GDN `(1,16,16)` and the default `(2,16,8)`;
 - spill grows: GDN `(1,1,1)` and `(1,1,2)`, which already spill at `DK = 128`;
-- spill: none starts. The single-wave `fuse_conv` tiles stay at 0 B at `WTK` 8 and 16 with the
-  exception above. At `WTK = 4` they already spill in the interleaved order (16/16 heads, every gate
-  kind, state dtype and norm setting); there the spill grows with the norm on for GDN `f32` state and
-  for KDA, shrinks in three other cases, stays the same for KDA `f32` state without the norm, and
-  ends for GDN bf16 state without the norm;
+- spill, fused tiles (`DK = DV = 128`, 16/16 heads, `BPV = 1`, every legal `(NW, WTK)`; ROCm 10
+  comgr from the kernel-factory image, `llvm23`): starts on five `(4,4,1)` `fuse_conv` tiles — GDN
+  bf16 state with and without the norm, KDA bf16 state with and without the norm, KDA `f32` state
+  without the norm; ends on three norm-only tiles — `(1,2,1)` GDN and KDA bf16 state, `(2,1,1)` KDA
+  `f32` state. 102 of the 228 legal fused tiles spill here and 100 in the interleaved order; the
+  rest grow or shrink. The single-wave `fuse_conv` tile `(1,16,1)` stays at 0 B; `(1,1,1)` to
+  `(1,8,1)` either stay at 0 B or already spilled in the interleaved order. Which tiles start to
+  spill depends on the compiler: ROCm 7.13 starts ten (on `(2,4,1)`, `(4,4,1)`, `(8,8,1)` and
+  `(16,16,1)`) and ROCm 7.1 eleven. Every compiler keeps these fused tiles at 0 B, and
+  `test_lowers_and_compiles_without_scratch` holds them there: every mode on `(1,16,1)`, `(2,8,1)`,
+  `(2,16,1)`, `(4,8,1)`, `(4,16,1)` and `(8,16,1)`, and norm-only on every legal tile except
+  `(1,1,1)` and `(1,2,1)`. At `DK = DV = 64` and `256`, which no target model uses (§1.4), seven
+  and eighteen fused tiles start to spill. The registry never builds a fused spec (§4.9), so this
+  list matters to callers who pick a fused tile themselves;
 - unchanged: every other registered GDN tile, the other KDA tuned tiles, the default `(2,16,8)`
-  with `f32` state and the other fused tiles; `(1,1,1)` at `DK` 64 (no spill) and 192 (its spill
+  with `f32` state; `(1,1,1)` at `DK` 64 (no spill) and 192 (its spill
   shrinks), where it is the auto route because `(2,16,8)` is illegal (§4.6).
 
 These counts depend on the compiler and the lowering; re-measure them when either changes.
@@ -579,7 +591,8 @@ implementation that rounds `o` to bf16 first differs by up to one bf16 step).
 
 **Cost.** `fuse_conv` with a single wave owns all `DV` rows plus their taps and weights, so it is a
 register-heavy (legal) tile, like the unfused `(1,1,1)`; it keeps part of the interleaved order so
-that it does not spill (§4.3), and some `(4,16,1)` conv tiles run one wave per SIMD lower than with
+that `(1,16,1)` does not spill, while multi-wave conv tiles hoist every load and some of them start
+to spill (§4.3, Cost); some `(4,16,1)` conv tiles also run one wave per SIMD lower than with
 an interleaved order (§4.3, Cost). The fused modes are an enablement path and recompute shared work
 instead of sharing it. A q/k conv channel depends only on its k-lane, so every `(wave, v-lane)`
 pair of the workgroup recomputes it: `NW × WTV = NW × 64 / WTK` times per head, each time

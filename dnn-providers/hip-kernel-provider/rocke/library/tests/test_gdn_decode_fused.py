@@ -212,6 +212,17 @@ def _scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
 
 _FLAGS = ((True, False), (False, True), (True, True))
 
+# Fused (NW, WTK) tiles at DK = DV = 128, 16/16 heads, BPV = 1 that compile
+# with 0 B scratch in every gate kind, state dtype and fusion mode under ROCm
+# 7.1, ROCm 7.13 and ROCm 10 (ALGORITHM.md section 4.3). Norm-only also fits on
+# every legal tile except _NORM_ONLY_SPILL_TILES. Every other fused tile spills
+# in some mode under at least one of those compilers, and which modes is
+# compiler-dependent, so the held set is per tile, not per mode: a few
+# individual modes on those tiles (8 of them) also stay at 0 B but are only
+# required to lower.
+_NO_SPILL_TILES = ((1, 16), (2, 8), (2, 16), (4, 8), (4, 16), (8, 16))
+_NORM_ONLY_SPILL_TILES = ((1, 1), (1, 2))
+
 
 class TestFusedEmission(unittest.TestCase):
     def test_params_match_signature(self):
@@ -229,30 +240,41 @@ class TestFusedEmission(unittest.TestCase):
                         )
 
     def test_lowers_and_compiles_without_scratch(self):
-        """Every fused variant lowers and compiles without spilling, including
-        one wave with fuse_conv, which owns all DV rows plus their taps and
-        weights (0 B on gfx950 with ROCm 7.1 and ROCm 7.13)."""
+        """Every legal fused tile lowers; the tiles every measured compiler
+        keeps at 0 B stay there, including one wave with fuse_conv at
+        (1,16,1), which owns all DV rows plus their taps and weights."""
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+        held = 0
         for gate in ("gdn", "kda"):
             for st in ("bf16", "f32"):
                 for conv, norm in _FLAGS:
-                    for nw in (1, 2, 4, 8):
-                        s = _fused(
-                            gate_kind=gate,
-                            state_dtype=st,
-                            num_warps=nw,
-                            fuse_conv=conv,
-                            fuse_out_norm=norm,
-                        )
-                        with self.subTest(name=s.kernel_name()):
-                            ll = _lower_kernel_to_llvm_python(
-                                build_gdn_decode(s, arch=ARCH),
-                                arch=ARCH,
-                                llvm_flavor="llvm20",
+                    for nw in (1, 2, 4, 8, 16):
+                        for wtk in (1, 2, 4, 8, 16, 32):
+                            s = _fused(
+                                gate_kind=gate,
+                                state_dtype=st,
+                                num_warps=nw,
+                                warp_threads_k=wtk,
+                                fuse_conv=conv,
+                                fuse_out_norm=norm,
                             )
-                            self.assertIn("define amdgpu_kernel", ll)
-                            self.assertEqual(_scratch_bytes(self, s), 0)
+                            if not is_valid_spec(s, arch=ARCH)[0]:
+                                continue
+                            with self.subTest(name=s.kernel_name()):
+                                ll = _lower_kernel_to_llvm_python(
+                                    build_gdn_decode(s, arch=ARCH),
+                                    arch=ARCH,
+                                    llvm_flavor="llvm20",
+                                )
+                                self.assertIn("define amdgpu_kernel", ll)
+                                if (nw, wtk) in _NO_SPILL_TILES or (
+                                    not conv and (nw, wtk) not in _NORM_ONLY_SPILL_TILES
+                                ):
+                                    held += 1
+                                    self.assertEqual(_scratch_bytes(self, s), 0)
+        # 6 tiles x 12 modes, plus norm-only on the 11 other legal tiles.
+        self.assertEqual(held, 6 * 12 + 11 * 4)
 
     def test_unfused_kernel_has_no_lds_or_barrier(self):
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python

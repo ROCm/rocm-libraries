@@ -810,7 +810,8 @@ def _build_warp_tiled(spec: GdnDecodeSpec) -> KernelDef:
     # and the norm inputs as well exceeds the VGPR budget, so with fuse_conv
     # that tile loads them where the parent order did: v in the row loop, each
     # state chunk at its decay, out_gate and norm_weight at the norm
-    # (ALGORITHM.md §4.3, "One exception").
+    # (ALGORITHM.md §4.3, "One exception"). Multi-wave fuse_conv tiles hoist
+    # every load; small-WTK and many-wave ones can spill (§4.3, Cost).
     LATE_ROW_INPUTS = CONV and NW == 1
     # One conv-state pool slot; the conv state carries the I/O dtype.
     CST_SLOT = spec.conv_dim * CONV_TAPS * _ELEM_BYTES[spec.dtype]
