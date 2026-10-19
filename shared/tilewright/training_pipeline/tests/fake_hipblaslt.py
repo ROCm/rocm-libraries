@@ -25,8 +25,9 @@ come in "Origami" order (a fixed analytical guess, so rank 0 is the Origami
 pick); with TENSILE_USE_TILEWRIGHT=1 they come in the order the deployed
 model ranks them (through the tilewright Python module when it is installed,
 otherwise unchanged), from a pool without the kernels of the library stem's
-blocklist sidecar next to its tilewright_index, as TensileLite's adapter
-leaves them out. A `solution_index_list` replaces the candidates by the
+blocklist sidecar next to its tilewright_index, matched by their
+`lib.correctness.blocklist_key`, as TensileLite's adapter leaves them out.
+A `solution_index_list` replaces the candidates by the
 listed solutions in list order, `algo_method: 1` takes them in library order,
 and `skip_screen_prepass` screens against the fastest of all candidates
 instead of the fastest so far. The output follows testing_matmul.hpp: an optional
@@ -470,10 +471,14 @@ def bench_main(argv: List[str]) -> int:
     sols, kernels = _library(libdir, stem, model_path)
     sidecar = libdir / f"{stem}.tilewright.blocklist"
     if tw_on and sidecar.is_file():
-        from lib.correctness import read_sidecar
+        from lib.correctness import blocklist_key, read_sidecar
 
-        blocked = set(read_sidecar(sidecar))
-        keep = [i for i, k in enumerate(kernels) if k["kernel_name"] not in blocked]
+        blocked = {blocklist_key(n) for n in read_sidecar(sidecar)}
+        keep = [
+            i
+            for i, k in enumerate(kernels)
+            if blocklist_key(k["kernel_name"]) not in blocked
+        ]
         sols, kernels = [sols[i] for i in keep], [kernels[i] for i in keep]
     model = cs = hw = None
     if tw_on:

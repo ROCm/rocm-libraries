@@ -96,7 +96,7 @@ from lib import procs  # noqa: E402
 from lib import repeats  # noqa: E402
 from lib import ui  # noqa: E402
 from lib.bench_yaml import write_bench_yaml  # noqa: E402
-from lib.correctness import Blocklist, bundle_blocklist  # noqa: E402
+from lib.correctness import Blocklist, blocklist_key, bundle_blocklist  # noqa: E402
 from lib.correctness import config_blocklist  # noqa: E402
 from lib.shapes import Shape  # noqa: E402
 from run_orchestrator import arch_base  # noqa: E402
@@ -746,7 +746,9 @@ def bundle_blocklist_of(
     config's cannot be read."""
     invocation = config_blocklist(cfg)
     own, where = bundle_blocklist(args.train_dir, args.library_stem or "")
-    mine = invocation.canonical if invocation else frozenset()
+    mine = frozenset(
+        blocklist_key(n) for n in (invocation.canonical if invocation else ())
+    )
     if own is None:
         if invocation:
             ui.warn(
@@ -755,7 +757,7 @@ def bundle_blocklist_of(
                 f"the config's ({len(invocation)} kernel(s))",
             )
         return invocation
-    if own.canonical != mine and not args.quiet:
+    if frozenset(blocklist_key(n) for n in own.canonical) != mine and not args.quiet:
         ui.warn(
             "blocklist",
             f"the bundle serves with its own blocklist, {where}: "

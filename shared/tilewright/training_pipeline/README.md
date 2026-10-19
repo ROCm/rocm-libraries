@@ -3359,7 +3359,14 @@ logic file names it (the solution name hipblaslt-bench prints and
 TensileLite's `ContractionSolution::name()` returns); names are
 integration-side data, and models know a kernel only by its signature. A
 name blocks every kernel of its canonical name, an alias group whole (*Kernel
-identity across hipBLASLt builds*), and the sidecar lists every member.
+identity across hipBLASLt builds*), and the sidecar lists every member. It
+also blocks every kernel whose name equals it once both drop their IA
+(InterleaveAlpha) and PKA (PreloadKernArgs) tokens, which builds of
+TensileLite spell differently for one kernel (`lib.correctness.blocklist_key`,
+the rule TensileLite reads the sidecar with), so a list or sidecar written
+from one build blocks the same kernels in another; a kernel that differs from
+another in those tokens alone is blocked with it. A kernel id is matched by
+its name hash only, which those tokens change.
 
 The gate writes `blocklist.json`, the listed kernels and those that failed,
 crashed or are unguarded, by name, kernel id and signature, into
@@ -3695,8 +3702,10 @@ after `#` comment lines, one kernel name per line, the kernels of the served
 pool (the table and the bank) that the config's blocklist names. TensileLite
 reads the sidecar of a library stem from the directory of its
 `tilewright_index` and leaves those kernels out of every pool it ranks with
-the model, so its pool positions and the members it serves are the
-pipeline's. A deploy whose pool holds no blocked kernel removes the sidecar
+the model, matching names as a blocklist does (without their IA and PKA
+tokens), so its pool positions and the members it serves are the
+pipeline's; it warns when names of the sidecar match no kernel of a pool it
+ranks. A deploy whose pool holds no blocked kernel removes the sidecar
 a former deploy of the stem left, in the checkout and in the build. With
 `deploy.build_after_apply` the build's copy is verified like the model's, so
 the deploy fails on a hipBLASLt whose build does not copy sidecars. Every

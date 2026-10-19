@@ -220,6 +220,80 @@ def test_sidecars_are_read_as_tensilelite_reads_them(tmp_path):
     assert cx.read_sidecar(p) == ["Cijk_a", "Cijk_c"]
 
 
+# (name, key) as TensileLite's
+# PredictionLibraryTest.TilewrightBlocklistKeysDropTheIaAndPkaTokens pins them.
+BLOCKLIST_KEYS = [
+    ("Cijk_Ailk_MT64x64x32_IA0_K1_PKA1_SU0", "Cijk_Ailk_MT64x64x32_K1_SU0"),
+    ("Cijk_Ailk_MT64x64x32_K1_PKA0_SU0", "Cijk_Ailk_MT64x64x32_K1_SU0"),
+    ("IA2_Cijk_IA10_PKAn1", "Cijk"),
+    (
+        "Cijk_SIA3_IA_PKA_IAx1_PKA1x_MIA0_IAn_ia0",
+        "Cijk_SIA3_IA_PKA_IAx1_PKA1x_MIA0_IAn_ia0",
+    ),
+    ("Cijk__IA0_", "Cijk__"),
+    ("PKA1", ""),
+    ("", ""),
+    (
+        "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
+        "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
+    ),
+]
+TENSILELITE = Path(__file__).resolve().parents[4] / "projects/hipblaslt/tensilelite"
+
+
+@pytest.mark.parametrize("name, key", BLOCKLIST_KEYS)
+def test_blocklist_keys_drop_the_ia_and_pka_tokens(name, key):
+    assert cx.blocklist_key(name) == key
+
+
+@pytest.mark.skipif(
+    not (TENSILELITE / "include").is_dir(), reason="no TensileLite tilewright adapter"
+)
+def test_tensilelite_reads_sidecars_by_the_same_keys():
+    hpp = (TENSILELITE / "include/Tensile/TilewrightRanker.hpp").read_text()
+    tokens = re.search(r"BlocklistIgnoredTokens\{([^}]*)\}", hpp)
+    assert tokens is not None
+    assert tuple(re.findall(r'"(\w+)"', tokens.group(1))) == cx.IGNORED_NAME_TOKENS
+    tests = (TENSILELITE / "tests/PredictionLibrary_test.cpp").read_text()
+    body = re.search(
+        r"TilewrightBlocklistKeysDropTheIaAndPkaTokens\)\n\{(.*?)\n\}", tests, re.S
+    )
+    assert body is not None
+    pinned = re.findall(r'\{"([^"]*)",\s*"([^"]*)"\}', body.group(1))
+    assert pinned == BLOCKLIST_KEYS
+
+
+def test_a_name_blocks_the_kernels_whose_ia_and_pka_tokens_differ(tmp_path):
+    """A sidecar written from a build that names kernels with PKA0 and no IA
+    token blocks them, by name, in a build that names them with IA0 and
+    PKA1, as TensileLite reads it; a kernel that differs from a listed one in
+    those tokens alone is blocked with it, while other tokens still tell
+    kernels apart. A kernel id hashes the name with its tokens, so it
+    matches only the build that wrote the name."""
+    side = tmp_path / ("Stem" + cx.SIDECAR_SUFFIX)
+    side.write_text(cx.sidecar_text("Stem", ["Cijk_a_K1_PKA0_SU0", "Custom_b"]))
+    bl = cx.sidecar_blocklist(side)
+    assert bl.names == {"Cijk_a_K1_PKA0_SU0", "Custom_b"}
+    names = [
+        "Cijk_a_IA0_K1_PKA1_SU0",
+        "Cijk_a_IA0_K1_PKA0_SU0",
+        "Cijk_a_IA0_K1_PKA1_SU1",
+        "Custom_b",
+        "Cijk_c_IA0_K1_PKA1_SU0",
+    ]
+    kept = bl.kept([{"kernel_name": n} for n in names])
+    assert [k["kernel_name"] for k in kept] == [names[2], names[4]]
+    assert bl.blocks_name("Cijk_a_IA2_K1_PKAn1_SU0")
+    assert not bl.blocks_name("Cijk_a_K1_SU1") and not bl.blocks_name("Custom")
+    kid = f"MT64x64x32_MI16x16x8_NTA0_NTB0:{ki.name_hash(names[0])}"
+    assert not bl.blocks_id(kid)
+    assert cx.Blocklist([cx.Entry(names[0])]).blocks_id(kid)
+    # A tensor-data-mover alias of a listed kernel, spelled by another build.
+    tdm = cx.Blocklist([cx.Entry("Cijk_d_TDMI1_THA3_K1_PKA0")])
+    assert tdm.blocks_name("Cijk_d_TDMI1_THA0_IA0_K1_PKA1")
+    assert not tdm.blocks_name("Cijk_d_TDMI2_THA0_IA0_K1_PKA1")
+
+
 # ── the gate ─────────────────────────────────────────────────────────────────
 
 
@@ -2268,6 +2342,28 @@ def test_stage08_evaluates_a_bundle_with_its_own_blocklist(tmp_path, capsys):
     (train / "metrics.json").unlink()
     assert s08.bundle_blocklist_of(args, cfg).names == {"Cijk_a", "Cijk_b"}
     assert "the bundle's blocklist is unknown" in capsys.readouterr().err
+
+
+def test_stage08_takes_names_that_differ_in_ia_and_pka_tokens_for_one(tmp_path, capsys):
+    import argparse
+
+    import stage08_optional_validate_selection_efficiency as s08
+
+    train = tmp_path / "round_2" / "stage05"
+    train.mkdir(parents=True)
+    own = tmp_path / "own.tsv"
+    own.write_text("A\tCijk_a_K1_PKA0\n")
+    snapshot = tmp_path / "snapshot.yaml"
+    snapshot.write_text(yaml.safe_dump({"correctness": {"lists": [str(own)]}}))
+    (train / "metrics.json").write_text(
+        json.dumps({"args": {"config_yaml": str(snapshot)}})
+    )
+    now = tmp_path / "now.tsv"
+    now.write_text("A\tCijk_a_IA0_K1_PKA1\n")
+    cfg = {"correctness": {"lists": [str(now)]}}
+    args = argparse.Namespace(train_dir=train, library_stem=cf.STEM, quiet=False)
+    assert s08.bundle_blocklist_of(args, cfg).names == {"Cijk_a_K1_PKA0"}
+    assert "the bundle serves with its own blocklist" not in capsys.readouterr().err
 
 
 def test_a_serving_libdir_never_takes_the_librarys_own_sidecar(tmp_path):

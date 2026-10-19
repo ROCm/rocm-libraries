@@ -13,9 +13,13 @@ kernel id ends in a hash of that name as the identity rule reads it (its
 canonical name), so an artifact that names kernels by id alone (an enriched
 folder's kernels.json, a plan) is checked by that hash
 (`Blocklist.blocks_id`). A name blocks the kernels of its canonical name,
-an alias group whole, since they run the same code. Names are
-framework-specific: they live in the pipeline's records and in the
-integration-side sidecar, never in a model.
+an alias group whole, since they run the same code, and every kernel whose
+name equals it once both drop the tokens builds of TensileLite spell
+differently for one kernel (`blocklist_key`), as TensileLite reads the
+sidecar: a list or sidecar written from one build names the same kernels in
+another. A kernel id cannot be matched that way, since its hash covers those
+tokens. Names are framework-specific: they live in the pipeline's records
+and in the integration-side sidecar, never in a model.
 
 Sources, the config's `correctness` section:
 
@@ -51,15 +55,18 @@ and 8 validate it with (`bundle_blocklist`). A blocked kernel
     and bank) that are blocked, those of every member of a blocked alias
     group too, one per line. TensileLite's tilewright adapter reads the
     sidecar of a library stem from the directory of its tilewright_index and
-    leaves those kernels out of the pools it ranks, so a key whose served
+    leaves those kernels out of the pools it ranks (matching names by
+    `blocklist_key`, as a Blocklist does), so a key whose served
     member is blocked is served by its next member and a key whose members
     are all blocked is no candidate, as in the pipeline.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -85,6 +92,32 @@ BLOCKLIST_FILE = "blocklist.json"
 SIDECAR_SUFFIX = ".tilewright.blocklist"
 LIST_SUFFIX = ".tsv"
 LISTS_DIR = Path(__file__).resolve().parent.parent / "blocklists"
+# The name tokens, an abbreviated parameter and its value, that builds of
+# TensileLite spell differently for one kernel: IA (InterleaveAlpha), which
+# older builds leave out of names, and PKA (PreloadKernArgs), which a build
+# turns off when its compiler cannot preload kernel arguments. TensileLite's
+# TilewrightRanker::BlocklistIgnoredTokens are the same.
+IGNORED_NAME_TOKENS: Tuple[str, ...] = ("IA", "PKA")
+_IGNORED_TOKEN = re.compile(
+    "(?:" + "|".join(map(re.escape, IGNORED_NAME_TOKENS)) + ")n?[0-9]+"
+)
+
+
+def blocklist_key(name: Any) -> str:
+    """`name` without its IGNORED_NAME_TOKENS: every `_`-separated part
+    that is one of them followed by its value (decimal digits, after an `n`
+    when negative) is dropped with its separator, as TensileLite's
+    TilewrightRanker::blocklistKey drops it. A blocklist name names every
+    kernel whose name has its key."""
+    text = str(name or "")
+    if not any(token in text for token in IGNORED_NAME_TOKENS):
+        return text
+    return _dropped(text)
+
+
+@functools.lru_cache(maxsize=1 << 14)
+def _dropped(text: str) -> str:
+    return "_".join(p for p in text.split("_") if not _IGNORED_TOKEN.fullmatch(p))
 
 
 @dataclass(frozen=True)
@@ -127,7 +160,8 @@ class Entry:
 class Blocklist:
     """Blocked kernels, the first entry of a name kept. A name blocks every
     kernel of its canonical name (`lib.dat.canonical_name`), its alias
-    group (lib/kernel_identity.py) whole."""
+    group (lib/kernel_identity.py) whole, and every kernel whose name has
+    the same `blocklist_key`; a kernel id only by its name hash."""
 
     def __init__(self, entries: Iterable[Entry] = ()) -> None:
         kept: Dict[str, Entry] = {}
@@ -136,6 +170,9 @@ class Blocklist:
         self.entries: Tuple[Entry, ...] = tuple(kept.values())
         self.names: FrozenSet[str] = frozenset(kept)
         self.canonical: FrozenSet[str] = frozenset(dat.canonical_name(n) for n in kept)
+        self.keys: FrozenSet[str] = frozenset(
+            blocklist_key(n) for n in self.names | self.canonical
+        )
         self.hashes: FrozenSet[str] = frozenset(
             ki.name_hash(n) for n in self.names | self.canonical
         )
@@ -146,10 +183,11 @@ class Blocklist:
     def __bool__(self) -> bool:
         return bool(self.entries)
 
+    def _keyed(self, name: str, canonical: str) -> bool:
+        return blocklist_key(name) in self.keys or blocklist_key(canonical) in self.keys
+
     def blocks_name(self, name: Any) -> bool:
-        return bool(name) and (
-            str(name) in self.names or dat.canonical_name(name) in self.canonical
-        )
+        return bool(name) and self._keyed(str(name), dat.canonical_name(name))
 
     def blocks_id(self, kid: Any) -> bool:
         """Whether a kernel id names a blocked kernel (by its name hash)."""
@@ -163,9 +201,7 @@ class Blocklist:
         blocked."""
         name = kernel.get("kernel_name")
         if name:
-            return (
-                str(name) in self.names or ki.canonical_name(kernel) in self.canonical
-            )
+            return self._keyed(str(name), ki.canonical_name(kernel))
         return self.blocks_id(kernel.get("kernel_id"))
 
     def kept(self, kernels: Iterable[Mapping[str, Any]]) -> List[Any]:
