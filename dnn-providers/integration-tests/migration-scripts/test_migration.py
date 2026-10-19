@@ -1280,6 +1280,7 @@ def test_import_tier_from_sidecar():
             "Smoke/IntegrationGpuTernaryFp32",
             "Full/IntegrationGpuTernaryFp32",
             "Standard/IntegrationGpuTernaryFp32",
+            "Comprehensive/IntegrationGpuTernaryFp32",
             "IntegrationGpuTernaryFp32",  # no tier prefix
         ]
         paths = {
@@ -1321,7 +1322,13 @@ def test_import_tier_from_sidecar():
             f"import tiers differ from place_bundles:\n"
             f"  imported: {imported}\n  placed:   {placed}"
         )
-        assert sorted(imported.values()) == ["full", "quick", "quick", "standard"]
+        assert sorted(imported.values()) == [
+            "comprehensive",
+            "full",
+            "quick",
+            "quick",
+            "standard",
+        ]
 
         # --tier still wins over the sidecar, but not silently.
         full_case = paths["Full/IntegrationGpuTernaryFp32"]
@@ -1364,6 +1371,54 @@ def test_import_tier_from_sidecar():
         assert "--tier" not in r.stderr, r.stderr
         assert list(_tiers_by_source(bare_tier_dir).values()) == ["full"]
         print("  PASS: import_tier_from_sidecar")
+
+
+def test_import_sidecar_outside_capture_layout():
+    """A sidecar still sets the tier when the graph is not at its capture path.
+
+    The suite is recorded in the sidecar, so a capture copied to a flat
+    directory keeps its tier; the case name is not, so no reference_source is
+    derived. A hand-written sidecar with no ``operation`` has no suite at all:
+    quick, as with no sidecar.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        suite = "Full/IntegrationGpuTernaryFp32"
+        captured = _capture(
+            tmp / "captured",
+            "case0",
+            _ternary_graph(_UIDS0),
+            _sidecar("case0", seed=7, suite=suite),
+            suite=suite,
+        )
+        flat = tmp / "flat"
+        flat.mkdir()
+        for p in (captured, captured.with_suffix(".meta.json")):
+            (flat / p.name).write_text(p.read_text())
+
+        bundle_dir = tmp / "moved"
+        bundle_dir.mkdir()
+        r = _import_capture(flat / captured.name, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "WARN" not in r.stderr, r.stderr
+        assert list(_tiers_by_source(bundle_dir)) == [None], "reference_source invented"
+        assert list(_tiers_by_source(bundle_dir).values()) == ["full"]
+        assert _only_metadata(bundle_dir)["seed"] == 7
+
+        # Hand-written sidecar, no operation: quick, no reference_source.
+        no_op = _sidecar("case1", seed=8, suite=suite)
+        del no_op["operation"]
+        path = _capture(
+            tmp / "captured", "case1", _ternary_graph(_UIDS0), no_op, suite=suite
+        )
+        bundle_dir = tmp / "no_operation"
+        bundle_dir.mkdir()
+        r = _import_capture(path, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "WARN" not in r.stderr, r.stderr
+        assert _tiers_by_source(bundle_dir) == {None: "quick"}
+        assert _only_metadata(bundle_dir)["seed"] == 8
+        print("  PASS: import_sidecar_outside_capture_layout")
 
 
 def test_import_meta_override_checks():
@@ -1434,45 +1489,110 @@ def test_import_meta_override_checks():
         assert "Traceback" not in r.stderr, r.stderr
         assert "not a tensor UID" in r.stderr, r.stderr
         assert _inventory(bad_dir) == {}, "refusal wrote files"
+
+        r = _import_capture(graph_path, bad_dir, "--meta", "inputs=[1]")
+        assert r.returncode == 1, f"non-object inputs must fail:\n{r.stderr}"
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "inputs: expected a JSON object" in r.stderr, r.stderr
+        assert _inventory(bad_dir) == {}, "refusal wrote files"
         print("  PASS: import_meta_override_checks")
 
 
-def test_import_malformed_sidecar_warns():
-    """An unreadable sidecar warns and the import proceeds without it.
+def test_import_meta_value_types():
+    """Only the non-string metadata keys parse as JSON; NaN and inf are refused.
 
-    Under --strict it is a refusal that writes nothing.
+    A string key keeps its text as given, so ``notes=NaN`` cannot write a bare
+    NaN that makes the whole sweep.json unreadable. A typed key that is not a
+    finite JSON value is refused with a message, not a traceback.
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
+        graph_path = _capture(
+            tmp / "captured", "case0", _ternary_graph(_UIDS0), _sidecar("case0")
+        )
+
+        bundle_dir = tmp / "strings"
+        bundle_dir.mkdir()
+        r = _import_capture(
+            graph_path,
+            bundle_dir,
+            "--meta",
+            "notes=NaN",
+            "--meta",
+            "precision_profile=123",
+            "--meta",
+            "minimum_vram_mb=512",
+        )
+        assert r.returncode == 0, r.stderr
+        meta = _only_metadata(bundle_dir)
+        assert meta["notes"] == "NaN", meta
+        assert meta["precision_profile"] == "123", meta
+        assert meta["minimum_vram_mb"] == 512, meta
+        sweep = next(bundle_dir.rglob("sweep.json")).read_text()
+        assert "NaN" not in sweep.replace('"NaN"', ""), "bare NaN written"
+
+        for bad in ("seed=NaN", "seed=Infinity", "seed=1e400", "seed=abc"):
+            bad_dir = tmp / f"bad_{bad.split('=')[1]}"
+            bad_dir.mkdir()
+            r = _import_capture(graph_path, bad_dir, "--meta", bad)
+            assert r.returncode == 1, f"{bad} must fail:\n{r.stderr}"
+            assert "Traceback" not in r.stderr, f"{bad}: crashed:\n{r.stderr}"
+            assert "import_graph: --meta seed:" in r.stderr, r.stderr
+            assert _inventory(bad_dir) == {}, f"{bad}: refusal wrote files"
+        print("  PASS: import_meta_value_types")
+
+
+def test_import_malformed_sidecar_refused():
+    """A sidecar that exists but is unusable is refused, with or without --strict.
+
+    Proceeding without it would land the case in quick/ with no
+    reference_source. place_bundles, which knows the suite from the path, warns
+    and places the case without the sidecar instead of crashing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
         bad = {
             "truncated": '{"seed": 4',
             "not an object": "[1, 2]",
             # Parses, but remap_meta_inputs would crash on int("x").
             "inputs key not a UID": '{"seed": 4, "inputs": {"x": {"kind": "free"}}}',
             "inputs not an object": '{"seed": 4, "inputs": [1]}',
+            "operation empty": '{"seed": 4, "operation": ""}',
+            "operation not a string": '{"seed": 4, "operation": 7}',
         }
         for i, (label, text) in enumerate(bad.items()):
-            path = _capture(tmp / "captured", f"case{i}", _ternary_graph(_UIDS0), text)
+            path = _capture(capture_dir, f"case{i}", _ternary_graph(_UIDS0), text)
             sidecar_path = path.with_suffix(".meta.json")
+            for strict in ([], ["--strict"]):
+                bundle_dir = tmp / f"refused{i}{len(strict)}"
+                bundle_dir.mkdir()
+                r = _import_capture(path, bundle_dir, "--seed", "3", *strict)
+                assert r.returncode == 1, f"{label} {strict}: must fail:\n{r.stderr}"
+                assert "Traceback" not in r.stderr, f"{label}: crashed:\n{r.stderr}"
+                assert (
+                    f"ERROR: bad sidecar {sidecar_path}" in r.stderr
+                ), f"{label}: no error:\n{r.stderr}"
+                assert _inventory(bundle_dir) == {}, f"{label}: refusal wrote files"
 
-            bundle_dir = tmp / f"lenient{i}"
-            bundle_dir.mkdir()
-            r = _import_capture(path, bundle_dir, "--seed", "3")
-            assert r.returncode == 0, f"{label}: must not abort:\n{r.stderr}"
-            assert "Traceback" not in r.stderr, f"{label}: crashed:\n{r.stderr}"
-            assert (
-                f"WARN: bad sidecar {sidecar_path}" in r.stderr
-            ), f"{label}: no warning:\n{r.stderr}"
-            meta = _only_metadata(bundle_dir)
-            assert meta == {"format_version": 1, "seed": 3}, f"{label}: {meta}"
-
-            strict_dir = tmp / f"strict{i}"
-            strict_dir.mkdir()
-            r = _import_capture(path, strict_dir, "--strict")
-            assert r.returncode == 1, f"{label}: --strict must fail:\n{r.stderr}"
-            assert f"ERROR: bad sidecar {sidecar_path}" in r.stderr, r.stderr
-            assert _inventory(strict_dir) == {}, f"{label}: --strict wrote files"
-        print("  PASS: import_malformed_sidecar_warns")
+        placed_dir = tmp / "placed"
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(placed_dir),
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, f"place_bundles failed:\n{r.stderr}"
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "WARN: bad meta" in r.stderr and "not a tensor UID" in r.stderr, r.stderr
+        placed = _tiers_by_source(placed_dir)
+        assert len(placed) == len(bad), f"place_bundles lost cases: {placed}"
+        print("  PASS: import_malformed_sidecar_refused")
 
 
 def test_import_seed_only_difference_distinct_cases():
@@ -1666,8 +1786,10 @@ def main() -> int:
         test_import_seed_override_warns,
         test_import_no_sidecar_unchanged,
         test_import_tier_from_sidecar,
+        test_import_sidecar_outside_capture_layout,
         test_import_meta_override_checks,
-        test_import_malformed_sidecar_warns,
+        test_import_meta_value_types,
+        test_import_malformed_sidecar_refused,
         test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
     ]

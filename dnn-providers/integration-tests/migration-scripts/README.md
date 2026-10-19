@@ -82,17 +82,21 @@ and a `reference_source` of `c++ integration suite: <Suite>.<Case>` — exactly
 as `place_bundles.py` would, so no `--seed`/`--meta` flags are needed. Explicit
 `--seed`/`--meta` values still override the sidecar, but an override that
 contradicts it (or the `reference_source` derived from it) prints a `WARN`
-naming both values and the sidecar path. `--meta` values parse as JSON when
-they can, so `--meta seed=42` is the number 42. An unreadable or malformed
-sidecar (e.g. an `inputs` key that is not a UID) also warns, and the import
-continues without it. With
-`--strict`, either warning fails the import. The sidecar's suite prefix
+naming both values and the sidecar path; with `--strict` it fails the import.
+`--meta` values for `seed`, `format_version`, `minimum_vram_mb` and `inputs`
+parse as JSON, so `--meta seed=42` is the number 42 (NaN and Infinity are
+refused); any other key is stored as the string given. A sidecar that exists
+but is unusable (unreadable, not an object, an `inputs` key that is not a UID,
+an `operation` that is not a non-empty string) fails the import, with or
+without `--strict`: without it the case would land in `quick/` with no
+`reference_source`. The sidecar's suite prefix
 also picks the tier folder, as in `place_bundles.py` (`Smoke/` → `quick/`,
 `Full/` → `full/`, `Standard/` → `standard/`, `Comprehensive/` →
 `comprehensive/`, anything else → `quick/`); `--tier` overrides it, with the
 same `WARN` (or `--strict` failure) when the two disagree. A graph
-with no sidecar (e.g. hand-written) gets only `format_version` plus whatever
-the flags supply, and lands in `quick/` unless `--tier` says otherwise.
+with no sidecar (e.g. hand-written), or a sidecar with no `operation`, gets
+only what the sidecar and flags supply plus `format_version`, and lands in
+`quick/` unless `--tier` says otherwise.
 
 Use the full pipeline below instead when migrating many tests/suites at
 once and you want the Hop C/D byte- and behavior-level proof that nothing
@@ -188,9 +192,9 @@ python3 migration-scripts/import_graph.py \
 Dedup-aware placement. Default: skip exact duplicates (same graph, seed, and
 inputs; an absent seed only matches another absent seed). `--force` appends
 regardless. Metadata and the tier are read from the graph's `.meta.json`
-sidecar (see the note under the quick path above). `--strict` (CI mode) exits
-non-zero on a duplicate, an unreadable sidecar, or a `--seed`/`--meta` value
-that contradicts the sidecar.
+sidecar (see the note under the quick path above); an unusable sidecar always
+fails the import. `--strict` (CI mode) also exits non-zero on a duplicate or a
+`--seed`/`--meta`/`--tier` value that contradicts the sidecar.
 
 ## Searching and Running Bundles
 
