@@ -650,6 +650,65 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
         with TemporaryDirectory() as d:
             self.assertEqual(self.drive_main(None, Path(d)), 1)
 
+    def test_a_golden_run_that_selects_no_family_exits_nonzero(self):
+        # A misspelled --only selects nothing: the check must not print
+        # GOLDEN OK over zero configs, and a record must not touch the file.
+        with TemporaryDirectory() as d:
+            golden = Path(d) / "golden.json"
+            store = run_diff.GoldenStore()
+            store.record(run_diff.LL, "llvm20", {"gemm": {"0": "a"}})
+            store.save(golden)
+            blessed = golden.read_text()
+            for step in ("--check-golden", "--record-golden"):
+                argv = [
+                    "run_diff.py",
+                    "--python-only",
+                    step,
+                    "--flavor",
+                    "llvm20",
+                    "--only",
+                    "no_such_family",
+                    "--golden-file",
+                    str(golden),
+                ]
+                with self.subTest(step=step):
+                    with mock.patch.object(sys, "argv", argv):
+                        self.assertEqual(run_diff.main(), 1)
+                    self.assertEqual(golden.read_text(), blessed)
+
+    def test_a_golden_record_keeps_the_families_it_excluded(self):
+        # --exclude leaves a family to another lane; a record without --only
+        # must still re-record only the families it ran, not drop the rest.
+        with TemporaryDirectory() as d:
+            golden = Path(d) / "golden.json"
+            store = run_diff.GoldenStore()
+            store.record(
+                run_diff.LL, "llvm20", {"kept": {"0": "old"}, "left_out": {"0": "x"}}
+            )
+            store.save(golden)
+            families = [("kept", Path(d)), ("left_out", Path(d))]
+            argv = [
+                "run_diff.py",
+                "--python-only",
+                "--record-golden",
+                "--flavor",
+                "llvm20",
+                "--exclude",
+                "left_out",
+                "--golden-file",
+                str(golden),
+            ]
+            with mock.patch.object(run_diff, "find_families", return_value=families):
+                with mock.patch.object(
+                    run_diff,
+                    "python_reference_families",
+                    return_value=({"kept": {"0": "new"}}, []),
+                ):
+                    with mock.patch.object(sys, "argv", argv):
+                        self.assertEqual(run_diff.main(), 0)
+            recorded = run_diff.GoldenStore.load(golden).section(run_diff.LL, "llvm20")
+            self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
+
 
 class TestConfigEnumeration(unittest.TestCase):
     """Both differential paths must visit the expanded catalog and its end."""
