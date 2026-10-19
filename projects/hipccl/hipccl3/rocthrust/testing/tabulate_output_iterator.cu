@@ -15,6 +15,8 @@
  *  limitations under the License.
  */
 
+#define CCCL_IGNORE_DEPRECATED_API
+
 #include <thrust/copy.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/device_vector.h>
