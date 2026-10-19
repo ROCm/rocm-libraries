@@ -354,6 +354,19 @@ namespace TensileLite
             const static bool flow = true;
         };
 
+        /// Every enumerator's name, in enumerator order. An enumeration() walk
+        /// asks for all of them on every field of every record, so the callers
+        /// below keep the table rather than composing the names again.
+        template <typename Enum, typename ToName>
+        std::vector<std::string> enumNames(int count, ToName toName)
+        {
+            std::vector<std::string> rv;
+            rv.reserve(static_cast<size_t>(count));
+            for(int i = 0; i < count; i++)
+                rv.push_back(toName(static_cast<Enum>(i)));
+            return rv;
+        }
+
         template <typename IO>
         struct EnumTraits<rocisa::DataType, IO>
         {
@@ -376,11 +389,12 @@ namespace TensileLite
 
             static void enumeration(IO& io, CustomArgType& value)
             {
-                for(int i = 0; i < static_cast<int>(CustomArgType::CustomArgType_Count); i++)
-                {
-                    auto const& info = static_cast<CustomArgType>(i);
-                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
-                }
+                static const auto names = enumNames<CustomArgType>(
+                    static_cast<int>(CustomArgType::CustomArgType_Count),
+                    [](CustomArgType v) { return TensileLite::toString(v); });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(io, value, names[i].c_str(), static_cast<CustomArgType>(i));
             }
         };
 
@@ -391,11 +405,14 @@ namespace TensileLite
 
             static void enumeration(IO& io, CustomArgSemantic& value)
             {
-                for(int i = 0; i < static_cast<int>(CustomArgSemantic::COUNT); i++)
-                {
-                    auto const& info = static_cast<CustomArgSemantic>(i);
-                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
-                }
+                static const auto names
+                    = enumNames<CustomArgSemantic>(static_cast<int>(CustomArgSemantic::COUNT),
+                                                   [](CustomArgSemantic v) {
+                                                       return TensileLite::toString(v);
+                                                   });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(io, value, names[i].c_str(), static_cast<CustomArgSemantic>(i));
             }
         };
 
@@ -405,11 +422,12 @@ namespace TensileLite
             using iot = IOTraits<IO>;
             static void enumeration(IO& io, CustomGridSize& value)
             {
-                for(int i = 0; i < static_cast<int>(CustomGridSize::CustomGridSize_Count); i++)
-                {
-                    auto const& info = static_cast<CustomGridSize>(i);
-                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
-                }
+                static const auto names = enumNames<CustomGridSize>(
+                    static_cast<int>(CustomGridSize::CustomGridSize_Count),
+                    [](CustomGridSize v) { return TensileLite::toString(v); });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(io, value, names[i].c_str(), static_cast<CustomGridSize>(i));
             }
         };
 
@@ -419,11 +437,13 @@ namespace TensileLite
             using iot = IOTraits<IO>;
             static void enumeration(IO& io, CustomWorkspaceType& value)
             {
-                for(int i = 0; i < static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count); i++)
-                {
-                    auto const& info = static_cast<CustomWorkspaceType>(i);
-                    iot::enumCase(io, value, TensileLite::toString(info).c_str(), info);
-                }
+                static const auto names = enumNames<CustomWorkspaceType>(
+                    static_cast<int>(CustomWorkspaceType::CustomWorkspaceType_Count),
+                    [](CustomWorkspaceType v) { return TensileLite::toString(v); });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(
+                        io, value, names[i].c_str(), static_cast<CustomWorkspaceType>(i));
             }
         };
 
@@ -434,11 +454,14 @@ namespace TensileLite
 
             static void enumeration(IO& io, ActivationType& value)
             {
-                for(int i = 0; i < static_cast<int>(ActivationType::Count); i++)
-                {
-                    auto const& info = static_cast<ActivationType>(i);
-                    iot::enumCase(io, value, TensileLite::ToString(info).c_str(), info);
-                }
+                static const auto names
+                    = enumNames<ActivationType>(static_cast<int>(ActivationType::Count),
+                                                [](ActivationType v) {
+                                                    return TensileLite::ToString(v);
+                                                });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(io, value, names[i].c_str(), static_cast<ActivationType>(i));
             }
         };
 
