@@ -11,11 +11,17 @@ the ``num_seg`` override is refused before anything is compiled.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch", reason="torch required")
 
-from builders.mla.mla_decode_runner import MlaDecodeRunner  # noqa: E402
+from builders.mla.mla_decode_runner import (  # noqa: E402
+    MlaDecodeRunner,
+    bmm_absorb_query,
+    bmm_project_latent,
+)
+from builders.mla.ref_mla_decode import absorb_query  # noqa: E402
 from dispatch.mla import MLARequest, dispatch_mla, mla_decode_launch  # noqa: E402
 
 H, T, B, MAX_K = 128, 3, 4, 100  # one sequence has no query
@@ -107,6 +113,12 @@ class TestInputChecks:
                 "c_kv must be paged",
             ),
             ("k_rope", torch.zeros(4, 16, 64, dtype=torch.float32), "k_rope must be"),
+            # One page id indexes both caches: a shorter k_rope reads past it.
+            (
+                "k_rope",
+                torch.zeros(B * PAGES - 1, 16, 64, dtype=torch.bfloat16),
+                "k_rope has 27 pages, c_kv 28",
+            ),
             (
                 "block_table",
                 torch.zeros(B, PAGES, dtype=torch.int64),
@@ -231,3 +243,111 @@ class TestNumSegOverride:
                 512,
             )
             assert names[-1] == "num_seg"
+
+
+class TestTorchStages:
+    """[A] and [D] are ``torch.bmm`` over transposed views: checked on CPU, in
+    fp32, against the fp64 reference's own absorb and ``W_UV`` contraction."""
+
+    T, HEADS, D_NOPE, D_ROPE, R_KV, D_V = 3, 4, 8, 4, 16, 12  # every width distinct
+
+    def _weights(self, rng):
+        return rng.standard_normal(
+            (self.HEADS, self.R_KV, self.D_NOPE + self.D_V)
+        ).astype(np.float32)
+
+    def test_absorb_matches_the_reference(self):
+        rng = np.random.default_rng(0)
+        q_nope = rng.standard_normal((self.T, self.HEADS, self.D_NOPE)).astype(
+            np.float32
+        )
+        q_rope = rng.standard_normal((self.T, self.HEADS, self.D_ROPE)).astype(
+            np.float32
+        )
+        w_uk = self._weights(rng)
+        out = torch.full((self.T, self.HEADS, self.R_KV + self.D_ROPE), float("nan"))
+        bmm_absorb_query(
+            q_nope=torch.from_numpy(q_nope),
+            q_rope=torch.from_numpy(q_rope),
+            w_uk=torch.from_numpy(w_uk),
+            out=out,
+        )
+        want = absorb_query(q_nope, q_rope, w_uk)
+        np.testing.assert_allclose(out.numpy(), want, rtol=1e-5, atol=1e-5)
+
+    def test_project_matches_the_reference(self):
+        rng = np.random.default_rng(1)
+        latent = rng.standard_normal((self.T, self.HEADS, self.R_KV)).astype(np.float32)
+        w_uk = self._weights(rng)
+        out = torch.full((self.T, self.HEADS, self.D_V), float("nan"))
+        bmm_project_latent(
+            latent=torch.from_numpy(latent),
+            w_uk=torch.from_numpy(w_uk),
+            d_nope=self.D_NOPE,
+            out=out,
+        )
+        want = np.einsum(
+            "thr,hrv->thv", latent.astype(np.float64), w_uk[:, :, self.D_NOPE :]
+        )
+        np.testing.assert_allclose(out.numpy(), want, rtol=1e-5, atol=1e-5)
+
+
+class TestBindLatent:
+    """bind_latent() enqueues exactly what latent() does, checked and packed once."""
+
+    class _Recorder:
+        def __init__(self, name, log):
+            self.name, self.log = name, log
+
+        def __call__(self, vals, *, config):
+            self.log.append((self.name, dict(vals), config))
+
+        def bind(self, vals, *, config):
+            snapshot = (self.name, dict(vals), config)
+            self.log.append(("bound",) + snapshot)
+            return lambda: self.log.append(snapshot)
+
+    def _runner(self, num_seg, log):
+        launch = mla_decode_launch(_result()).with_num_seg(num_seg)
+        runner = object.__new__(MlaDecodeRunner)
+        runner.launch, runner.spec = launch, launch.spec
+        runner.request = launch.result.request
+        runner.grid = tuple(launch.result.grid)
+        runner.block = tuple(launch.result.block)
+        runner._workspace = None
+        runner._latent = self._Recorder("latent", log)
+        runner._combine = (
+            self._Recorder("combine", log) if launch.combine_spec is not None else None
+        )
+        return runner
+
+    @pytest.mark.parametrize("num_seg", [1, 2])
+    def test_bound_launches_are_the_unbound_ones(self, num_seg):
+        args = dict(_inputs(), scale=0.1, stream=7)
+        eager, bound = [], []
+        self._runner(num_seg, eager).latent(**args)
+        run = self._runner(num_seg, bound).bind_latent(**args)
+        assert [e[1] for e in bound if e[0] == "bound"] == [e[0] for e in eager]
+        assert [e[0] for e in eager] == (
+            ["latent"] if num_seg == 1 else ["latent", "combine"]
+        )
+        del bound[:]
+        run()
+        run()  # replayable: no re-check, no re-pack
+        assert len(bound) == 2 * len(eager)
+        for got, want in zip(bound, eager * 2):
+            assert got[0] == want[0] and got[2] == want[2] and got[2].stream == 7
+            assert got[1].keys() == want[1].keys()
+            for k, w in want[1].items():
+                g = got[1][k]
+                if k.startswith("part_"):  # each runner owns its workspace
+                    assert g.shape == w.shape
+                else:
+                    assert g is w or g == w, k
+
+    def test_bind_checks_inputs_before_returning(self):
+        log = []
+        t = _inputs(qa=torch.zeros(T + 1, H, 576, dtype=torch.bfloat16))
+        with pytest.raises(ValueError, match="qa has shape"):
+            self._runner(1, log).bind_latent(**t, scale=0.1)
+        assert log == []

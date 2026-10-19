@@ -20,12 +20,14 @@ The whole op around it, for a decode step::
 ``w_uk`` is the fused per-head up-projection ``[H, r_kv, d_nope + d_v]``:
 ``W_UK_nope = w_uk[:, :, :d_nope]`` and ``W_UV = w_uk[:, :, d_nope:]``.
 :meth:`MlaDecodeRunner.forward` runs all four; :meth:`MlaDecodeRunner.latent`
-runs [B] + [C] only. torch is imported lazily: this is a GPU harness, and the
+runs [B] + [C] only; :func:`bmm_absorb_query` and :func:`bmm_project_latent`
+are [A] and [D] on their own. torch is imported lazily: this is a GPU harness, and the
 library itself stays importable without it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from dispatch.mla import mla_decode_launch
@@ -33,8 +35,41 @@ from dispatch.mla import mla_decode_launch
 if TYPE_CHECKING:
     import torch
     from rocke.dispatch.core import DispatchResult
+    from rocke.runtime import KernelLauncher, LaunchConfig
 
-__all__ = ["MlaDecodeRunner"]
+__all__ = ["MlaDecodeRunner", "bmm_absorb_query", "bmm_project_latent"]
+
+
+def bmm_absorb_query(
+    *, q_nope: torch.Tensor, q_rope: torch.Tensor, w_uk: torch.Tensor, out: torch.Tensor
+) -> None:
+    """[A] into ``out`` ``[total_q, H, r_kv + d_rope]``: per head,
+    ``qa_nope[h] = q_nope[h] @ W_UK_nope[h]ᵀ``, then ``q_rope``.
+
+    ``r_kv`` is ``w_uk.shape[1]``; ``out``'s dtype is the one stored (the
+    kernel reads bf16). Runs on torch's current stream.
+    """
+    import torch
+
+    d_nope = q_nope.shape[-1]
+    r_kv = w_uk.shape[1]
+    torch.bmm(
+        q_nope.transpose(0, 1),
+        w_uk[:, :, :d_nope].transpose(1, 2),
+        out=out[:, :, :r_kv].transpose(0, 1),
+    )
+    out[:, :, r_kv:].copy_(q_rope)
+
+
+def bmm_project_latent(
+    *, latent: torch.Tensor, w_uk: torch.Tensor, d_nope: int, out: torch.Tensor
+) -> None:
+    """[D] into ``out`` ``[total_q, H, d_v]``: per head,
+    ``out[h] = latent[h] @ W_UV[h]``, ``W_UV = w_uk[:, :, d_nope:]``. Runs on
+    torch's current stream."""
+    import torch
+
+    torch.bmm(latent.transpose(0, 1), w_uk[:, :, d_nope:], out=out.transpose(0, 1))
 
 
 class MlaDecodeRunner:
@@ -173,6 +208,12 @@ class MlaDecodeRunner:
                 raise ValueError(f"{name} must be torch.bfloat16, got {t.dtype}")
             if not t.is_contiguous():
                 raise ValueError(f"{name} must be contiguous")
+        # One page id indexes both caches.
+        if k_rope.shape[0] != c_kv.shape[0]:
+            raise ValueError(
+                f"k_rope has {k_rope.shape[0]} pages, c_kv {c_kv.shape[0]}; a page "
+                "id indexes both"
+            )
         for name, t in (
             ("c_kv", c_kv),
             ("k_rope", k_rope),
@@ -251,7 +292,7 @@ class MlaDecodeRunner:
                         f"block_table row {s} names a page outside [0, {num_pages})"
                     )
 
-    def latent(
+    def _launches(
         self,
         *,
         qa: torch.Tensor,
@@ -261,17 +302,15 @@ class MlaDecodeRunner:
         cu_seqlens_k: torch.Tensor,
         block_table: torch.Tensor,
         scale: float,
-        out: torch.Tensor | None = None,
-        lse: torch.Tensor | None = None,
-        stream: int = 0,
-        check_contents: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """[B] (+ [C]): ``(latent [total_q, H, r_kv] bf16, lse [total_q, H] f32)``.
-
-        ``out`` / ``lse`` are allocated when not given. ``scale`` is the raw
-        host scale, the same value the reference receives. ``check_contents``
-        adds :meth:`check_contents` (a host sync) before the launch.
-        """
+        out: torch.Tensor | None,
+        lse: torch.Tensor | None,
+        stream: int,
+        check_contents: bool,
+    ) -> tuple[
+        list[tuple[KernelLauncher, dict, LaunchConfig]], torch.Tensor, torch.Tensor
+    ]:
+        """Check the inputs, allocate missing outputs, and describe [B] (+ [C])
+        as ``(launcher, arguments, config)`` in launch order."""
         import torch
         from rocke.runtime import LaunchConfig
 
@@ -309,61 +348,114 @@ class MlaDecodeRunner:
         config = LaunchConfig(grid=self.grid, block=self.block, stream=stream)
         if self._combine is None:
             vals.update(out_ptr=out, lse_ptr=lse)
-            self._latent(vals, config=config)
-            return out, lse
+            return [(self._latent, vals, config)], out, lse
         part_acc, part_ml = self.workspace(qa.device)
         vals.update(part_acc_ptr=part_acc, part_ml_ptr=part_ml, num_seg=spec.num_seg)
-        self._latent(vals, config=config)
-        self._combine(
-            {
-                "out_ptr": out,
-                "lse_ptr": lse,
-                "part_acc_ptr": part_acc,
-                "part_ml_ptr": part_ml,
-                "num_seg": spec.num_seg,
-            },
-            config=LaunchConfig(
-                grid=self.launch.combine_grid(),
-                block=self.launch.combine_block(),
-                stream=stream,
-            ),
+        combine_vals = {
+            "out_ptr": out,
+            "lse_ptr": lse,
+            "part_acc_ptr": part_acc,
+            "part_ml_ptr": part_ml,
+            "num_seg": spec.num_seg,
+        }
+        combine_config = LaunchConfig(
+            grid=self.launch.combine_grid(),
+            block=self.launch.combine_block(),
+            stream=stream,
         )
+        return (
+            [
+                (self._latent, vals, config),
+                (self._combine, combine_vals, combine_config),
+            ],
+            out,
+            lse,
+        )
+
+    def latent(
+        self,
+        *,
+        qa: torch.Tensor,
+        c_kv: torch.Tensor,
+        k_rope: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
+        block_table: torch.Tensor,
+        scale: float,
+        out: torch.Tensor | None = None,
+        lse: torch.Tensor | None = None,
+        stream: int = 0,
+        check_contents: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """[B] (+ [C]): ``(latent [total_q, H, r_kv] bf16, lse [total_q, H] f32)``.
+
+        ``out`` / ``lse`` are allocated when not given. ``scale`` is the raw
+        host scale, the same value the reference receives. ``check_contents``
+        adds :meth:`check_contents` (a host sync) before the launch. ``stream``
+        is a HIP stream handle; ``0`` is torch's current stream
+        (:func:`rocke.runtime.resolve_stream`).
+        """
+        launches, out, lse = self._launches(
+            qa=qa,
+            c_kv=c_kv,
+            k_rope=k_rope,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            block_table=block_table,
+            scale=scale,
+            out=out,
+            lse=lse,
+            stream=stream,
+            check_contents=check_contents,
+        )
+        for launcher, vals, config in launches:
+            launcher(vals, config=config)
         return out, lse
 
-    def absorb(
+    def bind_latent(
         self,
         *,
-        q_nope: torch.Tensor,
-        q_rope: torch.Tensor,
-        w_uk: torch.Tensor,
+        qa: torch.Tensor,
+        c_kv: torch.Tensor,
+        k_rope: torch.Tensor,
+        cu_seqlens_q: torch.Tensor,
+        cu_seqlens_k: torch.Tensor,
+        block_table: torch.Tensor,
+        scale: float,
         out: torch.Tensor,
-    ) -> None:
-        """[A] into ``out`` ``[total_q, H, r_kv + d_rope]``: per head,
-        ``qa_nope[h] = q_nope[h] @ W_UK_nope[h]ᵀ``, then ``q_rope``."""
-        import torch
+        lse: torch.Tensor,
+        stream: int = 0,
+    ) -> Callable[[], None]:
+        """:meth:`latent` checked and packed once: a zero-argument callable
+        that only enqueues [B] (+ [C]).
 
-        d_nope = q_nope.shape[-1]
-        r_kv = self.spec.r_kv
-        torch.bmm(
-            q_nope.transpose(0, 1),
-            w_uk[:, :, :d_nope].transpose(1, 2),
-            out=out[:, :, :r_kv].transpose(0, 1),
+        For timed loops: :meth:`latent` re-checks every tensor and re-packs
+        every argument on each call, which for a short kernel times the host
+        instead of the GPU. The callable keeps its arguments alive; drain the
+        stream before dropping it or the tensors.
+        """
+        launches, _, _ = self._launches(
+            qa=qa,
+            c_kv=c_kv,
+            k_rope=k_rope,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            block_table=block_table,
+            scale=scale,
+            out=out,
+            lse=lse,
+            stream=stream,
+            check_contents=False,
         )
-        out[:, :, r_kv:].copy_(q_rope)
+        bound = [
+            launcher.bind(vals, config=config) for launcher, vals, config in launches
+        ]
 
-    def project(
-        self,
-        *,
-        latent: torch.Tensor,
-        w_uk: torch.Tensor,
-        d_nope: int,
-        out: torch.Tensor,
-    ) -> None:
-        """[D] into ``out`` ``[total_q, H, d_v]``: per head,
-        ``out[h] = latent[h] @ W_UV[h]``, ``W_UV = w_uk[:, :, d_nope:]``."""
-        import torch
+        def run() -> None:
+            for launch in bound:
+                launch()
 
-        torch.bmm(latent.transpose(0, 1), w_uk[:, :, d_nope:], out=out.transpose(0, 1))
+        return run
 
     def forward(
         self,
@@ -385,35 +477,43 @@ class MlaDecodeRunner:
         ``w_uk`` is the fused per-head ``[H, r_kv, d_nope + d_v]`` weight, both
         halves read as strided views; nothing is materialized but ``qa`` and
         the latent.
+
+        All four stages run in order on one stream: the HIP stream handle
+        ``stream``, or torch's current stream when it is ``0`` (the default, as
+        for every rocke launch -- :attr:`rocke.runtime.LaunchConfig.stream`);
+        the ``torch.bmm`` stages are issued on it too.
         """
         import torch
 
+        device = q_nope.device
+        if stream:
+            torch_stream = torch.cuda.ExternalStream(stream, device=device)
+        else:
+            torch_stream = torch.cuda.current_stream(device)
+            stream = int(torch_stream.cuda_stream)
         total_q, num_heads, d_nope = q_nope.shape
-        qa = torch.empty(
-            total_q,
-            num_heads,
-            self.spec.qa_cols,
-            dtype=q_nope.dtype,
-            device=q_nope.device,
-        )
-        self.absorb(q_nope=q_nope, q_rope=q_rope, w_uk=w_uk, out=qa)
-        latent, lse = self.latent(
-            qa=qa,
-            c_kv=c_kv,
-            k_rope=k_rope,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            block_table=block_table,
-            scale=scale,
-            stream=stream,
-            check_contents=check_contents,
-        )
-        out = torch.empty(
-            total_q,
-            num_heads,
-            w_uk.shape[2] - d_nope,
-            dtype=q_nope.dtype,
-            device=q_nope.device,
-        )
-        self.project(latent=latent, w_uk=w_uk, d_nope=d_nope, out=out)
+        with torch.cuda.stream(torch_stream):
+            qa = torch.empty(
+                total_q, num_heads, self.spec.qa_cols, dtype=q_nope.dtype, device=device
+            )
+            bmm_absorb_query(q_nope=q_nope, q_rope=q_rope, w_uk=w_uk, out=qa)
+            latent, lse = self.latent(
+                qa=qa,
+                c_kv=c_kv,
+                k_rope=k_rope,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                block_table=block_table,
+                scale=scale,
+                stream=stream,
+                check_contents=check_contents,
+            )
+            out = torch.empty(
+                total_q,
+                num_heads,
+                w_uk.shape[2] - d_nope,
+                dtype=q_nope.dtype,
+                device=device,
+            )
+            bmm_project_latent(latent=latent, w_uk=w_uk, d_nope=d_nope, out=out)
         return out, lse

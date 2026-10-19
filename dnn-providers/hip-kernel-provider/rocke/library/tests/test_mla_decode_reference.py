@@ -489,6 +489,54 @@ class TestParityGateIsNotVacuous:
         assert v.compare(p, ref_out + 0.0625, ref_lse, ref_out, ref_lse)[0]
         assert not v.compare(p, ref_out + 0.625, ref_lse, ref_out, ref_lse)[0]
 
+    def test_per_sequence_bar_fails_what_the_elementwise_bound_admits(self):
+        # A lost key tile on a long sequence: its output is small, so 0.03 sits
+        # inside the elementwise bound (4e-2 + 2e-2 * 0.5 = 0.05) and inside the
+        # whole-tensor peak (0.03 / 8 < 2e-2), but is 6% of that sequence's peak.
+        from builders.mla import verify_mla_decode as v
+
+        p = v.make_problem(heads=64, q_lens=(1, 1), k_lens=(20, 4096))
+        ref_out = np.zeros((2, 64, 512))
+        ref_out[0] = 8.0
+        ref_out[1] = 0.5
+        ref_lse = np.zeros((2, 64))
+        o = ref_out.copy()
+        o[1, 0, 0] += 0.03
+        ok, line = v.compare(p, o, ref_lse, ref_out, ref_lse)
+        assert not ok and "a sequence's out max_abs / peak" in line, line
+        assert "exceeds" not in line, line  # the elementwise bound alone admits it
+        o = ref_out.copy()
+        o[1, 0, 0] += 0.009  # 1.8% of the sequence's peak: inside
+        assert v.compare(p, o, ref_lse, ref_out, ref_lse)[0]
+
+    def test_lse_bar_is_the_prefill_harness_bar_not_atol(self):
+        # 0.03 passed the old 4e-2 LSE bar; one dropped page moves the LSE ~2e-2.
+        from builders.mla import verify_mla_decode as v
+
+        p = v.make_problem(heads=64, q_lens=(1,), k_lens=(20,))
+        ref_out = np.full((1, 64, 512), 1.0)
+        ref_lse = np.zeros((1, 64))
+        lse = ref_lse.copy()
+        lse[0, 5] = 0.03
+        ok, line = v.compare(p, ref_out, lse, ref_out, ref_lse)
+        assert not ok and "lse max_abs" in line, line
+        lse[0, 5] = 0.016  # just inside 1.7e-2
+        assert v.compare(p, ref_out, lse, ref_out, ref_lse)[0]
+
+    def test_new_bars_are_overridable(self):
+        # run_case / --rel-peak / --lse-atol forward these; pin that they bite.
+        from builders.mla import verify_mla_decode as v
+
+        p = v.make_problem(heads=64, q_lens=(1,), k_lens=(20,))
+        ref_out = np.full((1, 64, 512), 0.5)
+        ref_lse = np.zeros((1, 64))
+        o = ref_out.copy()
+        o[0, 0, 0] += 0.03
+        lse = ref_lse.copy()
+        lse[0, 0] = 0.03
+        assert not v.compare(p, o, lse, ref_out, ref_lse)[0]
+        assert v.compare(p, o, lse, ref_out, ref_lse, rel_peak=0.1, lse_atol=0.04)[0]
+
     def test_unused_cache_rows_are_poisoned(self):
         from builders.mla import verify_mla_decode as v
 

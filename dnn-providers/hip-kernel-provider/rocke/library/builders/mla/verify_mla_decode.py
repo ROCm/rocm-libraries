@@ -28,13 +28,21 @@ Three modes over one ragged, paged decode problem generator:
 counts; a forced count larger than a sequence's tile count leaves trailing
 segments empty, which the combine must weigh to zero.
 
-Tolerance: elementwise ``|got - ref| <= ATOL + RTOL * |ref|`` on the bf16
-output, with ``ATOL = 4e-2`` (``builders/mla/DESIGN.md`` section 8.1) and
-``RTOL = 2e-2`` (the MLA prefill harness's bound). The relative term is what
-lets the gate scale with the output: a bf16 output rounds by up to half an ulp
-of its own magnitude, which a fixed absolute bound cannot absorb once
-``|out|`` passes about 4. The LSE is fp32 and gated at ``ATOL`` alone, in
-natural-log units. The run also reports ``max_abs`` and ``max_abs / max|ref|``.
+Tolerance, three bars on every live row, all of which must hold:
+
+* elementwise ``|got - ref| <= ATOL + RTOL * |ref|`` on the bf16 output, with
+  ``ATOL = 4e-2`` (``builders/mla/DESIGN.md`` section 8.1) and ``RTOL = 2e-2``.
+  The relative term lets the bound follow the output: a bf16 output rounds by
+  up to half an ulp of its own magnitude, which a fixed absolute bound cannot
+  absorb once ``|out|`` passes about 4.
+* per sequence, ``max_abs / peak(|ref|) <= OUT_REL_PEAK_TOL`` (2e-2), adopted
+  from the MLA prefill harness (:mod:`builders.mla.verify_score_probe_gfx942`):
+  the output shrinks as ``S_k`` grows, and this bar keeps a lost key tile
+  visible where the elementwise bound has grown loose.
+* ``|got - ref| <= LSE_ATOL`` (1.7e-2, adopted from the prefill harness too)
+  on the fp32 LSE, in natural-log units: dropping one page of a long sequence
+  moves the LSE by about 2e-2.
+
 Fixed values are a stopgap: thresholds derived from the accumulation depth
 (CK-Tile's ``check_err``) are the follow-up.
 
@@ -86,12 +94,15 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ATOL",
+    "LSE_ATOL",
+    "OUT_REL_PEAK_TOL",
     "RTOL",
     "SCENARIOS",
     "Problem",
     "Scenario",
     "compare",
     "device_inputs",
+    "full_reference",
     "main",
     "make_problem",
     "run_case",
@@ -104,6 +115,13 @@ __all__ = [
 
 ATOL = 4e-2
 RTOL = 2e-2
+#: Per-sequence ``max_abs / peak(|ref|)`` bar on ``out``. Adopted from the MLA
+#: prefill harness (builders.mla.verify_score_probe_gfx942), not shared with
+#: it: decode's kernel and accumulation depth differ, so each gate owns its bar.
+OUT_REL_PEAK_TOL = 2e-2
+#: Absolute bar on the fp32 LSE, natural-log units; adopted from the prefill
+#: harness likewise. Dropping one 16-key page of a long sequence moves it ~2e-2.
+LSE_ATOL = 1.7e-2
 
 #: bf16-exact value of the spike: a ``q_rope`` / ``k_rope`` pair of all-4
 #: rows scores 64 * 16 = 1024 on the RoPE half alone, about 106 log2 units
@@ -460,6 +478,21 @@ def _residual(got: np.ndarray, ref: np.ndarray) -> Residual:
     return Residual(err, err / (peak if peak > 0 else 1.0), peak)
 
 
+def full_reference(p: Problem) -> tuple[np.ndarray, np.ndarray]:
+    """The fp64 whole-op reference ``(out, lse)`` for ``p``."""
+    return ref_mla_decode_absorb(
+        p.q_nope,
+        p.q_rope,
+        p.c_kv,
+        p.k_rope,
+        p.w_uk,
+        p.block_table,
+        p.cu_seqlens_q,
+        p.cu_seqlens_k,
+        p.scale,
+    )
+
+
 def compare(
     p: Problem,
     got_out: np.ndarray,
@@ -469,8 +502,11 @@ def compare(
     *,
     atol: float = ATOL,
     rtol: float = RTOL,
+    rel_peak: float = OUT_REL_PEAK_TOL,
+    lse_atol: float = LSE_ATOL,
 ) -> tuple[bool, str]:
-    """Gate one result; ``S_k = 0`` rows are checked exactly, not by residual."""
+    """Gate one result against the three bars of the module docstring;
+    ``S_k = 0`` rows are checked exactly, not by residual."""
     k_lens = np.diff(p.cu_seqlens_k)
     q_lens = np.diff(p.cu_seqlens_q)
     tok_of_seq = p.cu_seqlens_q[:-1]
@@ -497,10 +533,20 @@ def compare(
         problems.append(
             f"out exceeds {atol:g} + {rtol:g}*|ref| by up to {np.nanmax(excess):.3e}"
         )
-    if r_l.max_abs > atol:
-        problems.append(f"lse max_abs {r_l.max_abs:.3e} > {atol:g}")
+    # Decode has one token per sequence, so a live row is a sequence.
+    worst_seq = max(
+        (_residual(got_out[t], ref_out[t]).rel for t in np.flatnonzero(live)),
+        default=0.0,
+    )
+    if worst_seq > rel_peak:
+        problems.append(
+            f"a sequence's out max_abs / peak {worst_seq:.3e} > {rel_peak:g}"
+        )
+    if r_l.max_abs > lse_atol:
+        problems.append(f"lse max_abs {r_l.max_abs:.3e} > {lse_atol:g}")
     line = (
-        f"out[peak={r_o.peak:.3f} max_abs={r_o.max_abs:.3e} rel={r_o.rel:.3e}] "
+        f"out[peak={r_o.peak:.3f} max_abs={r_o.max_abs:.3e} rel={r_o.rel:.3e} "
+        f"seq_rel={worst_seq:.3e}] "
         f"lse[max_abs={r_l.max_abs:.3e} rel={r_l.rel:.3e}]"
     )
     if problems:
@@ -519,6 +565,8 @@ def run_case(
     arch: str,
     atol: float = ATOL,
     rtol: float = RTOL,
+    rel_peak: float = OUT_REL_PEAK_TOL,
+    lse_atol: float = LSE_ATOL,
 ) -> bool:
     """Gate ``p`` in ``mode`` (``latent``, ``full`` or ``oracle``) once per
     entry of ``num_segs`` (``"auto"`` or a forced split count); prints one
@@ -535,17 +583,7 @@ def run_case(
     result = dispatch_mla(_request(p, arch=arch))
     qa_bf16 = _bf16(absorb_query(p.q_nope, p.q_rope, p.w_uk).astype(np.float32))
     if mode == "full":
-        ref = ref_mla_decode_absorb(
-            p.q_nope,
-            p.q_rope,
-            p.c_kv,
-            p.k_rope,
-            p.w_uk,
-            p.block_table,
-            p.cu_seqlens_q,
-            p.cu_seqlens_k,
-            p.scale,
-        )
+        ref = full_reference(p)
     else:
         ref = ref_mla_decode_latent(
             qa_bf16,
@@ -556,10 +594,11 @@ def run_case(
             p.cu_seqlens_k,
             p.scale,
         )
+    bars = dict(atol=atol, rtol=rtol, rel_peak=rel_peak, lse_atol=lse_atol)
     ok = True
     if mode == "oracle":
         got = run_prefill_oracle(p, qa_bf16, arch=arch)
-        passed, line = compare(p, *got, *ref, atol=atol, rtol=rtol)
+        passed, line = compare(p, *got, *ref, **bars)
         print(f"   prefill-oracle vs reference  {line}", flush=True)
         ok &= passed
         oracle = got
@@ -571,11 +610,11 @@ def run_case(
             got = run_full(runner, p)
         else:
             got = run_latent(runner, p, qa_bf16)
-        passed, line = compare(p, *got, *ref, atol=atol, rtol=rtol)
+        passed, line = compare(p, *got, *ref, **bars)
         print(f"   {result.candidate.name} {tag:<16} {line}", flush=True)
         ok &= passed
         if mode == "oracle":
-            passed, line = compare(p, *got, *oracle, atol=atol, rtol=rtol)
+            passed, line = compare(p, *got, *oracle, **bars)
             print(f"   {'':<{len(result.candidate.name)}} vs prefill-oracle  {line}")
             ok &= passed
     return ok
@@ -599,6 +638,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ap.add_argument("--atol", type=float, default=ATOL)
     ap.add_argument("--rtol", type=float, default=RTOL)
+    ap.add_argument("--rel-peak", type=float, default=OUT_REL_PEAK_TOL)
+    ap.add_argument("--lse-atol", type=float, default=LSE_ATOL)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arch", default=None, help="default: the local device")
     ap.add_argument(
@@ -634,7 +675,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
     print(
-        f"arch={arch} atol={args.atol:g} rtol={args.rtol:g} num_seg={args.num_seg} "
+        f"arch={arch} atol={args.atol:g} rtol={args.rtol:g} "
+        f"rel_peak={args.rel_peak:g} lse_atol={args.lse_atol:g} num_seg={args.num_seg} "
         f"poison_unused={poison}",
         flush=True,
     )
@@ -649,6 +691,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             arch=arch,
             atol=args.atol,
             rtol=args.rtol,
+            rel_peak=args.rel_peak,
+            lse_atol=args.lse_atol,
         )
     ]
     print(f"\nSUMMARY {len(cases) - len(failed)}/{len(cases)} cases passed")
