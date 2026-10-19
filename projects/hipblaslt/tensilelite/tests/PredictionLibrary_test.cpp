@@ -228,3 +228,36 @@ TEST(PredictionLibraryTest, TemporalHintsOverrideLegacyNonTemporal)
     EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
     EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
 }
+
+// cacheHintA/B only treat temporal hints 1 (TH_NT) and 3 (TH_LU / TH_WB) as
+// non-temporal. TH_NT_RT, TH_RT_NT, TH_NT_HT, and TH_NT_WB (4-7) stay cached,
+// and that mapping overrides a legacy non-temporal value.
+TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
+{
+    struct Case
+    {
+        int hint;
+        int cache;
+    };
+    // 3 is the other non-temporal encoding. 4-7 currently collapse to 0.
+    Case const cases[] = {{3, 4}, {4, 0}, {5, 0}, {6, 0}, {7, 0}};
+
+    for(auto const& c : cases)
+    {
+        auto solution                         = makeMappedSolution(42);
+        solution->sizeMapping.hasTemporalHint = true;
+        solution->sizeMapping.temporalHintA   = c.hint;
+        solution->sizeMapping.temporalHintB   = c.hint;
+        solution->sizeMapping.nonTemporalA    = 4;
+        solution->sizeMapping.nonTemporalB    = 4;
+
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(42, solution);
+
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({42}, solutions, lib);
+        ASSERT_EQ(lib.origami_config_list.size(), 1u) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, c.cache) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, c.cache) << "temporalHint " << c.hint;
+    }
+}

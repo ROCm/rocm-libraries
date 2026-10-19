@@ -629,6 +629,58 @@ TEST_CASE("Origami: rank_configs non-temporal availability", "[origami][cache-hi
       REQUIRE(results.front().latency < rejected);
       REQUIRE(results.front().config.cache_hints_a == 4);
     }
+
+    // The skinny branch depends on this config's macro tile, so an NT variant
+    // at one tile must not reject a temporal config at another tile that also
+    // satisfies the predicate. 256x256 fits LDS on every test arch; 512x512
+    // would take the same branch but exceeds gfx942 LDS.
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - NT-B at one tile keeps temporal at another") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(256, 8192, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      configs.push_back(make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == configs.size());
+      bool saw_other_tile = false;
+      bool saw_nt_b       = false;
+      for (const auto& result : results) {
+        REQUIRE(result.latency < rejected);
+        if (result.config.mt.m == 256 && result.config.mt.n == 256) {
+          saw_other_tile = true;
+          REQUIRE(result.config.cache_hints_b == 0);
+        }
+        if (result.config.cache_hints_b == 4) saw_nt_b = true;
+      }
+      REQUIRE(saw_other_tile);
+      REQUIRE(saw_nt_b);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - NT-A at one tile keeps temporal at another") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(8192, 256, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 256, 64, 16, 16, 16, false, 1, 1, 0, 0));
+      configs.push_back(make_config(256, 128, 64, 16, 16, 16, false, 1, 1, 4, 0));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+      REQUIRE(results.size() == configs.size());
+      bool saw_other_tile = false;
+      bool saw_nt_a       = false;
+      for (const auto& result : results) {
+        REQUIRE(result.latency < rejected);
+        if (result.config.mt.m == 256 && result.config.mt.n == 256) {
+          saw_other_tile = true;
+          REQUIRE(result.config.cache_hints_a == 0);
+        }
+        if (result.config.cache_hints_a == 4) saw_nt_a = true;
+      }
+      REQUIRE(saw_other_tile);
+      REQUIRE(saw_nt_a);
+    }
   }
 }
 

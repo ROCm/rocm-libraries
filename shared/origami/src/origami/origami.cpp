@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <tuple>
 
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
@@ -673,14 +675,19 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   valid_configs.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
-  bool non_temporal_a_available = false;
-  bool non_temporal_b_available = false;
+  // The shortcut in compute_total_latency chooses its branch from this config's
+  // macro tile, so a non-temporal variant only counts when it is the same tile.
+  // An NT-B kernel at 128x256 must not reject a temporal 256x256 candidate.
+  std::map<std::tuple<size_t, size_t, size_t>, std::pair<bool, bool>> nt_by_tile;
   for (const auto& config : configs) {
-    non_temporal_a_available |= config.cache_hints_a == 4;
-    non_temporal_b_available |= config.cache_hints_b == 4;
+    auto& flags = nt_by_tile[{config.mt.m, config.mt.n, config.mt.k}];
+    flags.first |= config.cache_hints_a == 4;
+    flags.second |= config.cache_hints_b == 4;
   }
 
   for (auto& config : configs) {
+    const auto [non_temporal_a_available, non_temporal_b_available] =
+        nt_by_tile.at({config.mt.m, config.mt.n, config.mt.k});
     const double latency = compute_ranked_latency(
         problem, hardware, config, model, non_temporal_a_available, non_temporal_b_available);
 

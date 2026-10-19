@@ -2088,6 +2088,7 @@ TEST_CASE("GEMM: context_t::tile_schedule is none only before construction", "[g
 
 // Skinny TN shapes hit the non-temporal short circuit. The filter may reject a
 // temporal kernel only when the caller says a non-temporal variant exists.
+// Square problems, and K that misses the 128B line, never use non-temporal.
 TEST_CASE("GEMM: non-temporal shortcut honors variant availability", "[gemm][cache-hints]") {
   const double rejected = std::numeric_limits<double>::max();
 
@@ -2118,6 +2119,30 @@ TEST_CASE("GEMM: non-temporal shortcut honors variant availability", "[gemm][cac
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal, false, true) <
               rejected);
       REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) < rejected);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - square problems never use non-temporal") {
+      auto hardware = make_hardware(gpu_arch);
+      // Neither skinny branch applies, so the "never use Non Temporal" arm runs.
+      auto problem =
+          make_problem(4096, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
+      auto temporal    = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+      auto nontemporal = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 4);
+
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) == rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) < rejected);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - misaligned K rejects non-temporal") {
+      auto hardware = make_hardware(gpu_arch);
+      // K * 16 bits is not a multiple of the 128B line, so the trailing
+      // else-if rejects any non-temporal hint. A cached read still runs.
+      auto problem = make_problem(256, 8192, 12, origami::transpose_t::T, origami::transpose_t::N);
+      auto temporal    = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 0);
+      auto nontemporal = make_config(128, 256, 64, 16, 16, 16, false, 1, 1, 0, 4);
+
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, nontemporal) == rejected);
+      REQUIRE(origami::gemm::compute_total_latency(problem, hardware, temporal) < rejected);
     }
   }
 }
