@@ -291,25 +291,45 @@ namespace TensileLite
         }
 
         // launch_key() of training_pipeline/lib/hipblaslt_launch.py: FNV-1a 64
-        // over the 8-byte little-endian launch inputs.
-        static std::uint64_t launchKey(std::array<std::int64_t, 5> const& inputs)
+        // over the 8-byte little-endian launch inputs, followed by a sixth
+        // value, 1, for a tree-only kernel (treeOnly()).
+        static std::uint64_t launchKey(std::array<std::int64_t, 5> const& inputs,
+                                       bool                               treeOnly = false)
         {
             std::uint64_t hash = 0xcbf29ce484222325ull;
-            for(std::int64_t const value : inputs)
-            {
+            auto const    add  = [&hash](std::int64_t value) {
                 auto const bits = static_cast<std::uint64_t>(value);
                 for(int byte = 0; byte < 8; ++byte)
                 {
                     hash ^= (bits >> (8 * byte)) & 0xffu;
                     hash *= 0x100000001b3ull;
                 }
-            }
+            };
+            for(std::int64_t const value : inputs)
+                add(value);
+            if(treeOnly)
+                add(1);
             return hash;
         }
 
-        // launch_inputs() of hipblaslt_launch.py: (strategy, assignment,
-        // atomic, threads, occupancy), with the values plan() does not tell
-        // apart made equal.
+        // Whether `solution` is a hand-written Stream-K kernel that can run on
+        // a static grid (any work assignment but DynamicWorkQueue): its
+        // customKernel names a kernel that was not generated, as kernelLaunch()
+        // and ContractionSolution::handwrittenCustomKernel() tell it.
+        // resolvePersistentSettings() reduces its partial tiles in a tree only,
+        // so its plans can differ from those of a generated kernel with equal
+        // launch inputs; launch_inputs() of hipblaslt_launch.py follows its
+        // five values with a sixth, 1, that makes it a launch class of its own.
+        static bool treeOnly(MySolution const& solution)
+        {
+            auto const& sm = solution.sizeMapping;
+            return !solution.customKernel.name.empty() && !solution.customKernel.generated
+                   && sm.isStreamK() && sm.workAssignment != WorkAssignment::DynamicWorkQueue;
+        }
+
+        // launch_inputs() of hipblaslt_launch.py without its sixth value:
+        // (strategy, assignment, atomic, threads, occupancy), with the values
+        // plan() does not tell apart made equal.
         static std::array<std::int64_t, 5> launchInputs(SizeMapping const& sizeMapping)
         {
             std::int64_t const strategy
@@ -409,7 +429,7 @@ namespace TensileLite
         static KernelLaunch kernelLaunch(MySolution const& solution)
         {
             auto const&  sm = solution.sizeMapping;
-            KernelLaunch kernel{.key         = launchKey(launchInputs(sm)),
+            KernelLaunch kernel{.key         = launchKey(launchInputs(sm), treeOnly(solution)),
                                 .assignment  = sm.workAssignment,
                                 .persistent  = sm.isPersistent(),
                                 .batchInGrid = !sm.persistentKernelAlongBatch && !sm.packBatchDims,

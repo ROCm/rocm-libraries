@@ -269,11 +269,17 @@ TEST(TilewrightLaunchTest, PlansTheScopeProblemOnTheScopeDevice)
         std::out_of_range);
 }
 
-// Expected keys: lib/hipblaslt_launch.launch_key of the same kernels.
+// Expected keys: lib/hipblaslt_launch.launch_key of the same kernels. A
+// hand-written Stream-K kernel that can run on a static grid, whose partial
+// tiles TensileLite reduces in a tree only, hashes a sixth launch input, 1.
 TEST(TilewrightLaunchTest, LaunchKeysMatchThePipeline)
 {
     auto const key = [](Kernel const& kernel) {
         return Launch("gfx950", {makeSolution(kernel)}).launch_key(tilewright::Config{});
+    };
+    auto const byHand = [](Kernel kernel) {
+        kernel.handwritten = true;
+        return kernel;
     };
     auto atomic   = hybrid(2);
     atomic.atomic = 1;
@@ -285,6 +291,29 @@ TEST(TilewrightLaunchTest, LaunchKeysMatchThePipeline)
     EXPECT_EQ(key({.occupancy = 5, .assign = 2, .atomic = 1}), 0x40d69e0cf0f65c45ull);
     EXPECT_EQ(key(hybrid(0)), 0x7072d6b06be7de6bull);
     EXPECT_EQ(key(hybrid(1)), 0x7072d6b06be7de6bull);
+
+    Kernel const staticGrid{.occupancy = 2, .strategy = 2, .assign = 0};
+    Kernel const queue{.occupancy = 2, .strategy = 2, .assign = 1};
+    EXPECT_EQ(key(staticGrid), 0x9a1f0386bcc3a98eull);
+    EXPECT_EQ(key(queue), 0xd890c4fa793a6183ull);
+    EXPECT_EQ(key(byHand(hybrid(2))), 0xfd52fc8b94c39b29ull);
+    EXPECT_EQ(key(byHand(atomic)), 0xac0da9653af6e99cull);
+    EXPECT_EQ(key(byHand(staticGrid)), 0x76836540c6bd316full);
+    EXPECT_EQ(key(byHand(hybrid(0))), 0xac57afd1b8244faaull);
+    EXPECT_EQ(key(byHand(hybrid(1))), 0xac57afd1b8244faaull);
+    // A queue hands out whole tiles, and the other kernels split none.
+    EXPECT_EQ(key(byHand(queue)), 0xd890c4fa793a6183ull);
+    EXPECT_EQ(key(byHand({.occupancy = 2, .strategy = 1})), 0x862a415d97fba99dull);
+    EXPECT_EQ(key(byHand({.occupancy = 2})), 0x40d69e0cf0f65c45ull);
+
+    // A kernel generated from a custom kernel's config is not hand-written.
+    EXPECT_TRUE(Launch::treeOnly(*makeSolution(byHand(hybrid(2)))));
+    auto generated                    = makeSolution(byHand(hybrid(2)));
+    generated->customKernel.generated = true;
+    EXPECT_FALSE(Launch::treeOnly(*generated));
+    EXPECT_EQ(Launch("gfx950", {generated}).launch_key(tilewright::Config{}),
+              0x138281954b1a0008ull);
+
     tilewright::Config outside{};
     outside.index = 1;
     EXPECT_THROW(Launch("gfx950", {makeSolution(hybrid(2))}).launch_key(outside),
