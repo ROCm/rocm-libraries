@@ -869,8 +869,17 @@ struct fmha_bwd_launcher
     // nothing at all.
     int pick_chunks_(const fmha_bwd_traits& t, size_t device_ws_size, int& batch_chunk)
     {
-        constexpr double kChunkTail        = 0.3;
-        constexpr size_t kDefaultBudgetMiB = 4096;
+        constexpr double kChunkTail = 0.3;
+        // Budget baseline, in MiB, for a 128-wide head. One dq_acc split costs
+        // batch * nhead * seqlen_q * hdim_q * 4 bytes, so the bytes a given split count
+        // needs scale with hdim_q: a flat budget buys only half as many splits at d=256
+        // as at d=128 and forces twice the chunking for the same work. Measured on the
+        // d=256 shape (-b=2 -h=16 -h_k=8 -s=8192 -d=256 -mask=1): -2.0% at 4 GiB vs
+        // -7.6% at 8 GiB vs -11.6% at 16 GiB, against the persistent path.
+        // Scale the default up with hdim_q so the budget buys a consistent amount of
+        // work. Never scale it down: a narrow head does not make VRAM any less scarce,
+        // and d<=128 then keeps exactly the 4 GiB behaviour this was validated with.
+        constexpr size_t kBudgetMiBPer128 = 4096;
 
         batch_chunk = 0;
 
@@ -911,9 +920,10 @@ struct fmha_bwd_launcher
         if(xdim <= 0)
             return 0;
 
-        size_t budget_mib = kDefaultBudgetMiB;
+        const int hdim_mult = (t.hdim_q > 128) ? (t.hdim_q / 128) : 1;
+        size_t budget_mib   = kBudgetMiBPer128 * static_cast<size_t>(hdim_mult);
         if(const char* bs = std::getenv("CK_DET_WS_BUDGET_MB"))
-            budget_mib = static_cast<size_t>(std::atoll(bs));
+            budget_mib = static_cast<size_t>(std::atoll(bs)); // explicit override wins
         const size_t budget_bytes = budget_mib * size_t{1024} * 1024;
 
         const size_t ws_unit = device_ws_size / static_cast<size_t>(t.batch) /
