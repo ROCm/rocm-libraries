@@ -299,3 +299,28 @@ void TestCUDAZipIterator()
   }
 }
 DECLARE_UNITTEST(TestCUDAZipIterator);
+
+void TestCUDAReverseIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::device_vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::host_vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    std::vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAReverseIterator);
