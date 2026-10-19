@@ -111,19 +111,17 @@ def locate_rocke(explicit: str | None) -> Path:
     starts = []
     if explicit:
         starts.append(Path(explicit).expanduser())
-    if os.environ.get("ROCKE_ROOT"):
-        starts.append(Path(os.environ["ROCKE_ROOT"]).expanduser())
     starts.extend((Path.cwd(), Path(__file__).resolve().parent))
     for start in starts:
         for path in (start, *start.parents):
             for candidate in (path, path / "dnn-providers/hip-kernel-provider/rocke"):
                 if (candidate / "library/kernels/gfx942/attention_dense.py").is_file():
                     return candidate.resolve()
-    raise SystemExit("ROCKE root not found: set --rocke-root or ROCKE_ROOT")
+    raise SystemExit("ROCKE root not found: pass --rocke-root")
 
 
 def add_module_paths(rocke: Path) -> None:
-    for p in (rocke / "library", rocke / "platform/Python", rocke):
+    for p in (rocke / "library", rocke / "platform/python", rocke):
         if str(p) not in sys.path:
             sys.path.insert(0, str(p))
 

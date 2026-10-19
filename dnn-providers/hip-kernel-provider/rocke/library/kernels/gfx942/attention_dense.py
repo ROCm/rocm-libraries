@@ -890,15 +890,6 @@ def _use_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
     return spec.v_reg_prefetch
 
 
-def _use_kdb_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
-    """Combined variant predicate kept for existing external callers.
-
-    Neither knob implies the other. The kernel's allocation, scheduling, and
-    naming use ``_use_kdb`` and ``_use_vpf`` independently.
-    """
-    return _use_kdb(spec) and _use_vpf(spec)
-
-
 def _v_swizzle_width(block_n: int) -> int:
     """V^T row width (elements) the XOR bank-conflict swizzle needs: the smallest pow2
     >= max(64, block_n). SINGLE source of truth -- the derived pad (:func:`_v_row_pad`),
