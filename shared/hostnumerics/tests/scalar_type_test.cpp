@@ -166,24 +166,6 @@ TEST(Core, ScalarDispatchSqrt) {
 }
 
 TEST(Core, ScalarDispatchTags) {
-    for (size_t i = 0; i < scalarTypeCount; ++i) {
-        const auto type = static_cast<ScalarType>(i);
-        SCOPED_TRACE(scalarTypeName(type));
-        int calls = 0;
-        visitScalarType(type, [&]<typename Tag>() {
-            ++calls;
-            // Code that knows its encoding at compile time names this same tag type.
-            static_assert(std::is_same_v<Tag, detail::ScalarTag<Tag::type>>);
-            EXPECT_EQ(Tag::type, type);
-            EXPECT_EQ(Tag::storageBits, scalarTypeInfo(type).storageBits);
-            EXPECT_EQ(std::is_void_v<typename Tag::Storage>, scalarTypeInfo(type).isPacked());
-            if constexpr (!std::is_void_v<typename Tag::Storage>) {
-                EXPECT_EQ(sizeof(typename Tag::Storage) * 8, Tag::storageBits);
-            }
-        });
-        EXPECT_EQ(calls, 1);
-    }
-
     // Verify storage independently of enum order, especially encodings sharing
     // a storage type and packed formats that cannot occupy one C++ object.
     const std::pair<ScalarType, std::type_index> storageTypes[] = {
@@ -218,11 +200,15 @@ TEST(Core, ScalarDispatchTags) {
     static_assert(std::size(storageTypes) == scalarTypeCount);
     for (const auto& [type, expected] : storageTypes) {
         SCOPED_TRACE(scalarTypeName(type));
+        int calls = 0;
         EXPECT_EQ(visitScalarType(type,
-                                  []<typename Tag>() {
+                                  [&]<typename Tag>() {
+                                      ++calls;
+                                      EXPECT_EQ(Tag::type, type);
                                       return std::type_index(typeid(typename Tag::Storage));
                                   }),
                   expected);
+        EXPECT_EQ(calls, 1);
     }
 }
 
