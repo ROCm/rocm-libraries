@@ -744,9 +744,17 @@ namespace TensileLite
         }
 
         // Looks up the stem of `logicFile` in the tilewright_index of its
-        // directory. Returns nullptr when no model is listed for the stem, or,
-        // with a warning, when the listed model cannot be loaded.
+        // directory, for the PCI chip ID of indexChipId(). Returns nullptr
+        // when no model is listed for the stem, or, with a warning, when the
+        // listed model cannot be loaded.
         static tilewright::ModelPtr loadModel(std::string const& logicFile)
+        {
+            return loadModel(logicFile, indexChipId(logicArch(logicFile)));
+        }
+
+        // As above for a device of PCI chip ID `pciChipId` (0: unknown): the
+        // stem's row naming that chip ID wins over its row without one.
+        static tilewright::ModelPtr loadModel(std::string const& logicFile, std::uint32_t pciChipId)
         {
             if(logicFile.empty())
                 return nullptr;
@@ -755,10 +763,40 @@ namespace TensileLite
             std::string stem = logicStem(logicFile, &dir);
 
             std::string error;
-            auto        model = tilewright::load_model_by_index(stem, dir, &error);
+            auto        model = tilewright::load_model_by_index(stem, dir, pciChipId, &error);
             if(!model && !error.empty())
                 warnUnusable(stem, error);
+            if(model && pciChipId != 0 && diagnostics())
+                std::cerr << "[TILEWRIGHT_DIAG TENSILELITE] " << stem << " pci_chip_id=0x"
+                          << std::hex << pciChipId << std::dec << std::endl;
             return model;
+        }
+
+        // The PCI chip ID that chooses among a tilewright_index's rows for
+        // the libraries of `arch`. The parts of gfx1250 load the same library
+        // files, so their models can differ only by chip ID: there it is the
+        // chip ID of the calling thread's current device, whose call loads
+        // the library; 0, the stem's row without a chip ID, on other
+        // architectures (gfx950's chip-specific libraries are files of their
+        // own) and whenever HIP cannot tell it.
+        //
+        // hipBLASLt loads a library file once per process and builds one
+        // Hardware per architecture, from the first device of it, so a
+        // process whose devices of one architecture differ in chip ID, or in
+        // CU count (compute partitions in different modes), ranks every one
+        // of them with the model of the device that loaded the library and
+        // the CU count of the first device.
+        static std::uint32_t indexChipId(std::string const& arch)
+        {
+            if(arch != "gfx1250")
+                return 0;
+            int device = -1;
+            int chipId = 0;
+            if(hipGetDevice(&device) != hipSuccess
+               || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
+               || chipId <= 0 || chipId > std::numeric_limits<std::uint16_t>::max())
+                return 0;
+            return static_cast<std::uint32_t>(chipId);
         }
 
         // The blocklist of the stem of `logicFile` in the directory of its
@@ -1052,10 +1090,12 @@ namespace TensileLite
             std::lock_guard<std::mutex> lock(m_reportedMutex);
             if(!m_reported.emplace(context.cu_budget, static_cast<int>(context.schedule)).second)
                 return std::nullopt;
+            size_t const floor = tilewright::describe(m_candidates.model()).min_effective_cus;
             return "[TILEWRIGHT_DIAG TENSILELITE] arch=" + m_arch
                    + " cu_budget=" + std::to_string(context.cu_budget)
                    + " schedule=" + std::to_string(static_cast<int>(context.schedule))
                    + " n_cu=" + std::to_string(hardware.N_CU)
+                   + (floor != 0 ? " min_effective_cus=" + std::to_string(floor) : std::string())
                    + ": the model does not support this context; ranking with origami";
         }
 

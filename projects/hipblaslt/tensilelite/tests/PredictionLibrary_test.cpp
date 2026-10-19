@@ -1894,6 +1894,85 @@ TEST(PredictionLibraryTest, TilewrightLeavesBlockedKernelsOutOfTheBank)
 #endif
 #endif
 
+#if defined(TILEWRIGHT_TEST_MODEL_WRITER)
+namespace
+{
+    // An MLREC_v3 model of one cell that records `configId`, with the CU
+    // floor `minEffectiveCus` when it is not 0.
+    void writeTaggedModel(std::filesystem::path const& path,
+                          std::string const&           configId,
+                          std::uint32_t                minEffectiveCus = 0)
+    {
+        tilewright_test::CellSpec cell;
+        cell.label = "Large|Large|LargeK|Bnone";
+
+        tilewright_test::ModelSpec spec;
+        spec.arch       = "gfx1250";
+        spec.cells      = {cell};
+        spec            = tilewright_test::as_v3(spec, {});
+        spec.provenance = {{"config_id", configId}};
+        if(minEffectiveCus != 0)
+        {
+            spec.v3_serving_flags  = 0x100;
+            spec.min_effective_cus = minEffectiveCus;
+        }
+        auto const image = tilewright_test::write_model(spec);
+        std::ofstream(path, std::ios::binary)
+            .write(reinterpret_cast<char const*>(image.bytes.data()),
+                   static_cast<std::streamsize>(image.bytes.size()));
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightLoadsTheModelOfTheDevicesPciChipId)
+{
+    // The parts of an architecture load the same library files; the index
+    // can still give each its model.
+    ScratchDir        dir("tensilelite_tilewright_chip_id");
+    std::string const stem  = "TensileLibrary_Probe_gfx1250";
+    std::string const logic = (dir.path() / (stem + ".dat")).string();
+    writeTaggedModel(dir.path() / "any.tilewright.bin", "any");
+    writeTaggedModel(dir.path() / "chip.tilewright.bin", "chip");
+    std::ofstream(dir.path() / "tilewright_index") << stem << "\tchip.tilewright.bin\tchip=0x1a2b\n"
+                                                   << stem << "\tany.tilewright.bin\n";
+
+    auto const configId = [&](std::uint32_t chipId) {
+        auto const model = TilewrightRanker::loadModel(logic, chipId);
+        return model ? tilewright::describe(*model).provenance.config_id : std::string("<none>");
+    };
+    EXPECT_EQ(configId(0), "any");
+    EXPECT_EQ(configId(0x1A2B), "chip");
+    EXPECT_EQ(configId(0x1A2C), "any");
+    EXPECT_EQ(TilewrightRanker::indexChipId("gfx950"), 0u);
+
+    // A row of the stem the engine cannot read leaves the library to origami.
+    std::ofstream(dir.path() / "tilewright_index") << stem << "\tany.tilewright.bin\n"
+                                                   << stem << "\tchip.tilewright.bin\tchip=1a2b\n";
+    ::testing::internal::CaptureStderr();
+    EXPECT_EQ(TilewrightRanker::loadModel(logic, 0x1A2B), nullptr);
+    std::string const warning = ::testing::internal::GetCapturedStderr();
+    EXPECT_NE(warning.find("malformed row"), std::string::npos) << warning;
+    EXPECT_NE(warning.find("ranking with origami"), std::string::npos) << warning;
+}
+
+TEST(PredictionLibraryTest, TilewrightNotesTheCuFloorOfAContextItRefuses)
+{
+    ScratchDir const            dir("tensilelite_tilewright_cu_floor");
+    std::filesystem::path const path = dir.path() / "floor.tilewright.bin";
+    writeTaggedModel(path, "floor", 64);
+    std::string error;
+    auto        model = tilewright::load_model(path.string(), &error);
+    ASSERT_NE(model, nullptr) << error;
+    EXPECT_EQ(tilewright::describe(*model).min_effective_cus, 64u);
+
+    TilewrightRanker const             ranker(model, {}, nullptr, "gfx1250");
+    tilewright::ExecutionContext const whole{};
+    EXPECT_FALSE(ranker.unsupportedContextNote(whole, {64, 163840, 4000000}).has_value());
+    auto const note = ranker.unsupportedContextNote(whole, {32, 163840, 4000000});
+    ASSERT_TRUE(note.has_value());
+    EXPECT_NE(note->find("n_cu=32 min_effective_cus=64"), std::string::npos) << *note;
+}
+#endif
+
 TEST(PredictionLibraryTest, LibraryProblemTypeKeyDropsTheHardwareParts)
 {
     std::string const type = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
