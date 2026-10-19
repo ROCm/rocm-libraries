@@ -442,7 +442,7 @@ def build_attention_reduce(
     return _build
 
 
-def build_attention_reduce_lse(
+def build_attention_reduce_own_module(
     name,
     arch,
     *,
@@ -451,7 +451,7 @@ def build_attention_reduce_lse(
     num_kv_heads,
     dtype,
     num_segments,
-    emit_lse=True,
+    emit_lse=False,
 ):
     """Split-KV reduce built from ``arch``'s own module (``build_attention_reduce``
     above always builds the gfx950 module), with or without the LSE output."""
@@ -3025,7 +3025,7 @@ def cases():
         "attention",
         "attention/gfx950/reduce_lse_bf16_d128",
         "gfx950",
-        build_attention_reduce_lse(
+        build_attention_reduce_own_module(
             "irhash_attn_950_reduce_lse_bf16",
             "gfx950",
             head_size=128,
@@ -3033,6 +3033,7 @@ def cases():
             num_kv_heads=2,
             dtype="bf16",
             num_segments=4,
+            emit_lse=True,
         ),
     )
     add(
@@ -3125,7 +3126,7 @@ def cases():
         "attention",
         "attention/gfx942/reduce_lse_bf16_d128",
         "gfx942",
-        build_attention_reduce_lse(
+        build_attention_reduce_own_module(
             "irhash_attn_942_reduce_lse_bf16",
             "gfx942",
             head_size=128,
@@ -3133,13 +3134,14 @@ def cases():
             num_kv_heads=2,
             dtype="bf16",
             num_segments=4,
+            emit_lse=True,
         ),
     )
     add(
         "attention",
         "attention/gfx942/reduce_bf16_d128_own_module",
         "gfx942",
-        build_attention_reduce_lse(
+        build_attention_reduce_own_module(
             "irhash_attn_942_reduce_bf16_own_module",
             "gfx942",
             head_size=128,
@@ -3147,7 +3149,6 @@ def cases():
             num_kv_heads=2,
             dtype="bf16",
             num_segments=4,
-            emit_lse=False,
         ),
     )
 
