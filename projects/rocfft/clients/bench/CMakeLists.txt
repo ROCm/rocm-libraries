@@ -59,7 +59,10 @@ if( NOT HIP_FOUND )
 endif()
 
 if( NOT ROCmCMakeBuildTools_FOUND )
-  find_package( ROCmCMakeBuildTools REQUIRED )
+  find_package( ROCmCMakeBuildTools PATHS ${ROCM_PATH} /opt/rocm )
+  if( NOT ROCmCMakeBuildTools_FOUND )
+    include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-rocmcmake.cmake )
+  endif()
 endif()
 
 if( USE_HIPRAND AND NOT hiprand_FOUND )
