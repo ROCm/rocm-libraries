@@ -760,7 +760,7 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommRCCLAllToAll: count_per_rank=" + std::to_string(count_per_rank)
-                 + ", nworld=" + std::to_string(rccl.num_ranks())
+                 + ", nranks=" + std::to_string(rccl.num_ranks())
                  + ", nlocal=" + std::to_string(local_locs.size()) + ", "
                  + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
     }
