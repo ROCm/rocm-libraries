@@ -750,7 +750,9 @@ private:
                                                            std::move(kernelArch),
                                                            kernel.originDirectory,
                                                            kernel.name,
-                                                           kernel.treeRoot});
+                                                           kernel.treeRoot,
+                                                           nullptr,
+                                                           nullptr});
             }
             // Pushed even when every kernel was dropped: _definitions is indexed by pack
             // position, so skipping one entry would bind every later pack's definitions to
