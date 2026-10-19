@@ -177,21 +177,19 @@ namespace rocsparse
 
             if(direction == rocsparse_direction_row)
             {
-                local_values[tidy][tidx] = (tidx < block_dim && tidy < block_dim)
-                                               ? rocsparse::load_done_row_data(
-                                                     &bsr_val[static_cast<int64_t>(block_dim)
-                                                                  * block_dim * local_block_diag
-                                                              + block_dim * tidy + tidx])
-                                               : static_cast<T>(0);
+                local_values[tidy][tidx]
+                    = (tidx < block_dim && tidy < block_dim) ? rocsparse::load_done_row_data(
+                          &bsr_val[static_cast<int64_t>(block_dim) * block_dim * local_block_diag
+                                   + block_dim * tidy + tidx])
+                                                             : static_cast<T>(0);
             }
             else
             {
-                local_values[tidy][tidx] = (tidx < block_dim && tidy < block_dim)
-                                               ? rocsparse::load_done_row_data(
-                                                     &bsr_val[static_cast<int64_t>(block_dim)
-                                                                  * block_dim * local_block_diag
-                                                              + block_dim * tidx + tidy])
-                                               : static_cast<T>(0);
+                local_values[tidy][tidx]
+                    = (tidx < block_dim && tidy < block_dim) ? rocsparse::load_done_row_data(
+                          &bsr_val[static_cast<int64_t>(block_dim) * block_dim * local_block_diag
+                                   + block_dim * tidx + tidy])
+                                                             : static_cast<T>(0);
             }
 
             __threadfence_block();
@@ -213,20 +211,20 @@ namespace rocsparse
                     if(direction == rocsparse_direction_row)
                     {
                         T v1      = (tidx < block_dim) ? rocsparse::load_done_row_data(
-                                                        &bsr_val[idx2 + block_dim * tidx + p])
+                                   &bsr_val[idx2 + block_dim * tidx + p])
                                                        : static_cast<T>(0);
                         T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                        &bsr_val[idx + block_dim * tidy + p])
+                                   &bsr_val[idx + block_dim * tidy + p])
                                                        : static_cast<T>(0);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
                     else
                     {
                         T v1      = (tidx < block_dim) ? rocsparse::load_done_row_data(
-                                                        &bsr_val[idx2 + block_dim * p + tidx])
+                                   &bsr_val[idx2 + block_dim * p + tidx])
                                                        : static_cast<T>(0);
                         T v2      = (tidy < block_dim) ? rocsparse::load_done_row_data(
-                                                        &bsr_val[idx + block_dim * p + tidy])
+                                   &bsr_val[idx + block_dim * p + tidy])
                                                        : static_cast<T>(0);
                         local_sum = rocsparse::fma(v2, rocsparse::conj(v1), local_sum);
                     }
