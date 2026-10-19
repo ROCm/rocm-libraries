@@ -416,6 +416,105 @@ def _sample_combos(combos: list, frac: float, seed: int) -> list:
     return rng.sample(combos, min(n, len(combos)))
 
 
+# How many exact-tile combos _run_wgrad_sweep appends at most. These are
+# appended after --sample, so they are never thinned; the cap is what keeps
+# that from inflating a sampled run without bound.
+_EXACT_TILE_CAP = 1200
+
+
+def _wgrad_exact_tile_combos(
+    wg_M: int,
+    wg_N: int,
+    wave_size: int,
+    degrees_fn,
+    legs,
+    cap: int = _EXACT_TILE_CAP,
+) -> list:
+    """Tiles that cover the wgrad GEMM with no partial tile, plus their warps.
+
+    ``_TILE_MN`` and ``_WARP_MN`` are power-of-two ladders. A wgrad GEMM's free
+    dims are ``K`` and ``Z*Y*X*(C/groups)``, which routinely are not powers of
+    two, so a tile off that ladder either wastes lanes on a partial tile or is
+    not expressible at all -- and the wasted lanes are what decide the winner
+    once the kernel is re-fetch bound, because tile area is the only lever on
+    bytes-per-flop. Measured on gfx942: the best configurations found anywhere
+    for the shapes checked used tile edges and a warp split that the cartesian
+    grid cannot express at all, since ``_TILE_MN`` is powers of two and
+    ``_WARP_MN`` has no odd entry above 1.
+
+    Rather than widen the ladders -- which multiplies the whole grid and then
+    hides the good points behind ``--sample`` -- this derives a small set from
+    the actual GEMM dims. The call site appends it after sampling so it is
+    always measured in full.
+
+    Warp splits are enumerated, not taken from ``_WARP_MN``: the constraint is
+    ``tile % (warps * warp_tile) == 0``, which admits splits the power-of-two
+    ladder has no entry for. They are deliberately *not* ranked by block size
+    -- both measured winners sat at a middling block, so a "widest first" cut
+    drops exactly the configurations this function exists to reach.
+
+    The pipeline axis is pinned instead, to ``basic`` and ``mem``: the full
+    grid already sweeps pipelines thoroughly and they separated by very little
+    at fixed geometry, so spending the budget there would buy nothing.
+    Geometry is where the new information is.
+    """
+    if cap <= 0:
+        return []
+
+    def _divisors(n: int, lo: int, hi: int) -> list:
+        return [d for d in range(lo, min(n, hi) + 1) if d % 16 == 0 and n % d == 0]
+
+    pow2 = set(_TILE_MN)
+    # Both dims >= 64: a tile thin in either direction has a low area-to-edge
+    # ratio, which is the quantity this whole set is trying to raise.
+    tiles = [
+        (tm, tn)
+        for tm in _divisors(wg_M, 64, 256)
+        for tn in _divisors(wg_N, 64, 512)
+        if not (tm in pow2 and tn in pow2) and tm * tn <= 98304
+    ]
+    grouped: dict = {}
+    for tm, tn in tiles:
+        for wt in _WARP_TILE_MN:
+            if tm % wt or tn % wt:
+                continue
+            for wm in range(1, 9):
+                if tm % (wm * wt):
+                    continue
+                for wn in range(1, 17):
+                    if tn % (wn * wt):
+                        continue
+                    if not (256 <= wm * wn * wave_size <= 1024):
+                        continue
+                    for tk in _TILE_K:
+                        key = (tm, tn, tk, wm, wn, wt)
+                        variants = grouped.setdefault(key, [])
+                        for pipe, adma in legs:
+                            if adma or pipe not in ("basic", "mem"):
+                                continue
+                            for ep in _EPILOGUES:
+                                for sk in degrees_fn(pipe, adma):
+                                    variants.append(
+                                        WgradCombo(
+                                            tm, tn, tk, wm, wn, wt, pipe, ep, adma, sk
+                                        )
+                                    )
+    # Round-robin across geometries so the cap keeps one variant of every
+    # geometry before it keeps a second of any -- truncating a sorted-by-tile
+    # list would spend the whole budget on the first few tiles.
+    out: list = []
+    depth = 0
+    while True:
+        layer = [v[depth] for v in grouped.values() if len(v) > depth]
+        if not layer:
+            break
+        out.extend(layer)
+        if len(out) >= cap:
+            break
+        depth += 1
+    return out[:cap]
+
+
 def _verify_kernel(
     *,
     rt,
@@ -1045,6 +1144,19 @@ def main() -> int:
         help="RNG seed used by --sample (default: 0)",
     )
     parser.add_argument(
+        "--exact-tiles",
+        type=int,
+        default=_EXACT_TILE_CAP,
+        metavar="N",
+        help=(
+            "wgrad only: cap on the exact-tile combos appended to the sweep -- "
+            "tiles derived from the GEMM dims that divide them with no partial "
+            "tile, which the power-of-two ladders cannot express. Appended "
+            "after --sample so they are never thinned. 0 disables "
+            f"(default: {_EXACT_TILE_CAP})"
+        ),
+    )
+    parser.add_argument(
         "--group-merge-window",
         type=int,
         default=1,
@@ -1117,7 +1229,11 @@ def main() -> int:
             "split-K resolver picks for each kernel, "
             "1 = disabled, "
             ">1 = fixed degree, "
-            "-1 = auto (the resolver dispatch uses, per kernel)"
+            "-1 = auto (the resolver dispatch uses, per kernel). "
+            "Applies to --run-from-cache too, where the degree is a kernarg "
+            "and the cached binary is launched at whichever degree this "
+            "selects; there 1 selects nothing, since the non-split-K kernel "
+            "is a separate binary."
         ),
     )
     parser.add_argument(
@@ -1922,6 +2038,18 @@ def _build_wgrad_one(args_tuple):
         warp_tile_n=warp_tile_mn,
         wave_size=target.wave_size,
     )
+    # Likewise deduced per combo: the M-outer row stride is a function of
+    # tile_k, which is a sweep axis. None means "no derivation for this
+    # regime", and the spec keeps its own default.
+    lds_k_pad = WgradConvSpec.default_lds_k_pad(
+        arch=arch,
+        tile_k=tile_k,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        lds_k_outer=lds_k_outer,
+        async_dma=async_dma,
+        wave_size=target.wave_size,
+    )
     from kernels.common.conv_split_k import resolve_conv_split_k
 
     # The dispatcher's resolver: an auto (-1) degree comes out as dispatch
@@ -1962,6 +2090,7 @@ def _build_wgrad_one(args_tuple):
         split_k=resolved_split_k,
         group_merge=group_merge,
         lds_k_outer=lds_k_outer,
+        lds_k_pad=lds_k_pad,
         async_dma=async_dma,
         # Per-combo, from the same policy the AOT cache generator uses.
         # Stream-K never reaches the K loop prefetch_addr rewrites, so it is
@@ -2080,6 +2209,17 @@ def _build_wgrad_two_stage_one(args_tuple):
 
     from dataclasses import replace as dc_replace
 
+    # Hoisted out of the constructor below so the row-stride derivation can see
+    # it: an explicit pad is rejected under the K-outer tile.
+    _ts_k_outer = WgradConvSpec.default_lds_k_outer(
+        arch=arch,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        warp_tile_m=warp_tile_mn,
+        warp_tile_n=warp_tile_mn,
+        wave_size=target.wave_size,
+    )
+
     spec = WgradConvSpec(
         problem=problem,
         name="rocke_bench_igemm_wgrad_2s",
@@ -2110,12 +2250,15 @@ def _build_wgrad_two_stage_one(args_tuple):
         # kernels while the atomic leg builds K-outer ones, so the two sets of
         # timings the driver prints side by side are not comparable and the
         # K-outer win is never measured on the deterministic path.
-        lds_k_outer=WgradConvSpec.default_lds_k_outer(
+        lds_k_outer=_ts_k_outer,
+        # Same reasoning again: both legs must take the same LDS row stride.
+        lds_k_pad=WgradConvSpec.default_lds_k_pad(
             arch=arch,
+            tile_k=tile_k,
             dtype_a=dtype,
             dtype_b=dtype,
-            warp_tile_m=warp_tile_mn,
-            warp_tile_n=warp_tile_mn,
+            lds_k_outer=_ts_k_outer,
+            async_dma=async_dma,
             wave_size=target.wave_size,
         ),
     )
@@ -3130,6 +3273,28 @@ def _run_wgrad_sweep(
             flush=True,
         )
 
+    # Appended after sampling, deliberately: these are derived from the GEMM
+    # dims rather than drawn from the power-of-two ladders, so there are few of
+    # them and thinning them would defeat the point of deriving them.
+    _exact = _wgrad_exact_tile_combos(
+        wg_M=p.kpg,
+        wg_N=(p.Z if getattr(p, "is_3d", False) else 1) * p.Y * p.X * p.cpg,
+        wave_size=target.wave_size,
+        degrees_fn=_degrees,
+        legs=_legs,
+        cap=args.exact_tiles,
+    )
+    if _exact:
+        _seen = set(combos)
+        _exact = [c for c in _exact if c not in _seen]
+        combos = combos + _exact
+        print(
+            f"  +{len(_exact)} exact-tile combos (tiles that divide "
+            f"{p.kpg}x{(p.Z if getattr(p, 'is_3d', False) else 1) * p.Y * p.X * p.cpg} "
+            f"with no partial tile; off the power-of-two ladder).",
+            flush=True,
+        )
+
     _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
         f"Sweeping {len(combos)} wgrad combinations for {arch} {dtype} {p.short()} "
@@ -3159,13 +3324,28 @@ def _run_wgrad_sweep(
 
     # Two-stage path: build + compile Stage 1 and Stage 2 in one pass.
     _cpg_is_odd = (p.C // p.groups) % 2 != 0
+    # Exact tiles are the other trigger: Stage 1 stores f32 straight to the
+    # scratch, so it carries no cshuffle C tile in LDS, and the LDS freed is
+    # what lets the wide exact tiles run at a K depth the cshuffle leg cannot
+    # afford. Those tiles are the reason the set exists, so measure them on
+    # both legs.
     _run_two_stage = args.two_stage == "always" or (
-        args.two_stage == "auto" and _cpg_is_odd
+        args.two_stage == "auto" and (_cpg_is_odd or bool(_exact))
     )
+    # When only the exact tiles triggered it, run the second leg on just those
+    # rather than on the whole cartesian grid -- the grid has already been
+    # measured on the atomic leg and doubling it buys nothing.
+    _two_stage_src = combos if (args.two_stage == "always" or _cpg_is_odd) else _exact
     if _run_two_stage:
-        if args.two_stage == "auto":
+        if args.two_stage == "auto" and _cpg_is_odd:
             print(
                 f"  C/groups={p.C // p.groups} is odd — enabling two-stage deterministic path.",
+                flush=True,
+            )
+        elif args.two_stage == "auto":
+            print(
+                f"  running the {len(_two_stage_src)} exact-tile combos on the "
+                "two-stage leg as well (no cshuffle C tile in LDS).",
                 flush=True,
             )
         # The replica axis is expanded here rather than in `combos` because
@@ -3179,7 +3359,7 @@ def _run_wgrad_sweep(
             _ws_reps = (args.ws_replicas,)
         work_2s = [
             (combo._replace(ws_replicas=_r), problem, dtype, arch)
-            for combo in combos
+            for combo in _two_stage_src
             for _r in _ws_reps
         ]
         if len(_ws_reps) > 1:
@@ -4544,14 +4724,22 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                     sk_bound = (sk_run, sk_label)
 
                 # A split-K wgrad binary is one kernel for every degree > 1
-                # (the degree is a kernarg), so it is timed at each degree it
-                # can use.
+                # (the degree is a kernarg), so --split-k decides whether it
+                # is timed at one degree or at each degree it can use.
                 if direction == "wgrad" and ident.split_k > 1:
-                    degrees = _runtime_split_ks(problem, ident, args.split_k_degrees)
+                    degrees = _runtime_split_ks(
+                        problem, ident, args.split_k, args.split_k_degrees
+                    )
                     if not degrees:
                         print(
-                            f"  [skip] {ident.label()}: no split-K degree > 1 "
-                            f"fits this problem",
+                            f"  [skip] {ident.label()}: "
+                            + (
+                                "no split-K degree > 1 fits this problem"
+                                if args.split_k == 0
+                                else f"--split-k {args.split_k} does not fit "
+                                f"this problem (degree 1 is a separate "
+                                f"non-split-K binary)"
+                            ),
                             flush=True,
                         )
                         continue
@@ -5083,6 +5271,7 @@ def _split_k_degrees(
     two_stage: bool,
     degrees: tuple = _SPLIT_K_AUTO,
     ws_replicas: int = 0,
+    include_resolved: bool = True,
 ) -> tuple:
     """Split-K degrees to launch a wgrad split-K kernel with, largest first.
 
@@ -5093,6 +5282,12 @@ def _split_k_degrees(
     (degree 1 is the separate non-split kernel), does not exceed the number of
     K tiles (a larger degree only adds empty slices), and keeps
     ``(groups / group_merge) * degree`` inside the grid's z limit.
+
+    ``include_resolved=False`` leaves the resolver's degree out, for a caller
+    that has already pinned one. The validity rules still apply to it -- they
+    are a property of the problem, not of how the degree was chosen -- so a
+    pinned degree the shape cannot take drops out here rather than failing at
+    launch.
     """
     from kernels.common.conv_args import ConvArgs
     from kernels.common.conv_split_k import resolve_conv_split_k
@@ -5107,25 +5302,26 @@ def _split_k_degrees(
     k_tiles = -(-wg_k // tile_k)
     grid_groups = max(1, problem.groups // max(1, group_merge))
     candidates = set(degrees)
-    try:
-        candidates.add(
-            resolve_conv_split_k(
-                "wgrad",
-                problem,
-                arch=arch,
-                dtype=dtype,
-                tile_m=tile_m,
-                tile_n=tile_n,
-                tile_k=tile_k,
-                block_size=block_size,
-                group_merge=group_merge,
-                ws_replicas=ws_replicas,
-                reduction="workspace" if two_stage else "atomic",
-                allow_unsplit=False,
-            ).split_k
-        )
-    except ValueError:
-        pass  # this binary's reduction cannot serve the problem; nothing to add
+    if include_resolved:
+        try:
+            candidates.add(
+                resolve_conv_split_k(
+                    "wgrad",
+                    problem,
+                    arch=arch,
+                    dtype=dtype,
+                    tile_m=tile_m,
+                    tile_n=tile_n,
+                    tile_k=tile_k,
+                    block_size=block_size,
+                    group_merge=group_merge,
+                    ws_replicas=ws_replicas,
+                    reduction="workspace" if two_stage else "atomic",
+                    allow_unsplit=False,
+                ).split_k
+            )
+        except ValueError:
+            pass  # this binary's reduction cannot serve the problem; nothing to add
     return tuple(
         sk
         for sk in sorted(candidates, reverse=True)
@@ -5133,8 +5329,28 @@ def _split_k_degrees(
     )
 
 
-def _runtime_split_ks(problem, ident, degrees: tuple = _SPLIT_K_AUTO) -> tuple:
-    """:func:`_split_k_degrees` for a cached split-K wgrad binary."""
+def _runtime_split_ks(
+    problem, ident, requested: int = 0, degrees: tuple = _SPLIT_K_AUTO
+) -> tuple:
+    """Degrees to launch a cached split-K wgrad binary at.
+
+    ``requested`` is ``--split-k``, with the same meaning it has on the JIT
+    sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
+    pick, -1 launches at the resolver's pick only, and a positive value pins
+    that degree. The cache records ``split_k=2`` only as a marker that the
+    binary is the split-K one -- the degree itself is a kernarg -- so nothing
+    here is baked in and every mode is reachable at launch.
+
+    Degree 1 is not among them: that is the separate non-atomic kernel, a
+    different binary, so ``--split-k 1`` yields no degree and the caller skips
+    the entry rather than silently timing it at some other degree.
+    """
+    if requested == 0:
+        swept, include_resolved = degrees, True
+    elif requested == -1:
+        swept, include_resolved = (), True
+    else:
+        swept, include_resolved = (requested,), False
     return _split_k_degrees(
         problem,
         arch=ident.arch,
@@ -5145,8 +5361,9 @@ def _runtime_split_ks(problem, ident, degrees: tuple = _SPLIT_K_AUTO) -> tuple:
         block_size=ident.warp_m * ident.warp_n * ident.wave_size,
         group_merge=max(1, ident.group_merge),
         two_stage=ident.two_stage,
-        degrees=degrees,
+        degrees=swept,
         ws_replicas=ident.ws_replicas,
+        include_resolved=include_resolved,
     )
 
 

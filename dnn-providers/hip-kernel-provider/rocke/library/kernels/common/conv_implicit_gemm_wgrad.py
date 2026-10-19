@@ -1039,6 +1039,102 @@ class WgradConvSpec:
         return warp_tile_m in (16, 32) and warp_tile_n in (16, 32)
 
     @staticmethod
+    def default_lds_k_pad(
+        *,
+        arch: str,
+        tile_k: int,
+        dtype_a: str,
+        dtype_b: str,
+        lds_k_outer: bool = False,
+        async_dma: bool = False,
+        wave_size: int = 64,
+    ) -> Optional[int]:
+        """The bank-conflict-free LDS row pad for an M-outer wgrad tile.
+
+        Returns ``None`` for the regimes this does not model, meaning "leave
+        ``lds_k_pad`` unset and take the dataclass default". Selection policy
+        only: the field still defaults to ``None`` so an untouched spec keeps
+        its historical name and golden, and callers that build specs for
+        dispatch or for a sweep ask this what to pass -- the same arrangement
+        as :meth:`default_lds_k_outer`.
+
+        The default the spec falls back to is a flat ``8`` for every
+        ``tile_k >= 16`` (see :meth:`effective_lds_layout`), which is not a
+        derived number and is conflict-prone on gfx942. The M-outer tile is
+        ``(tile_mn, tile_k + pad)``, so the pad *is* the LDS row stride, and the
+        stride is what decides how many of the 32 four-byte banks an operand
+        read touches. Two constraints fix it:
+
+        1. **Fragment alignment.** The MFMA operand fetch is ``ds_read_b64`` /
+           ``ds_read2_b64`` -- 8 bytes, i.e. 4 elements at 16-bit. A row stride
+           that is not a multiple of 4 elements leaves odd rows 8-byte
+           unaligned and the reads split into narrower ones.
+        2. **Bank spread.** Consecutive rows land ``(tile_k + pad) / 2`` dwords
+           apart, so a fragment read reaches ``32 / gcd(stride_dwords, 32)``
+           distinct banks. Constraint 1 forces ``stride_dwords`` even, so
+           ``gcd == 2`` (16 banks) is the best reachable, and it needs
+           ``tile_k + pad == 4 (mod 8)``.
+
+        Constraint 2 is written against a **32-dword** ``ds_read_b64`` conflict
+        period, which is why this is gated on ``arch`` and not on ``wave_size``
+        alone: gfx950 is wave64 CDNA too, but its period is 64 dwords (see
+        ``dsl_docs/optimization/arch/gfx950.md``), so the congruence above
+        solves for the wrong modulus there and would hand back a pad that is
+        not conflict-free. Relying on gfx950 deducing the K-outer layout to
+        keep it out of this body is not enough -- the AOT cache sweep leaves
+        ``lds_k_outer`` at its ``False`` default for every arch, so gfx950
+        reaches here on the M-outer path.
+
+        Both were established by sweeping the pad on gfx942 bf16 wgrad with
+        every other lever held, not assumed. Run time was monotone in
+        ``gcd(stride_dwords, 32)`` across the whole ladder -- the 16-bank pads
+        fastest, then 8-bank, 4-bank, 2-bank -- and every pad that broke
+        constraint 1 fell behind all of them regardless of its bank spread, so
+        alignment is the stronger of the two and is applied first. (Per the
+        compliance rules the measurements themselves stay out of the repo; the
+        ordering is the part that generalises.)
+
+        Among the pads that satisfy both, take the **smallest**: the pad is
+        charged per row of both the A and the B tile, and a larger one can push
+        the tile past an occupancy step. At ``tile_k=32`` the next two
+        conflict-free pads up are equally bank-clean but grow A/B past 32 KB,
+        which halves the workgroups resident per CU, and they measured slower
+        for exactly that reason.
+
+        Restricted to what the arithmetic above actually covers: a 16-bit A/B
+        M-outer tile fed by the **wave64 CDNA MFMA** operand fetch. Everything
+        else returns ``None`` -- "leave the default alone" -- rather than a
+        guess:
+
+        * An ``arch`` outside ``_LDS_B64_CONFLICT_PERIOD_32`` -- see constraint
+          2 above.
+        * ``lds_k_outer`` derives its row stride from ``_KOUTER_PAD`` in the
+          builder and rejects an explicit pad outright.
+        * ``async_dma`` needs the packed (pad 0) layout
+          ``raw_ptr_buffer_load_lds`` writes.
+        * ``wave_size != 64`` is the RDNA WMMA path, which assembles its
+          fragments from 8-wide ``ds_read_b128`` chunks on a 32-lane wave, not
+          from ``ds_read_b64`` on a 64-lane one. Both constraints are stated in
+          terms of that 8-byte read and its lane-to-bank mapping, so neither
+          carries over unexamined -- and no RDNA wgrad was measured here.
+        * An fp32 tile puts one element per dword, which changes both
+          constraints, and no fp32 wgrad was measured either.
+        """
+        if arch not in _LDS_B64_CONFLICT_PERIOD_32:
+            return None
+        if lds_k_outer or async_dma:
+            return None
+        if wave_size != 64:
+            return None
+        if dtype_a not in ("bf16", "fp16") or dtype_b not in ("bf16", "fp16"):
+            return None
+        if tile_k % 4 != 0:
+            # Constraint 1 is unreachable: no pad makes a stride that is not a
+            # whole number of 4-element groups 8-byte aligned on every row.
+            return None
+        # Smallest pad >= 0 with pad % 4 == 0 and (tile_k + pad) % 8 == 4.
+        return (4 - tile_k) % 8
+
     def default_prefetch_addr(
         *,
         arch: str,
@@ -1102,6 +1198,14 @@ _PREFETCH_ADDR_MAX_TILE_ELEMS = 320 * 64
 # The IR op is the same in both cases; core/isa/backend.py selects the opcode.
 _LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64, "gfx1250": 32}
 _LDS_K_OUTER_ARCH = "gfx950"  # retained: the wave64 regime's arch
+
+# Arches whose ``ds_read_b64`` bank-conflict period is 32 dwords, which is the
+# modulus WgradConvSpec.default_lds_k_pad solves its row stride against. gfx950
+# is deliberately absent: it is wave64 CDNA like gfx942, but doubles both the
+# bank count and the period to 64, so the same congruence yields a stride that
+# is not conflict-free there. Per dsl_docs/optimization/arch/{gfx942,gfx950}.md.
+# Restrict the derived pad policy to gfx942, where the pad ordering was swept.
+_LDS_B64_CONFLICT_PERIOD_32 = frozenset({"gfx942"})
 
 
 def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
@@ -1871,11 +1975,21 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _c_lds = (
         spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
-    _total_lds = _ab_lds + _c_lds
+    # The cshuffle C tile aliases onto the A/B pool rather than adding to it:
+    # wgrad never passes ``no_alias`` to CShuffleEpilogue, so the C view is built
+    # with ``exclusive=False`` and reuses the A/B bytes. Charging the sum here
+    # rejected specs the hardware has room for -- it capped tile_k well below
+    # what the emitted code object actually asks for, and a larger tile_k is what
+    # amortises the wgrad K-loop address-decode VALU over each LDS row. The
+    # forward (:func:`~.conv_implicit_gemm.is_valid_spec`) and dgrad validators
+    # already charge the max; wgrad was the outlier. The ``wavelet`` pipeline is
+    # the one case that would keep A/B live across the epilogue, and it is
+    # rejected for wgrad above, so there is no additive case left to spell out.
+    _total_lds = max(_ab_lds, _c_lds)
     if not target.fits_lds(_total_lds):
         return False, (
             f"LDS budget {_total_lds} bytes "
-            f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}) "
+            f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}, aliased) "
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
