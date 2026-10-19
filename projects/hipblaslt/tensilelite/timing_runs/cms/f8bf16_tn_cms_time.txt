@@ -1,0 +1,24 @@
+Command exited with non-zero status 1
+	Command being timed: "taskset -c 0-24 pytest tensilelite/Tests/common/test_config_build.py::test_config_build[tensilelite/Tests/common/ductile/gfx950/f8bf16_tn_cms.yaml] --build-only --gpu-targets gfx950 --artifact-dir /tmp/tl_cms_art_f8bf16_tn_cms -s -v -n 0 --durations=0 --timeout=14400 --global-parameters=LibraryFormat='msgpack' --tensile-options=--cxx-compiler,/usr/bin/amdclang++,--global-parameters,TimingInstrumentation=True -p no:warnings"
+	User time (seconds): 80.67
+	System time (seconds): 10.13
+	Percent of CPU this job got: 392%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:23.12
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 483220
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 13
+	Minor (reclaiming a frame) page faults: 2817252
+	Voluntary context switches: 4991
+	Involuntary context switches: 7192
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 84912
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1
