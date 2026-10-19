@@ -168,4 +168,4 @@ atoms, `mfma_f32_16x16x32_xf32` and `mfma_f32_32x32x16_xf32`. They take the same
 operands (`vec<tf32x8>`, one I32 word per element) and FP32 accumulators (four and
 sixteen values), and lower to three BF16 MFMAs on `mfma_f32_16x16x32_bf16` and
 `mfma_f32_32x32x16_bf16`; see the
-[emulation plan](../architecture/xf32_bf16x3_emulation_plan.md).
+[emulation description](../architecture/xf32_bf16x3_emulation.md).

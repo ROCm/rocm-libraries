@@ -260,8 +260,16 @@ def test_strided_kv_decode(
     # Paged cases exercise the direct runtime; strided cases also test dispatch.
     if kv_layout == "strided":
         from dispatch.attention import AttentionRequest, dispatch_attention
+        from dispatch.attention.common import AttentionMaskType
 
+        # A decode window is anchored at the end of the sequence (bottom-right causal);
+        # NO_MASK + sliding_window is the non-causal top-left band.
         request = AttentionRequest(
+            mask_type=(
+                AttentionMaskType.BOTTOM_RIGHT_CAUSAL
+                if window
+                else AttentionMaskType.NO_MASK
+            ),
             batch=batch,
             nhead_q=q_heads,
             nhead_k=kv_heads,

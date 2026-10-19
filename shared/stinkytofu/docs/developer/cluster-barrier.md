@@ -53,11 +53,67 @@ cluster signal:
 
 ---
 
-## Rule 2 -- First kernel load wait
+## Rule 2 -- First kernel load wait and local rendezvous
 
-A single `s_barrier_wait -3` immediately before the first `tensor_load_to_lds`
-of the whole kernel, above any wait-cnt drains that precede it (see
-[Drain hoisting](#drain-hoisting)).
+The first `tensor_load_to_lds` of the kernel is preceded by a cluster wait.
+Every path from that wait to the next cluster phase must also pass a complete
+local workgroup rendezvous. When existing barriers do not establish this
+handoff, Rule 2 supplies it immediately after the entry wait:
+
+```asm
+    s_barrier_wait -3
+    s_barrier_signal -1
+    s_barrier_wait -1
+    <any existing wait-cnt drains>
+    tensor_load_to_lds ...
+```
+
+Every local wave must finish the cluster wait before it can post its local
+signal. The local wait therefore prevents the elected wave from posting the
+next cluster signal until all local waves have finished the previous cluster
+wait. This entry handoff is needed because Rule 3 can place the first loop
+signal above that iteration's head workgroup rendezvous. The steady-state
+signal lead is unchanged.
+
+Rule 2 handles both an existing first-load cluster wait and one it inserts.
+It recognizes a complete immediately following local signal/wait pair,
+including one carrying memory-token annotations. That recognition and Rule 2's
+[drain hoisting](#drain-hoisting) stay within the first load's straight-line
+segment, so a different predecessor cannot supply the entry wait or pair.
+
+After all cluster signals have been placed, the pass checks whether its newly
+added entry pair is redundant. It resolves direct and annotated indirect branch
+targets and stops each feasible path at a complete existing local signal/wait pair.
+Scalar equality/inequality facts from a preceding fall-through guard are retained
+across the walk; writes invalidate them, and merges retain only common facts.
+Thus a nonzero-K entry guard can rule out a later zero-trip bypass of a prefetch
+barrier. A label between the guard and entry prevents borrowing that condition
+from a different predecessor. Unsupported conditions leave both paths possible. If another cluster signal or wait is
+reachable without such a pair, the entry pair stays. Calls, unresolved targets,
+and uncovered exits also keep it. Only the new Rule 2 pair may be removed;
+existing barriers retain their LDS synchronization responsibilities and placement.
+
+This rule is independent of the optimization level. For example, SIA0 can retain
+the Python prefetch-prologue barrier after its first tensor loads. SIA4's
+LDS-token barrier reconstruction can remove that barrier and place its replacement
+after the next early cluster signal. The former reuses the existing join; the
+latter needs the added entry pair. No steady-state signal lead is shortened.
+
+Nonpersistent kernels use the same rule. With PGR2 and requested PLR1, the
+DU128 regression has effective PLR0 and needs the entry pair under both SIA0 and
+SIA4. DU256 has effective PLR1 and reuses its existing prefetch rendezvous.
+Immediate adjacency to the cluster wait is not required when a later local
+rendezvous supplies the ordering before the next cluster signal.
+
+This follows the local-before-cluster ordering used by
+[LLVM's cluster-barrier lowering](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AMDGPU/AMDGPULowerIntrinsics.cpp):
+all waves arrive at a local barrier, wait there, and one elected wave signals
+the cluster. The requirement here concerns ordering between phases; it does
+not depend on a claim about the hardware's internal notification storage.
+Memory readiness remains the responsibility of the existing LDS/tensor drains.
+
+The writer must ensure every local wave takes this first-load path under uniform
+tile/K/alpha guards; textual load order alone does not prove that condition.
 
 ---
 
@@ -83,10 +139,12 @@ Multiple loads sharing the same workgroup signal receive one handshake.
    `kRule3SignalMaxLeadCycles` is what bounds the answer. Past that ceiling it
    turns around and sinks back towards the wait instead.
 
-   It stops outright at a preceding handshake or at any `s_barrier_wait -3`, so
-   cluster phases never overlap, and at a call or an unconditional branch. With
-   `kRule3CrossLoop` false every label and branch stops it too, which confines it
-   to the wait's own segment.
+   It stops outright at a preceding handshake or at any `s_barrier_wait -3`,
+   preserving cluster wait/signal order within each wave. The local rendezvous
+   required between the entry wait and the next signal (Rule 2), and the joins
+   after loop waits, supply the cross-wave ordering. The search also stops at a call or
+   an unconditional branch. With `kRule3CrossLoop` false every label and branch
+   stops it too, which confines it to the wait's own segment.
 
 When cycle estimates are unavailable, the signal co-locates with the wait.
 
@@ -323,6 +381,19 @@ exit has drain wait + skip path.
   `STINKY_KRULE3_CROSS_LOOP` is 0. Cases that need the switch off stay in the binary
   and `GTEST_SKIP` themselves when it is 1. Covering the pass therefore means
   building and running both settings.
+
+---
+
+## Entry handoff regression tests
+
+`Tensile/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
+`common/gemm/gfx1250/cluster_entry_handoff.yaml` through the real Python and
+backend pipeline. It checks SIA0 barrier reuse and the required SIA4 entry pair
+for three layouts, with iteration cloning enabled and disabled, and assembles all
+12 generated kernels. The common GPU runner executes the YAML with full output
+validation. The YAML is selected on gfx1250 and gfx1250-strict and skipped on
+other supported architectures. Independent process reruns are part of manual
+hang validation.
 
 ---
 
