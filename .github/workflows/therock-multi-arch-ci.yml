@@ -294,12 +294,14 @@ jobs:
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
-    # Build and test jobs run inside TheRock's reusable workflows, so failures
-    # are reported from here using each failed job's log. Routing to the
-    # MIOpen / hipDNN channels (PR title tags [miopen], [hipdnn],
-    # [miopenprovider] or component name) is handled by notify_teams.py.
+    # Build and test jobs run inside TheRock's reusable workflows, so
+    # notify_teams.py reports each failed Linux::/Windows:: job of this run
+    # from here, routing to the MIOpen / hipDNN channels by PR title tag
+    # ([miopen], [hipdnn], [miopenprovider]) or component name.
     # Webhook secrets are unavailable to fork PRs.
     needs: [configure, linux_build_and_test, windows_build_and_test]
+    # A notification problem must never fail the PR.
+    continue-on-error: true
     if: >-
       ${{
         always() &&
@@ -326,52 +328,12 @@ jobs:
           HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
           CHANGED_PROJECTS: ${{ needs.configure.outputs.changed_projects }}
         run: |
-          webhook_urls="{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}"
-          mkdir -p failed_job_logs
-
-          # Failed jobs from the Linux/Windows reusable workflows in this attempt;
-          # expected failures (xfail) are skipped.
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[]
-              | select(.conclusion == "failure")
-              | select(.name | test("^(Linux|Windows)::"))
-              | select(.name | contains("(xfail)") | not)
-              | [.id, .name] | @tsv' \
-            > failed_jobs.tsv
-
-          status=0
-          while IFS=$'\t' read -r job_id job_name; do
-            log_path="failed_job_logs/${job_id}.log"
-            # Keep the log up to the first failing step so the error context
-            # is not buried under post-job cleanup output.
-            gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" \
-              | sed '/##\[error\]/q' > "${log_path}" || true
-
-            if [[ "${job_name}" == *" / Test "* ]]; then
-              failure_stage="test"
-              component_name="${job_name}"
-            else
-              failure_stage="build"
-              component_name="${CHANGED_PROJECTS}"
-            fi
-            if [[ "${job_name}" == Windows::* ]]; then
-              job_platform=windows
-            else
-              job_platform=linux
-            fi
-
-            python3 .github/scripts/notify_teams.py \
-              --failure-stage "${failure_stage}" \
-              --log-path "${log_path}" \
-              --webhook-urls "${webhook_urls}" \
-              --pr-number "${PR_NUMBER}" \
-              --pr-title "${PR_TITLE}" \
-              --component-name "${component_name}" \
-              --platform "${job_platform}" \
-              --job-name "${job_name}" || status=1
-          done < failed_jobs.tsv
-          exit "${status}"
+          python3 .github/scripts/notify_teams.py \
+            --failed-jobs-from-run \
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${CHANGED_PROJECTS}"
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
