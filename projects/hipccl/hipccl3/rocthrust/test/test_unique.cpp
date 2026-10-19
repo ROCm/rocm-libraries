@@ -15,7 +15,9 @@
  *  limitations under the License.
  */
 
+#include <thrust/equal.h>
 #include <thrust/functional.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
@@ -447,4 +449,43 @@ TEST(UniqueTests, TestUniqueDevice)
       ASSERT_EQ(h_data, d_data);
     }
   }
+}
+
+struct check_valid_item_op
+{
+  unsigned int* error_counter{};
+  int expected_upper_bound{};
+
+  __device__ bool operator()(const int lhs, const int rhs) const
+  {
+    if (lhs > expected_upper_bound || rhs > expected_upper_bound)
+    {
+      if (error_counter)
+      {
+        atomicAdd(error_counter, 1u);
+      }
+      return false;
+    }
+    return lhs == rhs;
+  }
+};
+
+// The equality operator must not be invoked for out-of-bounds items.
+TEST(UniqueTests, TestUniqueWithCustomEqualityOp)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  constexpr int num_items = 1000;
+  auto data               = thrust::make_counting_iterator(0);
+
+  thrust::device_vector<unsigned int> error_counter(1, 0);
+  auto const error_counter_ptr = thrust::raw_pointer_cast(error_counter.data());
+
+  thrust::device_vector<int> unique_out(num_items);
+  auto unique_out_end = thrust::unique_copy(
+    data, data + num_items, unique_out.begin(), check_valid_item_op{error_counter_ptr, num_items - 1});
+
+  ASSERT_EQ(unique_out_end - unique_out.begin(), num_items);
+  ASSERT_EQ(error_counter[0], 0u);
+  ASSERT_TRUE(thrust::equal(unique_out.cbegin(), unique_out.cend(), data));
 }
