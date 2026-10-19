@@ -48,15 +48,9 @@ class temporary_array;
 
 } // namespace detail
 
-namespace system
-{
-namespace detail
-{
-namespace sequential
+namespace system::detail::sequential
 {
 
-// TODO(bgruber): we should make this an alias of _THRUST_STD::iter_swap
-THRUST_EXEC_CHECK_DISABLE
 template <typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)
 {
@@ -307,7 +301,5 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   return thrust::make_pair(out_true, out_false);
 }
 
-} // end namespace sequential
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END

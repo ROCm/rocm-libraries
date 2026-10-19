@@ -43,11 +43,7 @@
 // Contributed by Erich Elsen
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 
 template <typename DerivedPolicy, typename InputIterator, typename T>
@@ -142,7 +138,5 @@ find_if_not(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, 
   return thrust::find_if(exec, first, last, _THRUST_STD::not_fn(pred));
 } // end find()
 
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

@@ -31,11 +31,7 @@
 #include _THRUST_STD_INCLUDE(cstdlib) // for malloc & free
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace sequential
+namespace system::detail::sequential
 {
 
 template <typename DerivedPolicy>
@@ -48,9 +44,7 @@ template <typename DerivedPolicy, typename Pointer>
 inline THRUST_HOST_DEVICE void free(sequential::execution_policy<DerivedPolicy>&, Pointer ptr)
 {
   _THRUST_STD::free(thrust::raw_pointer_cast(ptr));
-} // end mallc()
+}
 
-} // namespace sequential
-} // namespace detail
-} // namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END
