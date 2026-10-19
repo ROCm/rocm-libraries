@@ -111,15 +111,20 @@ function(_install_project build_dir install_dir label)
         )
     endif()
 
-    set(_private_include_dir
-        "${install_dir}/include/roc/hostnumerics/detail"
+    # The descriptor adapters reuse Shape's predicates through this installed
+    # internal bridge. No other implementation headers belong in the package.
+    file(GLOB_RECURSE _installed_detail_headers
+        LIST_DIRECTORIES FALSE
+        RELATIVE "${install_dir}/include/roc/hostnumerics/detail"
+        "${install_dir}/include/roc/hostnumerics/detail/*"
     )
-    if(EXISTS "${_private_include_dir}" OR IS_SYMLINK "${_private_include_dir}")
+    if(NOT _installed_detail_headers STREQUAL "shape_access.hpp")
         message(FATAL_ERROR
-            "${label} installed the private header directory "
-            "${_private_include_dir}."
+            "${label} installed unexpected internal headers: "
+            "${_installed_detail_headers}."
         )
     endif()
+
 endfunction()
 
 # Configure, build, and execute one explicit package-component consumer.
