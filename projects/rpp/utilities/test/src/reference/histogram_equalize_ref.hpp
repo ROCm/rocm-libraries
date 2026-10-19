@@ -57,8 +57,9 @@ Expression
        3 channel   the luminance Y, in BT.601 full-range (JPEG) YCbCr
 
   2. LUT[v] = round( (cdf[v] - cdfMin) / (N - cdfMin) * 255 )
-     the standard cdf-min-normalized mapping, cdfMin = first non-zero CDF
-     value.
+     the standard cdf-min-normalized mapping. cdf[v] is the cumulative pixel
+     COUNT (number of pixels <= v, so cdf[255] = N), not a normalized [0,1]
+     probability; cdfMin is the first non-zero cdf value.
 
   3. Apply:
        1 channel   dst = LUT[src]

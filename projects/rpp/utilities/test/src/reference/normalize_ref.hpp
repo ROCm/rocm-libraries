@@ -44,20 +44,28 @@ RPP op
   rppt_normalize   (ND / Statistical)
 
 Description
-  Removes the mean and divides by the standard deviation, then applies an
-  affine scale and shift: per the header, scale is "multiplied with data after
-  subtracting from mean" and shift is "added finally".
+  Normalizes each sample to zero mean and unit standard deviation, then
+  applies a scale and a shift.
 
-  axisMask selects the axes that are REDUCED: bit i set collapses axis i, so
-  mean/stdDev carry one value per combination of the remaining (non-reduced)
-  coordinates -- paramSize = product over i of (bit i set ? 1 : dims[i]), laid
-  out row-major over those same axes, one such block per sample.
+  axisMask chooses which axes the statistics are taken over. Bit i set means
+  axis i (counting from the first non-batch axis) is reduced: the mean and
+  stdDev are averaged across it. Every unset axis keeps its own statistics.
+  For example, a sample with dims {H, W, C} and axisMask = 0b011 reduces H and
+  W, giving one mean and one stdDev per channel.
 
-  computeMeanStddev is a bitmask: bit 0 computes the mean, bit 1 the standard
-  deviation; a clear bit means the caller's value is used.
+  meanTensor and stdDevTensor hold paramSize values per sample, where
+  paramSize is the product of the unset axes' extents (1 when every axis is
+  reduced), stored row-major in axis order.
+
+  computeMeanStddev chooses where the statistics come from: bit 0 set computes
+  the mean from the data, bit 1 set computes the stdDev. A clear bit uses the
+  caller's value from meanTensor / stdDevTensor instead.
 
 Expression
   dst = ((src - mean) / stdDev) * scale + shift
+
+  with mean and stdDev taken from the slot for the element's unset-axis
+  coordinates.
 
 Per-type form
   Accumulated in double. Integer outputs are rounded and clamped; float
