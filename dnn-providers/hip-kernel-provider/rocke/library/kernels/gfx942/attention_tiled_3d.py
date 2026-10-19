@@ -31,7 +31,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from kernels.common._attention_strided_kv import (
@@ -39,6 +39,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._lse_store import lse_store
 
 from rocke.core.ir import (
     BF16,
@@ -1245,6 +1246,16 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
+    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
+    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
+    #   Off by default; off emits no new IR, so shipped kernels are unchanged.
+    emit_lse: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if type(self.emit_lse) is not bool:
+            raise ValueError(
+                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+            )
 
     def __post_init__(self):
         if self.num_segments < 1:
@@ -1257,13 +1268,15 @@ class UnifiedAttentionReduceTiledSpec:
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
-        return kernel_name_join(
-            "rocke_uattn_reduce_tiled_gfx942",
+        parts = [
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
             self.dtype,
-        )
+        ]
+        if self.emit_lse:
+            parts.append("lse")
+        return kernel_name_join("rocke_uattn_reduce_tiled_gfx942", *parts)
 
 
 def build_unified_attention_reduce_tiled(
@@ -1295,6 +1308,17 @@ def build_unified_attention_reduce_tiled(
     seg_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
     seg_l = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    lse = (
+        b.param(
+            "lse_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            writeonly=True,
+            align=4,
+        )
+        if spec.emit_lse
+        else None
+    )
 
     q_token = b.block_id_x()
     q_head = b.block_id_y()
@@ -1396,6 +1420,22 @@ def build_unified_attention_reduce_tiled(
         scalar_out = b.cast_f32_to(scalar_out_f32, dtype)
         out_idx, _ = out_desc_red.offset(b, token=q_token, head=q_head, dim=d)
         b.global_store(out, out_idx, scalar_out, align=2)
+
+    if spec.emit_lse:
+        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
+        # lane writes. overall_max is in log2 units (segm_max carries
+        # scale*log2e); lse_store converts to natural log and writes -inf for a
+        # row with no mass (every segment empty), whose O is already 0.
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            lse_index = b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head)
+            lse_store(
+                b,
+                lse,
+                lse_index,
+                overall_max,
+                overall_expsum,
+                row_has_mass=b.fcmp("ogt", overall_expsum, zero_f),
+            )
 
     return b.kernel
 
