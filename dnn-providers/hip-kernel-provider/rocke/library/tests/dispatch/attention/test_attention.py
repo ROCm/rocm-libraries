@@ -22,9 +22,10 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
 # ``lse`` is an output feature, not part of ATTENTION_FEATURES: only candidates
-# whose kernels write LSE (dense, RDNA WMMA, and the unified split-KV ones)
-# declare it, so every other candidate must keep declining it. This map is the
-# source of truth.
+# whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_3d`` and the
+# ``_u3d_`` split-KV tuning candidates) declare it, so every other candidate
+# must keep declining it. The generated ``_u3d_`` candidates are not in this map;
+# their feature set is checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
