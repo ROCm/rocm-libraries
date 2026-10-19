@@ -162,8 +162,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -247,93 +247,6 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 #endif
 #define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
 
-// CHECK_HIP_ERROR
-#ifdef GOOGLE_TEST
-#define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
-#else
-#define CHECK_HIP_ERROR2(ERROR)                   \
-    do                                            \
-    {                                             \
-        auto error = ERROR;                       \
-        if(error != hipSuccess)                   \
-        {                                         \
-            fprintf(stderr,                       \
-                    "error: '%s'(%d) at %s:%d\n", \
-                    hipGetErrorString(error),     \
-                    error,                        \
-                    __FILE__,                     \
-                    __LINE__);                    \
-            exit(EXIT_FAILURE);                   \
-        }                                         \
-    } while(0)
-#endif
-#define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
-
-// Record a failure without throwing, so these are safe in a destructor.
-// Inline so GOOGLE_TEST is taken from the including translation unit.
-inline void log_hip_error(const char* call, hipError_t status)
-{
-#ifdef GOOGLE_TEST
-    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
-#else
-    fprintf(
-        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
-#endif
-}
-
-inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
-{
-#ifdef GOOGLE_TEST
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
-        << call << " failed: " << hipsparseStatusToString(status);
-#else
-    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
-#endif
-}
-
-[[noreturn]] inline void throw_hip_error(const char* call, hipError_t status)
-{
-    std::ostringstream message;
-    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
-            << ")";
-    throw std::runtime_error(message.str());
-}
-
-[[noreturn]] inline void throw_hipsparse_error(const char* call, hipsparseStatus_t status)
-{
-    std::ostringstream message;
-    message << call << " failed: " << hipsparseStatusToString(status) << " ("
-            << static_cast<int>(status) << ")";
-    throw std::runtime_error(message.str());
-}
-
-// Constructors throw so a failed create cannot be used by the rest of the test.
-// Destructors record a failed destroy without throwing, so teardown stays safe
-// while another exception is unwinding.
-inline void throw_if_hip_error(const char* call, hipError_t status)
-{
-    if(status != hipSuccess)
-    {
-        throw_hip_error(call, status);
-    }
-}
-
-inline void throw_if_hipsparse_error(const char* call, hipsparseStatus_t status)
-{
-    if(status != HIPSPARSE_STATUS_SUCCESS)
-    {
-        throw_hipsparse_error(call, status);
-    }
-}
-
-inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
-{
-    if(status != HIPSPARSE_STATUS_SUCCESS)
-    {
-        log_hipsparse_error(call, status);
-    }
-}
-
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
 #define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
@@ -359,8 +272,36 @@ inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
 #endif
 #define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
 
-// CHECK_HIPSPARSE_ERROR
-#define CHECK_HIPSPARSE_ERROR(ERROR) EXPECT_HIPSPARSE_STATUS(ERROR, HIPSPARSE_STATUS_SUCCESS)
+// Throw so a failure in a helper unwinds to the test or benchmark boundary.
+inline void throw_on_hip_error(const char* call, hipError_t status, const char* file, int line)
+{
+    if(status == hipSuccess)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": " << call << " failed: " << hipGetErrorString(status)
+            << " (" << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
+
+inline void
+    throw_on_hipsparse_error(const char* call, hipsparseStatus_t status, const char* file, int line)
+{
+    if(status == HIPSPARSE_STATUS_SUCCESS)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": " << call
+            << " failed: " << hipsparseStatusToString(status);
+    throw std::runtime_error(message.str());
+}
+
+#define CHECK_HIP_ERROR(ERROR) throw_on_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
+#define CHECK_HIPSPARSE_ERROR(ERROR) throw_on_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
@@ -3546,11 +3487,17 @@ inline void host_csrmv(hipsparseOperation_t trans,
                        const X*             x,
                        T                    beta,
                        Y*                   y,
-                       hipsparseIndexBase_t base,
-                       int                  warp_size)
+                       hipsparseIndexBase_t base)
 {
     if(trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
     {
+        // Get device properties
+        int             dev;
+        hipDeviceProp_t prop{};
+
+        CHECK_HIP_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
 
@@ -3562,7 +3509,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
             WF_SIZE = 8;
         else if(nnz_per_row < 32)
             WF_SIZE = 16;
-        else if(nnz_per_row < 64 || warp_size == 32)
+        else if(nnz_per_row < 64 || prop.warpSize == 32)
             WF_SIZE = 32;
         else
             WF_SIZE = 64;
@@ -5184,20 +5131,26 @@ static inline void host_lssolve(J                     M,
                                 hipsparseDiagType_t   diag_type,
                                 hipsparseIndexBase_t  base,
                                 J*                    struct_pivot,
-                                J*                    numeric_pivot,
-                                int                   warp_size)
+                                J*                    numeric_pivot)
 {
+    // Get device properties
+    int             dev;
+    hipDeviceProp_t prop{};
+
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(J i = 0; i < nrhs; ++i)
     {
-        std::vector<T> temp(warp_size);
+        std::vector<T> temp(prop.warpSize);
 
         // Process lower triangular part
         for(J row = 0; row < M; ++row)
         {
-            temp.assign(warp_size, make_DataType<T>(0.0));
+            temp.assign(prop.warpSize, make_DataType<T>(0.0));
 
             J idx_B
                 = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
@@ -5219,9 +5172,9 @@ static inline void host_lssolve(J                     M,
 
             T diag_val = make_DataType<T>(0.0);
 
-            for(I l = row_begin; l < row_end; l += warp_size)
+            for(I l = row_begin; l < row_end; l += prop.warpSize)
             {
-                for(int k = 0; k < warp_size; ++k)
+                for(int k = 0; k < prop.warpSize; ++k)
                 {
                     I j = l + k;
 
@@ -5281,9 +5234,9 @@ static inline void host_lssolve(J                     M,
                 }
             }
 
-            for(int j = 1; j < warp_size; j <<= 1)
+            for(int j = 1; j < prop.warpSize; j <<= 1)
             {
-                for(int k = 0; k < warp_size - j; ++k)
+                for(int k = 0; k < prop.warpSize - j; ++k)
                 {
                     temp[k] = temp[k] + temp[k + j];
                 }
@@ -5320,20 +5273,26 @@ static inline void host_ussolve(J                     M,
                                 hipsparseDiagType_t   diag_type,
                                 hipsparseIndexBase_t  base,
                                 J*                    struct_pivot,
-                                J*                    numeric_pivot,
-                                int                   warp_size)
+                                J*                    numeric_pivot)
 {
+    // Get device properties
+    int             dev;
+    hipDeviceProp_t prop{};
+
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(J i = 0; i < nrhs; ++i)
     {
-        std::vector<T> temp(warp_size);
+        std::vector<T> temp(prop.warpSize);
 
         // Process upper triangular part
         for(J row = M - 1; row >= 0; --row)
         {
-            temp.assign(warp_size, make_DataType<T>(0.0));
+            temp.assign(prop.warpSize, make_DataType<T>(0.0));
 
             J idx_B
                 = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
@@ -5355,9 +5314,9 @@ static inline void host_ussolve(J                     M,
 
             T diag_val = make_DataType<T>(0.0);
 
-            for(I l = row_end - 1; l >= row_begin; l -= warp_size)
+            for(I l = row_end - 1; l >= row_begin; l -= prop.warpSize)
             {
-                for(int k = 0; k < warp_size; ++k)
+                for(int k = 0; k < prop.warpSize; ++k)
                 {
                     I j = l - k;
 
@@ -5414,9 +5373,9 @@ static inline void host_ussolve(J                     M,
                 }
             }
 
-            for(int j = 1; j < warp_size; j <<= 1)
+            for(int j = 1; j < prop.warpSize; j <<= 1)
             {
-                for(int k = 0; k < warp_size - j; ++k)
+                for(int k = 0; k < prop.warpSize - j; ++k)
                 {
                     temp[k] = temp[k] + temp[k + j];
                 }
@@ -5587,15 +5546,21 @@ void host_csr_lsolve(J                    M,
                      hipsparseDiagType_t  diag_type,
                      hipsparseIndexBase_t base,
                      J*                   struct_pivot,
-                     J*                   numeric_pivot,
-                     int                  warp_size)
+                     J*                   numeric_pivot)
 {
-    std::vector<T> temp(warp_size);
+    // Get device properties
+    int             dev;
+    hipDeviceProp_t prop{};
+
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
+    std::vector<T> temp(prop.warpSize);
 
     // Process lower triangular part
     for(J row = 0; row < M; ++row)
     {
-        temp.assign(warp_size, make_DataType<T>(0.0));
+        temp.assign(prop.warpSize, make_DataType<T>(0.0));
         temp[0] = testing_mult(alpha, x[row]);
 
         I diag      = -1;
@@ -5604,9 +5569,9 @@ void host_csr_lsolve(J                    M,
 
         T diag_val = make_DataType<T>(0.0);
 
-        for(I l = row_begin; l < row_end; l += warp_size)
+        for(I l = row_begin; l < row_end; l += prop.warpSize)
         {
-            for(int k = 0; k < warp_size; ++k)
+            for(int k = 0; k < prop.warpSize; ++k)
             {
                 I j = l + k;
 
@@ -5653,9 +5618,9 @@ void host_csr_lsolve(J                    M,
             }
         }
 
-        for(int j = 1; j < warp_size; j <<= 1)
+        for(int j = 1; j < prop.warpSize; j <<= 1)
         {
-            for(int k = 0; k < warp_size - j; ++k)
+            for(int k = 0; k < prop.warpSize - j; ++k)
             {
                 temp[k] = temp[k] + temp[k + j];
             }
@@ -5688,15 +5653,21 @@ void host_csr_usolve(J                    M,
                      hipsparseDiagType_t  diag_type,
                      hipsparseIndexBase_t base,
                      J*                   struct_pivot,
-                     J*                   numeric_pivot,
-                     int                  warp_size)
+                     J*                   numeric_pivot)
 {
-    std::vector<T> temp(warp_size);
+    // Get device properties
+    int             dev;
+    hipDeviceProp_t prop{};
+
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
+
+    std::vector<T> temp(prop.warpSize);
 
     // Process upper triangular part
     for(J row = M - 1; row >= 0; --row)
     {
-        temp.assign(warp_size, make_DataType<T>(0));
+        temp.assign(prop.warpSize, make_DataType<T>(0));
         temp[0] = testing_mult(alpha, x[row]);
 
         I diag      = -1;
@@ -5705,9 +5676,9 @@ void host_csr_usolve(J                    M,
 
         T diag_val = make_DataType<T>(0);
 
-        for(I l = row_end - 1; l >= row_begin; l -= warp_size)
+        for(I l = row_end - 1; l >= row_begin; l -= prop.warpSize)
         {
-            for(int k = 0; k < warp_size; ++k)
+            for(int k = 0; k < prop.warpSize; ++k)
             {
                 I j = l - k;
 
@@ -5750,9 +5721,9 @@ void host_csr_usolve(J                    M,
             }
         }
 
-        for(int j = 1; j < warp_size; j <<= 1)
+        for(int j = 1; j < prop.warpSize; j <<= 1)
         {
-            for(int k = 0; k < warp_size - j; ++k)
+            for(int k = 0; k < prop.warpSize - j; ++k)
             {
                 temp[k] = temp[k] + temp[k + j];
             }
@@ -5788,8 +5759,7 @@ void host_csrsv(hipsparseOperation_t trans,
                 hipsparseFillMode_t  fill_mode,
                 hipsparseIndexBase_t base,
                 J*                   struct_pivot,
-                J*                   numeric_pivot,
-                int                  warp_size)
+                J*                   numeric_pivot)
 {
     // Initialize pivot
     *struct_pivot  = M + 1;
@@ -5809,8 +5779,7 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot,
-                            warp_size);
+                            numeric_pivot);
         }
         else
         {
@@ -5824,8 +5793,7 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot,
-                            warp_size);
+                            numeric_pivot);
         }
     }
     else if(trans == HIPSPARSE_OPERATION_TRANSPOSE
@@ -5868,8 +5836,7 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot,
-                            warp_size);
+                            numeric_pivot);
         }
         else
         {
@@ -5883,8 +5850,7 @@ void host_csrsv(hipsparseOperation_t trans,
                             diag_type,
                             base,
                             struct_pivot,
-                            numeric_pivot,
-                            warp_size);
+                            numeric_pivot);
         }
     }
 
@@ -5908,8 +5874,7 @@ void host_coosv(hipsparseOperation_t  trans,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 I*                    struct_pivot,
-                I*                    numeric_pivot,
-                int                   warp_size)
+                I*                    numeric_pivot)
 {
     std::vector<I> csr_row_ptr(M + 1);
 
@@ -5939,8 +5904,7 @@ void host_coosv(hipsparseOperation_t  trans,
                fill_mode,
                base,
                struct_pivot,
-               numeric_pivot,
-               warp_size);
+               numeric_pivot);
 }
 
 template <typename I, typename J, typename T>
@@ -5960,8 +5924,7 @@ void host_csrsm2(J                     M,
                  hipsparseFillMode_t   fill_mode,
                  hipsparseIndexBase_t  base,
                  J*                    struct_pivot,
-                 J*                    numeric_pivot,
-                 int                   warp_size)
+                 J*                    numeric_pivot)
 {
     // Initialize pivot
     *struct_pivot  = M + 1;
@@ -5984,8 +5947,7 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot,
-                         warp_size);
+                         numeric_pivot);
         }
         else
         {
@@ -6002,8 +5964,7 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot,
-                         warp_size);
+                         numeric_pivot);
         }
     }
     else if(transA == HIPSPARSE_OPERATION_TRANSPOSE
@@ -6049,8 +6010,7 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot,
-                         warp_size);
+                         numeric_pivot);
         }
         else
         {
@@ -6067,8 +6027,7 @@ void host_csrsm2(J                     M,
                          diag_type,
                          base,
                          struct_pivot,
-                         numeric_pivot,
-                         warp_size);
+                         numeric_pivot);
         }
     }
 
@@ -6098,8 +6057,7 @@ void host_csrsm(J                     M,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 J*                    struct_pivot,
-                J*                    numeric_pivot,
-                int                   warp_size)
+                J*                    numeric_pivot)
 {
     J B_m = (trans_B == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? M : nrhs;
     J B_n = (trans_B == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? nrhs : M;
@@ -6248,8 +6206,7 @@ void host_csrsm(J                     M,
                 fill_mode,
                 base,
                 struct_pivot,
-                numeric_pivot,
-                warp_size);
+                numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -6272,8 +6229,7 @@ void host_coosm(I                     M,
                 hipsparseFillMode_t   fill_mode,
                 hipsparseIndexBase_t  base,
                 I*                    struct_pivot,
-                I*                    numeric_pivot,
-                int                   warp_size)
+                I*                    numeric_pivot)
 {
     I B_m = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? M : nrhs;
     I B_n = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? nrhs : M;
@@ -6437,8 +6393,7 @@ void host_coosm(I                     M,
                 fill_mode,
                 base,
                 struct_pivot,
-                numeric_pivot,
-                warp_size);
+                numeric_pivot);
 }
 
 /* ============================================================================================ */

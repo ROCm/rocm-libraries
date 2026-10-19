@@ -155,13 +155,8 @@ static void call_spsv(hipsparseHandle_t&     handle,
     CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
     // Host SpSV
-    J               struct_pivot  = -1;
-    J               numeric_pivot = -1;
-    int             device_id;
-    hipDeviceProp_t device_prop{};
-    CHECK_HIP_ERROR(hipGetDevice(&device_id));
-    CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
-
+    J struct_pivot  = -1;
+    J numeric_pivot = -1;
     host_csrsv(transA,
                m,
                nnz,
@@ -175,8 +170,7 @@ static void call_spsv(hipsparseHandle_t&     handle,
                uplo,
                idx_base,
                &struct_pivot,
-               &numeric_pivot,
-               device_prop.warpSize);
+               &numeric_pivot);
 
     // Only validate when the triangular system is non-singular (no structural
     // or numerical pivot was encountered by the host reference).
@@ -303,14 +297,9 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(hy_out.data(), dy, sizeof(T) * m, hipMemcpyDeviceToHost));
 
-                        std::vector<T>  hy_gold(hy);
-                        J               struct_pivot  = -1;
-                        J               numeric_pivot = -1;
-                        int             device_id;
-                        hipDeviceProp_t device_prop{};
-                        CHECK_HIP_ERROR(hipGetDevice(&device_id));
-                        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
-
+                        std::vector<T> hy_gold(hy);
+                        J              struct_pivot  = -1;
+                        J              numeric_pivot = -1;
                         host_csrsv(op,
                                    m,
                                    nnz,
@@ -324,8 +313,7 @@ static void call_spsv_shared_buffer(hipsparseHandle_t&                       han
                                    uplo,
                                    idx_base,
                                    &struct_pivot,
-                                   &numeric_pivot,
-                                   device_prop.warpSize);
+                                   &numeric_pivot);
 
                         if(struct_pivot == -1 && numeric_pivot == -1)
                         {
