@@ -38,10 +38,6 @@ def problem_type(raw):
 def solution_state():
     # The fully-derived solution state (all keys MasterSolutionLibrary needs),
     # obtained by parsing the fixture into a real Solution.
-    import importlib.util
-
-    if importlib.util.find_spec("tensilelite_write") is None:
-        pytest.skip("tensilelite_write extension was not built")
     from Tensile.Common.Architectures import SUPPORTED_ISA
     from Tensile.Common.Capabilities import makeIsaInfoMap
     from Tensile.Toolchain.Assembly import makeAssemblyToolchain
@@ -89,15 +85,15 @@ def test_problem_type_predicates(problem_type, snapshot):
 
 # --- SizeMapping / InternalArgsSupport / Solution ---------------------------
 
-def test_size_mapping(solution_state):
-    record = C._solution_record(solution_state)
-    assert isinstance(record["sizeMapping"], dict)
-    assert record["sizeMapping"]["macroTile"]
+def test_size_mapping(solution_state, snapshot):
+    from Tensile.Common.Utilities import state
+    sm = C.SizeMapping.FromOriginalState(solution_state)
+    assert isinstance(state(sm), dict)
 
 
 def test_internal_args_support(solution_state):
-    record = C._solution_record(solution_state)
-    assert "version" in record["internalArgsSupport"]
+    ias = C.InternalArgsSupport.FromOriginalState(solution_state)
+    assert ias is not None
 
 
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):

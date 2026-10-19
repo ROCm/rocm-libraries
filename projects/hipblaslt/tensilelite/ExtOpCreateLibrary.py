@@ -25,6 +25,7 @@ from collections import defaultdict
 import os
 import glob
 import zlib
+import msgpack
 import yaml
 import json
 
@@ -65,6 +66,7 @@ if __name__ == '__main__':
 
     output_open_foramt = 'wb' if lib_format == 'dat' else 'w'
     output_format_2_writer = {
+        'dat': msgpack,
         'yaml': yaml,
         'json': json
     }
@@ -74,13 +76,6 @@ if __name__ == '__main__':
     output_lib_gz_path = output_lib_path + '.zlib' if lib_format == 'dat' else None
 
     if lib_format == 'dat':
-        try:
-            import tensilelite_write
-        except ImportError as error:
-            raise SystemExit(
-                "hipblasltExtOpLibrary MessagePack is written by tensilelite_write, "
-                "which this build did not produce: {}".format(error)
-            )
         existing_path = output_lib_gz_path if os.path.exists(output_lib_gz_path) else (
             output_lib_path if os.path.exists(output_lib_path) else None
         )
@@ -88,9 +83,9 @@ if __name__ == '__main__':
             data = open(existing_path, 'rb').read()
             if existing_path.endswith('.zlib'):
                 data = zlib.decompress(data)
-            org_content = tensilelite_write.decode(data)
+            org_content = msgpack.unpackb(data, strict_map_key=False)
             lib_meta = {**org_content, **lib_meta}
-        raw = tensilelite_write.encode(lib_meta)
+        raw = msgpack.packb(lib_meta)
         with open(output_lib_gz_path, 'wb') as f:
             f.write(zlib.compress(raw, 9))
         try:

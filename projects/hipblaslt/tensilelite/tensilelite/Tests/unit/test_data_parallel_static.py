@@ -434,19 +434,17 @@ def _minimal_size_mapping_state():
 
 
 def test_size_mapping_data_parallel_round_trips():
-    from test_streamk_force_dp_only import size_mapping_from_state
-
     assert "tileProcessingStrategy" in SizeMapping.StateKeys
 
     state = _minimal_size_mapping_state()
     state["TileProcessingStrategy"] = "DataParallel"
     state["WorkAssignment"] = "StaticGrid"
-    assert size_mapping_from_state(state).tileProcessingStrategy == "DataParallel"
+    assert SizeMapping.FromOriginalState(state).tileProcessingStrategy == "DataParallel"
 
     state_off = _minimal_size_mapping_state()
     state_off["TileProcessingStrategy"] = "StreamK"
     state_off["WorkAssignment"] = "StaticGrid"
-    assert size_mapping_from_state(state_off).tileProcessingStrategy == "StreamK"
+    assert SizeMapping.FromOriginalState(state_off).tileProcessingStrategy == "StreamK"
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +562,6 @@ def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     ri.setKernel(isa, kernel["WavefrontSize"])
 
     kwa = KernelWriterAssembly(assembler, DebugConfig())
-    kernel.duplicate = False
     kernel["BaseName"] = getKernelFileBase(False, kernel)
     res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
     src = res.src
