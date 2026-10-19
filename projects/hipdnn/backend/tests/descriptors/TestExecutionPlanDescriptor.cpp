@@ -17,8 +17,12 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <memory>
+#include <thread>
+#include <vector>
 
 using namespace hipdnn_backend;
 using namespace plugin;
@@ -887,4 +891,54 @@ TEST_F(TestExecutionPlanDescriptor, GetExecutionContext)
     auto context = plan->getExecutionContext();
     ASSERT_NE(context, nullptr);
     ASSERT_EQ(context, getExecutionContext());
+}
+
+TEST_F(TestExecutionPlanDescriptor, RecordExecutionCountsPerPlan)
+{
+    auto plan = getExecutionPlanDescriptor();
+    ExecutionPlanDescriptor otherPlan;
+
+    EXPECT_EQ(plan->recordExecution(), 1u);
+    EXPECT_EQ(plan->recordExecution(), 2u);
+    EXPECT_EQ(otherPlan.recordExecution(), 1u);
+    EXPECT_EQ(plan->recordExecution(), 3u);
+}
+
+TEST_F(TestExecutionPlanDescriptor, RecordExecutionGivesDistinctCountsAcrossThreads)
+{
+    constexpr size_t THREAD_COUNT = 8;
+    constexpr size_t EXECUTIONS_PER_THREAD = 1000;
+    auto plan = getExecutionPlanDescriptor();
+
+    std::vector<std::vector<uint64_t>> countsPerThread(THREAD_COUNT);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(auto& counts : countsPerThread)
+    {
+        threads.emplace_back([&plan, &counts]() {
+            counts.reserve(EXECUTIONS_PER_THREAD);
+            for(size_t i = 0; i < EXECUTIONS_PER_THREAD; ++i)
+            {
+                counts.push_back(plan->recordExecution());
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    std::vector<uint64_t> allCounts;
+    allCounts.reserve(THREAD_COUNT * EXECUTIONS_PER_THREAD);
+    for(const auto& counts : countsPerThread)
+    {
+        allCounts.insert(allCounts.end(), counts.begin(), counts.end());
+    }
+    std::sort(allCounts.begin(), allCounts.end());
+
+    // Each execution must get a unique count in [1, total].
+    for(size_t i = 0; i < allCounts.size(); ++i)
+    {
+        ASSERT_EQ(allCounts[i], static_cast<uint64_t>(i + 1));
+    }
 }
