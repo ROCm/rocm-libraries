@@ -75,7 +75,7 @@ try
     // size to store info about positiveness of each subblock
     size_t size_iinfo;
 
-    I const max_batch_count = 64 * 1024;
+    I const max_batch_count = 64 * 1024 - 1;
     I const nsweep = ceildiv(batch_count_arg, max_batch_count);
     I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
