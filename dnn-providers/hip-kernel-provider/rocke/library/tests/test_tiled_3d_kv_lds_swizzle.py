@@ -157,7 +157,7 @@ def test_gfx942_native_builder_matches_python(kw):
         ({}, "gfx1250", False),
     ],
 )
-def test_gfx942_dispatch_scope(monkeypatch, kw, arch, expected):
+def test_gfx942_dispatch_scope(kw, arch, expected):
     from kernels.common import attention_unified as au
 
     base: dict[str, object] = {
@@ -172,7 +172,6 @@ def test_gfx942_dispatch_scope(monkeypatch, kw, arch, expected):
         "dtype": "bf16",
     }
     base.update(kw)
-    monkeypatch.delenv("HIPDNN_GFX942_3D_WKV", raising=False)
     problem = au.UnifiedAttentionProblem(**base)  # type: ignore[arg-type]
     assert au._kv_lds_swizzle_3d(problem, arch) is expected
 

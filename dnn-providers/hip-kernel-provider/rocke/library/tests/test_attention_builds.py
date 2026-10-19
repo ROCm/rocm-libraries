@@ -2361,11 +2361,7 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_gfx942_3d_wide_kv_load_up_to_head_size_128(self):
         """The gfx942 3D wide K/V feed is on for fp16/bf16 up to head size 128;
         head size 256 keeps the async DMA (the wide feed relies on the
-        compiler to overlap its copies). ``HIPDNN_GFX942_3D_WKV=0`` and fp8 K/V
-        turn it off."""
-        import os
-        from unittest import mock
-
+        compiler to overlap its copies). fp8 K/V turns it off."""
         import kernels.common.attention_unified as au
 
         def problem(head_size, **kw):
@@ -2383,26 +2379,12 @@ class TestAttentionHelpers(unittest.TestCase):
             )
 
         with _patch_resolved_arch("gfx942"):
-            with mock.patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("HIPDNN_GFX942_3D_WKV", None)
-                self.assertTrue(
-                    au._enable_gfx942_3d_wide_kv_load(problem(64), "gfx942")
-                )
-                self.assertTrue(
-                    au._enable_gfx942_3d_wide_kv_load(problem(128), "gfx942")
-                )
-                self.assertFalse(
-                    au._enable_gfx942_3d_wide_kv_load(problem(256), "gfx942")
-                )
-                self.assertFalse(
-                    au._enable_gfx942_3d_wide_kv_load(
-                        problem(128, use_fp8=True), "gfx942"
-                    )
-                )
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX942_3D_WKV": "0"}):
-                self.assertFalse(
-                    au._enable_gfx942_3d_wide_kv_load(problem(128), "gfx942")
-                )
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(64), "gfx942"))
+            self.assertTrue(au._enable_gfx942_3d_wide_kv_load(problem(128), "gfx942"))
+            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(problem(256), "gfx942"))
+            self.assertFalse(
+                au._enable_gfx942_3d_wide_kv_load(problem(128, use_fp8=True), "gfx942")
+            )
 
     def test_gfx950_3d_graph_replay_is_opt_in(self):
         """gfx950 3D split-KV graph replay stays off unless explicitly enabled.
