@@ -14,11 +14,11 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /// True when a device that reports @p deviceArch can run a code object of source kind
-/// @p kind that was built for @p target.
+/// @p kind that is recorded with @p target.
 ///
-/// A kpack archive entry serves each device whose arch name starts with the entry name,
-/// so a kpack target follows the rule that selects the entry. Every other kind needs
-/// the exact target, feature flags included.
+/// A kpack target is a base architecture name. It serves each device whose arch name is that
+/// name, with or without feature flags. Every other kind needs the exact target, feature flags
+/// included.
 inline bool isCodeObjectTargetCompatible(hipdnn_plugin_sdk::ingestor::KernelSourceKind kind,
                                          std::string_view target,
                                          std::string_view deviceArch)

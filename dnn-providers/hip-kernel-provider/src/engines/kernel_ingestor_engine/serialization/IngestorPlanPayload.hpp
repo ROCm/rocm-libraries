@@ -77,7 +77,7 @@ struct IngestorPlanPayload
     hipdnn_plugin_sdk::ingestor::MetadataValues launchValues;
     hipdnn_plugin_sdk::ingestor::KernelSourceKind sourceKind{};
     std::string symbol;
-    /// The GPU target the code object was built for.
+    /// The base architecture of the GPU the plan was saved on.
     std::string target;
     /// The kernel's identity digest: 64 lowercase hex characters.
     std::string sha256;

@@ -64,8 +64,8 @@ std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>>
         serialization::refuseIngestorPlan(
             IngestorPlanRefusal::INCOMPATIBLE,
             kernel + " holds a " + hipdnn_plugin_sdk::ingestor::toString(payload.sourceKind)
-                + " code object built for target '" + payload.target + "', which device "
-                + std::to_string(deviceOrdinal) + " ('" + deviceArch + "') cannot run");
+                + " plan saved for '" + payload.target + "', which cannot run on device "
+                + std::to_string(deviceOrdinal) + " ('" + deviceArch + "')");
     }
 
     // Registration is idempotent. It makes the dispatch names resolvable whichever entry

@@ -39,7 +39,7 @@ struct SavedKernelCode
     DescriptorId kernelId{};
     KernelSourceKind sourceKind = KernelSourceKind::EMBEDDED_SOURCE;
     std::string symbol;
-    /// The GPU target the code object was built for.
+    /// The base architecture of the GPU the plan was saved on.
     std::string target;
     /// Lowercase hex SHA-256 of `codeObject`.
     std::string sha256;

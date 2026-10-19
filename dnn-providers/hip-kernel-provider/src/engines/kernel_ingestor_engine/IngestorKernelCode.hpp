@@ -111,7 +111,7 @@ struct KpackSource
 struct IngestorCodeObject
 {
     std::vector<uint8_t> bytes;
-    /// The GPU target the bytes were built for.
+    /// The base architecture of the GPU the plan was saved on.
     std::string target;
     /// Lowercase hex SHA-256 of `bytes`.
     std::string sha256;
@@ -661,7 +661,8 @@ inline IngestorCodeObject IngestorKernelCode::readCodeObject() const
         const auto* first = static_cast<const uint8_t*>(codeObject.data());
         IngestorCodeObject result;
         result.bytes.assign(first, first + codeObject.size());
-        result.target = selectedArch;
+        // This holds the device base name. It relies on archive keys that carry no feature suffix.
+        result.target = std::string(hipdnn_plugin_sdk::stripArchFeatures(_source->deviceArch));
         result.sha256 = _source->sha256;
         result.symbol = _source->symbol;
         return result;

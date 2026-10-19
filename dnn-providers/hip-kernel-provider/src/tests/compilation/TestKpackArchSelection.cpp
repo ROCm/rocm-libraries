@@ -73,6 +73,29 @@ TEST(TestKpackArchSelection, NoEntryForTheDeviceSelectsNothing)
     EXPECT_EQ(selectKpackArchiveArch({}, "gfx90a"), nullptr);
 }
 
+TEST(TestKpackArchSelection, AnExplicitEntryBeatsAGenericEntry)
+{
+    const std::vector<std::string> arches{"gfx11-generic", "gfx1151"};
+
+    const std::string* selected = selectKpackArchiveArch(arches, "gfx1151");
+
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(*selected, "gfx1151");
+}
+
+TEST(TestKpackArchSelection, AGenericEntryServesAMemberDevice)
+{
+    const std::vector<std::string> arches{"gfx942", "gfx11-generic"};
+
+    const std::string* member = selectKpackArchiveArch(arches, "gfx1151:xnack-");
+    ASSERT_NE(member, nullptr);
+    EXPECT_EQ(*member, "gfx11-generic");
+
+    const std::string* other = selectKpackArchiveArch(arches, "gfx942");
+    ASSERT_NE(other, nullptr);
+    EXPECT_EQ(*other, "gfx942");
+}
+
 } // namespace
 } // namespace hip_kernel_provider::compilation
 

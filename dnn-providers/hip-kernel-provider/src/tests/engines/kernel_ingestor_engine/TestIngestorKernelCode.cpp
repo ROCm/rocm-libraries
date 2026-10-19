@@ -972,6 +972,26 @@ TEST(TestIngestorKernelCodeReload, RefusesADeviceThatCannotRunTheExactTarget)
     EXPECT_TRUE(code.loads.empty());
 }
 
+TEST(TestIngestorKernelCodeReload, LaunchesARestoredPlanOnItsSavedBaseArchOnly)
+{
+    const FakeStoredCode code(storedKpackCode("gfx1151"),
+                              {{0, "gfx1151:xnack-"}, {1, "gfx1151:xnack-"}, {2, "gfx1100"}},
+                              0);
+
+    const auto& sameBaseArch = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+    EXPECT_EQ(sameBaseArch.ordinal(), 1);
+
+    const std::string what
+        = serialization::expectPluginException([&]() { static_cast<void>(code.kernelFor(2)); },
+                                               HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                               "",
+                                               "of another architecture");
+    EXPECT_NE(what.find("'gfx1100'"), std::string::npos) << what;
+
+    ASSERT_EQ(code.loads.size(), 1U);
+    EXPECT_EQ(code.loads[0].deviceOrdinal, 1);
+}
+
 // Gives the stored-bytes constructor a first entry with no program and no kernel.
 class EmptyStoredCode : public IngestorKernelCode
 {

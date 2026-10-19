@@ -3,10 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string>
-#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -28,6 +27,8 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+#include "mocks/MockCompiledProgram.hpp"
+#include "mocks/MockRunnableKernel.hpp"
 #include "utilities/Digest.hpp"
 
 namespace hip_kernel_provider::compilation
@@ -35,6 +36,7 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
+using hip_kernel_provider::testing::copyPackedArchTree;
 using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelDefinition;
 using hip_kernel_provider::testing::readPackedKernelSource;
@@ -148,15 +150,47 @@ TEST(TestKpackCodeObjectRead, ReturnsVerifiedBytesWithoutLoadingAModule)
     EXPECT_TRUE(hipdnn_plugin_sdk::archMatches(
         deviceArch, codeObject.target, hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
         << codeObject.target << " does not serve " << deviceArch;
+    EXPECT_EQ(codeObject.target, std::string(hipdnn_plugin_sdk::stripArchFeatures(deviceArch)));
+}
 
-    KpackArchive archive;
-    KpackError error;
-    ASSERT_TRUE(archive.open(kernel.originDirectory / kernel.source.library, error))
-        << error.codeName;
-    std::vector<std::string> arches;
-    ASSERT_TRUE(archive.architectures(arches, error)) << error.codeName;
-    EXPECT_NE(std::find(arches.begin(), arches.end(), codeObject.target), arches.end())
-        << codeObject.target << " is not an entry of the archive";
+// Reads and decompresses only, so this needs no device.
+TEST(TestKpackCodeObjectRead, ACaptureRecordsTheDeviceBaseName)
+{
+    const std::filesystem::path shard = unitKpackRoot() / "gfx942";
+    if(!std::filesystem::is_directory(shard))
+    {
+        GTEST_SKIP() << "this build packs no gfx942 shard: " << shard << " does not exist.";
+    }
+
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path packed = copyPackedArchTree(shard, scratch.path());
+
+    PackedKernelSource source;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packed, packs::CONV_FWD_DESCRIPTOR, source));
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelDefinition(packed, packs::CONV_FWD_DESCRIPTOR, kernel));
+
+    KpackModuleCache cache;
+    const KpackKernelLoader loader(cache);
+    kernel_ingestor_engine::KpackSource kpackSource;
+    kpackSource.archive = source.archive;
+    kpackSource.tocKey = source.tocKey;
+    kpackSource.symbol = kernel.source.symbol;
+    kpackSource.sha256 = source.sha256;
+    kpackSource.label = "kernel '" + kernel.name + "'";
+    kpackSource.strippedArch = "gfx942";
+    kpackSource.deviceArch = "gfx942:sramecc+:xnack-";
+    const kernel_ingestor_engine::IngestorKernelCode code(loader,
+                                                          kpackSource,
+                                                          0,
+                                                          std::make_unique<MockCompiledProgram>(),
+                                                          std::make_unique<MockRunnableKernel>());
+
+    const auto codeObject = code.readCodeObject();
+
+    EXPECT_EQ(codeObject.target, "gfx942");
+    EXPECT_EQ(utilities::sha256Hex(codeObject.bytes.data(), codeObject.bytes.size()),
+              source.sha256);
 }
 
 TEST(TestKpackCodeObjectRead, RefusesBytesWhoseDigestDisagrees)

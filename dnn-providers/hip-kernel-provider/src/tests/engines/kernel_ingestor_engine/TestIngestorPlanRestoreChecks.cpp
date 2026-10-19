@@ -190,9 +190,26 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesAnotherDeviceArch)
     payload.target = FOREIGN_TARGET;
     payload.dispatchSymbol = UNKNOWN_ALIAS;
 
-    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "target 'gfx942'");
+    expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "saved for 'gfx942'");
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, DEVICE_ARCH);
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "kpack");
+}
+
+// The unknown alias stops the restore at the next check, before any module load.
+TEST_F(TestIngestorPlanRestoreChecks, AdmitsAPlanSavedOnTheSameBaseArch)
+{
+    auto payload = validConvFwdPayload();
+    payload.target = "gfx1151";
+    payload.dispatchSymbol = UNKNOWN_ALIAS;
+    const auto encoded = serialization::encodeIngestorPlan(payload);
+    const FakeDeviceResolver sameBaseArch(0, "gfx1151:xnack-");
+
+    const std::string what
+        = expectIngestorPlanRefusal([&]() { static_cast<void>(restore(encoded, sameBaseArch)); },
+                                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "no dispatch handler is registered under");
+    EXPECT_EQ(what.find("saved for '"), std::string::npos) << what;
+    EXPECT_EQ(what.find("cannot run"), std::string::npos) << what;
 }
 
 TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnknownAlias)
