@@ -108,7 +108,7 @@ void hipsparselt_init_alternating_sign(
             size_t offset = j * lda + i_batch * stride;
             for(size_t i = 0; i < M; ++i)
             {
-                auto value    = random_generator<T>();
+                auto value    = random_int_idx<T>(i + offset);
                 A[i + offset] = (i ^ j) & 1 ? value : negate(value);
             }
         }

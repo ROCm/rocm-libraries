@@ -292,6 +292,47 @@ inline void random_run_generator<double>(double* ptr, size_t num)
     hipsparselt_uniform_int_1_10_run_double(ptr, num);
 };
 
+// Counter-based generator, same as hipBLASLt's pseudo_random_device(): the value depends only on
+// the element index, so the data does not depend on the OpenMP thread count and has no short
+// period along K.
+inline uint32_t pseudo_random_idx(size_t idx)
+{
+    // Numerical Recipes ranqd1 + 3 Marsaglia xorshift rounds
+    auto s = idx * 1664525 + 1013904223;
+    s ^= (s << 13) ^ (s >> 17) ^ (s << 5);
+    s ^= (s << 13) ^ (s >> 17) ^ (s << 5);
+    s ^= (s << 13) ^ (s >> 17) ^ (s << 5);
+    return s;
+}
+
+/*! \brief  generate a random number in range [1,2,3,4,5,6,7,8,9,10] from an element index */
+template <typename T>
+inline T random_int_idx(size_t idx)
+{
+    return T(pseudo_random_idx(idx) % 10 + 1.f);
+}
+
+/*! \brief  generate a random number in range [-2,-1,0,1,2] from an element index */
+template <>
+inline __half random_int_idx<__half>(size_t idx)
+{
+    return __half(static_cast<float>(int(pseudo_random_idx(idx) % 5) - 2));
+}
+
+/*! \brief  generate a random number in range [-2,-1,0,1,2] from an element index */
+template <>
+inline hip_bfloat16 random_int_idx<hip_bfloat16>(size_t idx)
+{
+    return hip_bfloat16(static_cast<float>(int(pseudo_random_idx(idx) % 5) - 2));
+}
+
+/*! \brief  generate a random number in range [1,2,3] from an element index */
+template <>
+inline int8_t random_int_idx<int8_t>(size_t idx)
+{
+    return static_cast<int8_t>(pseudo_random_idx(idx) % 3 + 1);
+}
+
 // HPL
 
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
