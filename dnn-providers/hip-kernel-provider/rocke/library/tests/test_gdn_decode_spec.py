@@ -133,6 +133,16 @@ class TestSpecAdmission(unittest.TestCase):
         ok, why = is_valid_spec(dc.replace(GdnDecodeSpec(), dtype="f32"), arch=ARCH)
         self.assertFalse(ok)
 
+    def test_f32_is_a_state_dtype_only(self):
+        # f32 widens the recurrent state alone; q/k/v and the output stay
+        # 16-bit, so f32 is legal as state_dtype and rejected as dtype above.
+        for simple in (False, True):
+            spec = dc.replace(GdnDecodeSpec(), state_dtype="f32", simple=simple)
+            ok, why = is_valid_spec(spec, arch=ARCH)
+            self.assertTrue(ok, why)
+        ok, _ = is_valid_spec(dc.replace(GdnDecodeSpec(), state_dtype="fp8"), arch=ARCH)
+        self.assertFalse(ok)
+
     def test_nonpositive_geometry_is_rejected_cleanly(self):
         # A zero geometry field must come back as a reason, never a
         # ZeroDivisionError from a downstream ``%`` divisibility check -- the
@@ -174,6 +184,20 @@ class TestKernelNameIdentity(unittest.TestCase):
         variants = {
             "base": base,
             "state_dtype": dc.replace(base, state_dtype="f16"),
+            "state_dtype_f32": dc.replace(base, state_dtype="f32"),
+            "fuse_conv": dc.replace(
+                base, num_k_heads=32, blocks_per_v_dim=1, fuse_conv=True
+            ),
+            "fuse_out_norm": dc.replace(base, blocks_per_v_dim=1, fuse_out_norm=True),
+            "fuse_both": dc.replace(
+                base,
+                num_k_heads=32,
+                blocks_per_v_dim=1,
+                fuse_conv=True,
+                fuse_out_norm=True,
+            ),
+            "bpv1": dc.replace(base, blocks_per_v_dim=1),
+            "kh32_bpv1": dc.replace(base, num_k_heads=32, blocks_per_v_dim=1),
             "dtype": dc.replace(base, dtype="f16"),
             "wave_size": dc.replace(base, wave_size=32),
             "num_warps": dc.replace(base, num_warps=4),
@@ -346,31 +370,58 @@ class TestEmission(unittest.TestCase):
     def test_registered_gdn_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
-        # nw1_wtk1_bpv1 gives each lane the whole K reduction, so it needs 512
-        # VGPRs and spills (448 B with ROCm 7.1 on gfx950). It stays registered
-        # because it can be pinned and is the fallback when DEFAULT_TILE is
-        # illegal. Require only that it compiles.
-        spills = {"nw1_wtk1_bpv1"}
+        # Register-bound tiles: warp_threads_k=1 gives each lane the whole K
+        # reduction, so these sit at the 512-VGPR limit and whether (and how
+        # much) they spill depends on the compiler. Measured on gfx950:
+        #   nw1_wtk1_bpv1  448 B (ROCm 7.1)  364 B (ROCm 7.13)
+        #   nw1_wtk1_bpv2    0 B             372-388 B
+        #   nw2_wtk1_bpv1    0 B             376-404 B
+        # GDN ``auto`` never selects them (it always picks DEFAULT_TILE); they
+        # stay registered because they can be pinned and (1,1,1) is the
+        # fallback when DEFAULT_TILE is illegal. They may spill up to
+        # SPILL_BUDGET_BYTES, which absorbs compiler drift but still catches a
+        # register-pressure blowup. Every other registered tile must not spill.
+        SPILL_BUDGET_BYTES = 512
+        may_spill = {"nw1_wtk1_bpv1", "nw1_wtk1_bpv2", "nw2_wtk1_bpv1"}
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=16, arch="gfx950"))
+        registered = {result.candidate.spec_id for result in results}
+        self.assertLessEqual(may_spill, registered, "stale may_spill entry")
         for result in results:
             with self.subTest(spec_id=result.candidate.spec_id):
                 scratch = _compiled_scratch_bytes(self, result.spec)
-                if result.candidate.spec_id not in spills:
+                if result.candidate.spec_id in may_spill:
+                    self.assertLessEqual(scratch, SPILL_BUDGET_BYTES)
+                else:
                     self.assertEqual(scratch, 0)
 
     def test_every_kda_tuned_tile_compiles(self):
         from dispatch.gdn.gfx950 import _TUNED_TILES_KDA
 
-        for _, tile, spec_id in _TUNED_TILES_KDA:
-            with self.subTest(spec_id=spec_id):
-                spec = dc.replace(
-                    GdnDecodeSpec(),
-                    gate_kind="kda",
-                    num_warps=tile[0],
-                    warp_threads_k=tile[1],
-                    blocks_per_v_dim=tile[2],
-                )
-                self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+        # f32 doubles the state registers each lane loads, so both widths run.
+        for state_dtype in ("bf16", "f32"):
+            for _, tile, spec_id in _TUNED_TILES_KDA:
+                with self.subTest(spec_id=spec_id, state_dtype=state_dtype):
+                    spec = dc.replace(
+                        GdnDecodeSpec(),
+                        gate_kind="kda",
+                        num_warps=tile[0],
+                        warp_threads_k=tile[1],
+                        blocks_per_v_dim=tile[2],
+                        state_dtype=state_dtype,
+                    )
+                    self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+
+    def test_default_gdn_tile_compiles_with_an_f32_state(self):
+        spec = dc.replace(GdnDecodeSpec(), state_dtype="f32")
+        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+        # The simple reference path holds a whole f32 state row per thread, so
+        # it is register-heavy by construction (never dispatched; its f32
+        # numerics are covered on device). Measured on gfx950: 44 B (ROCm 7.1),
+        # 1236 B (ROCm 7.13). The budget absorbs compiler drift but still
+        # catches a register-pressure blowup.
+        SPILL_BUDGET_BYTES = 2048
+        simple = dc.replace(spec, simple=True)
+        self.assertLessEqual(_compiled_scratch_bytes(self, simple), SPILL_BUDGET_BYTES)
 
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing

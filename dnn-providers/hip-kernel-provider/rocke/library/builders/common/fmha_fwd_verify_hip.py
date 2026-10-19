@@ -9,8 +9,8 @@ hipcc** backend (``compile_kernel_via_hipcc``) instead of the LLVM-IR ->
 libamd_comgr backend, launches it via the HIP runtime, and compares the
 output against a torch-free numpy dense-attention reference.
 
-This is the HIP-path analogue of
-``builders.gfx1151.attention.wmma_fmha_fwd_verify`` (which exercises the
+This is the HIP-path analogue of the gfx1151 WMMA numeric tests in
+``library/tests/test_wmma_fmha_fwd_numeric.py`` (which exercise the
 LLVM->comgr path). It closes the HIP-path FMHA numeric gate:
 
   * gfx950 / gfx942: ``__builtin_amdgcn_mfma_*`` C++ builtins (wave64).

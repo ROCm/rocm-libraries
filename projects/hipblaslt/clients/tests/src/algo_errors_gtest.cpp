@@ -137,6 +137,39 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
     }
 
+    // No kernel applies an aux scale, so both APIs refuse a non-null one.
+    TEST_F(AlgoErrors, smoke_AuxScaleIsRefused)
+    {
+        void* scaleAux = c;
+        EXPECT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &scaleAux, sizeof(void*)),
+            HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        void* noScale = nullptr;
+        EXPECT_EQ(
+            hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &noScale, sizeof(void*)),
+            HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   in = inputs();
+        in.setScaleAux(scaleAux);
+
+        hipblaslt_ext::Gemm gemm(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        EXPECT_EQ(gemm.setProblem(kSize, kSize, kSize, 1, epilogue, in),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+
+        hipblaslt_ext::GroupedGemm grouped(
+            handle, HIPBLAS_OP_N, HIPBLAS_OP_N, kType, kType, kType, kType, HIPBLAS_COMPUTE_32F);
+        std::vector<int64_t>                     size(2, kSize), batch(2, 1);
+        std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+        std::vector<hipblaslt_ext::GemmInputs>   ins{inputs(), in};
+        EXPECT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                  HIPBLAS_STATUS_NOT_SUPPORTED);
+    }
+
     struct WorkspaceConfig
     {
         hipDataType typeAB;
