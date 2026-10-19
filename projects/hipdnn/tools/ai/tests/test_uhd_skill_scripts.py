@@ -9,7 +9,6 @@ The validation scripts run against a fake `hipdnn_bench` that answers like the r
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1018,7 +1017,9 @@ def test_a_promote_runs_the_evaluator_it_is_given(
     absent = str(tmp_path / "no-such-build" / "hipdnn_uhd_features")
     refused = tmp_path / "refused"
     tree.build_farm(promotable["root"], refused)
-    with pytest.raises(SystemExit, match=re.escape(absent)):
+    # The refusal quotes the path as a repr, which doubles Windows separators, so the
+    # match is on the directory only this test names.
+    with pytest.raises(SystemExit, match="no-such-build"):
         tree.install_promoted(
             refused,
             promotable["model"],
