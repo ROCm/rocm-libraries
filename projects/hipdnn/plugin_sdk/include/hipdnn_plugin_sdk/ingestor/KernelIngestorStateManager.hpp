@@ -841,25 +841,19 @@ private:
         return complete;
     }
 
-    /// The graph is keyed by its v4 id, or by its exact bytes when it has none: a corpus
-    /// graph's content-derived id is not v4, and every plugin call for it must still hit.
     /// Device comes from the context, not a separate argument, so one device's catalog
     /// never caches under another's key. The engine version comes from this manager. The
     /// ranking metric is part of the key because both orders depend on it (RFC 0019 §11.4);
     /// the registry's own name is stored because the key outlives the request.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
+        const auto graphId = tryGetGraphId(context.graph);
         const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
-        if(metric == nullptr)
+        if(!graphId.has_value() || metric == nullptr)
         {
             return std::nullopt;
         }
-        auto graph = CatalogGraphKey::tryMake(context.graph);
-        if(!graph.has_value())
-        {
-            return std::nullopt;
-        }
-        return CatalogKey{std::move(*graph), context.deviceId, _engine.version, metric->name};
+        return CatalogKey{*graphId, context.deviceId, _engine.version, metric->name};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -891,8 +885,7 @@ private:
         else
         {
             HIPDNN_PLUGIN_LOG_TRACE(
-                "ingestor: graph carries neither a v4 id nor serialized bytes, so its catalog "
-                "cannot be cached");
+                "ingestor: graph carries no identity, so its catalog cannot be cached");
         }
 
         Catalog catalog = buildCatalog(context);

@@ -156,19 +156,8 @@ inline GraphId makeNilGraphId()
     return GraphId{};
 }
 
-/// A graph that supplies no serialized bytes and no id: nothing can key its catalog.
-class TestGraphWithoutBytes : public TestGraph
-{
-public:
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
-    {
-        return {nullptr, 0};
-    }
-};
-
 /// A serialized single-node matmul C[m, n] = A[m, k] x B[k, n], so `graph.flops` = 2mnk;
-/// TestGraph has no node and so no work. @p graphId, when given and v4, keys its catalog;
-/// otherwise its bytes do.
+/// TestGraph has no node and so no work. @p graphId, when given, makes the catalog cacheable.
 class MatmulTestGraph
 {
 public:
