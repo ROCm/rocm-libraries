@@ -32,7 +32,9 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/uninitialized_copy.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__new/device_new.h)
+#else
 #  include <type_traits>
 #endif
 
@@ -50,7 +52,6 @@ struct uninitialized_copy_functor
   {
     const InputType& in = thrust::get<0>(t);
     OutputType& out     = thrust::get<1>(t);
-
     ::new (static_cast<void*>(&out)) OutputType(in);
   } // end operator()()
 }; // end uninitialized_copy_functor
