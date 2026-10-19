@@ -13,7 +13,8 @@
 #   SHA-256 of its bytes; the per-file lines are sorted (locale-independent) and
 #   the whole list is hashed once more to yield the build-id. Including the path
 #   means a rename alone changes the id; including per-file content means an edit
-#   to any byte changes it.
+#   to any byte changes it. The table inputs are also configure dependencies of
+#   the calling directory, so an edit to one re-runs CMake and the id follows.
 
 # Compute a deterministic build id for the rocKE C++ source tree.
 function(rocke_compute_build_id out_var root_dir)
@@ -35,6 +36,14 @@ function(rocke_compute_build_id out_var root_dir)
        "${root_dir}/python/rocke/core/arch/data/arch_domain_waivers.json"
        "${root_dir}/python/rocke/core/arch/domain.py"
        "${root_dir}/tools/gen_arch_domain_cpp.py")
+  # CMake runs this function while it configures, so the id is only as fresh as
+  # the last configure. The glob above sees a column added or removed, but not
+  # one edited. The build still regenerates the table from the new bytes, so in
+  # an existing build directory the new table would carry the old id. Naming
+  # the inputs as configure dependencies makes the next build re-run CMake,
+  # which computes the id again.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+               ${_rocke_arch_domain})
   set(_rocke_all ${_rocke_src} ${_rocke_hdr} ${_rocke_arch_domain})
 
   set(_rocke_lines "")

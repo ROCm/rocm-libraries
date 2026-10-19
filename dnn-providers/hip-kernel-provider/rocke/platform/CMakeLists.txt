@@ -402,7 +402,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_wavescope_sidecar.py" EXCLUDE
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
-              # Configures source CMake modules; not an installed runtime test.
+              # Configure source CMake modules; not installed runtime tests.
+              PATTERN "test_build_id_cmake.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()

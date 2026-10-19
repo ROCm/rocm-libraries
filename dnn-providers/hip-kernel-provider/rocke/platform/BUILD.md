@@ -203,14 +203,18 @@ This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 The engine carries an explicit freshness stamp so a consumer can *detect* a
 mismatch rather than rely on rebuild discipline. At CMake configure time
 `cmake/rocke_build_id.cmake` computes a deterministic, git-independent content hash
-of the engine sources (`cpp/**`) and injects it (plus a human `engine_version`)
+of the engine sources (`cpp/**`) and of the inputs of the generated arch-domain table
+(the committed columns, `arch_domain_waivers.json`, `domain.py` and
+`tools/gen_arch_domain_cpp.py`), and injects it (plus a human `engine_version`)
 into `cpp/core/rocke_build_id.cpp` as compile definitions — scoped to that single
 TU so no emission object is touched (the `.ll` byte-identity contract holds). The
 stamp is exposed by `rocke_build_id()` / `rocke_engine_version()`
 (`cpp/include/rocke/rocke_build_id.h`), printed by `tools/check_byte_identity.py` on
 every run, and surfaced through the pybind `build_id` attribute. Changing any
-tracked source byte changes the build-id, so a stale or mixed-build archive is
-detectable.
+tracked byte changes the build-id the next time CMake configures, so a stale or
+mixed-build archive is detectable. An edit to a table input makes the next build
+re-run CMake. An edit to an engine source does not: re-run CMake, or use a new
+build directory, before you read the id of an edited tree.
 
 Remaining follow-on: a manifest/bundle version + provider-side validation that a
 loaded prebuilt-HSACO bundle matches the engine build-id it was built against.
