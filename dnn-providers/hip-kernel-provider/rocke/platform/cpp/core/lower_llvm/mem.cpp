@@ -81,6 +81,66 @@ static bool ll_is_vec(const rocke_type_t* t)
     return t && t->kind == ROCKE_TYPE_VECTOR;
 }
 
+/* Python _lds_natural_align: the natural alignment of op's LDS access, before
+ * the pool cap. 0 stands for Python's None (no claim). 64-bit because a stored
+ * align attribute may be any int64 power of two (Python ints are unbounded);
+ * rocke_ll_lds_access_align caps it before narrowing. */
+static int64_t ll_lds_natural_align(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!op)
+    {
+        return 0;
+    }
+    switch(op->opcode)
+    {
+    case ROCKE_OP_TILE_SMEM_STORE:
+        return ll_elem_bytes(op->operands[op->num_operands - 1]->type->name);
+    case ROCKE_OP_TILE_SMEM_STORE_VN:
+    {
+        int64_t vec = ll_attr_int(op, "vec", 0);
+        int elem_bytes = ll_elem_bytes(op->operands[op->num_operands - 1]->type->elem->name);
+        int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+        if(align <= 0 || (align & (align - 1)) != 0)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "tile.smem_store_vN: align %lld is not a positive power of two",
+                          (long long)align);
+        }
+        return align;
+    }
+    case ROCKE_OP_TILE_SMEM_LOAD_VN:
+    {
+        int64_t vec = ll_attr_int(op, "vec", 0);
+        /* 96-bit payloads (3 words, 6 halfwords, 12 bytes) are not a power of
+         * two wide, so they claim only element alignment. */
+        if(vec == 3 || vec == 6 || vec == 12)
+        {
+            return 12 / vec;
+        }
+        return vec * ll_elem_bytes(op->results[0]->type->elem->name);
+    }
+    case ROCKE_OP_TILE_SMEM_STORE_VN_F32:
+    case ROCKE_OP_TILE_SMEM_LOAD_VN_F32:
+        return ll_attr_int(op, "vec", 0) * 4;
+    case ROCKE_OP_TILE_SMEM_LOAD_V4:
+    case ROCKE_OP_TILE_SMEM_STORE_DISTRIBUTED:
+        /* Both lower to one scalar access per element, each claiming 2 bytes. */
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+/* Python _lds_access_align. The in-segment index is the kernel author's
+ * responsibility: a vector access must start at a multiple of its claim. A
+ * vector access wider than the pool alignment claims the pool alignment. */
+int rocke_ll_lds_access_align(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t natural = ll_lds_natural_align(L, op);
+    return natural < ROCKE_LL_SMEM_POOL_ALIGN ? (int)natural : ROCKE_LL_SMEM_POOL_ALIGN;
+}
+
 /* Emit the leading "i32 0, i32 <idx>, ..." gep index string used by every smem
  * gep. Returns an arena-owned string. indices come from op->operands[lo..hi). */
 static const char* ll_smem_gidx(rocke_lower_t* L, const rocke_op_t* op, int lo, int hi)
@@ -568,7 +628,7 @@ static void op_tile_smem_store(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
-    int align = ll_elem_bytes(value->type->name);
+    int align = rocke_ll_lds_access_align(L, op);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    gep,
@@ -624,8 +684,7 @@ static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* elem_ty = rocke_ll_llvm_type(L, value->type->elem);
-    int elem_bytes = ll_elem_bytes(value->type->elem->name);
-    int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
+    int64_t align = rocke_ll_lds_access_align(L, op);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    gep,
@@ -670,7 +729,11 @@ static void op_tile_smem_load_v4(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_emitf(
             L, "  %s = getelementptr inbounds half, ptr addrspace(3) %s, i32 %d", ep, base, i);
         ld = rocke_ll_fresh(L, "smem.ld");
-        rocke_ll_emitf(L, "  %s = load half, ptr addrspace(3) %s, align 2", ld, ep);
+        rocke_ll_emitf(L,
+                       "  %s = load half, ptr addrspace(3) %s, align %d",
+                       ld,
+                       ep,
+                       rocke_ll_lds_access_align(L, op));
         elems[i] = ld;
     }
     prev = "undef";
@@ -694,35 +757,9 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
-     * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
-     * 2 (not 1). Replicate that exact dict here rather than the shared
-     * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
-     * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
-    const char* en = op->results[0]->type->elem->name;
-    int elem_bytes = 2;
-    if(en)
-    {
-        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
-        {
-            elem_bytes = 1;
-        }
-        else if(strcmp(en, "f16") == 0 || strcmp(en, "bf16") == 0)
-        {
-            elem_bytes = 2;
-        }
-        else if(strcmp(en, "i32") == 0 || strcmp(en, "tf32") == 0 || strcmp(en, "f32") == 0)
-        {
-            elem_bytes = 4;
-        }
-        else if(strcmp(en, "i64") == 0 || strcmp(en, "f64") == 0)
-        {
-            elem_bytes = 8;
-        }
-    }
-    /* New 96-bit widths guarantee only element alignment, including FP8. */
-    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
+    /* Natural vector alignment: vec * element bytes (96-bit widths claim only
+     * element alignment). */
+    int64_t align = rocke_ll_lds_access_align(L, op);
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
@@ -796,7 +833,12 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
                        agg_ty,
                        base_ptr,
                        i);
-        rocke_ll_emitf(L, "  store %s %s, ptr addrspace(3) %s, align 2", elem_ty, ev, gep);
+        rocke_ll_emitf(L,
+                       "  store %s %s, ptr addrspace(3) %s, align %d",
+                       elem_ty,
+                       ev,
+                       gep,
+                       rocke_ll_lds_access_align(L, op));
     }
 }
 
@@ -811,7 +853,7 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
-    int64_t align = vec * 4;
+    int64_t align = rocke_ll_lds_access_align(L, op);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    gep,
@@ -861,7 +903,7 @@ static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
-    int64_t align = vec * 4;
+    int64_t align = rocke_ll_lds_access_align(L, op);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    base,
