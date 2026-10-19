@@ -301,11 +301,37 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
         endforeach()
     endforeach()
 
+    # PyTorch consumes these headers as C++20; every other target here compiles them as C++17.
+    # CXX_CLANG_TIDY is cleared for the reason given on the runtime-load C++20 target above.
+    set(_hipdnn_cudnn_v8_cpp20_targets)
+    if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+        add_library(hipdnn_frontend_cudnn_v8_tu_cpp20 OBJECT TestCudnnShimV8Tu.cpp)
+        target_compile_features(hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE cxx_std_20)
+        set_target_properties(
+            hipdnn_frontend_cudnn_v8_tu_cpp20
+            PROPERTIES CXX_STANDARD 20
+                       CXX_STANDARD_REQUIRED ON
+                       CXX_EXTENSIONS OFF
+                       CXX_CLANG_TIDY ""
+        )
+        target_compile_options(
+            hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS}
+        )
+        target_link_libraries(
+            hipdnn_frontend_cudnn_v8_tu_cpp20 PRIVATE hipdnn_frontend hip::host GTest::gtest
+        )
+        list(APPEND _hipdnn_cudnn_v8_cpp20_targets hipdnn_frontend_cudnn_v8_tu_cpp20)
+    else()
+        message(STATUS "hipDNN: this C++ compiler advertises no cxx_std_20; the C++20 cuDNN v8 "
+                       "shim compile target is not created")
+    endif()
+
     # Attached to the unit binary so targeted builds cannot skip the gates.
     add_dependencies(
         hipdnn_frontend_tests
         hipdnn_frontend_cudnn_v8_skip_cudnn_json
         hipdnn_frontend_cudnn_v8_skip_hipdnn_json
         ${_hipdnn_cudnn_v8_header_targets}
+        ${_hipdnn_cudnn_v8_cpp20_targets}
     )
 endif()
