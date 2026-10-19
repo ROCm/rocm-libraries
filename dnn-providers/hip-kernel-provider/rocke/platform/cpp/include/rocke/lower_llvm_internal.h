@@ -218,6 +218,11 @@ typedef struct rocke_isa_backend
      * is one the opcode cannot carry (the caller then fails with the same
      * message Python raises). */
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
+    /* Python ISABackend.has_fp8_scale_conversion: the fused scale-and-convert
+     * fp8/bf8 instructions (v_cvt_scalef32_pk_f32_fp8 / _bf8). True only on
+     * gfx950. Elsewhere LLVM may still select the intrinsic and write an
+     * encoding the GPU does not have, so the lowerer refuses the ops. */
+    bool has_fp8_scale_conversion;
 } rocke_isa_backend_t;
 
 /* Resolve a gfx string to its backend (Python backend_for). Returns NULL and

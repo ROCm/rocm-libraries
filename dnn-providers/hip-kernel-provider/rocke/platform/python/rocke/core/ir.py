@@ -1735,6 +1735,9 @@ class IRBuilder:
         """Convert ``<4 x fp8e4m3> -> <4 x f32>`` with **E8M0-scaled** fused
         cvt via AMDGPU's gfx950 ``v_cvt_scalef32_pk_f32_fp8``.
 
+        Only gfx950 has the instruction, so lowering for any other target
+        raises ``ValueError`` (the builder has no target to check against).
+
         IMPORTANT — E8M0 semantics, NOT plain f32 multiply:
 
             The hardware uses the f32 scale operand's *exponent bits
