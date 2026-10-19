@@ -82,6 +82,15 @@ public:
         return nullptr;
     }
     // NOLINTEND(portability-template-virtual-member-function, performance-unnecessary-value-param)
+
+    /// Returns true when this handler saves launch inputs and restores launches. The
+    /// default returns false. Return true only from a handler that overrides both
+    /// saveLaunchInputs and restoreLaunch.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool supportsSaving() const
+    {
+        return false;
+    }
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

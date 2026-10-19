@@ -1148,6 +1148,11 @@ public:
                                                                   preparedDense.blockM())};
     }
 
+    bool supportsSaving() const override
+    {
+        return true;
+    }
+
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,

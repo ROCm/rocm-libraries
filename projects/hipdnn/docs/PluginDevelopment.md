@@ -434,7 +434,7 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 
 A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
 
-- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring.
+- **Opt in per dispatch handler.** Override `saveLaunchInputs` and `restoreLaunch` in `hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler`. The defaults return no value, which means the handler does not support saving or restoring. In the same handler, override `supportsSaving` to return true.
 - **Save launch inputs under a versioned name.** `saveLaunchInputs` returns the handler's named, typed launch inputs (never computed grid or argument values) with a versioned dispatch name. Register the handler under that versioned name as well as under the dispatch symbol its descriptors use, so a loaded plan finds the handler whose contract gives the values their meaning.
 - **Change the version when the contract changes.** The version identifies the contract between the saved values and the launch. It is not the format version of the saved file. A saved plan can pair an older code object with the current launch. Use a new version when one of these items changes:
   - The names, types, or meanings of the values.
@@ -444,7 +444,7 @@ A provider that builds plans with the generic kernel ingestor can let users save
   Keep the handler of the old version registered while plans saved with that version must load.
 - **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
 - **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
-- **Report the note.** Decide from each engine's kernel source kinds whether it reports `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`.
+- **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must have a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
 - **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
 
 ## Plugin Architecture

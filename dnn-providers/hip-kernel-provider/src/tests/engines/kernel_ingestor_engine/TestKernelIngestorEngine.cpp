@@ -4,10 +4,12 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -43,8 +45,10 @@
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
@@ -68,6 +72,8 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::MockEngineConfig;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
 
 constexpr const char* SCRATCH_LABEL = "ingestorengine";
 
@@ -431,17 +437,28 @@ constexpr int32_t SERIALIZATION_NOTE
 constexpr int32_t RUNTIME_COMPILATION_NOTE
     = static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
 
+constexpr const char* GFX1151_WMMA_ATTENTION_DISPATCH_SYMBOL
+    = "hipkernel.gfx1151_wmma_attention.dispatch";
+
 // A set with one pack for each entry of `packs`, and one kernel for each source kind in it.
-DescriptorSet setWithKernels(const std::vector<std::vector<KernelSourceKind>>& packs)
+// Each pack has its own dispatch, which names `dispatchSymbol`.
+DescriptorSet setWithKernels(const std::vector<std::vector<KernelSourceKind>>& packs,
+                             std::string_view dispatchSymbol)
 {
-    DescriptorSet set;
+    DescriptorSet set{};
     for(const auto& kinds : packs)
     {
-        hipdnn_plugin_sdk::ingestor::KernelDescriptorPack pack;
+        hipdnn_plugin_sdk::ingestor::DispatchDescriptor dispatch{};
+        dispatch.id.back() = static_cast<uint8_t>(set.dispatches.size() + 1);
+        dispatch.dispatchSymbol = std::string(dispatchSymbol);
+
+        hipdnn_plugin_sdk::ingestor::KernelDescriptorPack pack{};
+        pack.dispatchId = dispatch.id;
         for(const auto kind : kinds)
         {
             pack.kernels.emplace_back().source.kind = kind;
         }
+        set.dispatches.push_back(std::move(dispatch));
         set.packs.push_back(std::move(pack));
     }
     return set;
@@ -450,21 +467,64 @@ DescriptorSet setWithKernels(const std::vector<std::vector<KernelSourceKind>>& p
 TEST(TestKernelIngestorEngine, SupportsSerializationOnlyWhenEveryKernelPassesTheGate)
 {
     EXPECT_TRUE(supportsExecutionPlanSerialization(setWithKernels(
-        {{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK, KernelSourceKind::KPACK}})));
+        {{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK, KernelSourceKind::KPACK}},
+        CONV_FWD.dispatch)));
 
     // Saving accepts only kpack kernels: embedded_source kernels have no recorded argument
     // signature, and their code bytes are not exposed.
-    EXPECT_FALSE(supportsExecutionPlanSerialization(
-        setWithKernels({{KernelSourceKind::KPACK},
-                        {KernelSourceKind::KPACK, KernelSourceKind::EMBEDDED_SOURCE}})));
+    EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels(
+        {{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK, KernelSourceKind::EMBEDDED_SOURCE}},
+        CONV_FWD.dispatch)));
 
     EXPECT_FALSE(supportsExecutionPlanSerialization(DescriptorSet{}));
-    EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels({{}, {}})));
+    EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels({{}, {}}, CONV_FWD.dispatch)));
+}
+
+TEST(TestKernelIngestorEngine, NoNoteWhenAHandlerCannotSave)
+{
+    using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
+
+    const std::string symbol = "hipkernel.engine_test.no_save.dispatch";
+    const packs::StubDispatchHandler handler;
+    // Not committed: the symbol is unregistered again when the scope ends.
+    SymbolScope<Handle> scope;
+    scope.add(symbol, &handler);
+
+    EXPECT_FALSE(
+        supportsExecutionPlanSerialization(setWithKernels({{KernelSourceKind::KPACK}}, symbol)));
+
+    DescriptorSet oneHandlerCannotSave
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    oneHandlerCannotSave.dispatches.back().dispatchSymbol = symbol;
+    EXPECT_FALSE(supportsExecutionPlanSerialization(oneHandlerCannotSave));
+
+    registerNativeIngestorSymbols();
+    ASSERT_NE(DispatchRegistry<Handle>::tryResolve(GFX1151_WMMA_ATTENTION_DISPATCH_SYMBOL),
+              nullptr);
+    EXPECT_FALSE(supportsExecutionPlanSerialization(
+        setWithKernels({{KernelSourceKind::KPACK}}, GFX1151_WMMA_ATTENTION_DISPATCH_SYMBOL)));
+}
+
+TEST(TestKernelIngestorEngine, NoNoteWithoutAResolvableDispatch)
+{
+    using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+
+    DescriptorSet missingDispatch
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    missingDispatch.dispatches.pop_back();
+    EXPECT_FALSE(supportsExecutionPlanSerialization(missingDispatch));
+
+    const std::string unregistered = "hipkernel.engine_test.unregistered.dispatch";
+    ASSERT_EQ(DispatchRegistry<Handle>::tryResolve(unregistered), nullptr);
+    EXPECT_FALSE(supportsExecutionPlanSerialization(
+        setWithKernels({{KernelSourceKind::KPACK}}, unregistered)));
 }
 
 TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
 {
-    DescriptorSet saveable = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}});
+    DescriptorSet saveable
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
     saveable.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
 
     const std::vector<int32_t> expected{RUNTIME_COMPILATION_NOTE, SERIALIZATION_NOTE};
@@ -472,8 +532,8 @@ TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
     EXPECT_EQ(once.engine.behaviorNotes, expected);
     EXPECT_EQ(withComputedBehaviorNotes(once).engine.behaviorNotes, expected);
 
-    DescriptorSet mixed
-        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::EMBEDDED_SOURCE}});
+    DescriptorSet mixed = setWithKernels(
+        {{KernelSourceKind::KPACK}, {KernelSourceKind::EMBEDDED_SOURCE}}, CONV_FWD.dispatch);
     mixed.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
     EXPECT_EQ(withComputedBehaviorNotes(mixed).engine.behaviorNotes,
               std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
@@ -532,22 +592,29 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
 // evidence of an override. A handler's own save down-casts the prepared dispatch, which
 // rejects a foreign one with std::bad_cast; its own restore runs the shared restore checks,
 // which refuse an empty saved plan with HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. Both reject
-// before any GPU work.
-TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
+// before any GPU work. The registry has no enumeration, so the handlers come from the
+// discovered sets and from one dispatch symbol for each pack.
+TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSavesAndRestores)
 {
     using hipdnn_plugin_sdk::HipdnnPluginException;
     using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+    using hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler;
     using hipdnn_plugin_sdk::ingestor::PreparedDispatch;
     using hipdnn_plugin_sdk::ingestor::SavedKernelCode;
     using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
-    size_t probed = 0;
+    constexpr std::array<std::string_view, 4> PACK_DISPATCH_SYMBOLS{
+        "hipkernel.pointwise.dispatch",
+        "hipkernel.conv_fwd.dispatch",
+        "hipkernel.gfx950_attention_dense.dispatch",
+        "hipkernel.gfx1151_wmma_attention.dispatch"};
+    EXPECT_EQ(PACK_DISPATCH_SYMBOLS.size(), ingestorPacks().size())
+        << "add the dispatch symbol of each new pack to this list";
+
+    // Each handler once, with the first symbol that resolved to it.
+    std::map<const IKernelDispatchHandler<Handle>*, std::string> handlers;
     for(const auto& set : discoverDescriptorSets())
     {
-        if(!supportsExecutionPlanSerialization(set))
-        {
-            continue;
-        }
         for(const auto& pack : set.packs)
         {
             const auto dispatch
@@ -557,37 +624,58 @@ TEST(TestKernelIngestorEngine, EveryHandlerOfANotedEngineSavesAndRestores)
             ASSERT_NE(dispatch, set.dispatches.end()) << set.engine.name << ": " << pack.name;
             const auto* handler = DispatchRegistry<Handle>::resolve(dispatch->dispatchSymbol);
             ASSERT_NE(handler, nullptr) << dispatch->dispatchSymbol;
-
-            bool saves = false;
-            try
-            {
-                const PreparedDispatch foreign{};
-                static_cast<void>(handler->saveLaunchInputs(foreign));
-            }
-            catch(const std::bad_cast&)
-            {
-                saves = true;
-            }
-            EXPECT_TRUE(saves) << dispatch->dispatchSymbol << " does not save its launch inputs";
-
-            bool restores = false;
-            try
-            {
-                static_cast<void>(
-                    handler->restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0));
-            }
-            catch(const HipdnnPluginException& refusal)
-            {
-                EXPECT_EQ(refusal.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
-                    << dispatch->dispatchSymbol << ": " << refusal.getMessage();
-                restores = true;
-            }
-            EXPECT_TRUE(restores) << dispatch->dispatchSymbol << " does not restore a launch";
-
-            ++probed;
+            handlers.emplace(handler, dispatch->dispatchSymbol);
         }
     }
-    EXPECT_GT(probed, 0U) << "no engine that reports the note was found";
+    registerNativeIngestorSymbols();
+    for(const auto symbol : PACK_DISPATCH_SYMBOLS)
+    {
+        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
+        ASSERT_NE(handler, nullptr) << symbol;
+        handlers.emplace(handler, std::string(symbol));
+    }
+
+    size_t saving = 0;
+    size_t notSaving = 0;
+    for(const auto& [handler, symbol] : handlers)
+    {
+        bool saves = false;
+        try
+        {
+            const PreparedDispatch foreign{};
+            static_cast<void>(handler->saveLaunchInputs(foreign));
+        }
+        catch(const std::bad_cast&)
+        {
+            saves = true;
+        }
+
+        bool restores = false;
+        try
+        {
+            static_cast<void>(handler->restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0));
+        }
+        catch(const HipdnnPluginException& refusal)
+        {
+            EXPECT_EQ(refusal.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+                << symbol << ": " << refusal.getMessage();
+            restores = true;
+        }
+
+        EXPECT_EQ(saves, restores) << symbol << ": saves " << saves << ", restores " << restores;
+        EXPECT_EQ(handler->supportsSaving(), saves && restores)
+            << symbol << ": supportsSaving() disagrees with the save and restore overrides";
+        if(saves && restores)
+        {
+            ++saving;
+        }
+        else
+        {
+            ++notSaving;
+        }
+    }
+    EXPECT_GT(saving, 0U) << "no handler that saves was probed";
+    EXPECT_GT(notSaving, 0U) << "no handler that cannot save was probed";
 }
 
 } // namespace

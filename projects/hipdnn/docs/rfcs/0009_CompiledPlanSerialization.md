@@ -213,7 +213,8 @@ are in `dnn-providers/hip-kernel-provider/src/core/PluginSerialization.cpp`.
 ### Supported Engines
 
 An ingestor engine supports serialization when each kernel in its descriptor set is a kpack code
-object. The provider calculates this from the descriptor set. A supported engine reports the
+object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
+calculates this from the descriptor set and its dispatch handlers. A supported engine reports the
 behavior note `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. The other engines of the
 provider do not report this note.
 

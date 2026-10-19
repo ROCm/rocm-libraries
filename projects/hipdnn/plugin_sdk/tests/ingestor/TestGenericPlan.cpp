@@ -180,6 +180,7 @@ TEST(TestIngestorGenericPlan, HandlerSaveAndRestoreDefaultToNotSerializable)
 
     EXPECT_FALSE(handler.saveLaunchInputs(prepared).has_value());
     EXPECT_EQ(handler.restoreLaunch(SavedLaunchInputs{}, SavedKernelCode{}, 0), nullptr);
+    EXPECT_FALSE(handler.supportsSaving());
 }
 
 } // namespace

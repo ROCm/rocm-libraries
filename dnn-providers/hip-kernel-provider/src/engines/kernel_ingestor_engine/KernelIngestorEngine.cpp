@@ -18,6 +18,7 @@
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
@@ -264,7 +265,30 @@ bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::Descr
             hasKernel = true;
         }
     }
-    return hasKernel;
+    if(!hasKernel)
+    {
+        return false;
+    }
+
+    registerNativeIngestorSymbols();
+    for(const auto& pack : set.packs)
+    {
+        const auto dispatch = std::find_if(
+            set.dispatches.begin(), set.dispatches.end(), [&pack](const auto& candidate) {
+                return candidate.id == pack.dispatchId;
+            });
+        if(dispatch == set.dispatches.end())
+        {
+            return false;
+        }
+        const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::tryResolve(
+            dispatch->dispatchSymbol);
+        if(handler == nullptr || !handler->supportsSaving())
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 hipdnn_plugin_sdk::ingestor::EngineDescriptor
