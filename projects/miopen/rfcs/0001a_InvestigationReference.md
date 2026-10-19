@@ -719,7 +719,7 @@ The redirect is entirely opt-in via environment variables and always falls back 
 
 ## Context (differs from the common context above)
 
-- Hardware: 1× AMD Instinct MI308X (gfx942) — **not** the MI300X used in §1–§5
+- Hardware: 1× gfx942 machine
 - ROCm 7.14.60850, MIOpen 3.5.2
 - Native solution selected for the test conv: `ConvBinWinogradRxSf2x3g1` (GPU kernel ~0.017 ms)
 
@@ -841,7 +841,3 @@ Native MIOpen drops to 0.213 s on the second process because it reuses its **per
 - **Per handle:** +~2.1 ms cold create, +~1 µs destroy; negligible thereafter.
 - **Per conv (warm):** ~27 µs host-side overhead per call (native GPU kernel is ~17 µs; not directly comparable, but the redirect adds modest steady-state cost).
 - **Cold start / repeated processes:** dominated by the non-persisted plan build (up to ~3.9 s), keeping warm-process wall time at ~4 s vs. native 0.2 s. This is the headline regression for the redirect as currently implemented and the main item to resolve in the RFC.
-
-## Related notes
-
-- The `gfx94250.HIP.fdb.txt ... unreadable` warning seen in the logs is a native find-db CU-count resolution issue on MI308X, **unrelated to the redirect** and tracked separately. It does not affect the conclusions above.
