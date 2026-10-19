@@ -18,6 +18,7 @@
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -235,3 +236,44 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);
+
+void TestIteratorSystemPropagationAnySystem()
+{
+  [[maybe_unused]] auto counting_it = thrust::make_counting_iterator(0);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(counting_it)>, thrust::any_system_tag>);
+
+  [[maybe_unused]] auto transform_it = thrust::make_transform_iterator(counting_it, thrust::square<>{});
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(transform_it)>, thrust::any_system_tag>);
+
+  [[maybe_unused]] auto zip_it = thrust::make_zip_iterator(counting_it, transform_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::any_system_tag>);
+};
+DECLARE_UNITTEST(TestIteratorSystemPropagationAnySystem);
+
+void TestIteratorSystemPropagationDeviceSystem()
+{
+  [[maybe_unused]] auto d_vec    = thrust::device_vector<int>{};
+  [[maybe_unused]] auto d_vec_it = d_vec.begin();
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(d_vec_it)>, thrust::device_system_tag>);
+
+  [[maybe_unused]] auto transform_it = thrust::make_transform_iterator(d_vec_it, thrust::square<>{});
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(transform_it)>, thrust::device_system_tag>);
+
+  [[maybe_unused]] auto zip_it = thrust::make_zip_iterator(d_vec_it, transform_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::device_system_tag>);
+};
+DECLARE_UNITTEST(TestIteratorSystemPropagationDeviceSystem);
+
+void TestIteratorSystemPropagationAnyAndDeviceSystem()
+{
+  [[maybe_unused]] auto d_vec    = thrust::device_vector<int>{};
+  [[maybe_unused]] auto d_vec_it = d_vec.begin();
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(d_vec_it)>, thrust::device_system_tag>);
+
+  [[maybe_unused]] auto counting_it = thrust::make_counting_iterator(0);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(counting_it)>, thrust::any_system_tag>);
+
+  [[maybe_unused]] auto zip_it = thrust::make_zip_iterator(d_vec_it, counting_it);
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_system_t<decltype(zip_it)>, thrust::device_system_tag>);
+};
+DECLARE_UNITTEST(TestIteratorSystemPropagationAnyAndDeviceSystem);
