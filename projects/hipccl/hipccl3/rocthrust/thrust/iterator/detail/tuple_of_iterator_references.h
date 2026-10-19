@@ -155,8 +155,8 @@ THRUST_NAMESPACE_BEGIN
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <class... Ts>
-struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
-{};
+inline constexpr bool
+  __is_tuple_of_iterator_references_v<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> = true;
 #endif
 
 // define tuple_size, tuple_element, etc.
