@@ -155,6 +155,7 @@ class WorkAssignment(Component):
         module = Module('Persistent cluster PAP handoff')
         if not persistentSpatialCluster(kernel):
             return module
+        assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
         module.add(SWaitCnt(dscnt=0, comment='PAP: finish reads of the next-tile LDS bank'))
         module.add(SBarrier(comment='PAP: all waves release the multicast destination bank'))
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPapSignal',
