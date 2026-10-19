@@ -132,7 +132,7 @@ be smaller than 2 GiB.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `fmha_fwd_mfma` | ✅ | ✅ | ✅ | auto-dispatches to WMMA on gfx1151 |
+| `fmha_fwd_mfma` | ✅ | ✅ | ✅ | auto-dispatches to WMMA on gfx1151; opt-in `free_stride` (any Q/K/V/O layout via per-tensor batch strides) has no C++ builder twin; numeric-verified on gfx942 and gfx950 for the contiguous BSHD/BHSD, padded-head-dim and packed-QKV placements, with gfx942 run in CI |
 | `fmha_bwd` | ✅ | ✅ | ✅ | |
 | `fmha_appendkv` | ✅ | ✅ | ✅ | |
 | `fmha_paged_prefill` | ✅ | ✅ | ✅ | |

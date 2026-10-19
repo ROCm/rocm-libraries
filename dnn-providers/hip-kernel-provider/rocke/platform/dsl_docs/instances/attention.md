@@ -12,7 +12,11 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
 - `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill; block orders and
   grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
-- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
+- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
+  Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
+  (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
+  byte-identical. The builder has no C++ mirror yet, though both lowerers emit it identically, so
+  the default backend serves it. Host strides: `_sdpa_fwd_strides.py`.
 - `platform/python/rocke/helpers/attention.py`
 
  FMHA expansion (CK Tile `01_fmha` family parity), all under `library/kernels/common/`:

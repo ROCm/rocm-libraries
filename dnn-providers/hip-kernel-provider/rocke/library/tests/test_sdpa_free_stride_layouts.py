@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host contract for free-stride attention forward (ticket 2 / layout axis).
+"""Host contract for the free-stride attention forward addressing layer.
 
 The generalized forward kernel must read Q/K/V from any memory layout -- BSHD,
 BHSD, general B/H/S strides and packed QKV -- addressed by per-tensor
@@ -16,8 +16,12 @@ element-address formula the kernel emits,
 
 and confirm every layout recovers the same values and the same attention
 output. This is exactly what the kernel ABI (the stride params we pass) has to
-satisfy, so it is the definition of done for the addressing work and the host
-reference the emitter is matched against later.
+satisfy, so it is the host reference the emitter is matched against.
+
+These are a contract check on the addressing formula, not on the kernel: they
+gather through numpy and would pass with no kernel at all. The padded and
+packed layouts are exercised against the real kernel on a GPU by
+``test_fmha_mfma_free_stride_numeric.py``.
 """
 
 from __future__ import annotations
@@ -93,7 +97,9 @@ def test_packed_qkv_views_recover_logical():
     # with its own base offset (0, D, 2D) into the shared buffer.
     B, H, S, D = 2, 4, 16, 16
     rng = np.random.default_rng(0xBEE5)
-    qkv = [(rng.standard_normal((B, H, S, D)) * 0.3).astype(np.float16) for _ in range(3)]
+    qkv = [
+        (rng.standard_normal((B, H, S, D)) * 0.3).astype(np.float16) for _ in range(3)
+    ]
     packed = np.zeros((B, H, S, 3, D), np.float16)
     for i, t in enumerate(qkv):
         packed[..., i, :] = t
@@ -102,13 +108,15 @@ def test_packed_qkv_views_recover_logical():
         flat, base, strides = _view_base_strides(view, packed)
         assert strides[3] == 1
         assert base == i * D
-        np.testing.assert_array_equal(_addr_gather(flat, base, strides, (B, H, S, D)), want)
+        np.testing.assert_array_equal(
+            _addr_gather(flat, base, strides, (B, H, S, D)), want
+        )
 
 
 @pytest.mark.parametrize("name", ["bhsd", "bshd"])
 def test_contiguous_strides_match_numpy_views(name):
     # The launcher's analytical (batch, head, token) strides must equal what
-    # numpy computes for the same contiguous layout (the Step 1 ground truth).
+    # numpy computes for the same contiguous layout.
     x = _logical()
     _B, H, S, D = x.shape
     view, backing = LAYOUTS[name](x)
