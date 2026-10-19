@@ -92,6 +92,7 @@ namespace TensileLite
         X_MACRO(StrideCK) \
         X_MACRO(Alpha) \
         X_MACRO(Beta) \
+        X_MACRO(ComputeUnits) \
         X_MACRO(SplitK) \
         X_MACRO(OutputBF16) \
         X_MACRO(Padding) \
@@ -164,7 +165,20 @@ namespace TensileLite
         X_MACRO(StrideE2) \
         X_MACRO(StrideScaleA2) \
         X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2)
+        X_MACRO(StrideMetadata2) \
+        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps
+           them distinct from another generator's WorkgroupMapping. */ \
+        X_MACRO(RR_WorkgroupMapping) \
+        X_MACRO(RR_MagicMultipleWgm) \
+        X_MACRO(RR_MagicShiftAndSignWgm) \
+        X_MACRO(RR_MagicMultipleNumTilesN) \
+        X_MACRO(RR_MagicShiftAndSignNumTilesN) \
+        X_MACRO(RR_QuotientTilesMByWgm) \
+        X_MACRO(RR_MagicMultipleWgmTail) \
+        X_MACRO(RR_MagicShiftAndSignWgmTail) \
+        X_MACRO(RR_QuotientTilesByBlock) \
+        X_MACRO(RR_MagicMultipleWgmMainBlock) \
+        X_MACRO(RR_MagicShiftAndSignWgmMainBlock)
 
     enum class CustomArgSemantic
     {
@@ -205,6 +219,8 @@ namespace TensileLite
         PersistentGrid,
         PersistentWithBatch,
         PersistentNoBatch,
+        TilesYGSU,
+        ComputeUnits,
         CustomGridSize_Count,
     };
 

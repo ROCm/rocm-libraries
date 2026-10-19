@@ -54,7 +54,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="rot_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F

@@ -3,9 +3,13 @@
 
 """CLI subprocess tests for generate.py.
 
-Exit-code contract: exit 0 success; exit 1 on ConfigError or a render failure;
-exit 2 from argparse on a bad flag. --dry-run must not create the output dir.
---force is required to overwrite an existing non-empty output directory.
+Exit-code contract: exit 0 success; exit 1 a gate refusal or internal failure (a
+strict budget overrun, --check-placeholders findings, an unreadable emitted file, a
+template error); exit 2 unusable input (a missing or invalid config, a non-existent
+--emitted-root, an --output-dir that is a file, a non-empty output directory without
+--force, a render ValueError), which is also argparse's code for a bad flag. --dry-run
+must not create the output dir. --force is required to overwrite an existing non-empty
+output directory.
 """
 
 import subprocess
@@ -32,24 +36,43 @@ class TestExitCodes:
         )
         assert result.returncode == 0, result.stderr
 
-    def test_missing_config_file_exits_one(self, tmp_path):
+    def test_missing_config_file_exits_two(self, tmp_path):
         result = run_cli(
             "--config",
             str(tmp_path / "does_not_exist.yaml"),
             "--output-dir",
             str(tmp_path / "out"),
         )
-        assert result.returncode == 1
-        assert "not found" in result.stderr
+        assert result.returncode == 2
 
-    def test_config_error_exits_one(self, tmp_path):
+    def test_config_error_exits_two(self, tmp_path):
         bad_config = tmp_path / "bad.yaml"
         bad_config.write_text("engine:\n  name: unscoped\n")
         result = run_cli(
             "--config", str(bad_config), "--output-dir", str(tmp_path / "out")
         )
-        assert result.returncode == 1
-        assert "Config error" in result.stderr
+        assert result.returncode == 2
+        assert not (tmp_path / "out").exists()
+
+    def test_a_missing_emitted_root_exits_two(self, tmp_path):
+        result = run_cli(
+            "--config",
+            str(SCALE_ADD_CONFIG),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--check-placeholders",
+            "--emitted-root",
+            str(tmp_path / "no_such_root"),
+        )
+        assert result.returncode == 2
+
+    def test_an_output_dir_that_is_a_file_exits_two(self, tmp_path):
+        target = tmp_path / "out"
+        target.write_text("not a directory")
+        result = run_cli("--config", str(SCALE_ADD_CONFIG), "--output-dir", str(target))
+        assert result.returncode == 2
+        assert "Traceback" not in result.stderr
+        assert str(target) in result.stderr
 
     def test_bad_flag_exits_two(self, tmp_path):
         result = run_cli("--nonexistent-flag", "value")
@@ -86,7 +109,7 @@ class TestDryRun:
 
 
 class TestForceOverwrite:
-    def test_existing_nonempty_dir_without_force_exits_one(self, tmp_path):
+    def test_existing_nonempty_dir_without_force_exits_two(self, tmp_path):
         output_dir = tmp_path / "out"
         output_dir.mkdir()
         (output_dir / "existing_file.txt").write_text("hand-authored content")
@@ -94,8 +117,7 @@ class TestForceOverwrite:
         result = run_cli(
             "--config", str(SCALE_ADD_CONFIG), "--output-dir", str(output_dir)
         )
-        assert result.returncode == 1
-        assert "--force" in result.stderr
+        assert result.returncode == 2
         assert (output_dir / "existing_file.txt").read_text() == "hand-authored content"
 
     def test_existing_nonempty_dir_with_force_succeeds(self, tmp_path):

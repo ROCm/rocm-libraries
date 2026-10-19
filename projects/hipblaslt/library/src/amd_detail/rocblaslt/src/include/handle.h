@@ -111,9 +111,11 @@ struct _rocblaslt_handle
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
     int32_t uniform_summation_order = 0;
 
+    // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
+    //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
+    int useRocRoller = -1;
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
-    int   useRocRoller     = -1;
 #endif
 
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
@@ -133,6 +135,10 @@ struct _rocblaslt_handle
     bool                  check_numerics_stop_on_first = false;
     // Sticky bypass for scan_D once any caller observes a NaN.
     std::atomic<bool>     check_numerics_short_circuit{false};
+
+    // HIPBLASLT_CHECK_SYNCHRONIZER state, read once in the ctor. See
+    // check_synchronizer.hpp for the checker protocol.
+    bool check_synchronizer = false;
 
     // Kernels treat these buffers as inter-workgroup flags that they set, spin
     // on, and reset themselves, so a flag region may only be touched by one

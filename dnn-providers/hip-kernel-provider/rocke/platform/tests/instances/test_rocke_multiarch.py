@@ -13,8 +13,10 @@ These tests need no GPU.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import unittest
+from unittest import mock
 
 from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
 from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
@@ -25,7 +27,7 @@ _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
         # CDNA MFMA (gfx90a CDNA2, gfx942/gfx950 CDNA3/4) + RDNA WMMA/wave32
-        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic) + gfx1250-class
+        # (gfx1151 RDNA3.5, gfx1201 RDNA4, gfx11-generic, gfx12-generic) + gfx1250-class
         # CDNA/GFX12 WMMA.
         self.assertEqual(
             set(known_arches()),
@@ -37,6 +39,7 @@ class TestArchTarget(unittest.TestCase):
                 "gfx1201",
                 "gfx1250",
                 "gfx11-generic",
+                "gfx12-generic",
             },
         )
 
@@ -244,12 +247,38 @@ class TestGfx950ByteIdentical(unittest.TestCase):
         )
         return build_universal_gemm(spec)
 
-    def test_legacy_equals_gfx950(self):
+    def test_omitting_the_target_raises(self):
+        """A caller that does not name a target gets an error, not a guess.
+
+        Both engines are covered: the default was removed from both, and a
+        fallback returning on only one side is exactly the drift the
+        byte-identity invariant exists to catch.
+        """
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = self._kernel()
+        for backend in ("python", "cpp"):
+            with (
+                self.subTest(backend=backend),
+                mock.patch.dict(os.environ, {"ROCKE_BACKEND": backend}),
+            ):
+                with self.assertRaises((TypeError, ValueError)):
+                    lower_kernel_to_llvm(k)
+                with self.assertRaises((TypeError, ValueError)):
+                    lower_kernel_to_llvm(k, arch=None)
+
+    def test_the_same_target_lowers_deterministically(self):
+        """Two lowerings of one kernel at one target are byte-identical.
+
+        The control for the test above: it shows the kernel lowers at all, so
+        a raise there is the missing target and not a broken fixture.
+        """
         from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         k = self._kernel()
         self.assertEqual(
-            lower_kernel_to_llvm(k), lower_kernel_to_llvm(k, arch="gfx950")
+            lower_kernel_to_llvm(k, arch="gfx950"),
+            lower_kernel_to_llvm(k, arch="gfx950"),
         )
 
     def test_arch_param_default_is_cdna_byte_identical(self):
@@ -714,9 +743,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
-            _detect_llvm_flavor,
-            _flavor_for_rocm,
-            _system_rocm_version,
+            _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
 
@@ -728,17 +755,19 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             attrs={},
         )
 
-        # Validate the constant for the flavor of the REFERENCE toolchain -- the
-        # `hipcc` on PATH (the system /opt/rocm) that emits the IR below. That can
-        # be a DIFFERENT LLVM vintage than the comgr lib `_detect_llvm_flavor()`
-        # resolves at runtime (e.g. a torch-bundled comgr 7.2/llvm22 alongside a
-        # system hipcc 7.0/llvm20). We can only statically validate the constant
-        # whose toolchain is actually present; the comgr flavor is exercised
-        # dynamically by every GPU compile (a wrong datalayout aborts codegen).
-        sys_ver = _system_rocm_version()
-        detected_flavor = (
-            _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
+        # This reference is hipcc on PATH, which may differ from loaded COMGR.
+        # Query that executable rather than assigning /opt/rocm's package
+        # metadata to an unrelated compiler selected by an environment module.
+        import re
+        import subprocess
+
+        version = subprocess.run(
+            ["hipcc", "--version"], capture_output=True, text=True, timeout=30
         )
+        match = re.search(r"clang version (\d+)", version.stdout + version.stderr)
+        if version.returncode or not match:
+            self.skipTest("cannot determine reference hipcc's LLVM version")
+        detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
         # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
         # the per-arch loop below reads it on the llvm23 path too.

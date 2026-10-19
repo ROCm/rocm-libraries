@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
@@ -14,6 +15,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250-strict architecture.
 
 ### Changed
+
+* Clarified in the API documentation that rocsolver_rfinfo is an input and output parameter as it could be modified within the functions.
+
 ### Removed
 ### Optimized
 
@@ -21,8 +25,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
-* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
-  matrix is scaled by a small number.
+* Fixed failure of GETRS for batch_count > 64 * 1024
+* Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
+* Fixed a race condition in SYEVJ GPU kernel.
+* Improved kernel launches to detect invalid launch configuration.
+* Fixed sparse functions potentially not using the stream set in the handle.
 
 ### Known issues
 ### Upcoming changes

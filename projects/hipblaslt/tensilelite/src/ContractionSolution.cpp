@@ -26,6 +26,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerWgmKernargs.hpp>
 
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -38,6 +39,7 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
+#include <optional>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/PreSwizzle.hpp>
 #endif
@@ -159,6 +161,8 @@ namespace TensileLite
         case CustomGridSize::PersistentWithBatch: return "PersistentWithBatch";
         case CustomGridSize::PersistentNoBatch: return "PersistentNoBatch";
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
+        case CustomGridSize::TilesYGSU:        return "TilesYGSU";
+        case CustomGridSize::ComputeUnits:     return "ComputeUnits";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -181,6 +185,8 @@ namespace TensileLite
             {"PersistentWithBatch", CustomGridSize::PersistentWithBatch},
             {"PersistentNoBatch", CustomGridSize::PersistentNoBatch},
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
+            {"TilesYGSU",        CustomGridSize::TilesYGSU},
+            {"ComputeUnits",     CustomGridSize::ComputeUnits},
         };
 
         auto it = lookup.find(str);
@@ -2813,6 +2819,16 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU);
 
+        // A persistent kernel strides by its ComputeUnits kernarg, so it and the
+        // ComputeUnits grid must be the same value. Cap it like Tensile's persistent
+        // grids, by the caller's SM-count target and persistentMaxCUs.
+        int computeUnits = pAMDGPU->computeUnitCount;
+        if(problem.getParams().smCountTarget() > 0)
+            computeUnits = std::min(computeUnits, problem.getParams().smCountTarget());
+        if(pAMDGPU->persistentMaxCUs > 0)
+            computeUnits = std::min(computeUnits, pAMDGPU->persistentMaxCUs);
+        computeUnits = std::max(1, computeUnits);
+
         if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
@@ -2916,6 +2932,9 @@ namespace TensileLite
                 case CustomGridSize::TilesXYBatchGSU:
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
                     break;
+                case CustomGridSize::TilesYGSU:
+                    dim = tiles.y * (gsu > 0 ? gsu : 1);
+                    break;
                 case CustomGridSize::PersistentWithBatch:
                 case CustomGridSize::StreamKWithBatch:
                     // generateCustomCall is only used for handwritten/external
@@ -2930,6 +2949,9 @@ namespace TensileLite
                 case CustomGridSize::StreamKNoBatch:
                     dim = launch.grid;
                     break;
+                case CustomGridSize::ComputeUnits:
+                    dim = static_cast<size_t>(computeUnits);
+                    break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
                     break;
@@ -2939,6 +2961,37 @@ namespace TensileLite
         assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
         assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
         assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
+
+        // A split-K kernel reduces into D only once every GSU slice of a tile has
+        // arrived, so a grid sized from tile counts alone would return success with
+        // D unwritten. GSU and persistent grids account for the split themselves.
+        auto tileCountOnly = [](CustomGridSize size) {
+            switch(size)
+            {
+            case CustomGridSize::One:
+            case CustomGridSize::TilesX:
+            case CustomGridSize::TilesY:
+            case CustomGridSize::Batch:
+            case CustomGridSize::TilesXY:
+            case CustomGridSize::TilesXYBatch:
+                return true;
+            default:
+                return false;
+            }
+        };
+        if(gsu > 1 && tileCountOnly(customKernel.grid.x) && tileCountOnly(customKernel.grid.y)
+           && tileCountOnly(customKernel.grid.z))
+            throw std::runtime_error(concatenate("Solution ",
+                                                 kernelName,
+                                                 " runs with GSU ",
+                                                 gsu,
+                                                 " but its custom-kernel grid [",
+                                                 customKernel.grid.x,
+                                                 ", ",
+                                                 customKernel.grid.y,
+                                                 ", ",
+                                                 customKernel.grid.z,
+                                                 "] launches one GSU slice per tile"));
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
@@ -2997,8 +3050,13 @@ namespace TensileLite
         const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
         const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
         const size_t descriptorStrideCD = usesDataParallelArgsV1 ? startStrideCD : 1;
-        auto const& descriptorA = usesDataParallelArgsV1 && problemType.sparse == 1 ? problem.compressed() : problem.a();
-        auto const& descriptorB = usesDataParallelArgsV1 && problemType.sparse == 2 ? problem.compressed() : problem.b();
+        bool         sparseA = problemType.sparse == 1;
+        bool         sparseB = problemType.sparse == 2;
+        auto const&  descriptorA = sparseA ? problem.compressed() : problem.a();
+        auto const&  descriptorB = sparseB ? problem.compressed() : problem.b();
+        void const*  aAddress = sparseA ? inputs.compressed : inputs.a;
+        void const*  bAddress = sparseB ? inputs.compressed : inputs.b;
+
         const bool pointerArrayBatch
             = problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY;
 
@@ -3013,6 +3071,26 @@ namespace TensileLite
 
         if(T_Debug)
             std::cout << "Custom call arguments:" << std::endl;
+
+        // rocRoller workgroup-mapping kernels read M, N, the macrotile, and
+        // WGM. hipBLASLt supplies DEFAULT_WGM (2). Computed only if a custom
+        // kernel argument asks for one of those semantics.
+        std::optional<RocRollerWgmKernargs> wgmKernargs;
+        auto wgmKernarg = [&]() -> RocRollerWgmKernargs const& {
+            if(!wgmKernargs)
+            {
+                if(problem.problemSizes().size() < 2)
+                    throw std::runtime_error(
+                        "rocRoller WGM kernargs need M and N problem sizes");
+                wgmKernargs = evaluateRocRollerWgmKernargs(
+                    static_cast<int64_t>(problem.problemSizes()[0]),
+                    static_cast<int64_t>(problem.problemSizes()[1]),
+                    customKernel.macrotile.x,
+                    customKernel.macrotile.y,
+                    RocRollerDefaultWgm);
+            }
+            return *wgmKernargs;
+        };
 
         for(auto arg : customKernel.args)
         {
@@ -3150,11 +3228,11 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        problem.a().strides()[1] * problem.a().elementBytes(), arg.type);
+                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        problem.b().strides()[1] * problem.b().elementBytes(), arg.type);
+                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
@@ -3194,6 +3272,9 @@ namespace TensileLite
                         rv.args.append("beta", 0.0f, problem.betaType());
                     else
                         rv.args.append("beta", inputs.beta, problem.betaType());
+                    break;
+                case CustomArgSemantic::ComputeUnits:
+                    rv.args.appendCustomType("ComputeUnits", computeUnits, arg.type);
                     break;
                 case CustomArgSemantic::SplitK:
                 {
@@ -3238,8 +3319,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchA)
                                    ? static_cast<void const*>(inputs.batchA)
-                                   : problemType.sparse == 1 ? inputs.compressed : inputs.a)
-                            : inputs.a);
+                                   : aAddress)
+                            : aAddress);
                     break;
                 case CustomArgSemantic::AddressB:
                     rv.args.template append<void const*>(
@@ -3247,8 +3328,8 @@ namespace TensileLite
                         usesDataParallelArgsV1
                             ? (!problemType.stridedBatched || (pointerArrayBatch && inputs.batchB)
                                    ? static_cast<void const*>(inputs.batchB)
-                                   : problemType.sparse == 2 ? inputs.compressed : inputs.b)
-                            : inputs.b);
+                                   : bAddress)
+                            : bAddress);
                     break;
                 case CustomArgSemantic::AddressC:
                 {
@@ -3548,6 +3629,43 @@ namespace TensileLite
                     rv.args.template append<uint32_t>("RNDSeed", distribution(gen));
                     break;
                 }
+
+                // rocRoller workgroup mapping. libdivide branchfree magics of
+                // the WGM integer, numTilesN, the tail, and the main block,
+                // plus the two signed quotients. Not Tensile magicNumber().
+                case CustomArgSemantic::RR_WorkgroupMapping:
+                    rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgm:
+                    rv.args.appendCustomType("RR_MagicMultipleWgm", wgmKernarg().magicMultipleWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgm:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgm", wgmKernarg().magicShiftAndSignWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleNumTilesN:
+                    rv.args.appendCustomType("RR_MagicMultipleNumTilesN", wgmKernarg().magicMultipleNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignNumTilesN:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignNumTilesN", wgmKernarg().magicShiftAndSignNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_QuotientTilesMByWgm:
+                    rv.args.appendCustomType("RR_QuotientTilesMByWgm", wgmKernarg().quotientTilesMByWgm, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgmTail:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmTail", wgmKernarg().magicMultipleWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmTail:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmTail", wgmKernarg().magicShiftAndSignWgmTail, arg.type);
+                    break;
+                case CustomArgSemantic::RR_QuotientTilesByBlock:
+                    rv.args.appendCustomType("RR_QuotientTilesByBlock", wgmKernarg().quotientTilesByBlock, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicMultipleWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicMultipleWgmMainBlock", wgmKernarg().magicMultipleWgmMainBlock, arg.type);
+                    break;
+                case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
+                    rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
+                    break;
 
                 default:
                     throw std::runtime_error(concatenate("Invalid kernel argument type: ", arg));

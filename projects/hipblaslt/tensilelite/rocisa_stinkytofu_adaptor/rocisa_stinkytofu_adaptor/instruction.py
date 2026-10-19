@@ -3040,6 +3040,10 @@ VMaxPKF16 = _make_scalar_alu_class("VMaxPKF16", "v_pk_max_f16", InstType.INST_F1
 VMed3I32 = _make_ternary_class("VMed3I32", "v_med3_i32", InstType.INST_I32)
 # logicalIR: VMed3F32
 VMed3F32 = _make_ternary_class("VMed3F32", "v_med3_f32", InstType.INST_F32)
+# logicalIR: VMaximumMinimumF32
+VMaximumMinimumF32 = _make_ternary_class(
+    "VMaximumMinimumF32", "v_maximumminimum_f32", InstType.INST_F32
+)
 # logicalIR: VMinF16
 VMinF16 = _make_scalar_alu_class("VMinF16", "v_min_f16", InstType.INST_F16)
 # logicalIR: VMinF32
