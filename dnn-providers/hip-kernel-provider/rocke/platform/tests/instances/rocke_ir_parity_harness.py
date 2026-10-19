@@ -442,6 +442,29 @@ def build_attention_reduce(
     return _build
 
 
+def build_attention_reduce_lse(
+    name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
+):
+    """Split-KV reduce with the optional LSE output, built from ``arch``'s own
+    module (``build_attention_reduce`` above always builds the gfx950 module)."""
+
+    def _build():
+        import importlib
+
+        mod = importlib.import_module(f"kernels.{arch}.attention_tiled_3d")
+        spec = mod.UnifiedAttentionReduceTiledSpec(
+            head_size=head_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            num_segments=num_segments,
+            emit_lse=True,
+        )
+        return mod.build_unified_attention_reduce_tiled(spec, arch=arch)
+
+    return _build
+
+
 def build_attention_scalar(name, arch, *, three_d=False, **problem):
     """Scalar (correctness-oracle) unified attention, 2D or split-3D segment kernel.
 
@@ -2992,6 +3015,20 @@ def cases():
     )
     add(
         "attention",
+        "attention/gfx950/reduce_lse_bf16_d128",
+        "gfx950",
+        build_attention_reduce_lse(
+            "irhash_attn_950_reduce_lse_bf16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
         "attention/gfx942/2d_fp16_d128_b64",
         "gfx942",
         build_attention_2d(
@@ -3068,6 +3105,20 @@ def cases():
         "gfx942",
         build_attention_reduce(
             "irhash_attn_942_reduce_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_lse_bf16_d128",
+        "gfx942",
+        build_attention_reduce_lse(
+            "irhash_attn_942_reduce_lse_bf16",
             "gfx942",
             head_size=128,
             num_query_heads=4,
