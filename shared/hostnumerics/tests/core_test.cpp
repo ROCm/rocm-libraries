@@ -83,6 +83,7 @@ TEST(CoordinateTraversalTutorial, GroupSelectedOutputsByBatch) {
 
 TEST(Core, Version) {
     EXPECT_EQ(version(), "0.1.0");
+    EXPECT_EQ(scalarTypeInfo(ScalarType::Float16).storageBits, 16);
 }
 
 TEST(Core, ScalarTypes) {
@@ -234,9 +235,12 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         Shape moved(std::move(copied));
         EXPECT_EQ(moved, original);
         EXPECT_EQ(moved.elementCount(), original.elementCount());
-        EXPECT_EQ(copied, Shape{});
+        // The move contract explicitly defines the source as a scalar.
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(copied.rank(), 0);
         EXPECT_EQ(copied.elementCount(), 1);
         EXPECT_EQ(copied.coordinates(0), std::vector<size_t>{});
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
         Shape assigned{7};
         assigned = original;
@@ -246,8 +250,10 @@ TEST(ShapeCpp, CachedCountAcrossCopiesAndMoves) {
         moveAssigned = std::move(assigned);
         EXPECT_EQ(moveAssigned, original);
         EXPECT_EQ(moveAssigned.elementCount(), original.elementCount());
-        EXPECT_EQ(assigned, Shape{});
+        // NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+        EXPECT_EQ(assigned.rank(), 0);
         EXPECT_EQ(assigned.elementCount(), 1);
+        // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
         Shape& self = moveAssigned;
         moveAssigned = std::move(self);
         EXPECT_EQ(moveAssigned, original);
