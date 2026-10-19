@@ -42,10 +42,9 @@ jobs:
     outputs:
       run: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
+      # No checkout: on pull_request, paths-filter reads the changed-file list
+      # from the GitHub REST API (hence `pull-requests: read`), and the filters
+      # are inline.
 
       # Schedule and manual dispatch always build; only PRs are filtered.
       # `every` makes a file count only if it matches all patterns: inside the
