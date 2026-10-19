@@ -26,7 +26,7 @@
 struct Foo
 {
   THRUST_DEVICE Foo()
-      : set_me_upon_destruction{nullptr}
+      : destroyed{nullptr}
   {}
 
   Foo(const Foo&)            = delete;
@@ -34,26 +34,76 @@ struct Foo
 
   THRUST_DEVICE ~Foo()
   {
-    if (set_me_upon_destruction != nullptr)
+    if (destroyed != nullptr)
     {
-      *set_me_upon_destruction = true;
+      *destroyed = true;
     }
   }
 
-  bool* set_me_upon_destruction;
+  bool* destroyed = nullptr;
 };
 
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<bool> destructor_flag(1, false);
-
   thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
-  *thrust::device_ptr<bool*>(&foo_ptr.get()->set_me_upon_destruction) =
-    thrust::raw_pointer_cast(destructor_flag.data());
+
+  thrust::device_vector<bool> destructor_flag(1, false);
+  *thrust::device_ptr<bool*>(&foo_ptr.get()->destroyed) = destructor_flag.data().get();
 
   ASSERT_EQ(false, destructor_flag[0]);
   thrust::device_delete(foo_ptr);
   ASSERT_EQ(true, destructor_flag[0]);
+}
+
+// based on: https://github.com/NVIDIA/cccl/issues/6132
+struct base
+{
+  THRUST_HOST_DEVICE virtual ~base()
+  {
+    if (base_destroyed != nullptr)
+    {
+      *base_destroyed = true;
+    }
+  }
+
+  // Thrust does not support abstract class types inside vectors, so f() has a body instead of being abstract
+  THRUST_HOST_DEVICE virtual void f() {}
+
+  bool* base_destroyed = nullptr;
+};
+
+struct derived : base
+{
+  THRUST_HOST_DEVICE ~derived() override
+  {
+    if (derived_destroyed != nullptr)
+    {
+      *derived_destroyed = true;
+    }
+  }
+
+  THRUST_HOST_DEVICE void f() override {}
+
+  bool* derived_destroyed = nullptr;
+};
+
+TEST(DeviceDelete, TestDeviceDeleteVirtualDestructorInvocation)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_ptr<derived> ptr = thrust::device_new<derived>();
+
+  thrust::device_vector<bool> destructor_flags(2, false);
+  *thrust::device_ptr<bool*>(&ptr.get()->base_destroyed)    = destructor_flags.data().get() + 0;
+  *thrust::device_ptr<bool*>(&ptr.get()->derived_destroyed) = destructor_flags.data().get() + 1;
+
+  thrust::device_ptr<derived> base_ptr = ptr;
+
+  ASSERT_EQ(false, destructor_flags[0]);
+  ASSERT_EQ(false, destructor_flags[1]);
+  thrust::device_delete(base_ptr); // delete through the base pointer
+  ASSERT_EQ(true, destructor_flags[0]);
+  ASSERT_EQ(true, destructor_flags[1]);
 }
