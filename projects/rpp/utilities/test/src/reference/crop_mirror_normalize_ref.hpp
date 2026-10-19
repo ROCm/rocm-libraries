@@ -51,7 +51,9 @@ Description
   although the header says size batchSize.
 
 Expression
-  dst(j, i) = f( src(y0 + j, x0 + (mirror ? w-1-i : i)) )
+  The output is the roiW x roiH crop, so for 0 <= j < roiH, 0 <= i < roiW:
+
+  dst(j, i) = f( src(y0 + j, x0 + (mirror ? roiW-1-i : i)) )
   f(v)      = v * multiplier + offset
 
 Per-type form

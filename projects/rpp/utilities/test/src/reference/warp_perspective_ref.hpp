@@ -41,8 +41,12 @@ RPP op
 Description
   Projective image warp. perspectiveTensor holds 9 values per image, the
   row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5; m6 m7 m8], which maps each
-  output pixel to the source coordinate it samples, in homogeneous form.
-  Centring, ROI offset, border and sampling are as in warp_affine.
+  output pixel to the source coordinate it samples, in homogeneous form. M is
+  therefore the inverse of the forward transform applied to the image; the op
+  does not invert it. The matrix acts about the ROI centre (truncated half
+  extents) and the ROI origin (x0,y0) is added to reach the absolute frame.
+  Out-of-ROI samples are the type's black. Sampling and quantization are
+  handled by geometric_reference().
 
 Expression
   cx = floor(roiW/2), cy = floor(roiH/2), dx = outX - cx, dy = outY - cy
@@ -53,8 +57,10 @@ Expression
 
 Notes
   The public header does not document the matrix direction or the mapping
-  frame; the model follows warp_affine, and shares its ROI-origin defect, so
-  partial-ROI cases are on the skip list.
+  frame; the model uses destination->source, as the op does.
+
+  The kernels omit the +x0/+y0 while still clipping against the absolute ROI,
+  so partial-ROI cases are on the skip list (*_PartialRoi_* in skip_list.hpp).
 */
 template <typename T>
 void warp_perspective_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd,
