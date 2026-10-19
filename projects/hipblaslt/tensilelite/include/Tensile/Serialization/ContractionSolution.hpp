@@ -118,6 +118,7 @@ namespace TensileLite
             static void mapping(IO& io, SizeMapping& s)
             {
                 iot::mapRequired(io, "waveNum", s.waveNum);
+                iot::mapOptional(io, "WavefrontSize", s.WavefrontSize);
 
                 iot::mapRequired(io, "workGroup", s.workGroupSize);
                 iot::mapRequired(io, "threadTile", s.threadTile);

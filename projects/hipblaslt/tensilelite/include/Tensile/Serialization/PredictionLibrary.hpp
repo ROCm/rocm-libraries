@@ -152,6 +152,7 @@ namespace TensileLite
                                     .direct_to_vgpr_b     = solution->sizeMapping.DirectToVgprB,
                                     .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
                                     .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                    .wavefront_size       = solution->sizeMapping.WavefrontSize,
                                     .wave_group_m         = solution->sizeMapping.waveGroup[0],
                                     .wave_group_n         = solution->sizeMapping.waveGroup[1],
                                     .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,

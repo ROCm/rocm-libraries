@@ -45,6 +45,18 @@ static const tensile_params_t& tparams(const config_t& config) {
   return config.has_tensile_params() ? config.tensile() : kDefaultTensile;
 }
 
+// Threads per wavefront of the kernel: the WavefrontSize it was built with when the config
+// carries it, otherwise the architecture's default.
+static size_t kernel_wavefront_size(const hardware_t& hardware, const config_t& config) {
+  const int built = tparams(config).wavefront_size;
+  return (built > 0) ? static_cast<size_t>(built) : hardware.wavefront_size();
+}
+
+// Clocks one vector-ALU instruction of the kernel's wavefront occupies its SIMD.
+static size_t kernel_valu_cycles(const hardware_t& hardware, const config_t& config) {
+  return std::max<size_t>(kernel_wavefront_size(hardware, config) / hardware.simd_lanes(), 1);
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* context_t constructor                                                                    */
 /* ---------------------------------------------------------------------------------------- */
@@ -884,7 +896,7 @@ double compute_cvt_overhead_x1(const problem_t& problem,
   // Note: change 16.0 based on mi_data_type if we want to generalize this for all
   // casting GEMMs.
   const double cvt =
-      (2.0 * static_cast<double>(hardware.valu_cycles_per_instruction()) / 16.0 * L_MI) * LR;
+      (2.0 * static_cast<double>(kernel_valu_cycles(hardware, config)) / 16.0 * L_MI) * LR;
   // cvt ops are interleaved in main loop and don't stall matrix or memory units.
   // Heuristically, we set
   const double H        = (8.0 / 16.0 * L_MI) * spare_mfma + (4.0 / 16.0) * L_MI * (LR + GR);
@@ -934,7 +946,7 @@ double compute_cvt_overhead(const problem_t& problem,
   //    A = 26 vector-ALU instructions, B = 8 and C = 4 cycles).
   // CVT per LR-sized chunk (DS->VGPR).
   const double A =
-      (26.0 / 16.0) * L_MI_bf16 * static_cast<double>(hardware.valu_cycles_per_instruction());
+      (26.0 / 16.0) * L_MI_bf16 * static_cast<double>(kernel_valu_cycles(hardware, config));
   const double B = (8.0 / 16.0) * L_MI_bf16;    // hidden per spare MFMA slot
   const double C = (4.0 / 16.0) * L_MI_bf16;    // hidden per (LR+GR) slot
 
@@ -1025,8 +1037,8 @@ static double compute_lsu_reduction_latency(const problem_t& problem,
 
   const double wg_m = std::max<double>(static_cast<double>(tparams(config).wave_group_m), 1.0);
   const double wg_n = std::max<double>(static_cast<double>(tparams(config).wave_group_n), 1.0);
-  const double num_threads =
-      wg_m * wg_n * static_cast<double>(lsu) * static_cast<double>(hardware.wavefront_size());
+  const double num_threads = wg_m * wg_n * static_cast<double>(lsu) *
+                             static_cast<double>(kernel_wavefront_size(hardware, config));
   const double tile_elems =
       static_cast<double>(config.mt.m) * static_cast<double>(config.mt.n);
   const double elems_per_thread = tile_elems / std::max(num_threads, 1.0);
@@ -1046,12 +1058,12 @@ static double compute_lsu_reduction_latency(const problem_t& problem,
   // The LDS costs were fitted for wave64 and scale with the lanes one instruction
   // moves; the adds are vector-ALU instructions.
   const double lds_lane_scale =
-      static_cast<double>(hardware.wavefront_size()) /
+      static_cast<double>(kernel_wavefront_size(hardware, config)) /
       static_cast<double>(hardware_t::get_wavefront_size(hardware_t::architecture_t::gfx950));
   const double local_write = elems_per_thread * lw_cycle * 2.0 * lds_lane_scale;
   const double local_read  = elems_per_thread / svw * 4.0 * 2.0 * lds_lane_scale;
   const double reduction   = elems_per_thread * static_cast<double>(lsu - 1) *
-                           static_cast<double>(hardware.valu_cycles_per_instruction());
+                           static_cast<double>(kernel_valu_cycles(hardware, config));
 
   return local_write + local_read + reduction;
 }
@@ -1552,7 +1564,7 @@ double compute_epilogue_latency(const problem_t& problem,
 
   if (d_bytes == 0.0) return 0.0;
 
-  const size_t WAVEFRONT_SIZE = hardware.wavefront_size();
+  const size_t WAVEFRONT_SIZE = kernel_wavefront_size(hardware, config);
   constexpr size_t STORE_PATTERN_IDEAL = 0;
   constexpr size_t STORE_PATTERN_NARROW = 1;
   constexpr size_t STORE_PATTERN_WIDE_SPLIT = 2;
@@ -1573,7 +1585,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const double reads_per_wave = acc_elems_per_thread * mi_reg_per_out;
   // ACC reads and the bounds checks below are vector-ALU instructions.  Without
   // separate accumulation registers the results are already in VGPRs.
-  const double valu_cycles = static_cast<double>(hardware.valu_cycles_per_instruction());
+  const double valu_cycles = static_cast<double>(kernel_valu_cycles(hardware, config));
   const double L_acc_transfer =
       hardware.has_accumulation_registers()
           ? reads_per_wave * heuristic_defaults_t::EPILOGUE_VALU_INSTS_PER_ACC_READ * valu_cycles
@@ -2326,12 +2338,12 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   double L_write = write_bytes_per_ts / read_bw;
   // Accumulate: each lane adds splitting_factor - 1 partials into each of its VW
   // outputs, one vector-ALU instruction apiece, and a WG's waves share the CU's SIMDs.
-  const size_t waves_per_wg =
-      math::safe_ceil_div(heuristic_defaults_t::POSTGSU_THREADS_PER_WG, hardware.wavefront_size());
+  const size_t waves_per_wg = math::safe_ceil_div(heuristic_defaults_t::POSTGSU_THREADS_PER_WG,
+                                                  kernel_wavefront_size(hardware, config));
   const double waves_per_simd =
       static_cast<double>(math::safe_ceil_div(waves_per_wg, hardware.simds_per_cu()));
   double L_acc = static_cast<double>((splitting_factor - 1) * VW) *
-                 static_cast<double>(hardware.valu_cycles_per_instruction()) * waves_per_simd;
+                 static_cast<double>(kernel_valu_cycles(hardware, config)) * waves_per_simd;
 
   double L_total = (L_read + L_acc + L_write) * timesteps;
 

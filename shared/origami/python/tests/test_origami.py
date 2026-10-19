@@ -365,6 +365,7 @@ def test_config_has_formocast_fields():
     assert hasattr(tensile, 'direct_to_vgpr_a')
     assert hasattr(tensile, 'direct_to_vgpr_b')
     assert hasattr(tensile, 'wave_num')
+    assert hasattr(tensile, 'wavefront_size')
     assert hasattr(tensile, 'wave_group_m')
     assert hasattr(tensile, 'wave_group_n')
     assert hasattr(tensile, 'prefetch_global_read')

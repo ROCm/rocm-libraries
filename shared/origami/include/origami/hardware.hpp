@@ -175,17 +175,22 @@ class ORIGAMI_EXPORT hardware_t {
   constexpr size_t simds_per_cu() const noexcept { return get_simds_per_cu(arch); }
 
   /**
-   * @brief Threads per wavefront for a given architecture.
+   * @brief Threads per wavefront TensileLite builds for an architecture by default: wave32
+   *        wherever the ISA supports it (gfx10/11/12), wave64 on CDNA (gfx90a/942/950).
+   *
+   * A kernel built with another WavefrontSize carries it in tensile_params_t::wavefront_size.
    */
   static constexpr size_t get_wavefront_size(architecture_t arch) noexcept {
     switch (arch) {
-      case architecture_t::gfx1250: return 32;
-      default: return 64;
+      case architecture_t::gfx90a:
+      case architecture_t::gfx942:
+      case architecture_t::gfx950: return 64;
+      default: return 32;
     }
   }
 
   /**
-   * @brief Threads per wavefront for this hardware instance's architecture.
+   * @brief Default threads per wavefront for this hardware instance's architecture.
    */
   constexpr size_t wavefront_size() const noexcept { return get_wavefront_size(arch); }
 

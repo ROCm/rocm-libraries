@@ -438,6 +438,9 @@ struct tensile_params_t {
   /// Number of waves per workgroup
   std::size_t wave_num = 4;
 
+  /// Threads per wavefront the kernel was built for (0 = the architecture's default)
+  int wavefront_size = 0;
+
   /// Wave group dimensions [wave_group_m, wave_group_n]
   int wave_group_m = 2;
   int wave_group_n = 2;
@@ -481,10 +484,9 @@ struct tensile_params_t {
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
            num_loads_coalesced_a == o.num_loads_coalesced_a &&
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
-           wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
-           prefetch_global_read == o.prefetch_global_read &&
-           buffer_load == o.buffer_load &&
-           buffer_store == o.buffer_store &&
+           wavefront_size == o.wavefront_size && wave_group_m == o.wave_group_m &&
+           wave_group_n == o.wave_group_n && prefetch_global_read == o.prefetch_global_read &&
+           buffer_load == o.buffer_load && buffer_store == o.buffer_store &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
@@ -509,6 +511,7 @@ struct tensile_params_t {
                               num_loads_coalesced_a,
                               num_loads_coalesced_b,
                               wave_num,
+                              wavefront_size,
                               wave_group_m,
                               wave_group_n,
                               prefetch_global_read,

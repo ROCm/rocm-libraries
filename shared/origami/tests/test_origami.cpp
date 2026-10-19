@@ -152,13 +152,35 @@ TEST_CASE("Origami: wavefront size and SIMD width are architecture-aware", "[ori
   REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1250) ==
           32);
   REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1100) ==
-          64);
+          32);
   REQUIRE(origami::hardware_t::get_wavefront_size(origami::hardware_t::architecture_t::gfx1201) ==
-          64);
+          32);
+
+  REQUIRE(origami::hardware_t::get_valu_cycles_per_instruction(
+              origami::hardware_t::architecture_t::gfx1100) == 1);
 
   REQUIRE(make_hardware(942).wavefront_size() == 64);
   REQUIRE(make_hardware(950).wavefront_size() == 64);
   REQUIRE(make_hardware(1250).wavefront_size() == 32);
+}
+
+TEST_CASE("Origami: a kernel's WavefrontSize overrides the architecture default",
+          "[origami][hardware]") {
+  using arch_t  = origami::hardware_t::architecture_t;
+  auto problem  = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  auto epilogue = [&](arch_t arch, int wavefront_size) {
+    auto hw                         = make_hardware(950);
+    hw.arch                         = arch;
+    auto config                     = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0);
+    config.tensile().wavefront_size = wavefront_size;
+    origami::gemm::context_t ctx(problem, hw, config);
+    return origami::gemm::compute_epilogue_latency(problem, hw, config, ctx);
+  };
+
+  REQUIRE(epilogue(arch_t::gfx1100, 0) == epilogue(arch_t::gfx1100, 32));
+  REQUIRE(epilogue(arch_t::gfx1100, 64) != epilogue(arch_t::gfx1100, 32));
+  REQUIRE(epilogue(arch_t::gfx950, 0) == epilogue(arch_t::gfx950, 64));
+  REQUIRE(epilogue(arch_t::gfx950, 32) != epilogue(arch_t::gfx950, 64));
 }
 
 // Keep all measured ratios identical and only flip the architecture enum so

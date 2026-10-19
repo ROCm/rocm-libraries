@@ -146,6 +146,7 @@ NB_MODULE(origami, m) {
       .def_rw("num_loads_coalesced_a", &origami::tensile_params_t::num_loads_coalesced_a)
       .def_rw("num_loads_coalesced_b", &origami::tensile_params_t::num_loads_coalesced_b)
       .def_rw("wave_num", &origami::tensile_params_t::wave_num)
+      .def_rw("wavefront_size", &origami::tensile_params_t::wavefront_size)
       .def_rw("wave_group_m", &origami::tensile_params_t::wave_group_m)
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
