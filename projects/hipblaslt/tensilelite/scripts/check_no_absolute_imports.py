@@ -2,10 +2,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Reject newly added absolute imports of the TensileLite package namespaces.
+"""Reject newly added absolute imports of the ``tensilelite`` package.
 
-Inside ``projects/hipblaslt/tensilelite/Tensile`` and
-``projects/hipblaslt/tensilelite/tensilelite`` every import of ``Tensile`` or
+Inside ``projects/hipblaslt/tensilelite/tensilelite`` every import of
 ``tensilelite`` (``import X``, ``import X.y``, ``from X import ...``,
 ``from X.y import ...``) must be package-relative.
 
@@ -39,23 +38,9 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-PACKAGE_ROOTS = (
-    "projects/hipblaslt/tensilelite/Tensile",
-    "projects/hipblaslt/tensilelite/tensilelite",
-)
-BANNED_TOP_LEVEL_NAMES = frozenset({"Tensile", "tensilelite"})
+PACKAGE_ROOTS = ("projects/hipblaslt/tensilelite/tensilelite",)
+BANNED_TOP_LEVEL_NAMES = frozenset({"tensilelite"})
 EXCLUDED_SUBDIRECTORIES = ("Tests",)
-
-# The alias package has to name the canonical package absolutely to install
-# the alias.
-TEMPORARY_EXEMPTIONS = frozenset(
-    {
-        (
-            "projects/hipblaslt/tensilelite/Tensile/__init__.py",
-            "tensilelite._namespace_bridge",
-        ),
-    }
-)
 
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -104,8 +89,6 @@ def banned_imports(source: str, path: str) -> list[tuple[int, int, str]]:
             continue
         for module in modules:
             if module.split(".")[0] not in BANNED_TOP_LEVEL_NAMES:
-                continue
-            if (path, module) in TEMPORARY_EXEMPTIONS:
                 continue
             found.append((node.lineno, node.col_offset, module))
     return sorted(set(found))
@@ -186,8 +169,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if failures:
         print(
-            "\nImports of 'Tensile' and 'tensilelite' inside these packages must "
-            "be relative\n(e.g. 'from . import x', 'from ..Common import y'). "
+            "\nImports of 'tensilelite' inside the package must be relative"
+            "\n(e.g. 'from . import x', 'from ..Common import y'). "
             "Only lines added by this\nchange are checked; existing absolute "
             "imports are not reported."
         )
