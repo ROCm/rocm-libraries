@@ -20,7 +20,7 @@ torch custom op over vLLM's paged KV cache::
 Optional tuning knobs, each selecting a different compiled kernel (0 / default
 means "the shipped choice"); see ``PagedDecodeCfg`` for what each trades::
 
-    d_lanes        : int  lanes per QK dot (0 -> ROCKE_PAGED_DECODE_DLANES or 16)
+    d_lanes        : int  lanes per QK dot (0 -> ROCKE_PAGED_DECODE_DLANES or 8)
     block_n        : int  tokens per V vector load (0 -> derived from d_lanes)
     unroll         : int  kv blocks per loop iteration (1)
     heads_per_cta  : int  Q heads per CTA (0 -> the whole GQA ratio)
@@ -59,7 +59,7 @@ _ARCH = "gfx1151"
 # argument on purpose: it selects a different compiled kernel, so it belongs to
 # the cache key and not to the op's ABI. See PagedDecodeCfg.d_lanes for the
 # swizzle-vs-VGPR tradeoff this picks a point on.
-D_LANES = int(os.environ.get("ROCKE_PAGED_DECODE_DLANES", "16"))
+D_LANES = int(os.environ.get("ROCKE_PAGED_DECODE_DLANES", "8"))
 
 # (head_size, num_q_heads, num_kv_heads, dtype, kv_block_size, num_splits,
 #  d_lanes, block_n, unroll, heads_per_cta, waves_per_eu, reduce_unroll)

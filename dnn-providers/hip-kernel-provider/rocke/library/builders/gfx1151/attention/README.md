@@ -13,7 +13,7 @@ vLLM v1 serving path rather than in isolated microbenchmarks alone.
 | | prefill — `wmma_fmha_swapqk` | decode — `paged_decode_splitk` |
 |---|---|---|
 | Replaces | vLLM Triton Flash-Attention (dense) | AMD HIP `paged_attention_rocm` |
-| Shipped config | `qk_douter=False`, `gqa_fuse=4`, `k_lds`, `v_paged`, `block_n=64` | `d_lanes=16`, split-K to `_TARGET_CTAS=256` |
+| Shipped config | `qk_douter=False`, `gqa_fuse=4`, `k_lds`, `v_paged`, `block_n=64` | `d_lanes=8`, split-K to `_TARGET_CTAS=256`, long-context shape rule |
 | Regime | compute-bound, ~5500 FLOP/byte | bandwidth-bound, ~4 FLOP/byte |
 | Reported as | TFLOP/s | **GB/s** — see [§5.1](#51-why-decode-must-be-reported-in-gbs) |
 | Isolated best | **1.57×** at S=1024, **1.14×** at S=8192 | **1.09×** at Sk=32768 |
@@ -137,10 +137,12 @@ All read once at import and folded into the kernel cache key.
 | `ROCKE_PAGED_DECODE` | `0` | enable the decode kernel |
 | `ROCKE_PAGED_DECODE_MIN_KV_MIB` | `32` | decode KV-bytes floor; `0` routes unconditionally |
 
-`d_lanes` is **not** an environment variable — it is a `PagedDecodeCfg` field defaulting
-to 16 and folded into the kernel cache key. Changing it means editing the config, which
-is deliberate: [§8.5](#85-d_lanes--16--a-decode-knob-with-an-interior-optimum) shows its
-optimum is interior and shape-dependent, not something to sweep at runtime.
+`d_lanes` defaults to 8 and is folded into the kernel cache key, so it selects a
+different compiled kernel rather than a different code path;
+`ROCKE_PAGED_DECODE_DLANES` overrides it process-wide for sweeps.
+`num_splits` and `heads_per_cta` are chosen per call by `choose_decode_cfg`
+([§8.7](#87-the-long-context-shape-rule)) from the batch and the host-side
+`max_seq_len`, which is the only shape information available without a device sync.
 
 ### 2.5 A correctness constraint that shaped the prefill design
 
@@ -336,7 +338,7 @@ is the entire cost and must be read once.
 Each CTA owns one `(request, kv_head)` pair and a slice of the KV range. `d_lanes` lanes
 cooperate on the head dimension; the partial dot products are combined with
 `ds_swizzle_b32` butterflies. That single parameter sets both the swizzle count and the
-register pressure — see [§8.5](#85-d_lanes--16--a-decode-knob-with-an-interior-optimum).
+register pressure — see [§8.5](#85-d_lanes--8--a-decode-knob-whose-optimum-moved-when-the-kernel-did).
 
 ### 5.3 Numerical stability: a finite sentinel
 
@@ -665,7 +667,7 @@ Two traps this exposed, both worth remembering:
   in the load counts — only the `readfirstlane` count guards it, which is why there is a
   CPU-only regression test on exactly that count.
 
-### 8.5 `d_lanes = 16` — a decode knob with an interior optimum
+### 8.5 `d_lanes = 8` — a decode knob whose optimum moved when the kernel did
 
 `d_lanes` sets how many lanes cooperate on the 128-element head dimension. It trades two
 costs in opposite directions:
@@ -676,23 +678,33 @@ VGPRs              = 2 * gqa_fuse * head_size / d_lanes
 ```
 
 More lanes means fewer registers per lane (better occupancy) but more butterfly
-reduction steps. The optimum is **interior**, which is the interesting part — it is not
-"as many as possible" or "as few as possible":
+reduction steps. Measured 2026-10-18 at `heads_per_cta=0`, min of 15 graph-replayed reps:
 
-| `d_lanes` | swizzles/key | VGPR | waves/SIMD | verdict |
-|---:|---:|---:|---:|---|
-| 32 | 20 | 115 | 4 | occupancy is fine; the swizzles dominate |
-| **16** | **8** | **152** | **3** | **won at all 11 measured points** |
-| 8 | 3 | 172 | 2 | cheapest reduction, but occupancy collapses |
+Speedup relative to the `d_lanes=32` arm of the same session, higher is better:
 
-16 won at **every one of 11 configurations**, not on average — there was no point at
-which either neighbour was preferable. Moving the default from 32 to 16 **doubled the
-batched e2e win** (to 1.027× at B=32).
+| `d_lanes` | swizzles/key | B=1 | B=4 | B=16 |
+|---:|---:|---:|---:|---:|
+| 32 | 20 | 1.000× | 1.000× | 1.000× |
+| 16 | 8 | 1.569× | 1.016× | 1.012× |
+| **8** | **3** | **1.668×** | **1.037×** | **1.028×** |
+
+8 > 16 > 32 monotonically, with no measured (batch, `Sk`) point where 8 loses. The
+default moved 16 → 8, worth **+6.3% at B=1** and +1.6–2.0% at batch.
+
+**This section previously claimed the opposite**, and that claim was correct when it was
+written: an 11-point sweep had 16 winning everywhere, with 8 losing on occupancy. What
+changed is the kernel, not the hardware. `block_n`, `unroll` and `waves_per_eu` did not
+exist then, and `block_n` is now *derived from* `d_lanes` — so the occupancy arm of the
+tradeoff is a different function than the one that was measured. **Treat any `d_lanes`
+conclusion older than the last edit to the kernel as void and re-sweep.**
+
+The scope matters: 8 wins at `heads_per_cta=0`. Once the GQA fusion is given up
+([§8.7](#87-the-long-context-shape-rule)) the ordering flips back and 16 is preferable,
+which is why the two knobs are chosen together rather than independently.
 
 **VGPR allocation is invisible in LLVM IR** — it is decided by the backend register
-allocator after IR is emitted. The table above was obtained by probing the compiled
-`.hsaco` metadata. Reasoning about occupancy from IR-level register counts would have
-picked the wrong value.
+allocator after IR is emitted. Occupancy figures here were obtained by probing the
+compiled `.hsaco` metadata; reasoning from IR-level register counts picks the wrong value.
 
 ### 8.6 `num_splits` — a measured target, not a derived one
 
@@ -709,6 +721,40 @@ Oversubscribing by 6.4× is what keeps the memory system busy through the tail o
 CTA's KV slice; one-CTA-per-CU leaves the fabric idle whenever a CTA reaches its
 epilogue. This is a case where the hardware-derived number was simply wrong and only the
 sweep found the right one.
+
+### 8.7 The long-context shape rule
+
+`choose_num_splits` never sees the sequence length, so at B=1 it returns 32 splits at
+every context. Above 16 K keys that is the wrong answer. `choose_decode_cfg` adds one
+branch: at **batch 1 and `Sk` ≥ 16384**, give up the GQA fusion (`heads_per_cta=1`) and
+let the same ~256-CTA target re-solve the split count, which lands on 8.
+
+Measured at B=1, `d_lanes=8`, vs the HIP incumbent (two interleaved runs, 10 reps each):
+
+| `Sk` | plain `ns32/hpc0` | rule `ns8/hpc1` | rule gain |
+|---:|---:|---:|---:|
+| 8192 | **1.004×** | 0.871× | −13% *(rule off here)* |
+| 16384 | 1.115× | **1.146×** | +2.8% |
+| 32768 | 1.125× | **1.140×** | +1.4% |
+| 65536 | 1.124× | **1.122×** | ±0 |
+
+Three things this table is saying:
+
+* **The threshold is a cliff.** At `Sk=8192` the branch costs 13%, and dropping to 8
+  splits *without* splitting the heads costs 31% (0.693×). 8192 is still inside the
+  regime the plain heuristic was tuned for; the rule must not fire there.
+* **Most of the gain is the split count, not the fusion.** Of the +2.8% at 16 K, the
+  32 → 8 split drop accounts for all but ~0.5 points. Giving up the fusion is worth a
+  consistent but small +0.5–0.9% on top, at every long context.
+* **It stops mattering by 64 K.** Every arrangement that reaches the CTA target measures
+  the same there, so the rule is neutral rather than harmful at the far end.
+
+Giving up the fusion means each kv head is read once per Q head instead of once per
+group — 4× the *logical* KV traffic. That it is affordable at all is a MALL result:
+achieved bandwidth computed on *logical* bytes comes out slightly **above** the part's
+DRAM limit, which is only possible if the duplicate reads are being served from cache. The same
+trade is **13% slower at B=16**, where the base grid is already wide enough and the
+duplicates no longer fit, so the rule is gated on `batch == 1`.
 
 ---
 
@@ -831,20 +877,24 @@ addressable market shrinks once prefix caching or chunked prefill is on.
   at S=8192). Consistent with `splitting_ops = attention_ops`: attention is split *out*
   of piecewise cudagraphs, so at prefill sizes launch overhead is negligible.
 
-### 9.9 `d_lanes = 8` — the predicted decode optimum that lost on both sides
+### 9.9 Trusting a tuning result across a retune of the same kernel
 
-Fewer lanes means fewer swizzles — 3 per key instead of 16's 8 — and the reduction cost
-is the term the design was written to minimise. It was the predicted winner.
+This section used to record `d_lanes = 8` as a failure: it was the predicted winner, and
+an 11-point sweep had it losing on occupancy at every point. That measurement was sound.
+The conclusion drawn from it — that 16 was *the* value — was not, and it survived a
+retune of the kernel that invalidated it.
 
-It lost, because VGPR pressure rises as `1/d_lanes`: 172 registers collapses occupancy
-to **2 waves/SIMD**, and this is a bandwidth-bound kernel whose entire job is keeping
-enough loads in flight to saturate the fabric. The swizzles it saves are VALU work that
-was already hidden behind memory latency; the occupancy it costs is not recoverable.
+`block_n`, `unroll` and `waves_per_eu` were added later, and `block_n` is derived from
+`d_lanes`. The occupancy arm of the tradeoff is therefore not the same function it was
+when the sweep ran, and on re-measurement 8 beats 16 at every batch
+([§8.5](#85-d_lanes--8--a-decode-knob-whose-optimum-moved-when-the-kernel-did)). The
+default spent five weeks one notch off, worth 6.3% at B=1, purely because a recorded
+result outlived the code it described.
 
-The mirror-image failure at `d_lanes=32` is cleaner still: occupancy is fine at 4
-waves/SIMD, but 20 swizzles per key is enough VALU work that it stops being free. **Both
-neighbours of 16 fail for opposite reasons**, which is what an interior optimum looks
-like when you find one.
+The rule: **a tuning constant is a property of the kernel at a commit, not of the
+hardware.** Any knob whose optimum was measured before the last edit to the kernel is
+unvalidated, and the cheap defence is to re-run the sweep rather than to reason about
+whether the edit "should" have mattered.
 
 ### 9.10 Expecting the decode win to track the bandwidth share
 
@@ -862,7 +912,8 @@ share, use it to decide whether the measurement is worth running, and then run i
 
 The original decode measurement reported the split-K kernel at **0.66–0.80×** — a large
 loss — below 32 MiB of KV. That figure was taken at `d_lanes=32`; at the shipped
-`d_lanes=16` the same region is a **wash** (0.93–1.00×), and the loss is corrected.
+`d_lanes=16` the same region was a **wash** (0.93–1.00×), and at the shipped
+`d_lanes=8` it is a slight win (1.00–1.01× at Sk=8192); the loss is corrected.
 
 What survives is the boundary itself: below ~32 MiB of KV the working set is
 MALL-resident, both kernels are fast, and there is nothing for split-K to recover. That

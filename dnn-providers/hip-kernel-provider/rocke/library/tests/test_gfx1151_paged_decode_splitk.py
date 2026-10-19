@@ -13,7 +13,7 @@ their own assertions:
     32-iteration waterfall AMDGPU wraps around a divergent buffer/gather base;
   * the K gather is one ``<EPT x half>`` load per token and the V gather one
     ``<block_n x half>`` load per lane-owned ``d`` (the transposed-V payoff);
-  * the workspace write is a ``<EPT x float>`` vector store, not EPT scalars;
+  * the workspace write is a run of maximal vector stores, not EPT scalars;
   * the reduce keeps the three-pass NaN-safe form (an all-empty split set must
     yield 0, not ``0 * inf``);
   * ``is_valid_spec`` rejects every shape the address math cannot express.
@@ -230,10 +230,16 @@ class TestSegmentCodegen(unittest.TestCase):
         self.assertEqual(got, want)
 
     def test_workspace_write_is_vectorised(self):
+        # One run of maximal vector stores per fused head, never ept scalars.
+        # At the shipping d_lanes=8 a lane owns 16 floats, which is wider than
+        # any single store, so the run is two <8 x float> rather than one.
         cfg = _cfg()
         ll = _seg(cfg)
-        stores = re.findall(r"store <(\d+) x float>", ll)
-        self.assertEqual(stores.count(str(cfg.ept)), cfg.gqa_fuse)
+        got = Counter(re.findall(r"store <(\d+) x float>", ll))
+        want: Counter = Counter()
+        for w in _chunk_widths(cfg.ept):
+            want[str(w)] += cfg.gqa_fuse
+        self.assertEqual(got, want)
 
     def test_reduction_stays_in_wave32_swizzle(self):
         # log2(d_lanes) XOR stages per QK dot, plus the fold. Every mask stays

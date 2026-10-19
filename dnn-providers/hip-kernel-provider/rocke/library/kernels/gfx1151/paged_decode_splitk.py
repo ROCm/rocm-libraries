@@ -88,8 +88,12 @@ class PagedDecodeCfg:
     # sibling SwapQKCfg already uses that name for the CTA thread count.
     kv_block_size: int = 16
     num_splits: int = 8
-    # Tokens per inner sub-tile == the width of one V vector load.
-    block_n: int = 8
+    # Tokens per inner sub-tile == the width of one V vector load. Capped by
+    # keys_per_sub, which d_lanes sets, so this default tracks the d_lanes
+    # default rather than standing on its own: at d_lanes=8 a sub-tile is 4
+    # keys wide and an 8-wide load would straddle two key partitions. The
+    # launcher derives it the same way when passed 0.
+    block_n: int = 4
     # Lanes that cooperate on ONE dot product. The wave's remaining
     # WAVE/d_lanes lanes work on disjoint keys and are folded together once
     # per segment, so this knob trades cross-lane reduce cost against
@@ -101,12 +105,15 @@ class PagedDecodeCfg:
     # At the production shape that is 20 swizzles / 115 VGPRs (4 waves/SIMD) at
     # d_lanes=32, 8 / 152 (3 waves) at 16, and 3 / 172 (2 waves) at 8.
     #
-    # 16 measured fastest at every point of an 11-point sweep straddling the
-    # 32 MiB MALL boundary. Both neighbours lose, for opposite reasons: 32 pays
-    # the swizzles, and 8 gives up the memory-level parallelism this kernel's
-    # DRAM-bound win rests on. The optimum being interior is why this is a knob
-    # and not a constant.
-    d_lanes: int = 16
+    # 8 > 16 > 32 monotonically, measured 2026-10-18 at heads_per_cta=0 with
+    # min-of-15-reps graph replay: 8 beats 16 by 6.3% at B=1, 2.0% at B=4 and
+    # 1.6% at B=16, with no (B, Sk) point in the sweep where it loses. An
+    # earlier sweep had 16 winning everywhere; that was true of the kernel as it
+    # stood before block_n, unroll and waves_per_eu existed, and block_n is now
+    # derived from d_lanes, so the occupancy arm is a different function. Treat
+    # any d_lanes conclusion older than the last edit to this file as void and
+    # re-sweep.
+    d_lanes: int = 8
     # Block-loop unroll: physical kv blocks consumed per loop iteration. All U
     # block-table lookups are issued ahead of the first block's math, and the
     # tail is masked, so any U is correct for any block count. Costs code size
@@ -930,3 +937,35 @@ def choose_num_splits(
     while n < want and n < max_splits:
         n *= 2
     return min(n, max_splits)
+
+
+# Where the long-context branch starts. The threshold is a cliff, not a taper:
+# at B=1 the branch is worth +2.8% at Sk=16384 and costs **31%** at Sk=8192,
+# because 8192 still fits the regime the plain heuristic was tuned for. Measured
+# 2026-10-19, two independent interleaved runs agreeing to 0.4 points.
+_HEADS_SPLIT_MIN_SEQLEN = 16384
+
+
+def choose_decode_cfg(
+    batch: int, max_seq_len: int, num_kv_heads: int, gqa_fuse: int
+) -> Tuple[int, int]:
+    """``(num_splits, heads_per_cta)`` for a decode step of this shape.
+
+    ``heads_per_cta=1`` gives up the GQA fusion, so each kv head is read once
+    per Q head instead of once per group. That is only affordable when the
+    duplicate reads land in MALL, and only worth it when there are too few base
+    CTAs to fill the machine any other way -- which is the single-request
+    long-context case. At ``batch >= 4`` the base grid is already wide and
+    splitting the fusion costs ~13% at B=16, so it stays gated on ``batch == 1``.
+
+    ``num_splits`` then falls out of the same ~256-CTA target as always, with
+    the head axis counted in, so the two knobs cannot both inflate the grid.
+    That coupling is doing most of the work: at B=1 the resulting drop from 32
+    splits to 8 is worth +2.8%/+1.4% at Sk=16384/32768 on its own, and giving up
+    the fusion adds a further +0.5-0.9%. Both effects wash out by Sk=65536,
+    where every arrangement that reaches the CTA target measures the same.
+    """
+    split_heads = batch == 1 and max_seq_len >= _HEADS_SPLIT_MIN_SEQLEN
+    heads_per_cta = 1 if split_heads else 0
+    head_groups = gqa_fuse if split_heads else 1
+    return choose_num_splits(batch, num_kv_heads * head_groups), heads_per_cta

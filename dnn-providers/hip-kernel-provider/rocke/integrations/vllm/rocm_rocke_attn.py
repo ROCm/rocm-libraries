@@ -617,6 +617,15 @@ class RockeAttentionImpl(RocmAttentionImpl):
         if kv_mib < _PAGED_DECODE_MIN_KV_MIB:
             return no("below_kv_threshold")
 
+        from kernels.gfx1151.paged_decode_splitk import choose_decode_cfg
+
+        # Same host-side max_seq_len the gate above uses, for the same reason.
+        num_splits, heads_per_cta = choose_decode_cfg(
+            b,
+            attn_metadata.max_seq_len,
+            self.num_kv_heads,
+            self.num_heads // self.num_kv_heads,
+        )
         torch.ops.rocke_gfx1151.paged_decode_splitk(
             query[:b],
             key_cache,
@@ -625,7 +634,11 @@ class RockeAttentionImpl(RocmAttentionImpl):
             seq_lens[:b],
             output[:b],
             self.scale,
-            0,  # 0 -> the measured choose_num_splits(batch, num_kv_heads)
+            num_splits,
+            0,  # d_lanes -> ROCKE_PAGED_DECODE_DLANES
+            0,  # block_n -> derived from d_lanes
+            1,  # unroll
+            heads_per_cta,
         )
         ROCKE_STATS["paged_decode"] += 1
         n = ROCKE_STATS["paged_decode"]
