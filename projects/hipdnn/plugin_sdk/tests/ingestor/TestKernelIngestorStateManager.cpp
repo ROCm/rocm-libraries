@@ -736,6 +736,132 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterMustAnswerForEveryKernel)
                  std::runtime_error);
 }
 
+/// A KernelPrepareFn's payload: the block size, decoded once.
+struct PreparedBlock
+{
+    int64_t blockSize;
+};
+
+int& prepareCalls()
+{
+    static int s_calls = 0;
+    return s_calls;
+}
+
+std::shared_ptr<const void> prepareBlock(const KernelDefinition& kernel)
+{
+    ++prepareCalls();
+    return std::make_shared<const PreparedBlock>(PreparedBlock{kernel.getIntMetadata(BLOCK_SIZE)});
+}
+
+std::shared_ptr<const void> prepareNothing(const KernelDefinition& /*kernel*/)
+{
+    return nullptr;
+}
+
+std::vector<int64_t>& preparedSeen()
+{
+    static std::vector<int64_t> s_seen;
+    return s_seen;
+}
+
+/// Admits FLOAT kernels, recording the prepared block size of each kernel it is shown.
+bool floatKernelsReadingPrepared(const MatchContext& context,
+                                 const BoundTokens& bound,
+                                 const KernelDefinition& kernel)
+{
+    if(kernel.preparedBy == &prepareBlock && kernel.prepared != nullptr)
+    {
+        preparedSeen().push_back(
+            static_cast<const PreparedBlock*>(kernel.prepared.get())->blockSize);
+    }
+    return acceptFloatKernels(context, bound, kernel);
+}
+
+/// RAII: registers @p prepare under @p symbol, the symbol of a kernel-scoped matcher.
+hipdnn_data_sdk::utilities::ScopedResource<const char*> scopedKernelPrepare(const char* symbol,
+                                                                            KernelPrepareFn prepare)
+{
+    prepareCalls() = 0;
+    preparedSeen().clear();
+    KernelPrepareRegistry::registerSymbol(symbol, prepare);
+    return {symbol,
+            [](const char* registered) { KernelPrepareRegistry::unregisterSymbol(registered); }};
+}
+
+TEST(TestKernelIngestorStateManager, AKernelPreparerRunsOncePerKernelWhenTheManagerIsBuilt)
+{
+    const ScopedSymbols symbols(
+        "test.graph", acceptGraph, "test.kernel", floatKernelsReadingPrepared);
+    const auto prepare = scopedKernelPrepare("test.kernel", &prepareBlock);
+    const auto manager = makeStateManager();
+    const auto properties = testDeviceProperties();
+
+    // Every kernel of the pack listing the matcher, once, before any graph.
+    EXPECT_EQ(prepareCalls(), 3);
+
+    // Matchers read the payload on every graph; nothing is prepared again, and the
+    // definitions handed out carry it.
+    const TestGraph first(makeGraphId(0xD1));
+    const TestGraph second(makeGraphId(0xD2));
+    const auto copies = manager->unsortedDefinitions(MatchContext{first, 0, properties});
+    manager->unsortedDefinitions(MatchContext{second, 0, properties});
+    EXPECT_EQ(prepareCalls(), 3);
+    EXPECT_EQ(preparedSeen(), (std::vector<int64_t>{64, 256, 64, 64, 256, 64}));
+    ASSERT_EQ(copies.size(), 2U);
+    for(const auto& copy : copies)
+    {
+        EXPECT_EQ(copy.preparedBy, &prepareBlock);
+        ASSERT_NE(copy.prepared, nullptr);
+        EXPECT_EQ(static_cast<const PreparedBlock*>(copy.prepared.get())->blockSize,
+                  copy.getIntMetadata(BLOCK_SIZE));
+    }
+}
+
+TEST(TestKernelIngestorStateManager, AKernelWithoutAPreparerCarriesNoPayload)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    // Registered under another symbol, so no matcher of this engine names it.
+    const auto prepare = scopedKernelPrepare("test.other_kernel", &prepareBlock);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0xD4));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_EQ(prepareCalls(), 0);
+    for(const auto& definition : manager->unsortedDefinitions(MatchContext{graph, 0, properties}))
+    {
+        EXPECT_EQ(definition.prepared, nullptr);
+        EXPECT_EQ(definition.preparedBy, nullptr);
+    }
+}
+
+TEST(TestKernelIngestorStateManager, APackWhoseMatchersPrepareDifferentlyIsRejected)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto second = hipdnn_data_sdk::utilities::ScopedResource<const char*>(
+        "test.second_kernel",
+        [](const char* registered) { KernelMatcherRegistry::unregisterSymbol(registered); });
+    KernelMatcherRegistry::registerSymbol("test.second_kernel", &acceptFloatKernels);
+    const auto first = scopedKernelPrepare("test.kernel", &prepareBlock);
+    const auto other = scopedKernelPrepare("test.second_kernel", &prepareNothing);
+    const auto secondMatcherId = testId(0xD3);
+
+    // A kernel carries one payload, so two preparers on one pack cannot both apply.
+    EXPECT_THROW(
+        StateManager(makeSchema(),
+                     std::vector<MatchDescriptor>{
+                         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"},
+                         {secondMatcherId,
+                          "second kernel scoped",
+                          MatchScope::KERNEL,
+                          "test.second_kernel"}},
+                     makeTestDispatches(),
+                     {makePack({KERNEL_MATCHER_ID, secondMatcherId})},
+                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                     "test.graph"),
+        std::invalid_argument);
+}
+
 TEST(TestKernelIngestorStateManager, AGraphTheMatchDeclinesEmptiesTheCatalogWithoutCriteria)
 {
     // nullopt from the engine's graph match is the whole answer: no criterion and no

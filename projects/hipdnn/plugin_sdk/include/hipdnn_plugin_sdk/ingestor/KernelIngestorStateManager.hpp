@@ -56,6 +56,8 @@ struct ResolvedMatcher
     MatchDescriptor descriptor;
     GraphCriterionFn graphFn = nullptr;
     KernelMatcherFn kernelFn = nullptr;
+    /// A kernel-scoped matcher's optional KernelPrepareFn, registered under its symbol.
+    KernelPrepareFn prepareFn = nullptr;
 };
 
 /// A UDD plus the handler its dispatchSymbol resolved to at construction.
@@ -185,7 +187,7 @@ public:
         {
             const auto id = matcher.id;
             const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
-            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr, nullptr};
             if(resolved.descriptor.scope == MatchScope::GRAPH)
             {
                 resolved.graphFn
@@ -195,6 +197,8 @@ public:
             {
                 resolved.kernelFn
                     = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+                resolved.prepareFn
+                    = KernelPrepareRegistry::tryResolve(resolved.descriptor.matchSymbol);
             }
 
             if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
@@ -221,6 +225,7 @@ public:
         }
 
         validateAndIndexPacks();
+        prepareDefinitions();
     }
 
     const MetadataSchema& metadataSchema() const
@@ -512,6 +517,44 @@ public:
     }
 
 private:
+    /// Runs each pack's KernelPrepareFn, if one of its kernel-scoped matchers registers
+    /// one, over every definition of the pack, once. A pack may have at most one: its
+    /// kernels carry a single payload.
+    /// @throws std::invalid_argument a pack lists two matchers with different preparers.
+    void prepareDefinitions()
+    {
+        for(size_t packIndex = 0; packIndex < _packs.size(); ++packIndex)
+        {
+            const auto& pack = _packs[packIndex];
+            KernelPrepareFn prepare = nullptr;
+            for(const auto& matcherId : pack.matcherIds)
+            {
+                const auto candidate = _matchers.at(matcherId).prepareFn;
+                if(candidate == nullptr || candidate == prepare)
+                {
+                    continue;
+                }
+                if(prepare != nullptr)
+                {
+                    throw std::invalid_argument("pack '" + toString(pack.id)
+                                                + "' lists two kernel-scoped matchers with "
+                                                  "different kernel preparers; a kernel "
+                                                  "carries one prepared payload");
+                }
+                prepare = candidate;
+            }
+            if(prepare == nullptr)
+            {
+                continue;
+            }
+            for(auto& definition : _definitions[packIndex])
+            {
+                definition.prepared = prepare(definition);
+                definition.preparedBy = prepare;
+            }
+        }
+    }
+
     /// Orders @p catalog by the record for @p context's graph and device and attaches that
     /// record, when the record fully covers @p catalog; false, leaving @p catalog untouched,
     /// otherwise.
