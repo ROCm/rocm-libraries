@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from .BinaryLibraryIO import iterSolutionRecords
 from .DataTypes import TYPE_PROPERTIES
-from .LibraryIO import iterSolutionRecords
 
 # Older metadata can name both FP8 operands with a single ordered pair.
 _INPUT_TYPE_PAIRS = {
@@ -72,8 +72,6 @@ class GemmProblem:
     math_op: str
     conjugate_a: bool = False
     conjugate_b: bool = False
-
-    # TODO(newling): vary scalars, batches and epilogue settings for better race coverage.
 
     @property
     def leading_dimensions(self) -> tuple[int, int, int, int]:
@@ -142,7 +140,6 @@ class LibraryMetadata:
             reasons.append(f"tileProcessingStrategy={strategy}")
         if split == -1 or mapping.get("adaptiveGemmGSUA", 0):
             reasons.append("automatic split-K")
-        # TODO(newling): implement these layouts/scheduling modes and close the sweep's coverage gaps.
         unsupported = (
             "groupedGemm",
             "fusedGemmA2A",
