@@ -434,7 +434,11 @@ namespace TensileLite
             msgpack::sbuffer         buffer;
             std::vector<std::string> error;
 
-            std::vector<std::string> keys;
+            // appendMap only needs how many entries this map holds, and path()
+            // only needs the key being written right now, so neither key is
+            // copied into a container.
+            size_t      keyCount = 0;
+            const char* lastKey  = nullptr;
 
             std::string enumKey;
             int         enumFound = 0;
@@ -467,7 +471,7 @@ namespace TensileLite
                 {
                     if(!rv.empty())
                         rv += ".";
-                    rv += keys.back();
+                    rv += lastKey ? lastKey : "";
                 }
                 for(size_t position : positions)
                     rv += concatenate("[", position, "]");
@@ -487,16 +491,28 @@ namespace TensileLite
                 return static_cast<uint32_t>(size);
             }
 
-            bool hasKey(const char* key) const
+            /// An output has no document to inspect: the keys it has written
+            /// are not retained. Every caller must guard the question with
+            /// !outputting(io) and decide from the object instead.
+            bool hasKey(const char*) const
             {
-                return std::find(keys.begin(), keys.end(), key) != keys.end();
+                return false;
+            }
+
+            void packKey(const char* key)
+            {
+                auto   pk  = packer();
+                size_t len = std::strlen(key);
+                pk.pack_str(length(len));
+                pk.pack_str_body(key, static_cast<uint32_t>(len));
+                keyCount++;
+                lastKey = key;
             }
 
             template <typename T>
             void mapRequired(const char* key, T& obj)
             {
-                keys.emplace_back(key);
-                packer().pack(keys.back());
+                packKey(key);
 
                 inValue = true;
                 output(obj);
@@ -511,9 +527,8 @@ namespace TensileLite
 
             bool mapRawBytes(const char* key, const uint8_t*& ptr, size_t& size)
             {
-                keys.emplace_back(key);
+                packKey(key);
                 auto pk = packer();
-                pk.pack(keys.back());
                 pk.pack_bin(length(size));
                 pk.pack_bin_body(reinterpret_cast<const char*>(ptr), size);
                 return true;
@@ -632,7 +647,7 @@ namespace TensileLite
 
             void appendMap(MessagePackOutput const& sub)
             {
-                packer().pack_map(length(sub.keys.size()));
+                packer().pack_map(length(sub.keyCount));
                 buffer.write(sub.buffer.data(), sub.buffer.size());
                 error.insert(error.end(), sub.error.begin(), sub.error.end());
             }
