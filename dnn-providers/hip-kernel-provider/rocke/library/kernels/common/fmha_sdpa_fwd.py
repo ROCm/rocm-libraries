@@ -21,22 +21,20 @@ softmax, PV, epilogue) is reused verbatim from
 just computes the per-tile base offsets and feeds them in, exactly like
 ``fmha_varlen.py`` does for the packed/cu_seqlens case.
 
-SCAFFOLD STATUS (Phase 1-2): dense contiguous BHSD only. Batch is threaded
-through the inner body's existing K/V offset hooks (general-stride correct)
-and, for Q/O, through a contiguous fold into ``q_tile_base`` (see the
-PHASE-3 notes below). The following are declared in the spec but NOT yet
-implemented and are rejected by ``is_valid_spec``:
+Addressing is layout-general. The body reads Q/K/V/O through runtime
+``(head, token)`` strides, and this shell rebases each tensor's BASE POINTER to
+the CTA's batch slice (``batch_idx * stride_*_batch``) before calling the body.
+Batch, head and token offsets are therefore all runtime, so BSHD, BHSD, general
+(non-contiguous) B/H/S strides and packed QKV are all expressed by the stride
+params and base pointers the launcher passes, with nothing baked. The head dim
+is assumed innermost with unit stride (the vectorized head-dim loads). The
+batch rebase is safe because the body loads through raw pointers and never
+sizes a buffer span from the original base.
 
-* BSHD order and general (non-contiguous) B/H/S strides,
-* packed-QKV strided views.
-
-PHASE-3 (general strides): the inner body has K/V offset hooks
-(``k_token_offset_elems`` / ``v_token_offset_elems``) but no Q/O offset
-hook, so a general-stride Q/O batch offset needs the shared body to gain a
-``q_base_offset_elems`` / ``o_base_offset_elems`` param pair (mirrored in
-the C++ engine, re-blessed golden). Until then Q/O batch addressing relies
-on the contiguous fold, which assumes ``stride_q_batch`` is a whole number
-of ``stride_q_token`` units.
+Python-only for now and OUTSIDE the byte-identity gate (a C++ port of the
+addressing is deferred): the shared inner body is reused UNCHANGED, so no
+byte-identity obligation is added to it. On-GPU numeric verification across the
+layouts is still pending.
 """
 
 from __future__ import annotations
@@ -44,6 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
+from rocke.core.ir import I64
 from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -62,10 +61,13 @@ __all__ = [
     "is_valid_spec",
 ]
 
-# Layouts the shell is designed to serve. Only the contiguous BHSD baseline
-# is implemented in the Phase 1-2 scaffold; the rest gate in is_valid_spec.
-_SUPPORTED_LAYOUTS = ("bhsd",)
-_PLANNED_LAYOUTS = ("bshd",)
+# Named contiguous layouts the launcher can derive strides for (see
+# _sdpa_fwd_strides.contiguous_strides). General and packed strides are passed
+# by the caller; the kernel itself is layout-agnostic (strides are runtime).
+_SUPPORTED_LAYOUTS = ("bhsd", "bshd")
+
+# Element size (bytes) for the per-batch base-pointer rebase.
+_ELEM_BYTES = {"f16": 2, "fp16": 2, "bf16": 2}
 
 
 @dataclass(frozen=True)
@@ -139,16 +141,19 @@ def is_valid_spec(spec: FmhaSdpaFwdSpec, arch: str = "gfx950") -> Tuple[bool, st
         return False, (
             f"MFMA sdpa needs head_size % 16 == 0 (got {spec.common.shape.head_size})"
         )
-    # Scaffold gates: only contiguous BHSD, unpacked, is implemented.
+    # The kernel is layout-agnostic (runtime strides + a per-batch pointer
+    # rebase), so packed QKV and either contiguous order build the same kernel;
+    # only the launcher's stride derivation is named-layout specific.
     if spec.layout not in _SUPPORTED_LAYOUTS:
-        planned = spec.layout in _PLANNED_LAYOUTS
         return False, (
-            f"layout {spec.layout!r} not yet implemented"
-            + (" (planned, Phase 3)" if planned else "")
-            + f"; supported: {_SUPPORTED_LAYOUTS}"
+            f"layout {spec.layout!r} is not a named contiguous order; "
+            f"supported: {_SUPPORTED_LAYOUTS} (general strides are caller-provided)"
         )
-    if spec.packed_qkv:
-        return False, "packed_qkv not yet implemented (Phase 3)"
+    if spec.common.dtype not in _ELEM_BYTES:
+        return False, (
+            f"dtype {spec.common.dtype!r} not supported; "
+            f"one of {sorted(_ELEM_BYTES)}"
+        )
     return True, "ok"
 
 
@@ -199,25 +204,25 @@ def build_fmha_sdpa_fwd(spec: FmhaSdpaFwdSpec, arch: str = "gfx950"):
     batch_idx = kb.batch_idx
     scale_log2 = kb.scalar("scale_log2")
 
-    # Within-sequence Q position of this CTA's tile (used for the causal
-    # mask check). Wave-uniform: depends only on block_id_x.
+    # Within-sequence Q position of this CTA's tile. It addresses Q rows AND is
+    # the causal-mask position; batch is carried by the rebased pointer below,
+    # so this stays the within-sequence row. Wave-uniform (block_id_x only).
     q_pos_base = b.to_sgpr_u32(b.mul(kb.q_token, b.const_i32(MFMA_ATTN_BLOCK_M)))
 
-    # Q/O batch addressing (CONTIGUOUS fold, Phase 3 extension point):
-    # per-batch Q holds num_query_heads * seqlen_q token-stride units, so
-    # fold the batch offset into the addressing base. This is exact only
-    # for contiguous BHSD (stride_q_batch == num_query_heads*seqlen_q *
-    # stride_q_token). General strides need a q/o offset hook on the body.
-    q_batch_tokens = b.mul(
-        batch_idx, b.const_i32(s.shape.num_query_heads * spec.seqlen_q)
-    )
-    q_tile_base = b.to_sgpr_u32(b.add(q_pos_base, q_batch_tokens))
+    # Rebase each tensor's base pointer to this CTA's batch slice:
+    # ptr + batch_idx * stride_*_batch (elements) * elem_bytes. The body then
+    # addresses head and token relative to the rebased pointer, so batch, head
+    # and token offsets are all runtime and any layout works. Safe because the
+    # body loads through raw pointers (no span is sized from the original base).
+    elem = _ELEM_BYTES[s.dtype]
 
-    # K/V batch addressing via the inner body's existing element-offset
-    # hooks. batch_idx * stride_*_batch is an absolute element offset, so
-    # this is general-stride correct (unlike the Q/O fold above).
-    k_batch_offset = b.to_sgpr_u32(b.mul(batch_idx, kb.scalar("stride_k_batch")))
-    v_batch_offset = b.to_sgpr_u32(b.mul(batch_idx, kb.scalar("stride_v_batch")))
+    def _batch_base(name):
+        off = b.mul(
+            b.zext(batch_idx, I64), b.zext(kb.scalar(f"stride_{name}_batch"), I64)
+        )
+        return b.global_ptr_add(kb.tensor(name.upper()), b.mul(off, b.const_i64(elem)))
+
+    q_base, k_base, v_base, o_base = (_batch_base(n) for n in ("q", "k", "v", "o"))
 
     # Dense: every sequence has the same length, known at build time.
     seqlen_k = b.const_i32(spec.seqlen_k)
@@ -226,13 +231,13 @@ def build_fmha_sdpa_fwd(spec: FmhaSdpaFwdSpec, arch: str = "gfx950"):
 
     mfma_attention_fwd_inner_body(
         b,
-        Q=kb.tensor("Q"),
-        K=kb.tensor("K"),
-        V=kb.tensor("V"),
-        O=kb.tensor("O"),
+        Q=q_base,
+        K=k_base,
+        V=v_base,
+        O=o_base,
         head_size=s.head_size,
         seqlen_k=seqlen_k,
-        q_tile_base=q_tile_base,
+        q_tile_base=q_pos_base,
         q_pos_base=q_pos_base,
         head_idx=head_idx,
         kv_head_idx=kv_head_idx,
@@ -249,8 +254,6 @@ def build_fmha_sdpa_fwd(spec: FmhaSdpaFwdSpec, arch: str = "gfx950"):
         mask_mode=s.mask_mode,
         sliding_window=s.sliding_window,
         causal_ctx_offset=causal_ctx,
-        k_token_offset_elems=k_batch_offset,
-        v_token_offset_elems=v_batch_offset,
         arch=arch,
     )
     b.ret()
