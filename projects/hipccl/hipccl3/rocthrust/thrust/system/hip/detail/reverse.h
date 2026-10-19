@@ -56,13 +56,10 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/advance.h>
 #  include <thrust/distance.h>
-#  include <thrust/iterator/reverse_iterator.h>
 #  include <thrust/system/hip/detail/copy.h>
 #  include <thrust/system/hip/detail/swap_ranges.h>
 
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(iterator)
-#  endif
+#  include _THRUST_STD_INCLUDE(iterator)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -71,7 +68,7 @@ namespace hip_rocprim
 template <class Derived, class ItemsIt, class ResultIt>
 ResultIt THRUST_HOST_DEVICE reverse_copy(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, ResultIt result)
 {
-  return hip_rocprim::copy(policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result);
+  return hip_rocprim::copy(policy, _THRUST_STD::reverse_iterator{last}, _THRUST_STD::reverse_iterator{first}, result);
 }
 
 template <class Derived, class ItemsIt>
@@ -84,7 +81,7 @@ void THRUST_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first
   ItemsIt mid(first);
   _THRUST_STD::advance(mid, N / 2);
 
-  hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
+  hip_rocprim::swap_ranges(policy, first, mid, _THRUST_STD::make_reverse_iterator(last));
 }
 
 } // namespace hip_rocprim
