@@ -30,11 +30,11 @@
 #  include <type_traits>
 #endif
 
-// There is an unfortunate miscompilation of the gcc-13 vectorizer leading to OOB writes
+// There is an unfortunate miscompilation of the gcc-12/gcc-13 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
-#if THRUST_COMPILER(GCC, >=, 13)
+#if THRUST_COMPILER(GCC, >=, 12)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
-#else // THRUST_COMPILER(GCC, <, 13)
+#else // THRUST_COMPILER(GCC, <, 12)
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
