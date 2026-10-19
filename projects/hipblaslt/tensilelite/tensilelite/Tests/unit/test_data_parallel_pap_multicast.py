@@ -89,13 +89,30 @@ def test_last_tile_skips_pap_without_a_cluster_phase(monkeypatch):
     assert machine.barrier_operations == []
 
 
-def test_noncluster_pap_keeps_its_local_handoff(monkeypatch):
+@pytest.mark.parametrize("target,wavesize,barriers", [
+    ("gfx950", 64, [("s_barrier", "")]),
+    ("gfx1250", 32, [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]),
+])
+def test_noncluster_pap_keeps_its_local_handoff(monkeypatch, target, wavesize, barriers):
+    from gpu_test_helpers import init_rocisa
+    from rocisa import rocIsa
+    init_rocisa(target=target, wavesize=wavesize)
     kernel, assignment, writer = _setup(monkeypatch, (1, 1))
+    kernel["WavefrontSize"] = wavesize
+    writer.states.asmCaps = dict(rocIsa.getInstance().getAsmCaps())
+    assert assignment.persistentClusterPrefetchHandoff(writer, kernel).itemsSize() == 0
     machine = Machine(NextTile=1, TotalTiles=2)
     machine.run(PersistentLoopOn().prefetch(writer, kernel, {}, {}))
     machine.run(assignment.persistentClusterNextTileArrive(writer, kernel))
     assert machine["Loads"] == 1
-    assert machine.barrier_operations == [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
+    assert machine.barrier_operations == barriers
+
+
+def test_cluster_pap_handoff_requires_barrier_capability(monkeypatch):
+    kernel, assignment, writer = _setup(monkeypatch)
+    writer.states.asmCaps["HasClusterBarrier"] = False
+    with pytest.raises(AssertionError, match="HasClusterBarrier"):
+        assignment.persistentClusterPrefetchHandoff(writer, kernel)
 
 
 @pytest.mark.parametrize("current_phantom,next_phantom", [(0, 1), (1, 0)])

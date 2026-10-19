@@ -1817,13 +1817,17 @@ def test_pap_epilogue_lds_overwrite_rejected(_gp_gfx1250, gfx1250_iim, assembler
     assert reason + " epilogue LDS overwrite" in out
 
 
-def test_pap_epilogue_local_split_u_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys):
-    params = _make_params(gfx1250_iim, PrefetchAcrossPersistent=1)
+@pytest.mark.parametrize("wave_group, waves", [([1, 1], 2), ([2, 2], 8)])
+def test_pap_epilogue_local_split_u_rejected(_gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                           wave_group, waves):
+    params = _make_params(gfx1250_iim, mi=_MI_W4[:-2] + wave_group,
+                          PrefetchAcrossPersistent=1)
     params["LocalSplitU"] = 2
     params["WorkGroup"][2] = 2
     sol = Solution(params, False, True, False, assembler, gfx1250_iim)
     out = capsys.readouterr().out
     assert not sol.get("Valid")
+    assert sol["NumWaves"] == waves
     assert "LocalSplitU epilogue LDS overwrite" in out
 
 
