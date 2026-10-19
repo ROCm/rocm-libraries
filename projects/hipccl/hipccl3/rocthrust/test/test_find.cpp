@@ -28,50 +28,7 @@
 TESTS_DEFINE(FindTestsVector, FullTestsParams);
 TESTS_DEFINE(FindTests, NumericalTestsParams);
 
-template <typename T>
-struct equal_to_value_pred
-{
-  T value;
-
-  equal_to_value_pred(T value)
-      : value(value)
-  {}
-
-  THRUST_HOST_DEVICE bool operator()(T v) const
-  {
-    return v == value;
-  }
-};
-
-template <typename T>
-struct not_equal_to_value_pred
-{
-  T value;
-
-  not_equal_to_value_pred(T value)
-      : value(value)
-  {}
-
-  THRUST_HOST_DEVICE bool operator()(T v) const
-  {
-    return v != value;
-  }
-};
-
-template <typename T>
-struct less_than_value_pred
-{
-  T value;
-
-  less_than_value_pred(T value)
-      : value(value)
-  {}
-
-  THRUST_HOST_DEVICE bool operator()(T v) const
-  {
-    return v < value;
-  }
-};
+using thrust::placeholders::_1;
 
 TYPED_TEST(FindTestsVector, TestFindSimple)
 {
@@ -135,12 +92,12 @@ TYPED_TEST(FindTestsVector, TestFindIfSimple)
 
   Vector vec{1, 2, 3, 3, 5};
 
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(2)) - vec.begin(), 1);
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(3)) - vec.begin(), 2);
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(4)) - vec.begin(), 5);
-  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(5)) - vec.begin(), 4);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(0)) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(1)) - vec.begin(), 0);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(2)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(3)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(4)) - vec.begin(), 5);
+  ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), _1 == T(5)) - vec.begin(), 4);
 }
 
 template <typename InputIterator, typename Predicate>
@@ -189,12 +146,12 @@ TYPED_TEST(FindTestsVector, TestFindIfNotSimple)
 
   Vector vec{0, 1, 2, 3, 4};
 
-  ASSERT_EQ(0, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
-  ASSERT_EQ(1, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
-  ASSERT_EQ(2, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(2)) - vec.begin());
-  ASSERT_EQ(3, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(3)) - vec.begin());
-  ASSERT_EQ(4, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(4)) - vec.begin());
-  ASSERT_EQ(5, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(5)) - vec.begin());
+  ASSERT_EQ(0, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(0)) - vec.begin());
+  ASSERT_EQ(1, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(1)) - vec.begin());
+  ASSERT_EQ(2, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(2)) - vec.begin());
+  ASSERT_EQ(3, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(3)) - vec.begin());
+  ASSERT_EQ(4, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(4)) - vec.begin());
+  ASSERT_EQ(5, thrust::find_if_not(vec.begin(), vec.end(), _1 < T(5)) - vec.begin());
 }
 
 template <typename InputIterator, typename Predicate>
@@ -291,15 +248,15 @@ TYPED_TEST(FindTests, TestFindIf)
       typename thrust::host_vector<T>::iterator h_iter;
       typename thrust::device_vector<T>::iterator d_iter;
 
-      h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
-      d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
+      h_iter = thrust::find_if(h_data.begin(), h_data.end(), _1 == T(0));
+      d_iter = thrust::find_if(d_data.begin(), d_data.end(), _1 == T(0));
       ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
       for (size_t i = 1; i < size; i *= 2)
       {
         T sample = h_data[i];
-        h_iter   = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(sample));
-        d_iter   = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
+        h_iter   = thrust::find_if(h_data.begin(), h_data.end(), _1 == T(sample));
+        d_iter   = thrust::find_if(d_data.begin(), d_data.end(), _1 == T(sample));
         ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
       }
     }
@@ -327,15 +284,15 @@ TYPED_TEST(FindTests, TestFindIfNot)
       typename thrust::host_vector<T>::iterator h_iter;
       typename thrust::device_vector<T>::iterator d_iter;
 
-      h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
-      d_iter = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
+      h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), _1 != T(0));
+      d_iter = thrust::find_if_not(d_data.begin(), d_data.end(), _1 != T(0));
       ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
       for (size_t i = 1; i < size; i *= 2)
       {
         T sample = h_data[i];
-        h_iter   = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(sample));
-        d_iter   = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
+        h_iter   = thrust::find_if_not(h_data.begin(), h_data.end(), _1 != T(sample));
+        d_iter   = thrust::find_if_not(d_data.begin(), d_data.end(), _1 != T(sample));
         ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
       }
     }
