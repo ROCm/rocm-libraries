@@ -94,10 +94,6 @@ Example: MPI-only on a Cray node (no RCCL)::
      -DCMAKE_SHARED_LINKER_FLAGS="-L${MPICH_DIR}/lib -lmpi ${PE_MPICH_GTL_DIR_amd_gfx90a} ${PE_MPICH_GTL_LIBS_amd_gfx90a} ${CRAY_XPMEM_POST_LINK_OPTS} -lxpmem" \
      ..
 
-Example: same build with RCCL (requires a ROCm that provides ``roc::rccl`` and
-matches this rocFFT, ROCm 10.x preferred)::
-
-   cmake ... -DROCFFT_RCCL_ENABLE=ON ...
 
 ``AMDGPU_TARGETS`` still works but is deprecated; use ``GPU_TARGETS``.
 
