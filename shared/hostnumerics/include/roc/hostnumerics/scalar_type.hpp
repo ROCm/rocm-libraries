@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -177,7 +178,6 @@ inline constexpr std::string_view scalarTypeName(ScalarType type) {
 }
 
 namespace detail {
-// Implementation of the native mapping, not a customization point.
 template <typename T>
 struct NativeScalarType;
 
@@ -297,15 +297,15 @@ struct ScalarTag {
     static_assert(isConcreteScalarType(TypeValue));
     static constexpr ScalarType type = TypeValue;
     static constexpr uint16_t storageBits = scalarTypeInfo(TypeValue).storageBits;
-    typedef typename decltype(scalarStorageIdentity<TypeValue>())::type Storage;
+    using Storage = typename decltype(scalarStorageIdentity<TypeValue>())::type;
 };
 }  // namespace detail
 
 // Dispatches a type-templated operation on a runtime ScalarType by calling
 // visitor.template operator()<Tag>(args...). Tag supplies type, storageBits,
 // and Storage (void when the storage width is not divisible by 8 bits).
-// The visitor must accept every tag and return the same type for each.
-// Visitors, arguments, and return values preserve their value categories.
+// The visitor is instantiated for every tag and must return the same type for each.
+// Visitors and arguments are forwarded; value, reference, and void returns are preserved.
 // Invalid types throw std::runtime_error before invoking the visitor.
 template <typename Visitor, typename... Args>
 decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... args) {
@@ -371,6 +371,7 @@ decltype(auto) visitScalarType(ScalarType type, Visitor&& visitor, Args&&... arg
         case ScalarType::Count:
             break;
     }
-    throw std::runtime_error("Invalid ScalarType.");
+    throw std::runtime_error("Invalid ScalarType: " + std::to_string(static_cast<unsigned>(type)) +
+                             ".");
 }
 }  // namespace roc::hostnumerics
