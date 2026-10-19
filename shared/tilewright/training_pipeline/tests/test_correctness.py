@@ -237,6 +237,10 @@ BLOCKLIST_KEYS = [
         "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
         "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
     ),
+    (
+        "Cijk_Ailk_Bjlk_S_MT64x64x64_MI32x32x1_GRVWA1_GRVWB4_IA0_K1_MIAV1_NTA7_NTB2_PKA1_SIA3_SU0",
+        "Cijk_Ailk_Bjlk_S_MT64x64x64_MI32x32x1_GRVWA1_GRVWB4_K1_MIAV1_NTA7_NTB2_SIA3_SU0",
+    ),
 ]
 TENSILELITE = Path(__file__).resolve().parents[4] / "projects/hipblaslt/tensilelite"
 
@@ -244,6 +248,14 @@ TENSILELITE = Path(__file__).resolve().parents[4] / "projects/hipblaslt/tensilel
 @pytest.mark.parametrize("name, key", BLOCKLIST_KEYS)
 def test_blocklist_keys_drop_the_ia_and_pka_tokens(name, key):
     assert cx.blocklist_key(name) == key
+
+
+def test_blocklist_keys_keep_every_other_token():
+    """Kernels whose names differ in any other token keep different keys,
+    as TensileLite's key test checks."""
+    assert cx.blocklist_key("Cijk_MT64x64x32_IA0_NTA0_NTB0_PKA1") != (
+        cx.blocklist_key("Cijk_MT64x64x32_IA0_NTA4_NTB0_PKA1")
+    )
 
 
 @pytest.mark.skipif(

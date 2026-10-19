@@ -651,9 +651,14 @@ TEST(PredictionLibraryTest, TilewrightBlocklistKeysDropTheIaAndPkaTokens)
         {"", ""},
         {"Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
          "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0"},
+        {"Cijk_Ailk_Bjlk_S_MT64x64x64_MI32x32x1_GRVWA1_GRVWB4_IA0_K1_MIAV1_NTA7_NTB2_PKA1_SIA3_SU0",
+         "Cijk_Ailk_Bjlk_S_MT64x64x64_MI32x32x1_GRVWA1_GRVWB4_K1_MIAV1_NTA7_NTB2_SIA3_SU0"},
     };
     for(auto const& [name, key] : keys)
         EXPECT_EQ(TilewrightRanker::blocklistKey(name), key) << name;
+    // Kernels whose names differ in any other token keep different keys.
+    EXPECT_NE(TilewrightRanker::blocklistKey("Cijk_MT64x64x32_IA0_NTA0_NTB0_PKA1"),
+              TilewrightRanker::blocklistKey("Cijk_MT64x64x32_IA0_NTA4_NTB0_PKA1"));
 }
 
 TEST(PredictionLibraryTest, TilewrightConfigKeepsTheCoreKernelFields)
