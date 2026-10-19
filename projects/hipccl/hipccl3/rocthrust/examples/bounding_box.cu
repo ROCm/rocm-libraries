@@ -74,7 +74,7 @@ struct bbox
 };
 
 // reduce a pair of bounding boxes (a,b) to a bounding box containing a and b
-struct bbox_reduction
+struct bbox_union
 {
   __host__ __device__ bbox operator()(bbox a, bbox b)
   {
@@ -91,13 +91,13 @@ struct bbox_reduction
 int main(void)
 {
   const size_t N = 40;
-  thrust::default_random_engine rng;
-  thrust::uniform_real_distribution<float> u01(0.0f, 1.0f);
 
   // allocate storage for points
   thrust::device_vector<point2d> points(N);
 
   // generate some random points in the unit square
+  thrust::default_random_engine rng;
+  thrust::uniform_real_distribution<float> u01(0.0f, 1.0f);
   for (size_t i = 0; i < N; i++)
   {
     float x   = u01(rng);
@@ -106,13 +106,10 @@ int main(void)
   }
 
   // initial bounding box contains first point
-  bbox init = bbox(points[0], points[0]);
-
-  // binary reduction operation
-  bbox_reduction binary_op;
+  bbox init(points[0], points[0]);
 
   // compute the bounding box for the point set
-  bbox result = thrust::reduce(points.begin(), points.end(), init, binary_op);
+  bbox result = thrust::reduce(points.begin(), points.end(), init, bbox_union{});
 
   // print output
   std::cout << "bounding box " << std::fixed;
