@@ -25,6 +25,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
+#include <thrust/tabulate.h>
 
 #include <unittest/unittest.h>
 
@@ -36,6 +37,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>
 #endif
+
+#include <numeric>
 
 template <class Vector>
 void TestScanSimple()
@@ -695,24 +698,40 @@ struct Int
   THRUST_HOST_DEVICE explicit Int(int num)
       : i(num)
   {}
-  THRUST_HOST_DEVICE Int()
-      : i{}
-  {}
-  THRUST_HOST_DEVICE Int operator+(Int const& o) const
+
+  // TODO(bgruber): I think we should not need this constructors, but CUB fails to compile without it
+  Int() = default;
+
+  THRUST_HOST_DEVICE friend Int operator+(Int const& a, Int const& b)
   {
-    return Int{this->i + o.i};
+    return Int{a.i + b.i};
+  }
+
+  THRUST_HOST_DEVICE friend bool operator==(Int const& a, Int const& b)
+  {
+    return a.i == b.i;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, Int const& a)
+  {
+    return os << "Int{" << a.i << "}";
   }
 };
 
-void TestInclusiveScanWithUserDefinedType()
+void TestScanWithUserDefinedTypeAndInit()
 {
-  thrust::device_vector<Int> vec(5, Int{1});
-
-  thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin());
-
-  ASSERT_EQUAL(static_cast<Int>(vec.back()).i, 5);
+  {
+    thrust::device_vector<Int> vec(5, Int{1});
+    thrust::exclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin(), Int{100}, _THRUST_STD::plus<Int>());
+    ASSERT_EQUAL(vec, (thrust::device_vector<Int>{Int{100}, Int{101}, Int{102}, Int{103}, Int{104}}));
+  }
+  {
+    thrust::device_vector<Int> vec(5, Int{1});
+    thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin(), Int{100}, _THRUST_STD::plus<Int>());
+    ASSERT_EQUAL(vec, (thrust::device_vector<Int>{Int{101}, Int{102}, Int{103}, Int{104}, Int{105}}));
+  }
 }
-DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
+DECLARE_UNITTEST(TestScanWithUserDefinedTypeAndInit);
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
 // We need a distinct type (instead of an alias) for operator<< to be found via ADL
@@ -805,3 +824,148 @@ void TestInclusiveScanWithNonCommutativeOp()
       {4, 0, 2, 1, 3}}));
 }
 DECLARE_UNITTEST(TestInclusiveScanWithNonCommutativeOp);
+
+// Adapted from issue: https://github.com/NVIDIA/cccl/issues/6317
+void TestScanBug6317()
+{
+  using T     = unsigned int;
+  const int n = 1729;
+  {
+    thrust::device_vector<T> s = unittest::random_integers<T>(n);
+    thrust::device_vector<T> d(n);
+    const auto r = thrust::inclusive_scan(s.cbegin(), s.cend(), d.begin(), _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d.end() == r), true);
+    std::partial_sum(s.cbegin(), s.cend(), s.begin(), std::multiplies<>{});
+    ASSERT_EQUAL(s, d);
+  }
+  {
+    thrust::device_vector<T> s = unittest::random_integers<T>(n);
+    thrust::device_vector<T> d(n);
+    const auto r = thrust::exclusive_scan(s.cbegin(), s.cend(), d.begin(), 42, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d.end() == r), true);
+    thrust::exclusive_scan(s.cbegin(), s.cend(), s.begin(), 42, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL(s, d);
+  }
+}
+DECLARE_UNITTEST(TestScanBug6317);
+
+// Test edge cases for parallel scan with non-additive operations
+void TestScanEdgeCases()
+{
+  // Test 1: Large array with inclusive_scan, multiplies, and init
+  // Tests Step 1 fix with many threads
+  {
+    const int n = 10000;
+    thrust::device_vector<int> d_input(n);
+    using thrust::placeholders::_1;
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 5) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    // Verify with host scan
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), 2, _THRUST_STD::multiplies<>{});
+
+    ASSERT_EQUAL(d_output, h_output);
+  }
+
+  // Test 2: Boundary exactly at parallel_scan_threshold (1024)
+  {
+    const int n = 1024;
+    thrust::device_vector<int> d_input(n);
+    using thrust::placeholders::_1;
+    thrust::tabulate(d_input.begin(), d_input.end(), _1 + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 10, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), 10, _THRUST_STD::multiplies<>{});
+
+    ASSERT_EQUAL(d_output, h_output);
+  }
+
+  // Test 3: Below threshold (1023) should use serial path
+  {
+    const int n = 1023;
+    thrust::device_vector<int> d_input(n);
+    using thrust::placeholders::_1;
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 3) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 5, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), 5, _THRUST_STD::multiplies<>{});
+
+    ASSERT_EQUAL(d_output, h_output);
+  }
+
+  // Test 4: Very small array (edge case for block distribution)
+  {
+    thrust::device_vector<int> d_input = {3, 7};
+    thrust::device_vector<int> d_output(2);
+
+    auto r = thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 2, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::device_vector<int> expected = {6, 42};
+    ASSERT_EQUAL(d_output, expected);
+  }
+
+  // Test 5: exclusive_scan with large array and multiplies
+  {
+    const int n = 10000;
+    thrust::device_vector<int> d_input(n);
+    using thrust::placeholders::_1;
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 3) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 5, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), 5, _THRUST_STD::multiplies<>{});
+
+    ASSERT_EQUAL(d_output, h_output);
+  }
+
+  // Test 6: exclusive_scan at boundary (1024 elements)
+  {
+    const int n = 1024;
+    thrust::device_vector<int> d_input(n);
+    using thrust::placeholders::_1;
+    thrust::tabulate(d_input.begin(), d_input.end(), (_1 % 5) + 1);
+
+    thrust::device_vector<int> d_output(n);
+    auto r = thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 3, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::host_vector<int> h_input = d_input;
+    thrust::host_vector<int> h_output(n);
+    thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), 3, _THRUST_STD::multiplies<>{});
+
+    ASSERT_EQUAL(d_output, h_output);
+  }
+
+  // Test 7: exclusive_scan with very small array
+  {
+    thrust::device_vector<int> d_input = {2, 4};
+    thrust::device_vector<int> d_output(2);
+
+    auto r = thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), 3, _THRUST_STD::multiplies<>{});
+    ASSERT_EQUAL((d_output.end() == r), true);
+
+    thrust::device_vector<int> expected = {3, 6};
+    ASSERT_EQUAL(d_output, expected);
+  }
+}
+DECLARE_UNITTEST(TestScanEdgeCases);
