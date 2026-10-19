@@ -446,6 +446,7 @@ struct GenerationRecipeAccess {
                 throw std::runtime_error("Raw generation supports scalar encodings up to 64 bits.");
             } else {
                 return [](std::span<std::byte> storage, ptrdiff_t offset, uint64_t value) {
+                    constexpr uint16_t bits = scalarTypeInfo(Tag::type).storageBits;
                     if constexpr (bits <= 32)
                         preparedWritePackedBits(storage, preparedBitOffset(Tag::type, offset), bits,
                                                 static_cast<uint32_t>(value));
