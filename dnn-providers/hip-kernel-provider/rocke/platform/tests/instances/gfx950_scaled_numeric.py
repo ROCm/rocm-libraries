@@ -1,6 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Bounded gfx950 compiler and hardware numeric validation helpers."""
+"""Bounded gfx950 compiler and hardware numeric validation helpers.
+
+Missing hardware or compiler tools skip ordinary runs. Set ROCKE_REQUIRE_GFX950=1
+on validation nodes to fail instead when a required dependency is unavailable.
+"""
 
 import os
 import re
@@ -28,9 +32,18 @@ def require_gpu():
         pytest.skip(f"requires gfx950; found {arch}")
 
 
+def _require_tool(name: str) -> str:
+    tool = shutil.which(name)
+    if tool is None:
+        reason = f"{name} is required for gfx950 numeric validation"
+        if os.environ.get("ROCKE_REQUIRE_GFX950") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    return tool
+
+
 def check_isa(artifact, spec):
-    objdump = shutil.which("llvm-objdump")
-    assert objdump, "llvm-objdump is required for the compiler evidence"
+    objdump = _require_tool("llvm-objdump")
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "kernel.hsaco"
         path.write_bytes(artifact.hsaco)
@@ -104,6 +117,10 @@ def check_isa(artifact, spec):
 
 def run_numeric(monkeypatch, a, b, output, route, M, N, K, cases=None):
     require_gpu()
+    # Check dependencies before compiling or importing the numeric harness.
+    _require_tool("llvm-objdump")
+    if route == "hip":
+        _require_tool("hipcc")
     from rocke.examples.gfx950.gemm import block_scaled_gemm_verify as verifier
     from rocke.instances.gfx950.block_scaled_gemm import BlockScaledGemmSpec
 
