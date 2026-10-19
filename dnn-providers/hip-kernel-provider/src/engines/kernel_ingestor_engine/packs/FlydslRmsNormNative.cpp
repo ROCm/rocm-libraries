@@ -549,7 +549,9 @@ public:
             = static_cast<unsigned int>(kernel.getIntMetadata(std::string(BLOCK_THREADS_FIELD)));
 
         // Build defines are ignored on the kpack path -- they were baked when the archive
-        // was produced -- but the signature still wants an options object.
+        // was produced. This calls the compile-capable overload, which takes an options
+        // object; a prebuilt-only overload without a compiler or options also exists
+        // (IngestorKernelCode.hpp) and would serve these kpack-only kernels equally.
         //
         // Built from the arch alone, without x. The tensor overload derives the dtype and
         // layout defines, and deriving the layout means classifying stride order as

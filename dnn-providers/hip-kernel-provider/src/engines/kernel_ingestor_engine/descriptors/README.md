@@ -4,8 +4,10 @@ This root holds the descriptors the provider **ships**. Its sibling `test_descri
 stages into the build tree for the unit and integration binaries and is installed only
 under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds two producers' bundles:
 
-- `rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only and whose kernels are
-  compiled at pack time; it packs for a build whose GPU targets include gfx950 and that
+- `rocKE/gfx950_attention_dense/`, whose KDP declares gfx950 only, and
+  `rocKE/gfx1151_wmma_attention/`, whose KDP declares the gfx11 (gfx1100–gfx1103,
+  gfx1150–gfx1153) and gfx12 (gfx1200, gfx1201) arches. Their kernels are compiled at
+  pack time; each packs for a build whose GPU targets include one of its arches and that
   has rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/`
   folder in the walk).
 - `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and checked in

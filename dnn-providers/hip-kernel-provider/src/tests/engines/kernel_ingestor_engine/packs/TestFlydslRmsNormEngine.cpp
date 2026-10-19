@@ -45,6 +45,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslRmsNormTestGraphs.hpp"
 
 /**
@@ -55,7 +56,7 @@
  * which belongs to the census binary because its cases need a named shard. Everything
  * here runs in the ordinary unit binary.
  *
- * The pack is unusual among the ingestor packs in three ways, and each gets cases here:
+ * The pack is unusual among the ingestor packs in four ways, and each gets cases here:
  *
  *  - It ships TWO SELECTION TIERS over the same graph. A kernel whose `N` metadata names
  *    the graph's width is preferred (`priority: 100`); a generic kernel carrying the
@@ -107,22 +108,6 @@ BoundTokens bindingsFor(const MatchContext& context)
         throw std::logic_error("test graph does not match the pack it is dispatched against");
     }
     return std::move(*bound);
-}
-
-/// The current device, with the arch stripped of its feature suffix.
-///
-/// hipGetDeviceProperties reports `gfx1151:xnack-`; the packer names shards with the bare
-/// arch, and prepare() passes this string straight through to the archive lookup. Asking
-/// in the wrong spelling fails to find a shard that is sitting right there.
-hipdnn_plugin_sdk::ingestor::DeviceProperties packedArchDeviceProperties()
-{
-    auto properties = currentDeviceProperties();
-    const auto colon = properties.gcnArchName.find(':');
-    if(colon != std::string::npos)
-    {
-        properties.gcnArchName.resize(colon);
-    }
-    return properties;
 }
 
 /// A kernel carrying exactly the metadata triple this pack's KMD declares.
@@ -456,7 +441,7 @@ TEST(TestFlydslRmsNormBinding, BindsEveryTokenTheDispatchReads)
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_RMSNORM.outputToken), FLYDSL_Y_UID);
 
     // Shape, not uids: the two values the grid and the descriptors are built from. Rows is
-    // the product of every axis outside the innermost, so 2x3 here and not 2.
+    // the product of every axis before the normalised one, so 2x3 here and not 2.
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_ROWS_TOKEN), 6);
     EXPECT_EQ(tryGetBoundInt(*bound, FLYDSL_COLUMNS_TOKEN), 4096);
 }
@@ -478,8 +463,9 @@ TEST(TestFlydslRmsNormBinding, BindsInvRmsOnlyForTraining)
 TEST(TestFlydslRmsNormBinding, CollapsesRank4UnderABroadcastShapedScale)
 {
     // Rank 4 with a scale of (1,1,1,W) rather than the rank-1 {W} every other case uses.
-    // The matcher asks only that the scale carry ONE row and that its innermost extent be
-    // the width, so leading unit axes are accepted the same way a rank-1 scale is. Packed
+    // The normalised axes are the trailing run where the scale matches x, here W alone, and
+    // the scale is 1 on every axis before it, so leading unit axes are accepted the same
+    // way a rank-1 scale is. Packed
     // strides here; the stride-0 form frameworks emit is the acceptance suite's
     // Rank4ScaleWithStrideZeroOnItsUnitAxes.
     // The three leading axes of x still collapse into the row count, 2x8x4.
@@ -840,6 +826,88 @@ INSTANTIATE_TEST_SUITE_P(
                                                      false,
                                                      std::nullopt,
                                                      DataType::BFLOAT16);
+                  }},
+        // y is written in x's element type, over x's rows, packed: an f32 y would receive
+        // bf16 bits, a smaller y would be written past its end, and a padded one as if it
+        // were dense.
+        GraphCase{"YOfAnotherDtype",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.yDataType = DataType::FLOAT;
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"YOfAnotherShape",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.yDims = std::vector<int64_t>{8, 2048};
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"PaddedRowsInY",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.yStrides = std::vector<int64_t>{4160, 1};
+                      return rmsNormGraphWith(extras);
+                  }},
+        // x, gamma and y are read and written through device pointers; one carrying a host
+        // value is a scalar, not an operand.
+        GraphCase{"PassByValueX",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.passByValueTensors.insert(FLYDSL_X_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"PassByValueGamma",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.passByValueTensors.insert(FLYDSL_SCALE_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"PassByValueY",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.passByValueTensors.insert(FLYDSL_Y_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"VirtualGamma",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.virtualTensors.insert(FLYDSL_SCALE_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        GraphCase{"RaggedY",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.raggedTensors.insert(FLYDSL_Y_UID);
+                      return rmsNormGraphWith(extras);
+                  }},
+        // One kernel serves one complete graph; a second node would be dropped.
+        GraphCase{"TwoNodes",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.secondNode = true;
+                      return rmsNormGraphWith(extras);
+                  }},
+        // At least 16 bytes is not enough: the 128-bit copies need a multiple of 16.
+        GraphCase{"XAlignedTo24",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_X_UID] = 24;
+                      return rmsNormGraphWith(extras);
+                  }},
+        // A strides vector longer than the shape describes no tensor, even when its leading
+        // entries happen to be the packed ones.
+        GraphCase{"StridesLongerThanTheShape",
+                  [] {
+                      return rmsNormGraphWithShapes(
+                          {8, 4096}, {4096}, {}, std::vector<int64_t>{4096, 1, 1});
+                  }},
+        // inv_rms is written one f32 at a time: at least 4-byte aligned is not enough, it
+        // has to be a multiple of 4.
+        GraphCase{"InvRmsAlignedTo6",
+                  [] {
+                      RmsNormGraphExtras extras;
+                      extras.alignment[FLYDSL_INV_RMS_UID] = 6;
+                      return trainingGraph({8, 4096}, extras);
                   }}),
     graphCaseName);
 
@@ -861,9 +929,14 @@ TEST(TestFlydslRmsNormKernelMatcher, RefusesAKernelBakedForAnotherWidth)
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {8, 4096}));
     const auto bound = bindingsFor(fixture.context());
 
-    // Baking N fixes the loop trip count, so a mismatched instance would read past the row.
+    // Baking N fixes the loop trip count: a wider instance would read past the row, and a
+    // narrower one would normalise only its first N columns and leave the rest unwritten.
+    // Both directions, because every baked instance carries the same priority and so only
+    // this rule keeps a narrower one out of the candidates.
     EXPECT_FALSE(
         matchesKernel(FLYDSL_RMSNORM, fixture.context(), makeFlydslKernel("bf16", 8192), bound));
+    EXPECT_FALSE(
+        matchesKernel(FLYDSL_RMSNORM, fixture.context(), makeFlydslKernel("bf16", 2560), bound));
 }
 
 TEST(TestFlydslRmsNormKernelMatcher, TheGenericTierAdmitsAWidthNothingWasBakedFor)
@@ -1026,12 +1099,16 @@ TEST(TestFlydslRmsNormDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 /// the kernel's own: the reference is computed from the SAME bf16/f16 values the device
 /// reads, which keeps input quantisation out of the error budget. Gamma is held as @p G,
 /// which is T unless the case gives a 16-bit x an f32 gamma.
+///
+/// Each row is scaled by its own power of two, so every row has a different RMS: a kernel
+/// that normalised every row by one row's statistic, or wrote inv_rms to the wrong row,
+/// would still match a reference in which all rows agree.
 template <typename T, typename G = T>
 class RmsNormBuffers
 {
 public:
-    /// @param training Also allocate inv_rms (one f32 per row), pre-filled with NaN so a row
-    /// the kernel does not write fails the comparison.
+    /// @param training Also allocate inv_rms (one f32 per row). It and y start as NaN, so
+    /// an element the kernel does not write fails the comparison.
     RmsNormBuffers(int64_t rows, int64_t columns, bool training = false)
         : _rows(rows)
         , _columns(columns)
@@ -1042,8 +1119,11 @@ public:
         {
             for(int64_t column = 0; column < columns; ++column)
             {
-                // Eighths, so every value is exact in bf16's 8 mantissa bits.
-                const float value = 0.5F + static_cast<float>((row + column) % 8) * 0.125F;
+                // Eighths times a power of two, so every value is exact in bf16's 8
+                // mantissa bits.
+                const float value
+                    = std::ldexp(0.5F + static_cast<float>((row + column) % 8) * 0.125F,
+                                 static_cast<int>(row % 4) - 1);
                 _x[static_cast<size_t>(row * columns + column)] = T(value);
             }
         }
@@ -1061,7 +1141,7 @@ public:
             hipSuccess,
             hipMemcpy(
                 _gammaDevice, _gamma.data(), _gamma.size() * sizeof(G), hipMemcpyHostToDevice));
-        EXPECT_EQ(hipSuccess, hipMemset(_yDevice, 0, _x.size() * sizeof(T)));
+        EXPECT_EQ(hipSuccess, hipMemset(_yDevice, 0xFF, _x.size() * sizeof(T)));
         if(training)
         {
             const auto bytes = static_cast<size_t>(rows) * sizeof(float);
@@ -1169,13 +1249,6 @@ private:
     void* _invRmsDevice = nullptr;
 };
 
-/// Runs the staged (@p dtype, @p bakedN) kernel over a @p rows x @p columns graph and
-/// checks every element against the host reference. @p scaleDims, @p extras and @p xDims
-/// describe the operands the way a framework might; they must split into the same
-/// @p rows x @p columns, so the buffers are the same packed arrays either way.
-///
-/// Skips rather than fails when the staged set holds no such kernel: on an arch this build
-/// packed nothing for, there is no kernel to be wrong about.
 /// How a launch case describes its operands and epsilon, beyond the dtype and the
 /// rows x columns its buffers hold. The shapes and strides must split into those same
 /// rows x columns, so the buffers are the same packed arrays either way.
@@ -1191,6 +1264,12 @@ struct RmsNormLaunchCase
     bool training = false;
 };
 
+/// Runs the staged (@p dtype, @p bakedN) kernel over a @p rows x @p columns graph and
+/// checks every element against the host reference, as @p launchCase describes the graph.
+///
+/// Fails when the staged set holds no such kernel on a device this build ships RMSNorm
+/// for, and skips elsewhere: on an arch this build packed nothing for, there is no kernel
+/// to be wrong about.
 template <typename T, typename G = T>
 void expectRmsNormMatchesReference(DataType dataType,
                                    const std::string& dtype,
@@ -1204,9 +1283,11 @@ void expectRmsNormMatchesReference(DataType dataType,
     KernelDefinition kernel;
     if(!findStagedKernel(dtype, bakedN, kernel, F32_SCALE ? 1 : 0, launchCase.training ? 1 : 0))
     {
-        GTEST_SKIP() << "nothing packed for dtype=" << dtype << " N=" << bakedN
-                     << " scale_f32=" << F32_SCALE << " store_rstd=" << launchCase.training
-                     << " in this build's descriptor root";
+        reportUnstaged("rmsnorm",
+                       "nothing staged for dtype=" + dtype + " N=" + std::to_string(bakedN)
+                           + " scale_f32=" + std::to_string(F32_SCALE ? 1 : 0)
+                           + " store_rstd=" + std::to_string(launchCase.training ? 1 : 0));
+        return;
     }
 
     const GraphFixture fixture(
@@ -1249,37 +1330,20 @@ void expectRmsNormMatchesReference(DataType dataType,
     const auto expected = buffers.reference(static_cast<double>(launchCase.epsilon));
     ASSERT_EQ(actual.size(), expected.size());
 
-    double worst = 0.0;
-    size_t worstIndex = 0;
-    for(size_t i = 0; i < actual.size(); ++i)
-    {
-        const double error
-            = std::abs(static_cast<double>(static_cast<float>(actual[i])) - expected[i])
-              / std::max(std::abs(expected[i]), 1e-3);
-        if(error > worst)
-        {
-            worst = error;
-            worstIndex = i;
-        }
-    }
-    EXPECT_LE(worst, relativeTolerance)
-        << "at element " << worstIndex << ": got " << static_cast<float>(actual[worstIndex])
-        << ", expected " << expected[worstIndex];
+    const auto worst = worstRelativeError(actual, expected, 1e-3);
+    EXPECT_LE(worst.error, relativeTolerance)
+        << "at element " << worst.index << ": got " << static_cast<float>(actual[worst.index])
+        << ", expected " << expected[worst.index];
 
     if(launchCase.training)
     {
         // f32 out of an f32 reduction and a hardware rsqrt: 1e-4 relative is far above
         // either's error and far below a wrong row, a wrong epsilon or an unwritten NaN.
         const auto invRms = buffers.readInvRms();
-        const auto expectedInvRms
-            = buffers.referenceInvRms(static_cast<double>(launchCase.epsilon));
-        for(size_t row = 0; row < invRms.size(); ++row)
-        {
-            const double error = std::abs(static_cast<double>(invRms[row]) - expectedInvRms[row])
-                                 / std::abs(expectedInvRms[row]);
-            ASSERT_LE(error, 1e-4) << "inv_rms of row " << row << ": got " << invRms[row]
-                                   << ", expected " << expectedInvRms[row];
-        }
+        const auto worstInvRms = worstRelativeError(
+            invRms, buffers.referenceInvRms(static_cast<double>(launchCase.epsilon)), 0.0);
+        EXPECT_LE(worstInvRms.error, 1e-4)
+            << "inv_rms of row " << worstInvRms.index << ": got " << invRms[worstInvRms.index];
     }
 }
 
@@ -1288,7 +1352,8 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesTheTrainingForward)
     SKIP_IF_NO_DEVICES();
 
     // y and inv_rms, at a baked width, through the generic tier, in f32, and with an f32
-    // gamma beside bf16; the last also with an epsilon that moves inv_rms by a fifth.
+    // gamma beside bf16; the last also with an epsilon large beside the first rows' mean
+    // squares, so inv_rms tells a kernel that ignored it apart.
     RmsNormLaunchCase launchCase;
     launchCase.training = true;
     expectRmsNormMatchesReference<hipdnn_data_sdk::types::bfloat16>(
@@ -1350,7 +1415,8 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesTheCudnnLayout)
 {
     SKIP_IF_NO_DEVICES();
 
-    // x {4, 4096, 1, 1} and gamma {1, 4096, 1, 1}, cuDNN's strides: 4 rows of 4096.
+    // x {4, 4096, 1, 1} and gamma {1, 4096, 1, 1}, gamma with cuDNN's strides: 4 rows of
+    // 4096.
     RmsNormLaunchCase launchCase;
     launchCase.scaleDims = std::vector<int64_t>{1, 4096, 1, 1};
     launchCase.extras.scaleStrides = {4096, 1, 4096, 4096};
@@ -1377,9 +1443,9 @@ TEST(TestGpuFlydslRmsNormDispatch, ComputesWithTheGraphsOwnEpsilon)
 {
     SKIP_IF_NO_DEVICES();
 
-    // The inputs' mean square is about 1, so an epsilon of 0.5 moves every output by
-    // about a fifth: a kernel that ignored it, or kept 1e-5, would fail by far more than
-    // the tolerance. Zero is the other edge.
+    // The rows' mean squares run from about 0.24 to 15, so an epsilon of 0.5 moves the
+    // first row's outputs by over 40%: a kernel that ignored it, or kept 1e-5, would fail
+    // by far more than the tolerance. Zero is the other edge.
     for(const float epsilon : {0.5F, 0.0F})
     {
         SCOPED_TRACE(::testing::Message() << "epsilon " << epsilon);
@@ -1498,52 +1564,62 @@ std::optional<double> timeRmsNormLaunches(
     return std::chrono::duration<double, std::micro>(elapsed).count() / timedLaunches;
 }
 
-TEST(TestGpuFlydslRmsNormTiers, CostTheBakedAndGenericTiersOverOneGraph)
+/// The rows of the graph a tier case times.
+class TestGpuFlydslRmsNormTiers : public ::testing::TestWithParam<int64_t>
+{
+};
+
+TEST_P(TestGpuFlydslRmsNormTiers, CostTheBakedAndGenericTiersOverOneGraph)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Two shapes, because either one alone would say something the other contradicts.
-    // Four rows is four workgroups: latency-bound, nothing to hide an instruction count
-    // behind, and the tier difference shows at its widest. 4096 rows moves 64 MiB per
-    // launch and runs near the memory ceiling, which compresses the same difference
-    // without erasing it. One number alone would overstate or bury the effect.
     const int64_t columns = 4096;
-    const std::array<int64_t, 2> rowCounts{4, 4096};
+    const int64_t rows = GetParam();
 
-    for(const auto rows : rowCounts)
+    const auto baked = timeRmsNormLaunches<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", columns, rows, columns);
+    const auto generic = timeRmsNormLaunches<hipdnn_data_sdk::types::bfloat16>(
+        DataType::BFLOAT16, "bf16", FLYDSL_GENERIC_N, rows, columns);
+    if(!baked.has_value() || !generic.has_value())
     {
-        SCOPED_TRACE(::testing::Message() << rows << "x" << columns);
-
-        const auto baked = timeRmsNormLaunches<hipdnn_data_sdk::types::bfloat16>(
-            DataType::BFLOAT16, "bf16", columns, rows, columns);
-        const auto generic = timeRmsNormLaunches<hipdnn_data_sdk::types::bfloat16>(
-            DataType::BFLOAT16, "bf16", FLYDSL_GENERIC_N, rows, columns);
-
-        if(!baked.has_value() || !generic.has_value())
-        {
-            GTEST_SKIP() << "this build's descriptor root lacks a bf16 tier at N=" << columns
-                         << " or N=" << FLYDSL_GENERIC_N;
-        }
-
-        // Nanoseconds because RecordProperty carries integers, and a microsecond figure
-        // rounded to int would quantise away most of the difference being reported.
-        const auto shape = std::to_string(rows) + "x" + std::to_string(columns);
-        RecordProperty("baked_" + shape + "_nsPerLaunch", static_cast<int>(*baked * 1000.0));
-        RecordProperty("generic_" + shape + "_nsPerLaunch", static_cast<int>(*generic * 1000.0));
-        GTEST_LOG_(INFO) << shape << " bf16: baked N=" << columns << " " << *baked
-                         << " us/launch, generic " << *generic << " us/launch, ratio "
-                         << "generic/baked " << (*generic / *baked);
-
-        EXPECT_GT(*baked, 0.0);
-        EXPECT_GT(*generic, 0.0);
-        EXPECT_LT(*generic, *baked * 10.0) << "the generic tier lost more than an order of "
-                                              "magnitude against the baked one; that is a "
-                                              "collapsed code path, not a tuning difference";
-        EXPECT_LT(*baked, *generic * 10.0) << "the baked tier lost more than an order of "
-                                              "magnitude against the generic one, which is "
-                                              "backwards for the tier `score` prefers";
+        reportUnstaged("rmsnorm",
+                       "nothing staged for a bf16 tier at N=" + std::to_string(columns)
+                           + " or N=" + std::to_string(FLYDSL_GENERIC_N));
+        return;
     }
+
+    // Nanoseconds because RecordProperty carries integers, and a microsecond figure
+    // rounded to int would quantise away most of the difference being reported.
+    const auto shape = std::to_string(rows) + "x" + std::to_string(columns);
+    RecordProperty("baked_" + shape + "_nsPerLaunch", static_cast<int>(*baked * 1000.0));
+    RecordProperty("generic_" + shape + "_nsPerLaunch", static_cast<int>(*generic * 1000.0));
+    GTEST_LOG_(INFO) << shape << " bf16: baked N=" << columns << " " << *baked
+                     << " us/launch, generic " << *generic << " us/launch, ratio "
+                     << "generic/baked " << (*generic / *baked);
+
+    EXPECT_GT(*baked, 0.0);
+    EXPECT_GT(*generic, 0.0);
+    EXPECT_LT(*generic, *baked * 10.0) << "the generic tier lost more than an order of "
+                                          "magnitude against the baked one; that is a "
+                                          "collapsed code path, not a tuning difference";
+    EXPECT_LT(*baked, *generic * 10.0) << "the baked tier lost more than an order of "
+                                          "magnitude against the generic one, which is "
+                                          "backwards for the tier `score` prefers";
 }
+
+// Two shapes, because either one alone would say something the other contradicts. Four
+// rows is four workgroups: latency-bound, nothing to hide an instruction count behind, and
+// the tier difference shows at its widest. 4096 rows moves 64 MiB per launch and runs near
+// the memory ceiling, which compresses the same difference without erasing it.
+//
+// The `Full` tier only: the bound is on wall-clock ratios, which a loaded, shared CI device
+// can distort, and the case answers a performance question no pre-merge run needs answered.
+INSTANTIATE_TEST_SUITE_P(Full,
+                         TestGpuFlydslRmsNormTiers,
+                         ::testing::Values(int64_t{4}, int64_t{4096}),
+                         [](const ::testing::TestParamInfo<int64_t>& info) {
+                             return "Rows" + std::to_string(info.param);
+                         });
 
 TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
 {
@@ -1552,7 +1628,8 @@ TEST(TestGpuFlydslRmsNormDispatch, RejectsANegativeEpsilonSuppliedAtExecute)
     KernelDefinition kernel;
     if(!findStagedKernel("bf16", 4096, kernel))
     {
-        GTEST_SKIP() << "nothing packed for bf16 N=4096 in this build's descriptor root";
+        reportUnstaged("rmsnorm", "nothing staged for bf16 N=4096");
+        return;
     }
 
     // The other half of the epsilon contract. An unusable baked epsilon is declined at
@@ -1592,7 +1669,8 @@ TEST(TestGpuFlydslRmsNormDispatch, LoadsTheModuleOnceAcrossTwoPrepares)
     KernelDefinition kernel;
     if(!findStagedKernel("bf16", 4096, kernel))
     {
-        GTEST_SKIP() << "nothing packed for bf16 N=4096 in this build's descriptor root";
+        reportUnstaged("rmsnorm", "nothing staged for bf16 N=4096");
+        return;
     }
 
     const GraphFixture fixture(buildFlydslRmsNormGraph(DataType::BFLOAT16, {4, 4096}),
@@ -1637,8 +1715,8 @@ TEST(TestGpuFlydslRmsNormDispatch, LoadsTheModuleOnceAcrossTwoPrepares)
 // `TestGpuFlydslRmsNormTiers` above does; what a recorded order must do is *win*, and a
 // record whose ranking merely agreed with `score` could not tell the two apart. So the
 // record written below is deliberately the INVERSE of the score order -- generic ahead
-// of baked, which §18.8 measured to be the slower of the two. If the ordering that comes
-// back is still baked-first, the record was ignored.
+// of baked, the slower of the two wherever the tiers were measured. If the ordering that
+// comes back is still baked-first, the record was ignored.
 
 /// A state manager over the flyDSL descriptors this binary actually discovered.
 ///
@@ -1707,7 +1785,8 @@ TEST(TestGpuFlydslRmsNormWinnerShard, ARecordedOrderDisplacesTheScoreOrder)
     SKIP_IF_NO_DEVICES();
     if(findLoadedSet(FLYDSL_RMSNORM.engineName) == nullptr)
     {
-        GTEST_SKIP() << "this build staged no RMSNorm objects";
+        reportUnstaged("rmsnorm", "this build staged no RMSNorm objects");
+        return;
     }
 
     // TEST scope, not BINARY: main() already installed a binary-wide root, and every
@@ -1727,8 +1806,10 @@ TEST(TestGpuFlydslRmsNormWinnerShard, ARecordedOrderDisplacesTheScoreOrder)
     const auto scored = manager->sortedDefinitions(context);
     if(scored.size() < 2)
     {
-        GTEST_SKIP() << "this build's descriptor root offers " << scored.size()
-                     << " bf16 kernels at N=4096; the ordering cases need both tiers";
+        reportUnstaged("rmsnorm",
+                       "this build's descriptor root offers " + std::to_string(scored.size())
+                           + " bf16 kernels at N=4096; the ordering cases need both tiers");
+        return;
     }
 
     ASSERT_EQ(bakedWidthOf(scored.front()), std::optional<int64_t>(4096))
@@ -1760,7 +1841,8 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
     SKIP_IF_NO_DEVICES();
     if(findLoadedSet(FLYDSL_RMSNORM.engineName) == nullptr)
     {
-        GTEST_SKIP() << "this build staged no RMSNorm objects";
+        reportUnstaged("rmsnorm", "this build staged no RMSNorm objects");
+        return;
     }
 
     const hipdnn_test_sdk::utilities::ScopedTestCacheDir cache(
@@ -1777,8 +1859,10 @@ TEST(TestGpuFlydslRmsNormWinnerShard, TheShardIsScopedToThisEngineAndOutlivesThe
         const auto scored = writer->sortedDefinitions(context);
         if(scored.size() < 2)
         {
-            GTEST_SKIP() << "this build's descriptor root offers " << scored.size()
-                         << " bf16 kernels at N=4096; the ordering cases need both tiers";
+            reportUnstaged("rmsnorm",
+                           "this build's descriptor root offers " + std::to_string(scored.size())
+                               + " bf16 kernels at N=4096; the ordering cases need both tiers");
+            return;
         }
         const std::vector<KernelDefinition> inverted(scored.rbegin(), scored.rend());
         writer->recordWinner(

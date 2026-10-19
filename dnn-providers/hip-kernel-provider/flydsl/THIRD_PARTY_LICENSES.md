@@ -7,11 +7,14 @@ from the following third-party project.
 
 ## FlyDSL
 
-- **Version:** the upstream commit each vendored file's header records
+- **Version:** commit `89ad52fbbb9e252396829a8a44b12e18b7acd970` (`v0.3.4.1-19-g89ad52f`)
 - **License:** Apache-2.0
 - **Project:** https://github.com/ROCm/FlyDSL
-- **Use:** The kernel sources under `flydsl/kernels_src/` are vendored from FlyDSL, with
-  the modifications each file's header lists. The FlyDSL code objects the provider ships
+- **Use:** The kernel sources under `flydsl/kernels_src/` are vendored from FlyDSL at
+  that commit. The two modified files (`kernels/norm/rmsnorm_kernel.py` and
+  `kernels/norm/rmsnorm_bwd_kernel.py`) carry a provenance header naming the upstream,
+  commit and path and listing their modifications; the other seven match upstream up to `black` formatting. The
+  FlyDSL code objects the provider ships
   (`src/engines/kernel_ingestor_engine/descriptors/FlyDSL/`, packed into the
   installed `.kpack` archives) are compiled from them. Each vendored file carries its
   upstream SPDX identifier and copyright line.

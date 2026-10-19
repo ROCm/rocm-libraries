@@ -14,8 +14,8 @@
 #     path is unchanged and still requires a compile-time N -- it caches tiles
 #     in a Python list of registers, which only exists under unrolling.
 #   - Removed the `from kernels.norm.rmsnorm_bwd_kernel import (...)`
-#     backward-compat re-export. Increment 1 is forward-only and the re-export
-#     pulls in a module this provider never builds.
+#     backward-compat re-export. The backward generator imports
+#     rmsnorm_bwd_kernel directly, so the forward module need not load it.
 #   - Removed the trailing `if torch is not None:` PyTorch wrapper/autograd
 #     section (upstream lines 1498-1902). This copy is imported by an AOT
 #     generator to build modules, never for eager use, and the section drags in

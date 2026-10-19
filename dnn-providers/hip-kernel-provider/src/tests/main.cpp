@@ -273,8 +273,10 @@ int main(int argc, char** argv)
     //
     // Set only when this binary was built with FlyDSL active, and never over a value the
     // caller supplied. Unlike the root above this one does not fail the process when it
-    // resolves to nothing: the cases that need the shard are FlyDSL's own and say so by
-    // failing, while every other suite in this binary is indifferent to it.
+    // resolves to nothing: the cases that need the shard are FlyDSL's own, and on a
+    // device this build ships FlyDSL for they fail when the objects are not there
+    // (reportUnstaged() in FlydslNormDeviceTestSupport.hpp), while every other suite in
+    // this binary is indifferent to it.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
     {
         const auto productDescriptors = hip_kernel_provider::testing::descriptorSetRoot(

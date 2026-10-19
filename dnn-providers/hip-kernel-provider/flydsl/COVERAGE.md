@@ -41,8 +41,10 @@ forms × 10 baked widths, so 45; doubled for training, 90. Names gain `_f32scale
 `_rstd1` only when those knobs are set, so the inference objects keep their names. The
 f32-gamma form reads gamma as f32 beside bf16/f16 x and y (the kernel's
 `weight_dtype_str="f32"`): the mixed form cuDNN and PyTorch commonly send. f32 has no
-baked tier because the kernel's 128-bit fast path (below) is for 16-bit elements only:
-an f32 object with `N` baked in runs the same scalar loop the generic one does.
+baked tier because baking was measured for bf16 only (below) and an f32 baked tier
+never was. An f32 object with `N` baked in would not take the 128-bit fast path (16-bit
+elements only), but it would run the unrolled compile-time-`N` loop rather than the
+generic one, which is where five of the ten 16-bit baked widths get their gain.
 `block_threads` is single-valued
 today: it is launch geometry, not correctness, so a second value only earns its
 6 extra objects once benchmarking says it wins somewhere. It stays in the knob
@@ -64,7 +66,12 @@ else.
 FlyDSL's vectorized 128-bit path caches tiles in a Python list of registers,
 which only exists while the tile loop is unrolled, and unrolling needs a
 compile-time count. So the fast path **genuinely cannot take a runtime `N`** —
-the tier split is forced by the kernel, not chosen for convenience.
+the tier split is forced by the kernel, not chosen for convenience. The fast path
+only runs when `N` is a multiple of its 2048-element tile, though, so of the baked
+widths only 4096, 6144, 8192, 12288 and 16384 use it; 2560, 3072, 3584, 5120 and 7168
+run the scalar loop unrolled at their compile-time `N`, and were still measured
+≥ 1.2× faster than the generic tier. The baked list is chosen by that measurement,
+not by which widths reach the fast path.
 
 The generic tier is the vendored runtime-`N` variant (modification 1 in
 [`kernels_src/kernels/norm/rmsnorm_kernel.py`](kernels_src/kernels/norm/rmsnorm_kernel.py)):
@@ -76,9 +83,10 @@ for a baked width, and the tie is broken by ranking, not by refusal.
 
 Which one wins is expressed purely as **data**. `IKernelHeuristic::rank` orders
 `score desc → priority desc → kernelId asc`, and `flydslRmsNormScore` returns
-`kernel.priority` unchanged rather than inventing a second opinion — so the
-`priority` column above *is* the ranking, decided at the first comparison
-(100 > 10, baked before generic). The later tiebreaks never come into play here,
+`kernel.priority` unchanged rather than inventing a second opinion — so each row's
+`priority` in `_instances.py` (`PRIORITY_SPECIALIZED` 100, `PRIORITY_GENERIC` 10,
+carried into each object's descriptor) *is* the ranking, decided at the first
+comparison (100 > 10, baked before generic). The later tiebreaks never come into play here,
 which is the point: selection is authored in the descriptors and refined by the
 autotuner, not computed from the shape. A score derived from the shape would
 also make the winner cache's key insufficient.
@@ -115,13 +123,16 @@ Evaluated once per graph. Every one of these is a hard refusal.
 | Exactly **one node**, and its attributes are `RMSNormAttributes` | Each kernel serves one complete graph. `RMSNormAttributes` is its own union arm, so matching it is the whole node-type test — there is no mode enum to disambiguate it from layer norm. |
 | No `bias_tensor_uid` | Every instance was compiled with no bias term and adds nothing after scaling. |
 | `inv_rms_tensor_uid` present exactly when `forward_phase == TRAINING`; otherwise NOT_SET or INFERENCE | A training graph wants the statistic even when it forgot to name the tensor, and one that names it outside training asks for an output cuDNN's semantics do not produce: both decline. inv_rms must be FLOAT, x's rank, x's extent on every row axis and 1 on every normalised one, packed, 4-byte aligned: the `store_rstd` objects write one f32 per row. The kernel matcher pairs `store_rstd` with it. |
-| x, scale, y all present and all **device operands** | Not virtual, not pass-by-value: the kernel reads each through a pointer. |
+| Node compute type `UNSET`, `FLOAT`, `HALF` or `BFLOAT16` | The kernels accumulate in f32, which is at least the precision any of these asks for; any other (e.g. `DOUBLE`, `INT32`) asks for one they do not provide. |
+| x, scale, y all present and all **device operands** | Not virtual, not pass-by-value, not ragged (no `ragged_offset_tensor_uid`): the kernel reads each through a pointer as a dense tensor. |
+| x, scale, y each declare an alignment that is a multiple of 16 bytes (the schema default) | The fast path copies 128-bit vectors from each operand's base, and the backend enforces only the alignment a graph declares. |
 | x and y one dtype, in {`BFLOAT16`, `HALF`, `FLOAT`}; gamma in that dtype, or `FLOAT` beside `BFLOAT16`/`HALF` | Each object reads x and writes y in one element type, and reads gamma in that type or, for the `scale_f32` objects, as f32. |
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
 | rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
 | gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The same rule as `validateScaleNormalizedShape` in the frontend. |
+| epsilon is one scalar: present, with dims, and extent 1 on every axis | The kernel takes one f32; a tensor of more elements would be read as its first. |
 | epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
 | The graph is not override-shape | Rows and width are bound from the graph's shapes at prepare, which an override-shape graph may replace at execute. |
 
@@ -187,8 +198,10 @@ program count and row order on every launch of a plan.
 
 The generic tiers bound the width instead of taking any: the partial kernel holds each
 thread's dgamma columns in registers across rows, so `n_max` sizes them. 1024 → ~22
-VGPRs, 8192 → ~115, 16384 → ~240, none spilling; 32768 spills, so wider graphs are
-declined. The narrower tier ranks first. Baked widths were chosen by the same
+VGPRs, 8192 → ~115, 16384 → ~240, none spilling VGPRs; 32768 spills, so wider graphs
+are declined. (No shipped object spills VGPRs or uses scratch; the `n_max` 16384 partial
+kernels on the CDNA targets spill a few SGPRs — 15–16 on gfx90a, 3 on gfx942/gfx950 —
+into VGPR lanes.) The narrower tier ranks first. Baked widths were chosen by the same
 measurement as the forward's and gained 1.2–8.4× on all five archs; 128, 512 and 1024
 stay generic (within ~25%).
 
@@ -200,10 +213,13 @@ per CU on gfx90a/gfx942/gfx950: within 2% almost everywhere, up to 10% faster at
 shipped: 2.6–90× slower at large M from contention, and its small-M edge was inside
 host launch overhead.
 
-**The graph matcher** takes one RMSNormBackward node: no dbias; x, dy, dx one dtype;
-gamma and dgamma one dtype, x's or f32 beside 16-bit x; inv_rms one f32 per row (the
-forward's rule); every row operand packed and 16-byte aligned; gamma encoding the
-normalised shape; not override-shape. **The kernel matcher** pairs dtype and gamma
+**The graph matcher** takes one RMSNormBackward node: no dbias; compute type `UNSET`,
+`FLOAT`, `HALF` or `BFLOAT16` (as the forward); every operand a device operand (not
+virtual, pass-by-value or ragged); x, dy, dx one dtype; gamma and dgamma one dtype, x's
+or f32 beside 16-bit x; dx shaped as x and dgamma as gamma; inv_rms one f32 per row (the
+forward's rule); every row operand and gamma/dgamma packed and 16-byte aligned; gamma
+encoding the normalised shape; every element of x, dy and dx within 2³¹ − 1 bytes (the
+forward's bound); not override-shape. **The kernel matcher** pairs dtype and gamma
 form, and serves a baked width exactly or a generic one up to its `n_max`.
 
 ---
@@ -239,4 +255,12 @@ do not compute, declined rather than approximated.
 | The vendored sources match upstream but for recorded modifications | `tools/diff_upstream.py` ([REGEN.md](REGEN.md) §5) |
 | The pack ships the generic tier for every dtype and gamma form and the specialized tier for the 16-bit ones, every kernel declares the 9-slot signature (epsilon last), and the engine's schema admits runtime epsilons | `TestFlydslRmsNormPacks` — and the shard census that runs it, which fails when the suite is green against an empty shard |
 | The pack ships the backward tiers per form, each object names its reduce kernel, and every kernel declares the 15-slot partial signature | `TestFlydslRmsNormBwdPacks` and its shard census |
-| The accept/refuse rules above hold | The matcher suites in `TestFlydslRmsNormEngine.cpp` and `TestFlydslRmsNormBwdEngine.cpp`; the GPU suites there check y, inv_rms, dx and dgamma against host references and dgamma's determinism |
+| The accept/refuse rules above hold | The matcher suites in `TestFlydslRmsNormEngine.cpp` and `TestFlydslRmsNormBwdEngine.cpp`. `TestFlydslRmsNormGraphMatcherRefusal` and `TestFlydslRmsNormBwdGraphMatcherRefusal` hold one host refusal case per gated field — forward: y dtype, shape and strides, pass-by-value operands, a second node, an alignment that is not a multiple of 16, strides of the wrong length, an inv_rms alignment that is not a multiple of 4; backward: dy and dgamma shape, per-operand packing, alignment and virtual-ness, two nodes. `TestFlydslRmsNormKernelMatcher` and `TestFlydslRmsNormBwdKernelMatcher` test each width rule in both directions (served and refused). The GPU suites there check y, inv_rms, dx and dgamma against host references and dgamma's determinism |
+| Every staged object computes what its name says | `TestGpuFlydslRmsNormObjects` (`TestFlydslRmsNormObjects.cpp`): launches each object by name through its pack's dispatch handler against an f64 host reference, into NaN-prefilled outputs, with a different scale per row, the backward twice and compared bit for bit. `OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier) in every test tier, pre-merge included; `Full/...Every` runs all 153 objects of the device's target, in the full (nightly) tier only |
+| The baked tier is faster than the generic one where both apply | `Full/TestGpuFlydslRmsNormTiers` (wall-clock comparison), full tier only |
+| A device case cannot pass by skipping on an arch FlyDSL ships for | Each GPU case that finds its objects unstaged **fails** on an arch the build ships FlyDSL for, and skips only on other arches |
+| `gen_descriptors.py --check` and `tools/check_shards.py` still refuse a tampered tree | CTest `hip-kernel-provider-flydsl-drift-guards` (pytest, `flydsl/tests/test_drift_guards.py`): copies the content tree and one packed shard, breaks one thing at a time, and requires each check to refuse it. Host-only, quick tier |
+
+Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
+comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
+(nightly) tier; every other case above runs in every tier.

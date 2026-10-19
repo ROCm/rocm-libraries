@@ -8,7 +8,7 @@
     "flydsl_kernels_describe": "v0.3.4.1-19-g89ad52f",
     "aiter_kernels_commit": "8253efc4059516f492df597b80ce5311e9fda8bd",
     "rocm_version": "7.13.0",
-    "inputs_sha256": "7ac8550fbf458a1ef0c26c349e5f4872a08b02e24af1119e4c9251b0123ee7ec"
+    "inputs_sha256": "e6b104e89956b87b2507e567bda29e9ab27d1d21ab75f96cdc50eebab835e811"
   },
   "instances": [
     {

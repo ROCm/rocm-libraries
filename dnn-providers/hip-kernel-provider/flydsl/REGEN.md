@@ -20,6 +20,13 @@ Regeneration is **reproducible**: the pinned toolchain in
 objects. Verifying that is the first procedure below, and it is the one to run
 after touching anything under `kernels_src/`.
 
+Every manifest records a digest of the bytes of its op's inputs (`inputs_sha256`), and
+the build's `--check` fails when they no longer match. So even a **comment-only** edit
+to a digested file -- anything under `kernels_src/`, or a shared module under
+`generators/` -- needs a regeneration per §3; it should reproduce byte-identical
+objects, with only the digest recorded in `manifest.json` and `<arch>.SOURCE.md` moving. Edits to `_instances.py` count only
+through the op's own rows, so a comment there does not.
+
 > An object that regenerates to *different* bytes is a **change** to what this
 > provider ships, not a refresh. See [When the bytes differ](#when-the-bytes-differ).
 
@@ -36,7 +43,7 @@ Everything below runs from the provider's `flydsl/` directory.
 | FlyDSL kernel sources | commit `89ad52fbbb9e…` (`v0.3.4.1-19-g89ad52f`) | `_flydsl_env.py` `FLYDSL_KERNELS_*`, and vendored under `kernels_src/` |
 | ROCm | 7.13.0 | read at runtime from `$ROCM_PATH/.info/version` |
 | `torch` | any ROCm build | imported by the vendored kernel sources |
-| `msgpack` | 1.2.2 | reads the AMDGPU metadata note out of each object |
+| `msgpack` | any (the tree was built with 1.2.2) | reads the AMDGPU metadata note out of each object |
 
 `torch` and `msgpack` are **not** transitive dependencies of the `flydsl`
 wheel — install them explicitly. Regeneration packs nothing: the archive is
@@ -112,7 +119,6 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 | `gfx950` | `rmsnorm rmsnorm_bwd` | 153 (90 + 63) |
 
 ```bash
-cd dnn-providers/hip-kernel-provider/flydsl
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd"
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
@@ -179,8 +185,6 @@ Only when the kernels actually change: a `kernels_src/` edit, a new instance row
 a new arch, a deliberate toolchain bump.
 
 ```bash
-cd dnn-providers/hip-kernel-provider/flydsl
-
 # (1) Compile. Writes $CONTENT/<op>/<arch>/*.hsaco + manifest.json, and
 #     $CONTENT/<op>/<arch>.SOURCE.md
 #     for each op.
@@ -280,19 +284,22 @@ change.
    reviews as a no-op diff while changing what every user runs.
 
 Bumping a pin is a deliberate act with a cost attached: `FLYDSL_VERSION` is
-per-provider, not per-arch, so changing it obliges regenerating **every** arch in
-`kernels/`. Leaving one behind ships a tree whose `<arch>.SOURCE.md` files disagree
+per-provider, not per-arch, so changing it obliges regenerating **every** target
+under `$CONTENT/<op>/`. Leaving one behind ships a tree whose `<arch>.SOURCE.md` files disagree
 about which compiler built it.
 
 ---
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of eight kernel modules from FlyDSL. Deliberate
-modifications are recorded beside the code, in the header of
-`kernels_src/kernels/norm/rmsnorm_kernel.py` (three). Each file's header names the
-upstream and path it came from, and the tool reads that header to decide what
-to diff it against. To see what has drifted:
+`kernels_src/` is a vendored copy of nine kernel modules from FlyDSL. Deliberate
+modifications are recorded beside the code, in the provenance headers of the two
+modified files: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four) and
+`kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two). Those headers also name the
+upstream, commit and path the file came from; the other seven files carry only
+FlyDSL's SPDX and copyright lines, and the tool diffs a file without a provenance
+header against the same relative path in the FlyDSL checkout. The pinned commit
+itself lives in `generators/_flydsl_env.py`. To see what has drifted:
 
 ```bash
 python3 tools/diff_upstream.py --upstream /path/to/FlyDSL --commit
@@ -302,14 +309,16 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 
 ```
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
+=== kernels/norm/rmsnorm_bwd_kernel.py
+  …
 === kernels/norm/rmsnorm_kernel.py
   …
-7/8 vendored files identical to upstream after normalization; 1 differ, 0 absent upstream, 0 not compared
+7/9 vendored files identical to upstream after normalization; 2 differ, 0 absent upstream, 0 not compared
 ```
 
-The differing file is the point of the tool, not a failure — read its hunks
-against its recorded modifications. It differs at least by the provenance
-header it carries. Anything that header does not
+The differing files are the point of the tool, not a failure — read each one's hunks
+against its recorded modifications. Each differs at least by the provenance
+header it carries. Anything its header does not
 account for is drift: either a local edit nobody wrote down, or an upstream
 re-vendor that did not update the pins in `generators/_flydsl_env.py`. Exit
 status reports whether the comparison held together, not whether files matched:

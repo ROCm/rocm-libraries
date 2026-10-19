@@ -36,6 +36,15 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_sources(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormBwdEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormObjects.cpp
+    )
+    # The architectures each op ships objects for, so a device case that finds none
+    # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
+    string(REPLACE ";" "," _flydsl_rmsnorm_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm}")
+    string(REPLACE ";" "," _flydsl_rmsnorm_bwd_archs "${HIPKERNELPROVIDER_FLYDSL_ARCHS_rmsnorm_bwd}")
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM="${_flydsl_rmsnorm_archs}"
+        HIPKERNELPROVIDER_FLYDSL_ARCHS_RMSNORM_BWD="${_flydsl_rmsnorm_bwd_archs}"
     )
     target_sources(hip_kernel_provider_census_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslRmsNormPacks.cpp

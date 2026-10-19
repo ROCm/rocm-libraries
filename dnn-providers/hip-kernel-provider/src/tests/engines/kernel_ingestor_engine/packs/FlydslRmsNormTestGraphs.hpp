@@ -123,9 +123,10 @@ inline std::vector<int64_t> flydslPackedStrides(const std::vector<int64_t>& dims
  *        the tensor carries no value and the caller supplies one at execute.
  */
 /// The fields buildFlydslRmsNormGraph()'s positional parameters do not reach: the node's
-/// compute type, each tensor's declared alignment, virtual flag and ragged offset,
-/// epsilon's shape, gamma's strides and the graph's override-shape flag. Each exists for
-/// a case that pins the matcher's reading of it.
+/// compute type, each tensor's declared alignment, virtual flag, ragged offset and
+/// pass-by-value value, epsilon's shape, gamma's strides, y's dtype, shape and strides, a
+/// second node, and the graph's override-shape flag. Each exists for a case that pins the
+/// matcher's reading of it.
 struct RmsNormGraphExtras
 {
     /// The node's compute type; unset means x's dtype, as the defaults always wrote.
@@ -133,6 +134,15 @@ struct RmsNormGraphExtras
     std::map<int64_t, int64_t> alignment;
     std::set<int64_t> virtualTensors;
     std::set<int64_t> raggedTensors;
+    /// Tensors that carry a host value, so they are pass-by-value scalars rather than
+    /// device operands.
+    std::set<int64_t> passByValueTensors;
+    /// y's dtype, shape and strides; unset means x's dtype and shape, packed.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> yDataType;
+    std::optional<std::vector<int64_t>> yDims;
+    std::optional<std::vector<int64_t>> yStrides;
+    /// A second RMS-norm node after the first, over the same tensors.
+    bool secondNode = false;
     std::vector<int64_t> epsilonDims;
     /// Gamma's strides; unset means packed for its shape.
     std::optional<std::vector<int64_t>> scaleStrides;
@@ -172,6 +182,13 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
                     flatbuffers::Offset<void> value = 0,
                     bool runtime = false) {
               const auto declared = extras.alignment.find(uid);
+              if(valueType == data_objects::TensorValue::NONE && !runtime
+                 && extras.passByValueTensors.count(uid) != 0)
+              {
+                  const data_objects::Float32Value hostValue(1.0F);
+                  valueType = data_objects::TensorValue::Float32Value;
+                  value = fbb.CreateStruct(hostValue).Union();
+              }
               return data_objects::CreateTensorAttributesDirect(
                   fbb,
                   uid,
@@ -188,15 +205,16 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
                   declared == extras.alignment.end() ? 16 : declared->second);
           };
 
-    // Gamma defaults to the innermost extent of x, whatever rank x has: the matcher
-    // collapses everything outside the innermost axis into the row count, so that extent
-    // is the normalised width in every accepted shape.
+    // Gamma defaults to the innermost extent of x, whatever rank x has: the normalised
+    // axes are the trailing run where gamma matches x, so that one axis is the normalised
+    // width unless a case gives gamma more.
     const auto resolvedScaleDims
         = scaleDims.has_value() ? *scaleDims : std::vector<int64_t>{xDims.back()};
     const auto resolvedScaleDataType = scaleDataType.value_or(dataType);
 
     const auto xStrides = xStridesOverride.value_or(flydslPackedStrides(xDims));
-    const auto yStrides = flydslPackedStrides(xDims);
+    const auto yDims = extras.yDims.value_or(xDims);
+    const auto yStrides = extras.yStrides.value_or(flydslPackedStrides(yDims));
     const auto scaleStrides = extras.scaleStrides.value_or(flydslPackedStrides(resolvedScaleDims));
 
     flatbuffers::FlatBufferBuilder builder;
@@ -208,7 +226,8 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
                              resolvedScaleDataType,
                              &scaleStrides,
                              &resolvedScaleDims));
-    tensors.push_back(tensor(builder, FLYDSL_Y_UID, "y", dataType, &yStrides, &xDims));
+    tensors.push_back(
+        tensor(builder, FLYDSL_Y_UID, "y", extras.yDataType.value_or(dataType), &yStrides, &yDims));
 
     // Epsilon is pass-by-value either way: baked carries a Float32Value, runtime carries
     // the is_runtime_pass_by_value flag and no value at all. Both make
@@ -257,22 +276,25 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormGraph(
                                  &invRmsDims));
     }
 
-    auto attributes = data_objects::CreateRMSNormAttributes(
-        builder,
-        FLYDSL_X_UID,
-        FLYDSL_SCALE_UID,
-        FLYDSL_EPSILON_UID,
-        FLYDSL_Y_UID,
-        withBias ? flatbuffers::Optional<int64_t>(FLYDSL_BIAS_UID) : flatbuffers::nullopt,
-        withInvRms ? flatbuffers::Optional<int64_t>(FLYDSL_INV_RMS_UID) : flatbuffers::nullopt,
-        forwardPhase);
-
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                                   "rmsnorm",
-                                                   extras.computeDataType.value_or(dataType),
-                                                   data_objects::NodeAttributes::RMSNormAttributes,
-                                                   attributes.Union()));
+    for(int node = 0; node < (extras.secondNode ? 2 : 1); ++node)
+    {
+        auto attributes = data_objects::CreateRMSNormAttributes(
+            builder,
+            FLYDSL_X_UID,
+            FLYDSL_SCALE_UID,
+            FLYDSL_EPSILON_UID,
+            FLYDSL_Y_UID,
+            withBias ? flatbuffers::Optional<int64_t>(FLYDSL_BIAS_UID) : flatbuffers::nullopt,
+            withInvRms ? flatbuffers::Optional<int64_t>(FLYDSL_INV_RMS_UID) : flatbuffers::nullopt,
+            forwardPhase);
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "rmsnorm",
+                                           extras.computeDataType.value_or(dataType),
+                                           data_objects::NodeAttributes::RMSNormAttributes,
+                                           attributes.Union()));
+    }
 
     auto name = builder.CreateString("flydsl_rmsnorm_test");
     auto tensorsVector = builder.CreateVector(tensors);

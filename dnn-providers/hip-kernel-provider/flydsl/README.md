@@ -13,7 +13,11 @@ This directory holds the kernels, the generators that produce them, and the
 descriptors that make them selectable. The matching C++ — the code that decides
 whether a graph may run on them and how to launch them — lives one level up, one
 file per engine:
-[`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp).
+[`FlydslRmsNormNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormNative.cpp)
+(forward) and
+[`FlydslRmsNormBwdNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormBwdNative.cpp)
+(backward), with the rules they share in
+[`FlydslRmsNormCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslRmsNormCommon.hpp).
 
 **One kernel family per engine.** An engine's objects are one kernel — one algorithm, one
 argument list, one launch rule, one set of knobs every object fills. Two approaches are
@@ -23,7 +27,9 @@ autotune's. A variation that only bakes a runtime value or changes a schedule �
 size, a generic head_dim tier — stays a knob of its family.
 
 **Nothing here is compiled by the build.** The `.hsaco` objects are committed
-artifacts; the provider's shared packer packs and stages them. That is the central fact about this
+artifacts; the provider's shared packer packs and stages them. (The build does run
+Python 3, for the checks below — `gen_descriptors.py --check` and
+`tools/check_shards.py` — but never FlyDSL or a kernel compiler.) That is the central fact about this
 directory, and it is what the rest of this file is mostly about: an artifact
 whose build is not reproduced on every `ninja` has to carry its provenance and a
 way to check it, or it is just bytes someone once vouched for.
@@ -58,7 +64,8 @@ a kernel argument, so any value is served:
   tier on five GPUs)
 - a **generic** tier that reads `N` from the tensor descriptor at runtime, so
   every other width is served too — more slowly, but served. f32 ships this tier
-  only, since the kernel's fast path is for 16-bit elements.
+  only: the measurement that chose the baked widths covered bf16, and f32 baked
+  objects were never measured.
 
 **RMSNorm backward** (`hipkernel:flydsl_rmsnorm_bwd`), 63 objects: dx and dgamma, the same
 dtypes and gamma forms, a deterministic two-stage dgamma reduction, baked widths from
@@ -149,9 +156,9 @@ one engine TU and one test TU per op, one census suite per op, and the `FlyDSL/`
 family folder, which the packer excludes with the option OFF
 (`HKP_DESCRIPTOR_FAMILIES`). No other integration's flag changes
 anything FlyDSL compiles, registers or asserts, and no FlyDSL suite names another
-engine. That isolation is a property to preserve, not an accident: it is checked
-by building with `ENABLE_HIP_MLOPS_ENGINE=OFF` and diffing the FlyDSL case list,
-which must come out empty.
+engine. That isolation is a property to preserve, not an accident. No build or CI
+job checks it; to check it by hand, build with `ENABLE_HIP_MLOPS_ENGINE=OFF` and diff
+the FlyDSL case list, which must come out empty.
 
 ## File map
 
@@ -165,13 +172,13 @@ provider tree; everything else is relative to this directory.
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
 | `<content>/<op>/<target>/manifest.json` | per-object SHA256 + knobs + argument layout + the toolchain and input digest that built them |
-| `kernels_src/kernels/**` | vendored kernel sources; each file's header names its upstream (FlyDSL), commit and path |
+| `kernels_src/kernels/**` | vendored kernel sources, each with its FlyDSL SPDX and copyright lines; the two modified files (`norm/rmsnorm_kernel.py`, `norm/rmsnorm_bwd_kernel.py`) also carry a header naming upstream, commit, path and their modifications. The commit is pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
 | `generators/_instances.py` | **the instance table** — one row per shipped object, every op |
 | `generators/_flydsl_env.py` | the pins: wheel version, upstream commits, ROCm recording |
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
@@ -215,8 +222,12 @@ from (`inputs_sha256`): the op's own kernel directories
 shared kernel helpers and generator machinery, its `gen_<op>.py`, its own rows
 of the instance table, and its target's row of `arch_families.json`. The build's `gen_descriptors.py --check` fails when
 the tree's inputs no longer match -- so a source change without a regeneration
-cannot ship objects built from other sources, and a change to one op leaves the
-others current. Regeneration is
+cannot ship objects built from other sources. Ops go stale together when they share
+inputs: `rmsnorm` and `rmsnorm_bwd` both digest the whole `norm/` directory and the
+shared kernel helpers and generator modules, so an edit to the forward-only
+`rmsnorm_kernel.py` invalidates the backward objects too. The digest hashes bytes, so
+a comment-only edit to any digested file also needs a regeneration (which then
+reproduces byte-identical objects). Regeneration is
 byte-reproducible against the pinned toolchain: a contributor who regenerates
 gets exactly the bytes a maintainer would, and a maintainer can regenerate a
 contribution to confirm it.
@@ -229,7 +240,8 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 12/12 gfx11-generic, 12/12 gfx12-generic
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 153/153 on each of gfx11-generic,
+   │                                    gfx12-generic, gfx90a, gfx942, gfx950
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)
@@ -242,15 +254,12 @@ The last link is the one that is easy to leave out and expensive to be without:
 a test suite that builds its graphs in-process stays green against an **empty**
 shard. The census exists to fail in exactly that case.
 
-Regeneration is byte-reproducible against the pinned toolchain, which is what
-lets the whole chain be re-derived rather than trusted. Two consequences worth
-stating plainly:
+Byte-reproducibility is what lets the whole chain be re-derived rather than
+trusted. Two consequences worth stating plainly:
 
 - Objects that regenerate to **different bytes** are a *change to what this
   provider ships*, not a refresh — commit them as such, with objects, manifest,
-  `<target>.SOURCE.md` and descriptors moving together. A regenerated object committed as
-  a refresh reviews as a no-op diff while changing what every user runs.
-- The repo's `black` hook reformats `kernels_src/`. That is accepted, and the
-  reformat was verified codegen-neutral by regenerating — so re-run the
-  verification after any bulk reformat, because that verification is the only
-  thing keeping the acceptance honest.
+  `<target>.SOURCE.md` and descriptors moving together ([REGEN.md §4](REGEN.md)).
+- The repo's `black` hook reformats `kernels_src/`. That is accepted because the
+  reformat was verified codegen-neutral; re-run that verification after any bulk
+  reformat ([REGEN.md §2](REGEN.md)).

@@ -191,6 +191,26 @@ if(_flydsl_product_root)
         VERBATIM
     )
     add_dependencies(flydsl_shard_check hkp_packaging_product)
+
+    # The two checks above stop the build on drift, so a check that stopped checking
+    # would pass silently. These tests copy the content tree and one packed shard, break
+    # one thing at a time, and require each check to refuse it. Host-only and a couple of
+    # seconds, so they run in the quick tier (HKP_PACK_test_categories_external.yaml).
+    if(HIPKERNELPROVIDER_ENABLE_TESTS)
+        list(GET _flydsl_archs 0 _flydsl_shard_arch)
+        add_test(NAME hip-kernel-provider-flydsl-drift-guards
+                 COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+                         -v -p no:cacheprovider)
+        # The quick tier's labels, set here too so they survive a tree where YAML
+        # categorization is off, as the census entries' do.
+        set_tests_properties(hip-kernel-provider-flydsl-drift-guards PROPERTIES
+            LABELS "unit_test;hip-kernel-provider;host"
+            ENVIRONMENT
+                "FLYDSL_PRODUCT_OUT_ROOT=${_flydsl_product_root};FLYDSL_SHARD_ARCH=${_flydsl_shard_arch};HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON=${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON};PYTHONDONTWRITEBYTECODE=1")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND COMMAND apply_ctest_category_labels)
+            apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+        endif()
+    endif()
 endif()
 
 # The shipped objects are compiled from Apache-2.0 sources, which asks that a copy

@@ -14,9 +14,9 @@ depends on, both asserted rather than assumed:
 
 * *The file is matched by pass name, never by the numeric stage prefix.* The
   prefix is an ordinal into whatever pipeline that build of FlyDSL runs, so it
-  moves when a pass is added: the POC this is ported from documented "stage 19"
-  and flydsl 0.3.4 emits ``20_gpu_module_to_binary.mlir`` out of 23 stages. The
-  glob below has always keyed on the name; only the prose was stale.
+  moves when a pass is added: flydsl 0.3.4 emits
+  ``20_gpu_module_to_binary.mlir`` out of 23 stages, and the number has moved
+  between releases. The glob below keys on the name.
 * *The extracted bytes begin with ELF magic.* A pipeline change that stops
   embedding the binary, or embeds something else, then fails here rather than
   writing a plausible-looking file that will not load.

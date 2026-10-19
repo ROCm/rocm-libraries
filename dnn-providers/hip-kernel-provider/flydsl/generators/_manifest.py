@@ -34,10 +34,12 @@ MANIFEST_VERSION = 1
 
 FLYDSL_DIR = Path(__file__).resolve().parent.parent
 
-# What one op's objects are generated from, so a change to one op's inputs leaves
-# every other op's objects current. Each op names its kernel directories under
-# kernels_src/kernels/; a new op must add itself, and an op missing here is an
-# error rather than an empty digest.
+# What one op's objects are generated from. Each op names its kernel directories
+# under kernels_src/kernels/; a new op must add itself, and an op missing here is
+# an error rather than an empty digest. Ops that share a directory, as rmsnorm and
+# rmsnorm_bwd share norm/, and every op through the shared generator modules
+# below, go stale together: an edit to any of their files, comments included,
+# needs a regeneration of each.
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),

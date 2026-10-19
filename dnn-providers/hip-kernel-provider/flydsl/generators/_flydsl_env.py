@@ -39,10 +39,10 @@ FLYDSL_VERSION = "0.3.4"
 FLYDSL_KERNELS_COMMIT = "89ad52fbbb9e252396829a8a44b12e18b7acd970"
 FLYDSL_KERNELS_DESCRIBE = "v0.3.4.1-19-g89ad52f"
 
-# The AITER checkout the attention source was taken from. AITER carries FlyDSL
+# The AITER checkout the attention sources are taken from. AITER carries FlyDSL
 # kernels that upstream FlyDSL does not -- the RDNA4 flash-attention kernel the
-# gfx1151 port starts from among them -- so a vendored file names which of the
-# two it came from in its own header, and this pins the second.
+# RDNA attention engines build on among them -- so a vendored file names which
+# of the two it came from in its own header, and this pins the second.
 AITER_KERNELS_COMMIT = "8253efc4059516f492df597b80ce5311e9fda8bd"
 
 # --- Paths ------------------------------------------------------------------

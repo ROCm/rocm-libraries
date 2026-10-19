@@ -153,13 +153,15 @@ TEST(TestFlydslRmsNormPacks, EveryKernelDeclaresTheNineSlotSignature)
             // alignment -- the slots sum to 72 bytes but span a segment of 80, and a
             // reader who assumed the sizes were contiguous would place y four bytes low.
             //
-            // The third pair is VESTIGIAL: the instances are built store_rstd=False, so
-            // nothing is written through it, and launch() fills it with gamma's pointer
-            // and descriptor rather than leaving it null. A rebuild with store_rstd=True
-            // would produce this same nine-slot signature and silently write the
-            // statistic over gamma. That aliasing is invisible in the signature, so this
-            // is where it gets caught: if a regenerated manifest ever changes this table,
-            // re-read launch() before updating the expectation.
+            // The third pair is the inv_rms output. The training (`store_rstd` 1) objects
+            // write one f32 per row through it, and launch() binds the graph's inv_rms
+            // buffer with a Desc1D of the row count. The inference objects never store
+            // through it, so launch() fills it with gamma's pointer and descriptor rather
+            // than leaving it null. Both kinds share this nine-slot signature, so which
+            // pointer the slot gets is decided only in launch() -- an inference binding
+            // given to a training object would write the statistic over gamma. That is
+            // invisible in the signature, so if a regenerated manifest ever changes this
+            // table, re-read launch() before updating the expectation.
             static const std::array<std::pair<const char*, uint32_t>, 9> s_slots{
                 {{"global_buffer", 8},
                  {"by_value", 16},

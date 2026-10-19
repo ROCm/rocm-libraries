@@ -31,6 +31,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslRmsNormBwdTestGraphs.hpp"
 
 /**
@@ -72,18 +73,6 @@ BoundTokens bindingsFor(const MatchContext& context)
         throw std::logic_error("test graph does not match the pack it is dispatched against");
     }
     return std::move(*bound);
-}
-
-/// The current device with its arch's feature suffix stripped; see the forward suite.
-DeviceProperties packedArchDeviceProperties()
-{
-    auto properties = currentDeviceProperties();
-    const auto colon = properties.gcnArchName.find(':');
-    if(colon != std::string::npos)
-    {
-        properties.gcnArchName.resize(colon);
-    }
-    return properties;
 }
 
 KernelDefinition makeBwdKernel(const std::string& dtype,
@@ -340,16 +329,118 @@ INSTANTIATE_TEST_SUITE_P(
                     spec.dxDims = std::vector<int64_t>{8, 2048};
                     return spec;
                 }},
+        // dy is read and dgamma written over x's rows and gamma's width: a smaller dy would
+        // be read past its end, a shorter dgamma written past its end.
+        BwdCase{"DyOfAnotherShape",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.dyDims = std::vector<int64_t>{8, 2048};
+                    return spec;
+                }},
+        BwdCase{"DgammaOfAnotherShape",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.dscaleDims = std::vector<int64_t>{2048};
+                    return spec;
+                }},
+        BwdCase{"PaddedRowsInDx",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.strides[FLYDSL_BWD_DX_UID] = {4160, 1};
+                    return spec;
+                }},
+        BwdCase{"GammaStridedAlongTheAxis",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.strides[FLYDSL_BWD_SCALE_UID] = {2};
+                    return spec;
+                }},
+        BwdCase{"DgammaStridedAlongTheAxis",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.strides[FLYDSL_BWD_DSCALE_UID] = {2};
+                    return spec;
+                }},
+        // Every operand is a real device buffer the kernels address through a pointer.
+        BwdCase{"VirtualDy",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.virtualTensors.insert(FLYDSL_BWD_DY_UID);
+                    return spec;
+                }},
+        BwdCase{"VirtualX",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.virtualTensors.insert(FLYDSL_BWD_X_UID);
+                    return spec;
+                }},
+        BwdCase{"VirtualGamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.virtualTensors.insert(FLYDSL_BWD_SCALE_UID);
+                    return spec;
+                }},
+        BwdCase{"VirtualInvRms",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.virtualTensors.insert(FLYDSL_BWD_INV_RMS_UID);
+                    return spec;
+                }},
         BwdCase{"VirtualDx",
                 [] {
                     RmsNormBwdGraphSpec spec;
                     spec.virtualTensors.insert(FLYDSL_BWD_DX_UID);
                     return spec;
                 }},
+        BwdCase{"VirtualDgamma",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.virtualTensors.insert(FLYDSL_BWD_DSCALE_UID);
+                    return spec;
+                }},
+        // The baked 16-bit objects copy 128-bit vectors from every row operand and gamma.
         BwdCase{"DyAlignedTo8",
                 [] {
                     RmsNormBwdGraphSpec spec;
                     spec.alignment[FLYDSL_BWD_DY_UID] = 8;
+                    return spec;
+                }},
+        BwdCase{"XAlignedTo8",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.alignment[FLYDSL_BWD_X_UID] = 8;
+                    return spec;
+                }},
+        BwdCase{"GammaAlignedTo8",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.alignment[FLYDSL_BWD_SCALE_UID] = 8;
+                    return spec;
+                }},
+        BwdCase{"DxAlignedTo8",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.alignment[FLYDSL_BWD_DX_UID] = 8;
+                    return spec;
+                }},
+        BwdCase{"DgammaAlignedTo8",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.alignment[FLYDSL_BWD_DSCALE_UID] = 8;
+                    return spec;
+                }},
+        // inv_rms is read one f32 at a time, so it needs a multiple of 4, not just 4 or more.
+        BwdCase{"InvRmsAlignedTo6",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.alignment[FLYDSL_BWD_INV_RMS_UID] = 6;
+                    return spec;
+                }},
+        // One launch serves one complete graph; a second node would be dropped.
+        BwdCase{"TwoNodes",
+                [] {
+                    RmsNormBwdGraphSpec spec;
+                    spec.secondNode = true;
                     return spec;
                 }},
         BwdCase{"GammaNotTheNormalisedShape",
@@ -397,9 +488,13 @@ bool kernelServes(const RmsNormBwdGraphSpec& spec, const KernelDefinition& kerne
 
 TEST(TestFlydslRmsNormBwdKernelMatcher, ABakedObjectServesItsOwnWidthOnly)
 {
+    // Both directions: every baked object carries the same priority, so only this rule
+    // keeps a narrower one, which would leave the row's tail unwritten, out of the
+    // candidates.
     const RmsNormBwdGraphSpec spec;
     EXPECT_TRUE(kernelServes(spec, makeBwdKernel("bf16", 4096, 4096)));
     EXPECT_FALSE(kernelServes(spec, makeBwdKernel("bf16", 8192, 8192)));
+    EXPECT_FALSE(kernelServes(spec, makeBwdKernel("bf16", 2048, 2048)));
 }
 
 TEST(TestFlydslRmsNormBwdKernelMatcher, AGenericObjectServesUpToItsBound)
@@ -477,8 +572,10 @@ TEST(TestFlydslRmsNormBwdDispatch, SizesOneF32DgammaRowPerProgram)
 // ---------------------------------------------------------------------------
 
 /// Device x, dy, gamma, inv_rms (f32), dx and dgamma for one backward, freed on scope
-/// exit. Inputs are exact in bf16; inv_rms is the forward's statistic of the same x. dx
-/// and dgamma start as NaN, so an element the kernels do not write fails the comparison.
+/// exit. Inputs are exact in bf16; inv_rms is the forward's statistic of the same x, and
+/// each row of x carries its own power-of-two scale so every row's inv_rms differs. dx,
+/// dgamma and the workspace start as NaN, so an element the kernels do not write fails
+/// the comparison and a launch cannot lean on a previous one's partial rows.
 template <typename T, typename G = T>
 class RmsNormBwdBuffers
 {
@@ -486,6 +583,7 @@ public:
     RmsNormBwdBuffers(int64_t rows, int64_t columns, size_t workspaceBytes)
         : _rows(rows)
         , _columns(columns)
+        , _workspaceBytes(std::max<size_t>(workspaceBytes, 1))
         , _x(static_cast<size_t>(rows * columns))
         , _dy(_x.size())
         , _gamma(static_cast<size_t>(columns))
@@ -497,7 +595,8 @@ public:
             for(int64_t column = 0; column < columns; ++column)
             {
                 const auto index = static_cast<size_t>(row * columns + column);
-                _x[index] = T(0.5F + static_cast<float>((row + column) % 8) * 0.125F);
+                _x[index] = T(std::ldexp(0.5F + static_cast<float>((row + column) % 8) * 0.125F,
+                                         static_cast<int>(row % 4) - 1));
                 _dy[index] = T(-1.0F + static_cast<float>((3 * row + column) % 16) * 0.125F);
                 const auto value = static_cast<double>(static_cast<float>(_x[index]));
                 sumOfSquares += value * value;
@@ -515,7 +614,7 @@ public:
         upload(_invRmsDevice, _invRms);
         EXPECT_EQ(hipSuccess, hipMalloc(&_dxDevice, _x.size() * sizeof(T)));
         EXPECT_EQ(hipSuccess, hipMalloc(&_dgammaDevice, _gamma.size() * sizeof(G)));
-        EXPECT_EQ(hipSuccess, hipMalloc(&_workspace, std::max<size_t>(workspaceBytes, 1)));
+        EXPECT_EQ(hipSuccess, hipMalloc(&_workspace, _workspaceBytes));
         poison();
     }
 
@@ -541,6 +640,7 @@ public:
     {
         EXPECT_EQ(hipSuccess, hipMemset(_dxDevice, 0xFF, _x.size() * sizeof(T)));
         EXPECT_EQ(hipSuccess, hipMemset(_dgammaDevice, 0xFF, _gamma.size() * sizeof(G)));
+        EXPECT_EQ(hipSuccess, hipMemset(_workspace, 0xFF, _workspaceBytes));
     }
 
     std::vector<hipdnnPluginDeviceBuffer_t> descriptors() const
@@ -624,6 +724,7 @@ private:
 
     int64_t _rows;
     int64_t _columns;
+    size_t _workspaceBytes;
     std::vector<T> _x;
     std::vector<T> _dy;
     std::vector<G> _gamma;
@@ -636,24 +737,6 @@ private:
     void* _dgammaDevice = nullptr;
     void* _workspace = nullptr;
 };
-
-/// Largest error relative to max(|expected|, floor).
-template <typename V>
-double worstRelativeError(const std::vector<V>& actual,
-                          const std::vector<double>& expected,
-                          double floor)
-{
-    double worst = 0.0;
-    for(size_t i = 0; i < actual.size(); ++i)
-    {
-        const auto got = static_cast<double>(static_cast<float>(actual[i]));
-        const double error = std::isfinite(got) ? std::abs(got - expected[i])
-                                                      / std::max(std::abs(expected[i]), floor)
-                                                : std::numeric_limits<double>::infinity();
-        worst = std::max(worst, error);
-    }
-    return worst;
-}
 
 /// Runs the staged (dtype, N, n_max, form) object over a rows x columns graph twice,
 /// checks dx and dgamma against the host reference and that the two runs agree bitwise.
@@ -670,8 +753,10 @@ void expectBackwardMatchesReference(DataType dataType,
     KernelDefinition kernel;
     if(!findStagedBwdKernel(dtype, bakedN, nMax, F32_SCALE ? 1 : 0, kernel))
     {
-        GTEST_SKIP() << "nothing packed for dtype=" << dtype << " N=" << bakedN << " n_max=" << nMax
-                     << " in this build's descriptor root";
+        reportUnstaged("rmsnorm_bwd",
+                       "nothing staged for dtype=" + dtype + " N=" + std::to_string(bakedN)
+                           + " n_max=" + std::to_string(nMax));
+        return;
     }
 
     RmsNormBwdGraphSpec spec;
@@ -705,9 +790,11 @@ void expectBackwardMatchesReference(DataType dataType,
 
     const auto [dx, dgamma] = run();
     const auto [expectedDx, expectedDgamma] = buffers.reference();
-    EXPECT_LE(worstRelativeError(dx, expectedDx, 1e-1), relativeTolerance) << "dx";
+    const auto worstDx = worstRelativeError(dx, expectedDx, 1e-1);
+    EXPECT_LE(worstDx.error, relativeTolerance) << "dx at element " << worstDx.index;
     // dgamma sums `rows` products, so its scale grows with the row count.
-    EXPECT_LE(worstRelativeError(dgamma, expectedDgamma, 1.0), relativeTolerance) << "dgamma";
+    const auto worstDgamma = worstRelativeError(dgamma, expectedDgamma, 1.0);
+    EXPECT_LE(worstDgamma.error, relativeTolerance) << "dgamma at element " << worstDgamma.index;
 
     // Deterministic: the same programs, rows and reduction order on every launch.
     const auto [dxAgain, dgammaAgain] = run();

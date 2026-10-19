@@ -17,8 +17,7 @@ porting an op to another architecture is then a validation step on that
 hardware, not a generation one.
 
 **Every object is verified against its own AMDGPU metadata before it is
-written.** The increment-1 gate established that FlyDSL emits no argument
-*names* in that note (HIP ``extern "C"`` kernels do not; the AITER ASM objects
+written.** FlyDSL 0.3.4 emits no argument *names* in that note (HIP ``extern "C"`` kernels do not; the AITER ASM objects
 do), so ``requireSignatureMatch`` at load time can catch a kind/size/offset
 change but cannot catch an operand *permutation* -- two pointers of the same
 size swapped look identical to it. The compensation is here, at the point where
@@ -235,7 +234,7 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
                 "vgprs": described["vgpr_count"],
                 "block": [instance.knobs["block_threads"], 1, 1],
                 "grid_rule": _GRID_RULE,
-                # The gate's finding, recorded per object rather than asserted once:
+                # The missing names, recorded per object rather than asserted once:
                 # if a future FlyDSL starts emitting names, this stops being 0 and
                 # the packer can hand real names to requireSignatureMatch.
                 "named_args": described["named_args"],

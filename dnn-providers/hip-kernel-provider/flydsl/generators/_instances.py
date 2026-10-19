@@ -18,9 +18,13 @@ when no heuristic model is loaded -- so no ranking code is written for it.
 
 For RMSNorm the specialized knob is the row width ``N``: FlyDSL's vectorized
 128-bit path caches tiles in a Python list of registers, which only exists under
-compile-time loop unrolling, so it genuinely cannot take a runtime ``N``. The
-generic tier is the vendored runtime-``N`` variant (``kernels_src`` modification
-1), which reads ``N`` from the input tensor descriptor and predicates the tail.
+compile-time loop unrolling, so it genuinely cannot take a runtime ``N``. That path
+runs only when ``N`` is a multiple of its 2048-element tile; a baked width off that
+grid runs the scalar loop unrolled at its compile-time ``N``, which still measured
+faster than the generic tier. The baked widths are chosen by measurement, not by
+which ones reach the fast path. The generic tier is the vendored runtime-``N``
+variant (``kernels_src`` modification 1), which reads ``N`` from the input tensor
+descriptor and predicates the tail.
 """
 
 from __future__ import annotations
@@ -186,10 +190,12 @@ RMSNORM_SPECIALIZED_N = (2560, 3072, 3584, 4096, 5120, 6144, 7168, 8192, 12288, 
 # the native matcher already carry the axis when it grows.
 RMSNORM_BLOCK_THREADS = (256,)
 
-# Dtypes built in the generic tier only. The kernel's specialized-N fast path is
-# 128-bit tiles of 16-bit elements (`elem_bits <= 16` in rmsnorm_kernel.py), so an
-# f32 object baked for one width would run the same scalar loop the generic one
-# does; the specialized tier would add objects and no speed.
+# Dtypes built in the generic tier only. f32 baked objects were never measured: the
+# width measurement above was bf16. An f32 object baked for one width would not take
+# the 128-bit fast path (`elem_bits <= 16` in rmsnorm_kernel.py), but it would run the
+# scalar loop unrolled at its compile-time N rather than the generic loop -- the path
+# by which 2560, 3072, 3584, 5120 and 7168 gain for 16-bit types -- so whether baking
+# f32 pays is open, and a measurement would decide it.
 RMSNORM_GENERIC_ONLY_DTYPES = ("f32",)
 
 
@@ -269,9 +275,12 @@ def _assert_unique(instances: list[Instance]) -> None:
 # The generic tiers bound the width (`n_max`) instead of taking any: the partial
 # kernel holds each thread's dgamma columns in registers across rows, so the bound
 # sizes them. Measured on gfx942 and gfx11-generic: 1024 -> ~22 VGPRs, 8192 -> ~115,
-# 16384 -> ~240, all without spills; 32768 spills and 65536 spills ~450, so widths past
-# 16384 are declined until a variant that accumulates elsewhere exists. The narrower
-# tier ranks first, so a graph runs on the least masked-off work that serves it.
+# 16384 -> ~240, all without VGPR spills; 32768 spills and 65536 spills ~450, so
+# widths past 16384 are declined until a variant that accumulates elsewhere exists.
+# The narrower tier ranks first, so a graph runs on the least masked-off work that
+# serves it.
+# No shipped object spills VGPRs or uses scratch, but the n_max 16384 partial kernels
+# on the CDNA targets spill a few SGPRs (15-16 on gfx90a, 3 on gfx942 and gfx950).
 RMSNORM_BWD_GENERIC_N_MAX = {1024: 30, 8192: 20, 16384: 10}
 # Baked backward widths, chosen as the forward's are: each gained 1.2-8.4x over the
 # generic tier at M >= 4096 on all five measured archs. 128, 512 and 1024 stay generic:

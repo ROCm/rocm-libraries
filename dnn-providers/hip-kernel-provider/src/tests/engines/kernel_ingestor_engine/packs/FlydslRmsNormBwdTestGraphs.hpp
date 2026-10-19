@@ -72,13 +72,19 @@ struct RmsNormBwdGraphSpec
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> invRmsDataType;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> computeDataType;
     std::optional<std::vector<int64_t>> invRmsDims;
+    /// dy's and dx's shapes; unset means x's.
+    std::optional<std::vector<int64_t>> dyDims;
     std::optional<std::vector<int64_t>> dxDims;
+    /// dgamma's shape; unset means gamma's.
+    std::optional<std::vector<int64_t>> dscaleDims;
     /// Strides by uid; unset means packed for the tensor's shape.
     std::map<int64_t, std::vector<int64_t>> strides;
     std::map<int64_t, int64_t> alignment;
     std::set<int64_t> virtualTensors;
     bool withDbias = false;
     bool overrideShapeEnabled = false;
+    /// A second RMS-norm backward node after the first, over the same tensors.
+    bool secondNode = false;
 };
 
 inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBwdGraphSpec& spec
@@ -125,7 +131,10 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
             flatbuffers::nullopt,
             declared == spec.alignment.end() ? 16 : declared->second));
     };
-    add(FLYDSL_BWD_DY_UID, "dy", spec.dyDataType.value_or(spec.dataType), xDims);
+    add(FLYDSL_BWD_DY_UID,
+        "dy",
+        spec.dyDataType.value_or(spec.dataType),
+        spec.dyDims.value_or(xDims));
     add(FLYDSL_BWD_X_UID, "x", spec.dataType, xDims);
     add(FLYDSL_BWD_SCALE_UID, "scale", scaleType, scaleDims);
     add(FLYDSL_BWD_INV_RMS_UID,
@@ -133,30 +142,35 @@ inline flatbuffers::FlatBufferBuilder buildFlydslRmsNormBwdGraph(const RmsNormBw
         spec.invRmsDataType.value_or(data_objects::DataType::FLOAT),
         invRmsDims);
     add(FLYDSL_BWD_DX_UID, "dx", spec.dxDataType.value_or(spec.dataType), dxDims);
-    add(FLYDSL_BWD_DSCALE_UID, "dscale", spec.dscaleDataType.value_or(scaleType), scaleDims);
+    add(FLYDSL_BWD_DSCALE_UID,
+        "dscale",
+        spec.dscaleDataType.value_or(scaleType),
+        spec.dscaleDims.value_or(scaleDims));
     if(spec.withDbias)
     {
         add(FLYDSL_BWD_DBIAS_UID, "dbias", scaleType, scaleDims);
     }
 
-    auto attributes = data_objects::CreateRMSNormBackwardAttributes(
-        builder,
-        FLYDSL_BWD_DY_UID,
-        FLYDSL_BWD_X_UID,
-        FLYDSL_BWD_SCALE_UID,
-        FLYDSL_BWD_INV_RMS_UID,
-        FLYDSL_BWD_DX_UID,
-        FLYDSL_BWD_DSCALE_UID,
-        spec.withDbias ? flatbuffers::Optional<int64_t>(FLYDSL_BWD_DBIAS_UID)
-                       : flatbuffers::nullopt);
-
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.push_back(
-        data_objects::CreateNodeDirect(builder,
-                                       "rmsnorm_backward",
-                                       spec.computeDataType.value_or(data_objects::DataType::FLOAT),
-                                       data_objects::NodeAttributes::RMSNormBackwardAttributes,
-                                       attributes.Union()));
+    for(int node = 0; node < (spec.secondNode ? 2 : 1); ++node)
+    {
+        auto attributes = data_objects::CreateRMSNormBackwardAttributes(
+            builder,
+            FLYDSL_BWD_DY_UID,
+            FLYDSL_BWD_X_UID,
+            FLYDSL_BWD_SCALE_UID,
+            FLYDSL_BWD_INV_RMS_UID,
+            FLYDSL_BWD_DX_UID,
+            FLYDSL_BWD_DSCALE_UID,
+            spec.withDbias ? flatbuffers::Optional<int64_t>(FLYDSL_BWD_DBIAS_UID)
+                           : flatbuffers::nullopt);
+        nodes.push_back(data_objects::CreateNodeDirect(
+            builder,
+            "rmsnorm_backward",
+            spec.computeDataType.value_or(data_objects::DataType::FLOAT),
+            data_objects::NodeAttributes::RMSNormBackwardAttributes,
+            attributes.Union()));
+    }
 
     auto name = builder.CreateString("flydsl_rmsnorm_bwd_test");
     auto tensorsVector = builder.CreateVector(tensors);
