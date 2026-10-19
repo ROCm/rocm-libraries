@@ -5,8 +5,8 @@ worth reviewing in a descriptor PR. `variants` states the same thing as a
 shape list, named knob sets and a name template, which
 `codegen/config_loader.py` expands at load time.
 
-For sets already generated and shipped; new sets come out of
-`dispatch_parity.py` compact already. The round trip is not optional: this
+For sets already generated and shipped; `registry_enumerator.py` emits the enumerated
+form, which this tool compacts. The round trip is not optional: this
 tool re-expands what it wrote and refuses anything that does not reproduce the
 input kernel-for-kernel, key-for-key, in order.
 
@@ -72,6 +72,7 @@ def _flatten(config: dict) -> list:
                 },
                 "metadata": dict(kernel.get("metadata") or {}),
                 "priority": kernel.get("priority"),
+                "default": kernel.get("default", False),
             }
         )
     return flat
@@ -368,6 +369,8 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
                 arm["tag"] = _tag_template(tags[index], entry)
             if ordinals is not None:
                 arm["ordinal_offset"] = ordinals[index] - ordinals[base]
+            if entry["default"]:
+                arm["default"] = True
             arms.append(arm)
         signature = repr(arms)
         if signature not in knob_sets:
@@ -582,6 +585,11 @@ def _round_trip(original: dict, compact: dict) -> None:
             f"machine holding the archive has nothing to check the compiled bytes "
             f"against."
         )
+    if reloaded.reduction != expected.reduction:
+        raise FactoriseError(
+            f"round trip lost or altered the 'reduction' block: "
+            f"{reloaded.reduction!r} != {expected.reduction!r}."
+        )
     got = reloaded.packs[0].kernels
     want = expected.packs[0].kernels
     if len(got) != len(want):
@@ -602,6 +610,7 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("kind", a.kernel_source.kind, b.kernel_source.kind),
             ("source", a.kernel_source.source, b.kernel_source.source),
             ("builder", a.kernel_source.builder, b.kernel_source.builder),
+            ("target", a.kernel_source.target, b.kernel_source.target),
             ("source_file", a.kernel_source.source_file, b.kernel_source.source_file),
             ("entry_point", a.kernel_source.entry_point, b.kernel_source.entry_point),
             ("entry", a.kernel_source.entry, b.kernel_source.entry),
@@ -610,6 +619,7 @@ def _round_trip(original: dict, compact: dict) -> None:
             ("symbol", a.kernel_source.symbol, b.kernel_source.symbol),
             ("arch", a.arch, b.arch),
             ("priority", a.priority, b.priority),
+            ("default", a.default, b.default),
         ):
             if left != right:
                 raise FactoriseError(

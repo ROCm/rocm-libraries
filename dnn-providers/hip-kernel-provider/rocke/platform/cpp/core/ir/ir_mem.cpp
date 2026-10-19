@@ -51,6 +51,67 @@ rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b)
     return rocke_i_block_id_axis(b, "z");
 }
 
+/* gfx1250 workgroup clusters. A launch without a cluster shape is a 1x1x1
+ * cluster: every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. */
+
+static rocke_value_t* rocke_i_cluster_axis_read(
+    rocke_ir_builder_t* b, rocke_opcode_t op, const char* name, const char* axis, const char* hint)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!axis)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got None", name);
+    if(strcmp(axis, "x") != 0 && strcmp(axis, "y") != 0 && strcmp(axis, "z") != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s axis must be x, y, or z, got '%s'", name, axis);
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "axis", axis);
+    return rocke_i_op1(b, op, NULL, 0, rocke_i32(), &a, hint);
+}
+
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(b, ROCKE_OP_GPU_CLUSTER_ID, "cluster_id", axis, "cid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID, "cluster_workgroup_id", axis, "cwid");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis)
+{
+    return rocke_i_cluster_axis_read(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID, "cluster_workgroup_max_id", axis, "cwmax");
+}
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwflat");
+}
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b)
+{
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    a = rocke_i_attrs(b);
+    return rocke_i_op1(
+        b, ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID, NULL, 0, rocke_i32(), &a, "cwmaxflat");
+}
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis)
+{
+    rocke_value_t* max_id = rocke_b_cluster_workgroup_max_id(b, axis);
+    if(!max_id)
+        return NULL;
+    return rocke_b_add(b, max_id, rocke_b_const_i32(b, 1));
+}
+
 /* ============================ global loads ============================== */
 
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
@@ -290,6 +351,13 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
             return (rocke_value_t*)rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
     }
+    else if(rocke_i_type_is(dtype, "f64"))
+    {
+        elem_bytes = 8;
+        if(n != 2)
+            return (rocke_value_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
+    }
     else if(rocke_i_type_is(dtype, "fp8e4m3") || rocke_i_type_is(dtype, "bf8e5m2")
             || rocke_i_type_is(dtype, "i8"))
     {
@@ -303,7 +371,7 @@ rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, got %s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
     streaming = mem_opts_streaming(b, opts, "global_load_vN");
@@ -419,6 +487,16 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
             return;
         }
     }
+    else if(rocke_i_type_is(et, "f64"))
+    {
+        elem_bytes = 8;
+        if(n > 2)
+        {
+            (void)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "global_store_vN n=%d not supported for %s", n, en);
+            return;
+        }
+    }
     else if(rocke_i_type_is(et, "i8") || rocke_i_type_is(et, "fp8e4m3")
             || rocke_i_type_is(et, "bf8e5m2"))
     {
@@ -429,7 +507,7 @@ void rocke_b_global_store_vN_ex(rocke_ir_builder_t* b,
         (void)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, got %s",
+            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, got %s",
             en);
         return;
     }
@@ -1162,6 +1240,30 @@ rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke
     rocke_attr_set_str(b, &attr, "elem", elem->name);
     rocke_attr_set_int(b, &attr, "vec", (int64_t)n);
     return rocke_i_op1(b, ROCKE_OP_VECTOR_CONCAT, ops, 2, vt, &attr, "vc");
+}
+
+/* ==================== undef (freeze-poison) vector base ================= */
+
+/* Only a base for vectors fully overwritten by subsequent inserts; never a
+ * zero substitute. Port of Python IRBuilder.undef_vec / the pinned PR9710
+ * vector.undef op (LLVM: ``freeze <nxtype> poison``). */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n)
+{
+    rocke_attr_map_t a;
+    const rocke_type_t* vt;
+    char* hint;
+    if(!rocke_i_live(b))
+        return NULL;
+    vt = rocke_vector_type(b, elem, n);
+    if(!vt)
+        return NULL;
+    hint = rocke_arena_printf(&b->arena, "udf%d", n);
+    if(!hint)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "OOM udf hint");
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "elem", elem->name);
+    rocke_attr_set_int(b, &a, "vec", (int64_t)n);
+    return rocke_i_op1(b, ROCKE_OP_VECTOR_UNDEF, NULL, 0, vt, &a, hint);
 }
 
 /* =================== vec bitcast / packed f32->fXX ===================== */

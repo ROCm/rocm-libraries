@@ -172,26 +172,21 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             PassFeatureConfig passFeatureConfig;
             if (runScheduler) {
                 passFeatureConfig.loopConfig.unrollGemm = true;
-                passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
                 passFeatureConfig.dagFeatures.distributeGlobalRead = true;
                 passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
                 passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
-                passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
-                    moduleOptions.DsReadThrottleTransitionFactor;
-                passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
-                    moduleOptions.DsReadThrottleTransitionEntries;
                 passFeatureConfig.dagFeatures.tensorLoadWmmaSpace =
                     moduleOptions.TensorLoadWmmaSpace;
                 passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                     moduleOptions.TensorLoadDsLoadGapCycles;
-                passFeatureConfig.dagFeatures.barrierHalfSlack = moduleOptions.BarrierHalfSlack;
                 passFeatureConfig.dagFeatures.wmmaQueueDepth = moduleOptions.WmmaQueueDepth;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
-                passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
-                    moduleOptions.DsIssueCapSpanCycles;
-                passFeatureConfig.dagFeatures.dsIssueCapMode =
-                    static_cast<PassFeatureConfig::DsIssueCapMode>(moduleOptions.DsIssueCapMode);
+                passFeatureConfig.dagFeatures.wmmaRefillMode =
+                    static_cast<PassFeatureConfig::WmmaRefillMode>(moduleOptions.WmmaRefillMode);
+                passFeatureConfig.dagFeatures.wmmaBatchSize =
+                    std::max(1, moduleOptions.WmmaBatchSize);
+                passFeatureConfig.dagFeatures.wmmaRefillToCycles = moduleOptions.WmmaRefillToCycles;
                 passFeatureConfig.dagFeatures.globalReadQueueDepth =
                     moduleOptions.GlobalReadQueueDepth;
                 passFeatureConfig.dagFeatures.globalReadDrainLatency =
@@ -201,7 +196,13 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.clusterBarrier = moduleOptions.ClusterBarrier;
                 passFeatureConfig.dagFeatures.lockDsReadOrder = moduleOptions.LockDsReadOrder;
                 passFeatureConfig.dagFeatures.evenSpreadFillers = moduleOptions.EvenSpreadFillers;
-                passFeatureConfig.dagFeatures.dsSlotFirst = moduleOptions.DsSlotFirst;
+                passFeatureConfig.dagFeatures.dsSpread = moduleOptions.DsSpread;
+                passFeatureConfig.dagFeatures.wmmaBarrierCoverCycles =
+                    moduleOptions.WmmaBarrierCoverCycles;
+                passFeatureConfig.dagFeatures.dsCatchUpPace = moduleOptions.DsCatchUpPace;
+                passFeatureConfig.dagFeatures.dsBatchWmmas = moduleOptions.DsBatchWmmas;
+                passFeatureConfig.dagFeatures.dsReadCyclesPerLoad =
+                    moduleOptions.DsReadCyclesPerLoad;
                 // The hold mirrors InsertWaitAlu, which only runs with ESM2.
                 passFeatureConfig.dagFeatures.waitAluHoldStrictCount =
                     moduleOptions.EnableESM2 ? moduleOptions.WaitAluHoldStrictCount : -1;
@@ -209,7 +210,6 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 passFeatureConfig.dagFeatures.prefetchLeadMinStageWmmas =
                     moduleOptions.PrefetchLeadMinStageWmmas;
                 passFeatureConfig.dagFeatures.warGateWmmas = moduleOptions.WarGateWmmas;
-                applyResolvedSchedulingKnobs(passFeatureConfig, resolvedKnobs);
                 if (moduleOptions.DsReadOrder >= 0)
                     passFeatureConfig.dagFeatures.dsReadOrder =
                         static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
