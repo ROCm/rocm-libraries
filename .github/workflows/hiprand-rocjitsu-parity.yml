@@ -1,506 +1,232 @@
-name: hipRAND rocJITsu Parity PoC
-run-name: rocJITsu ${{ github.event.inputs.sweep == 'all' && (github.event.inputs.ctest_label || '^quick$') || 'hipRAND quick' }} (dispatch ${{ github.event.inputs.dispatch_threads || 'config' }}, quantum ${{ github.event.inputs.functional_quantum || 'default' }}, ${{ github.event.inputs.rocjitsu_arg || 'no extra args' }}, ${{ github.event.inputs.runner_label || 'default runner' }})
-
-# Standalone hipRAND parity check. It does not call TheRock reusable workflows
-# and it does not change therock-multi-arch-ci.yml.
-#
-# The pull-request label ci:rocjitsu decides whether the parity job runs.
-# runs-on comes from TheRock select_build_runner(), which reads build_runners
-# (therock-ci-config when CI_CONFIG_PATH is set, otherwise the in-tree
-# BUILD_RUNNER_LABELS). That label is a CPU scale set, not a GPU test runner.
-#
-# The default run is ctest -L '^quick$', the same five hipRAND binaries the
-# hardware baseline selects with ctest -L '^standard$'. quick and standard are
-# the same set here. Set the workflow_dispatch gtest_filter to narrow it, or
-# ctest_label to select another installed label such as ^ffm-quick$.
+name: rocJITsu gfx950 on RDNA4 comparison
+run-name: gfx950 ${{ inputs.ctest_label }} on RDNA4 DBT (wait on/off) vs native gfx950
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
-    paths:
-      - "projects/hiprand/**"
-      - ".github/workflows/hiprand-rocjitsu-parity.yml"
-      - ".github/scripts/ci_parity_runner.py"
-      - ".github/scripts/parity_diff.py"
-      - ".github/scripts/resource_monitor.py"
-      - ".github/scripts/select_cpu_build_runner.py"
-      - "baseline/hiprand-gfx942-hw.json"
   workflow_dispatch:
     inputs:
-      gtest_filter:
-        description: "Optional hipRAND gtest filter. Empty runs ctest -L ^quick$."
-        type: string
-        default: ""
       rocm_version:
-        description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
+        description: Same pinned gfx950 nightly for translated and native tests
         type: string
         default: "10.2.0a20260928"
-      rocjitsu_arg:
-        description: "Optional extra rocJITsu flag, for example --cpu-thread-budget=1 or --wait-checking=off."
-        type: string
-        default: ""
       ctest_label:
-        description: "CTest label regex. Default ^quick$ runs all five binaries. ^ffm-quick$ runs kernel and linkage only."
+        description: Installed CTest label regex
         type: string
         default: "^quick$"
       component_filter:
-        description: "Optional comma-separated exact component paths to run"
+        description: Empty discovers all components; otherwise comma-separated exact paths
         type: string
         default: ""
-      ctest_parallel:
-        description: "Number of quick-filter CTest binaries to run concurrently (for example 5)."
+      parallel:
+        description: Maximum test processes per component on both GPU types
         type: string
-        default: "1"
-      dispatch_threads:
-        description: "Optional explicit rocJITsu cpu_dispatch_threads override (for example 80). Empty uses the gfx942 allocation table."
-        type: string
-        default: ""
-      functional_quantum:
-        description: "Optional per-CU functional_quantum override. Empty uses the rocJITsu default (1024)."
-        type: string
-        default: ""
-      runner_label:
-        description: "Optional self-hosted runner label override (for example aws-linux-scale-rocm-large). Empty uses the selected default runner."
-        type: string
-        default: ""
-      sweep:
-        description: "Set to all to run every installed component suite for the selected label."
-        type: string
-        default: ""
+        default: "5"
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  # Do not cancel an in-progress parity run. Label bots (for example
-  # therock-pr-bot adding "Not ready to Review") emit another pull_request
-  # labeled event, and cancel-in-progress was killing the CPU job at startup.
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: rocjitsu-gfx950-rdna4-${{ github.run_id }}
   cancel-in-progress: false
 
+env:
+  ROCM_VERSION: ${{ inputs.rocm_version }}
+  TEST_LABEL: ${{ inputs.ctest_label }}
+  TEST_PARALLEL: ${{ inputs.parallel }}
+  ROCM_SYSTEMS_REF: 1c144a5d55ea53118ad48047dfac2b9256e3bb26
+
 jobs:
-  gate:
-    name: Check ci:rocjitsu label
+  discover:
     runs-on: ubuntu-24.04
-    outputs:
-      enabled: ${{ steps.label.outputs.enabled }}
-      build_runs_on: ${{ steps.runner.outputs.build_runs_on || steps.skipped.outputs.build_runs_on }}
-    steps:
-      - name: Label gate
-        id: label
-        run: |
-          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:rocjitsu') }}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout rocm-libraries scripts
-        if: steps.label.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github
-          sparse-checkout-cone-mode: true
-
-      - name: Load CI environment
-        if: steps.label.outputs.enabled == 'true'
-        id: ci-env
-        uses: ./.github/actions/ci-env
-
-      - name: Checkout TheRock
-        if: steps.label.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
-          path: TheRock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Checkout CI config
-        if: steps.label.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/therock-ci-config
-          ref: main
-          path: ci-config
-        continue-on-error: true
-
-      - name: Select CPU build runner
-        id: runner
-        if: steps.label.outputs.enabled == 'true'
-        env:
-          CI_CONFIG_PATH: ci-config
-        run: python3 .github/scripts/select_cpu_build_runner.py
-
-      - name: No runner when the label is absent
-        id: skipped
-        if: steps.label.outputs.enabled != 'true'
-        run: echo "build_runs_on=skipped" >> "$GITHUB_OUTPUT"
-
-  hiprand-parity:
-    name: hipRAND parity on CPU build runner
-    needs: gate
-    if: needs.gate.outputs.enabled == 'true' && github.event.inputs.sweep != 'all'
-    runs-on: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
-    timeout-minutes: 360
-    # The build-runner process has CapEff 0 and no docker socket, and a nested
-    # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
-    # build and the nightly unpack already succeeded. The test uses the non-kmd
-    # config in local mode, which is how the rocJITsu corpus job runs on a CPU
-    # scale set without ptrace.
+    container:
+      image: ubuntu:24.04
     defaults:
       run:
         shell: bash
-    container:
-      image: ubuntu:24.04
-    env:
-      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
-      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '' }}
-      CTEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
-      CTEST_PARALLEL: ${{ github.event.inputs.ctest_parallel || '1' }}
-      DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
-      FUNCTIONAL_QUANTUM: ${{ github.event.inputs.functional_quantum || '' }}
-      BUILD_RUNS_ON: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
-      # Pinned to a rocJITsu revision that supports --wait-checking for the
-      # wait-diagnostic overhead comparison. Keep this pin fixed for both jobs.
-      ROCM_SYSTEMS_REF: 1c144a5d55ea53118ad48047dfac2b9256e3bb26
-    steps:
-      - name: Install build tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3 python3-yaml
-
-      - name: Checkout rocm-libraries
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            .github
-            baseline
-          sparse-checkout-cone-mode: true
-
-      - name: Checkout rocJITsu
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/rocm-systems
-          ref: ${{ env.ROCM_SYSTEMS_REF }}
-          path: rocm-systems
-          sparse-checkout: emulation/rocjitsu
-          sparse-checkout-cone-mode: true
-
-      - name: Build rocJITsu
-        run: |
-          set -euo pipefail
-          mkdir -p parity
-          cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=OFF \
-            -DRJ_LOG_GROUPS=OFF
-          python3 .github/scripts/resource_monitor.py \
-            --phase "Build rocJITsu" \
-            --output parity/resources-build.json -- \
-            cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
-          test -x rj-build/tools/rocjitsu/rocjitsu
-
-      - name: Install pinned gfx94X runtime and tests
-        run: |
-          set -euo pipefail
-          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
-          mkdir -p "$root" cache
-          base="https://nightly.repo.amd.com/rocm/core/tarball"
-          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
-            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
-          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
-            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
-          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
-          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
-          test -x "$root/bin/rocminfo"
-          test -x "$root/bin/test_hiprand_api"
-          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
-
-      - name: Run the hipRAND quick filter under rocJITsu
-        run: |
-          set -euo pipefail
-          export ROCM_PATH="$ROCM_ROOT"
-          export PATH="$ROCM_ROOT/bin:$PATH"
-          export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          mkdir -p parity
-          config_args=(--config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json")
-          config_path="$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
-          if [ -n "$DISPATCH_THREADS" ] || [ -n "$FUNCTIONAL_QUANTUM" ]; then
-            python3 - "$config_path" "$PWD/parity/gfx942_cdna3-tuned.json" "$DISPATCH_THREADS" "$FUNCTIONAL_QUANTUM" <<'PY'
-          import json, pathlib, sys
-          source, destination, dispatch, quantum = sys.argv[1:]
-          config = json.loads(pathlib.Path(source).read_text())
-          if dispatch:
-              config["num_threads"] = 8
-              config["cpu_dispatch_threads"] = int(dispatch)
-              config["async_helper_threads"] = 0
-          if quantum:
-              value = str(int(quantum))
-              updated = 0
-              def visit(node):
-                  global updated
-                  if isinstance(node, dict):
-                      if node.get("type") == "compute_unit":
-                          entries = node.setdefault("config", [])
-                          setting = next((entry for entry in entries if entry.get("key") == "functional_quantum"), None)
-                          if setting is None:
-                              entries.append({"key": "functional_quantum", "value": value})
-                          else:
-                              setting["value"] = value
-                          updated += 1
-                      for child in node.values():
-                          visit(child)
-                  elif isinstance(node, list):
-                      for child in node:
-                          visit(child)
-              visit(config.get("topology", {}))
-              if updated == 0:
-                  raise SystemExit("No compute_unit nodes found for functional_quantum override")
-          pathlib.Path(destination).write_text(json.dumps(config, indent=2) + "\n")
-          PY
-            config_path="$PWD/parity/gfx942_cdna3-tuned.json"
-            config_args=(--config "$config_path")
-          fi
-          common=(
-            python3 .github/scripts/ci_parity_runner.py
-            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
-            --config "$config_path"
-            --rocm-root "$ROCM_ROOT"
-            --rocm-version "$ROCM_VERSION"
-            --runner-label "$BUILD_RUNS_ON"
-            --out parity/emu.json
-          )
-          if [ -n "$ROCJITSU_ARG" ]; then
-            common+=(--rocjitsu-arg="$ROCJITSU_ARG")
-            case "$ROCJITSU_ARG" in
-              --cpu-thread-budget=*)
-                config_args+=(--cpu-thread-budget="${ROCJITSU_ARG#--cpu-thread-budget=}")
-                ;;
-              *)
-                echo "extra rocJITsu argument applies to the test launch; thread-budget table shows allocation only"
-                ;;
-            esac
-          fi
-          "$PWD/rj-build/tools/rocjitsu/rocjitsu" "${config_args[@]}" --thread-budget-table \
-            | tee parity/thread-budget-table.txt
-          monitor=(
-            python3 .github/scripts/resource_monitor.py
-            --phase "hipRAND under rocJITsu"
-            --output parity/resources-test.json
-            --interval 1
-            --
-          )
-          echo "ctest label: $CTEST_LABEL"
-          if [ -n "$GTEST_FILTER" ]; then
-            "${monitor[@]}" "${common[@]}" \
-              --binary "$ROCM_ROOT/bin/test_hiprand_api" \
-              --gtest-filter "$GTEST_FILTER" \
-              --timeout-seconds 1800
-          else
-            "${monitor[@]}" "${common[@]}" \
-              --ctest-label "$CTEST_LABEL" \
-              --parallel "$CTEST_PARALLEL" \
-              --timeout-seconds 7200
-          fi
-
-      - name: Diff against the hardware baseline
-        if: always()
-        run: |
-          set -euo pipefail
-          test -f parity/emu.json
-          python3 .github/scripts/parity_diff.py \
-            --hw baseline/hiprand-gfx942-hw.json \
-            --emu parity/emu.json \
-            --report parity/report.md \
-            --summary-json parity/summary.json
-          cat parity/report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload parity report
-        if: always()
-        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
-        with:
-          name: hiprand-rocjitsu-parity
-          path: parity/
-
-  suite-discovery:
-    name: Discover ${{ github.event.inputs.ctest_label || '^quick$' }} component suites
-    needs: gate
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.sweep == 'all'
-    runs-on: ubuntu-24.04
     outputs:
       components: ${{ steps.discover.outputs.components }}
-    defaults:
-      run:
-        shell: bash
-    container:
-      image: ubuntu:24.04
-    env:
-      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
-      COMPONENT_FILTER: ${{ github.event.inputs.component_filter || '' }}
     steps:
       - name: Install discovery tools
         run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3
-      - name: Fetch parity script
-        run: |
-          mkdir -p .github/scripts
-          curl -fL --retry 3 \
-            "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/ffm_quick_rocjitsu.py" \
-            -o .github/scripts/ffm_quick_rocjitsu.py
-      - name: Download test metadata and discover components
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+      - name: Discover every matching gfx950 component
         id: discover
+        env:
+          COMPONENT_FILTER: ${{ inputs.component_filter }}
         run: |
           set -euo pipefail
-          root="$PWD/test-root"
-          mkdir -p "$root" cache
-          base="https://nightly.repo.amd.com/rocm/core/tarball"
-          curl -fL --retry 3 -o cache/tests.tar.gz \
-            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
-          tar -xzf cache/tests.tar.gz -C "$root"
-          args=(--rocjitsu /bin/true --config /dev/null --rocm-root "$root" \
-            --out-dir /tmp/parity --label-regex "$TEST_LABEL" --list-components)
+          mkdir -p test-root discovery
+          base=https://nightly.repo.amd.com/rocm/core/tarball
+          # Extract only metadata; the complete test package is large.
+          curl -fL --retry 3 "$base/therock-dist-linux-gfx950-dcgpu-tests-${ROCM_VERSION}.tar.gz" \
+            | tar -xzf - -C test-root --wildcards --no-anchored 'CTestTestfile.cmake'
+          args=(--direct --rocm-root test-root --out-dir discovery --label-regex "$TEST_LABEL" --list-components)
           if [ -n "$COMPONENT_FILTER" ]; then args+=(--component-filter "$COMPONENT_FILTER"); fi
           components="$(python3 .github/scripts/ffm_quick_rocjitsu.py "${args[@]}")"
+          python3 -c 'import json,sys; x=json.loads(sys.argv[1]); assert x, "No suites selected"; print(f"Discovered {len(x)} components")' "$components"
           echo "components=$components" >> "$GITHUB_OUTPUT"
-          echo "Discovered $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$components") component suites for $TEST_LABEL"
+          printf '%s\n' "$components" > discovery/components.json
+      - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: pilot-discovery
+          path: discovery/
 
-  component-suites:
-    name: ${{ github.event.inputs.ctest_label || '^quick$' }} / ${{ matrix.test.component }}
-    needs: [gate, suite-discovery]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.sweep == 'all'
-    strategy:
-      fail-fast: false
-      matrix:
-        test: ${{ fromJSON(needs.suite-discovery.outputs.components) }}
-    runs-on: ${{ github.event.inputs.runner_label || needs.gate.outputs.build_runs_on }}
-    timeout-minutes: 360
+  build:
+    name: Build rocJITsu with PRs 13749, 13750, 13751
+    runs-on: aws-linux-scale-rocm-prod
+    timeout-minutes: 90
+    container:
+      image: ubuntu:24.04
     defaults:
       run:
         shell: bash
-    container:
-      image: ubuntu:24.04
-    env:
-      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      ROCM_SYSTEMS_REF: 1c144a5d55ea53118ad48047dfac2b9256e3bb26
-      TEST_LABEL: ${{ github.event.inputs.ctest_label || '^quick$' }}
-      COMPONENT: ${{ matrix.test.component }}
-      DISPATCH_THREADS: ${{ github.event.inputs.dispatch_threads || '' }}
-      FUNCTIONAL_QUANTUM: ${{ github.event.inputs.functional_quantum || '' }}
-      ROCJITSU_ARG: ${{ github.event.inputs.rocjitsu_arg || '--wait-checking=off' }}
     steps:
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git libgfortran5 ninja-build pkg-config python3 python3-yaml
-
-      - name: Fetch parity scripts
-        run: |
-          mkdir -p .github/scripts
-          for script in ffm_quick_rocjitsu.py resource_monitor.py; do
-            curl -fL --retry 3 \
-              "https://raw.githubusercontent.com/ROCm/rocm-libraries/${GITHUB_SHA}/.github/scripts/${script}" \
-              -o ".github/scripts/${script}"
-          done
-
-      - name: Checkout rocJITsu
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+          apt-get install -y --no-install-recommends build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
           ref: ${{ env.ROCM_SYSTEMS_REF }}
           path: rocm-systems
           sparse-checkout: emulation/rocjitsu
-          sparse-checkout-cone-mode: true
-
-      - name: Build rocJITsu
+      - name: Build launcher, interposer, and HSA translation hook once
         run: |
           set -euo pipefail
-          mkdir -p parity
           cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTING=OFF \
-            -DRJ_LOG_GROUPS=OFF
-          python3 .github/scripts/resource_monitor.py \
-            --phase "Build rocJITsu" \
-            --output parity/resources-build.json -- \
-            cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DRJ_LOG_GROUPS=OFF \
+            -DROCJITSU_HOST_CPU_BASELINE=x86-64
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared rocjitsu_hooks -j"$(nproc)"
           test -x rj-build/tools/rocjitsu/rocjitsu
+          find rj-build -name 'librocjitsu_hooks.so' -print | grep .
+          mkdir -p build-artifact
+          ldd rj-build/tools/rocjitsu/rocjitsu > build-artifact/ldd.txt
+          find rj-build \( -type f -o -type l \) \( -name '*.so' -o -name '*.so.*' -o -name rocjitsu \) -print0 \
+            | tar --null -T - -czf build-artifact/rocjitsu-runtime.tar.gz
+          cp rocm-systems/emulation/rocjitsu/configs/guest_gfx950_on_gfx1201.json build-artifact/
+          printf '%s\n' "$ROCM_SYSTEMS_REF" > build-artifact/source-sha.txt
+      - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-build
+          path: build-artifact/
 
-      - name: Install pinned gfx94X runtime and tests
-        run: |
-          set -euo pipefail
-          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
-          mkdir -p "$root" cache
-          base="https://nightly.repo.amd.com/rocm/core/tarball"
-          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
-            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
-          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
-            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
-          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
-          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
-          test -x "$root/bin/rocminfo"
-          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
-
-      - name: Configure emulator settings
-        run: |
-          set -euo pipefail
-          mkdir -p parity
-          source_config="$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
-          python3 - "$source_config" parity/gfx942_cdna3-tuned.json "$DISPATCH_THREADS" "$FUNCTIONAL_QUANTUM" <<'PY'
-          import json, pathlib, sys
-          source, destination, dispatch, quantum = sys.argv[1:]
-          config = json.loads(pathlib.Path(source).read_text())
-          if dispatch:
-              config["num_threads"] = 8
-              config["cpu_dispatch_threads"] = int(dispatch)
-              config["async_helper_threads"] = 0
-          if quantum:
-              value = str(int(quantum))
-              updated = 0
-              def visit(node):
-                  global updated
-                  if isinstance(node, dict):
-                      if node.get("type") == "compute_unit":
-                          entries = node.setdefault("config", [])
-                          setting = next((x for x in entries if x.get("key") == "functional_quantum"), None)
-                          if setting is None:
-                              entries.append({"key": "functional_quantum", "value": value})
-                          else:
-                              setting["value"] = value
-                          updated += 1
-                      for child in node.values(): visit(child)
-                  elif isinstance(node, list):
-                      for child in node: visit(child)
-              visit(config.get("topology", {}))
-              if updated == 0: raise SystemExit("No compute_unit nodes found")
-          pathlib.Path(destination).write_text(json.dumps(config, indent=2) + "\n")
-          PY
-          config="$PWD/parity/gfx942_cdna3-tuned.json"
-          "$PWD/rj-build/tools/rocjitsu/rocjitsu" --config "$config" --thread-budget-table | tee parity/thread-budget-table.txt
-          printf 'suite=%s\ncomponent=%s\nfunctional_quantum=%s\ndispatch_threads=%s\nrocjitsu_arg=%s\n' \
-            "$TEST_LABEL" "$COMPONENT" "$FUNCTIONAL_QUANTUM" "$DISPATCH_THREADS" "$ROCJITSU_ARG" > parity/run-config.txt
-
-      - name: Run component suite under rocJITsu without per-test timeout
-        run: |
-          set +e
-          python3 .github/scripts/resource_monitor.py \
-            --phase "$TEST_LABEL / $COMPONENT under rocJITsu" \
-            --output parity/resources-test.json -- \
-            python3 .github/scripts/ffm_quick_rocjitsu.py \
-              --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
-              --config "$PWD/parity/gfx942_cdna3-tuned.json" \
-              --rocm-root "$ROCM_ROOT" \
-              --out-dir parity --component "$COMPONENT" --label-regex "$TEST_LABEL" \
-              --rocjitsu-arg="$ROCJITSU_ARG"
-          status=$?
-          if [ -f parity/summary.md ]; then
-            cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-          exit "$status"
-
-      - name: Upload component parity artifacts
+  rdna4-suites:
+    name: RDNA4 DBT wait=${{ matrix.wait }} / ${{ matrix.test.component }}
+    needs: [discover, build]
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        wait: ["on", "off"]
+        test: ${{ fromJSON(needs.discover.outputs.components) }}
+    runs-on: linux-gfx120X-gpu-rocm
+    timeout-minutes: 360
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --user 0:0
+        --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576
+        --security-opt seccomp=unconfined --group-add video
+        --device /dev/kfd --device /dev/dri
+        --group-add 993 --group-add 992 --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPONENT: ${{ matrix.test.component }}
+      WAIT_CHECKING: ${{ matrix.wait }}
+      PILOT_MODE: rdna4-dbt
+    steps:
+      - name: Install runtime tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgfortran5 python3 python3-yaml
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: rocjitsu-build
+          path: build-artifact
+      - name: Unpack rocJITsu runtime
+        run: tar -xzf build-artifact/rocjitsu-runtime.tar.gz
+      - name: Install pinned gfx950 runtime and component tests
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh install
+      - name: Verify RDNA4 hardware and translated guest identity
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh preflight
+      - name: Run selected quick entries through DBT
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh run
+      - name: Upload configuration, identity, timing, and test logs
         if: always()
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:
-          name: rocjitsu-${{ matrix.test.id }}
+          name: pilot-rdna4-wait-${{ matrix.wait }}-${{ matrix.test.id }}
           path: parity/
+
+  native-suites:
+    name: Native gfx950 / ${{ matrix.test.component }}
+    needs: discover
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        test: ${{ fromJSON(needs.discover.outputs.components) }}
+    runs-on: linux-gfx950-1gpu-ccs-ossci-rocm
+    timeout-minutes: 360
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --user 0:0
+        --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576
+        --security-opt seccomp=unconfined --group-add video
+        --device /dev/kfd --device /dev/dri
+        --group-add 993 --group-add 992 --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES -e KUBE_CPU_REQUEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPONENT: ${{ matrix.test.component }}
+      PILOT_MODE: native-gfx950
+    steps:
+      - name: Install runtime tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libgfortran5 python3 python3-yaml
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+      - name: Install identical pinned gfx950 runtime and component tests
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh install
+      - name: Verify native gfx950 hardware
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh preflight
+      - name: Run matching quick entries directly on gfx950
+        run: bash .github/scripts/gfx950_rdna4_pilot.sh run
+      - name: Upload native hardware baseline
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: pilot-native-gfx950-${{ matrix.test.id }}
+          path: parity/
+
+  comparison:
+    name: Compare translated and native component measurements
+    if: always()
+    needs: [rdna4-suites, native-suites]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: pilot-*
+          path: measurements
+      - name: Generate measured runtime comparison
+        run: python3 .github/scripts/compare_gfx950_rdna4.py measurements comparison
+      - uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: gfx950-rdna4-comparison
+          path: comparison/

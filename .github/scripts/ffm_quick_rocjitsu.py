@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 def tokenize_cmake_args(text: str) -> list[str]:
@@ -94,6 +95,7 @@ def parse_ctest_file(text: str) -> dict[str, dict]:
                     "timeout": None,
                     "skip_regex": "",
                     "working_directory": "",
+                    "properties": {},
                 }
             else:
                 tests[test_name]["command"] = command
@@ -120,10 +122,12 @@ def parse_ctest_file(text: str) -> dict[str, dict]:
                     "timeout": None,
                     "skip_regex": "",
                     "working_directory": "",
+                    "properties": {},
                 },
             )
             if test_name not in order:
                 order.append(test_name)
+            test["properties"].update(updates)
             if "LABELS" in updates:
                 test["labels"] = updates["LABELS"].split(";")
             if "TIMEOUT" in updates:
@@ -190,31 +194,57 @@ def build_env(rocm_root: Path) -> dict:
     return env
 
 
+def cmake_true(value: str) -> bool:
+    return value.upper() not in ("", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND") and not value.upper().endswith("-NOTFOUND")
+
+
+def test_command(rocjitsu, config, rocjitsu_args, test):
+    if rocjitsu is None:
+        return list(test["command"])
+    return [str(rocjitsu), "--config", str(config), *rocjitsu_args, "--", *test["command"]]
+
+
+def scheduling_policy(tests: list[dict], requested: int) -> tuple[int, list[str]]:
+    reasons = []
+    for test in tests:
+        props = test.get("properties", {})
+        if cmake_true(props.get("DISABLED", "")):
+            continue
+        if cmake_true(props.get("RUN_SERIAL", "")):
+            reasons.append(f"{test['name']}: RUN_SERIAL")
+        for key in ("RESOURCE_LOCK", "DEPENDS", "RESOURCE_GROUPS", "FIXTURES_SETUP", "FIXTURES_REQUIRED", "FIXTURES_CLEANUP"):
+            if props.get(key):
+                reasons.append(f"{test['name']}: {key}={props[key]}")
+    return (1 if reasons else requested), reasons
+
+
 def run_one(rocjitsu: Path | None, config: Path | None, rocjitsu_args: list[str], test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
-    command = (
-        [str(rocjitsu), "--config", str(config), *rocjitsu_args, "--", *test["command"]]
-        if rocjitsu is not None
-        else list(test["command"])
-    )
+    command = test_command(rocjitsu, config, rocjitsu_args, test)
     work = Path(test["working_directory"]) if test["working_directory"] else cwd
+    if test["working_directory"] and not work.is_absolute():
+        work = cwd / work
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata = {"command": command, "working_directory": str(work), "log": str(log_path)}
+    if cmake_true(test.get("properties", {}).get("DISABLED", "")):
+        log_path.write_text("Not executed: CTest DISABLED property is true.\n", encoding="utf-8")
+        return {"name": test["name"], "status": "skipped", "seconds": 0.0,
+                "returncode": None, "timeout": None, "reason": "CTest DISABLED", **metadata}
     started = time.monotonic()
     print(
         f"START {test['name']} timeout=disabled cmd={shlex.join(test['command'])}",
         flush=True,
     )
-    proc = subprocess.run(
-        command,
-        cwd=work,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
-    output = proc.stdout or ""
-    status = "passed" if proc.returncode == 0 else "failed"
-    returncode = proc.returncode
+    try:
+        proc = subprocess.run(
+            command, cwd=work, env=env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+        )
+        output = proc.stdout or ""
+        returncode = proc.returncode
+    except OSError as error:
+        output = f"Could not launch test: {error}\n"
+        returncode = 127
+    status = "passed" if returncode == 0 else "failed"
     if status != "passed" and output_skips(output, test["skip_regex"]):
         status = "skipped"
     elapsed = time.monotonic() - started
@@ -230,6 +260,7 @@ def run_one(rocjitsu: Path | None, config: Path | None, rocjitsu_args: list[str]
         "seconds": round(elapsed, 1),
         "returncode": returncode,
         "timeout": None,
+        **metadata,
     }
 
 
@@ -265,14 +296,17 @@ def main() -> int:
     parser.add_argument("--component", help="Exact component name; omit with --list-components")
     parser.add_argument("--rocjitsu-arg", action="append", default=[], help="Extra rocJITsu argument; repeat for multiple flags")
     parser.add_argument("--direct", action="store_true", help="Run test commands directly on hardware without rocJITsu")
+    parser.add_argument("--parallel", type=int, default=1, help="Maximum concurrent test commands per component")
     parser.add_argument("--component-filter", help="Comma-separated exact component paths to include")
     parser.add_argument("--list-components", action="store_true")
     parser.add_argument("--list-only", action="store_true")
     args = parser.parse_args()
+    if args.parallel < 1:
+        parser.error("--parallel must be positive")
     if not args.direct and (not args.rocjitsu or not args.config):
         parser.error("--rocjitsu and --config are required unless --direct is set")
 
-    rocm_root = Path(args.rocm_root)
+    rocm_root = Path(args.rocm_root).resolve()
     label_pattern = re.compile(args.label_regex)
     groups = discover(rocm_root, label_pattern)
     if args.component_filter:
@@ -300,24 +334,41 @@ def main() -> int:
     if args.list_only:
         return 0 if groups else 1
 
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     env = build_env(rocm_root)
     rocjitsu = None if args.direct else Path(args.rocjitsu).resolve()
     config = None if args.direct else Path(args.config).resolve()
+    inventory = [
+        {"component": group["component"], "directory": str(group["directory"]),
+         "tests": [dict(test, launch_command=test_command(rocjitsu, config, args.rocjitsu_arg, test))
+                   for test in group["tests"]]}
+        for group in groups
+    ]
+    (out_dir / "selected-tests.json").write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "execution-config.json").write_text(json.dumps({
+        "direct": args.direct, "rocjitsu": str(rocjitsu) if rocjitsu else None,
+        "config": str(config) if config else None,
+        "config_contents": json.loads(config.read_text()) if config else None,
+        "rocjitsu_args": args.rocjitsu_arg, "requested_parallel": args.parallel,
+        "label_regex": args.label_regex, "rocm_root": str(rocm_root),
+    }, indent=2) + "\n", encoding="utf-8")
     rows = []
     any_problem = False
     for group in groups:
         started = time.monotonic()
-        results = []
+        parallel, sequential_reasons = scheduling_policy(group["tests"], args.parallel)
         print(f"COMPONENT {group['component']} tests={len(group['tests'])}", flush=True)
-        for test in group["tests"]:
+        if sequential_reasons:
+            print("Using sequential execution: " + "; ".join(sequential_reasons), flush=True)
+        def execute(index_and_test):
+            index, test = index_and_test
             safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", test["name"])[:120]
-            log_path = out_dir / "logs" / group["component"] / f"{safe}.log"
-            result = run_one(rocjitsu, config, args.rocjitsu_arg, test, group["directory"], env, log_path)
-            results.append(result)
-            if result["status"] in ("failed", "timeout"):
-                any_problem = True
+            log_path = out_dir / "logs" / group["component"] / f"{index:05d}-{safe}.log"
+            return run_one(rocjitsu, config, args.rocjitsu_arg, test, group["directory"], env, log_path)
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            results = list(executor.map(execute, enumerate(group["tests"])))
+        any_problem |= any(result["status"] in ("failed", "timeout") for result in results)
         counts = {
             status: sum(1 for result in results if result["status"] == status)
             for status in ("passed", "failed", "timeout", "skipped", "not_started")
@@ -328,6 +379,9 @@ def main() -> int:
             "seconds": time.monotonic() - started,
             "counts": counts,
             "tests": results,
+            "requested_parallel": args.parallel,
+            "effective_parallel": parallel,
+            "sequential_reasons": sequential_reasons,
         }
         rows.append(row)
         summary = render_summary(rows, args.label_regex)
