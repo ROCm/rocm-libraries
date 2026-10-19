@@ -286,7 +286,7 @@ def test_gfx950_segments_conservatively_clamped():
                 is not None
             ):
                 # Paged decode in the split rule's scope derives its segments
-                # from num_cus by design (test_tiled_3d_decode_split.py).
+                # from num_cus by design (test_attention_tiled_3d_decode_split.py).
                 continue
             s120 = au._num_segments(_prob(120, **c), "gfx950")
             s256 = au._num_segments(_prob(256, **c), "gfx950")
@@ -677,7 +677,7 @@ class TestNumCusResolver(unittest.TestCase):
                 is not None
             ):
                 # Paged decode in the split rule's scope derives its segments
-                # from num_cus by design (test_tiled_3d_decode_split.py).
+                # from num_cus by design (test_attention_tiled_3d_decode_split.py).
                 continue
             s120 = au._num_segments(_prob(120, **c), "gfx950")
             s256 = au._num_segments(_prob(256, **c), "gfx950")
