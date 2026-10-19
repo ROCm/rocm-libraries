@@ -53,6 +53,8 @@
 #include <thrust/detail/complex/cexp.h>
 #include <thrust/detail/complex/math_private.h>
 
+#include _THRUST_STD_INCLUDE(cmath)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail::complex
 {
@@ -86,32 +88,33 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
   {
     if ((iy | ly) == 0)
     {
-      return (thrust::complex<double>(::cosh(x), x * y));
+      return (thrust::complex<double>(_THRUST_STD::cosh(x), x * y));
     }
     if (ix < 0x40360000) /* small x: normal case */
     {
-      return (thrust::complex<double>(::cosh(x) * ::cos(y), ::sinh(x) * ::sin(y)));
+      return (thrust::complex<double>(
+        _THRUST_STD::cosh(x) * _THRUST_STD::cos(y), _THRUST_STD::sinh(x) * _THRUST_STD::sin(y)));
     }
 
     /* |x| >= 22, so cosh(x) ~= exp(|x|) */
     if (ix < 0x40862e42)
     {
       /* x < 710: exp(|x|) won't overflow */
-      h = ::exp(::fabs(x)) * 0.5;
-      return (thrust::complex<double>(h * cos(y), copysign(h, x) * sin(y)));
+      h = _THRUST_STD::exp(_THRUST_STD::fabs(x)) * 0.5;
+      return (thrust::complex<double>(h * _THRUST_STD::cos(y), _THRUST_STD::copysign(h, x) * _THRUST_STD::sin(y)));
     }
     else if (ix < 0x4096bbaa)
     {
       /* x < 1455: scale to avoid overflow */
-      thrust::complex<double> z_ = ldexp_cexp(thrust::complex<double>(fabs(x), y), -1);
-      z_.imag(copysign(z_.imag(), x));
+      thrust::complex<double> z_ = ldexp_cexp(thrust::complex<double>(_THRUST_STD::fabs(x), y), -1);
+      z_.imag(_THRUST_STD::copysign(z_.imag(), x));
       return z_;
     }
     else
     {
       /* x >= 1455: the result always overflows */
       h = huge * x;
-      return (thrust::complex<double>(h * h * cos(y), h * sin(y)));
+      return (thrust::complex<double>(h * h * _THRUST_STD::cos(y), h * _THRUST_STD::sin(y)));
     }
   }
 
@@ -126,7 +129,7 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
    */
   if ((ix | lx) == 0 && iy >= 0x7ff00000)
   {
-    return (thrust::complex<double>(y - y, copysign(0.0, x * (y - y))));
+    return (thrust::complex<double>(y - y, _THRUST_STD::copysign(0.0, x * (y - y))));
   }
 
   /*
@@ -139,9 +142,9 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
   {
     if (((hx & 0xfffff) | lx) == 0)
     {
-      return (thrust::complex<double>(x * x, copysign(0.0, x) * y));
+      return (thrust::complex<double>(x * x, _THRUST_STD::copysign(0.0, x) * y));
     }
-    return (thrust::complex<double>(x * x, copysign(0.0, (x + x) * y)));
+    return (thrust::complex<double>(x * x, _THRUST_STD::copysign(0.0, (x + x) * y)));
   }
 
   /*
@@ -172,7 +175,7 @@ THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<do
     {
       return (thrust::complex<double>(x * x, x * (y - y)));
     }
-    return (thrust::complex<double>((x * x) * cos(y), x * sin(y)));
+    return (thrust::complex<double>((x * x) * _THRUST_STD::cos(y), x * _THRUST_STD::sin(y)));
   }
 
   /*
@@ -201,7 +204,7 @@ THRUST_HOST_DEVICE inline complex<ValueType> cos(const complex<ValueType>& z)
 {
   const ValueType re = z.real();
   const ValueType im = z.imag();
-  return complex<ValueType>(std::cos(re) * std::cosh(im), -std::sin(re) * std::sinh(im));
+  return complex<ValueType>(_THRUST_STD::cos(re) * _THRUST_STD::cosh(im), -_THRUST_STD::sin(re) * _THRUST_STD::sinh(im));
 }
 
 template <typename ValueType>
@@ -209,7 +212,7 @@ THRUST_HOST_DEVICE inline complex<ValueType> cosh(const complex<ValueType>& z)
 {
   const ValueType re = z.real();
   const ValueType im = z.imag();
-  return complex<ValueType>(std::cosh(re) * std::cos(im), std::sinh(re) * std::sin(im));
+  return complex<ValueType>(_THRUST_STD::cosh(re) * _THRUST_STD::cos(im), _THRUST_STD::sinh(re) * _THRUST_STD::sin(im));
 }
 
 template <>

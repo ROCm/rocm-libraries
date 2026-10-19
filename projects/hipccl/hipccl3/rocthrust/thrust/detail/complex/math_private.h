@@ -128,5 +128,3 @@ THRUST_HOST_DEVICE inline void extract_words(int32_t& ix0, int32_t& ix1, double 
 } // namespace detail::complex
 
 THRUST_NAMESPACE_END
-
-#include <thrust/detail/complex/c99math.h>

@@ -76,16 +76,16 @@ THRUST_HOST_DEVICE inline complex<float> csqrtf(const complex<float>& z)
   {
     return (complex<float>(0, b));
   }
-  if (isinf(b))
+  if (_THRUST_STD::isinf(b))
   {
     return (complex<float>(_THRUST_STD::numeric_limits<float>::infinity(), b));
   }
-  if (isnan(a))
+  if (_THRUST_STD::isnan(a))
   {
     t = (b - b) / (b - b); /* raise invalid if b is not a NaN */
     return (complex<float>(a, t)); /* return NaN + NaN i */
   }
-  if (isinf(a))
+  if (_THRUST_STD::isinf(a))
   {
     /*
      * csqrtf(inf + NaN i)  = inf +  NaN i
@@ -93,13 +93,13 @@ THRUST_HOST_DEVICE inline complex<float> csqrtf(const complex<float>& z)
      * csqrtf(-inf + NaN i) = NaN +- inf i
      * csqrtf(-inf + y i)   = 0   +  inf i
      */
-    if (signbit(a))
+    if (_THRUST_STD::signbit(a))
     {
-      return (complex<float>(fabsf(b - b), copysignf(a, b)));
+      return (complex<float>(_THRUST_STD::fabsf(b - b), _THRUST_STD::copysignf(a, b)));
     }
     else
     {
-      return (complex<float>(a, copysignf(b - b, b)));
+      return (complex<float>(a, _THRUST_STD::copysignf(b - b, b)));
     }
   }
   /*
@@ -116,14 +116,14 @@ THRUST_HOST_DEVICE inline complex<float> csqrtf(const complex<float>& z)
   const float low_thresh = 2.35098870164458e-38f;
   scale                  = 0;
 
-  if (fabsf(a) >= THRESH || fabsf(b) >= THRESH)
+  if (_THRUST_STD::fabsf(a) >= THRESH || _THRUST_STD::fabsf(b) >= THRESH)
   {
     /* Scale to avoid overflow. */
     a *= 0.25f;
     b *= 0.25f;
     scale = 1;
   }
-  else if (fabsf(a) <= low_thresh && fabsf(b) <= low_thresh)
+  else if (_THRUST_STD::fabsf(a) <= low_thresh && _THRUST_STD::fabsf(b) <= low_thresh)
   {
     /* Scale to avoid underflow. */
     a *= 4.f;
@@ -134,13 +134,13 @@ THRUST_HOST_DEVICE inline complex<float> csqrtf(const complex<float>& z)
   /* Algorithm 312, CACM vol 10, Oct 1967. */
   if (a >= 0.0f)
   {
-    t      = sqrtf((a + hypotf(a, b)) * 0.5f);
+    t      = _THRUST_STD::sqrtf((a + _THRUST_STD::hypotf(a, b)) * 0.5f);
     result = complex<float>(t, b / (2.0f * t));
   }
   else
   {
-    t      = sqrtf((-a + hypotf(a, b)) * 0.5f);
-    result = complex<float>(fabsf(b) / (2.0f * t), copysignf(t, b));
+    t      = _THRUST_STD::sqrtf((-a + _THRUST_STD::hypotf(a, b)) * 0.5f);
+    result = complex<float>(_THRUST_STD::fabsf(b) / (2.0f * t), _THRUST_STD::copysignf(t, b));
   }
 
   /* Rescale. */
