@@ -372,6 +372,14 @@ def bind_tuning_attention_torch(
             f"{type(problem).__name__}"
         )
     validate_tuning_attention_contract(request, problem, spec)
+    # The caller-owned LSE buffer must be bound exactly when the problem asks
+    # for it, so misuse fails here and not at the first launch. Its shape,
+    # dtype, device and overlap are validated by the runner, which needs torch.
+    has_lse = tensors.get("lse") is not None
+    if problem.emit_lse and not has_lse:
+        raise ValueError("emit_lse=True requires tensors['lse']")
+    if has_lse and not problem.emit_lse:
+        raise ValueError("tensors['lse'] was given but emit_lse is off")
     unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
     num_blocks = validate_tuning_attention_tensors(
         problem,

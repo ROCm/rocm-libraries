@@ -144,26 +144,82 @@ def test_lse_on_gfx1250_split_kv_is_refused():
         dispatch_attention(_decode_request("gfx1250", emit_lse=True))
 
 
+class _FakeTensor:
+    """Metadata-only stand-in the real binding validator accepts (no torch)."""
+
+    def __init__(self, shape, dtype, values=None):
+        self.shape, self.dtype, self.device = tuple(shape), dtype, "cuda:0"
+        self._values = values
+
+    def is_contiguous(self):
+        return True
+
+    def stride(self, dim):
+        stride = 1
+        for extent in self.shape[dim + 1 :]:
+            stride *= extent
+        return stride
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def tolist(self):
+        return self._values
+
+
+def _paged_tensors(problem):
+    """Paged decode tensors matching ``problem``, every sequence at full length."""
+    seqs, pages = problem.num_seqs, -(-problem.max_seqlen_k // problem.block_size)
+    act = (problem.total_q, problem.num_query_heads, problem.head_size)
+    kv = (seqs * pages, problem.block_size, problem.num_kv_heads, problem.head_size)
+    return {
+        "q": _FakeTensor(act, "torch.bfloat16"),
+        "out": _FakeTensor(act, "torch.bfloat16"),
+        "k": _FakeTensor(kv, "torch.bfloat16"),
+        "v": _FakeTensor(kv, "torch.bfloat16"),
+        "cu_seqlens_q": _FakeTensor((seqs + 1,), "torch.int32", list(range(seqs + 1))),
+        "seqused_k": _FakeTensor((seqs,), "torch.int32", [problem.max_seqlen_k] * seqs),
+        "block_table": _FakeTensor(
+            (seqs, pages),
+            "torch.int32",
+            [list(range(s * pages, (s + 1) * pages)) for s in range(seqs)],
+        ),
+    }
+
+
 @pytest.mark.parametrize("arch", _ARCHES)
 def test_binding_forwards_the_lse_buffer(arch, monkeypatch):
-    """The bound launch hands the caller's lse tensor to the runtime."""
-    from dispatch.attention import bindings
+    """The bound launch hands the caller's lse tensor to the runtime, after the
+    real paged-tensor validation (only the GPU runner is replaced)."""
+    from dispatch.attention.common import _tuning_problem
     from kernels.common import attention_unified as au
 
     seen = {}
-    monkeypatch.setattr(
-        bindings, "validate_tuning_attention_tensors", lambda problem, t, **kw: 64
-    )
     monkeypatch.setattr(au, "run_unified_attention_torch", lambda **kw: seen.update(kw))
-    result = dispatch_attention(
-        _pinned(_decode_request(arch, emit_lse=True), _SPLIT_KV_SPEC[arch])
-    )
+    request = _pinned(_decode_request(arch, emit_lse=True), _SPLIT_KV_SPEC[arch])
     lse = object()
-    tensors = {name: object() for name in ("q", "k", "v", "out")}
-    tensors.update(cu_seqlens_q=object(), seqused_k=object(), block_table=object())
-    result.bind_torch({**tensors, "lse": lse}).launch()
+    tensors = {**_paged_tensors(_tuning_problem(request)), "lse": lse}
+    dispatch_attention(request).bind_torch(tensors).launch()
     assert seen["lse"] is lse
     assert seen["problem"].emit_lse is True
+
+
+@pytest.mark.parametrize("emit_lse", [True, False], ids=["missing", "stray"])
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_binding_refuses_an_lse_buffer_that_does_not_match_the_request(arch, emit_lse):
+    """missing: LSE requested without tensors['lse']. stray: an lse buffer with
+    LSE off. Both fail at bind_torch, not at the first launch."""
+    from dispatch.attention.common import _tuning_problem
+
+    request = _pinned(_decode_request(arch, emit_lse=emit_lse), _SPLIT_KV_SPEC[arch])
+    tensors = _paged_tensors(_tuning_problem(request))
+    if not emit_lse:
+        tensors["lse"] = object()
+    with pytest.raises(ValueError, match=r"tensors\['lse'\]"):
+        dispatch_attention(request).bind_torch(tensors)
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
