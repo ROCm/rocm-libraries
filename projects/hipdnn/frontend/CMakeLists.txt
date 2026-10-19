@@ -158,10 +158,28 @@ if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     )
 endif()
 
+# CI payload: the harness that compiles NVIDIA's cudnn-frontend sample corpus against the
+# installed shim. Deliberately NOT gated on HIPDNN_ENABLE_CUDNN_COMPATIBILITY. The harness
+# decides for itself whether the shim is present, and when it is not it reports a skipped
+# test; that only works if the payload ships in every build. It is a few hundred lines of
+# CMake, JSON, Python and headers, and nothing user-facing consumes it.
+# No COMPONENT, matching how hipDNN's own test binaries install (cmake/Tests.cmake); the
+# artifact descriptors select test payloads by globbing the staged tree, not by component.
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../tests/cudnn_samples/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn/cudnn_samples
+)
+
 # Install generated version header
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_frontend/version.h"
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_frontend
+    COMPONENT Development
+)
+
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/hipdnn_frontend
     COMPONENT Development
 )
 

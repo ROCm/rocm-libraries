@@ -38,6 +38,7 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
+#include <miopen/timer.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
@@ -297,12 +298,13 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitValidKernels(
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
     const ExecutionContext& ctx)
 {
-    const auto dev_name = ctx.GetStream().GetDeviceName();
-    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const auto dev_name  = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11  = StartsWith(dev_name, "gfx110") || StartsWith(dev_name, "gfx115");
+    const bool is_gfx117 = StartsWith(dev_name, "gfx117");
+    const bool is_gfx12  = StartsWith(dev_name, "gfx12");
 
     auto* ranked_p = &ranked_gemm_grp_fwd;
-    if(is_gfx11 || is_gfx12)
+    if(is_gfx11 || is_gfx12 || is_gfx117)
         ranked_p = &ranked_gemm_grp_fwd_navi;
 
     const auto ranked_1st_applicable = *ranked_p;
@@ -322,6 +324,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(
 void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
+    ScopedTimeLogger heuristic_init_timer("GrpConvFwdXdlops::HeuristicInit");
     HeuristicInitState state(valid_kernels, index, split_k, kernel_id);
     state.Reset(k2DFwdSolverConfig.uses_split_k);
 
@@ -334,6 +337,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
     {
+        ScopedTimeLogger ai_timer("GrpConvFwdXdlops::HeuristicInit.RunAIHeuristics");
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
         auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
@@ -364,11 +368,17 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
 #endif
 
     // Fallback to default initialization
-    InitValidKernels(problem);
+    {
+        ScopedTimeLogger init_timer("GrpConvFwdXdlops::HeuristicInit.InitValidKernels");
+        InitValidKernels(problem);
+    }
     if(!valid_kernels.empty())
     {
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
+        {
+            ScopedTimeLogger default_timer("GrpConvFwdXdlops::HeuristicInit.DefaultKernelFromList");
             DefaultKernelFromList(ctx);
+        }
         state.SetResult(index, split_k, k2DFwdSolverConfig.uses_split_k);
     }
 }
@@ -377,20 +387,13 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
-        if(!loader.IsLoaded())
-            return false;
-
-        auto data_type = problem.GetInDataType();
-        use_tf32       = (data_type == miopenFloat) && problem.UseTF32();
-
-        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKSolverType::GrpConvFwd, problem, data_type, use_tf32);
-
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
+        InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-
-        assert(!valid_kernels.empty());
         return true;
     }
     if((index + 1) < valid_kernels.size())
@@ -460,6 +463,7 @@ ConvHipImplicitGemmGroupFwdXdlops::Search(const ExecutionContext& ctx,
 bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(const ExecutionContext& ctx,
                                                      const ProblemDescription& problem) const
 {
+    ScopedTimeLogger is_applicable_timer("GrpConvFwdXdlops::IsApplicable");
     if(env::disabled(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS))
         return false;
     if(problem.GetConv().attribute.deterministic)
@@ -498,6 +502,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
     const ProblemDescription& problem,
     const PerformanceConfigHipImplicitGemmGroupFwdXdlops& config) const
 {
+    ScopedTimeLogger get_solution_timer("GrpConvFwdXdlops::GetSolution");
     const auto& loader = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};

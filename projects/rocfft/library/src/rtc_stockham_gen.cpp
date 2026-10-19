@@ -122,6 +122,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         kernel_name += std::to_string(specs.static_dim);
     }
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(precision);
 
     if(placement == rocfft_placement_inplace)
@@ -342,6 +343,25 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         if(transforms_per_block)
             *transforms_per_block = kernel->transforms_per_block;
 
+        auto generate_pp_functions = [&](StockhamPartialPassKernel* kernel_pp) {
+            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
+            reg2lds
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
+            lds2reg_pp_steps = std::make_unique<Function>(
+                kernel_pp->partial_pass_steps == PartialPassSteps::STEPS_1_2
+                    ? kernel_pp->generate_lds_to_reg_partial_pass_steps_1_2_input_function()
+                    : kernel_pp->generate_lds_to_reg_partial_pass_steps_3_4_input_function());
+            reg2lds_pp_steps = std::make_unique<Function>(
+                kernel_pp->partial_pass_steps == PartialPassSteps::STEPS_1_2
+                    ? kernel_pp->generate_lds_from_reg_partial_pass_steps_1_2_output_function()
+                    : kernel_pp->generate_lds_from_reg_partial_pass_steps_3_4_output_function());
+            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp = std::make_unique<Function>(
+                kernel_pp->partial_pass_steps == PartialPassSteps::STEPS_1_2
+                    ? kernel_pp->generate_pp_steps_1_2_device_function()
+                    : kernel_pp->generate_pp_steps_3_4_device_function());
+        };
+
         switch(ppType)
         {
         case PPT_NONE:
@@ -353,36 +373,17 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         }
         case PPT_SBRR:
         {
-            auto kernel_pp = static_cast<StockhamPartialPassKernelRR*>(kernel.get());
-
-            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
-            reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
-            lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_partial_pass_steps_1_2_input_function());
-            reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_partial_pass_steps_1_2_output_function());
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
-            device_pp
-                = std::make_unique<Function>(kernel_pp->generate_pp_steps_1_2_device_function());
+            generate_pp_functions(static_cast<StockhamPartialPassKernelRR*>(kernel.get()));
             break;
         }
         case PPT_SBCC:
         {
             auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
 
-            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
-            reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
-            lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_partial_pass_steps_3_4_input_function());
-            reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_partial_pass_steps_3_4_output_function());
+            generate_pp_functions(kernel_pp);
+
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
-            device_pp
-                = std::make_unique<Function>(kernel_pp->generate_pp_steps_3_4_device_function());
             break;
         }
         default:
@@ -454,6 +455,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(precision);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(loadOps, storeOps, cbtype);
     src += memory_gfx_h;
     src += callback_h;

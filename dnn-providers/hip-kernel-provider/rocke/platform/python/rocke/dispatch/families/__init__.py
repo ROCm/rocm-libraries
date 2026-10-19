@@ -45,14 +45,34 @@ of a constraint that silently never matches.
 
 from __future__ import annotations
 
-from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
-from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
+from .moe import (
+    MOE_REGISTRY,
+    MoeRequest,
+    dispatch_moe,
+    dispatch_moe_all,
+    moe_sweep_space,
+    registered_moe_combos,
+)
+from .norm import (
+    NORM_REGISTRY,
+    NormRequest,
+    dispatch_norm,
+    dispatch_norm_all,
+    norm_sweep_space,
+    registered_norm_combos,
+)
 
 __all__ = [
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",
+    "dispatch_moe_all",
+    "moe_sweep_space",
+    "registered_moe_combos",
     "NORM_REGISTRY",
     "NormRequest",
     "dispatch_norm",
+    "dispatch_norm_all",
+    "norm_sweep_space",
+    "registered_norm_combos",
 ]

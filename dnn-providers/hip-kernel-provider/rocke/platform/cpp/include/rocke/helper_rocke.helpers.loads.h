@@ -17,7 +17,7 @@
  *     .from_tile     (classmethod)    rocke_async_tile_loader_from_tile()
  *     .halves_per_chunk (property)    rocke_async_tile_loader_halves_per_chunk()
  *     .bytes_per_chunk  (property)    rocke_async_tile_loader_bytes_per_chunk()
- *     .cols_per_chunk   (property)    rocke_async_tile_loader_cols_per_chunk()
+ *     .chunks_per_row   (property)    rocke_async_tile_loader_chunks_per_row()
  *     .wave_bytes       (property)    rocke_async_tile_loader_wave_bytes()
  *     .pass_bytes       (property)    rocke_async_tile_loader_pass_bytes()
  *     .bind          (method)         rocke_async_tile_loader_bind()
@@ -222,6 +222,40 @@ void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
                                            rocke_value_t* smem_dst,
                                            const rocke_ctl_staged_t* staged);
 
+/* Address-prefetch split (Python plan_slots / slot_offsets / issue_slots).
+ *
+ * Lets a K loop carry each chunk's byte offset across iterations instead of
+ * deriving it right before the read. A staged buffer doubles as the slot list:
+ * plan_slots fills row/col (v = NULL), issue_slots fills v, and store_lds then
+ * consumes it unchanged. */
+
+/* CoalescedTileLoader.plan_slots(): decode every per-thread chunk's tile-local
+ * (row, col) into `slots` (count = vecs_per_thread, v left NULL). */
+void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
+                                            const rocke_coalesced_tile_loader_t* self,
+                                            rocke_value_t* tid,
+                                            rocke_ctl_staged_t* slots);
+
+/* CoalescedTileLoader.slot_offsets(): one byte voffset per slot, invalid chunks
+ * redirected to oob_sentinel. Writes slots->count values into out_offsets.
+ * Buffer-resource loaders only. */
+void rocke_coalesced_tile_loader_slot_offsets(rocke_ir_builder_t* b,
+                                              const rocke_coalesced_tile_loader_t* self,
+                                              const rocke_ctl_staged_t* slots,
+                                              rocke_loads_descriptor_fn descriptor,
+                                              void* descriptor_user,
+                                              rocke_value_t** out_offsets);
+
+/* CoalescedTileLoader.issue_slots(): one buffer read per slot from `offsets`
+ * (slots->count entries). Copies row/col from `slots` into `staged` and fills
+ * each staged v; `staged` may alias `slots`. */
+void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* rsrc,
+                                             const rocke_ctl_staged_t* slots,
+                                             rocke_value_t* const* offsets,
+                                             rocke_ctl_staged_t* staged);
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */
@@ -238,6 +272,12 @@ typedef struct rocke_async_tile_loader
     int chunks_total; /* tile_rows * tile_cols / (dwords * 2) */
     int chunks_per_pass; /* = block_size */
     int passes; /* ceil(chunks_total / block_size) */
+    /* Python `contig_cols: Optional[int] = None`, spelled here as 0 => None.
+     * Longest run of tile columns that is contiguous in global memory. When the
+     * col axis is composite -- e.g. the conv reduction index (y, x, c), where
+     * only c is stride-1 -- a chunk crossing one of those boundaries would fetch
+     * the wrong elements silently. */
+    int contig_cols;
 } rocke_async_tile_loader_t;
 
 /* Bound AsyncTileLoader (rocke.helpers.loads.AsyncTileLoaderSlot). */
@@ -255,7 +295,7 @@ typedef struct rocke_async_tile_loader_slot
  * ValueError path. max_dwords default 4 (values > 4 are clamped to 4, matching
  * Python). */
 rocke_status_t rocke_async_tile_loader_choose_dwords(
-    int tile_rows, int tile_cols, int block_size, int max_dwords, int* out);
+    int tile_rows, int tile_cols, int block_size, int max_dwords, int contig_cols, int* out);
 
 /* AsyncTileLoader.from_tile classmethod.
  *
@@ -267,12 +307,13 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
                                                  int block_size,
                                                  int wave_size,
                                                  int max_dwords,
+                                                 int contig_cols, /* 0 => None */
                                                  rocke_async_tile_loader_t* out);
 
 /* AsyncTileLoader properties (pure int arithmetic). */
 int rocke_async_tile_loader_halves_per_chunk(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_bytes_per_chunk(const rocke_async_tile_loader_t* self);
-int rocke_async_tile_loader_cols_per_chunk(const rocke_async_tile_loader_t* self);
+int rocke_async_tile_loader_chunks_per_row(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_wave_bytes(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_pass_bytes(const rocke_async_tile_loader_t* self);
 

@@ -250,6 +250,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2gI07f8Pw
   KernelNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_UserArgs_shortname0_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_UserArgs_shortname0_gfx950
   ActivationFuncCall: false
@@ -279,7 +280,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
@@ -407,6 +408,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 1
+  SolutionUID: 0uR2gI08LdtP
   KernelNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   ActivationFuncCall: false
@@ -436,7 +438,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
@@ -564,6 +566,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 2
+  SolutionUID: 0uR2gI08P8Ln
   KernelNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   ActivationFuncCall: false
@@ -593,7 +596,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
@@ -721,6 +724,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 3
+  SolutionUID: 0uR2gI081VPm
   KernelNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname1_gfx950
   ActivationFuncCall: false
@@ -750,7 +754,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128
@@ -878,6 +882,7 @@ Solutions:
   tailLoopOptA: false
   tailLoopOptB: false
 - SolutionIndex: 4
+  SolutionUID: 0uR2gI08VkPe
   KernelNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   SolutionNameMin: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
   ActivationFuncCall: false
@@ -907,7 +912,7 @@ Solutions:
   GuaranteeNoPartialB: true
   GuaranteeNoPartialMetadata: true
   ISA: [9, 5, 0]
-  InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+  InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
     SupportUserGSU: true, UseUniversalArgs: true}
   Kernel: true
   LSCA: 128

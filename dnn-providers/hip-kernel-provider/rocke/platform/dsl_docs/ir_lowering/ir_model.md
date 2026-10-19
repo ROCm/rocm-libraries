@@ -10,7 +10,7 @@ Named scalar types are singletons exported from `core/ir.py`:
 
 ```text
 I1, I8, I32, I64
-F16, BF16, F32
+F16, BF16, F32, F64
 FP8E4M3      # e4m3 fp8 (cvt_fp8_to_f32 / cvt_f32_to_fp8)
 BF8E5M2      # e5m2 fp8 (cvt_bf8_to_f32 / cvt_f32_to_bf8)
 ```
@@ -32,6 +32,11 @@ CACHE_GLOBAL = 1   # GLC set, skip L2
 CACHE_STREAM = 2   # SLC set, streaming hint (don't evict useful lines)
 NON_TEMPORAL = 3   # GLC + SLC, bypass cache hierarchy
 ```
+
+GLC / SLC are the gfx90a names; on gfx942 / gfx950 the same values are SC0 (1) and NT (2).
+These are raw bit values for buffer ops. They are **not** `temporal_hint=TemporalHint.STREAMING`
+on `global_load_vN` / `global_store_vN` (below), whose bits the backend picks per arch: on
+gfx942 / gfx950 it sets NT only, the bits of `CACHE_STREAM`, **not** `NON_TEMPORAL`.
 
 ### `Value`
 
@@ -83,6 +88,7 @@ Kernel attributes consumed by lowering:
 const_i32(value)
 const_i64(value)
 const_f32(value)
+const_f64(value)           # printed as the exact IEEE-754 bit pattern
 fp16_zero()
 zero_vec_f32(n)            # <n x f32>, all zeros
 zero_vec_f32_4()           # <4 x f32>, all zeros
@@ -93,8 +99,8 @@ zero_vec(elem, n)          # f32 / f16 / bf16
 
 ```text
 add, sub, mul, div, mod                    # integer arithmetic
-fadd, fsub, fmul, fdiv, fneg               # f32 arithmetic
-fmax, fmin                                 # llvm.maxnum / llvm.minnum (f32/f16/bf16)
+fadd, fsub, fmul, fdiv, fneg               # f64/f32/f16/bf16 arithmetic
+fmax, fmin                                 # llvm.maxnum / llvm.minnum (f64/f32/f16/bf16)
 fcmp(pred, a, b)                           # pred in {olt,ole,ogt,oge,oeq,one,ord,uno}
 cmp_lt, cmp_le, cmp_gt, cmp_ge, cmp_eq, cmp_ne   # integer compare (-> i1)
 land, lor, lnot                            # bitwise + i1 logic
@@ -120,13 +126,13 @@ cvt_f32_to_i8_sat(v)     # round + saturate to i8
 
 ### Math intrinsics
 
-LLVM target intrinsics; lowering is f32-centric.
+LLVM target intrinsics; lowering is f32-centric. `exp2`, `exp2_fast`, `log2`, `sqrt`, `rsqrt`, `rcp_fast`, `tanh`, `fabs`, `fma`, `fmax3`, `fmin3` and `vector_fma` have no f64 lowering and reject f64 inputs in both the LLVM and HIP lowerings; `rcp` is a plain `fdiv` and accepts f64.
 
 ```text
 exp2(v)        # llvm.exp2.f32
 sqrt(v)        # llvm.sqrt.f32
 rsqrt(v)       # llvm.amdgcn.rsq.f32 (single hardware reciprocal-sqrt)
-tanh(v)        # llvm.tanh.f32
+tanh(v)        # OCML-style piecewise f32 expansion (polynomial below |v| < 0.625, exp2/rcp otherwise)
 rcp(v)         # 1/v, lowered to hardware reciprocal
 ```
 
@@ -172,8 +178,14 @@ global_load_fp8e4m3(ptr, idx, align=1)
 masked_global_load(ptr, idx, mask, other, dtype, align=1)   # clamps false-lane idx to 0
 global_store(ptr, idx, value, align=1)
 global_load_vN_f16(ptr, idx, n)        # n in {2,4,8}; aligned by default
-global_load_vN(ptr, idx, dtype, n)     # f16 or bf16; n in {2,4,8}
-global_store_vN(...)                   # vector stores
+global_load_vN(ptr, idx, dtype, n, temporal_hint=TemporalHint.DEFAULT)   # 16-bit n in {2,4,6,8,16}; f32/i32 {2,3,4,8}; 8-bit {2,4,8,12,16}
+global_store_vN(ptr, idx, value, n, temporal_hint=TemporalHint.DEFAULT)  # vector stores
+# TemporalHint.STREAMING: semantic intent (data read/written once). Lowered today to LLVM
+# `!nontemporal` (HIP: __builtin_nontemporal_load/store), and only for gfx942/gfx950
+# (`nt` only = CACHE_STREAM, NOT NON_TEMPORAL); every lowerer rejects it (ValueError /
+# ROCKE_ERR_VALUE) on other targets, whose cache bits differ or are unverified.
+# DEFAULT records nothing. C: rocke_b_global_{load,store}_vN_ex(..., const rocke_mem_opts_t*),
+# opts initialized with ROCKE_MEM_OPTS_INIT (records struct_size; see ir.h for the contract).
 global_atomic_add_f32(ptr, idx, value) # used by split-K paths
 ```
 

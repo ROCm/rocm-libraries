@@ -9,8 +9,8 @@ if(MIOPEN_ENABLE_SQLITE)
 endif()
 
 if(MIOPEN_USE_HIPCONV)
-    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed one.
-    set(HIPCONV_ENABLE_POINTWISE OFF CACHE BOOL "" FORCE)
+    # MIOpen provides its own 1x1/pointwise path, so drop hipconv's hipBLASLt-backed ones.
+    set(HIPCONV_ENABLE_EXPLICIT_GEMM OFF CACHE BOOL "" FORCE)
     add_subdirectory(hipconv)
 endif()
 
@@ -110,6 +110,7 @@ set( MIOpen_Source
     fusion/problem_description.cpp
     generic_search.cpp
     getitem_api.cpp
+    gpu_conv_reference.cpp
     glu/problem_description.cpp
     glu_api.cpp
     groupnorm_api.cpp
@@ -252,7 +253,6 @@ set( MIOpen_Source
     solver/conv/conv_ck_grouped_conv_fwd.cpp
     solver/conv/conv_3d_depthwise_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
-    solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
     solver/conv_ck_igemm_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_grp_fwd_bias_activ_fused.cpp
@@ -327,6 +327,24 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
+if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pick.cpp
+        conv/heuristics/lgbm_metadata.cpp
+        conv/heuristics/lgbm_forest.cpp)
+    # The rank model ships as a compact binary asset (kernels/lgbm_rank.bin,
+    # installed with the other model assets below) and is read at runtime by
+    # lgbm_forest.cpp -- no generated C, no text/JSON parse.
+
+    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver, all
+    # packed into a single binary bundle (kernels/lgbm_pcfg.bin, installed with
+    # the other model assets below) and read at runtime by the pcfg metadata
+    # loader. See lgbm_binary.hpp and script/convert_lgbm_binary.py.
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pcfg_pick.cpp
+        conv/heuristics/lgbm_pcfg_metadata.cpp)
+endif()
+
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
 if(MIOPEN_ENABLE_SQLITE)
     list(APPEND MIOpen_Source sqlite_db.cpp)
@@ -381,6 +399,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/reduction_functions.hpp
         kernels/configuration.hpp
         kernels/default_configurations.hpp
+        kernels/gpu_reference_kernel/naive_conv.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc
@@ -393,21 +412,11 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/Conv_Winograd_v16_5_0_epilogue.inc
         kernels/Conv_Winograd_v16_5_0_prologue.inc
         kernels/Conv_Winograd_v16_5_0_stride1.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_epilogue.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_gfx8_stride_2_dec.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_gfx8.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b_epilogue.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b_epilogue.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b_prologue.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_epilogue.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8_stride_2_dil.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8_stride_2_dec.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9_stride_2_dil.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9_stride_2_dec.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9.inc
@@ -517,10 +526,12 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_gfx11_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_gfx12_1536vgprs_fp16_fp32acc_f2x3_c32_stride1.inc
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_gfx117_1024vgprs_fp16_fp16acc_f2x3_c16_stride1.inc
         kernels/winograd/Conv_Winograd_Fury_v2_X_X_X_metadata.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_gfx94x_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx12x_fp16_fp32acc_f2x3_stride1.inc
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_gfx117x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx94x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_gfx95x_fp16_fp32acc_f2x3_stride1.inc
         kernels/winograd/Conv_Winograd_Rage_v4_X_X_metadata.inc
@@ -624,9 +635,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/conv_3x3_wheel_alpha_v9_0_15_stride_2_dec.s
         kernels/conv_3x3_wheel_alpha_v9_0_15.s
         kernels/conv_3x3_wheel_alpha_v7_0_3b.s
-        kernels/conv_3x3_wheel_alpha_v3_0b.s
-        kernels/conv_3x3_wheel_alpha_v9_2_7.s
-        kernels/conv_3x3_wheel_alpha_v9_2_7_stride_2_dec.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_dilation2.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_stride1.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_stride2.s
@@ -666,8 +674,10 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/winograd/Conv_Winograd_Fury_v2_4_1_fp16_fp16acc_f2x3_c32_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Fury_v4_6_0_fp16_fp32acc_f2x3_c32_stride1.s
+        kernels/winograd/Conv_Winograd_Fury_v4_7_0_fp16_fp16acc_f2x3_c16_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
         kernels/winograd/Conv_Winograd_Rage_v4_9_1_fp16_fp32acc_f2x3_stride1.s
+        kernels/winograd/Conv_Winograd_Rage_v4_11_0_fp16_fp32acc_f2x3_stride1.s
         kernels/xform_data.s
         kernels/xform_filter.s
         kernels/xform_bidirect_winograd_data.s
@@ -907,6 +917,26 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
+    # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
+    # frontend configured to dlopen the backend at first use, so libMIOpen.so
+    # carries no DT_NEEDED entry for libhipdnn_backend.so and a machine without
+    # hipDNN installed still loads MIOpen. Linking hipdnn_frontend instead would
+    # make the backend a hard load-time dependency of every MIOpen consumer.
+    # In a superbuild hipDNN is already part of the build graph; its generated
+    # package config re-creates these targets as imported ones, which collides.
+    if(NOT TARGET hipdnn_frontend_dynamic)
+        find_package(hipdnn_frontend REQUIRED)
+    else()
+        # An in-tree target's headers arrive as -I, so MIOpen's -Werror set gets
+        # applied to them. An installed hipDNN arrives as -isystem and does not.
+        set_target_properties(hipdnn_frontend_dynamic PROPERTIES SYSTEM TRUE)
+    endif()
+    target_sources(MIOpen PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_conv.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_graph.cpp
+        ${PROJECT_SOURCE_DIR}/src/private/hipdnn_types.cpp)
+    target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
+
     # Deliberately excludes src/include: the wrapper must see only the public
     # header and its own _impl declarations. Without that restriction a stub
     # could include an internal C++ header and re-couple the public shim to
@@ -1055,9 +1085,23 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         add_library(nlohmann_json INTERFACE IMPORTED GLOBAL)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
-    file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
+    file(GLOB MODEL_FILES CONFIGURE_DEPENDS
+        kernels/*.model
+        kernels/lgbm_model_meta.json
+        kernels/lgbm_rank.bin
+        kernels/lgbm_pcfg.bin)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
+    endif()
+    # Test-only golden-vector fixtures for the LGBM forest walker parity gates
+    # (test/gtest/lgbm_picker.cpp, lgbm_pcfg_picker.cpp). Copied next to the
+    # model assets so the tests find them via GetSystemDbPath(), but NOT
+    # installed into the package.
+    if(BUILD_TESTING)
+        configure_file("kernels/lgbm_rank_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
+        configure_file("kernels/lgbm_pcfg_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_pcfg_golden.json" COPYONLY)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)

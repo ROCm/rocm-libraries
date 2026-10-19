@@ -46,10 +46,22 @@ static_assert(RPP_BACKEND_HIP == EXPECTED_RPP_BACKEND_HIP,
 
 int main() {
     rppHandle_t handle = nullptr;
+    constexpr size_t expectedBatchSize = 1;
 
-    if (rppCreate(&handle, 1, 0, nullptr, RPP_HOST_BACKEND) != rppStatusSuccess ||
+    // This test intentionally creates a HOST handle even when RPP was built with
+    // HIP support. It must pass on a machine with no GPU device nodes: host handle
+    // construction must not call hipInit() or otherwise acquire a HIP context.
+    if (rppCreate(&handle, expectedBatchSize, 0, nullptr, RPP_HOST_BACKEND) != rppStatusSuccess ||
         handle == nullptr) {
         std::printf("FAIL: rppCreate() with RPP_HOST_BACKEND did not succeed\n");
+        return 1;
+    }
+
+    size_t actualBatchSize = 0;
+    if (rppGetBatchSize(handle, &actualBatchSize) != rppStatusSuccess ||
+        actualBatchSize != expectedBatchSize) {
+        std::printf("FAIL: HOST handle is not usable after creation\n");
+        rppDestroy(handle, RPP_HOST_BACKEND);
         return 1;
     }
 

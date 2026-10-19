@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <optional>
 #include <ostream>
 #include <unordered_set>
 
@@ -34,6 +35,8 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/SymbolicRegName.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -143,6 +146,69 @@ void collectAsmSetSymbolInfo(const Function& func,
         }
         out[kv.first] = info;
     }
+}
+
+/// Walks the function in emission order, tracking `.set` bindings as they come
+/// into force, and rewrites each symbolically-named operand's index to match.
+size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes) {
+    std::unordered_map<std::string, std::string> raw;
+    std::unordered_map<std::string, int64_t> live;
+    bool liveIsStale = true;
+
+    auto refreshLive = [&]() {
+        if (!liveIsStale) return;
+        live.clear();
+        for (const auto& kv : raw) {
+            std::unordered_set<std::string> expanding;
+            int64_t value = 0;
+            if (resolveAsmSetRhs(kv.second, raw, expanding, 0, value)) live[kv.first] = value;
+        }
+        liveIsStale = false;
+    };
+
+    size_t corrected = 0;
+    for (BasicBlock& bb : func) {
+        for (IRBase& ir : bb) {
+            if (auto* directive = dyn_cast<AsmDirective>(&ir)) {
+                if (directive->kind != AsmDirectiveKind::SET || directive->symbol.empty()) continue;
+                raw[directive->symbol] = trimAsmToken(directive->value);
+                liveIsStale = true;
+                continue;
+            }
+            auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+            if (instruction == nullptr) continue;
+
+            auto materialise = [&](bool isDest, size_t operand) {
+                const StinkyRegister& reg = isDest ? instruction->getDestRegs()[operand]
+                                                   : instruction->getSrcRegs()[operand];
+                // Virtual registers are not yet indices, so a name cannot contradict them.
+                if (!reg.isRegister() || reg.isVirtualReg() || !reg.hasSymbolicName()) return;
+                refreshLive();
+                // Read before the write below, which lands in `reg`.
+                const std::string symbol = reg.getSymbolicName();
+                const uint32_t oldIdx = reg.reg.idx;
+                const std::optional<int64_t> named = resolveNamedIndex(symbol, live, reg.reg.num);
+                // An unresolvable name says nothing about the index; leave it be.
+                if (!named.has_value() || *named < 0) return;
+                if (*named == static_cast<int64_t>(oldIdx)) return;
+
+                StinkyRegister updated = reg;
+                updated.reg.idx = static_cast<uint32_t>(*named);
+                if (isDest)
+                    instruction->setDestReg(operand, updated);
+                else
+                    instruction->setSrcReg(operand, updated);
+                fixes.push_back({symbol, oldIdx, static_cast<uint32_t>(*named)});
+                ++corrected;
+            };
+
+            for (size_t operand = 0; operand < instruction->getNumDestRegs(); ++operand)
+                materialise(true, operand);
+            for (size_t operand = 0; operand < instruction->getNumSrcRegs(); ++operand)
+                materialise(false, operand);
+        }
+    }
+    return corrected;
 }
 
 bool tryResolveAsmSetSymbolToInt32(const std::unordered_map<std::string, int64_t>* asmSetSymbols,

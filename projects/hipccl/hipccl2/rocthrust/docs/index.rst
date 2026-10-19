@@ -1,0 +1,46 @@
+.. meta::
+  :description: rocThrust API precision support
+  :keywords: rocThrust, ROCm, API, reference, data type, support
+
+.. _index:
+
+******************************************
+rocThrust documentation
+******************************************
+
+rocThrust is a parallel algorithm library that has been ported to `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and `ROCm <https://rocm.docs.amd.com/en/latest/>`_, and uses the `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ library.
+
+The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocthrust.
+
+.. grid:: 2
+  :gutter: 3
+
+  .. grid-item-card:: Install
+
+    * :doc:`Install rocThrust <install/install>`
+    * :doc:`Build from source <install/source-build>`
+
+  .. grid-item-card:: Conceptual
+
+    * :ref:`Synchronization and blocking <synchronization-and-blocking>`
+
+  .. grid-item-card:: How to
+
+    * :doc:`Build rocThrust for different backends <./how-to/rocThrust-build-for-backends>`
+    * :ref:`Avoid synchronization barriers <hip-execution-policies>`
+    * :doc:`Add rocThrust to a CMake project <./how-to/use-rocThrust-in-a-project>`
+    * :doc:`Run tests on multiple GPUs <./how-to/run-rocThrust-tests-on-multiple-gpus>`
+    * :doc:`Use HIPSTDPAR <./how-to/rocThrust-hipstdpar>`
+
+  .. grid-item-card:: Reference
+
+    * :ref:`rocthrust-data-type-support`
+    * :ref:`bitwise-repro`
+    * :ref:`atomic-path`
+    * :ref:`rocThrust API reference <api-reference>`
+
+To contribute to the documentation, refer to
+`Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+
+You can find licensing information on the
+`Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

@@ -14,6 +14,19 @@
 namespace hipdnn_test_sdk::utilities
 {
 
+/// Whether a comparison treats same-signed infinities in the reference and the
+/// implementation as equal.
+///
+/// REJECTED is the default: an unexpected infinity is normally a real defect, most often an
+/// output element the operation never wrote. ACCEPTED is for outputs whose correct value is
+/// infinite on both sides, such as an SDPA forward STATS (log-sum-exp) tensor holding -inf
+/// for every fully masked causal row.
+enum class MatchingInfinities
+{
+    REJECTED,
+    ACCEPTED
+};
+
 template <class T>
 class CpuFpReferenceValidation : public IReferenceValidation
 {
@@ -21,9 +34,11 @@ public:
     // NOLINTNEXTLINE(readability-redundant-casting) - cast needed for non-float T types
     CpuFpReferenceValidation(float absoluteTolerance = float(std::numeric_limits<T>::epsilon()),
                              // NOLINTNEXTLINE(readability-redundant-casting)
-                             float relativeTolerance = float(std::numeric_limits<T>::epsilon()))
+                             float relativeTolerance = float(std::numeric_limits<T>::epsilon()),
+                             MatchingInfinities matchingInfinities = MatchingInfinities::REJECTED)
         : _absoluteTolerance(absoluteTolerance)
         , _relativeTolerance(relativeTolerance)
+        , _matchingInfinities(matchingInfinities)
     {
         if(absoluteTolerance < 0.0f || relativeTolerance < 0.0f || std::isnan(absoluteTolerance)
            || std::isnan(relativeTolerance) || std::isinf(absoluteTolerance)
@@ -39,25 +54,54 @@ public:
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
+        const auto raggedLayout = reference.raggedIterationInfo();
         if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+           || reference.dims() != implementation.dims()
+           || raggedLayout != implementation.raggedIterationInfo())
         {
             return false;
         }
+        const bool isRagged = raggedLayout.has_value();
 
         hipdnn_data_sdk::utilities::TensorView<T> refView(reference);
         hipdnn_data_sdk::utilities::TensorView<T> implView(implementation);
 
         std::atomic<bool> result(true);
+        std::atomic<size_t> comparedCount(0);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
+            using hipdnn_data_sdk::types::signbit;
+            if(isRagged && raggedLayout->isOutOfBlock(indices))
+            {
+                return result.load(std::memory_order_relaxed);
+            }
+
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
-            if(isnan(refValue) || isinf(refValue) || isnan(implValue) || isinf(implValue))
+            // A ragged reference marks the positions it leaves undefined with NaN (RFC 0014).
+            if(isRagged)
+            {
+                if(isnan(refValue))
+                {
+                    return result.load(std::memory_order_relaxed);
+                }
+                comparedCount.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            const bool refIsInf = isinf(refValue);
+            const bool implIsInf = isinf(implValue);
+
+            if(_matchingInfinities == MatchingInfinities::ACCEPTED && refIsInf && implIsInf
+               && signbit(refValue) == signbit(implValue))
+            {
+                return result.load(std::memory_order_relaxed);
+            }
+
+            if(isnan(refValue) || refIsInf || isnan(implValue) || implIsInf)
             {
                 HIPDNN_SDK_LOG_ERROR(
                     "NaN or Inf detected at indices "
@@ -92,12 +136,20 @@ public:
             = hipdnn_test_sdk::detail::makeParallelTensorFunctor(validateFunc, reference.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
+        if(isRagged && reference.elementCount() > 0 && comparedCount.load() == 0)
+        {
+            HIPDNN_SDK_LOG_ERROR("No element of the ragged reference was compared: every "
+                                 "in-block reference value is NaN.");
+            return false;
+        }
+
         return result.load();
     }
 
 private:
     float _absoluteTolerance;
     float _relativeTolerance;
+    MatchingInfinities _matchingInfinities;
 };
 
 template <class T>
@@ -111,8 +163,10 @@ public:
     bool allClose(hipdnn_data_sdk::utilities::ITensor& reference,
                   hipdnn_data_sdk::utilities::ITensor& implementation) const override
     {
+        const auto raggedLayout = reference.raggedIterationInfo();
         if(reference.elementCount() != implementation.elementCount()
-           || reference.dims() != implementation.dims())
+           || reference.dims() != implementation.dims()
+           || raggedLayout != implementation.raggedIterationInfo())
         {
             return false;
         }
@@ -123,6 +177,11 @@ public:
         std::atomic<bool> result(true);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            if(raggedLayout.has_value() && raggedLayout->isOutOfBlock(indices))
+            {
+                return result.load(std::memory_order_relaxed);
+            }
+
             T refValue = refView.getHostValue(indices);
             T implValue = implView.getHostValue(indices);
 
@@ -165,34 +224,81 @@ public:
     }
 };
 
+/// Named apart from hipdnn_test_sdk::detail, which headers in this namespace reach unqualified.
+namespace validation_detail
+{
+
+/// Integer element types have no infinity, so the relaxation is reported rather than
+/// silently ignored.
+inline void rejectMatchingInfinitiesRequest(MatchingInfinities matchingInfinities)
+{
+    if(matchingInfinities == MatchingInfinities::ACCEPTED)
+    {
+        throw std::runtime_error(
+            "Matching infinity allClose validator requires a floating point data type");
+    }
+}
+
+/// Shared body of createAllCloseValidator and createAllCloseMatchingInfinitiesValidator.
+inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
+    makeAllCloseValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                          float absoluteTolerance,
+                          float relativeTolerance,
+                          MatchingInfinities matchingInfinities)
+{
+    switch(dataType)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceValidation<float>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::half>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceValidation<double>>(
+            absoluteTolerance, relativeTolerance, matchingInfinities);
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<int8_t>>();
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<uint8_t>>();
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<int32_t>>();
+    default:
+        throw std::runtime_error("Unsupported data type for allClose validator");
+    }
+}
+
+} // namespace validation_detail
+
 inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     createAllCloseValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                             float absoluteTolerance = std::numeric_limits<float>::epsilon(),
                             float relativeTolerance = std::numeric_limits<float>::epsilon())
 {
-    switch(dataType)
-    {
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT:
-        return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
-                                                                 relativeTolerance);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::HALF:
-        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::half>>(
-            absoluteTolerance, relativeTolerance);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16:
-        return std::make_unique<CpuFpReferenceValidation<hipdnn_data_sdk::types::bfloat16>>(
-            absoluteTolerance, relativeTolerance);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE:
-        return std::make_unique<CpuFpReferenceValidation<double>>(absoluteTolerance,
-                                                                  relativeTolerance);
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
-        return std::make_unique<CpuIntReferenceValidation<int8_t>>();
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8:
-        return std::make_unique<CpuIntReferenceValidation<uint8_t>>();
-    case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
-        return std::make_unique<CpuIntReferenceValidation<int32_t>>();
-    default:
-        throw std::runtime_error("Unsupported data type for allClose validator");
-    }
+    return validation_detail::makeAllCloseValidator(
+        dataType, absoluteTolerance, relativeTolerance, MatchingInfinities::REJECTED);
+}
+
+/// Builds a validator for an output whose correct value is infinite in the reference and on
+/// the device alike, such as the SDPA forward STATS (log-sum-exp) tensor. Same-signed
+/// infinities compare equal; NaN, opposite-signed infinities and finite-versus-infinite
+/// disagreements still fail, and finite elements compare as usual.
+///
+/// Throws for integer data types, which have no infinity to match.
+inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
+    createAllCloseMatchingInfinitiesValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+        float absoluteTolerance,
+        float relativeTolerance)
+{
+    return validation_detail::makeAllCloseValidator(
+        dataType, absoluteTolerance, relativeTolerance, MatchingInfinities::ACCEPTED);
 }
 
 template <typename T>

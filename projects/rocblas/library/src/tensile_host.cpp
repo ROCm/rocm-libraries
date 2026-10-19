@@ -339,6 +339,14 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx1153;
         }
+        else if(deviceString.find("gfx1170") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1170;
+        }
+        else if(deviceString.find("gfx1171") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx1171;
+        }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1200;
@@ -860,6 +868,18 @@ namespace
             static std::string base_path;
             static int         determined_path{determine_tensile_base_path(base_path)};
 
+            // The device predicate name stays `processor` (matches the physical
+            // device for Tensile solution selection); the catalog key may diverge
+            // to select the strict device library by GPU revision. The strict
+            // variant is the base arch with a "-strict" suffix.
+            std::string catalog_key    = processor;
+            std::string strict_catalog = processor + "-strict";
+            if(rocblas_internal_is_strict_target(deviceId)
+               && TestPath(base_path + "/" + strict_catalog))
+            {
+                catalog_key = strict_catalog;
+            }
+
             path = base_path;
             // Probe subdirectories from most-specific to least-specific so that shard
             // overlays compose correctly regardless of how TheRock splits arch builds:
@@ -870,29 +890,29 @@ namespace
             std::string xnack_mode   = rocblas_internal_get_xnack_mode();
             if(!xnack_mode.empty())
             {
-                std::string processor_xnack = processor + "-" + xnack_mode;
+                std::string processor_xnack = catalog_key + "-" + xnack_mode;
                 if(TestPath(path + "/" + processor_xnack))
                 {
                     path += "/" + processor_xnack;
                     found_subdir = true;
                 }
             }
-            if(!found_subdir && TestPath(path + "/" + processor))
-                path += "/" + processor;
+            if(!found_subdir && TestPath(path + "/" + catalog_key))
+                path += "/" + catalog_key;
 
 #ifdef TENSILE_YAML
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".yaml";
 #else
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
+            tensileLibraryPath = path + "/TensileLibrary_lazy_" + catalog_key + ".dat";
 #endif
             if(!TestPath(tensileLibraryPath))
             {
                 tensile_lazy_load_enabled = false;
 
 #ifdef TENSILE_YAML
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".yaml";
 #else
-                tensileLibraryPath = path + "/TensileLibrary_" + processor + ".dat";
+                tensileLibraryPath = path + "/TensileLibrary_" + catalog_key + ".dat";
 #endif
                 if(!TestPath(tensileLibraryPath))
                 {
@@ -973,7 +993,7 @@ namespace
             if(!tensile_lazy_load_enabled || rocblas_initialize_called())
             {
                 // only load modules for the current architecture
-                auto dir = path + "/*" + processor + "*co";
+                auto dir = path + "/*" + catalog_key + "*co";
 
                 // Get current xnack mode
                 std::string xnack = rocblas_internal_get_xnack_mode();
@@ -1055,8 +1075,10 @@ namespace
             }
 
             {
-                // initialize adapter for lazy loading or experimental code objects
-                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(processor, path));
+                // initialize adapter for lazy loading or experimental code objects.
+                // Uses catalog_key (not processor) because the helper kernel's on-disk
+                // name carries the compiler-target arch, i.e. the -strict variant under strict.
+                PRINT_IF_HIP_ERROR(adapter.initializeLazyLoading(catalog_key, path));
 
                 // Load library for this specific architecture if not already loaded
 
@@ -1266,19 +1288,52 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2)
+    if(!prob.handle->isHipBLASLtForcedOn())
     {
-        if(!prob.handle->isHipBLASLtForcedOn())
+        int arch = rocblas_internal_get_arch(prob.handle);
+
+        // gfx950: Tensile remains the default only for SGEMM (real f32).
+        // TODO remove after SGEMM is supported
+        if constexpr(std::is_same<Ti, float>::value)
         {
-            // gfx950: hipBLASLt is used only for fp16/bf16
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
+            if(arch == 950)
                 return false;
+        }
+
+        // gfx942: the set of types defaulting to hipBLASLt depends on the device.
+        //   MI300X (304 CUs) and MI300A (228 CUs):  fp16/bf16/fp64
+        //   228-CU MI300A only:                     complex-fp64, fp32, complex-fp32
+        //   every other gfx942 configuration:       nothing, Tensile remains the default
+        // The CU count is the one reported for the visible device, so a partitioned
+        // MI300A or MI300X does not match 228 or 304 and keeps the Tensile default.
+        // TODO expand once more gfx942 configs are validated
+        if(arch == 942)
+        {
+            constexpr bool MI300A_or_MI300X = sizeof(Ti) == 2 || std::is_same<Ti, double>::value;
+
+            constexpr bool only_MI300A = std::is_same<Ti, rocblas_double_complex>::value
+                                         || std::is_same<Ti, float>::value
+                                         || std::is_same<Ti, rocblas_float_complex>::value;
+
+            if constexpr(only_MI300A)
+            {
+                if(prob.handle->device_properties.multiProcessorCount != 228)
+                    return false;
+            }
+            else if constexpr(MI300A_or_MI300X)
+            {
+                const int cu_count = prob.handle->device_properties.multiProcessorCount;
+                if(cu_count != 228 && cu_count != 304)
+                    return false;
+            }
+            else
+            {
+                return false;
+            }
         }
     }
 
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
+    return prob.handle->tryHipBLASLt();
 #else
     return false;
 #endif

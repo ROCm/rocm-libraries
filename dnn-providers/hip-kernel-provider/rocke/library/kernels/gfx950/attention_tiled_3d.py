@@ -28,6 +28,12 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kernels.common._attention_strided_kv import (
+    declare_strided_kv_params,
+    strided_kv_offset,
+    strided_kv_resource,
+)
+
 from rocke.core.ir import (
     BF16,
     F16,
@@ -56,7 +62,6 @@ from rocke.helpers.attention import (
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import TensorDescriptor, indirect, unmerge
-
 
 MFMA_M = 16
 MFMA_N = 16
@@ -143,8 +148,36 @@ class UnifiedAttention3DTiledSpec:
     # this when the cache is actually that large (see ``_enable_i64_kv_addr``),
     # so the default (small-cache) build is byte-identical to before.
     use_i64_kv_addr: bool = False
+    # Direct non-paged [B,H,S,D] addressing; D remains contiguous.
+    kv_layout: str = "paged"
+    # Top-left causal (unshifted diagonal, ``context_len = 0``); see the 2D spec.
+    # At ``q_len == 1`` the single query row attends only key 0 and the cached
+    # context is ignored -- correct by definition, not a bug.
+    causal_top_left: bool = False
+    # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
+    # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
+    right_bound: int = 0
 
     def __post_init__(self):
+        if self.kv_layout not in ("paged", "strided"):
+            raise ValueError("kv_layout must be 'paged' or 'strided'")
+        if self.kv_layout == "strided" and (
+            self.kv_storage_dtype is not None
+            or self.use_i64_kv_addr
+            or self.use_wide_kv_load
+        ):
+            raise ValueError(
+                "strided KV requires fp16/bf16 async loads without paged i64 addressing"
+            )
+        if self.right_bound < -1:
+            raise ValueError(
+                f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
+            )
+        if self.right_bound != 0 and (self.use_alibi or self.use_qq_bias):
+            raise ValueError(
+                "right_bound != 0 is incompatible with use_alibi / use_qq_bias "
+                "(their offsets are defined on the causal diagonal)"
+            )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
                 f"kv_storage_dtype must be None or 'fp8e4m3' (got {self.kv_storage_dtype!r})"
@@ -193,6 +226,13 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "stridedkv" if self.kv_layout == "strided" else "",
+            "tl" if self.causal_top_left else "",
+            (
+                ("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
+                if self.right_bound != 0
+                else ""
+            ),
         )
 
 
@@ -369,6 +409,9 @@ def build_unified_attention_3d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    if spec.kv_layout == "strided":
+        k_strides = declare_strided_kv_params(b, "k")
+        v_strides = declare_strided_kv_params(b, "v")
 
     q_block_global_idx = b.block_id_x()
     kv_head_idx = b.block_id_y()
@@ -389,7 +432,24 @@ def build_unified_attention_3d_tiled(
     q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BLOCK_Q)), seq_idx)
     q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
     seq_len = b.global_load_i32(seq_lens, seq_idx)
-    context_len = b.sub(seq_len, cur_batch_q_len)
+    if spec.causal_top_left:
+        context_len = b.const_i32(0)
+    else:
+        context_len = b.sub(seq_len, cur_batch_q_len)
+
+    # Right bound of the band; identical to the causal IR when ``RIGHT == 0``.
+    RIGHT = spec.right_bound
+
+    def _upper_ok(col_abs, causal_lim):
+        if RIGHT < 0:
+            return None
+        lim = causal_lim if RIGHT == 0 else b.add(causal_lim, b.const_i32(RIGHT))
+        return b.cmp_le(col_abs, lim)
+
+    def _band_row_mask(row_ok, upper_ok, in_prefix):
+        if upper_ok is None:
+            return b.land(row_ok, in_prefix)
+        return b.land(b.land(row_ok, upper_ok), in_prefix)
 
     qb_start_pos = b.mul(q_block_local_idx, b.const_i32(BLOCK_Q))
     with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
@@ -526,8 +586,13 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- Per-segment tile range ----------------
     bm1_div_nqk = (BLOCK_M - 1) // NQK
-    msp_raw = b.add(b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1))
-    max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
+    if RIGHT < 0:
+        max_seq_prefix_len = seq_len  # no upper bound: every key of the sequence
+    else:
+        msp_raw = b.add(
+            b.add(context_len, qb_start_pos), b.const_i32(bm1_div_nqk + 1 + RIGHT)
+        )
+        max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
     # Segment bounds: [seg_idx * tps, min((seg_idx+1)*tps, num_tiles))
@@ -576,8 +641,12 @@ def build_unified_attention_3d_tiled(
 
     # ---------------- async K/V infra (identical to 2D) ----------------
     big_bytes = b.const_i32(0x7FFF0000)
-    key_rsrc = b.buffer_rsrc(key, big_bytes)
-    value_rsrc = b.buffer_rsrc(value, big_bytes)
+    if spec.kv_layout == "strided":
+        key_rsrc = strided_kv_resource(b, key, k_strides, seq_idx, kv_head_idx)
+        value_rsrc = strided_kv_resource(b, value, v_strides, seq_idx, kv_head_idx)
+    else:
+        key_rsrc = b.buffer_rsrc(key, big_bytes)
+        value_rsrc = b.buffer_rsrc(value, big_bytes)
 
     KV_HALVES_PER_CALL = THREADS * 8
     assert (T * HD) % KV_HALVES_PER_CALL == 0
@@ -606,7 +675,7 @@ def build_unified_attention_3d_tiled(
     # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
     # half offset, plus the byte-stride 4D base. One ``.offset()`` call
     # produces the final byte address for one async DMA call.
-    seq_base = b.mul(seq_idx, bt_stride_p)
+    seq_base = b.mul(seq_idx, bt_stride_p) if spec.kv_layout == "paged" else None
     paged_kv_desc = TensorDescriptor.naive(
         "paged_kv_bytes",
         lengths=[1 << 24, T, NUM_KV, HD],
@@ -624,7 +693,11 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             call_rsrc = key_rsrc
-            if I64_KV_ADDR:
+            if spec.kv_layout == "strided":
+                voff = strided_kv_offset(
+                    b, k_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                     b,
                     "physical_block",
@@ -652,7 +725,11 @@ def build_unified_attention_3d_tiled(
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             call_rsrc = value_rsrc
-            if I64_KV_ADDR:
+            if spec.kv_layout == "strided":
+                voff = strided_kv_offset(
+                    b, v_strides, kv_tile_idx, linear_half, seq_len, HD, T
+                )
+            elif I64_KV_ADDR:
                 base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                     b,
                     "physical_block",
@@ -858,9 +935,9 @@ def build_unified_attention_3d_tiled(
                 col_abs = b.add(
                     b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
                 )
-                causal_ok = b.cmp_le(col_abs, causal_lim)
+                causal_ok = _upper_ok(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
-                m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
+                m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
                 if SLIDING_WINDOW > 0:
                     dist = b.sub(causal_lim, col_abs)
                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
@@ -1236,3 +1313,28 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     return b.kernel
+
+
+def supports_tiled_3d_spec(
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_3d``.
+
+    ``supports_tiled_3d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads each of them off the spec and delegates, making the 3D
+    unified builder validatable at pack time.
+    """
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_3d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        arch=arch,
+    )

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # rocThrust header-only library
@@ -65,17 +65,15 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-include(ROCMExportTargetsHeaderOnly)
-
 if(${LINK_HIP_DEVICE_LIBS})
   # Export targets
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS roc::rocthrust
     DEPENDS PACKAGE rocprim
     NAMESPACE roc::
   )
 else()
-  rocm_export_targets_header_only(
+  rocm_export_targets(
     TARGETS roc::rocthrust
     NAMESPACE roc::
   )
