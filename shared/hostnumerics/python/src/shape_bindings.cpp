@@ -48,17 +48,17 @@ Examples:
     Shape((0, 5, 10, 15))
 
 Shape() has rank zero and represents one scalar. A zero extent describes a shape
-with no elements, so both index conversions reject it. Construction requires
-the product of all nonzero extents to fit size_t, even when an extent is zero.
-If SIZE_MAX denotes the maximum size_t value, [SIZE_MAX, 2] and [SIZE_MAX, 2, 0]
-fail construction; [SIZE_MAX, 1, 0] has zero elements. Every dimension subrange,
-projection, and slice therefore has a representable element count.
+with no elements, so both index conversions reject it. Otherwise the product of
+extents must fit size_t. If SIZE_MAX denotes the maximum size_t value,
+[SIZE_MAX, 2] fails construction, while [SIZE_MAX, 2, 0] has zero elements.
+Selecting dimensions or slicing can fail if the resulting nonempty shape is too
+large, even when the original shape is empty.
 
-Named methods use nonnegative axes, coordinates, and range bounds. Unlike tuple
-indexing, extent, project, element_count_in_range, and index-conversion order
-arguments do not normalize negative axes. Invalid logical arguments raise
-RuntimeError; tuple operations retain their native Python exceptions. Values
-that cannot be converted to size_t raise TypeError.
+Named methods use nonnegative axes and coordinates. Unlike tuple indexing,
+extent, from_dimensions, and index-conversion order arguments do not normalize
+negative axes. Invalid logical arguments raise RuntimeError; tuple operations
+retain their native Python exceptions. Values that cannot be converted to
+size_t raise TypeError.
 )doc")
         .def(nb::init<>())
         .def(nb::init<std::vector<size_t>>(), "dimensions"_a)
@@ -113,14 +113,14 @@ that cannot be converted to size_t raise TypeError.
         .def_prop_ro(
             "element_count", [](const Shape& shape) { return shape.elementCount(); },
             "Product of all extents; one for rank zero and zero if any extent is zero.")
-        .def("element_count_in_range",
-             static_cast<size_t (Shape::*)(size_t, size_t) const>(&Shape::elementCount),
-             "first_dimension"_a, "one_past_last_dimension"_a,
-             "Product over a half-open dimension range; an empty product is one.")
         .def(
-            "project",
-            [](const Shape& shape, const std::vector<size_t>& axes) { return shape.project(axes); },
-            "axes"_a, "Select distinct dimensions in the given order.")
+            "from_dimensions",
+            [](const Shape& shape, const std::vector<size_t>& axes) {
+                return shape.fromDimensions(axes);
+            },
+            "axes"_a,
+            "Select axes in the supplied order, allowing repetition. The resulting "
+            "shape must have a representable element count; an empty selection is a scalar.")
         .def(
             "linear_index",
             [](const Shape& shape, const std::vector<size_t>& indices,
