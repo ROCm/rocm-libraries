@@ -23,17 +23,18 @@ nb::tuple shapeTuple(const Shape& shape) {
 namespace roc::hostnumerics::python_bindings {
 void registerShapeBindings(nb::module_& module) {
     nb::class_<Shape>(module, "Shape", R"doc(
-Immutable tuple-like sequence of nonnegative extents, independent of storage.
+Immutable sequence of nonnegative extents, independent of storage.
 
-Integer indexing returns an extent and accepts negative positions. Select
-dimensions with from_dimensions. Length, iteration, membership, count, index,
-and hashing follow tuple semantics. Shapes compare equal to other Shapes with
-the same extents; they do not compare equal to tuples or lists. Mutation, concatenation,
-repetition, slicing, and ordering comparisons are not supported.
+Integer indexing returns an extent at a nonnegative axis less than rank, using
+the same bounds checking as extent. Select dimensions with from_dimensions.
+Length, iteration, membership, count, index, and hashing follow tuple semantics.
+Shapes compare equal to other Shapes with the same extents; they do not compare
+equal to tuples or lists. Mutation, concatenation, repetition, slicing, and
+ordering comparisons are not supported.
 
 Examples:
     >>> shape = Shape([2, 3, 5])
-    >>> shape[-1]
+    >>> shape[2]
     5
     >>> shape.from_dimensions([1, 2])
     Shape((3, 5))
@@ -51,11 +52,10 @@ extents must fit size_t. If SIZE_MAX denotes the maximum size_t value,
 Selecting dimensions can fail if the resulting nonempty shape is too
 large, even when the original shape is empty.
 
-Named methods use nonnegative axes and coordinates. Unlike tuple indexing,
-extent, from_dimensions, and index-conversion order arguments do not normalize
-negative axes. Invalid logical arguments raise RuntimeError; tuple operations
-retain their native Python exceptions. Values that cannot be converted to
-size_t raise TypeError.
+Axes and coordinates must be nonnegative, including integer indexing, extent,
+from_dimensions, and index-conversion order arguments. Invalid logical
+arguments raise RuntimeError. Membership, count, and index retain their native
+Python exceptions. Values that cannot be converted to size_t raise TypeError.
 )doc")
         .def(nb::init<>())
         .def(nb::init<std::vector<size_t>>(), "dimensions"_a)
@@ -70,14 +70,8 @@ size_t raise TypeError.
              "Return the extent at a nonnegative axis less than rank.")
         .def("__len__", &Shape::rank)
         .def("__iter__", [](const Shape& shape) { return shapeTuple(shape).attr("__iter__")(); })
-        .def(
-            "__getitem__",
-            [](const Shape& shape, nb::handle key) -> nb::object {
-                if (nb::isinstance<nb::slice>(key))
-                    throw nb::type_error("Shape slicing is not supported; use from_dimensions.");
-                return shapeTuple(shape).attr("__getitem__")(key);
-            },
-            "key"_a.none())
+        .def("__getitem__", &Shape::extent, "dimension"_a,
+             "Return the extent at a nonnegative axis less than rank.")
         .def(
             "__contains__",
             [](const Shape& shape, nb::handle value) {

@@ -85,7 +85,7 @@ class ShapeTests(unittest.TestCase):
         shape = hn.Shape([2, 3, 4])
         with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
             shape.extent(3)
-        with self.assertRaisesRegex(IndexError, "tuple index out of range"):
+        with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
             shape[3]
         with self.assertRaisesRegex(RuntimeError, r"dimension 3 is outside \[0, 3\)"):
             shape.from_dimensions([3])
@@ -287,9 +287,11 @@ class ShapeTests(unittest.TestCase):
             with self.subTest(dimensions=dimensions), self.assertRaises(TypeError):
                 hn.Shape(dimensions)
         shape = hn.Shape([2])
-        for index in (-1, SIZE_MAX + 1, 1.5):
+        for index in (-1, -(10**100), SIZE_MAX + 1, 1.5):
             with self.subTest(index=index), self.assertRaises(TypeError):
                 shape.extent(index)
+            with self.subTest(index=index), self.assertRaises(TypeError):
+                shape[index]
         for order in (-1, 2, "row-major"):
             with self.subTest(order=order), self.assertRaises(TypeError):
                 shape.coordinates(0, order)
@@ -327,33 +329,40 @@ class ShapeTests(unittest.TestCase):
                         else:
                             self.assertEqual(shape.index(value, *bounds), expected)
 
-    def test_tuple_integer_indexing(self):
-        class LastIndex:
+    def test_checked_integer_indexing(self):
+        class FirstIndex:
             def __index__(self):
-                return -1
+                return 0
 
         for extents in ((), (0,), (2, 3, 5), tuple(range(20)), (SIZE_MAX, 1)):
             shape = hn.Shape(extents)
-            for key in (0, -1, True, np.int64(-1), LastIndex(), 10**100, -(10**100)):
+            for key in (*range(len(extents)), True, np.int64(0), FirstIndex()):
                 with self.subTest(extents=extents, key=key):
                     try:
                         expected = extents[key]
                     except IndexError:
-                        with self.assertRaises(IndexError):
+                        with self.assertRaises(RuntimeError):
                             shape[key]
                     else:
                         self.assertEqual(shape[key], expected)
+                        self.assertEqual(shape[key], shape.extent(key))
+            for key in (len(extents), SIZE_MAX):
+                with self.subTest(extents=extents, key=key), self.assertRaisesRegex(
+                    RuntimeError, rf"dimension {key} is outside \[0, {len(extents)}\)"
+                ):
+                    shape[key]
         shape = hn.Shape([2, 3, 5])
-        for key in (None, Ellipsis, (slice(None), slice(None)), [0], 1.5):
+        for key in (
+            -1,
+            np.int64(-1),
+            None,
+            Ellipsis,
+            (slice(None), slice(None)),
+            [0],
+            1.5,
+        ):
             with self.assertRaises(TypeError):
                 shape[key]
-
-        class InvalidIndex:
-            def __index__(self):
-                raise RuntimeError("index conversion failed")
-
-        with self.assertRaisesRegex(RuntimeError, "index conversion failed"):
-            shape[InvalidIndex()]
 
     def test_slices_are_rejected(self):
         for extents in ((), (0,), (2, 3, 5)):
@@ -365,8 +374,8 @@ class ShapeTests(unittest.TestCase):
                 slice(0, 3, 2),
                 slice(None, None, 0),
             ):
-                with self.subTest(extents=extents, key=key), self.assertRaisesRegex(
-                    TypeError, "Shape slicing is not supported; use from_dimensions"
+                with self.subTest(extents=extents, key=key), self.assertRaises(
+                    TypeError
                 ):
                     shape[key]
 
