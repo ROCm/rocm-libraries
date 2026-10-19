@@ -55,10 +55,16 @@ solution names of the logic file) of kernels that compute wrong results, one
 per line, after comment lines that start with `#`. TensileLite leaves them out
 of every pool it ranks with the model, the Prediction table's and the bank's,
 and the analytical ranking that fills the remaining slots of a call skips them
-too. A view key whose first member is listed is served by its next member, a
-key whose members are all listed is no candidate, and `top1_index` counts the
-kernels that remain, as the training pipeline's pools do. A blocklist that
-cannot be read makes the model unusable for the library.
+too. A name lists every kernel whose name equals it once both drop their IA
+(InterleaveAlpha) and PKA (PreloadKernArgs) tokens, which builds of
+TensileLite spell differently for one kernel, so a blocklist written from one
+build lists the same kernels in another; a kernel that differs from another in
+those tokens alone is listed with it. TensileLite warns when names match no
+kernel of a pool it ranks: they leave nothing out. A view key whose first
+member is listed is served by its next member, a key whose members are all
+listed is no candidate, and `top1_index` counts the kernels that remain, as
+the training pipeline's pools do. A blocklist that cannot be read makes the
+model unusable for the library.
 
 ## Layout
 

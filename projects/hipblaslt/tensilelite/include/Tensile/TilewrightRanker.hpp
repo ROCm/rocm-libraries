@@ -23,7 +23,9 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -716,7 +718,10 @@ namespace TensileLite
      * kernels that compute wrong results, one per line. The ranker leaves them
      * out of its pool, so a group of configs the model scores as one candidate
      * is served by its first member that is not blocked, and a group whose
-     * members are all blocked is no candidate.
+     * members are all blocked is no candidate. A name blocks every kernel
+     * whose name has its blocklistKey(): builds of TensileLite can spell the
+     * name of one kernel differently, and a blocklist written from one build
+     * still names the kernel in another.
      */
     class TilewrightRanker
     {
@@ -726,13 +731,17 @@ namespace TensileLite
 
         // Throws std::invalid_argument for a null model, an invalid attribute
         // name, or a launch model other than the one the model was trained with.
-        // `blocked` flags the pool positions `blocklist` left out of `configs`.
+        // `blocked` flags the pool positions `blocklist` left out of `configs`,
+        // `unresolved` lists its names that match no kernel of the pool, and
+        // `library` names the library for warnings.
         TilewrightRanker(tilewright::ModelPtr                           model,
                          std::vector<tilewright::Config>                configs,
-                         std::shared_ptr<const tilewright::LaunchModel> launch    = nullptr,
-                         std::string                                    arch      = {},
-                         Blocklist                                      blocklist = nullptr,
-                         std::vector<bool>                              blocked   = {})
+                         std::shared_ptr<const tilewright::LaunchModel> launch     = nullptr,
+                         std::string                                    arch       = {},
+                         Blocklist                                      blocklist  = nullptr,
+                         std::vector<bool>                              blocked    = {},
+                         std::vector<std::string>                       unresolved = {},
+                         std::string                                    library    = {})
             : m_candidates(std::move(model),
                            std::move(configs),
                            tilewright::PoolOptions{.tie_break = tilewright::TieBreak::PoolOrder,
@@ -740,6 +749,8 @@ namespace TensileLite
             , m_arch(std::move(arch))
             , m_blocklist(std::move(blocklist))
             , m_blocked(std::move(blocked))
+            , m_unresolved(std::move(unresolved))
+            , m_library(std::move(library))
         {
         }
 
@@ -829,32 +840,57 @@ namespace TensileLite
         }
 
         // A ranker over `poolSize` kernels of `arch` whose kernel i is
-        // solutionAt(i), without those `blocklist` names, with its per-cell data
-        // built now when `prepare` is set and TENSILE_TILEWRIGHT_PREPARE does not
-        // turn that off. Throws what the CandidateSet throws.
+        // solutionAt(i), without the kernels `blocklist` names (blocklistKey()),
+        // with its per-cell data built now when `prepare` is set and
+        // TENSILE_TILEWRIGHT_PREPARE does not turn that off. `library` names the
+        // library in warnings. Throws what the CandidateSet throws.
         template <typename SolutionAt>
         static std::shared_ptr<const TilewrightRanker> make(tilewright::ModelPtr model,
                                                             size_t               poolSize,
                                                             SolutionAt&&         solutionAt,
                                                             std::string const&   arch,
                                                             bool                 prepare = true,
-                                                            Blocklist blocklist          = nullptr)
+                                                            Blocklist          blocklist = nullptr,
+                                                            std::string const& library   = {})
         {
             using MySolution = typename std::decay_t<decltype(*solutionAt(0))>;
 
             auto const                      names = tilewright::attribute_names(*model);
             std::vector<tilewright::Config> configs;
             std::vector<bool>               blocked;
+            // The keys of the blocklist's names, each with whether it matched a
+            // kernel of the pool.
+            std::unordered_map<std::string, bool> keys;
+            if(blocklist)
+            {
+                for(auto const& name : *blocklist)
+                    keys.emplace(blocklistKey(name), false);
+            }
             configs.reserve(poolSize);
             for(size_t i = 0; i < poolSize; i++)
             {
-                if(blocklist && blocklist->count(solutionAt(i)->name()) != 0)
+                if(!keys.empty())
                 {
-                    blocked.resize(poolSize);
-                    blocked[i] = true;
-                    continue;
+                    auto const key = keys.find(blocklistKey(solutionAt(i)->name()));
+                    if(key != keys.end())
+                    {
+                        key->second = true;
+                        blocked.resize(poolSize);
+                        blocked[i] = true;
+                        continue;
+                    }
                 }
                 configs.push_back(makeConfig(solutionAt(i)->sizeMapping, i, &names));
+            }
+            std::vector<std::string> unresolved;
+            if(blocklist)
+            {
+                for(auto const& name : *blocklist)
+                {
+                    if(!keys.at(blocklistKey(name)))
+                        unresolved.push_back(name);
+                }
+                std::sort(unresolved.begin(), unresolved.end());
             }
 
             std::shared_ptr<const tilewright::LaunchModel> launch;
@@ -873,7 +909,9 @@ namespace TensileLite
                                                                    std::move(launch),
                                                                    arch,
                                                                    std::move(blocklist),
-                                                                   std::move(blocked));
+                                                                   std::move(blocked),
+                                                                   std::move(unresolved),
+                                                                   library);
             if(prepare && Debug::Instance().tilewrightPrepare())
             {
                 auto const start = std::chrono::steady_clock::now();
@@ -924,7 +962,8 @@ namespace TensileLite
                     },
                     logicArch(logicFile),
                     prepare,
-                    loadBlocklist(logicFile));
+                    loadBlocklist(logicFile),
+                    logicStem(logicFile));
             }
             catch(std::exception const& e)
             {
@@ -1127,9 +1166,93 @@ namespace TensileLite
             return !m_blocked.empty();
         }
 
+        // The blocklist names that match no kernel of the pool, sorted.
+        std::vector<std::string> const& unresolvedBlocklistNames() const noexcept
+        {
+            return m_unresolved;
+        }
+
+        // The library the ranker ranks, as warnings name it.
+        std::string const& library() const noexcept
+        {
+            return m_library;
+        }
+
+        // Warns when some blocklist names match no kernel of the pool: they
+        // leave nothing out, so a kernel one was written for is offered when
+        // its name differs in more than the tokens blocklistKey() drops.
+        void warnUnresolvedBlocklistNames() const
+        {
+            if(m_unresolved.empty())
+                return;
+            std::cerr << "hipBLASLt Warning: " << m_unresolved.size() << " of the "
+                      << m_blocklist->size() << " names in the tilewright blocklist of "
+                      << m_library << " match no kernel tilewright ranks for it, even without";
+            char const* separator = " their ";
+            for(std::string_view const token : BlocklistIgnoredTokens)
+            {
+                std::cerr << separator << token;
+                separator = "/";
+            }
+            std::cerr << " tokens (the first: " << m_unresolved.front()
+                      << "); they leave nothing out.\n";
+        }
+
         static constexpr char const* BlocklistSuffix = ".tilewright.blocklist";
 
+        // The name tokens, an abbreviated parameter and its value, that builds
+        // of TensileLite spell differently for one kernel: IA (InterleaveAlpha),
+        // which older builds leave out of names, and PKA (PreloadKernArgs),
+        // which a build turns off when its compiler cannot preload kernel
+        // arguments. The training pipeline's blocklist reader drops the same
+        // tokens.
+        static constexpr std::array<std::string_view, 2> BlocklistIgnoredTokens{"IA", "PKA"};
+
+        // `name` without its BlocklistIgnoredTokens: every '_'-separated part
+        // that is one of them followed by its value (decimal digits, after an
+        // 'n' when negative) is dropped with its separator. A blocklist name
+        // names every kernel whose name has its key.
+        static std::string blocklistKey(std::string_view name)
+        {
+            std::string key;
+            key.reserve(name.size());
+            bool first = true;
+            for(size_t start = 0;;)
+            {
+                size_t const           end  = std::min(name.find('_', start), name.size());
+                std::string_view const part = name.substr(start, end - start);
+                if(!ignoredToken(part))
+                {
+                    if(!first)
+                        key += '_';
+                    key += part;
+                    first = false;
+                }
+                if(end == name.size())
+                    return key;
+                start = end + 1;
+            }
+        }
+
     private:
+        // Whether `part` is a BlocklistIgnoredTokens token with its value.
+        static bool ignoredToken(std::string_view part)
+        {
+            for(std::string_view const token : BlocklistIgnoredTokens)
+            {
+                if(part.substr(0, token.size()) != token)
+                    continue;
+                std::string_view value = part.substr(token.size());
+                if(!value.empty() && value.front() == 'n')
+                    value.remove_prefix(1);
+                if(!value.empty() && std::all_of(value.begin(), value.end(), [](char c) {
+                       return c >= '0' && c <= '9';
+                   }))
+                    return true;
+            }
+            return false;
+        }
+
         // TILEWRIGHT_DIAG, read as tilewright reads it.
         static bool diagnostics()
         {
@@ -1295,6 +1418,8 @@ namespace TensileLite
         std::string                              m_arch;
         Blocklist                                m_blocklist;
         std::vector<bool>                        m_blocked;
+        std::vector<std::string>                 m_unresolved;
+        std::string                              m_library;
         mutable std::mutex                       m_reportedMutex;
         mutable std::set<std::pair<size_t, int>> m_reported;
     };

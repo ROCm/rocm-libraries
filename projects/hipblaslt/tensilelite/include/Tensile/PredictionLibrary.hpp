@@ -193,10 +193,12 @@ namespace TensileLite
             auto       model = TilewrightRanker::loadModel(logicFile);
             bool const bank  = model && TilewrightRanker::ranksBank(*model);
             // A bank pool ranker, prepared when it is made, ranks in place of
-            // this one.
+            // this one and warns about the blocklist names its pool lacks.
             tilewright_ranker = TilewrightRanker::load(model, logicFile, solution_list, !bank);
             if(tilewright_ranker && bank)
                 tilewright_bank = std::make_shared<const TilewrightBank<MySolution>>(model);
+            else if(tilewright_ranker)
+                tilewright_ranker->warnUnresolvedBlocklistNames();
         }
 #endif
 
@@ -525,7 +527,9 @@ namespace TensileLite
                     },
                     tilewright_ranker->arch(),
                     true,
-                    tilewright_ranker->blocklist());
+                    tilewright_ranker->blocklist(),
+                    tilewright_ranker->library());
+                pool.ranker->warnUnresolvedBlocklistNames();
             }
             catch(std::exception const& e)
             {

@@ -638,6 +638,24 @@ TEST(PredictionLibraryTest, TilewrightBlocklistIsReadNextToTheIndex)
         std::runtime_error);
 }
 
+TEST(PredictionLibraryTest, TilewrightBlocklistKeysDropTheIaAndPkaTokens)
+{
+    // The training pipeline's blocklist_key gives these keys too.
+    std::vector<std::pair<std::string, std::string>> const keys = {
+        {"Cijk_Ailk_MT64x64x32_IA0_K1_PKA1_SU0", "Cijk_Ailk_MT64x64x32_K1_SU0"},
+        {"Cijk_Ailk_MT64x64x32_K1_PKA0_SU0", "Cijk_Ailk_MT64x64x32_K1_SU0"},
+        {"IA2_Cijk_IA10_PKAn1", "Cijk"},
+        {"Cijk_SIA3_IA_PKA_IAx1_PKA1x_MIA0_IAn_ia0", "Cijk_SIA3_IA_PKA_IAx1_PKA1x_MIA0_IAn_ia0"},
+        {"Cijk__IA0_", "Cijk__"},
+        {"PKA1", ""},
+        {"", ""},
+        {"Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0",
+         "Custom_Cijk_Ailk_Bljk_S_SK3_UserArgs_MT256x256x32_shortname0"},
+    };
+    for(auto const& [name, key] : keys)
+        EXPECT_EQ(TilewrightRanker::blocklistKey(name), key) << name;
+}
+
 TEST(PredictionLibraryTest, TilewrightConfigKeepsTheCoreKernelFields)
 {
     SizeMapping sizeMapping{};
@@ -1889,6 +1907,129 @@ TEST(PredictionLibraryTest, TilewrightLeavesBlockedKernelsOutOfTheBank)
     auto const& pool = builtPool(lib, device);
     EXPECT_EQ(bankIndices(pool), (std::vector<int>{21, 22}));
     ASSERT_NE(pool.ranker, nullptr);
+    EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{1, 2, 4}));
+}
+
+namespace
+{
+    // Loads keyTable, its kernels 31, 32 and 33 named `names`, with a
+    // writeV3Model model and a blocklist of `blocked`; returns what the load
+    // wrote to stderr.
+    std::string loadNamed(ScratchDir const&                    dir,
+                          std::vector<std::string> const&      names,
+                          std::vector<std::string> const&      blocked,
+                          ContractionProblemPredictionLibrary& lib,
+                          std::uint32_t                        servingFlags = 0)
+    {
+        SolutionMap<ContractionSolution> solutions;
+        addKeyKernels(solutions);
+        for(size_t i = 0; i < keyTable.size(); i++)
+            solutions.at(keyTable[i])->solutionName = names.at(i);
+        {
+            std::ofstream out(dir.path() / "TensileLibrary_Probe_gfx950.tilewright.blocklist");
+            out << "# kernels that compute wrong results\n";
+            for(auto const& name : blocked)
+                out << name << "\n";
+        }
+        ::testing::internal::CaptureStderr();
+        loadWithTilewright(dir, writeV3Model(dir, servingFlags, {}), keyTable, solutions, lib);
+        return ::testing::internal::GetCapturedStderr();
+    }
+}
+
+TEST(PredictionLibraryTest, TilewrightBlocklistNamesKernelsWhoseIaAndPkaTokensDiffer)
+{
+    // The first name comes from a build that names the kernels with PKA0 and
+    // no IA token, the second, exact, from the build that loads them.
+    ScratchDir                          dir("tensilelite_tilewright_blocklist_tokens");
+    ContractionProblemPredictionLibrary lib;
+    EXPECT_EQ(loadNamed(dir,
+                        {"Cijk_probe_31_IA0_K1_PKA1_SU0",
+                         "Cijk_probe_32_IA0_K1_PKA1_SU0",
+                         "Cijk_probe_33_IA0_K1_PKA1_SU0"},
+                        {"Cijk_probe_31_K1_PKA0_SU0", "Cijk_probe_32_IA0_K1_PKA1_SU0"},
+                        lib),
+              "");
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    EXPECT_EQ(configPositions(*lib.tilewright_ranker), (std::vector<size_t>{2}));
+    EXPECT_TRUE(lib.tilewright_ranker->unresolvedBlocklistNames().empty());
+
+    auto const problem = TensileLite::testing::dummyProblem();
+    auto const device  = makeGfx950Device();
+    EXPECT_EQ(lib.tilewright_ranker->rank(problem, device, -1), (std::vector<size_t>{2}));
+    EXPECT_EQ(solutionIndices(lib.findTopSolutions(problem, device, 3)), (std::vector<int>{33}));
+}
+
+TEST(PredictionLibraryTest, TilewrightBlocklistNameBlocksEveryKernelOfItsKey)
+{
+    // 31 and 32 differ in their PKA token alone: a name of either leaves both
+    // out rather than offer the one it was written for.
+    ScratchDir                          dir("tensilelite_tilewright_blocklist_variants");
+    ContractionProblemPredictionLibrary lib;
+    EXPECT_EQ(loadNamed(dir,
+                        {"Cijk_probe_IA0_PKA0", "Cijk_probe_IA0_PKA1", "Cijk_other_IA0_PKA1"},
+                        {"Cijk_probe_PKA1"},
+                        lib),
+              "");
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    EXPECT_EQ(configPositions(*lib.tilewright_ranker), (std::vector<size_t>{2}));
+}
+
+TEST(PredictionLibraryTest, TilewrightWarnsAboutBlocklistNamesThatMatchNoKernel)
+{
+    // probe_31 names its kernel exactly; the others name no kernel of the
+    // library, also without their IA and PKA tokens.
+    ScratchDir                          dir("tensilelite_tilewright_blocklist_unresolved");
+    ContractionProblemPredictionLibrary lib;
+    std::string const                   warning
+        = loadNamed(dir,
+                    {"probe_31", "probe_32", "probe_33"},
+                    {"probe_31", "probe_32_SU1", "probe_of_another_library_PKA0"},
+                    lib);
+    ASSERT_NE(lib.tilewright_ranker, nullptr);
+    EXPECT_EQ(configPositions(*lib.tilewright_ranker), (std::vector<size_t>{1, 2}));
+    EXPECT_EQ(lib.tilewright_ranker->unresolvedBlocklistNames(),
+              (std::vector<std::string>{"probe_32_SU1", "probe_of_another_library_PKA0"}));
+    EXPECT_NE(warning.find("hipBLASLt Warning: 2 of the 3 names in the tilewright blocklist of "
+                           "TensileLibrary_Probe_gfx950 match no kernel"),
+              std::string::npos)
+        << warning;
+    EXPECT_NE(warning.find("without their IA/PKA tokens (the first: probe_32_SU1)"),
+              std::string::npos)
+        << warning;
+    EXPECT_EQ(std::count(warning.begin(), warning.end(), '\n'), 1) << warning;
+}
+
+TEST(PredictionLibraryTest, TilewrightWarnsAboutBlocklistNamesTheBankPoolLacks)
+{
+    // probe_21 names a bank kernel, so the library's own pool lacking it is
+    // no warning when the bank pool ranks in its place; probe_gone names none.
+    ScopedTilewrightBank                unset(nullptr);
+    ScratchDir                          dir("tensilelite_tilewright_blocklist_bank_unresolved");
+    ContractionProblemPredictionLibrary lib;
+    EXPECT_EQ(loadNamed(dir,
+                        {"probe_31", "probe_32", "probe_33"},
+                        {"probe_31", "probe_21", "probe_gone"},
+                        lib,
+                        TrainedOnBank),
+              "");
+    ASSERT_NE(lib.tilewright_bank, nullptr);
+    EXPECT_EQ(lib.tilewright_ranker->unresolvedBlocklistNames(),
+              (std::vector<std::string>{"probe_21", "probe_gone"}));
+    setBankSources(lib, {named(withTile(21, 128, 64)), named(withTile(22, 256, 64))});
+
+    auto const device = makeGfx950Device();
+    ::testing::internal::CaptureStderr();
+    lib.findTopSolutions(TensileLite::testing::dummyProblem(), device, 5);
+    std::string const warning = ::testing::internal::GetCapturedStderr();
+    EXPECT_NE(warning.find("1 of the 3 names in the tilewright blocklist of "
+                           "TensileLibrary_Probe_gfx950"),
+              std::string::npos)
+        << warning;
+    EXPECT_NE(warning.find("(the first: probe_gone)"), std::string::npos) << warning;
+    auto const& pool = builtPool(lib, device);
+    ASSERT_NE(pool.ranker, nullptr);
+    EXPECT_EQ(pool.ranker->unresolvedBlocklistNames(), (std::vector<std::string>{"probe_gone"}));
     EXPECT_EQ(configPositions(*pool.ranker), (std::vector<size_t>{1, 2, 4}));
 }
 #endif
