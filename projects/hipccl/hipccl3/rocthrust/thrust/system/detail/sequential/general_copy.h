@@ -37,11 +37,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace sequential
+namespace system::detail::sequential
 {
 namespace general_copy_detail
 {
@@ -127,7 +123,5 @@ THRUST_HOST_DEVICE OutputIterator general_copy_n(InputIterator first, Size n, Ou
   return result;
 } // end general_copy_n()
 
-} // end namespace sequential
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END
