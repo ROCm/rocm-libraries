@@ -165,9 +165,10 @@ if(HIPSPARSELT_ENABLE_HIP)
         message(STATUS "hipSPARSELt uses the staged hipBLASLt package.")
     else()
         cmake_path(GET HIPBLASLT_TENSILELITE_PATH PARENT_PATH _hipblaslt_source_dir)
-        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/cmake")
+        list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/tensilelite/cmake")
         block()
             set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
+            set(HIPBLASLT_ENABLE_MXDATAGENERATOR OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
                 set(HIPBLASLT_ENABLE_YAML ON)
@@ -258,10 +259,26 @@ endif()
 
 if(_hipsparselt_requires_hipblaslt)
     if(BUILD_SHARED_LIBS)
-        rocm_package_add_dependencies(
-            COMPONENT runtime
-            DEPENDS hipblaslt
-        )
+        set(tensilelite_minimum 1.5.0)
+
+        if(CPACK_RPM_PACKAGE_REQUIRES)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_RPM_PACKAGE_REQUIRES}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_rpm_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        if(CPACK_DEBIAN_PACKAGE_DEPENDS)
+            rocm_package_add_deb_dependencies(COMPONENT runtime
+                DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+        endif()
+        if(ROCM_DEP_ROCMCORE)
+            rocm_package_add_deb_dependencies(COMPONENT runtime DEPENDS "rocm-core")
+        endif()
+        rocm_package_add_dependencies(COMPONENT runtime
+            DEPENDS "tensilelite-host >= ${tensilelite_minimum}")
+
+        unset(tensilelite_minimum)
         rocm_package_add_deb_dependencies(
             COMPONENT devel
             DEPENDS hipblaslt-dev

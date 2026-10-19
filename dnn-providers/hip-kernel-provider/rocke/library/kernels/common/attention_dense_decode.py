@@ -540,7 +540,8 @@ class PersistHqMinorSwz(PersistDecode):
 
 
 def _aligned_causal_error(spec, name: str):
-    if not spec.persistent or not spec.causal:
+    # right_bound (a lookahead) exists only on gfx950.
+    if not spec.persistent or not spec.causal or getattr(spec, "right_bound", 0):
         return f"{name} requires persistent causal attention"
     if spec.ragged or spec.varlen or spec.paged:
         return f"{name} is validated only for aligned dense attention"

@@ -26,6 +26,7 @@ from dispatch.attention.axes import (
     _CODEPATH_KNOBS,
     DENSE_BASE_RELATIVE_KNOBS,
     DENSE_LOOP_FIELDS,
+    DENSE_ARCH_PROBLEM_FIELDS,
     DENSE_OUTPUT_FIELDS,
     DENSE_PROBLEM_FIELDS,
     DENSE_UNTUNABLE_KNOBS,
@@ -398,6 +399,75 @@ def _gfx950_variant(spec_id):
 _KQ_PAD = {"use_k_single_buffer": True, "use_kq_lds_pad": True, "kq_lds_pad_halves": 16}
 
 
+# (label, request kwargs). Decode (3D) bands use seqlen_q=2 so full attention keeps its
+# own body; at seqlen_q=1 it is the causal kernel.
+_BAND_REQUESTS = {
+    "causal_br": dict(mask_type=2),
+    "causal_tl": dict(mask_type=1),
+    "full": dict(mask_type=0),
+    "lookahead": dict(mask_type=0, right_bound=16),
+    "left_only": dict(mask_type=0, sliding_window=256),
+    "two_sided": dict(mask_type=0, sliding_window=256, right_bound=64),
+    "causal_window": dict(mask_type=2, sliding_window=256),
+}
+
+
+class TestBandTuning(unittest.TestCase):
+    """Band requests through the unified tuning space: every spec carries the mask
+    it was asked for, and masks never share a kernel identity or cache key."""
+
+    def _first_specs(self, path, **kw):
+        from dispatch.attention.unified_rules import iter_tuning_specs
+
+        variant = next(v for v in GFX950_TUNING_VARIANTS if v.path == path)
+        shape = (
+            dict(seqlen_q=700, seqlen_k=1400)
+            if path == "2d"
+            else dict(seqlen_q=2, seqlen_k=8192)
+        )
+        req = _request(**shape, **kw)
+        problem = _problem(req)
+        return problem, list(islice(iter_tuning_specs(req, variant), 3))
+
+    def test_specs_carry_the_requested_band(self):
+        for path in ("2d", "3d"):
+            for label, kw in _BAND_REQUESTS.items():
+                with self.subTest(path=path, band=label):
+                    problem, specs = self._first_specs(path, **kw)
+                    self.assertTrue(specs)
+                    for spec in specs:
+                        ks = spec.kernel_spec
+                        self.assertEqual(ks.causal_top_left, problem.causal_top_left)
+                        self.assertEqual(ks.right_bound, problem.right_bound)
+                        self.assertEqual(ks.sliding_window, problem.sliding_window)
+
+    def test_masks_do_not_share_identity_or_cache_key(self):
+        for path in ("2d", "3d"):
+            with self.subTest(path=path):
+                seen = {}
+                for label, kw in _BAND_REQUESTS.items():
+                    _, specs = self._first_specs(path, **kw)
+                    spec = specs[0]
+                    for what, value in (
+                        ("identity", repr(spec.identity())),
+                        ("cache_key", repr(spec.cache_key)),
+                        ("kernel_name", spec.kernel_name),
+                    ):
+                        other = seen.setdefault((what, value), label)
+                        self.assertEqual(
+                            other, label, f"{what} shared: {other} / {label}"
+                        )
+
+    def test_gfx942_tuning_declines_a_top_left_band_without_raising(self):
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
+        from dispatch.attention.unified_rules import iter_tuning_specs
+
+        req = _request("gfx942", mask_type=1, seqlen_q=700, seqlen_k=1400)
+        for variant in GFX942_TUNING_VARIANTS[:8]:
+            with self.subTest(variant=variant.variant_id):
+                self.assertEqual(list(islice(iter_tuning_specs(req, variant), 3)), [])
+
+
 class TestGfx950UnifiedLegality(unittest.TestCase):
     """What the tiled 2D validator does not model: the LDS footprint, and the
     padded-K layout the kernel disables or cannot share with Q."""
@@ -564,6 +634,7 @@ def _assert_dense_fields_classified(case, arch, spec_type):
     swept = _dense_swept_fields(arch)
     fixed = (
         DENSE_PROBLEM_FIELDS
+        | DENSE_ARCH_PROBLEM_FIELDS[arch]
         | DENSE_OUTPUT_FIELDS[arch]
         | DENSE_VARIANT_FIELDS[arch]
         | DENSE_LOOP_FIELDS
@@ -631,7 +702,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
     def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
         req = _dense_request()
         grouped = _by_candidate(_dense_combos(req))
-        self.assertEqual(len(grouped), 3, sorted(grouped))
+        self.assertEqual(len(grouped), 4, sorted(grouped))
         for name, (candidate, specs) in grouped.items():
             with self.subTest(candidate=name):
                 probe = replace(

@@ -355,7 +355,7 @@ In the source tree, bundle data lives with the integration test suite at `dnn-pr
 
 ##### Tier folders
 
-The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/README.md#test-tiers):
+The top-level folder determines the tier. The runner scans each tier directory separately (see [Generic Test Runner](#test-discovery)), mapping to the standard [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers):
 
 | Folder | GTest prefix | `ctest -L` |
 |--------|-------------|------------|
@@ -771,7 +771,7 @@ Each flag has an environment variable fallback. The CLI flag takes precedence wh
 
 ### CI Integration
 
-Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/README.md#how-tiers-cascade) as all other integration tests.
+Tiers are determined by the top-level folder (see [Folder Convention](#folder-convention)), following the same [tier cascade](../../../../dnn-providers/integration-tests/docs/running-tests.md#how-tiers-cascade) as all other integration tests.
 
 | CI Stage | ctest Command | Verification Mode | Notes |
 |----------|--------------|-------------------|-------|

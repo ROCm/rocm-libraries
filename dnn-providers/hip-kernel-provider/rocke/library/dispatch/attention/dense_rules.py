@@ -19,6 +19,7 @@ from typing import Callable, Iterable, Mapping, Optional, Tuple
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
 from .axes import (
+    DENSE_ARCH_PROBLEM_FIELDS,
     DENSE_OUTPUT_FIELDS,
     DENSE_PROBLEM_FIELDS,
     KnobAxis,
@@ -29,8 +30,11 @@ from .common import AttentionTuningSpec
 from .waves import WavesPerEuSpace, waves_per_eu_sweep_values
 
 DenseSupports = Callable[..., Tuple[bool, str]]
-# Request-set fields: never recorded as a tuning point's defaults.
-_REQUEST_FIELDS = DENSE_PROBLEM_FIELDS.union(*DENSE_OUTPUT_FIELDS.values())
+# Request-set fields: never recorded as a tuning point's defaults (problem fields,
+# including the arch-specific band fields, and output fields).
+_REQUEST_FIELDS = DENSE_PROBLEM_FIELDS.union(
+    *DENSE_ARCH_PROBLEM_FIELDS.values(), *DENSE_OUTPUT_FIELDS.values()
+)
 
 
 def _gfx950_dense_inert_knobs(spec) -> dict:

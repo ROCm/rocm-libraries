@@ -27,7 +27,19 @@ Production tiled matrix-core, paged-KV decode:
 - `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
 RDNA / gfx1250 WMMA forward:
-- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward
+- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward (the hipDNN
+  catalog's kernel; rocKE dispatch now selects the two kernels below)
+- `library/kernels/gfx1151/wmma_fmha_fwd_v2.py` -- gfx11 / gfx12 multi-wave WMMA prefill
+  (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
+  head counts incl. a separate V head count, head widths, masks and bias strides;
+  baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
+  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+- `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
+  decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
+  split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
+  merge as one code object), runtime head counts incl. a separate V head count, head widths,
+  masks and bias strides; the same baked features as the prefill; host helpers for split
+  count, grids and workspace mirrored in C (`instance_gfx1151_wmma_fmha_decode.h`)
 - `library/kernels/gfx1250/wmma_attention_fwd.py`, `library/kernels/gfx1250/_wmma_attention_common.py`
 
 Helpers (all under `platform/python/rocke/helpers/`):
