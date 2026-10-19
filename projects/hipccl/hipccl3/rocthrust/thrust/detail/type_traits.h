@@ -183,7 +183,7 @@ struct larger_type
 
 template <class F, class... Us>
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-using invoke_result = _THRUST_STD::__invoke_of<F, Us...>;
+using invoke_result = _THRUST_STD::invoke_result<F, Us...>;
 #else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
 #  if _THRUST_USE_ROCPRIM
 using invoke_result = ::rocprim::invoke_result<F, Us...>;
