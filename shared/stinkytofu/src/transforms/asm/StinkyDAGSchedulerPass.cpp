@@ -200,19 +200,97 @@ static void applyClusterBarrierSccRule(
         barrier.wait->handshakeBarrier = true;
     }
 
-    std::vector<std::vector<char>> reach;
-    reach.reserve(barriers.size());
-    for (const HandshakeBarrier& barrier : barriers)
-        reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
+    // Collected once: chains are determined purely by SCC register def/use, which
+    // this pass never changes, so the same set stays valid across every pass below.
+    const std::vector<SccChain> chains = collectSccChains(dagNodes, instToId);
 
+    // Chains can chain into each other through the SCC register itself -- e.g. a
+    // multi-limb add-with-carry sequence, where one chain's last reader is also the
+    // next chain's def. Pinning one chain's def after a barrier (because one of its
+    // readers depended on that barrier) can retroactively put an *earlier-processed*
+    // chain's reader after that barrier too, once that reader is itself a later
+    // chain's def. A single reachability snapshot taken before the chain loop can't
+    // see that, so settle every edge this rule adds to a fixed point -- recomputing
+    // reachability and re-deriving edges until a full pass adds none -- before using
+    // it to decide which chains still need a runtime lock.
+    std::vector<std::vector<char>> reach;
+    for (;;) {
+        reach.clear();
+        reach.reserve(barriers.size());
+        for (const HandshakeBarrier& barrier : barriers)
+            reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
+
+        bool addedEdge = false;
+        for (const SccChain& chain : chains) {
+            // Nothing reads the value inside the region and nothing outside does
+            // either: it is dead here, so a clobber cannot hurt it.
+            if (chain.readers.empty() && !chain.liveOut) continue;
+            // Live-in readers alone (def in an earlier region) are reported below,
+            // once, in the final classification pass; skip them here.
+            if (chain.def == nullptr) continue;
+
+            DAGNode* first = chain.def;
+            DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
+
+            // A live-out value is read past the end of the region (the loop terminator,
+            // a later region, a successor), so there is no reader here for the queue to
+            // close the chain on, and no freedom to preserve either -- that reader is
+            // fixed at the region end. The range therefore reaches from the def to the
+            // end of the region, and the only way for no barrier to fall inside it is
+            // for the def to follow every barrier in the region -- including the ones
+            // it currently comes before.
+            if (chain.liveOut) {
+                const std::vector<char> fromDef = reachableFrom(first->id, dagGraph);
+                for (const HandshakeBarrier& barrier : barriers) {
+                    if (fromDef[barrier.wait->id]) continue;
+                    if (!dagGraph[barrier.wait->id].contains(first->id)) addedEdge = true;
+                    addEdgeById(barrier.wait, first, dagGraph);
+                }
+                continue;
+            }
+
+            bool alreadySplit = false;
+            std::vector<const HandshakeBarrier*> pinAfter;
+            for (size_t i = 0; i < barriers.size(); ++i) {
+                const HandshakeBarrier& barrier = barriers[i];
+                if (barrier.signal->id > first->id && barrier.signal->id < last->id) {
+                    alreadySplit = true;
+                    break;
+                }
+                // The def already depends on the barrier, so the whole chain follows
+                // it and there is nothing to keep apart.
+                if (reach[i][first->id]) continue;
+
+                bool readerDependsOnBarrier = false;
+                for (const DAGNode* reader : chain.readers) {
+                    if (!reach[i][reader->id]) continue;
+                    readerDependsOnBarrier = true;
+                    break;
+                }
+                if (readerDependsOnBarrier) pinAfter.push_back(&barrier);
+            }
+            // The incoming order already spans the barrier, so the scheduler is not
+            // what broke it and no ordering it can pick will put it back together --
+            // leave it to the barrier pass, same as the final classification below.
+            if (alreadySplit) continue;
+
+            for (const HandshakeBarrier* barrier : pinAfter) {
+                if (barrier->wait->id >= first->id) continue;
+                if (!dagGraph[barrier->wait->id].contains(first->id)) addedEdge = true;
+                addEdgeById(barrier->wait, first, dagGraph);
+            }
+        }
+        if (!addedEdge) break;
+    }
+
+    // The graph is now settled (the last pass above added no new edges), so `reach`
+    // reflects every edge this rule will ever add. Safe to make the final per-chain
+    // decisions -- and to assign runtime lock chain ids -- from it.
     unsigned nextChainId = 0;
-    for (const SccChain& chain : collectSccChains(dagNodes, instToId)) {
-        // Nothing reads the value inside the region and nothing outside does either:
-        // it is dead here, so a clobber cannot hurt it.
+    for (const SccChain& chain : chains) {
         if (chain.readers.empty() && !chain.liveOut) continue;
 
         // ClusterBarrier: every SCC use in the region must follow a region SCC writer.
-        // Live-in readers alone (def in an earlier region) are not supported.
         if (chain.def == nullptr) {
             STINKY_UNREACHABLE(
                 "applyClusterBarrierSccRule: region has SCC reader(s) but no SCC writer");
@@ -221,26 +299,7 @@ static void applyClusterBarrierSccRule(
         DAGNode* first = chain.def;
         DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
 
-        // A live-out value is read past the end of the region (the loop terminator, a
-        // later region, a successor), so there is no reader here for the queue to close
-        // the chain on, and no freedom to preserve either -- that reader is fixed at the
-        // region end. The range therefore reaches from the def to the end of the region,
-        // and the only way for no barrier to fall inside it is for the def to follow every
-        // barrier in the region -- including the ones it currently comes before.
-        //
-        // Those are edges that point back up the program order, so they are the one place
-        // a cycle could be introduced. Skipping the barriers the def can reach is what
-        // rules that out, and the skip costs little: a barrier takes no register operands,
-        // so the only way to reach one is through an edge this rule itself added.
         if (chain.liveOut) {
-            const std::vector<char> fromDef = reachableFrom(first->id, dagGraph);
-            for (const HandshakeBarrier& barrier : barriers) {
-                if (fromDef[barrier.wait->id]) continue;
-                addEdgeById(barrier.wait, first, dagGraph);
-                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out"
-                                     << " chain (dagId=" << first->id << ") after barrier wait"
-                                     << " (dagId=" << barrier.wait->id << ")\n");
-            }
             // kRule3CrossLoop true only: lead ceiling on live-out SCC def (see cluster-barrier.md).
             if (cluster_barrier::kRule3CrossLoop) {
                 first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
@@ -254,15 +313,12 @@ static void applyClusterBarrierSccRule(
 
         bool alreadySplit = false;
         bool needsLock = false;
-        std::vector<const HandshakeBarrier*> pinAfter;
         for (size_t i = 0; i < barriers.size(); ++i) {
             const HandshakeBarrier& barrier = barriers[i];
             if (barrier.signal->id > first->id && barrier.signal->id < last->id) {
                 alreadySplit = true;
                 break;
             }
-            // The def already depends on the barrier, so the whole chain follows it and
-            // there is nothing to keep apart.
             if (reach[i][first->id]) continue;
 
             bool readerDependsOnBarrier = false;
@@ -271,29 +327,15 @@ static void applyClusterBarrierSccRule(
                 readerDependsOnBarrier = true;
                 break;
             }
-            if (readerDependsOnBarrier)
-                pinAfter.push_back(&barrier);
-            else
-                needsLock = true;
+            if (!readerDependsOnBarrier) needsLock = true;
         }
 
         if (alreadySplit) {
-            // The incoming order already spans the barrier, so the scheduler is not what
-            // broke it and no ordering it can pick will put it back together.
             PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
                                  << ".." << last->id
                                  << "] already spans a barrier; leaving it to the"
                                     " barrier pass\n");
             continue;
-        }
-
-        for (const HandshakeBarrier* barrier : pinAfter) {
-            if (barrier->wait->id >= first->id) continue;
-            addEdgeById(barrier->wait, first, dagGraph);
-            PASS_DEBUG(
-                std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id << ".."
-                          << last->id << "] has a reader depending on barrier (dagId="
-                          << barrier->signal->id << "); pinned after it instead of locking\n");
         }
 
         if (!needsLock) continue;
