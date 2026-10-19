@@ -1,6 +1,6 @@
 ---
 name: github-ci-pr-quality
-description: "GitHub CI supplements to the ROCm PR quality base skill. Use for PR author, review, or pre-merge gating when a change touches .github/ (workflows, composite actions, CI scripts, CODEOWNERS, labeler) in rocm-libraries. Covers where CI tests belong, runner sizing, checkout and trigger cost, shared CI state, and the cross-read of each affected project's TESTING.md. Adds and tightens base rules; never relaxes a base MUST."
+description: "GitHub CI supplements to the ROCm PR quality base skill. Use to author, review, or pre-merge-gate PRs that touch .github/ (workflows, actions, CI scripts, CODEOWNERS) in rocm-libraries. Adds and tightens base rules; never relaxes a MUST."
 argument-hint: "[author | review | pre-merge] [PR URL | branch:<name> | local]"
 extends: rocm-pr-quality
 allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
 
 ## Dependency (mandatory: do this first)
 
-Read and apply the `rocm-pr-quality` base skill before anything below. It lives in `ROCm/TheRock` at `skills/rocm-pr-quality/` (`SKILL.md` + `reference.md`). It is not in this repo; see the "PR-quality skills" section of the root [`AGENTS.md`](../../AGENTS.md) for how overlays are layered.
+Read and apply the `rocm-pr-quality` base skill before anything below. It lives in `ROCm/TheRock`, not in this repo: [`SKILL.md`](https://github.com/ROCm/TheRock/blob/main/skills/rocm-pr-quality/SKILL.md) and [`reference.md`](https://github.com/ROCm/TheRock/blob/main/skills/rocm-pr-quality/reference.md). The `extends` and `argument-hint` keys above are repo conventions that not every agent runtime interprets, which is why this section tells you to load the base explicitly. See the "PR-quality skills" section of the root [`AGENTS.md`](../../AGENTS.md) for how overlays are layered.
 
 The supplements here only **ADD** rules or **TIGHTEN** thresholds. They never relax a base MUST-rule. On any conflict, the base MUST-rule wins. Where `.github/` CI changes also touch a component's code, apply that component's overlay too (for example `hipblaslt-pr-quality`).
 
@@ -95,15 +95,15 @@ Every lane should test the same thing: the PR merged into its base branch (`refs
 - The PR must say what moves for whom, and how it was checked across projects (not only the PR's own CI).
 - Emptying, removing, or changing the meaning of a value is `BLOCKING` without an impact statement. A value that downstream jobs treat as "reuse a prior build" must not silently become empty.
 - Automated bump PRs are held to the same rule as human ones. A green PR with the right title can still change shared state in a way its own CI cannot see.
-- When a reusable workflow's interface changes, update all callers in the same PR.
+- When a reusable workflow's interface changes, inspect every caller. Update callers in the same PR only where the change breaks them or changes their intended behavior; an added optional input with a behavior-preserving default needs none. A caller left on a breaking interface is `BLOCKING`. Callers outside this repo, or pinned to a version, cannot be edited here: state the migration obligation in the PR instead.
 
 ### Defers to the style guides
 
-Follow the TheRock [GitHub Actions style guide](https://github.com/ROCm/TheRock/blob/main/docs/development/style_guides/github_actions_style_guide.md) and cite its section for a style finding: commit-SHA pinning of actions, pinned runner image labels, least-privilege `permissions`, no template injection, `persist-credentials: false`, and Python scripts over non-trivial inline Bash. Run `pre-commit run --files <changed files>` and, where available, `actionlint` on the PR. Treat a style-guide gap as `SUGGESTION` unless it is a security item, which is `IMPORTANT` at minimum.
+Follow the TheRock [GitHub Actions style guide](https://github.com/ROCm/TheRock/blob/main/docs/development/style_guides/github_actions_style_guide.md) and cite its section for a style finding: commit-SHA pinning of actions, pinned runner image labels, least-privilege `permissions`, no template injection, `persist-credentials: false`, and Python scripts over non-trivial inline Bash. When authoring, run `pre-commit run --files <changed files>` (the hooks can rewrite files; commit the result) and, where available, `actionlint`. When reviewing, do not modify the PR's checkout (the base review contract is read-only): run the hooks in a throwaway checkout of the PR head, or read the PR's own pre-commit check result, and report any formatter diff as a finding. Treat a style-guide gap as `SUGGESTION` unless it is a security item, which is `IMPORTANT` at minimum.
 
 ### Tightens: stale-base on high-coupling CI files
 
-Make the base stale-base check concrete. High-coupling files: `.github/actions/ci-env/**`, `.github/workflows/component-ci.yml`, `.github/scripts/component_ci.py`, `.github/scripts/ci_utils.py`, `.github/scripts/therock_matrix.py`, `.github/scripts/therock_configure_ci.py`, and the `therock-*` workflows. Overlap with the base branch on any of these since the PR diverged means a **mandatory** rebase and re-run (base default is strong-recommend). Two CI PRs can each be green and still break each other in combination.
+Make the base stale-base check concrete. High-coupling files: `.github/actions/ci-env/**`, `.github/workflows/component-ci.yml`, `.github/scripts/component_ci.py`, `.github/scripts/ci_utils.py`, `.github/scripts/therock_matrix.py`, `.github/scripts/therock_configure_ci.py`, and the `therock-*` workflows. Overlap with the base branch on any of these since the PR diverged means a **mandatory** rebase and re-run (base default is strong-recommend). Two CI PRs can each be green and still break each other in combination. The base helper (`pr_quality_check.py`) has no profile for this overlay and its `base` profile has an empty high-coupling list, so it will not flag this overlap for you: apply this list by hand.
 
 ### Tightens: approvals
 
@@ -143,3 +143,36 @@ Drop the regression/test obligations (M1/M2), allow disabling tests to green CI 
 [PR #13623](https://github.com/ROCm/rocm-libraries/pull/13623) (an automated TheRock reference bump) changed `baseline-run-id` in `ci-env` from a run ID to an empty string. `therock-multi-arch-ci.yml` treats an empty baseline as "no prebuilt stages" and turns stage reuse off (see its `prebuilt_stages` and `baseline_run_id` inputs), so every pull request rebuilt every stage, not only the stages its diff touched. The bump was reverted in [#13698](https://github.com/ROCm/rocm-libraries/pull/13698), and commit `67a16e4ea5c` records the effect. The bump's own checks were fine; the cost landed on every other PR. That is the `ci-shared-state` case: a value emptied without an impact statement, visible only by looking across projects.
 
 [PR #12185](https://github.com/ROCm/rocm-libraries/pull/12185) also added trigger paths under the old `tensilelite/Tensile/` package directory. [PR #12150](https://github.com/ROCm/rocm-libraries/pull/12150) renamed that package to `tensilelite/tensilelite/` the same day and missed those references. The lane's trigger pointed at a file that no longer existed until [#13399](https://github.com/ROCm/rocm-libraries/pull/13399) ("correct paths missed in #12150") fixed it. Each PR was correct when reviewed, and the rename touched no `.github/` file. The reference check at the move is what catches it.
+
+---
+
+## Worked review output (retrospective example)
+
+This shows the shape the base skill asks for (overall assessment, the four answers, severity-ordered findings, blocking items) for one CI PR. It is a retrospective run on [PR #12185](https://github.com/ROCm/rocm-libraries/pull/12185), which is already merged, so it is an illustration and not a review that gated anything. It was scoped to the `.github/` changes; the SolutionUID code belongs to the hipBLASLt overlay and is not re-reviewed here.
+
+**Evidence checked:** [the job run](https://github.com/ROCm/rocm-libraries/actions/runs/37805607146/job/113409341093) (runner `aws-linux-scale-rocm-prod`; 3:10 total, checkout 2:53, container init 0:06, test step 0:07); the new workflow and its wiring in `component-ci.yml` and `component_ci.py`; and `projects/hipblaslt/TESTING.md` and `tensilelite/TESTING.md`, neither of which mentions the new lane.
+
+**Overall assessment:** `CHANGES REQUESTED` (two `BLOCKING` items, both resolvable by a written justification or by folding the check into an existing lane).
+
+**The four questions**
+
+1. *What lands:* a new `component-ci-library-uniqueness.yml`, wired through `component-ci.yml` and a `COMPONENTS` entry, running one tox environment (one test file) in a container on the `ci-env` prod runner.
+1. *Appropriate test level:* a CPU-only, unit-level check. It belongs in an existing lightweight lane or on a small runner.
+1. *Omitted tests or flags, and waivers:* nothing omitted and no waiver declared, so none to adjudicate.
+1. *Adjacent lanes to consider:* an existing tensilelite lane (the CPU-only coverage lane) might host it. The PR does not say whether that was considered.
+
+**Findings (most severe first)**
+
+| Finding | Severity | Evidence |
+| --- | --- | --- |
+| New workflow file for one small test, no reason given | `BLOCKING` unless justified | `ci-new-workflow`: one tox environment; the PR body does not say why it cannot join an existing lane. |
+| Prod runner for light work | `BLOCKING` | `ci-runner-change`: `linux-runner` from `ci-env` passed straight through; the real work was 7 seconds. |
+| Checkout and setup dominate the job | `IMPORTANT` | 2m53s of 3m10s, no `sparse-checkout`. Sparse checkout is the likely fix; that is a hypothesis, not measured. |
+| TESTING.md not updated; gating unstated | `IMPORTANT` | The PR calls the lane a gate, but it rolls up into `Component CI Summary`, which `tensilelite/TESTING.md` says is not a required check. If that still holds, the lane cannot block a merge. |
+| No `timeout-minutes` | `SUGGESTION` | Minor. |
+
+**Blocking items:** justify the new workflow file in the PR description or move the check into an existing lane; use a right-sized runner or state why the prod runner is needed.
+
+**Passed:** the workflow's own file is in the path filter, the summary job includes the lane, actions are pinned to SHAs, and `permissions` is `contents: read`.
+
+**Limits of this review:** it did not re-run the job, did not check the small-runner labels (the skill deliberately names none; confirm them with DevOps), and judged only the `.github/` surface.
