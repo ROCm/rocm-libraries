@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit c01e3a3f3f67966dd35612cf363b49964f33cd47.
+# TheRock ref: pinned to ROCm/TheRock commit 47434387de730d51788b705e5600602dd6064997.
 
 on:
   schedule:
