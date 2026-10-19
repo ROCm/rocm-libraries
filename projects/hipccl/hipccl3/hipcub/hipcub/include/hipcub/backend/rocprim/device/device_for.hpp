@@ -351,9 +351,9 @@ HIPCUB_RUNTIME_FUNCTION
      */
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
-    static hipError_t ForEachInExtents(const ::hipcub::extents<IndexType, Extents...>& extents,
-                                       OpT                                             op,
-                                       hipStream_t                                     stream = {})
+    static hipError_t ForEachInExtents(const _HIPCUB_STD::extents<IndexType, Extents...>& extents,
+                                       OpT                                                op,
+                                       hipStream_t stream = {})
     {
         using extents_type = _HIPCUB_STD::extents<IndexType, Extents...>;
         return ForEachInLayout(_HIPCUB_STD::layout_right::mapping<extents_type>{extents},
