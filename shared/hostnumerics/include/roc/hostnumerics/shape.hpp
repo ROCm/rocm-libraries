@@ -49,7 +49,7 @@ class Shape {
         return m_dimensions[dimension];
     }
 
-    size_t operator[](size_t dimension) const {
+    size_t operator[](size_t dimension) const noexcept {
       return m_dimensions[dimension];
     }
 
@@ -62,11 +62,9 @@ class Shape {
         return m_elementCount;
     }
 
-    // Select dimensions in the supplied order; repetition is allowed. The new
-    // Shape checks its own element count, which can overflow if axes are repeated
-    // or if selection removes the only zero extent from an oversized empty Shape.
+    // Select dimensions in the supplied order; repetition is allowed. 
     Shape fromDimensions(std::span<const size_t> axes) const {
-        validateDimensionsSelection(axes);
+        validateDimensions(axes);
         std::vector<size_t> dimensions;
         dimensions.reserve(axes.size());
         for (size_t axis : axes) dimensions.push_back(m_dimensions[axis]);
@@ -131,11 +129,11 @@ class Shape {
                                      " is outside [0, " + std::to_string(rank()) + ").");
     }
 
-    void validateDimensionsSelection(std::span<const size_t> axes) const {
+    void validateDimensions(std::span<const size_t> axes) const {
         for (size_t axis : axes) validateDimension(axis);
     }
 
-    void validateIndexOrder(std::span<const size_t> order) const {
+    void validateOrder(std::span<const size_t> order) const {
         if (order.size() != rank())
             throw std::runtime_error("Tensor index order rank " + std::to_string(order.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
@@ -150,7 +148,7 @@ class Shape {
     }
 
     void validateLinearIndex(std::span<const size_t> indices, std::span<const size_t> order) const {
-        validateIndexOrder(order);
+        validateOrder(order);
         if (indices.size() != rank())
             throw std::runtime_error("Tensor coordinate rank " + std::to_string(indices.size()) +
                                      " does not match shape rank " + std::to_string(rank()) + ".");
@@ -163,7 +161,7 @@ class Shape {
     }
 
     void validateCoordinates(size_t index, std::span<const size_t> order) const {
-        validateIndexOrder(order);
+        validateOrder(order);
         if (index >= elementCount())
             throw std::runtime_error("Tensor logical index " + std::to_string(index) +
                                      " is outside [0, " + std::to_string(elementCount()) + ").");
