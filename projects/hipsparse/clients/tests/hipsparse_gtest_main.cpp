@@ -321,7 +321,7 @@ int main(int argc, char** argv)
     // Validate and select the requested HIP device before any subsequent
     // hipSPARSE / HIP API call.
     int        device_count = 0;
-    hipError_t query_status = query_device_property(&device_count);
+    hipError_t query_status = query_device_property(&device_count, device_id);
     if(query_status != hipSuccess)
     {
         return EXIT_FAILURE;

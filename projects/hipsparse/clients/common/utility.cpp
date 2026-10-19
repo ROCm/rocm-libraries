@@ -161,7 +161,7 @@ void query_version(char* version)
 
 /* ============================================================================================ */
 /*  device query and print out their ID and name. */
-hipError_t query_device_property(int* device_count)
+hipError_t query_device_property(int* device_count, int device_id)
 {
     if(device_count == nullptr)
     {
@@ -188,7 +188,12 @@ hipError_t query_device_property(int* device_count)
                     i,
                     hipGetErrorString(status),
                     status);
-            return status;
+            // Only the selected device is required to start the client.
+            if(i == device_id)
+            {
+                return status;
+            }
+            continue;
         }
 
         printf("Device ID %d : %s\n", i, props.name);
@@ -235,7 +240,8 @@ double get_time_us(void)
     if(status != hipSuccess)
     {
         fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        throw status;
+        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
+        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -252,7 +258,8 @@ double get_time_us_sync(hipStream_t stream)
     if(status != hipSuccess)
     {
         fprintf(stderr, "HIP error: %s (%d)\n", hipGetErrorString(status), status);
-        throw status;
+        // hipsparse-bench catches hipsparseStatus_t, not hipError_t.
+        throw HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
     auto now = std::chrono::steady_clock::now();

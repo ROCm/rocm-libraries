@@ -310,6 +310,25 @@ hipsparseStatus_t
 
 hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
 {
+    // hipsparse_bench selects the device with hipSetDevice before the cases run.
+    int        device_id;
+    hipError_t status = hipGetDevice(&device_id);
+    if(status != hipSuccess)
+    {
+        std::cerr << "hipGetDevice failed: " << hipGetErrorString(status) << " (" << status << ")"
+                  << std::endl;
+        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+    }
+
+    hipDeviceProp_t prop{};
+    status = hipGetDeviceProperties(&prop, device_id);
+    if(status != hipSuccess)
+    {
+        std::cerr << "hipGetDeviceProperties failed: " << hipGetErrorString(status) << " ("
+                  << status << ")" << std::endl;
+        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+    }
+
     out << "{" << std::endl;
     auto        end      = std::chrono::system_clock::now();
     std::time_t end_time = std::chrono::system_clock::to_time_t(end);
@@ -322,18 +341,6 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
         }
     out << "\"date\": \"" << str << "\"," << std::endl;
     out << "\"hipSPARSE version\": \"" << hipsparse_get_version() << "\"," << std::endl;
-
-    //
-    // !!! To fix, not necessarily the gpu used from hipsparse_bench.
-    //
-    hipDeviceProp_t prop{};
-    hipError_t      status = hipGetDeviceProperties(&prop, 0);
-    if(status != hipSuccess)
-    {
-        std::cerr << "hipGetDeviceProperties failed: " << hipGetErrorString(status) << " ("
-                  << status << ")" << std::endl;
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
 
     gpu_config g(prop);
     g.print_json(out);
@@ -440,9 +447,7 @@ hipsparseStatus_t hipsparse_bench_app::define_results_json(std::ostream& out)
     }
     out << "]," << std::endl << std::endl;
     ;
-    out << "\""
-        << "results"
-        << "\": [";
+    out << "\"" << "results" << "\": [";
 
     return HIPSPARSE_STATUS_SUCCESS;
 }
