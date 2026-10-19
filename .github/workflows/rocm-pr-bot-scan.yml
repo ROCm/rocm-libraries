@@ -40,7 +40,7 @@ jobs:
     if: >-
       github.event_name != 'check_run' ||
       !endsWith(github.event.check_run.name, 'therock-pr-bot')
-    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@3ae33a370e0eaf5d305a736f7d775cc93cc95b98
+    uses: ROCm/TheRock-PR-Bot/.github/workflows/rocm-pr-bot.yml@c421bd284b7e8d82692d36420aef0ccda3f62985
     with:
       repo_name: rocm-libraries
     secrets:
