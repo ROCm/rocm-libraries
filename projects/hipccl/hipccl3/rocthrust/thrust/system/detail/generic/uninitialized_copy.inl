@@ -37,11 +37,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
+namespace system::detail::generic
 {
 namespace detail
 {
@@ -170,7 +166,5 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
     exec, first, n, result, ResultTypeHasTrivialCopyConstructor());
 } // end uninitialized_copy_n()
 
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

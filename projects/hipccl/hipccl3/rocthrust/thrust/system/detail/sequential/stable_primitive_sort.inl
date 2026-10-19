@@ -37,11 +37,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace sequential
+namespace system::detail::sequential
 {
 namespace stable_primitive_sort_detail
 {
@@ -109,7 +105,7 @@ typename disable_if_bool_sort<RandomAccessIterator1>::type THRUST_HOST_DEVICE st
   sequential::stable_radix_sort_by_key(exec, keys_first, keys_last, values_first);
 }
 
-} // namespace stable_primitive_sort_detail
+} // end namespace stable_primitive_sort_detail
 
 template <typename DerivedPolicy, typename RandomAccessIterator>
 THRUST_HOST_DEVICE void stable_primitive_sort(
@@ -128,7 +124,5 @@ THRUST_HOST_DEVICE void stable_primitive_sort_by_key(
   stable_primitive_sort_detail::stable_primitive_sort_by_key(exec, keys_first, keys_last, values_first);
 }
 
-} // end namespace sequential
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::sequential
 THRUST_NAMESPACE_END
