@@ -25,7 +25,8 @@ python3 run_diff.py --mode ir --canonical --python-only --check-golden
 
 `--python-only` runs only the Python reference emitters: no C++ build, and any host checks
 every flavor (the flavor is an argument to lowering). Both commands must print `GOLDEN OK`
-(exit 0).
+(exit 0). CI runs exactly these from the installed test tree, as the quick-tier CTest
+entries `rocke_differential_golden_ll` and `rocke_differential_golden_canonical`.
 
 `GOLDEN OK` answers *"does output match the blessed hashes"* and nothing else; it is not the
 parity verdict. The byte-identity gate (`tools/check_byte_identity.py`, or `run_diff.py`
