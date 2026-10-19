@@ -203,7 +203,7 @@ private:
     rocfft_location_t to_world(const rocfft_location_t& comm_location) const;
     rocfft_location_t to_comm(const rocfft_location_t& world_location) const;
 
-    // owning cache keyed by location set
+    // owning cache keyed by MPI_COMM_WORLD location set (comm_rank 0 for single-process comms)
     static std::map<std::set<rocfft_location_t>, rocfft_rccl_comm_t> comm_cache;
     static std::mutex                                                comm_cache_mutex;
 
