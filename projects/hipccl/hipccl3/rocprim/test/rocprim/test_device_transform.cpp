@@ -561,9 +561,9 @@ TYPED_TEST(RocprimDeviceTransformTests, TernaryTransformPredicate)
             std::vector<T1> input1
                 = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
             std::vector<T2> input2
-                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value);
+                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value + 1);
             std::vector<T2> input3
-                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value + 2);
 
             common::device_ptr<T1> d_input1(input1);
             common::device_ptr<T2> d_input2(input2);
