@@ -921,6 +921,11 @@ TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanRetriesAfterAFailedFill)
     ASSERT_NO_THROW(
         plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
 
+    flatbuffers::Verifier verifier(serializedOutput.data(), serializedOutput.size());
+    ASSERT_TRUE(hipdnn_flatbuffers_sdk::data_objects::VerifySerializedExecutionPlanBuffer(verifier))
+        << "The second call returned " << serializedOutput.size()
+        << " bytes that are not a rebuilt plan.";
+
     auto executionPlan
         = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
     ASSERT_NE(executionPlan->plugin_payload(), nullptr);
