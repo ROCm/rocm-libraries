@@ -403,7 +403,14 @@ TEST(Core, ScalarDispatchExceptions) {
                                        static_cast<ScalarType>(0xffff)};
     // NOLINTEND(clang-analyzer-optin.core.EnumCastOutOfRange)
     for (const auto type : invalidTypes) {
-        EXPECT_THROW(visitScalarType(type, visitor, std::move(argument)), std::runtime_error);
+        try {
+            visitScalarType(type, visitor, std::move(argument));
+            FAIL() << "Invalid scalar type was accepted";
+        } catch (const std::runtime_error& error) {
+            EXPECT_NE(
+                std::string_view(error.what()).find(std::to_string(static_cast<unsigned>(type))),
+                std::string_view::npos);
+        }
         EXPECT_EQ(calls, 0);
         ASSERT_NE(argument, nullptr);
     }
