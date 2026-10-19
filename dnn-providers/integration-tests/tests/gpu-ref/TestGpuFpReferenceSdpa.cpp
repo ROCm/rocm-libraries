@@ -25,9 +25,11 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -41,8 +43,12 @@ using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_gpu_ref;
+using namespace hipdnn_gpu_ref::common::gpu_fp_reference_tensor;
 
 using gpu_conv_ref_test::assertAllClose;
+
+using HalfType = hipdnn_data_sdk::types::half;
+using BFloat16Type = hipdnn_data_sdk::types::bfloat16;
 
 namespace
 {
@@ -57,12 +63,15 @@ constexpr unsigned int SEED_MASK = 45;
 // the SAME inputs, and assert the outputs match within tolerance.
 //
 // Template params allow distinct Q/K/V/O element types; ComputeDataType is the
-// float compute/mask type shared by both reference implementations.
+// float compute type shared by both reference implementations. MaskT is the dtype of the
+// additive mask, independent of ComputeDataType; the mask parameter is non-deduced, so a
+// non-float mask must name MaskT explicitly.
 template <typename QDataType,
           typename KDataType,
           typename VDataType,
           typename ODataType,
-          typename ComputeDataType = float>
+          typename ComputeDataType = float,
+          typename MaskT = float>
 void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             Tensor<KDataType>& k,
                             Tensor<VDataType>& v,
@@ -70,33 +79,38 @@ void compareGpuVsCpuSdpaFwd(Tensor<QDataType>& q,
                             Tensor<ODataType>& oGpu,
                             float tolerance,
                             std::optional<float> attnScaleValue = std::nullopt,
-                            Tensor<float>* attnMask = nullptr,
+                            Tensor<typename NonDeduced<MaskT>::type>* attnMask = nullptr,
                             int64_t leftBound = -1,
                             int64_t rightBound = -1,
                             bool topLeftAlignment = true)
 {
-    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
-    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
-    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
+    fillWithRandomValues(q, static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
+    fillWithRandomValues(k, static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
+    fillWithRandomValues(v, static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
 
-    CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
+
+    CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskT>(
         q,
         k,
         v,
         oCpu,
         attnScaleValue,
-        static_cast<const TensorBase<ComputeDataType>*>(attnMask),
+        static_cast<const TensorBase<MaskT>*>(attnMask),
         leftBound,
         rightBound,
         topLeftAlignment);
 
-    GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+    GpuFpReferenceSdpa::fprop<QDataType, KDataType, VDataType, ODataType, ComputeDataType, MaskT>(
         q,
         k,
         v,
         oGpu,
         attnScaleValue,
-        static_cast<TensorBase<ComputeDataType>*>(attnMask),
+        static_cast<TensorBase<MaskT>*>(attnMask),
         leftBound,
         rightBound,
         topLeftAlignment);
@@ -118,7 +132,7 @@ float gpuRefFwdTolerance()
     {
         return 2e-5f;
     }
-    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
+    else if constexpr(std::is_same_v<T, HalfType> || std::is_same_v<T, BFloat16Type>)
     {
         return 1e-2f;
     }
@@ -135,7 +149,7 @@ float storeProbabilityForProvider(float probability, SdpaSoftmaxProbabilityMode 
     case SdpaSoftmaxProbabilityMode::FLOAT:
         return probability;
     case SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE:
-        return static_cast<float>(bfloat16(probability));
+        return static_cast<float>(BFloat16Type(probability));
     case SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ:
     {
         // Non-negative probability: clearing the low 16 mantissa bits is round-toward-zero.
@@ -147,9 +161,9 @@ float storeProbabilityForProvider(float probability, SdpaSoftmaxProbabilityMode 
     }
 }
 
-float expectedSingleQueryProviderOutput(const Tensor<bfloat16>& q,
-                                        const Tensor<bfloat16>& k,
-                                        const Tensor<bfloat16>& v,
+float expectedSingleQueryProviderOutput(const Tensor<BFloat16Type>& q,
+                                        const Tensor<BFloat16Type>& k,
+                                        const Tensor<BFloat16Type>& v,
                                         SdpaSoftmaxProbabilityMode probabilityMode)
 {
     const auto* qData = q.memory().hostData();
@@ -207,9 +221,14 @@ void compareGpuVsCpuSdpaFwdWithLse(Tensor<QDataType>& q,
                                    int64_t rightBound = -1,
                                    bool topLeftAlignment = true)
 {
-    q.fillWithRandomValues(static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
-    k.fillWithRandomValues(static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
-    v.fillWithRandomValues(static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
+    fillWithRandomValues(q, static_cast<QDataType>(-1.0f), static_cast<QDataType>(1.0f), SEED_Q);
+    fillWithRandomValues(k, static_cast<KDataType>(-1.0f), static_cast<KDataType>(1.0f), SEED_K);
+    fillWithRandomValues(v, static_cast<VDataType>(-1.0f), static_cast<VDataType>(1.0f), SEED_V);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
 
     CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
         q,
@@ -267,7 +286,7 @@ class TestGpuSdpaFwdPlain : public ::testing::Test
 {
 };
 
-using SdpaFwdTypes = ::testing::Types<float, half, bfloat16>;
+using SdpaFwdTypes = ::testing::Types<float, HalfType, BFloat16Type>;
 TYPED_TEST_SUITE(TestGpuSdpaFwdPlain, SdpaFwdTypes, );
 
 TYPED_TEST(TestGpuSdpaFwdPlain, BasicMha)
@@ -289,20 +308,20 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> q({1, 1, 1, 1});
-    Tensor<bfloat16> k({1, 1, 4, 1});
-    Tensor<bfloat16> v({1, 1, 4, 1});
+    Tensor<BFloat16Type> q({1, 1, 1, 1});
+    Tensor<BFloat16Type> k({1, 1, 4, 1});
+    Tensor<BFloat16Type> v({1, 1, 4, 1});
     Tensor<float> oGpu({1, 1, 1, 1});
 
-    q.memory().hostData()[0] = bfloat16(1.0f);
-    k.memory().hostData()[0] = bfloat16(-3.0f);
-    k.memory().hostData()[1] = bfloat16(-1.0f);
-    k.memory().hostData()[2] = bfloat16(0.0f);
-    k.memory().hostData()[3] = bfloat16(2.0f);
-    v.memory().hostData()[0] = bfloat16(1000.0f);
-    v.memory().hostData()[1] = bfloat16(-1000.0f);
-    v.memory().hostData()[2] = bfloat16(500.0f);
-    v.memory().hostData()[3] = bfloat16(-500.0f);
+    q.memory().hostData()[0] = BFloat16Type(1.0f);
+    k.memory().hostData()[0] = BFloat16Type(-3.0f);
+    k.memory().hostData()[1] = BFloat16Type(-1.0f);
+    k.memory().hostData()[2] = BFloat16Type(0.0f);
+    k.memory().hostData()[3] = BFloat16Type(2.0f);
+    v.memory().hostData()[0] = BFloat16Type(1000.0f);
+    v.memory().hostData()[1] = BFloat16Type(-1000.0f);
+    v.memory().hostData()[2] = BFloat16Type(500.0f);
+    v.memory().hostData()[3] = BFloat16Type(-500.0f);
 
     const float fp32ProbabilityExpected
         = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::FLOAT);
@@ -310,7 +329,7 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
         = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
     ASSERT_GT(std::abs(providerExpected - fp32ProbabilityExpected), 0.1f);
 
-    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
+    GpuFpReferenceSdpa::fprop<BFloat16Type, BFloat16Type, BFloat16Type, float, float>(
         q,
         k,
         v,
@@ -332,20 +351,20 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> q({1, 1, 1, 1});
-    Tensor<bfloat16> k({1, 1, 4, 1});
-    Tensor<bfloat16> v({1, 1, 4, 1});
+    Tensor<BFloat16Type> q({1, 1, 1, 1});
+    Tensor<BFloat16Type> k({1, 1, 4, 1});
+    Tensor<BFloat16Type> v({1, 1, 4, 1});
     Tensor<float> oGpu({1, 1, 1, 1});
 
-    q.memory().hostData()[0] = bfloat16(1.0f);
-    k.memory().hostData()[0] = bfloat16(-3.0f);
-    k.memory().hostData()[1] = bfloat16(-1.0f);
-    k.memory().hostData()[2] = bfloat16(0.0f);
-    k.memory().hostData()[3] = bfloat16(2.0f);
-    v.memory().hostData()[0] = bfloat16(1000.0f);
-    v.memory().hostData()[1] = bfloat16(-1000.0f);
-    v.memory().hostData()[2] = bfloat16(500.0f);
-    v.memory().hostData()[3] = bfloat16(-500.0f);
+    q.memory().hostData()[0] = BFloat16Type(1.0f);
+    k.memory().hostData()[0] = BFloat16Type(-3.0f);
+    k.memory().hostData()[1] = BFloat16Type(-1.0f);
+    k.memory().hostData()[2] = BFloat16Type(0.0f);
+    k.memory().hostData()[3] = BFloat16Type(2.0f);
+    v.memory().hostData()[0] = BFloat16Type(1000.0f);
+    v.memory().hostData()[1] = BFloat16Type(-1000.0f);
+    v.memory().hostData()[2] = BFloat16Type(500.0f);
+    v.memory().hostData()[3] = BFloat16Type(-500.0f);
 
     const float rtneExpected
         = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
@@ -353,7 +372,7 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv
         = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ);
     ASSERT_GT(std::abs(rtneExpected - rtzExpected), 1.0f);
 
-    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
+    GpuFpReferenceSdpa::fprop<BFloat16Type, BFloat16Type, BFloat16Type, float, float>(
         q,
         k,
         v,
@@ -482,8 +501,8 @@ class TestGpuSdpaFwdMaskCartesianBase : public ::testing::TestWithParam<SdpaMask
 // Explicit per-dtype aliases with their own TEST_P/INSTANTIATE (project style:
 // prefer aliases over TYPED_TEST_P macros for readable gtest names + failures).
 using TestGpuSdpaFwdMaskCartesianFp32 = TestGpuSdpaFwdMaskCartesianBase<float>;
-using TestGpuSdpaFwdMaskCartesianFp16 = TestGpuSdpaFwdMaskCartesianBase<half>;
-using TestGpuSdpaFwdMaskCartesianBfp16 = TestGpuSdpaFwdMaskCartesianBase<bfloat16>;
+using TestGpuSdpaFwdMaskCartesianFp16 = TestGpuSdpaFwdMaskCartesianBase<HalfType>;
+using TestGpuSdpaFwdMaskCartesianBfp16 = TestGpuSdpaFwdMaskCartesianBase<BFloat16Type>;
 
 TEST_P(TestGpuSdpaFwdMaskCartesianFp32, SkvNotEqualSq)
 {
@@ -494,13 +513,13 @@ TEST_P(TestGpuSdpaFwdMaskCartesianFp32, SkvNotEqualSq)
 TEST_P(TestGpuSdpaFwdMaskCartesianFp16, SkvNotEqualSq)
 {
     SKIP_IF_NO_DEVICES();
-    runMaskCartesianCase<half>(GetParam());
+    runMaskCartesianCase<HalfType>(GetParam());
 }
 
 TEST_P(TestGpuSdpaFwdMaskCartesianBfp16, SkvNotEqualSq)
 {
     SKIP_IF_NO_DEVICES();
-    runMaskCartesianCase<bfloat16>(GetParam());
+    runMaskCartesianCase<BFloat16Type>(GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(MaskCombos,
@@ -560,7 +579,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskRank4)
     Tensor<T> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -589,7 +611,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank2)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({8, 8}); // [Sq, Skv]
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -617,7 +642,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
     Tensor<T> oGpu({2, 2, 8, 16});
     Tensor<float> mask({2, 8, 8}); // [H, Sq, Skv]
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -627,6 +655,132 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastRank3)
                                        gpuRefFwdTolerance<T>(),
                                        std::nullopt,
                                        /*attnMask=*/&mask);
+}
+
+// ============================================================================
+// Mask dtype sweep: the additive mask is read with its own dtype (float, half or
+// bfloat16), independent of Q/K/V/O. The mask is non-uniform along Skv with values
+// exactly representable in all three dtypes; a uniform mask would pass by coincidence
+// because softmax is shift-invariant.
+// ============================================================================
+
+namespace
+{
+
+template <typename MaskT>
+void fillExactlyRepresentableMask(Tensor<MaskT>& mask)
+{
+    constexpr std::array<float, 8> VALUES = {-2.0f, -1.0f, -0.5f, -0.25f, 0.0f, 0.25f, 0.5f, 1.0f};
+    auto* data = mask.memory().hostData();
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        data[i] = static_cast<MaskT>(VALUES[(i * 3 + i / 8) % VALUES.size()]);
+    }
+}
+
+} // namespace
+
+template <typename T>
+class TestGpuSdpaFwdMaskDtype : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestGpuSdpaFwdMaskDtype, SdpaFwdTypes, );
+
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, AdditiveMaskRank4)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({1, 2, 8, 16});
+    Tensor<float> k({1, 2, 8, 16});
+    Tensor<float> v({1, 2, 8, 16});
+    Tensor<float> oCpu({1, 2, 8, 16});
+    Tensor<float> oGpu({1, 2, 8, 16});
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<float, float, float, float, float, MaskT>(
+        q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, AdditiveMaskBroadcastRank2)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({2, 4, 8, 16});
+    Tensor<float> k({2, 4, 8, 16});
+    Tensor<float> v({2, 4, 8, 16});
+    Tensor<float> oCpu({2, 4, 8, 16});
+    Tensor<float> oGpu({2, 4, 8, 16});
+    Tensor<MaskT> mask({8, 8}); // [Sq, Skv]
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<float, float, float, float, float, MaskT>(
+        q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
+}
+
+// The mask dtype does not follow the Q/K/V/O dtype.
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, Bfloat16InputsAdditiveMask)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<BFloat16Type> q({1, 2, 8, 16});
+    Tensor<BFloat16Type> k({1, 2, 8, 16});
+    Tensor<BFloat16Type> v({1, 2, 8, 16});
+    Tensor<BFloat16Type> oCpu({1, 2, 8, 16});
+    Tensor<BFloat16Type> oGpu({1, 2, 8, 16});
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+
+    compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, BFloat16Type, float, MaskT>(
+        q,
+        k,
+        v,
+        oCpu,
+        oGpu,
+        gpuRefFwdTolerance<BFloat16Type>(),
+        std::nullopt,
+        /*attnMask=*/&mask);
+}
+
+// Same kernel, same inputs, mask values identical after conversion: the output must not
+// depend on the mask storage dtype at all.
+TYPED_TEST(TestGpuSdpaFwdMaskDtype, MatchesFloatMaskBitwise)
+{
+    SKIP_IF_NO_DEVICES();
+    using MaskT = TypeParam;
+
+    Tensor<float> q({1, 2, 8, 16});
+    Tensor<float> k({1, 2, 8, 16});
+    Tensor<float> v({1, 2, 8, 16});
+    fillWithRandomValues(q, -1.0f, 1.0f, SEED_Q);
+    fillWithRandomValues(k, -1.0f, 1.0f, SEED_K);
+    fillWithRandomValues(v, -1.0f, 1.0f, SEED_V);
+
+    Tensor<MaskT> mask({1, 2, 8, 8});
+    fillExactlyRepresentableMask(mask);
+    Tensor<float> floatMask({1, 2, 8, 8});
+    for(size_t i = 0; i < mask.elementCount(); ++i)
+    {
+        floatMask.memory().hostData()[i] = static_cast<float>(mask.memory().hostData()[i]);
+    }
+
+    Tensor<float> oMask({1, 2, 8, 16});
+    Tensor<float> oFloatMask({1, 2, 8, 16});
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float, MaskT>(
+        q, k, v, oMask, std::nullopt, &mask);
+    GpuFpReferenceSdpa::fprop<float, float, float, float, float, float>(
+        q, k, v, oFloatMask, std::nullopt, &floatMask);
+
+    const auto* actual = oMask.memory().hostData();
+    const auto* expected = oFloatMask.memory().hostData();
+    for(size_t i = 0; i < oMask.elementCount(); ++i)
+    {
+        ASSERT_EQ(actual[i], expected[i]) << "at flat index " << i;
+    }
 }
 
 // ============================================================================
@@ -847,8 +1001,8 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LargerShape)
 
 // ============================================================================
 // Explicit (non-default) attention scale. Every case above leaves attnScaleValue
-// unset, so both references fall back to 1/sqrt(D); this passes an explicit value
-// to exercise the provided-scale path on both sides.
+// unset, so both references apply no scaling; this passes an explicit value to
+// exercise the provided-scale path on both sides.
 // ============================================================================
 
 TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitAttnScale)
@@ -864,6 +1018,31 @@ TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitAttnScale)
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), /*attnScaleValue=*/0.25f);
+}
+
+// An absent scale is 1.0 (no scaling), as in cuDNN. One query against two keys,
+// D = 4: the logits are q.k = 4 and 0, so the output is 1 / (e^4 + 1). With the
+// 1/sqrt(D) scale it would be 1 / (e^2 + 1), about 0.119.
+TEST(TestGpuSdpaFwdDefaultScale, AbsentScaleIsOne)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> q({1, 1, 1, 4});
+    Tensor<float> k({1, 1, 2, 4});
+    Tensor<float> v({1, 1, 2, 1});
+    Tensor<float> o({1, 1, 1, 1});
+    for(int i = 0; i < 4; ++i)
+    {
+        q.memory().hostData()[i] = 1.0f;
+        k.memory().hostData()[i] = 1.0f;
+        k.memory().hostData()[4 + i] = 0.0f;
+    }
+    v.memory().hostData()[0] = 0.0f;
+    v.memory().hostData()[1] = 1.0f;
+
+    GpuFpReferenceSdpa::fprop<float>(q, k, v, o);
+
+    EXPECT_NEAR(o.memory().hostData()[0], 1.0f / (std::exp(4.0f) + 1.0f), 1e-6f);
 }
 
 // ============================================================================
@@ -884,7 +1063,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskWithSlidingWindow)
     Tensor<T> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q,
                                        k,
@@ -918,7 +1100,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastBatchHead)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({1, 1, 8, 8}); // broadcast over batch and head
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -942,7 +1127,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, AdditiveMaskBroadcastHeadOnly)
     Tensor<T> oGpu({2, 4, 8, 16});
     Tensor<float> mask({2, 1, 8, 8}); // broadcast over head only
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -960,13 +1148,13 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> q({2, 4, 8, 16});
-    Tensor<half> k({2, 4, 8, 16});
-    Tensor<half> v({2, 4, 8, 16});
+    Tensor<HalfType> q({2, 4, 8, 16});
+    Tensor<HalfType> k({2, 4, 8, 16});
+    Tensor<HalfType> v({2, 4, 8, 16});
     Tensor<float> oCpu({2, 4, 8, 16});
     Tensor<float> oGpu({2, 4, 8, 16});
 
-    compareGpuVsCpuSdpaFwd<half, half, half, float>(
+    compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
 
@@ -974,13 +1162,13 @@ TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> q({2, 4, 8, 16});
-    Tensor<bfloat16> k({2, 4, 8, 16});
-    Tensor<bfloat16> v({2, 4, 8, 16});
+    Tensor<BFloat16Type> q({2, 4, 8, 16});
+    Tensor<BFloat16Type> k({2, 4, 8, 16});
+    Tensor<BFloat16Type> v({2, 4, 8, 16});
     Tensor<float> oCpu({2, 4, 8, 16});
     Tensor<float> oGpu({2, 4, 8, 16});
 
-    compareGpuVsCpuSdpaFwd<bfloat16, bfloat16, bfloat16, float>(
+    compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }
 
@@ -1061,9 +1249,14 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
     Tensor<float> lseCpu({batch, numHeads, seqQ, 1});
     Tensor<float> lseGpu({batch, numHeads, seqQ});
 
-    q.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
-    k.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
-    v.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+    fillWithRandomValues(q, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
+    fillWithRandomValues(k, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_K);
+    fillWithRandomValues(v, static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_V);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    q.memory().hostData();
+    k.memory().hostData();
+    v.memory().hostData();
 
     CpuFpReferenceSdpa::forward<T, T, T, T, float>(q,
                                                    k,
@@ -1186,7 +1379,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, GqaAdditiveMaskRank4)
     Tensor<T> oGpu({1, 8, 8, 16});
     Tensor<float> mask({1, 8, 8, 8}); // mask is per Q head, not KV head
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -1254,7 +1450,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, NonPackedBshdAdditiveMask)
     Tensor<T> oGpu({2, 4, 8, 16}, TensorLayout::BSHD);
     Tensor<float> mask({2, 4, 8, 8}); // packed mask against strided q/k/v
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -1312,7 +1511,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, ExplicitScaleAdditiveMask)
     Tensor<T> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), /*attnScaleValue=*/0.25f, /*attnMask=*/&mask);
@@ -1410,7 +1612,10 @@ TYPED_TEST(TestGpuSdpaFwdPlain, CrossAttentionAdditiveMask)
     Tensor<T> oGpu({1, 2, 8, 32});
     Tensor<float> mask({1, 2, 8, 6}); // [B, H, Sq, Skv]
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>(), std::nullopt, /*attnMask=*/&mask);
@@ -1422,39 +1627,42 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputCausal)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> q({1, 2, 8, 16});
-    Tensor<half> k({1, 2, 8, 16});
-    Tensor<half> v({1, 2, 8, 16});
+    Tensor<HalfType> q({1, 2, 8, 16});
+    Tensor<HalfType> k({1, 2, 8, 16});
+    Tensor<HalfType> v({1, 2, 8, 16});
     Tensor<float> oCpu({1, 2, 8, 16});
     Tensor<float> oGpu({1, 2, 8, 16});
 
-    compareGpuVsCpuSdpaFwd<half, half, half, float>(q,
-                                                    k,
-                                                    v,
-                                                    oCpu,
-                                                    oGpu,
-                                                    gpuRefFwdTolerance<float>(),
-                                                    std::nullopt,
-                                                    /*attnMask=*/nullptr,
-                                                    /*leftBound=*/-1,
-                                                    /*rightBound=*/0,
-                                                    /*topLeftAlignment=*/true);
+    compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(q,
+                                                                k,
+                                                                v,
+                                                                oCpu,
+                                                                oGpu,
+                                                                gpuRefFwdTolerance<float>(),
+                                                                std::nullopt,
+                                                                /*attnMask=*/nullptr,
+                                                                /*leftBound=*/-1,
+                                                                /*rightBound=*/0,
+                                                                /*topLeftAlignment=*/true);
 }
 
 TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutputAdditiveMask)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<bfloat16> q({1, 2, 8, 16});
-    Tensor<bfloat16> k({1, 2, 8, 16});
-    Tensor<bfloat16> v({1, 2, 8, 16});
+    Tensor<BFloat16Type> q({1, 2, 8, 16});
+    Tensor<BFloat16Type> k({1, 2, 8, 16});
+    Tensor<BFloat16Type> v({1, 2, 8, 16});
     Tensor<float> oCpu({1, 2, 8, 16});
     Tensor<float> oGpu({1, 2, 8, 16});
     Tensor<float> mask({1, 2, 8, 8});
 
-    mask.fillWithRandomValues(-2.0f, 2.0f, SEED_MASK);
+    fillWithRandomValues(mask, -2.0f, 2.0f, SEED_MASK);
 
-    compareGpuVsCpuSdpaFwd<bfloat16, bfloat16, bfloat16, float>(
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    mask.memory().hostData();
+
+    compareGpuVsCpuSdpaFwd<BFloat16Type, BFloat16Type, BFloat16Type, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>(), std::nullopt, /*attnMask=*/&mask);
 }
 
@@ -1462,12 +1670,12 @@ TEST(TestGpuSdpaFwdMixedPrecision, HalfInputsFloatOutputGqa)
 {
     SKIP_IF_NO_DEVICES();
 
-    Tensor<half> q({1, 8, 8, 16});
-    Tensor<half> k({1, 2, 8, 16});
-    Tensor<half> v({1, 2, 8, 16});
+    Tensor<HalfType> q({1, 8, 8, 16});
+    Tensor<HalfType> k({1, 2, 8, 16});
+    Tensor<HalfType> v({1, 2, 8, 16});
     Tensor<float> oCpu({1, 8, 8, 16});
     Tensor<float> oGpu({1, 8, 8, 16});
 
-    compareGpuVsCpuSdpaFwd<half, half, half, float>(
+    compareGpuVsCpuSdpaFwd<HalfType, HalfType, HalfType, float>(
         q, k, v, oCpu, oGpu, gpuRefFwdTolerance<float>());
 }

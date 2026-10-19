@@ -105,7 +105,8 @@ static_assert(
         std::vector<int64_t>>,
     "MetadataType::INT_LIST no longer indexes MetadataValue's vector<int64_t> alternative.");
 
-/// A kernel's complete metadata tuple; must be unique per kernel within an engine.
+/// A kernel's complete metadata tuple. Kernels of one engine sharing a tuple must not compete at
+/// the same arch tier on any device; a better tier shadows a worse one.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
 /// One field a kernel may vary along, as declared by an engine's KMD.
@@ -256,8 +257,10 @@ struct KernelSource
     std::string library;
     /// KPACK: the archive's own key for this code object. Opaque -- the hip packager
     /// content-addresses it on (source, build) and the rocKE producer uses a different
-    /// scheme entirely, so nothing here may parse it. Not unique per kernel: two kernels
-    /// differing only by entry point share one key, one blob, and one loaded module.
+    /// scheme entirely, so nothing here may parse it. An authored hsaco's key hashes the
+    /// normalized root-relative file path, so one file serving several symbols is one entry.
+    /// Not unique per kernel: two kernels differing only by entry point share one key, one
+    /// blob, and one loaded module.
     std::string tocKey;
     /// KPACK: the undecorated extern "C" name to resolve inside the loaded module. The
     /// only field that separates two kernels sharing a tocKey.
@@ -377,8 +380,9 @@ struct KernelDescriptorPack
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
-    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent, matched
-    /// exactly against the device's base target id. Part of the pack's catalog identity
+    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent. A concrete
+    /// entry is matched exactly against the device's base target id; a generic entry
+    /// matches by membership in the generic target table. Part of the pack's catalog identity
     /// -- packs are keyed by (id, arch), so per-arch shards may ship one pack id many
     /// times -- as well as a match-time filter. The filter itself is enforced at catalog
     /// build, not load time, so an excluded pack still builds and simply declines per
