@@ -89,7 +89,9 @@ extern "C" {
  * pull in. The moe_gemm_fused family is bound in its own translation unit
  * (rocke_engine_moe_gemm_fused.cpp) and registered via register_moe_gemm_fused(). */
 /* ---- RDNA WMMA families ---- */
+#include "rocke/instance_gfx1151_wmma_fmha_decode.h"
 #include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
+#include "rocke/instance_gfx1151_wmma_fmha_fwd_v2.h"
 #include "rocke/instance_gfx1151_wmma_gemm.h"
 #include "rocke/instance_gfx1151_wmma_gemm_int8.h"
 #include "rocke/instance_gfx1151_wmma_gemm_iu8.h"
@@ -3664,6 +3666,228 @@ std::vector<std::string> gfx1151_wmma_fmha_fwd_verify(const py::dict& d, const s
     return out;
 }
 
+/* ---- gfx1151_wmma_fmha_fwd_v2 (RDNA gfx11/gfx12 prefill) ---- */
+rocke_wmma_fmha_fwd_v2_spec_t w1151fmha_v2_build_spec(const py::dict& d,
+                                                      std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_wmma_fmha_fwd_v2_spec_t s = rocke_wmma_fmha_fwd_v2_spec_default();
+    s.head_dim = dict_int(d, "head_dim", s.head_dim);
+    s.head_dim_v = dict_int(d, "head_dim_v", s.head_dim_v);
+    s.block_m = dict_int(d, "block_m", s.block_m);
+    s.block_n = dict_int(d, "block_n", s.block_n);
+    s.waves_per_eu = dict_int(d, "waves_per_eu", s.waves_per_eu);
+    s.lazy_rescale = dict_bool(d, "lazy_rescale", s.lazy_rescale);
+    s.k_pad = dict_int(d, "k_pad", s.k_pad);
+    s.v_pad = dict_int(d, "v_pad", s.v_pad);
+    s.use_softcap = dict_bool(d, "use_softcap", s.use_softcap);
+    s.use_sinks = dict_bool(d, "use_sinks", s.use_sinks);
+    s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
+    s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
+    if(d.contains("wave_pair") && !d["wave_pair"].is_none())
+        s.wave_pair = d["wave_pair"].cast<bool>() ? 1 : 0;
+    {
+        std::string v;
+        if(dict_str(d, "dtype", v))
+            s.dtype = keep(v);
+        if(dict_str(d, "mask", v))
+            s.mask = keep(v);
+        if(dict_str(d, "bias", v))
+            s.bias = keep(v);
+        if(dict_str(d, "scheduler_strategy", v))
+            s.scheduler_strategy = keep(v);
+        if(dict_str(d, "cta_order", v))
+            s.cta_order = keep(v);
+        if(dict_str(d, "layout", v))
+            s.layout = keep(v);
+        if(dict_str(d, "kv_dtype", v))
+            s.kv_dtype = keep(v);
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    return s;
+}
+
+/* Build into `b` (initialised with the kernel name); throws on failure. */
+rocke_kernel_def_t* w1151fmha_v2_build(rocke_ir_builder_t* b,
+                                       const py::dict& d,
+                                       const std::string& arch,
+                                       const char* what)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_wmma_fmha_fwd_v2_spec_t s = w1151fmha_v2_build_spec(d, store);
+    const char* a = arch.c_str();
+    char kname[512];
+    kname[0] = '\0';
+    rocke_wmma_fmha_fwd_v2_kernel_name(&s, kname, sizeof kname);
+    rocke_ir_builder_init(b, kname);
+    rocke_kernel_def_t* k = rocke_build_wmma_fmha_fwd_v2(b, &s, a);
+    if(!k || !rocke_ir_builder_ok(b))
+    {
+        std::string msg = std::string(what) + " build failed: " + rocke_ir_builder_error(b);
+        rocke_ir_builder_free(b);
+        throw std::runtime_error(msg);
+    }
+    return k;
+}
+
+std::string gfx1151_wmma_fmha_fwd_v2_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151fmha_v2_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    const char* a = arch.c_str();
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
+    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_lower_llvm");
+}
+
+std::string gfx1151_wmma_fmha_fwd_v2_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151fmha_v2_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_serialize_ir");
+    std::string out = serialize_kernel(k, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_serialize_ir");
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
+std::vector<std::string> gfx1151_wmma_fmha_fwd_v2_verify(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151fmha_v2_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_fwd_v2_verify");
+    std::vector<std::string> out = verify_kernel(k);
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
+/* ---- gfx1151_wmma_fmha_decode (RDNA gfx11/gfx12 split-KV decode + merge) ----
+ * The dict mirrors WmmaFmhaDecodeSpec; "kind": "merge" selects the merge kernel. */
+rocke_wmma_fmha_decode_spec_t w1151dec_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    auto tri = [&](const char* key, int dflt) -> int {
+        if(!d.contains(key))
+            return dflt;
+        if(d[key].is_none())
+            return -1;
+        return d[key].cast<bool>() ? 1 : 0;
+    };
+    rocke_wmma_fmha_decode_spec_t s = rocke_wmma_fmha_decode_spec_default();
+    s.head_size = dict_int(d, "head_size", s.head_size);
+    s.softcap = dict_bool(d, "softcap", s.softcap);
+    s.sinks = dict_bool(d, "sinks", s.sinks);
+    s.alibi = dict_bool(d, "alibi", s.alibi);
+    s.qq_bias = dict_bool(d, "qq_bias", s.qq_bias);
+    s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
+    s.num_waves = dict_int(d, "num_waves", s.num_waves);
+    s.dv_split = dict_int(d, "dv_split", s.dv_split);
+    s.waves_per_eu = dict_int(d, "waves_per_eu", s.waves_per_eu);
+    s.v_store_early = tri("v_store_early", s.v_store_early);
+    s.prefetch = tri("prefetch", s.prefetch);
+    s.lockstep = tri("lockstep", s.lockstep);
+    s.fp8_cvt = tri("fp8_cvt", s.fp8_cvt);
+    s.tanh_fast = tri("tanh_fast", s.tanh_fast);
+    if(d.contains("scheduler_strategy"))
+        s.scheduler_strategy = d["scheduler_strategy"].is_none()
+                                   ? nullptr
+                                   : keep(d["scheduler_strategy"].cast<std::string>());
+    {
+        std::string v;
+        if(dict_str(d, "dtype", v))
+            s.dtype = keep(v);
+        if(dict_str(d, "bias", v))
+            s.bias = keep(v);
+        if(dict_str(d, "kv_dtype", v))
+            s.kv_dtype = keep(v);
+        if(dict_str(d, "layout", v))
+            s.layout = keep(v);
+        if(dict_str(d, "q_mode", v))
+            s.q_mode = keep(v);
+        if(dict_str(d, "wmma_family", v))
+            s.wmma_family = keep(v);
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    return s;
+}
+
+/* Build into `b` (initialised with the resolved kernel name); throws on failure. */
+rocke_kernel_def_t* w1151dec_build(rocke_ir_builder_t* b,
+                                   const py::dict& d,
+                                   const std::string& arch,
+                                   const char* what)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_wmma_fmha_decode_spec_t s = w1151dec_build_spec(d, store);
+    const char* a = arch.c_str();
+    std::string kind;
+    const bool merge = dict_str(d, "kind", kind) && kind == "merge";
+    char kname[512];
+    kname[0] = '\0';
+    char reason[ROCKE_ERR_MSG_CAP];
+    reason[0] = '\0';
+    if(merge)
+        rocke_wmma_fmha_decode_merge_kernel_name(&s, kname, sizeof kname);
+    else if(rocke_wmma_fmha_decode_resolve(&s, a, &s, reason, sizeof reason) == ROCKE_OK)
+        rocke_wmma_fmha_decode_kernel_name(&s, kname, sizeof kname);
+    rocke_ir_builder_init(b, kname);
+    rocke_kernel_def_t* k = merge ? rocke_build_wmma_fmha_decode_merge(b, &s, a)
+                                  : rocke_build_wmma_fmha_decode(b, &s, a);
+    if(!k || !rocke_ir_builder_ok(b))
+    {
+        std::string msg = std::string(what) + " build failed: " + rocke_ir_builder_error(b);
+        rocke_ir_builder_free(b);
+        throw std::runtime_error(msg);
+    }
+    return k;
+}
+
+std::string gfx1151_wmma_fmha_decode_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151dec_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    const char* a = arch.c_str();
+    rocke_status_t st = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
+    guard.reset();
+    return take_lowered(st, ll, nullptr, "rocke_engine.gfx1151_wmma_fmha_decode_lower_llvm");
+}
+
+std::string gfx1151_wmma_fmha_decode_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151dec_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_decode_serialize_ir");
+    std::string out = serialize_kernel(k, "rocke_engine.gfx1151_wmma_fmha_decode_serialize_ir");
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
+std::vector<std::string> gfx1151_wmma_fmha_decode_verify(const py::dict& d, const std::string& arch)
+{
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* k
+        = w1151dec_build(&b, d, arch, "rocke_engine.gfx1151_wmma_fmha_decode_verify");
+    std::vector<std::string> out = verify_kernel(k);
+    rocke_ir_builder_free(&b);
+    return out;
+}
+
 /* ---- gfx1201_wmma_gemm ---- */
 rocke_wmma_gemm_gfx1201_spec_t w1201_build_spec(const py::dict& d, std::deque<std::string>& store)
 {
@@ -4056,6 +4280,14 @@ PYBIND11_MODULE(rocke_engine, m)
          &gfx1151_wmma_fmha_fwd_lower_llvm,
          &gfx1151_wmma_fmha_fwd_serialize_ir,
          &gfx1151_wmma_fmha_fwd_verify);
+    reg3("gfx1151_wmma_fmha_fwd_v2",
+         &gfx1151_wmma_fmha_fwd_v2_lower_llvm,
+         &gfx1151_wmma_fmha_fwd_v2_serialize_ir,
+         &gfx1151_wmma_fmha_fwd_v2_verify);
+    reg3("gfx1151_wmma_fmha_decode",
+         &gfx1151_wmma_fmha_decode_lower_llvm,
+         &gfx1151_wmma_fmha_decode_serialize_ir,
+         &gfx1151_wmma_fmha_decode_verify);
     reg3("gfx1201_wmma_gemm",
          &gfx1201_wmma_gemm_lower_llvm,
          &gfx1201_wmma_gemm_serialize_ir,

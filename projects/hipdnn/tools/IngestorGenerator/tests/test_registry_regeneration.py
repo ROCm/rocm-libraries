@@ -34,7 +34,7 @@ _SHIPPED_DIR = (
     _PROVIDER
     / "src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_attention_dense"
 )
-_SHIPPED_KDP = _SHIPPED_DIR / "gfx950_attention_dense.kdp.json"
+_SHIPPED_KDP = _SHIPPED_DIR / "artifacts" / "gfx950_attention_dense.kdp.json"
 _SHIPPED_KMD = _SHIPPED_DIR / "gfx950_attention_dense.kmd.json"
 _SELECTION = _ROOT / "configs" / "gfx950_attention_dense.yaml"
 _MANIFEST = _ROOT / "configs" / "gfx950_attention_dense.engine.yaml"
