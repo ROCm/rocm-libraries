@@ -46,6 +46,7 @@ import ctypes
 import csv
 import json
 import os
+import shlex
 import sys
 import zlib
 from dataclasses import dataclass, field
@@ -309,6 +310,64 @@ def saved_mappings(root: Path) -> list[tuple[str, Problem, Path, int]]:
                 prob = problem_of(pt, *map(int, f[4:8]))
                 out[(arch, _key(prob))] = (arch, prob, dat, shard)
     return list(out.values())
+
+
+# hipBLASLt gives user kernels the solution indices [USER_INDEX_BASE, 2**31).
+USER_INDEX_BASE = 3 << 29
+
+
+def is_user_kernel_index(index: int) -> bool:
+    return USER_INDEX_BASE <= index < 1 << 31
+
+
+@dataclass
+class Dispatch:
+    """Matmul calls a hipBLASLt log records for one problem, and the solution they ran."""
+
+    problem: Problem
+    index: int
+    calls: int
+
+
+# Log field -> (HIPBLASLT_LOG_MASK=32 flag, HIPBLASLT_LOG_MASK=64 key).
+_LOG_FIELDS = {"transA": ("--transA", "transA"), "transB": ("--transB", "transB"),
+               "m": ("-m", "M"), "n": ("-n", "N"), "k": ("-k", "K"),
+               "batch": ("--batch_count", "batch_count"), "a_type": ("--a_type", "a_type"),
+               "b_type": ("--b_type", "b_type"), "d_type": ("--d_type", "d_type"),
+               "index": ("--solution_index", "solution_index")}
+
+
+def read_dispatch_log(path: str | os.PathLike) -> list[Dispatch]:
+    """The matmul calls a HIPBLASLT_LOG_MASK=32 or 64 log records.
+
+    Mask 32 writes a hipblaslt-bench command line before each call launches; mask 64
+    writes one YAML entry per distinct call, with its call_count, when the process
+    exits. Both name the solution the call ran by index. Calls with data types this
+    module does not know are left out.
+    """
+    names = {v[1]: k for k, v in TENSILE_TYPES.items()}
+    out = []
+    for line in Path(path).read_text(errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("hipblaslt-bench "):
+            tok = shlex.split(line)
+            flags = {tok[i]: tok[i + 1] for i in range(len(tok) - 1) if tok[i].startswith("-")}
+            f = {name: flags.get(flag) for name, (flag, _) in _LOG_FIELDS.items()}
+            calls = 1
+        elif line.startswith("- {") and "function: matmul" in line:
+            entry = dict(kv.strip().split(": ", 1) for kv in line[3:].rstrip("} ").split(",")
+                         if ": " in kv)
+            f = {name: entry.get(key) for name, (_, key) in _LOG_FIELDS.items()}
+            calls = int(entry.get("call_count", 1))
+        else:
+            continue
+        try:
+            p = Problem(f["transA"] + f["transB"], int(f["m"]), int(f["n"]), int(f["batch"]),
+                        int(f["k"]), names[f["a_type"]], names[f["b_type"]], names[f["d_type"]])
+            out.append(Dispatch(p, int(f["index"]), calls))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 class UserKernels:

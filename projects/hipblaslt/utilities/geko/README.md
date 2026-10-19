@@ -13,6 +13,7 @@ A comprehensive Python framework for optimizing General Matrix Multiply (GEMM) k
   - [Ductile-based Optimization](#1-ductile-based-optimization)
   - [Dense Search (Offline Tuning)](#2-dense-search-offline-tuning)
   - [Benchmark](#3-benchmark)
+  - [Runtime Registration (Experimental)](#4-runtime-registration-experimental)
 - [Module Reference](#module-reference)
 - [Common Usage Patterns](#common-usage-patterns)
 - [Troubleshooting](#troubleshooting)
@@ -703,6 +704,45 @@ Runs hipblaslt-bench on a workload without any tuning. Useful for measuring base
 # From a generator tuning YAML
 ./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
   --list my_gemm_config.yaml --devices=0
+```
+---
+
+### 4. Runtime Registration (Experimental)
+
+Instead of merging Geko's results and rebuilding hipBLASLt, `examples/tune_and_register.py` adds the tuned kernels that win to a user kernel library, a directory that any process loads when `HIPBLASLT_USER_KERNEL_LIBRARY` names it. It needs a `libhipblaslt.so` built with `HIPBLASLT_ENABLE_USER_KERNELS=ON`; see the script's help for the steps.
+
+```bash
+export HIPBLASLT_USER_KERNEL_LIBRARY=$PWD/user_kernel_lib
+python examples/tune_and_register.py -- ./bin/geko --tune --arch gfx950 --list sizes.yaml --workdir W
+```
+
+#### Checking that the tuned kernels are dispatched
+
+The script's last step, and `--replay`, report what the heuristic selects in a fresh process. To see what your own workload actually runs, log it with the library set and check the log. Each matmul call in a hipBLASLt log names the solution it launched, and user kernels have solution indices from 1610612736 (3·2^29) up:
+
+```bash
+export HIPBLASLT_USER_KERNEL_LIBRARY=$PWD/user_kernel_lib
+HIPBLASLT_LOG_MASK=64 HIPBLASLT_LOG_FILE=dispatch.yaml python my_application.py
+python examples/tune_and_register.py --check-dispatch dispatch.yaml
+```
+
+```
+size                                     arch       calls   tuned shipped  result
+M=384 N=37 B=1 K=5120 TN bf16_r          gfx950         4       0       4  not in library: shipped kernel 7187
+M=384 N=120 B=1 K=5120 TN bf16_r         gfx950         4       0       4  WARNING: mapped, but every call ran shipped kernel 7197
+M=384 N=16372 B=1 K=5120 TN bf16_r       gfx950         4       4       0  OK: tuned kernel 1610612757
+22 mapped size(s) are not called in this log
+```
+
+For every size in the log, it counts the calls that ran a tuned kernel from the library and those that ran a shipped one. Sizes the library doesn't map are listed with the shipped kernel they ran, under the library's archs, since the log doesn't record the GPU. It exits non-zero if any mapped size ran a shipped kernel. The table is also written to `dispatch_<library>/dispatch.csv`. `HIPBLASLT_LOG_MASK=64` is the log Geko takes as `--workload-log` and is written when the process exits; `HIPBLASLT_LOG_MASK=32` writes a `hipblaslt-bench` line per call as it happens, and either works.
+
+If no call ran a tuned kernel, the workload did not use the library: check that `HIPBLASLT_USER_KERNEL_LIBRARY` was set for that process, and that the `libhipblaslt.so` it loaded is the one built with the option (a PyTorch wheel can bring its own; `grep hipblaslt /proc/<pid>/maps` shows which). If only some sizes ran a shipped kernel while `--replay` reports the user kernel for them, the workload calls those sizes differently from how they were tuned.
+
+To confirm on the GPU side, `TENSILE_DB=0x8000` prints `Running kernel: <name>` for each call, and `rocprofv3 --kernel-trace` lists the kernels the GPU ran; compare the names with Geko's `kernel_tuned` in `results/raw_results.csv`. A tuned kernel can share its name with a shipped one, so the solution index is the reliable signal. `rocprofv3` puts `/opt/rocm/lib` first on the library path, so set `LD_LIBRARY_PATH` inside the profiled command if your hipBLASLt is elsewhere:
+
+```bash
+rocprofv3 --kernel-trace --output-format csv -d prof -- \
+  env LD_LIBRARY_PATH=/path/to/hipblaslt/lib python my_application.py
 ```
 ---
 

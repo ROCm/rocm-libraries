@@ -37,6 +37,16 @@ it and, for every size it maps, reports whether the heuristic returns the user
 kernel, how fast it is against the shipped kernel in hipblaslt-bench, and whether
 both match the host reference.
 
+--check-dispatch shows what your own workload ran, which can differ from what the
+heuristic returns here: run the workload with the library and a hipBLASLt log, then
+give the log. Each logged call names the solution it ran; for every size in the log,
+the script reports whether the calls ran a tuned kernel from the library or a shipped
+one, and fails if a size the library maps ran a shipped kernel:
+
+    export HIPBLASLT_USER_KERNEL_LIBRARY=/abs/path/user_kernel_lib
+    HIPBLASLT_LOG_MASK=64 HIPBLASLT_LOG_FILE=dispatch.yaml python train.py
+    python tune_and_register.py --check-dispatch dispatch.yaml
+
 Usage:
     export HIPBLASLT_USER_KERNEL_LIBRARY=/abs/path/user_kernel_lib
     python tune_and_register.py [OPTIONS] -- geko --tune --arch gfx950 --list sizes.yaml \\
@@ -44,6 +54,7 @@ Usage:
     python tune_and_register.py [OPTIONS] -- geko --search --list sizes.yaml --workdir W
     python tune_and_register.py [OPTIONS] --geko-workdir W    # a Geko run that finished
     python tune_and_register.py --replay
+    python tune_and_register.py --check-dispatch dispatch.yaml
 """
 from __future__ import annotations
 
@@ -55,14 +66,15 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, astuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from geko.user_kernels import (  # noqa: E402
     LIBRARY_ENV, TENSILE_TYPES, HipBLASLt, MatmulAlgo, Problem, UserKernels,
-    geko_payloads, problem_of, read_payload, saved_in, saved_mappings, user_kernel_library,
+    geko_payloads, is_user_kernel_index, problem_of, read_dispatch_log, read_payload, saved_in,
+    saved_mappings, user_kernel_library,
 )
 
 GEKO_TYPES = {v[1]: k for k, v in TENSILE_TYPES.items()}
@@ -356,6 +368,91 @@ def replay(args, library_root, children, outdir):
     return 0
 
 
+def check_dispatch(args, library_root, outdir):
+    """Report, from a workload's hipBLASLt log, which kernel each logged size ran."""
+    mapped = saved_mappings(library_root) if library_root.is_dir() else []
+    if not mapped:
+        return f"{library_root} maps no sizes; nothing to check"
+    archs = {}
+    for arch, p, _, _ in mapped:
+        archs.setdefault(size_key(p), (p, []))[1].append(arch)
+    library_archs = sorted({arch for arch, _, _, _ in mapped})
+    runs = {}  # size_key -> (problem, {solution index: calls})
+    for log in args.check_dispatch:
+        for d in read_dispatch_log(log):
+            per = runs.setdefault(size_key(d.problem), (d.problem, {}))[1]
+            per[d.index] = per.get(d.index, 0) + d.calls
+    total = sum(sum(per.values()) for _, per in runs.values())
+    print(f"library   {library_root} ({len(archs)} mapped sizes)")
+    print(f"log       {', '.join(str(p) for p in args.check_dispatch)} "
+          f"({len(runs)} sizes, {total} calls)")
+    if not runs:
+        return ("the log records no hipBLASLt matmul call; capture it with HIPBLASLT_LOG_MASK=64 "
+                "(written when the process exits) or 32, and HIPBLASLT_LOG_FILE")
+
+    print("\n" + "=" * 110)
+    print(f"{'size':40} {'arch':8} {'calls':>7} {'tuned':>7} {'shipped':>7}  result")
+    problems = {k: p for k, (p, _) in runs.items()} | {k: p for k, (p, _) in archs.items()}
+    rows, shipped_only, not_called, others, any_tuned = [], 0, 0, 0, False
+    for key in sorted(problems, key=lambda k: (k not in runs, astuple(problems[k]))):
+        p, per = problems[key], runs.get(key, (None, {}))[1]
+        arch = archs[key][1] if key in archs else library_archs
+        calls = sum(per.values())
+        tuned = {i: c for i, c in per.items() if is_user_kernel_index(i)}
+        shipped = {i: c for i, c in per.items() if not is_user_kernel_index(i)}
+        n_tuned, n_shipped = sum(tuned.values()), sum(shipped.values())
+        tuned_ids = ", ".join(str(i) for i in sorted(tuned))
+        ids = ", ".join(str(i) for i in sorted(shipped))
+        if key not in archs:
+            others += 1
+            result = (f"not in library: shipped kernel {ids}" if not n_tuned
+                      else f"not in this library, but ran user kernel {tuned_ids}")
+        elif not calls:
+            not_called += 1
+            result = "not called in this log"
+        elif not n_shipped:
+            result = f"OK: tuned kernel {tuned_ids}"
+        elif not n_tuned:
+            shipped_only += 1
+            result = f"WARNING: mapped, but every call ran shipped kernel {ids}"
+        else:
+            shipped_only += 1
+            result = f"WARNING: {n_shipped} of {calls} calls ran shipped kernel {ids}"
+        any_tuned |= key in archs and n_tuned > 0
+        if calls:
+            print(f"{label(p):40} {','.join(arch):8} {calls:>7} {n_tuned:>7} "
+                  f"{n_shipped:>7}  {result}")
+        rows.append(dict(asdict(p), arch=",".join(arch), in_library=key in archs, calls=calls,
+                         tuned_calls=n_tuned, shipped_calls=n_shipped,
+                         tuned_indices=" ".join(map(str, sorted(tuned))),
+                         shipped_indices=" ".join(map(str, sorted(shipped))), result=result))
+    if not_called:
+        print(f"{not_called} mapped size(s) are not called in this log")
+
+    with open(outdir / "dispatch.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    print(f"report: {outdir / 'dispatch.csv'}")
+
+    called = len(archs) - not_called
+    if not called:
+        return (f"the log calls none of the {len(archs)} mapped sizes; check that the workload's "
+                "GEMMs go through hipBLASLt with these sizes and data types")
+    if shipped_only:
+        if not any_tuned:
+            print(f"\nno call ran a tuned kernel, so the workload likely did not use the library: "
+                  f"check that {LIBRARY_ENV} was set for it and that the libhipblaslt.so it "
+                  "loaded was built with HIPBLASLT_ENABLE_USER_KERNELS=ON")
+        else:
+            print("\nif --replay reports the user kernel for a size that ran a shipped kernel "
+                  "here, the workload calls it differently from the tuned problem")
+        return f"{shipped_only} of {called} mapped size(s) called ran a shipped kernel"
+    print(f"\nall {called} mapped size(s) the log calls ran their tuned kernel"
+          + (f"; the {others} other size(s) are not in the library" if others else ""))
+    return 0
+
+
 def main(args):
     library_root = user_kernel_library()
     problems = check_library(library_root)
@@ -368,6 +465,10 @@ def main(args):
         outdir = Path.cwd() / f"replay_{library_root.name}"
         outdir.mkdir(parents=True, exist_ok=True)
         return replay(args, library_root, Children(args, outdir), outdir)
+    if args.check_dispatch:
+        outdir = Path.cwd() / f"dispatch_{library_root.name}"
+        outdir.mkdir(parents=True, exist_ok=True)
+        return check_dispatch(args, library_root, outdir)
 
     print(f"library   {library_root}" + ("" if library_root.is_dir() else " (new)"))
     t0 = time.time()
@@ -471,6 +572,9 @@ def main(args):
 
     report(entries, outdir, args.dry_run)
     print(f"\nto use the library:  {LIBRARY_ENV}={library_root} <your workload>")
+    print(f"to check the workload runs the tuned kernels:  {LIBRARY_ENV}={library_root} "
+          "HIPBLASLT_LOG_MASK=64 HIPBLASLT_LOG_FILE=dispatch.yaml <your workload>, then "
+          f"{Path(__file__).name} --check-dispatch dispatch.yaml")
     print(f"done in {time.time() - t0:.0f}s")
     return 0
 
@@ -739,6 +843,10 @@ def parse_args():
     ap.add_argument("--replay", action="store_true",
                     help="tune nothing and only read the library: in a fresh process, report "
                          "what the heuristic selects for every size the library maps")
+    ap.add_argument("--check-dispatch", nargs="+", type=Path, default=None, metavar="LOG",
+                    help="tune nothing and only read the library: from a hipBLASLt log of your "
+                         "workload (HIPBLASLT_LOG_MASK=64 or 32), report which kernel each "
+                         "mapped size ran")
     ap.add_argument("--hipblaslt", default=None, metavar="PATH",
                     help="hipBLASLt checkout whose build/release/clients/hipblaslt-bench "
                          "times kernels (default: Geko's --hipblaslt, else "
@@ -752,8 +860,10 @@ def parse_args():
     ap.add_argument("--_out", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     args.geko = geko
-    if not args._stage and not args.replay and bool(geko) == bool(args.geko_workdir):
-        ap.error("give a Geko command after `--`, or --geko-workdir, or --replay")
+    if (not args._stage and not args.replay and not args.check_dispatch
+            and bool(geko) == bool(args.geko_workdir)):
+        ap.error("give a Geko command after `--`, or --geko-workdir, or --replay, "
+                 "or --check-dispatch")
     if geko and not any(Path(t).name == "geko" for t in geko[:3]):
         ap.error(f"expected a geko command after `--`, got {' '.join(geko[:3])!r}")
     return args

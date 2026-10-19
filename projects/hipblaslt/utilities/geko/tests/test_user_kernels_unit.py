@@ -112,5 +112,32 @@ def test_read_payload_names_solutions(tmp_path: Path) -> None:
     assert set(pl.names) == {3, 7} and pl.problem_types[7]["transA"] is True
 
 
+def test_user_kernel_index_range() -> None:
+    assert not uk.is_user_kernel_index(7187)
+    assert not uk.is_user_kernel_index((3 << 29) - 1)
+    assert uk.is_user_kernel_index(3 << 29)
+    assert uk.is_user_kernel_index((1 << 31) - 1)
+    assert not uk.is_user_kernel_index(1 << 31)
+
+
+def test_read_dispatch_log_reads_both_log_formats(tmp_path: Path) -> None:
+    mask32 = ("hipblaslt-bench --api_method c -m 384 -n 36 -k 5120 --lda 5120 --ldb 5120 "
+              "--alpha -1.000000 --transA T --transB N --batch_count 1 --a_type bf16_r "
+              "--b_type bf16_r --c_type f32_r --d_type f32_r --compute_type f32_r "
+              "--algo_method index --solution_index 1610612736 --any_stride --iters 4")
+    mask64 = ("- { function: matmul, M: 384, N: 120, K: 5120, transA: T, transB: N, "
+              "batch_count: 2, a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, "
+              "algo_method: 2, solution_index: 7197, flush: false, call_count: 5 }")
+    log = tmp_path / "dispatch.log"
+    log.write_text("\n".join([mask32, mask32, mask64,
+                              "- { function: matmul_heuristic, M: 1 }",
+                              mask32.replace("bf16_r", "x9_r"), "unrelated line", ""]))
+    got = [(d.problem.trans, d.problem.m, d.problem.n, d.problem.batch, d.problem.k,
+            d.problem.a_type, d.problem.c_type, d.index, d.calls)
+           for d in uk.read_dispatch_log(log)]
+    assert got == [("TN", 384, 36, 1, 5120, "BFloat16", "Float", 1610612736, 1)] * 2 + [
+        ("TN", 384, 120, 2, 5120, "BFloat16", "Float", 7197, 5)]
+
+
 def test_mapped_libraries_finds_libc() -> None:
     assert any("libc" in Path(p).name for p in uk.mapped_libraries("libc"))
