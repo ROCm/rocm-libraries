@@ -319,13 +319,8 @@ void testing_spsv_csc(Arguments argus)
             }
         }
 
-        J               struct_pivot  = -1;
-        J               numeric_pivot = -1;
-        int             device_id;
-        hipDeviceProp_t device_prop{};
-        CHECK_HIP_ERROR(hipGetDevice(&device_id));
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&device_prop, device_id));
-
+        J struct_pivot  = -1;
+        J numeric_pivot = -1;
         host_csrsv(trans_gold,
                    m,
                    nnz,
@@ -339,8 +334,7 @@ void testing_spsv_csc(Arguments argus)
                    uplo_gold,
                    idx_base,
                    &struct_pivot,
-                   &numeric_pivot,
-                   device_prop.warpSize);
+                   &numeric_pivot);
 
         if(struct_pivot == -1 && numeric_pivot == -1)
         {
