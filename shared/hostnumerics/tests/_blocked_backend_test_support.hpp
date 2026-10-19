@@ -84,7 +84,9 @@ Tensor expectedFloatResult(const GemmTestCase& problem) {
     const auto selected = problem.outputSelection.indices(problem.d.elementCount());
     for (const size_t linearIndex : selected) {
         const auto coordinates =
-            problem.d.shape().coordinates(linearIndex, problem.outputSelection.indexOrder());
+            problem.outputSelection.indexOrder().empty()
+                ? problem.d.shape().coordinates(linearIndex)
+                : problem.d.shape().coordinates(linearIndex, problem.outputSelection.indexOrder());
         const size_t row = coordinates[0];
         const size_t column = coordinates[1];
         float accumulation = 0.0f;

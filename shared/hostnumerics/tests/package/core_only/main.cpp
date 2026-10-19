@@ -39,8 +39,8 @@ TEST(Package, CoreOnly) {
          roc::hostnumerics::broadcastShapes(roc::hostnumerics::Shape{2, 1},
                                             roc::hostnumerics::Shape{1, 3}) ==
              roc::hostnumerics::Shape{2, 3} &&
-         shape.linearIndex(coordinates, std::vector<size_t>{}) == 5 &&
-         shape.coordinates(5, std::vector<size_t>{}) == std::vector<size_t>({1, 2}) &&
+         shape.linearIndex(coordinates) == 5 &&
+         shape.coordinates(5) == std::vector<size_t>({1, 2}) &&
          mxTensor.type() == roc::hostnumerics::ScalarType::Float4E2M1 &&
          mxTensor.shape().elementCount() == 8));
 }
