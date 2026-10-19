@@ -368,12 +368,10 @@ namespace
             EXPECT_TRUE(
                 rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", true));
             EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_lazy.dat", true));
-            EXPECT_FALSE(
-                rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", true));
+            EXPECT_FALSE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", true));
 
             // Per-arch scheme: only TensileLibrary_gfx* filenames match.
-            EXPECT_TRUE(
-                rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", false));
+            EXPECT_TRUE(rocblas_tensile_is_library_filename("TensileLibrary_gfx1100.dat", false));
             EXPECT_FALSE(
                 rocblas_tensile_is_library_filename("TensileLibrary_lazy_gfx1100.dat", false));
 
