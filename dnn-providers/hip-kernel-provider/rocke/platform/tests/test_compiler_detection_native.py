@@ -327,7 +327,7 @@ import rocke_engine
 kernel = IRBuilder("compiler_requirement").kernel
 serialized = serialize(kernel)
 for lower in (
-    lambda: lower_llvm.lower_kernel_to_llvm(kernel),
+    lambda: lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950"),
     lambda: rocke_engine.lower_serialized_ir(serialized, arch="gfx950"),
 ):
     try:
@@ -338,12 +338,12 @@ for lower in (
         raise AssertionError("AUTO emitted IR without compiler evidence")
 
 for flavor in lower_llvm.LLVM_FLAVORS:
-    py = lower_llvm.lower_kernel_to_llvm(kernel, llvm_flavor=flavor)
+    py = lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=flavor)
     native = rocke_engine.lower_serialized_ir(serialized, arch="gfx950", flavor=flavor)
     assert py == native
 
 os.environ["ROCKE_LLVM_FLAVOR"] = "llvm20"
-assert lower_llvm.lower_kernel_to_llvm(kernel) == rocke_engine.lower_serialized_ir(
+assert lower_llvm.lower_kernel_to_llvm(kernel, arch="gfx950") == rocke_engine.lower_serialized_ir(
     serialized, arch="gfx950")
 try:
     comgr.build_hsaco_from_llvm_ir(py)
