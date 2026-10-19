@@ -591,7 +591,7 @@ namespace TensileLite::Client::hostnumerics
                 = roc::hostnumerics::detail::ShapeAccess::tryElementCount(problem.d().sizes());
             if(!logicalCount)
                 return failure(TranslationFailureCode::InvalidDescriptor,
-                               "Tensor shape product of nonzero extents exceeds size_t.");
+                               "Tensor shape element count exceeds size_t.");
             if(!roc::hostnumerics::detail::ShapeAccess::isValidIndexOrder(
                    problem.d().dimensions(), globalSelection.indexOrder()))
                 return failure(TranslationFailureCode::InvalidDescriptor,

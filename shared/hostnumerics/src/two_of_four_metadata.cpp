@@ -28,6 +28,7 @@ Shape validateTwoOfFourMetadataProblem(const TwoOfFourMetadataArguments& problem
     metadataDimensions[problem.axis] = (sparsityGroups + 1) / 2;
     const Shape metadataShape(std::move(metadataDimensions));
 
+    if (problem.retainedIndices.elementCount() == 0) return metadataShape;
     const size_t lineCount =
         projectWithoutAxis(problem.retainedIndices.shape(), problem.axis).elementCount();
     std::vector<size_t> retainedCoordinates(problem.retainedIndices.shape().rank(), 0);

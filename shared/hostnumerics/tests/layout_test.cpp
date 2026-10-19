@@ -13,8 +13,8 @@ void testLayoutBasics() {
             "Contiguous compatibility API changed dimension order.");
     require(rowMajor.shape().rank() == 2 && rowMajor.shape().dimensions().size() == 2 &&
                 rowMajor.shape().extent(0) == 2 && rowMajor.shape().elementCount() == 6 &&
-                rowMajor.shape().elementCount(0, 1) == 2 &&
-                rowMajor.shape().project(std::array<size_t, 1>{1}).elementCount() == 3 &&
+                rowMajor.shape().fromDimensions(std::array<size_t, 1>{0}).elementCount() == 2 &&
+                rowMajor.shape().fromDimensions(std::array<size_t, 1>{1}).elementCount() == 3 &&
                 rowMajor.stride(0) == 3 && rowMajor.stride(1) == 1,
             "Last-dimension-fastest layout helper mismatch.");
     require(columnMajor.stride(0) == 1 && columnMajor.stride(1) == 2,

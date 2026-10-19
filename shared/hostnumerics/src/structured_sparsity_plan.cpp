@@ -93,7 +93,9 @@ StructuredSparsityPlan validateStructuredSparsityProblem(
     plan.compressedShape = compressedShape;
     plan.metadataShape = std::move(metadataShape);
     plan.groupsPerLine = groupsPerLine;
-    plan.lineCount = projectWithoutAxis(inputShape, problem.pattern.axis).elementCount();
+    plan.lineCount = inputShape.elementCount() == 0
+                         ? 0
+                         : projectWithoutAxis(inputShape, problem.pattern.axis).elementCount();
 
     if (problem.pattern.selection == StructuredSparsitySelection::Fixed) {
         if (problem.pattern.fixedPositions.size() != problem.pattern.retainedElements)
