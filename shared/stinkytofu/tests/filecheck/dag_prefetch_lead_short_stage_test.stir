@@ -1,7 +1,8 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=2 --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --prefetch-lead-wmmas=25 --print-output
 #
-# Lead requested, but the block's stages are shorter than PrefetchLeadMinStageWmmas (64 by
-# default), so it runs with no lead: same schedule as dag_prefetch_lead_off.stir.
+# Multi-stage lead requested, but the block's stages are shorter than
+# PrefetchLeadMinStageWmmas (64 by default), so it runs with no lead: same schedule as
+# dag_prefetch_lead_off.stir. A single-stage lead is kept (dag_prefetch_lead.stir).
 
 # CHECK-LABEL: @prefetch_lead
 # CHECK: v_wmma_scale

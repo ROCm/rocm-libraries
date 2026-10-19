@@ -111,9 +111,11 @@ struct _rocblaslt_handle
     // Handle-level uniform-summation-order request. 0 off, 1 on; see hipblaslt.h.
     int32_t uniform_summation_order = 0;
 
+    // -1: rocRoller (or the checked-in KFA kernels) for block-scaled GEMMs.
+    //  1: force that path. 0: Tensile only. Parsed even when rocRoller is not linked.
+    int useRocRoller = -1;
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
-    int   useRocRoller     = -1;
 #endif
 
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.

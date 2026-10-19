@@ -68,8 +68,8 @@ namespace hipblaslt_bench
             return "min_iters (" + std::to_string(cfg.min_iters) + ") > max_iters ("
                    + std::to_string(cfg.max_iters) + ")";
         if(cfg.max_measure_time > 0.0f && cfg.measure_time > cfg.max_measure_time)
-            return "measure_time (" + std::to_string(cfg.measure_time)
-                   + " ms) > max_measure_time (" + std::to_string(cfg.max_measure_time) + " ms)";
+            return "measure_time (" + std::to_string(cfg.measure_time) + " ms) > max_measure_time ("
+                   + std::to_string(cfg.max_measure_time) + " ms)";
         if(cfg.max_measure_time <= 0.0f && cfg.max_iters <= 0)
             return "adaptive timing requires a ceiling: set max_measure_time or max_iters > 0";
         if(cfg.stability_threshold > 0.0f

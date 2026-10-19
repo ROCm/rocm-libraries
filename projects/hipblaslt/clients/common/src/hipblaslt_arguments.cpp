@@ -25,9 +25,9 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
-#include "benchmark_stats.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <iomanip>
 #include <istream>
 #include <ostream>
