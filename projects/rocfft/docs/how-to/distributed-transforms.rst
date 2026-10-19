@@ -56,8 +56,7 @@ Additionally, rocFFT MPI support requires a GPU-aware MPI library
 that supports transferring data to and from HIP devices.
 
 If the library is also built with ``ROCFFT_RCCL_ENABLE=ON``, multi-process
-plans may use RCCL for the transpose when every rank's bricks use exactly
-one device.
+plans may use RCCL for the transpose.
 
 Support for MPI transforms was introduced in ROCm 6.3 with rocFFT
 1.0.29.
