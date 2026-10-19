@@ -30,6 +30,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/partition.h>
 
+#include _THRUST_STD_INCLUDE(iterator)
+
 #include <string>
 
 #include "bench_utils.hpp"
@@ -74,7 +76,7 @@ struct partition_benchmark : public primbench::benchmark_interface
         in.cbegin(),
         in.cend(),
         out.begin(),
-        thrust::make_reverse_iterator(out.begin() + m_items),
+        _THRUST_STD::make_reverse_iterator(out.begin() + m_items),
         select_op);
     });
   }
