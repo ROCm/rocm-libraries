@@ -102,6 +102,48 @@ class TestMoeFusedMegaLdsBudget(unittest.TestCase):
                     mega_lds_pool_bytes(_lds_allocs(spec)), low._smem_pool_size
                 )
 
+    def test_accounting_covers_a_vector_segment_after_a_small_one(self):
+        # A 2-byte buffer followed by one read as <4 x float>: the packer
+        # aligns the vector segment to 16 bytes (its access claim), not the
+        # 4 bytes of its element rule. The accounting must not count less.
+        from rocke.core import lower_llvm
+        from rocke.core.ir import F16, F32, IRBuilder, PtrType, type_bytes
+        from rocke.instances.common._moe_fused_mega_lds import (
+            LdsAlloc,
+            mega_lds_pool_bytes,
+        )
+
+        builder = IRBuilder("mega_lds_vector_after_small")
+        out = builder.param("out", PtrType(F32, "global"))
+        zero = builder.const_i32(0)
+        head = builder.smem_alloc(F16, [1], name_hint="head")
+        vector = builder.smem_alloc(F32, [4], name_hint="vector")
+        tail = builder.smem_alloc(F16, [1], name_hint="tail")
+        half = builder.trunc_f32_to_f16(builder.const_f32(1.0))
+        # The small buffers are written before and after the vector traffic,
+        # so all three are live together and get disjoint segments.
+        builder.smem_store_f16(head, [zero], half)
+        builder.smem_store_f16(tail, [zero], half)
+        loaded = builder.global_load_vN(out, zero, F32, 4, align=16)
+        builder.smem_store_vN(vector, [zero], loaded, 4)
+        reloaded = builder.smem_load_vN(vector, zero, dtype=F32, n=4)
+        builder.global_store_vN(out, zero, reloaded, 4)
+        builder.smem_store_f16(head, [zero], half)
+        builder.smem_store_f16(tail, [zero], half)
+        builder.ret()
+
+        lowerer = lower_llvm._Lowerer(builder.kernel, arch="gfx950")
+        lowerer._collect_smem(builder.kernel.body)
+        lowerer._compute_smem_layout()
+        vector_global = lowerer._smem_storage_name[vector.name]
+        self.assertEqual(lowerer._smem_offsets[vector_global], 16)
+        allocs = [
+            LdsAlloc("head", type_bytes(F16), 1),
+            LdsAlloc("vector", type_bytes(F32), 4),
+            LdsAlloc("tail", type_bytes(F16), 1),
+        ]
+        self.assertGreaterEqual(mega_lds_pool_bytes(allocs), lowerer._smem_pool_size)
+
     def test_shipped_geometry_costs_the_measured_bytes(self):
         from rocke.instances.common._moe_fused_mega_lds import mega_lds_pool_bytes
         from rocke.instances.common.moe_fused_mega import _lds_allocs

@@ -28,6 +28,7 @@ from rocke.core.ir import (
     SmemType,
     VectorType,
     type_bits,
+    type_bytes,
 )
 from rocke.tests.engines import lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts
@@ -42,6 +43,20 @@ def test_a_vector_occupies_count_times_its_element_width():
     assert type_bits(VectorType(I32, 4)) == 128
     assert type_bits(VectorType(ir.FP4E2M1, 32)) == 128
     assert type_bits(VectorType(ir.FP6E2M3, 32)) == 192
+
+
+def test_a_whole_byte_type_occupies_its_bits_over_eight_bytes():
+    assert type_bytes(ir.F64) == 8
+    assert type_bytes(ir.FP8E4M3) == 1
+    assert type_bytes(VectorType(F16, 8)) == 16
+
+
+def test_a_sub_byte_type_has_no_byte_width():
+    message = (
+        "type_bytes failed - type=fp6e2m3 (6 bits), expected a whole number of bytes"
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
+        type_bytes(ir.FP6E2M3)
 
 
 @pytest.mark.parametrize(

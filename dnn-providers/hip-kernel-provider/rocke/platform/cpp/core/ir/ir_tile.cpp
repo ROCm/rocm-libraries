@@ -89,30 +89,6 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
-static int rocke_elem_bytes_name(const char* elem_name)
-{
-    if(!elem_name)
-    {
-        return 2;
-    }
-    if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-       || strcmp(elem_name, "bf8e5m2") == 0)
-    {
-        return 1;
-    }
-    if(strcmp(elem_name, "f64") == 0)
-    {
-        return 8;
-    }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
-       || strcmp(elem_name, "tf32") == 0)
-    {
-        return 4;
-    }
-    return 2;
-}
-
 /* Element types an LDS vector access (smem_load_vN and smem_store_vN) admits,
  * in the order its refusal lists them (Python core/ir.py
  * _SMEM_VECTOR_ELEMENTS). One list for both directions keeps the pair
@@ -337,7 +313,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    elem_bytes = rocke_elem_bytes_name(elem_name);
+    elem_bytes = rocke_i_type_bytes(value->type->elem);
     ops = rocke_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
     if(!ops)
     {
@@ -347,14 +323,8 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    /* Mirrors ir.py smem_store_vN. The natural alignment is n * elem_bytes,
-     * but that only holds if every address the store can land on is that
-     * aligned. An LDS tile advances by its innermost dimension per row, so a
-     * pad making that dimension a non-multiple of n -- lds_k_pad's whole
-     * purpose -- leaves alternate rows off the natural boundary. gcd bounds
-     * the claim to what every row start actually guarantees. Overstating
-     * alignment is undefined behaviour even where the hardware tolerates the
-     * access; understating it only affects instruction selection. */
+    /* Mirrors ir.py smem_store_vN: bounded by what every row start of a padded
+     * tile guarantees (rocke_i_smem_vec_align_elems). */
     rocke_attr_set_int(
         b,
         &attrs,

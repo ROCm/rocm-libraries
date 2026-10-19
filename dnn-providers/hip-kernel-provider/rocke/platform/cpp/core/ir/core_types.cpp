@@ -297,6 +297,20 @@ int rocke_i_type_bits(const rocke_type_t* t)
     return rocke_require_dtype_info(t->name)->encoded_bits;
 }
 
+/* Mirrors core/ir.py::type_bytes; the refusal text is the Python engine's. */
+int rocke_i_type_bytes(const rocke_type_t* t)
+{
+    const int bits = rocke_i_type_bits(t);
+    if(bits % 8 != 0)
+    {
+        throw ckc::ValueError(ckc::format_error(
+            "type_bytes failed - type=%s (%d bits), expected a whole number of bytes",
+            t->name,
+            bits));
+    }
+    return bits / 8;
+}
+
 /* Python core/ir.py::_buffer_access_bytes; the texts are the Python engine's. */
 int rocke_i_buffer_access_bytes(
     const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap)

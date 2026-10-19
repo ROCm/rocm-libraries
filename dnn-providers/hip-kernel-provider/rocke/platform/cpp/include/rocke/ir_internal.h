@@ -178,7 +178,7 @@ int rocke_i_count_of(const rocke_type_t* t);
  * of `vec` -- what a bank-conflict pad such as lds_k_pad does -- alternate rows
  * start off the natural boundary. Returns gcd(vec, innermost_dim), or `vec`
  * when the shape is unavailable. Multiply by the element size for bytes.
- * Mirrors lower_llvm._smem_vec_align / ir.py smem_store_vN. */
+ * Mirrors ir.py smem_vec_align_elems. */
 int rocke_i_smem_vec_align_elems(const rocke_type_t* smem_type, int vec);
 /* VectorType(elem, count) allocated in `arena`, for callers that hold an arena
  * but no builder (the lowerers). `elem` must be non-NULL; NULL on OOM. The
@@ -199,6 +199,12 @@ const rocke_type_t* rocke_require_ir_type(const char* dtype);
  * (memory, not a value) and ckc::ValueError "unknown dtype '<name>'" for a
  * scalar with no format. */
 int rocke_i_type_bits(const rocke_type_t* t);
+
+/* The number of whole bytes a value of type `t` occupies (Python
+ * core/ir.py::type_bytes): rocke_i_type_bits divided by eight. Throws
+ * ckc::ValueError "type_bytes failed - type=<name> (<bits> bits), expected a
+ * whole number of bytes" for a width that is not whole bytes. */
+int rocke_i_type_bytes(const rocke_type_t* t);
 
 /* The bytes one buffer access of `count` `elem` elements moves (Python
  * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole

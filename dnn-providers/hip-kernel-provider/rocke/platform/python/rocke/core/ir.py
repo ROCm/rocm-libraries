@@ -987,6 +987,53 @@ def type_bits(t: Type) -> int:
     return dtype_info(t.name).encoded_bits
 
 
+def element_type(t: Type) -> Type:
+    """The element type of a vector type, or ``t`` itself for a scalar.
+
+    The C++ engine's twin is ``rocke_i_elem_of``.
+    """
+    return t.elem if isinstance(t, VectorType) else t
+
+
+def type_bytes(t: Type) -> int:
+    """The number of whole bytes a value of IR type ``t`` occupies.
+
+    :func:`type_bits` divided by eight. Raises ``ValueError`` for a type whose
+    width is not a whole number of bytes (a packed sub-byte format), which has
+    no byte width to give.
+    """
+    bits = type_bits(t)
+    if bits % 8:
+        raise ValueError(
+            f"type_bytes failed - type={t.name} ({bits} bits), "
+            "expected a whole number of bytes"
+        )
+    return bits // 8
+
+
+def smem_vec_align_elems(smem_type: Type, vec: int) -> int:
+    """The element count every ``vec``-wide access into LDS tile type
+    ``smem_type`` is guaranteed to start on a multiple of.
+
+    The natural answer is ``vec``, but that only holds if every address the
+    access can land on is that aligned. An LDS tile is indexed
+    ``(..., row, col)`` with ``col`` a multiple of ``vec``, so the address
+    advances by the innermost dimension per row. When that dimension is not a
+    multiple of ``vec`` -- which is exactly what a bank-conflict pad such as
+    ``lds_k_pad`` does -- alternate rows start off the natural boundary.
+    ``gcd(vec, innermost)`` bounds the claim; outer strides are products that
+    include the innermost dimension, so they never bind tighter. A type with no
+    shape gives ``vec``. Multiply by the element size for bytes.
+
+    An alignment attribute is an assertion to LLVM: overstating it is undefined
+    behaviour even where the hardware tolerates the access, while understating
+    it only costs instruction selection. The C++ engine's twin is
+    ``rocke_i_smem_vec_align_elems``.
+    """
+    shape = getattr(smem_type, "shape", None)
+    return _gcd(int(vec), int(shape[-1])) if shape else int(vec)
+
+
 def _check_bitcast_width(verb: str, source: Type, target: Type, hint: str) -> None:
     if isinstance(source, PtrType) or isinstance(target, PtrType):
         raise TypeError(
@@ -3919,28 +3966,15 @@ class IRBuilder:
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
-            elem_bytes = 1
         elif elem_name == "f64":
             allowed_n = (2,)
-            elem_bytes = 8
         else:
             allowed_n = (2, 4, 8)
-            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
-        # The natural alignment is n * elem_bytes, but that only holds if every
-        # address the store can land on is that aligned. An LDS tile advances by
-        # its innermost dimension per row, so a pad that makes that dimension a
-        # non-multiple of n -- lds_k_pad's whole purpose -- leaves alternate rows
-        # off the natural boundary. gcd bounds the claim to what every row start
-        # actually guarantees. Overstating alignment is undefined behaviour even
-        # where the hardware tolerates the access; understating it only affects
-        # instruction selection.
-        shape = getattr(smem.type, "shape", None)
-        align_elems = _gcd(n, int(shape[-1])) if shape else n
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -3948,7 +3982,9 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": align_elems * elem_bytes,
+                # Bounded by what every row start of a padded tile guarantees.
+                "align": smem_vec_align_elems(smem.type, n)
+                * type_bytes(value.type.elem),
             },
         )
 
