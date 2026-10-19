@@ -529,7 +529,7 @@ struct rocfft_plan_t
     bool BuildMultiDevicePlan();
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // populate the rccl communicator from the plan's world locations
+    // populate the rccl communicator from the plan's brick locations
     // before any plan-building path is chosen. empty when not applicable.
     // multi-process init is collective; local failure is synchronized so
     // no rank enters ncclCommInitRank alone. on failure rccl is left
