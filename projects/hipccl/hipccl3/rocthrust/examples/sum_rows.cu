@@ -1,3 +1,4 @@
+<<<<<<< ours
 // Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -18,72 +19,60 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <thrust/device_vector.h>
-#include <thrust/functional.h>
-#include <thrust/generate.h>
-#include <thrust/host_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/for_each.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <thrust/random.h>
 #include <thrust/reduce.h>
+#include <thrust/tabulate.h>
+#include <thrust/universal_vector.h>
 
+#include <iomanip>
 #include <iostream>
 
 #include "include/host_device.h"
 
-// convert a linear index to a row index
-template <typename T>
-struct linear_index_to_row_index
-{
-  T C; // number of columns
-
-  __host__ __device__ linear_index_to_row_index(T C)
-      : C(C)
-  {}
-
-  __host__ __device__ T operator()(T i)
-  {
-    return i / C;
-  }
-};
-
 int main(void)
 {
-  int R = 5; // number of rows
-  int C = 8; // number of columns
-  thrust::default_random_engine rng;
-  thrust::uniform_int_distribution<int> dist(10, 99);
+  const int rows = 32;
+  const int cols = 16;
 
-  // initialize data
-  thrust::host_vector<int> host_array(R * C);
-  for (auto& e : host_array)
-  {
-    e = dist(rng);
-  }
-  thrust::device_vector<int> array = host_array;
+  // Create a 2D row-major multidimensional array of ints.
+  thrust::universal_vector<int> data(rows * cols, 42);
+  int* M         = thrust::raw_pointer_cast(data.data());
+  const int size = rows * cols;
 
-  // allocate storage for row sums and indices
-  thrust::device_vector<int> row_sums(R);
-  thrust::device_vector<int> row_indices(R);
+  // Create an iterator to the flat linear index space for the multidimensional array.
+  auto flat_idx = thrust::counting_iterator<int>(0);
 
-  // compute row sums by summing values with equal row indices
-  thrust::reduce_by_key(
-    thrust::make_transform_iterator(thrust::counting_iterator<int>(0), linear_index_to_row_index<int>(C)),
-    thrust::make_transform_iterator(thrust::counting_iterator<int>(0), linear_index_to_row_index<int>(C)) + (R * C),
-    array.begin(),
-    row_indices.begin(),
-    row_sums.begin(),
-    _THRUST_STD::equal_to<int>(),
-    _THRUST_STD::plus<int>());
+  // Fill the array with pseudorandom inputs in parallel on the device.
+  thrust::tabulate(thrust::device, M, M + size, [] __host__ __device__(int flat) {
+    thrust::default_random_engine rng;
+    thrust::uniform_int_distribution<int> dist(0, 3);
+    rng.discard(flat); // Advance to the current element's position.
+    return dist(rng);
+  });
 
-  // print data
-  for (int i = 0; i < R; i++)
-  {
+  // Create a range to the row index of each element.
+  auto row_idx_begin = thrust::make_transform_iterator(flat_idx, [=] __host__ __device__(int flat) {
+    return flat / cols;
+  });
+  auto row_idx_end   = row_idx_begin + size;
+
+  // Sum each row, storing the result in a new vector.
+  thrust::universal_vector<int> sums(rows);
+  thrust::reduce_by_key(thrust::device, row_idx_begin, row_idx_end, M, thrust::make_discard_iterator(), sums.begin());
+
+  // Output the result.
+  thrust::for_each_n(thrust::seq, flat_idx, rows, [&](int i) {
     std::cout << "[ ";
-    for (int j = 0; j < C; j++)
-    {
-      std::cout << array[i * C + j] << " ";
-    }
-    std::cout << "] = " << row_sums[i] << "\n";
-  }
+    thrust::for_each_n(thrust::seq, flat_idx, cols, [&](int j) {
+      std::cout << std::setw(2) << M[i * cols + j] << " ";
+    });
+    std::cout << "] = " << sums[i] << "\n";
+  });
 
   return 0;
 }
