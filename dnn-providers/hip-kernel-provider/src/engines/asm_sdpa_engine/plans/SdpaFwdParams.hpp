@@ -6,6 +6,7 @@
 #include "SdpaPlanUtils.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
@@ -27,6 +28,23 @@ struct SdpaFwdParams
     int64_t vUid;
     int64_t oUid;
     int64_t lseUid = -1; // LSE output, -1 = disabled
+
+    /// FP8 Q/K/V descale tensor UIDs. The three are always set together or all absent
+    /// (the non-fp8 path), so they are modeled as one optional struct rather than three
+    /// independent sentinels. When present they dequantize the fp8 Q/K/V inputs; the
+    /// kernel reads them via ptr_*_descale.
+    struct DescaleUids
+    {
+        int64_t q; ///< Q descale tensor UID.
+        int64_t k; ///< K descale tensor UID.
+        int64_t v; ///< V descale tensor UID.
+    };
+    std::optional<DescaleUids> descaleUids;
+
+    // Bytes per element for the Q/K/V inputs: 1 for fp8, 2 for bf16. The output is
+    // always 2-byte BF16 regardless. Element strides are multiplied by this to get
+    // the byte strides the kernel expects.
+    unsigned int inBytesPerElement = 2;
 
     // Tensor dimensions
     unsigned int batchSize; // B

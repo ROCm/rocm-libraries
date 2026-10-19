@@ -286,7 +286,6 @@ typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  * \brief \p rocsparse_spildlt0_descr is a structure holding the rocSPARSE spildlt0
  * descriptor data. It must be initialized using
@@ -294,6 +293,15 @@ typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
  * end using rocsparse_spildlt0_descr_destroy().
  */
 typedef struct _rocsparse_spildlt0_descr* rocsparse_spildlt0_descr;
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ * \brief \p rocsparse_spsort_descr is a structure holding the rocSPARSE spsort
+ * descriptor data. It must be initialized using
+ * the rocsparse_spsort_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spsort_descr_destroy().
+ */
+typedef struct _rocsparse_spsort_descr* rocsparse_spsort_descr;
 #endif
 
 #ifdef __cplusplus
@@ -592,11 +600,10 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
-// The deprecated u16 index type is removed from the public enum when
-// ROCSPARSE_WITH_U16_REMOVED is defined, but it is retained internally
-// (ROCSPARSE_KEEP_INTERNAL_U16) so that the library can still recognize and
-// gracefully reject the value without triggering -Wswitch warnings.
-#if !defined(ROCSPARSE_WITH_U16_REMOVED) || defined(ROCSPARSE_KEEP_INTERNAL_U16)
+// The deprecated u16 index type is retained internally (ROCSPARSE_KEEP_INTERNAL_U16)
+// so that the library can still recognize and gracefully reject the value without
+// triggering -Wswitch warnings.
+#ifdef ROCSPARSE_KEEP_INTERNAL_U16
     rocsparse_indextype_u16
     [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
                  "release. Use "
@@ -1160,6 +1167,11 @@ typedef enum rocsparse_sptrsm_input_
 typedef enum rocsparse_sptrsm_output_
 {
     rocsparse_sptrsm_output_zero_pivot_position /**< Get zero pivot \p int64_t based position for output from the SpTRSM descriptor and synchronously return zero_pivot. */
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    ,
+    rocsparse_sptrsm_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpTRSM calculation for output from the SpTRSM descriptor. */
+    rocsparse_sptrsm_output_singularity_position /**< Get the singularity \p int64_t based position for output from the SpTRSM descriptor. */
+#endif
 } rocsparse_sptrsm_output;
 
 /*! \ingroup types_module
@@ -1268,7 +1280,6 @@ typedef enum rocsparse_spilu0_output_
     rocsparse_spilu0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILU0 descriptor. */
 } rocsparse_spilu0_output;
 
-#ifdef ROCSPARSE_WITH_ILDLT0
 /*! \ingroup types_module
  *  \brief List of SpILDLT0 algorithms.
  *
@@ -1328,7 +1339,6 @@ typedef enum rocsparse_spildlt0_output_
     rocsparse_spildlt0_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during SpILDLT0 calculation for output from the SpILDLT0 descriptor. */
     rocsparse_spildlt0_output_singularity_position, /**< Get the singularity \p int64_t based position for output from the SpILDLT0 descriptor. */
 } rocsparse_spildlt0_output;
-#endif /* ROCSPARSE_WITH_ILDLT0 */
 
 /*! \ingroup types_module
  *  \brief List of SpGEAM stages.
@@ -1390,6 +1400,46 @@ typedef enum rocsparse_spgeam_alg_
 {
     rocsparse_spgeam_alg_default = 0 /**< Default SpGEAM algorithm for the given format. */
 } rocsparse_spgeam_alg;
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup types_module
+ *  \brief List of SpSort algorithms.
+ *
+ *  \details
+ *  This is a list of supported \ref rocsparse_spsort_alg types that are used to sort a sparse
+ *  matrix.
+ */
+typedef enum rocsparse_spsort_alg_
+{
+    rocsparse_spsort_alg_default    = 0, /**< Default SpSort algorithm (radix sort). */
+    rocsparse_spsort_alg_radix_sort = 1, /**< Radix sort based SpSort algorithm. */
+} rocsparse_spsort_alg;
+
+/*! \ingroup types_module
+  *  \brief List of inputs to the SpSort descriptor.
+  *
+  *  \details
+  *  This is a list of possible inputs to the SpSort descriptor.
+  */
+typedef enum rocsparse_spsort_input_
+{
+    rocsparse_spsort_input_alg, /**< Select algorithm \ref rocsparse_spsort_alg for input on a SpSort descriptor. */
+    rocsparse_spsort_input_direction, /**< Select sorting direction \ref rocsparse_direction for input on a SpSort descriptor. Only used by the COO format. */
+} rocsparse_spsort_input;
+
+/*! \ingroup types_module
+  *  \brief List of SpSort stages.
+  *
+  *  \details
+  *  This is a list of possible stages during SpSort computation. The stages must be executed
+  *  in the order \ref rocsparse_spsort_stage_analysis, then \ref rocsparse_spsort_stage_compute.
+  */
+typedef enum rocsparse_spsort_stage_
+{
+    rocsparse_spsort_stage_analysis, /**< Analysis of the data. */
+    rocsparse_spsort_stage_compute /**< Performs the actual SpSort computation. */
+} rocsparse_spsort_stage;
+#endif
 
 /*! \ingroup types_module
  *  \brief List of gpsv algorithms.

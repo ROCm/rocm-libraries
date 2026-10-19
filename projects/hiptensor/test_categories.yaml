@@ -88,7 +88,9 @@ test_categories:
     labels:
       - "ffm-full"
 
-  # bench -> performance runs (device tests only). Opt-in via -L bench.
+  # bench -> performance runs (device tests only). Installed to its own
+  # bin/hiptensor/bench/ subdir (excluded from a bare `ctest` in bin/hiptensor);
+  # run from there, optionally filtered with -L bench.
   bench:
     description: "hipTensor bench tests - performance runs"
     test_patterns:

@@ -168,7 +168,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "gcc-c++" "libcxx-devel" "rpm-build" )
   local library_dependencies_sles=( "make" "gcc-c++" "rpm-build" )
 
-  if [[ $HIP_PLATFORM == "nvidia" ]]; then
+  if [[ "${build_cuda}" == true ]]; then
     # Ideally, this could be cuda-cublas-dev, but the package name has a version number in it
     library_dependencies_ubuntu+=( "" ) # removed, use --installcuda option to install cuda
   else
@@ -206,7 +206,7 @@ install_packages( )
   fi
 
   # wget is needed for cmake
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.17.0); then
     if $update_cmake == true; then
       library_dependencies_ubuntu+=("wget")
       library_dependencies_centos_rhel+=("wget")
@@ -360,9 +360,10 @@ cat <<EOF
 
     --cmake_install               Install minimum cmake version if required.
 
-    --cuda, --use-cuda            Build library for CUDA backend (deprecated).
-                                  The target HIP platform is determined by \`hipconfig --platform\`.
-                                  To explicitly specify a platform, set the \`HIP_PLATFORM\` environment variable.
+    --cuda, --use-cuda            Build library for CUDA backend using nvcc
+                                  directly (no hipcc dependency). Passes
+                                  -DUSE_CUDA=ON to CMake. nvcc must be on
+                                  PATH or reachable via --cudapath.
 
     -d, --dependencies            Build and install external dependencies. Dependencies are to be installed in /usr/local.
                                   This should be done only once (this does not install rocBLAS, rocSolver, or cuda).
@@ -458,8 +459,6 @@ while true; do
         shift ;;
     --cuda|--use-cuda)
         # still need this flag in install.sh to support install.sh --cuda -d for now
-        echo "--cuda option is deprecated (use environment variable HIP_PLATFORM=nvidia)"
-        export HIP_PLATFORM="nvidia"
         build_cuda=true
         shift ;;
     --installcuda)
@@ -527,19 +526,19 @@ if [[ "${install_dependencies}" == true ]]; then
 
   install_packages
 
-  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.16.8); then
+  if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt 3.17.0); then
       if $update_cmake == true; then
-        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download/v3.16.8/"
-        wget -nv ${CMAKE_REPO}/cmake-3.16.8.tar.gz
-        tar -xvf cmake-3.16.8.tar.gz
-        cd cmake-3.16.8
+        CMAKE_REPO="https://github.com/Kitware/CMake/releases/download/v3.17.5/"
+        wget -nv ${CMAKE_REPO}/cmake-3.17.5.tar.gz
+        tar -xvf cmake-3.17.5.tar.gz
+        cd cmake-3.17.5
         ./bootstrap --prefix=/usr --no-system-curl --parallel=16
         make -j16
         elevate_if_not_root make install
         cd ..
-        rm -rf cmake-3.16.8.tar.gz cmake-3.16.8
+        rm -rf cmake-3.17.5.tar.gz cmake-3.17.5
       else
-          echo "hipBLAS requires CMake version >= 3.16.8 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_VERSION} will be uninstalled and CMake version 3.16.8 will be installed"
+          echo "hipBLAS requires CMake version >= 3.17.0 and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_VERSION} will be uninstalled and CMake version 3.17.5 will be installed"
           exit 2
       fi
   fi
@@ -572,10 +571,6 @@ else
   full_build_dir=${build_dir}/debug
 fi
 
-# this can be removed and be done in rmake.py once --cuda flag support is gone
-if [[ "${build_cuda}" != true ]]; then
-  export HIP_PLATFORM="$(${rocm_path}/bin/hipconfig --platform)"
-fi
 
 if [[ "${rmake_invoked}" == false ]]; then
   pushd .

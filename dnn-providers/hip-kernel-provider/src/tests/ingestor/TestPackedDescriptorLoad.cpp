@@ -288,10 +288,10 @@ TEST(TestPackedDescriptorLoad, LibraryResolvesFromTheDescriptorThatDeclaredIt)
 /// descriptor cannot exercise this, and silently proving nothing is the failure mode this
 /// whole file exists to end.
 ///
-/// buildIngestorKernelCode() cannot be called here -- it needs a device, a compiler and a
-/// real archive open. The containment rule is reproduced instead, reading the same two
-/// loader-populated fields the guard reads, so a change to either field's meaning fails
-/// here rather than only on hardware.
+/// buildIngestorKernelCode() cannot be called here -- it needs a device and a real archive
+/// open. The containment rule is reproduced instead, reading the same two loader-populated
+/// fields the guard reads, so a change to either field's meaning fails here rather than
+/// only on hardware.
 TEST(TestPackedDescriptorLoad, PackedKernelsSatisfyTheRuntimeContainmentGuard)
 {
     REQUIRE_PACKED_SHARDS(shards);
@@ -355,7 +355,7 @@ TEST(TestPackedDescriptorLoad, PackedKernelsSatisfyTheRuntimeContainmentGuard)
 
 /// A packed kernel carries every coordinate the kpack adapter needs to reach a code object.
 ///
-/// `parseKernelSource` requires all four to be PRESENT, but a present empty string
+/// `parseKernelSource` requires all five to be PRESENT, but a present empty string
 /// satisfies that and then fails much later inside the archive reader, as a confusing
 /// runtime error. Checking them here pins the packer to emitting usable values rather than
 /// merely the right keys.
@@ -384,6 +384,12 @@ TEST(TestPackedDescriptorLoad, PackedKernelsCarryCompleteKpackCoordinates)
                         << "' has an empty symbol; no entry point can be resolved.";
                     EXPECT_FALSE(kernel.source.sha256.empty())
                         << "packed kernel '" << kernel.name << "' has an empty sha256.";
+                    // Every kernel this tree packs takes arguments, so an empty list here is
+                    // the extractor having found nothing rather than a nullary kernel -- the
+                    // failure that would otherwise read as a signature agreeing with anything.
+                    EXPECT_FALSE(kernel.source.signature.empty())
+                        << "packed kernel '" << kernel.name
+                        << "' has an empty signature; nothing would be compared at dispatch.";
                 }
             }
         }

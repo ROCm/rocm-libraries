@@ -28,6 +28,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from bundle_utils import (
     derive_operation,
     expand,
     infer_layout,
+    next_free_topology_dir,
     remap_graph,
     remap_meta_inputs,
     sanitize,
@@ -120,6 +122,88 @@ def _deep_set(obj, dotted_path, value):
     cur[parts[-1]] = value
 
 
+def _first_mismatch(expected, actual, path=""):
+    """First differing location between two JSON trees.
+
+    Walks the sorted union of dict keys, then list indices, then scalars.
+    Returns (path, expected_value, actual_value), or None when nothing compares
+    unequal; a side that lacks the key or index is ``_MISSING``. Used only to
+    describe a failed canonical comparison, never to decide it.
+    """
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in sorted(set(expected) | set(actual)):
+            found = _first_mismatch(
+                expected.get(key, _MISSING),
+                actual.get(key, _MISSING),
+                f"{path}.{key}" if path else key,
+            )
+            if found:
+                return found
+        return None
+    if isinstance(expected, list) and isinstance(actual, list):
+        for i in range(max(len(expected), len(actual))):
+            found = _first_mismatch(
+                expected[i] if i < len(expected) else _MISSING,
+                actual[i] if i < len(actual) else _MISSING,
+                f"{path}[{i}]",
+            )
+            if found:
+                return found
+        return None
+    if expected is _MISSING or actual is _MISSING or expected != actual:
+        return (path or "<root>", expected, actual)
+    return None
+
+
+def _brief(value, limit=200):
+    """Render a JSON value (or ``<absent>`` for ``_MISSING``) in ``limit`` chars."""
+    text = "<absent>" if value is _MISSING else json.dumps(value, sort_keys=True)
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _report_roundtrip_failure(where, expanded, graph, selected=None):
+    """Name the first location a failed round-trip lost, with expected vs actual.
+
+    `selected`, when given, describes the sweep the graph was matched to and is
+    printed directly after the ERROR line.
+    """
+    print(f"  ERROR: round-trip verify failed {where}", file=sys.stderr)
+    if selected is not None:
+        print(f"  selected sweep: {selected}", file=sys.stderr)
+    mismatch = _first_mismatch(graph, expanded)
+    if mismatch is None:
+        want, got = canon(graph), canon(expanded)
+        at = next(
+            (i for i, (a, b) in enumerate(zip(want, got)) if a != b),
+            min(len(want), len(got)),
+        )
+        print(
+            "    mismatch:  no field compares unequal, so this is a JSON rendering"
+            " difference, such as int 1 against float 1.0",
+            file=sys.stderr,
+        )
+        print(f"    at offset: {at}", file=sys.stderr)
+        print(f"    expected:  {want[at : at + 60]}  (input graph)", file=sys.stderr)
+        print(
+            f"    actual:    {got[at : at + 60]}  (template + values)", file=sys.stderr
+        )
+        return
+    field, expected, actual = mismatch
+    print(f"    field:     {field}", file=sys.stderr)
+    if field.startswith("tensors["):
+        index = int(field[len("tensors[") : field.index("]")])
+        tensors = graph.get("tensors", [])
+        tensor = tensors[index] if index < len(tensors) else {}
+        name = tensor.get("name", _MISSING) if isinstance(tensor, dict) else _MISSING
+        print(
+            f"    tensor:    name={_brief(name)}"
+            "  (tensors listed in canonical-uid order)",
+            file=sys.stderr,
+        )
+    print(f"    expected:  {_brief(expected)}  (input graph)", file=sys.stderr)
+    print(f"    actual:    {_brief(actual)}  (template + values)", file=sys.stderr)
+
+
 def _extract_values(graph: dict, template: dict) -> dict:
     """Extract per-case values from a concrete graph given its template."""
     values = {}
@@ -154,6 +238,41 @@ def _extract_values(graph: dict, template: dict) -> dict:
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
+
+_SWEEP_SUPPORT_FILE = "support.json"
+
+
+def _canonical_support_json() -> str:
+    """Canonical bytes for an empty support-claim sidecar (LF line endings)."""
+    return json.dumps({"claims": {}, "version": 1}, indent=2, sort_keys=True) + "\n"
+
+
+def _ensure_support_json(sweep_dir: Path, dry_run: bool) -> bool:
+    """Create an empty canonical support.json next to a sweep if one is missing.
+
+    Never touches an existing support.json. Returns whether one was (or,
+    under --dry-run, would be) created.
+    """
+    support_path = sweep_dir / _SWEEP_SUPPORT_FILE
+    if support_path.exists():
+        return False
+    if not dry_run:
+        with open(support_path, "w", newline="\n") as f:
+            f.write(_canonical_support_json())
+    return True
+
+
+def _sanitize_gtest(s: str) -> str:
+    """Mirror BundleDiscovery.hpp's sanitizeForGtest: non [A-Za-z0-9_] -> '_'."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", s)
+
+
+def _gtest_name(sweep_dir: Path, bundle_dir: Path, case_id: str) -> str:
+    """The full GTest name the harness registers for a case in this sweep dir."""
+    suite = "_".join(
+        _sanitize_gtest(part) for part in sweep_dir.relative_to(bundle_dir).parts
+    )
+    return f"{suite}.{_sanitize_gtest(case_id)}"
 
 
 def main() -> int:
@@ -206,6 +325,13 @@ def main() -> int:
             meta[k] = v
     if args.seed is not None:
         meta["seed"] = args.seed
+    meta.setdefault("generator", "import_graph.py")
+    if not str(meta.get("reference_source", "")).strip():
+        print(
+            "import_graph: warning: no reference_source in metadata;"
+            " pass --meta reference_source=... to record where this graph came from",
+            file=sys.stderr,
+        )
 
     # Canonicalize UIDs by tensor name so an imported graph lines up with sweeps
     # built by place_bundles (which does the same). The C++ builder auto-assigns
@@ -265,18 +391,37 @@ def main() -> int:
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph):
-            print("  ERROR: round-trip verify failed after extraction", file=sys.stderr)
+            _report_roundtrip_failure(
+                "after extraction",
+                expanded,
+                graph,
+                selected=f"{sweep_path}"
+                f" (of {len(matches)} structural match(es),"
+                f" {len(tier_matches)} in tier '{args.tier}')",
+            )
             return 1
 
+        # existing_cases keep every original key (e.g. golden, tensor_patches);
+        # only their id is (re)assigned above, and any other top-level sweep
+        # key already survives untouched since only sweep["cases"] is
+        # replaced below.
+        sweep["cases"] = existing_cases + [new_case]
+        support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
         if not args.dry_run:
-            sweep["cases"] = [
-                {"id": c["id"], "values": c["values"], "metadata": c["metadata"]}
-                for c in all_cases
-            ]
-            with open(sweep_path, "w") as f:
+            with open(sweep_path, "w", newline="\n") as f:
                 json.dump(sweep, f, indent=2)
                 f.write("\n")
         print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
+        print(
+            "  gtest name: "
+            f"{_gtest_name(sweep_path.parent, args.bundle_dir, new_case['id'])}",
+            file=sys.stderr,
+        )
+        if support_created:
+            print(
+                f"  created empty support.json in {sweep_path.parent}",
+                file=sys.stderr,
+            )
         return 0
 
     # --- No structural match: create new template+sweep ---
@@ -293,27 +438,42 @@ def main() -> int:
 
     expanded = expand(template, values)
     if canon(expanded) != canon(graph):
-        print("  ERROR: round-trip verify failed for new template", file=sys.stderr)
+        _report_roundtrip_failure("for new template", expanded, graph)
         return 1
 
     tmap = tensors_by_uid(graph)
     first = tmap[min(tmap)] if tmap else {}
     layout = infer_layout(first.get("dims"), first.get("strides")) or "Default"
-    topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
+    preferred_topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
 
-    out_dir = args.bundle_dir / args.tier / op / topo_name
-    case_entry = {"id": "case", "values": values, "metadata": meta}
+    op_dir = args.bundle_dir / args.tier / op
+    topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
+    out_dir = op_dir / topo_name
+
+    case_entry = {"id": None, "values": values, "metadata": meta}
+    assign_case_ids([case_entry])
     sweep_out = {"version": 1, "cases": [case_entry]}
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
-        with open(out_dir / "graph.template.json", "w") as f:
+    support_created = _ensure_support_json(out_dir, args.dry_run)
+    if not args.dry_run:
+        with open(out_dir / "graph.template.json", "w", newline="\n") as f:
             json.dump(template, f, indent=2)
             f.write("\n")
-        with open(out_dir / "sweep.json", "w") as f:
+        with open(out_dir / "sweep.json", "w", newline="\n") as f:
             json.dump(sweep_out, f, indent=2)
             f.write("\n")
-    print(f"  created new bundle: {out_dir}", file=sys.stderr)
+    print(
+        f"  created new bundle: {out_dir} (case '{case_entry['id']}')",
+        file=sys.stderr,
+    )
+    print(
+        f"  gtest name: {_gtest_name(out_dir, args.bundle_dir, case_entry['id'])}",
+        file=sys.stderr,
+    )
+    if support_created:
+        print(f"  created empty support.json in {out_dir}", file=sys.stderr)
     return 0
 
 

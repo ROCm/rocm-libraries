@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 
 static int g_failures = 0;
@@ -31,13 +32,17 @@ static int g_failures = 0;
         }                                                                     \
     } while(0)
 
-/* Emit rocke_b_mma(op_id) and assert the result is a vec<expect_elem x
- * expect_frag>. expect_int selects i32 vs f32 for the accumulator element. */
-static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+/* Emit rocke_b_mma(op_id) on the given operands and assert the result is a
+ * vec<expect_elem x expect_frag>. expect_int selects i32 vs f32 for the
+ * accumulator element. */
+static void check_atom_on(rocke_ir_builder_t* b,
+                          const char* op_id,
+                          rocke_value_t* a,
+                          rocke_value_t* bb,
+                          rocke_value_t* c,
+                          int expect_frag,
+                          bool expect_int)
 {
-    rocke_value_t* a = rocke_b_const_i32(b, 0);
-    rocke_value_t* bb = rocke_b_const_i32(b, 0);
-    rocke_value_t* c = rocke_b_const_i32(b, 0);
     rocke_value_t* r = rocke_b_mma(b, op_id, a, bb, c, NULL, 0);
 
     CHECK(r != NULL, op_id);
@@ -59,6 +64,42 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
     }
 }
 
+/* Placeholder scalar operands: this check is about the result's fragment, not the
+ * operands, which an ordinary atom's builder does not inspect. */
+static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag, bool expect_int)
+{
+    rocke_value_t* a = rocke_b_const_i32(b, 0);
+    rocke_value_t* bb = rocke_b_const_i32(b, 0);
+    rocke_value_t* c = rocke_b_const_i32(b, 0);
+    check_atom_on(b, op_id, a, bb, c, expect_frag, expect_int);
+}
+
+/* An emulated TF32 atom is verified on the way in: its operands are vec<tf32xN>
+ * (an fp32 payload wrapped by a bitcast) and its accumulator a vec<f32xM>. N and M
+ * are the physical atom's fragment lengths, which the atom borrows. */
+static void check_emulated_atom(rocke_ir_builder_t* b, const char* op_id, int ab_len, int c_len)
+{
+    rocke_value_t* zero = rocke_b_const_f32(b, 0.0);
+    const rocke_type_t* tf32_vec = rocke_vector_type(b, rocke_tf32(), ab_len);
+    rocke_value_t* a = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* bb = rocke_b_bitcast(b, rocke_b_vector_splat(b, zero, ab_len), tf32_vec);
+    rocke_value_t* c = rocke_b_vector_splat(b, zero, c_len);
+    check_atom_on(b, op_id, a, bb, c, c_len, false);
+}
+
+static void check_catalog_fragments(const rocke_mma_catalog_t* catalog, const char* op_id)
+{
+    const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(catalog, op_id);
+    CHECK(op != NULL, op_id);
+    if(!op)
+    {
+        return;
+    }
+    CHECK(op->a_frag_len == 16, op_id);
+    CHECK(op->b_frag_len == 16, op_id);
+    CHECK(op->c_frag_len == 8, op_id);
+}
+
 int main(void)
 {
     rocke_ir_builder_t b;
@@ -77,6 +118,30 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+    /* Emulated TF32 atoms have no frag-table row of their own; the logical op_id
+     * sizes through the bf16 atom it expands into, so rocke_b_mma can build it. */
+    check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
+    check_emulated_atom(&b, "mfma_f32_32x32x16_xf32", 8, 16);
+
+    /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
+     * matrix operands are <16 x i32>, so fragment length is 16 elements, not
+     * the equivalent 64-byte storage width. */
+    const rocke_arch_target_t* gfx1250 = rocke_arch_target_from_gfx("gfx1250");
+    CHECK(gfx1250 != NULL, "gfx1250 target");
+    if(gfx1250)
+    {
+        int scaled = 0;
+        for(int i = 0; i < gfx1250->mma.num_ops; ++i)
+        {
+            const auto& op = gfx1250->mma.ops[i];
+            if(strcmp(op.family, "wmma_scaled") != 0)
+                continue;
+            check_catalog_fragments(&gfx1250->mma, op.op_id);
+            check_atom(&b, op.op_id, 8, false);
+            ++scaled;
+        }
+        CHECK(scaled == 86, "all scaled atoms must have accumulator metadata");
+    }
 
     /* Unknown op_id must be rejected. The engine's error path either returns
      * NULL with a sticky builder error or raises (ckc::ValueError) depending on

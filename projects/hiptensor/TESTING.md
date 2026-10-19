@@ -33,7 +33,7 @@ cmake --install <build_dir> --component tests
 | Any C++ source | `ctest` | Build tree | No (GPU-dependent tests will fail) |
 | Contraction / elementwise / reduction logic | `ctest -L '^quick$'` | `<prefix>/bin/hiptensor` | Yes |
 | Kernel selection or data types | `ctest -L '^standard$'` | `<prefix>/bin/hiptensor` | Yes |
-| Performance-sensitive path | `ctest -L '^bench$' -V -O bench.log` | `<prefix>/bin/hiptensor` | Yes |
+| Performance-sensitive path | `ctest -V -O bench.log` | `<prefix>/bin/hiptensor/bench` | Yes |
 
 > **Run in parallel:** add `-j$(nproc)` (or `-j <N>`) to any validation run — e.g. `ctest -L '^standard$' -j$(nproc)` — to run test binaries concurrently. Do **not** parallelize the `bench` tier: concurrent runs contend for the GPU and corrupt timing measurements.
 
@@ -89,6 +89,32 @@ There is no ctest filter to run only the unit tests currently.
 
 **Coverage expectation:** The hardware-independent surface area in hipTensor is small relative to the total codebase. The current unit test suite covers the identifiable CPU-only subsystems (logging, YAML parsing, option handling, utility math, op type traits). A target of >95% line coverage for the CPU-only subsystems is the goal; overall repository coverage is not meaningful because the dominant code paths are device kernels instantiated from CK templates. Coverage is currently not measured in CI — see the Coverage section below.
 
+#### ABI export-surface test (`abi_exported_symbols`)
+
+A host-only, non-GoogleTest check that guards the shared-library ABI. It runs
+`scripts/check_exported_symbols.py` over the built `libhiptensor.so` and fails if any symbol
+outside the public allowlist is exported. The allowlist is the public `extern "C"` C API plus
+the two shared-state singletons that the test harness and the library must share
+(`hiptensor::HiptensorOptions`, `hiptensor::Logger`); everything else, internal C++ classes and
+Composable Kernel template instantiations, must be hidden. This enforces the hidden-visibility
+baseline and the version script (`library/src/hiptensor.map`) so internal symbols cannot silently
+re-leak.
+
+- **Platform:** Linux/ELF only. On Windows the DLL export set is driven by `__declspec` and there
+  is no version script, so the test is not registered there. It is also skipped if a Python 3.9+
+  interpreter or an `nm`/`llvm-nm` tool is not found at configure time.
+- **Requires a GPU:** No. It inspects the `.so` with `nm -D` and runs in any environment.
+- **CTest label:** `symbol-visibility` (build tree). In the installed tree it is registered as
+  `abi_exported_symbols quick`, so the tier nesting carries it into the `quick`, `standard`,
+  `comprehensive`, and `full` label sets — it runs in every validation tier.
+
+```bash
+# Build tree:
+ctest -R abi_exported_symbols            # run just the ABI check
+# Or invoke the checker directly against any built/installed library:
+python3 scripts/check_exported_symbols.py build/lib/libhiptensor.so
+```
+
 ---
 
 ### Integration Testing Strategy
@@ -134,7 +160,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `full` | `validation/full` | Long | Nightly / release |
 | `ffm-quick` | `emulation/quick` | Long | FFM simulator PR |
 | `ffm-full` | `emulation/full` | Long | FFM simulator nightly |
-| `bench` | `bench` | Very Long | Manual / nightly perf |
+| `bench` | `bench` | Very Long | Manual / nightly perf (own `bench/` subdir; excluded from bare `ctest`) |
 
 > See [test_categories.yaml](test_categories.yaml) for the specific timeouts on each category.
 
@@ -165,7 +191,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 |---|---|
 | Stack layer | Expansion SDK |
 | Metrics measured | GFLOP/s per operation type; wall-clock time (hot-run average) |
-| How benchmarks are run | `ctest -L '^bench$' -V -O bench.log` from `<prefix>/bin/hiptensor` (5 hot runs, 1 cold run per config; `-V` prints GFLOP/s output, `-O` saves it to a file); alternatively via `scripts/performance/Benchmark{Contraction,Permutation,Reduction}.sh` |
+| How benchmarks are run | `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` (5 hot runs, 1 cold run per config, validation off via `-v OFF`; `-V` prints GFLOP/s output, `-O` saves it to a file); alternatively via `scripts/performance/Benchmark{Contraction,Permutation,Reduction}.sh` |
 | Baseline stored per architecture | Yes — baselines must not be aggregated across GFX targets |
 | Where results are stored | Log files written by the benchmark scripts; no centralized DB currently (known gap) |
 | Regression threshold | Not automated — manual review (known gap) |
@@ -197,6 +223,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 |---|---|---|---|
 | Build | Yes | CI / DevOps | `cmake --build` on all supported GPU_TARGETS |
 | Unit tests | Yes | Component team | All `00_unit/` binaries pass |
+| ABI export surface | Yes | Component team | `abi_exported_symbols` CTest (runs in the standard tier); Linux-only, no GPU |
 | Integration / smoke tests | Yes | Component team | `ctest -L '^standard$'` on at least one supported ASIC |
 | Static analysis | No | — | Not currently gated |
 | Formatting checks | No | — | `clang-format` is available but not enforced in CI |
@@ -214,6 +241,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `elementwise_op_test` | Trusted gate | CPU-only, reliable |
 | `util_test` | Trusted gate | CPU-only, reliable |
 | `hiptensor_options_test` | Trusted gate | CPU-only, reliable |
+| `abi_exported_symbols` | Trusted gate | Host-only ABI allowlist check (Linux/ELF); no GPU |
 | `plan_lifetime_test` | Trusted gate | Device test (launches a permute kernel); runs on GPU runners |
 | `*standard*` device tests | Trusted gate | Run on dedicated GPU runners |
 | `*comprehensive*` / `*full*` | Informational | Nightly only; not PR gates |
@@ -265,7 +293,7 @@ hipTensor's test coverage surface is wide: 6 tensor ranks × multiple data types
 Beyond PR validation, nightly runs add:
 
 - `comprehensive` and `full` tier validation on all supported ASIC targets (gfx908, gfx90a, gfx942, gfx950, gfx11xx, gfx12xx).
-- Benchmark runs (`ctest -L '^bench$'` from `<prefix>/bin/hiptensor`) with 5 hot runs; results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
+- Benchmark runs (`ctest` from `<prefix>/bin/hiptensor/bench`) with 5 hot runs and validation off (`-v OFF`); results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
 - FFM simulator full suite (`ffm-full`) for pre-silicon targets.
 - Cross-component smoke: downstream consumers (e.g., libraries built on top of hipTensor) are validated separately by those components' nightly suites.
 
@@ -328,7 +356,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | New or changed GPU operation behavior | Integration test: add a YAML config entry in the appropriate `validation/` tier |
 | Bug fix | A regression test (unit if CPU-side, integration config entry if GPU-side) that fails before the fix |
 | New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered |
-| Performance-sensitive change | Run `ctest -L '^bench$' -V -O bench.log` from `<prefix>/bin/hiptensor` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
+| Performance-sensitive change | Run `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
 | New GPU architecture | Validate on that target; update the Supported Configurations table |
 
 ---
