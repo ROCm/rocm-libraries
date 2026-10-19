@@ -291,23 +291,3 @@ if(TENSILELITE_ENABLE_HOST)
 endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensilelite_packaging.cmake")
-
-# Solution parsing imports this module to build a solution record.
-# A client build and a device-library build both run that parsing, and a host
-# build that is not YAML does too. gemm-libs sets TENSILELITE_ENABLE_HOST=OFF
-# and still generates libraries.
-if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
-        OR (TENSILELITE_ENABLE_HOST AND NOT HIPBLASLT_ENABLE_YAML))
-    add_subdirectory(write)
-endif()
-if(TARGET tensilelite_write)
-    if(TARGET tensilelite-client)
-        add_dependencies(tensilelite-client tensilelite_write)
-    endif()
-    if(TARGET cpu-gemm-driver)
-        add_dependencies(cpu-gemm-driver tensilelite_write)
-    endif()
-    if(TARGET RunPythonScript)
-        add_dependencies(RunPythonScript tensilelite_write)
-    endif()
-endif()

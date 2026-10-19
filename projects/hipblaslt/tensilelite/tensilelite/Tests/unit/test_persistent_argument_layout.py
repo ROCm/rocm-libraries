@@ -9,6 +9,7 @@ import json
 import pytest
 import yaml
 
+from Tensile.Contractions import SizeMapping
 from Tensile.CustomKernels import getCustomKernelConfig, validateCustomPersistentArgs
 from Tensile.ExecutionPolicy import normalize_execution_policy
 from Tensile.SolutionStructs.Naming import getKernelFileBase
@@ -149,11 +150,11 @@ def test_data_parallel_payload_rejects_legacy_outer_version(outer):
 
 
 def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
-    from test_streamk_force_dp_only import minimal_size_mapping_state, size_mapping_from_state
+    from test_streamk_force_dp_only import minimal_size_mapping_state
 
     state = minimal_size_mapping_state()
     state.update(StreamK=0, StreamKAtomic=1)
-    mapping = size_mapping_from_state(state)
+    mapping = SizeMapping.FromOriginalState(state)
     assert mapping.tileProcessingStrategy == "None"
     assert mapping.streamKAtomic == 0
     assert state["StreamKAtomic"] == 1
