@@ -359,10 +359,8 @@ inline void
     throw_on_generate_matrix_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
 // A pivot position of -1 requires success. Any other position requires zero pivot.
-inline void throw_on_zero_pivot_status(hipsparseStatus_t status,
-                                       int               pivot,
-                                       const char*       file,
-                                       int               line)
+inline void
+    throw_on_zero_pivot_status(hipsparseStatus_t status, int pivot, const char* file, int line)
 {
     const hipsparseStatus_t expected
         = (pivot == -1) ? HIPSPARSE_STATUS_SUCCESS : HIPSPARSE_STATUS_ZERO_PIVOT;
@@ -373,8 +371,8 @@ inline void throw_on_zero_pivot_status(hipsparseStatus_t status,
 
     std::ostringstream message;
     message << file << ":" << line << ": zero pivot status failed: received "
-            << hipsparseStatusToString(status) << ", expected "
-            << hipsparseStatusToString(expected) << ".";
+            << hipsparseStatusToString(status) << ", expected " << hipsparseStatusToString(expected)
+            << ".";
     throw std::runtime_error(message.str());
 }
 
