@@ -2333,6 +2333,13 @@ class Solution(collections.abc.Mapping):
          and (not isStreamKSpatialCluster(state)
               or (hasStaticAssignment(state) and not state["ProblemType"]["Gradient"]
                   and not state["ProblemType"]["Sparse"] and not state.get("UseSubtileImpl", False))))
+    # Sparse, subtile and gradient variants retain tree fixup.
+    state["InternalSupportParams"]["SupportStreamKClusterParallel"] = (
+        isStreamKSpatialCluster(state)
+        and not state["ProblemType"]["Sparse"]
+        and not state["ProblemType"]["Gradient"]
+        and not state.get("UseSubtileImpl", False)
+    )
 
     if isPersistent(state):
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K

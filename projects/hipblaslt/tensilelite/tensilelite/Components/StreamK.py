@@ -3309,6 +3309,13 @@ class StreamKTwoTileDPFirst(StreamK):
             # If WG does not start tile, skip to end of persistent loop to check for other SK tile
             alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
             module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+            if isStreamKSpatialCluster(kernel):
+                # The post kernel reads every split, including alpha-zero partials.
+                # Keep the interval and store zero; calculateLoopNumIterCommon
+                # already skips the multiply loop.
+                module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=0,
+                                      comment="Parallel alpha-zero initializes every split"))
+                module.add(SCBranchSCC1(labelName=alphaLabel.getLabelName()))
             # Skip to end if not doing the global write
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
             skCloseLoopLabel = Label("PersistentLoopClose", "")

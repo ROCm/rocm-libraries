@@ -10,6 +10,8 @@
 
 #include <gtest/gtest.h>
 #include <Tensile/ContractionSolution.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -1138,4 +1140,67 @@ TEST(PersistentArgumentLayout, ClusterBiasWorkspaceSeparatesPartialsAndOutputRed
             EXPECT_EQ(disabledBias.workspaceBytes, partialBytes + biasBytes);
         }
     }
+}
+
+
+TEST(PersistentArgumentLayout, ClusterParallelCapabilityAndPackedOutputContract)
+{
+    using arch_t = origami::hardware_t::architecture_t;
+    hip::HipAMDGPU device;
+    device.processor = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = 256;
+    device.persistentDynamicGrid = 6;
+    device.persistentFixedGrid = 128;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        arch_t::gfx950, 256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 4);
+    auto problem = clusterProblem(257, 385, 65537, 2);
+    // Missing capability is the old ABI2: it must stay tree even when Origami
+    // would select parallel for a newly generated kernel.
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    solution.internalArgsSupport.streamKClusterParallel = true;
+    ASSERT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::parallel);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+    auto const& cluster = launch.clusterSchedule;
+    ASSERT_EQ(cluster.blocks, 4u);
+    EXPECT_EQ(launch.grid, 16u);
+    EXPECT_EQ(cluster.physicalGrid, 128u);
+    EXPECT_EQ(cluster.parallelSplits, 4u);
+    EXPECT_EQ(cluster.flagEntries, 0u);
+    EXPECT_EQ(launch.workspaceBytes, 257u * 385 * 2 * sizeof(float) * 4);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+    auto inputs = clusterInputs();
+    inputs.Synchronizer = nullptr;
+    const auto gemm = solution.generateSingleCall<true>(problem, inputs, device, launch, GSUSettings{});
+    EXPECT_EQ(value<void*>(gemm.args, "Flags"), nullptr);
+    EXPECT_EQ(value<void*>(gemm.args, "ws_d"), inputs.ws);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "skTiles"), 4u);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "SKItersPerWG"), 1025u / 4);
+    EXPECT_EQ(value<uint32_t>(gemm.args, "skGrid"), 16u);
+    const auto conversion = solution.generateOutputConversionCall<true>(problem, inputs, launch, 1, 0);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "gsu"), 4u);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "strideW1"), 257u);
+    EXPECT_EQ(value<uint32_t>(conversion.args, "strideW2"), 257u * 385);
+    EXPECT_FLOAT_EQ(value<float>(conversion.args, "alpha"), 2.5f);
+    EXPECT_FLOAT_EQ(value<float>(conversion.args, "beta"), -1.25f);
+    const auto decisions = solution.computeStreamKDecisions(problem, device);
+    EXPECT_EQ(decisions.skSplit, 4u);
+    EXPECT_EQ(decisions.requiredWorkspaceBytes, launch.workspaceBytes);
+
+    problem.setWorkspaceSize(launch.workspaceBytes - 1);
+    const auto fallback = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(fallback.reduction, origami::reduction_t::tree);
+    EXPECT_TRUE(fallback.clusterSchedule.workspaceFallback);
+    EXPECT_TRUE(fallback.clusterSchedule.wholeBlocksOnly);
+    EXPECT_EQ(fallback.workspaceBytes, 0u);
+    EXPECT_EQ(fallback.clusterSchedule.parallelSplits, 1u);
+    EXPECT_EQ(fallback.clusterSchedule.physicalGrid, 32u);
+    solution.problemType.useGradient = true;
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    solution.problemType.useGradient = false;
+    solution.problemType.sparse = 1;
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
 }

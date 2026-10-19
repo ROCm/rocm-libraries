@@ -1148,11 +1148,11 @@ namespace TensileLite
         if(usesStreamKSpatialCluster())
         {
             if(!launch.clusterSchedule.enabled || launch.argsVersion != 2
-               || launch.reduction != origami::reduction_t::tree)
+               || (launch.reduction == origami::reduction_t::parallel
+                   && (!internalArgsSupport.streamKClusterParallel || handwrittenCustomKernel())))
                 throw std::runtime_error("Invalid resolved StreamK cluster schedule");
-            // Flags==null selects the old parallel-reduction branch, even on a
-            // whole-block fallback. Keep ABI2 explicitly on the tree path.
-            if(inputs.Synchronizer == nullptr)
+            // Old ABI2 and whole-block fallbacks still select tree with flags.
+            if(launch.reduction == origami::reduction_t::tree && inputs.Synchronizer == nullptr)
                 throw std::runtime_error("StreamK cluster multicast requires a non-null flag buffer");
             if(launch.workspaceBytes != 0 && inputs.ws == nullptr)
                 throw std::runtime_error("StreamK cluster multicast requires its resolved partial workspace");
@@ -4470,8 +4470,10 @@ namespace TensileLite
         if(sizeMapping.isStreamK())
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
-            if(tiles > 0)
+            // Cluster grids count logical workers, each producing several tiles.
+            if(usesStreamKSpatialCluster())
+                gsu = sk.clusterSchedule.parallelSplits;
+            else if(tiles > 0)
                 gsu = sk.grid / tiles;
         }
 
@@ -4555,7 +4557,8 @@ namespace TensileLite
             // If using post kernel with stream-k then it is doing parallel reduciton
             // Calculate the splitting factor
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            gsu = usesStreamKSpatialCluster() ? sk.clusterSchedule.parallelSplits
+                                             : sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
         int additionalPaddingPerBatchGeneralBatch = 0;
@@ -5553,7 +5556,10 @@ namespace TensileLite
             //
             // Deliberate behavior change: tiles == 0 throws here instead of
             // dividing by zero (grouped-GEMM callers report 0 tiles).
-            if(launch.reduction == origami::reduction_t::parallel && (tiles == 0 || launch.grid / tiles < 2))
+            const size_t reductionTiles = usesStreamKSpatialCluster()
+                ? launch.clusterSchedule.blocks : tiles;
+            if(launch.reduction == origami::reduction_t::parallel
+               && (reductionTiles == 0 || launch.grid / reductionTiles < 2))
             {
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
@@ -6274,7 +6280,11 @@ namespace TensileLite
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
-        if(usesStreamKSpatialCluster())
+        if(usesStreamKSpatialCluster()
+           && (!internalArgsSupport.streamKClusterParallel || handwrittenCustomKernel()
+               || problemType.sparse || problemType.useGradient || sizeMapping.useSubtileImpl
+               || problemType.useInitialStridesCD
+               || problem.batchMode() != ContractionProblemGemm::BATCHMODE::STRIDED))
             return origami::reduction_t::tree;
         if(sizeMapping.isPersistentDataParallel())
             return origami::reduction_t::none;
@@ -6545,7 +6555,7 @@ namespace TensileLite
         launch.workAssignment = WorkAssignment::StaticGrid;
         launch.effectiveWorkAssignment = WorkAssignment::StaticGrid;
         launch.argsVersion = 2;
-        launch.reduction = origami::reduction_t::tree;
+        launch.reduction = getSKReduction(problem, hardware);
         launch.smCountTarget = problem.getParams().smCountTarget();
         auto& cluster = launch.clusterSchedule;
         cluster.enabled = true;
@@ -6576,6 +6586,7 @@ namespace TensileLite
         }
         if(cluster.blocks == 0)
         {
+            launch.reduction = origami::reduction_t::tree;
             cluster.wholeBlocksOnly = true;
             cluster.fallbackReason = "empty-output";
             return launch;
@@ -6584,7 +6595,7 @@ namespace TensileLite
         // The existing predictor consumes physical tiles/CUs and returns a
         // physical workgroup budget. Convert once, before partitioning blocks.
         launch.selectedGrid = getPersistentGridImpl(*this, problem, hardware,
-            launch.totalTiles, origami::reduction_t::tree, nullptr,
+            launch.totalTiles, launch.reduction, nullptr,
             &cluster.fixedGridUsed, nullptr, nullptr, nullptr);
         // A whole-tile grid has no inter-cluster reduction dependencies. Keep
         // that decision before applying residency limits for cooperative splits,
@@ -6621,6 +6632,7 @@ namespace TensileLite
         launch.clusterGridClamp = checkedMultiply(launch.grid, cluster.clusterSize) != launch.selectedGrid;
 
         auto wholeBlocks = [&](char const* reason) {
+            launch.reduction = origami::reduction_t::tree;
             cluster.wholeBlocksOnly = true;
             cluster.fallbackReason = reason;
             // Whole-block persistent scheduling needs no more workers than blocks.
@@ -6671,6 +6683,36 @@ namespace TensileLite
                 launch.clusterGridClamp = cluster.physicalGrid != launch.selectedGrid;
                 return launch;
             }
+        }
+        // One logical worker owns one K interval of one spatial block. All
+        // peers use the same split index and store at their real output
+        // coordinates in [split][batch][N][M], as the conversion kernel expects.
+        if(launch.reduction == origami::reduction_t::parallel && k != 0
+           && !Debug::Instance().useStreamKDataParrallel())
+        {
+            const size_t factor = std::min(launch.grid / cluster.blocks, iters);
+            if(factor >= 2)
+            {
+                launch.grid = checkedMultiply(cluster.blocks, factor);
+                const size_t outputBytes = checkedMultiply(
+                    problem.d().totalLogicalElements(), problem.computeTypeElementSize());
+                cluster.idealWorkspaceBytes = checkedMultiply(outputBytes, factor);
+                if(cluster.idealWorkspaceBytes <= problem.workspaceSize())
+                {
+                    cluster.parallelSplits = static_cast<uint32_t>(factor);
+                    cluster.partialSlots = checkedMultiply(launch.totalTiles, factor);
+                    cluster.partialWorkspaceBytes = cluster.idealWorkspaceBytes;
+                    launch.workspaceBytes = cluster.idealWorkspaceBytes;
+                    cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                    return launch;
+                }
+                cluster.workspaceFallback = true;
+                wholeBlocks("insufficient-workspace");
+                cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
+                return launch;
+            }
+            // No uniform split fits: use the existing clustered tree schedule.
+            launch.reduction = origami::reduction_t::tree;
         }
         if(k == 0)
             wholeBlocks("zero-k");
@@ -7929,7 +7971,7 @@ namespace TensileLite
             d.skGridPreFallback = cluster.gridBeforeFallback;
             d.skGrid = d.finalGrid = launch.grid;
             d.skTiles = cluster.split.skTiles;
-            d.skSplit = 1;
+            d.skSplit = cluster.parallelSplits;
             d.totalItems = cluster.blocks;
             d.dpOnly = cluster.wholeBlocksOnly;
             d.streamKDP = Debug::Instance().useStreamKDataParrallel();
@@ -8212,6 +8254,7 @@ namespace TensileLite
             field(22, "spatialBlocks", std::to_string(cluster.blocks));
             field(22, "realTiles", std::to_string(d.tiles));
             field(22, "itersPerBlock", std::to_string(cluster.itersPerTile));
+            field(22, "parallelSplits", std::to_string(cluster.parallelSplits));
             field(22, "skBlocks", std::to_string(cluster.split.skTiles));
             field(22, "skItersPerCluster", std::to_string(cluster.split.skItersPerWG));
             field(22, "extraIters", std::to_string(cluster.split.extraIters));

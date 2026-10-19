@@ -16155,9 +16155,12 @@ class KernelWriterAssembly(KernelWriter):
     if not self.do["PostLoop"]: return Module("GlobalWriteElements (Empty)"), Module("DeferredGSU0 (Empty)")
     module = Module("GlobalWriteElements")
     deferredGSU0 = Module("DeferredGSU0")
-    # Spatial StreamK uses in-kernel fixup and a non-null flag buffer.
-    # Its unreachable parallel/GSU epilogue has no GSU argument registers.
-    noGSUBranch = noGSUBranch or isStreamKSpatialCluster(kernel)
+    # Only kernels advertising the ABI2 parallel extension emit both output
+    # paths. Older/specialized clustered variants retain their tree epilogue.
+    noGSUBranch = noGSUBranch or (
+      isStreamKSpatialCluster(kernel)
+      and not kernel["InternalSupportParams"].get("SupportStreamKClusterParallel", False)
+    )
 
     module.addComment2("Global Write Elements")
     if kernel["ProblemType"]["OutputAmaxD"]:

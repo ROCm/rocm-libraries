@@ -550,6 +550,7 @@ namespace TensileLite
         size_t biasWorkspaceOffset = 0;
         size_t biasWorkspaceBytes = 0;
         uint32_t itersPerTile = 1;
+        uint32_t parallelSplits = 1;
         StreamKStaticSplit split;
         bool wholeBlocksOnly = false;
         bool workspaceFallback = false;
@@ -1364,6 +1365,9 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // ABI2 extension: null flags select split-major parallel partials.
+            // Older and handwritten kernels retain the tree-only contract.
+            bool streamKClusterParallel = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };
