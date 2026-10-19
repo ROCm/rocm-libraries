@@ -97,10 +97,11 @@ template <typename ALayout,
           typename ComputeTypeA,
           typename ComputeTypeB,
           bool ForceNaiveLdsLayout,
-          bool DirectLoad   = false,
-          bool IsMxGemm     = false,
-          bool LargeTensors = false,
-          bool UseTdmB      = false>
+          bool DirectLoad      = false,
+          bool IsMxGemm        = false,
+          bool LargeTensors    = false,
+          bool UseTdmB         = false,
+          bool UseLdsTranspose = false>
 struct GridwiseGemm_xdl_cshuffle_base
 {
     static constexpr auto I0 = Number<0>{};
@@ -370,36 +371,55 @@ struct GridwiseGemm_xdl_cshuffle_base
         {
             // 16 is the byte size of ds_load_b128 and ds_write_b128.
             constexpr auto PaddingSize = 16 / sizeof(ADataType);
-            if constexpr(MLdsLayer == 1)
+            if constexpr(UseLdsTranspose &&
+                         is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value)
             {
-                return make_naive_tensor_descriptor(
-                    make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number),
-                    make_tuple(AK1Number, Number<AKPerBlock + PaddingSize>{}, I1));
+                constexpr auto base_desc = make_naive_tensor_descriptor(
+                    make_tuple(Number<KPerBlock>{}, Number<MPerBlock>{}),
+                    make_tuple(Number<MPerBlock + PaddingSize>{}, I1));
+
+                return transform_tensor_descriptor(
+                    base_desc,
+                    make_tuple(make_unmerge_transform(make_tuple(AK0Number, AK1Number)),
+                               make_pass_through_transform(Number<MPerBlock>{})),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
             }
             else
             {
-                constexpr auto a_lds_block_desc_ak0_m_unmerge_ak1 = make_naive_tensor_descriptor(
-                    make_tuple(AK0Number,
-                               Number<MPerBlock / MLdsLayer / MPerThreadLayer>{},
-                               Number<MPerThreadLayer>{},
-                               Number<MLdsLayer>{},
-                               AK1Number),
-                    make_tuple(AK1Number,
-                               Number<(AKPerBlock * MLdsLayer + PaddingSize) * MPerThreadLayer>{},
-                               Number<AKPerBlock * MLdsLayer + PaddingSize>{},
-                               Number<AKPerBlock>{},
-                               I1));
+                if constexpr(MLdsLayer == 1)
+                {
+                    return make_naive_tensor_descriptor(
+                        make_tuple(AK0Number, Number<MPerBlock>{}, AK1Number),
+                        make_tuple(AK1Number, Number<AKPerBlock + PaddingSize>{}, I1));
+                }
+                else
+                {
+                    constexpr auto a_lds_block_desc_ak0_m_unmerge_ak1 =
+                        make_naive_tensor_descriptor(
+                            make_tuple(AK0Number,
+                                       Number<MPerBlock / MLdsLayer / MPerThreadLayer>{},
+                                       Number<MPerThreadLayer>{},
+                                       Number<MLdsLayer>{},
+                                       AK1Number),
+                            make_tuple(
+                                AK1Number,
+                                Number<(AKPerBlock * MLdsLayer + PaddingSize) * MPerThreadLayer>{},
+                                Number<AKPerBlock * MLdsLayer + PaddingSize>{},
+                                Number<AKPerBlock>{},
+                                I1));
 
-                return transform_tensor_descriptor(
-                    a_lds_block_desc_ak0_m_unmerge_ak1,
-                    make_tuple(make_pass_through_transform(AK0Number),
-                               make_merge_transform_v3_division_mod(
-                                   make_tuple(Number<MPerBlock / MLdsLayer / MPerThreadLayer>{},
-                                              Number<MLdsLayer>{},
-                                              Number<MPerThreadLayer>{})),
-                               make_pass_through_transform(AK1Number)),
-                    make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+                    return transform_tensor_descriptor(
+                        a_lds_block_desc_ak0_m_unmerge_ak1,
+                        make_tuple(make_pass_through_transform(AK0Number),
+                                   make_merge_transform_v3_division_mod(
+                                       make_tuple(Number<MPerBlock / MLdsLayer / MPerThreadLayer>{},
+                                                  Number<MLdsLayer>{},
+                                                  Number<MPerThreadLayer>{})),
+                                   make_pass_through_transform(AK1Number)),
+                        make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+                }
             }
         }
         // xor tensor transformation request more unnecessary vgpr usage, would cause register spill
@@ -736,36 +756,55 @@ struct GridwiseGemm_xdl_cshuffle_base
         {
             // 16 is the byte size of ds_load_b128 and ds_write_b128.
             constexpr auto PaddingSize = 16 / sizeof(BDataType);
-            if constexpr(NLdsLayer == 1 || UseTdmB)
+            if constexpr(UseLdsTranspose &&
+                         is_same<tensor_layout::gemm::ColumnMajor, ALayout>::value)
             {
-                return make_naive_tensor_descriptor(
-                    make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number),
-                    make_tuple(BK1Number, Number<BKPerBlock + PaddingSize>{}, I1));
+                constexpr auto base_desc = make_naive_tensor_descriptor(
+                    make_tuple(Number<KPerBlock>{}, Number<NPerBlock>{}),
+                    make_tuple(Number<NPerBlock + PaddingSize>{}, I1));
+
+                return transform_tensor_descriptor(
+                    base_desc,
+                    make_tuple(make_unmerge_transform(make_tuple(AK0Number, AK1Number)),
+                               make_pass_through_transform(Number<NPerBlock>{})),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}),
+                    make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
             }
             else
             {
-                constexpr auto b_lds_block_desc_bk0_n_unmerge_bk1 = make_naive_tensor_descriptor(
-                    make_tuple(BK0Number,
-                               Number<NPerBlock / NLdsLayer / NPerThreadLayer>{},
-                               Number<NPerThreadLayer>{},
-                               Number<NLdsLayer>{},
-                               BK1Number),
-                    make_tuple(BK1Number,
-                               Number<(BKPerBlock * NLdsLayer + PaddingSize) * NPerThreadLayer>{},
-                               Number<BKPerBlock * NLdsLayer + PaddingSize>{},
-                               Number<BKPerBlock>{},
-                               I1));
+                if constexpr(NLdsLayer == 1 || UseTdmB)
+                {
+                    return make_naive_tensor_descriptor(
+                        make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number),
+                        make_tuple(BK1Number, Number<BKPerBlock + PaddingSize>{}, I1));
+                }
+                else
+                {
+                    constexpr auto b_lds_block_desc_bk0_n_unmerge_bk1 =
+                        make_naive_tensor_descriptor(
+                            make_tuple(BK0Number,
+                                       Number<NPerBlock / NLdsLayer / NPerThreadLayer>{},
+                                       Number<NPerThreadLayer>{},
+                                       Number<NLdsLayer>{},
+                                       BK1Number),
+                            make_tuple(
+                                BK1Number,
+                                Number<(BKPerBlock * NLdsLayer + PaddingSize) * NPerThreadLayer>{},
+                                Number<BKPerBlock * NLdsLayer + PaddingSize>{},
+                                Number<BKPerBlock>{},
+                                I1));
 
-                return transform_tensor_descriptor(
-                    b_lds_block_desc_bk0_n_unmerge_bk1,
-                    make_tuple(make_pass_through_transform(BK0Number),
-                               make_merge_transform_v3_division_mod(
-                                   make_tuple(Number<NPerBlock / NLdsLayer / NPerThreadLayer>{},
-                                              Number<NLdsLayer>{},
-                                              Number<NPerThreadLayer>{})),
-                               make_pass_through_transform(BK1Number)),
-                    make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
-                    make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+                    return transform_tensor_descriptor(
+                        b_lds_block_desc_bk0_n_unmerge_bk1,
+                        make_tuple(make_pass_through_transform(BK0Number),
+                                   make_merge_transform_v3_division_mod(
+                                       make_tuple(Number<NPerBlock / NLdsLayer / NPerThreadLayer>{},
+                                                  Number<NLdsLayer>{},
+                                                  Number<NPerThreadLayer>{})),
+                                   make_pass_through_transform(BK1Number)),
+                        make_tuple(Sequence<0>{}, Sequence<1, 3, 2>{}, Sequence<4>{}),
+                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}));
+                }
             }
         }
         else if constexpr(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value)
