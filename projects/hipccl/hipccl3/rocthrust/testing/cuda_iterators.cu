@@ -270,3 +270,32 @@ void TestCUDATransformIterator()
   }
 }
 DECLARE_UNITTEST(TestCUDATransformIterator);
+
+void TestCUDAZipIterator()
+{
+  cuda::zip_function<cuda::std::plus<void>> fun{};
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::device_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::host_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    std::vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAZipIterator);
