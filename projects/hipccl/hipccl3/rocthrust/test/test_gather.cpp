@@ -28,6 +28,14 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+// There is an unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
+// Adding this attribute suffices that this miscompilation does not appear anymore
+#if THRUST_COMPILER(GCC, >=, 11)
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
+
 TESTS_DEFINE(GatherTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
@@ -418,7 +426,7 @@ TYPED_TEST(PrimitiveGatherTests, TestGatherIfToDiscardIterator)
   }
 }
 
-TYPED_TEST(GatherTests, TestGatherCountingIterator)
+TYPED_TEST(GatherTests, TestGatherCountingIterator) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   using Vector = typename TestFixture::input_type;
 

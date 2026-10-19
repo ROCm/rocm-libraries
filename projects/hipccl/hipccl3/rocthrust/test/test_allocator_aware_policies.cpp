@@ -17,10 +17,10 @@
 
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
 #include <thrust/detail/seq.h>
-#include <thrust/system/cpp/detail/par.h>
+#include <thrust/system/cpp/detail/execution_policy.h>
 #include <thrust/system/hip/detail/par.h>
-#include <thrust/system/omp/detail/par.h>
-#include <thrust/system/tbb/detail/par.h>
+#include <thrust/system/omp/detail/execution_policy.h>
+#include <thrust/system/tbb/detail/execution_policy.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
@@ -117,9 +117,9 @@ struct TestAllocatorAttachment
 };
 
 using sequential_info = policy_info<thrust::detail::seq_t, thrust::system::detail::sequential::execution_policy>;
-using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::system::cpp::detail::execution_policy>;
-using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::detail::execution_policy>;
-using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::detail::execution_policy>;
+using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::system::cpp::execution_policy>;
+using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::execution_policy>;
+using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::execution_policy>;
 
 using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
 
