@@ -380,6 +380,36 @@ def test_dense_mfma_dgrad_channels_are_routed(cache, cpg, kpg):
     assert all(json.loads(p.identity.knobs)["block_groups"] == 1 for p in mfma)
 
 
+def test_mfma_dgrad_grid_skips_spilling_preloads(jobs):
+    """With waves_k > 1 the MFMA dgrad's fprop pass preloads its weights into
+    registers; specs past the budget spill at the 512-VGPR ceiling, where
+    comgr has produced a wrong-dX kernel. None of them is built."""
+    built = [j for j in jobs if j.identity.algorithm == "direct_grouped_dgrad_mfma"]
+    assert built
+    for job in built:
+        caps = dks.DirectCaps(**job.caps)
+        probe = dks.probe_problem(caps, dks.DIRECT_DTYPE, "direct_grouped_dgrad_mfma")
+        assert (
+            dks._mfma_knobs_reason(probe, job.spec_kwargs) is None
+        ), job.identity.label()
+
+    # The spec that computed the wrong dX on gfx950 is rejected; halving its
+    # Q tile brings it under the budget and it stays.
+    problem = _problem(groups=1, cpg=48, kpg=192)
+    knobs = dict(
+        block_q=32,
+        block_groups=1,
+        block_h=8,
+        waves_q=1,
+        waves_k=2,
+        runtime_k_loop=False,
+        persistent_grid=False,
+        fold_k32=True,
+    )
+    assert "spill" in dks._mfma_knobs_reason(problem, knobs)
+    assert dks._mfma_knobs_reason(problem, dict(knobs, block_q=16)) is None
+
+
 @pytest.mark.parametrize(
     "direction,problem",
     [
