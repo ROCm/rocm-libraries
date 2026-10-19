@@ -11,13 +11,13 @@
 5. [Principles](#5-principles)
 6. [Feature Inventory](#6-feature-inventory)
 7. [Shape Catalog and Size Ladder](#7-shape-catalog-and-size-ladder)
-8. [Sweep Construction and Tiers](#8-sweep-construction-and-tiers)
+8. [Sweep Construction, Levels and Lanes](#8-sweep-construction-levels-and-lanes)
 9. [Case Purpose](#9-case-purpose)
 10. [Trade-off Register](#10-trade-off-register)
 11. [Oracles and Reference Prerequisites](#11-oracles-and-reference-prerequisites)
 12. [Golden Tests](#12-golden-tests)
 13. [Authoring Process and Plan Template](#13-authoring-process-and-plan-template)
-14. [Test Generator and Fuzzing Tool](#14-test-generator-and-fuzzing-tool)
+14. [Exhaustive Mode and the Separate Tool](#14-exhaustive-mode-and-the-separate-tool)
 15. [Required Infrastructure](#15-required-infrastructure)
 16. [Rollout](#16-rollout)
 17. [Alternatives Considered](#17-alternatives-considered)
@@ -35,19 +35,25 @@ captured from older C++ tests, then re-tiered. No case has a stated reason.
 Nothing records what we left out.
 
 This RFC adds a **per-op test plan**: one reviewed document for each op family,
-in `dnn-providers/integration-tests/docs/test-plans/`. All plans follow one
-method:
+in `dnn-providers/integration-tests/docs/test-plans/`. The plan tests the op. It
+does not depend on an engine. We apply the plan to each engine through claims.
+All plans follow one method:
 
 - Derive features from the graph API. Do not use engines or old tests.
 - Take shapes from size sets (small, medium, model, stress) and hazard
-  breakpoints. Each tier has a size ceiling.
+  breakpoints. Each level has a size ceiling.
 - Combine features one at a time, then all-pairs, then in targeted products.
 - Give each case a purpose: `claim`, `probe` or `regression`.
 - Record each product that we do not run in a trade-off register.
+- Put each case in one of four levels (quick, PR, nightly, full). Each level
+  answers one question (§8).
 - Select a small golden set with fixed criteria. An independent third party
   generates it.
-- Write the bundles from the plan with one **test generator tool**. The same
-  tool makes tensor values and fuzzes (§14).
+- Write the bundles from the plan with a generator, so that bundles and plan
+  cannot drift.
+
+Exhaustive testing is **not** part of this RFC. It is a separate tool with its
+own RFC. Each plan only declares the hook that the tool reads (§14).
 
 ## 2. Problem Statement
 
@@ -79,15 +85,20 @@ each op depend on the tests that the op happened to have.
 - The **method** of every per-op plan (§5–§13).
 - The **plan document**: location, template, and the rule that bundles and plan
   stay in sync.
-- **Golden selection** (§12), building on RFC 0011.
-- The **test generator and fuzzing tool** (§14).
-- The **infrastructure** that the method needs (§15) and its rollout (§16).
+- The **four levels**, the question that each answers, and the **mapping** from
+  a plan to bundles, claims, TOML, tier YAML and CTest lanes (§8).
+- **Golden policy and selection** (§12), building on RFC 0011.
+- The **hook** that each plan declares for the exhaustive tool (§14).
+- The **infrastructure** that the method needs (§15), its rollout and the
+  documents to update (§16).
 
 ### 3.2 Out of scope
 
 | Item | Where it belongs |
 |---|---|
-| Gating a new engine integration: per-case outcome reporting, running every kernel of an engine, fuzzing campaigns (engines, duration, schedule), the days-long gauntlet tier, review of agent-authored integrations | A separate engine-integration-gate proposal. It uses the plans' graphs and axes and the tool of §14. It returns bug reproducers as pinned regressions (§9). |
+| Exhaustive test generation, fuzzing, invalid-graph generation, engine-knob sweeps | A separate tool, with its own RFC. §14 states only the interface. |
+| Gating a new engine integration: per-case outcome reporting, running every kernel of an engine, the days-long gauntlet tier, review of agent-authored integrations | A separate engine-integration-gate proposal |
+| Writing the per-op plans and bundles | One PR for each op (§16) |
 | Bundle format, verification modes, DVC layout | RFC 0011 |
 | Claim schema, enforcement, harvesting | RFC 0015 |
 | Fuzzing of the descriptor loader and matcher | RFC 0017, RFC 0018 |
@@ -100,22 +111,25 @@ each op depend on the tests that the op happened to have.
 flowchart LR
   API[Graph API<br/>schemas + frontend validation] --> PLAN[Per-op test plan<br/>docs/test-plans/&lt;op&gt;.md]
   AUDIT[Audit of existing bundles] --> PLAN
-  PLAN --> GEN[Test generator tool<br/>plan mode]
-  GEN --> B[Bundles per tier<br/>sweep.json, support.json]
+  PLAN --> GEN[Bundle generator]
+  GEN --> B[Bundles per level<br/>sweep.json, support.json]
   PLAN --> GOLD[Golden generator<br/>third party]
   GOLD --> B
-  B --> CI[CI tiers<br/>quick / PR / nightly / full]
+  B --> CI[CI levels<br/>quick / PR / nightly / full]
   CI -- claims harvest --> B
-  PLAN --> FUZZ[Test generator tool<br/>fuzz mode]
-  FUZZ -- minimized reproducers --> PLAN
-  GATE[Engine integration gate] -. campaigns .-> FUZZ
+  PLAN -. exhaustive-mode hook .-> EXH[Exhaustive tool<br/>separate RFC]
+  EXH -. minimized reproducers .-> PLAN
 ```
 
-- **One plan for each op family**, for example `convolution-fwd.md`, `matmul.md`
-  or `sdpa-fwd.md`, in `dnn-providers/integration-tests/docs/test-plans/`. An
-  index (`README.md`) lists the plans and their bundles.
+- **One plan for each op family**, for example `sdpa-fwd.md`,
+  `convolution-fwd.md` or `matmul.md`, in
+  `dnn-providers/integration-tests/docs/test-plans/`. An index (`README.md`)
+  lists the plans and their bundles.
+- **The plan is engine-independent.** It tests the op. It has no engine matrix.
+  Claims (`support.json`) and per-engine TOML apply the plan to each engine
+  (§8.4).
 - **The plan is the source of truth.** The generator reads the declared axes,
-  legality rules, shape catalog and tier rules, and writes the bundles. Nobody
+  legality rules, shape catalog and level rules, and writes the bundles. Nobody
   edits bundles by hand.
 - **Traceability in both directions.** Each bundle case maps to a plan item.
   Each plan item maps to at least one case. A PR that adds, moves or deletes
@@ -128,10 +142,10 @@ flowchart LR
 | # | Principle | Practice |
 |---|---|---|
 | P1 | **Derive features from the API.** | Each field of the op schema (`flatbuffers_sdk/schemas/*.fbs`) is a feature. So is each rule in `pre_validate_node` and `infer_properties_node` of the frontend node. Tests and engine capabilities do not define the op. |
-| P2 | **The plan does not depend on an engine.** | Engines join through claims. A feature that no engine supports stays as a probe. When support arrives, the run reports `UNCLAIMED_SUPPORT` (RFC 0015). The plan needs no edit. |
+| P2 | **The plan does not depend on an engine.** | The plan tests the op. Engines join through claims. A feature that no engine supports stays as a probe. When support arrives, the run reports `UNCLAIMED_SUPPORT` (RFC 0015). The plan needs no edit. |
 | P3 | **Divide each axis into classes. Then add boundaries and hazards.** | Classes: 1, odd, small, power of two, large, not a multiple of the vector width. Boundaries: output size 1, padding ≥ filter, remainders, values near the dtype limit. Hazards: powers of 2 ± 1, dims not divisible by 4 or 8, int32 index overflow. |
-| P4 | **One feature at a time. Then all-pairs. Then targeted products.** | One-feature shapes show the cause of a failure. All-pairs finds most interaction faults. Run a complete product only where an interaction is plausible. The corpus and fuzz mode (§14) find three-way faults. Pin them. |
-| P5 | **Size grows with the tier.** | Nightly tests each feature again at medium size. |
+| P4 | **One feature at a time. Then all-pairs. Then targeted products.** | One-feature shapes show the cause of a failure. All-pairs finds most interaction faults. Run a complete product only where an interaction is plausible. The corpus and the exhaustive tool (§14) find three-way faults. Pin them. |
+| P5 | **Size grows with the level.** | Nightly tests each feature again at medium size. |
 | P6 | **Each product that we do not run is a recorded decision.** | Use the trade-off register (§10). Never trim rejection probes. |
 | P7 | **A case needs an oracle that models it.** | See §11. A case with no oracle is "not run", never green. |
 | P8 | **Count distinct behaviors, not cases.** | Report distinct geometries, feature values and skip-only cases. |
@@ -151,11 +165,11 @@ A plan lists every feature of the op, in these groups:
 | Data types | Mixed precision, compute and intermediate types, graph-level or per-node types |
 | Graph options | Override-shape ([RFC 0008](0008_OverridableTensorShapesDesign.md)), fused epilogues and chains, virtual or stored intermediates |
 | Awkward combinations | Legal but hazardous graphs: inputs of different dtypes, tensors in different layouts, degenerate ratios |
-| Values | The value domains of §14.3. Accumulation length. Determinism. |
+| Values | Uniform, zero-excluded, all-zero, constant and large-magnitude fills. NaN, Inf, subnormals. Accumulation length. Determinism. |
 | Execution | Workspace limits, plan reuse with new pointers, serialization round trip ([RFC 0009](0009_CompiledPlanSerialization.md)) |
 | Invalid inputs | One frontend **unit test** for each validation rule. These are not sweep cases. |
 
-For each feature, the plan records the values to cover, the earliest tier, the
+For each feature, the plan records the values to cover, the earliest level, the
 oracle readiness (§11) and the purpose of its cases (§9).
 
 **Legality is declared once for each op.** It copies the frontend validation.
@@ -181,44 +195,67 @@ pointer *less* aligned than declared and expects `BAD_PARAM`.
 **Defaults are non-degenerate.** Each dimension or ratio that can exceed 1 does
 so in the default shape.
 
-**Per-tier ceilings.** Each plan tunes these starting values.
+**Per-level ceilings.** Each plan tunes these starting values.
 
-| Tier | Ceiling for each case (fp32, x + w + y) | Sets |
+| Level | Ceiling for each case (fp32, x + w + y) | Sets |
 |---|---|---|
 | quick | ≤ 20 MFLOP, ≤ 1 MB | S |
 | PR | ≤ 200 MFLOP, ≤ 16 MB | S, H, a few M |
 | nightly | ≤ 8 GFLOP, ≤ 64 MB | S, L, M, H |
 | full | none | all, including X |
 
-## 8. Sweep Construction and Tiers
+## 8. Sweep Construction, Levels and Lanes
+
+### 8.1 Sweep rules
 
 | Rule | Content |
 |---|---|
-| Core axes | Every tier covers them completely. Typically rank × layout × dtype. |
-| Core cover | Every tier holds every core combination for the plain op and each fused topology. In quick, at least one engine executes each cell. |
+| Core axes | Every level covers them completely. Typically rank × layout × dtype. |
+| Core cover | Every level holds every core combination for the plain op and each fused topology. In quick, at least one engine executes each cell. |
 | One at a time | S and L shapes isolate one feature. |
 | All-pairs | By the end of nightly, each value of each axis meets each value of each other axis. A seeded generator makes this from the declared axes and legality. |
 | Full | Complete products only where an interaction is plausible. |
-| Probes | Each unsupported feature, awkward combination and hazard has a probe. Each tier has rejection probes. |
-| Regressions | The reproducer of each escaped bug is a concrete case in the lowest tier that can afford it. |
-| Concrete graphs | Each tier runs checked-in graphs only. Random sampling is fuzz mode (§14). |
+| Probes | Each unsupported feature, awkward combination and hazard has a probe. Each level has rejection probes. |
+| Regressions | The reproducer of each escaped bug is a concrete case in the lowest level that can afford it. |
+| Concrete graphs | Each level runs checked-in graphs only. Random sampling belongs to the exhaustive tool (§14). |
 
-The tiers use the existing CTest labels and cascade. Each tier runs everything
+### 8.2 The four levels
+
+Each level answers one question. The levels cascade: each level runs everything
 below it. `full_*` runs only in full.
 
-| Tier | Bundle dir | Cadence | Budget (whole suite, cumulative) |
-|---|---|---|---|
-| quick | `quick/` | pre-commit | ~5 min |
-| PR | `standard/` | PR gate | ~30 min |
-| nightly | `comprehensive/` | nightly | ≤ 60 min |
-| full | `full/` | weekly | none |
+| Level | Question it answers | Bundle dir | CTest label (other labels) | Cadence | Budget (whole suite, cumulative) |
+|---|---|---|---|---|---|
+| quick | What must we test to catch gross breakage fast? | `quick/` | `quick` (`pre-commit`, `smoke`) | pre-commit | ~5 min |
+| PR | What must we test on every PR? | `standard/` | `standard` (`pr`, `precheckin`) | PR gate | ~30 min |
+| nightly | What should we test each day, with wider coverage for each engine? | `comprehensive/` | `comprehensive` (`nightly`, `extended`) | nightly | ≤ 60 min |
+| full | Which wider sweeps must exist in the full suite? | `full/` | `full` (`all`) | weekly | none |
 
 **Estimate before you generate.** A plan states the case count, FLOP per case
-and oracle cost for each tier and size class. A full product can be very large.
+and oracle cost for each level and size class. A full product can be very large.
 For convolution forward, it is ~14,000 cases. About 10,000 of them repeat one
 fused epilogue over every geometry. A cold-cache timing run fixes the final
 counts. Solver search and compile time for each unique shape cost more than
 execution.
+
+### 8.3 Mapping a plan to files
+
+| Plan item | File or setting | Who writes it |
+|---|---|---|
+| Op topology | `{level}/{Op}/{Topology}/graph.template.json` | The bundle generator |
+| Cases: axes, shapes, level, purpose | `sweep.json` (cases and per-case metadata) in the directory of the level | The bundle generator |
+| Golden cases | `golden/{CaseId}/tensors.dvc` (RFC 0011) | The golden generator |
+| Claims: which engine supports which case | `support.json`, or `{Name}.support.json` for a single graph (RFC 0015) | Harvested with `--write-support-claims`. Never hand-written. |
+| Tolerances, validator overrides, skips for an engine | `dnn-providers/<provider>/config/<ENGINE_NAME>.toml` | The provider, for each engine |
+| Which suites each lane runs | Level YAML (`test_categories_integration.yaml`) in each provider. Its categories become CTest labels. | The provider |
+| Cascade of levels | Each YAML category lists the patterns of the lower levels. CTest labels do not inherit. | The provider |
+
+### 8.4 From plan to engine
+
+The plan never names an engine. The same bundles run on every provider lane.
+The claim of each engine decides which cases run for that engine. TOML records
+the engine tolerances and known limits. Therefore, one plan covers any number of
+engines, and a new engine needs no plan edit.
 
 ## 9. Case Purpose
 
@@ -256,7 +293,7 @@ each oracle **models** it. List each gap with its fix. Typical gaps:
 | Asymmetric parameters tested in one reference only | Conv asymmetric padding |
 | Types with no reference | fp8 and int8 conv |
 | Special values | NaN and Inf need a validator that matches infinities. |
-| Harness support | Exact-alignment placement, value-domain control, repeat-and-compare (§14.3) |
+| Harness support | Exact-alignment placement, value-domain control, repeat-and-compare (§15) |
 
 A feature with no oracle stays in the plan and is marked "not run". A golden case
 can cover it (§12, criterion G-B).
@@ -279,7 +316,13 @@ Golden data does four jobs that a live reference cannot:
 Golden tests are **not** a coverage tool. They make the judges of the sweep
 trustworthy.
 
-### 12.2 Selection criteria
+### 12.2 Policy and selection criteria
+
+**The policy is a baseline, not an exhaustive set.** Each op gets the baseline
+third-party check (G-A, with PyTorch or a similar third party). The other
+criteria add a case only where that criterion applies. Exhaustive golden
+coverage is not a goal. The separate exhaustive tool (§14) covers the wide
+space.
 
 A golden case meets at least one criterion. Most ops need 6–20 golden cases.
 
@@ -321,7 +364,7 @@ disagreement.
 ### 12.5 Placement and lifecycle
 
 - Put one or two G-A anchors in quick. Put the rest in PR or nightly.
-- A golden case is never the only coverage of a feature in a tier that some
+- A golden case is never the only coverage of a feature in a level that some
   lanes run without `dvc pull`.
 - Regenerate golden data when semantics, third-party version or strategy
   change. Review it like code.
@@ -334,19 +377,20 @@ disagreement.
 2. **Audit** the bundles at the tip of the integration branch:
    - map uids to roles through the template;
    - derive the real parameters from the dims;
-   - count distinct behaviors, skip-only cases and per-tier cover.
+   - count distinct behaviors, skip-only cases and per-level cover.
 3. **Shape catalog** (§7).
-4. **Combination and tier rules** (§8).
-5. **Estimate** counts, FLOP and oracle cost for each tier.
+4. **Combination and level rules** (§8).
+5. **Estimate** counts, FLOP and oracle cost for each level.
 6. **Trade-off register** (§10).
 7. **Oracle prerequisites** (§11).
 8. **Golden selection** (§12).
-9. **Generate, time, harvest and finalize:**
-   - generate the bundles and tag each case purpose;
-   - time a cold-cache run and fix the counts;
-   - harvest claims;
-   - update everything that uses case ids (FFM pins, TOML globs);
-   - update the plan in the same PR.
+9. **Exhaustive-mode hook** (§14).
+10. **Generate, time, harvest and finalize:**
+    - generate the bundles and tag each case purpose;
+    - time a cold-cache run and fix the counts;
+    - harvest claims;
+    - update everything that uses case ids (FFM pins, TOML globs);
+    - update the plan in the same PR.
 
 ### 13.2 Template
 
@@ -356,10 +400,13 @@ Scope, bundles, out of scope.
 ## 1. The operation        formula, tensors, shape rules, parameters, sources
 ## 2. Feature inventory    per group: Id | Feature | Values | Oracle ready?; legality; rejection list
 ## 3. Shape catalog        ceilings; S, L, M, H, X
-## 4. Building the sweep   rules; tier contents; counts by size class; probes and regressions; trade-off register
-## 5. Golden reference     Id | Case | Criterion | Precision strategy | Tier; generator; confirmation
+## 4. Building the sweep   rules; level contents; counts by size class; probes and regressions; trade-off register
+## 5. Golden reference     Id | Case | Criterion | Precision strategy | Level; generator; confirmation
 ## 6. Pass criteria        verification, tolerances, claims; oracle and harness gaps
+## 7. Exhaustive mode      states that the op has one; axes, legality, shape ranges, value domains for the exhaustive tool
 ```
+
+A plan has no engine matrix (§8.4).
 
 ### 13.3 Review checklist
 
@@ -370,117 +417,58 @@ Scope, bundles, out of scope.
 - [ ] Each axis has classes, boundaries and hazards. No default is degenerate.
 - [ ] Each case has a purpose. Quick executes each core cell. Nightly retests
       each feature at medium size.
-- [ ] Each complete product is justified or in the register. Each tier has
+- [ ] Each complete product is justified or in the register. Each level has
       rejection probes.
 - [ ] Each oracle gap is listed with its fix.
-- [ ] Counts, FLOP and oracle cost fit the tier budgets.
+- [ ] Counts, FLOP and oracle cost fit the level budgets.
 - [ ] Golden cases follow §12.2 and are confirmed.
+- [ ] The exhaustive-mode section is present.
 - [ ] Bundle cases and plan items map in both directions.
 
-## 14. Test Generator and Fuzzing Tool
+## 14. Exhaustive Mode and the Separate Tool
 
-### 14.1 Purpose
+**This RFC does not design exhaustive testing.** Exhaustive test generation,
+fuzzing, invalid-graph generation and engine-knob sweeps belong to a separate
+tool. That tool has its own RFC. Work on it starts after the attention and
+convolution plans exist (§16).
 
-One tool (working name `testgen`) reads one declaration of axes and legality for
-each op. It has two modes:
+This RFC defines only the **hook**. Each plan has an exhaustive-mode section
+(§13.2). It states that the op has an exhaustive mode, and it declares:
 
-| Mode | Output | Where it runs |
-|---|---|---|
-| **Plan** | Deterministic bundles for the tiers (all-pairs, seeded rotation). We check in the output. | When a plan changes |
-| **Fuzz** | Random legal graphs and tensors, run at once against engines and oracles | A developer machine, a scheduled non-gating job, the engine integration gate |
+- the axes and legality rules (the same declarations that the bundle generator
+  reads);
+- the shape ranges and a size budget;
+- the value domains that matter for the op.
 
-The modes share the legality rules, so fuzz mode never writes an illegal graph.
-A failing fuzz case becomes a plan case with no translation.
+The tool reads these declarations. It must not need a second copy of the
+legality rules.
 
-### 14.2 Inputs
+In return, the tool gives the plans two things:
 
-- **Axes and legality** of the op (where they live: §19, question 1).
-- **Shape catalog** of the plan (§7). Fuzz mode takes sizes from its ranges. A
-  size budget limits each case.
-- **Seed.** The default is fixed. `RANDOM` picks a new seed and prints it. This
-  follows the `HIPDNN_GLOBAL_TEST_SEED` convention (`Seeds.hpp`).
+- minimized reproducers, as concrete sweep cases with purpose `regression` (§9);
+- oracle bugs, as input to golden selection (G-B, §12.2).
 
-### 14.3 Tensor generation
+Boundaries:
 
-The test SDK has `Tensor::fillWithRandomValues(min, max, seed)`, `fillWithValue`
-and `GraphTensorBundle::randomizeTensor`. The per-op tensor bundles fix the value
-range in code. For example, the conv bundles fill x and w with uniform values in
-[0, 1], and pass one seed to every tensor. The tool adds these **value domains**
-(I3, I4):
-
-| Value domain | What it finds |
-|---|---|
-| Uniform, range set for each op and dtype | The default case |
-| Zero-excluded | Hidden zero assumptions in division and normalization |
-| All-zero, constant | Shortcut paths, bias-only paths |
-| Large magnitude, near the dtype limit | Overflow, saturation |
-| Subnormal | Flush-to-zero behavior |
-| NaN and Inf injection (the case sets rate and position) | Special-value propagation. Needs a validator that matches infinities. |
-| Index-unique ramp (each element is distinct) | Wrong indexing that random values can hide |
-| Same sign, long accumulation | Worst-case rounding error |
-
-Rules:
-
-- The domain is an attribute of each tensor in the case, in the sweep metadata.
-- The seed of each tensor comes from the case seed and the tensor uid. A new
-  tensor does not change the values of the other tensors.
-- Placement (base alignment and offset, §6) is part of the case.
-- Value fill runs in the C++ test SDK. The generator writes only the domain name
-  and its parameters.
-
-### 14.4 Fuzz mode
-
-Each iteration draws axis values from the legal space, builds the graph and
-tensors, runs the graph on the selected engines, and checks the result with the
-oracle chain (§11). It also checks these invariants: no crash, no hang, and the
-same result when the run repeats or the plan is reused with new pointers.
-
-Each iteration has one typed outcome: `pass`, `mismatch`, `crash`, `timeout` or
-`reject` (with the reason). A `reject` is not a failure. It does not count as
-executed (P10).
-
-| Sampling strategy | Use |
-|---|---|
-| Uniform over the legal space | Broad search |
-| Boundary-biased: draw the boundaries and hazards of P3 more often | Faults at limits |
-| Corpus mutation: change one axis of a real model layer (set M) | Three-way faults near real use |
-
-A run has a count budget or a time budget, and prints its seed. A fault in a
-feature that an oracle does not model (§11) is reported as "unverified".
-
-### 14.5 Failure handling
-
-1. Record the seed and the full case description (JSON).
-2. **Minimize.** Reset one axis to its default, or halve one dimension. Keep the
-   change if the failure remains. Repeat until no change keeps the failure.
-3. Write the result as a concrete sweep case with purpose `regression` (§9), in
-   the lowest tier that can afford it.
-4. If two oracles disagree, report an oracle bug. Consider a G-B golden case.
-
-The case description is the permanent record. A seed reproduces a case only for
-the same tool version.
-
-### 14.6 Boundaries
-
-- Fuzz mode is not a CI tier. The tiers run checked-in graphs only (§8).
-- The engine integration gate decides campaign policy. This RFC defines the tool.
-- The tool does not fuzz the descriptor loader or matcher (RFC 0017, RFC 0018).
-  It shares only the seed convention.
+- Exhaustive runs are not a CI level. The levels run checked-in graphs only
+  (§8).
+- The tool design, its campaign policy and its schedule are in the companion
+  RFC, not here.
+- Fuzzing of the descriptor loader and matcher is in RFC 0017 and RFC 0018.
 
 ## 15. Required Infrastructure
 
 | # | Capability | Status | Needed for |
 |---|---|---|---|
-| I1 | **Sweep generator** (plan mode, §14). Reads declared axes, legality, shape sets and tier rules. Writes `sweep.json` for each tier, with all-pairs and seeded rotation. | Missing. The conv sweeps came from C++ tests (`generator: capture-bundles`) or were written by hand (`generator: manual`). | §8 |
+| I1 | **Bundle generator.** Reads declared axes, legality, shape sets and level rules. Writes `sweep.json` for each level, with all-pairs and seeded rotation. | Missing. The conv sweeps came from C++ tests (`generator: capture-bundles`) or were written by hand (`generator: manual`). | §8 |
 | I2 | **`purpose` field** in sweep case metadata. Support-matrix generation excludes probes. | Missing | §9 |
 | I3 | **Exact-alignment and offset placement** in the harness | Missing. Pointers are allocator-aligned. | §6 |
-| I4 | **Value-domain control** for each tensor, with seeds derived for each tensor (§14.3) | Missing. The tensor bundles fix ranges in code. | §6, §14 |
-| I5 | **Repeat-and-compare** on bundles | Exists only inside providers | §6 |
+| I4 | **Value-domain control** for each tensor: zero-excluded, all-zero, constant, large magnitude, subnormal, NaN and Inf injection. A seed derived for each tensor. | Missing. The tensor bundles fix ranges in code. For example, conv x and w are uniform in [0, 1], with one seed for every tensor. | §6 |
+| I5 | **Repeat-and-compare** on bundles (determinism, plan reuse) | Exists only inside providers | §6 |
 | I6 | **Oracle fixes** for each plan (for example conv `conv_mode`) | Per op | §11 |
 | I7 | **Golden generator for each op** in `reference-data-scripts/`, writing `meta.json` with criterion and strategy | Batchnorm and SDPA only | §12 |
 | I8 | **Corpus intake** for M shapes | `migration-scripts/import_graph.py` is the start. | §7 |
 | I9 | **Cold-cache timing** for each unique shape and arch | Ad hoc | §8 |
-| I10 | **Fuzz mode** (§14.4, §14.5): sampling, invariant checks, minimizer, reproducer writer | Missing | §14 |
 
 Templates can also need new placeholders. Today, conv `conv_mode`,
 `compute_data_type` and pointwise `operation` are hard-coded. These changes are
@@ -488,16 +476,35 @@ per op. The plan tracks them.
 
 ## 16. Rollout
 
+The priority order is attention, then convolution, then normalization (layer,
+batch and RMS). Other ops follow as bandwidth allows.
+
 | Phase | Content | Exit |
 |---|---|---|
-| 1 | This RFC. The methodology guide and index under `docs/test-plans/`. | RFC merged |
-| 2 | I1, I2. The first per-op plan, in its own PR, regenerates its bundles from the plan. Harvest claims. Fix FFM pins and TOML globs. | Tiers green on supported engines. Each case traces to the plan. |
-| 3 | I3–I7, as the first plan needs them. Its golden set. | Reference gaps closed or recorded |
-| 4 | I10. Fuzz mode for the first op, on a developer machine and in a scheduled non-gating job. | Fuzz finds a seeded fault. The minimizer writes a reproducer that runs as a `regression` case. |
-| 5 | Plans for the other op families, in epic order (attention, normalization, then the rest). Each plan regenerates its bundles. | Each op family has a plan |
+| 1 | This RFC. The methodology guide and index under `docs/test-plans/`. Documents updated (§16.1). | RFC merged |
+| 2 | I1 and I2. | Generator writes bundles with `purpose` |
+| 3 | The attention plan, then the convolution plan, each in its own PR. Each plan regenerates its bundles, harvests claims, and fixes FFM pins and TOML globs. I3–I7 land as these plans need them. | Attention and convolution have plans. This is the minimum before exhaustive-tool work starts. |
+| 4 | Normalization plans: layer, batch, RMS. | Each has a plan |
+| 5 | Other op families, as bandwidth allows. | Each op family has a plan |
+
+The exhaustive tool and its RFC run as a separate effort. It starts after
+phase 3.
 
 Each phase lands on its own. Bundles without a plan keep working until the plan
 of their op replaces them.
+
+### 16.1 Documents and tickets to update
+
+When this RFC merges, update these documents:
+
+| Document | Change |
+|---|---|
+| `projects/hipdnn/docs/testing/TESTING_STRATEGY.md` | Link this RFC and the plan index. Describe the four levels and their questions (§8.2). |
+| `projects/hipdnn/docs/testing/KNOWN_TESTING_GAPS.md` | Link each known gap to the plan that closes it, when that plan exists. |
+| `dnn-providers/integration-tests/README.md` and `docs/README.md` | Link the plan index and the plan-to-file mapping (§8.3). |
+| `dnn-providers/integration-tests/docs/test-plans/README.md` | The index. Each plan and its RFC link from here. |
+
+The existing per-op stories under epic ALMIOPEN-2892 must reference this RFC.
 
 ## 17. Alternatives Considered
 
@@ -506,51 +513,51 @@ of their op replaces them.
 | **Keep curating bundles by hand** | It caused the K = G degeneracy, toy sizes and blind spots of §2. It does not scale to a full plan. |
 | **Plans keyed to engine support** | They stay green easily but hide API features (§2) and need a rewrite when support changes. P2 and claims replace them. |
 | **Full cross-products** | The conv-forward product is ~14,000 cases. Most repeat one check (§10). All-pairs, targeted products and a register replace them. |
-| **Random sampling in the CI tiers** | Random cases make CI results change from run to run. Fuzz mode (§14) runs outside the tiers. Its reproducers become pinned cases. |
-| **Golden data for every case** | It costs storage, has a 2 MiB limit for each case, cannot hold non-finite values, and adds nothing where a trusted live reference exists. Criteria (§12.2) replace it. |
-| **Separate tools for bundles and fuzzing** | Two copies of the legality rules would drift. A fuzz failure would need translation into a plan case. One tool with two modes (§14) replaces them. |
+| **Random sampling in the CI levels** | Random cases make CI results change from run to run. The exhaustive tool (§14) runs outside the levels. Its reproducers become pinned cases. |
+| **Golden data for every case** | It costs storage, has a 2 MiB limit for each case, cannot hold non-finite values, and adds nothing where a trusted live reference exists. A baseline policy and criteria (§12.2) replace it. |
 
 ## 18. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Plan and bundles drift | The generator writes the bundles. The same-PR rule. Reviewers check traceability in both directions. |
-| Case counts exceed the budgets | Estimate first (§8). A cold-cache timing run fixes the counts. Per-tier ceilings. |
+| Case counts exceed the budgets | Estimate first (§8.2). A cold-cache timing run fixes the counts. Per-level ceilings. |
 | Probes fill the suite with skips | A probe costs ~1 ms. The `purpose` tag keeps probes out of the support matrix. P10 requires executed cover. |
 | A missed oracle gap gives wrong verdicts | Review step of §11. Golden G-B cases. Three-way confirmation. |
-| Pairwise misses a three-way fault | Corpus shapes. Fuzz mode. Pinned regressions. |
-| Case-id changes break name-keyed config | Step 9 of §13.1 updates FFM pins and TOML globs in the same PR. |
+| Pairwise misses a three-way fault | Corpus shapes. The exhaustive tool (§14). Pinned regressions. |
+| Case-id changes break name-keyed config | Step 10 of §13.1 updates FFM pins and TOML globs in the same PR. |
 | The methodology guide and this RFC diverge | The guide (`docs/test-plans/methodology.md`) is the working form of §5–§13. Principle changes need an RFC amendment. |
-| Fuzz mode reports false failures from a weak oracle | Check each minimized reproducer against both references. Report faults in unmodeled features as "unverified" (§14.4). |
-| A seed stops reproducing a case after a tool change | The JSON case description is the permanent record (§14.5). |
+| The exhaustive tool needs declarations that plans do not provide | Each plan has an exhaustive-mode section (§13.2). The companion RFC can ask for more fields. |
 
 ## 19. Open Questions and Future Work
 
 1. **Where axes and legality live.** A per-op Python module in
-   `reference-data-scripts/`, or a data file beside the plan?
+   `reference-data-scripts/`, or a data file beside the plan? The bundle
+   generator and the exhaustive tool both read them.
 2. **Precision strategy for fp16 and bf16 golden cases.** We propose matched
    precision. Confirm it against the accumulation contracts of all claiming
    engines.
 3. **Source of tolerance calibration.** Per-case `meta.json` (RFC 0011 level 2),
    or dynamic tolerances?
-4. **Full tier and unclaimed dtypes.** Should full-tier products run only on
+4. **Full level and unclaimed dtypes.** Should full-level products run only on
    claimed dtypes, to cut skip-only cases?
 5. **The engine integration gate.** Its proposal, and the interface it takes from
    the plans.
-6. **Tool language split.** Plan mode can be Python, like
-   `reference-data-scripts/`. Value fill must run in the C++ harness. Does the
-   Python side drive a fuzz run through process calls, or do the two sides share
-   only the case-description format?
-7. **Fuzz job placement.** Which machine and schedule run the non-gating job?
-   Where do its reports go?
+6. **TheRock bump lane.** The suite must run a wide set of cases on each TheRock
+   bump, each PR and each nightly. Which level runs on a TheRock bump? §8.2 does
+   not yet say.
+7. **Companion exhaustive-tool RFC.** Its owner, its timing, and the fields that
+   it needs in the exhaustive-mode section.
 
 ## 20. Glossary
 
 - **Plan.** A per-op document under `docs/test-plans/` that defines the test
-  sweep of the op.
+  sweep of the op. It does not depend on an engine.
+- **Level.** One of quick, PR, nightly or full (§8.2). Also called a tier. Each
+  level answers one question.
 - **Feature.** A schema field, enum value, validation rule or harness property
   that can change behavior.
-- **Core axes.** The axes that each tier covers completely. Typically rank ×
+- **Core axes.** The axes that each level covers completely. Typically rank ×
   layout × dtype.
 - **All-pairs.** A set of cases in which each value of each axis meets each value
   of each other axis at least once.
@@ -561,5 +568,6 @@ of their op replaces them.
 - **Oracle.** Anything that produces the expected output: golden data, the GPU
   reference or the CPU reference.
 - **G-A … G-F.** Golden selection criteria (§12.2).
-- **Test generator tool.** The tool of §14, with plan mode and fuzz mode.
-- **Value domain.** The class of values that fills a tensor (§14.3).
+- **Bundle generator.** The tool that writes bundles from a plan (I1).
+- **Exhaustive mode.** The section of a plan that declares the hook for the
+  separate exhaustive tool (§14).
