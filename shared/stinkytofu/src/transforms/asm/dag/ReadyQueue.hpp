@@ -86,9 +86,14 @@ struct DAGNode {
     unsigned inDegree;
     unsigned id;
     // Pre-computed pick order for ds_reads. Lower = pick first.
-    // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
-    // based on DsReadOrder config and WMMA consumer analysis.
+    // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects from
+    // deadline (earliest in-region matrix consumer), parent-VALU inputs first,
+    // then DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
+    // True when this VALU/transcendental has a direct matrix DAG successor.
+    // CDNA5ReadyQueue routes these to wmmaParentValuQueue (Phase B unlock).
+    // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
+    bool feedsWmma = false;
     // Packed s_set_vgpr_msb immediate this op needs (computeRequiredMsb); -1 = no MSB
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
@@ -324,6 +329,10 @@ class ReadySetByDAGid {
 
     void erase(DAGNode* node) {
         set.erase(node);
+    }
+
+    bool contains(DAGNode* node) const {
+        return set.contains(node);
     }
 
     using iterator = std::set<DAGNode*, CompareByDAGid>::iterator;
