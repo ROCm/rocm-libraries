@@ -32,6 +32,7 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
+#include "../detail/util_env.hpp"
 #include "../thread/thread_operators.hpp"
 
 #include <rocprim/device/config_types.hpp> // IWYU pragma: export
@@ -40,6 +41,8 @@
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/types/future_value.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(__execution/determinism.h)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
 #include _HIPCUB_STD_INCLUDE(functional)
 
 BEGIN_HIPCUB_NAMESPACE
@@ -257,6 +260,28 @@ public:
         return ExclusiveSum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t
+        ExclusiveSum(InputIteratorT d_in, OutputIteratorT d_out, NumItemsT num_items, EnvT env = {})
+    {
+        // Env-based reduce invoke
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return ExclusiveSum(d_temp_storage,
+                                                          temp_storage_bytes,
+                                                          d_in,
+                                                          d_out,
+                                                          num_items,
+                                                          stream);
+                                  });
+    }
+
     template<typename IteratorT, typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSum(void*       d_temp_storage,
@@ -340,6 +365,35 @@ public:
                              init_value,
                              num_items,
                              stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ScanOpT,
+             typename InitValueT,
+             typename NumItemsT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    [[nodiscard]]
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ExclusiveScan(InputIteratorT  d_in,
+                                    OutputIteratorT d_out,
+                                    ScanOpT         scan_op,
+                                    InitValueT      init_value,
+                                    NumItemsT       num_items,
+                                    EnvT            env = {})
+    {
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return ExclusiveScan(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           d_in,
+                                                           d_out,
+                                                           scan_op,
+                                                           init_value,
+                                                           num_items,
+                                                           stream);
+                                  });
     }
 
     template<typename IteratorT, typename ScanOpT, typename InitValueT, typename NumItemsT>
