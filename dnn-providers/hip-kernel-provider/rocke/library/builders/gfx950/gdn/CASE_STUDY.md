@@ -33,8 +33,10 @@ weights) or many waves can cross it.
 Tiles are `(num_warps, warp_threads_k, blocks_per_v_dim)`. bf16 I/O, bf16 and
 `f32` state, `DK = DV = 128` unless stated:
 
-- **Dispatcher candidates (114):** GDN at `Hk/Hv = 16/32`, every tile in
-  `CONFIGURED_TILES`; KDA at `32/32`, the three tiles in `_TUNED_TILES_KDA`.
+- **Dispatcher tiles (114 tile and state-dtype pairs):** GDN at `Hk/Hv = 16/32`,
+  every tile in `CONFIGURED_TILES`; KDA at `32/32`, the three tiles in
+  `_TUNED_TILES_KDA`; each with bf16 and `f32` state. Dispatch accepts only a
+  16-bit state today, so the `f32` half is not reachable from a request yet.
 - **Auto-route fallback (4):** GDN `(1,1,1)` at `DK = DV = 64` and `192`, where
   `DEFAULT_TILE` `(2,16,8)` is illegal (ALGORITHM.md §4.6).
 - **Fused tiles (228):** GDN and KDA at `16/16`, `BPV = 1`, every legal
@@ -57,7 +59,7 @@ count crossed a granule boundary in that model; a case can cross more than one.
 
 ### 4.1 ROCm 7.1.0 (`llvm20`, comgr SHA-256 `b3e6941ac89a1ba6…`)
 
-Dispatcher candidates (modeled waves per SIMD, merge base → head):
+Dispatcher tiles (modeled waves per SIMD, merge base → head):
 
 - fewer waves: GDN `(1,4,1)` bf16 (2→1), GDN `(1,16,1)` bf16 (2→1), GDN `(1,16,4)` bf16 (5→4), GDN `(1,16,8)` bf16 (8→7);
 - more waves: GDN `(4,16,1)` bf16 (4→5), GDN `(16,16,1)` bf16 (7→8), GDN `(1,8,8)` f32 (5→6), GDN `(2,8,4)` f32 (5→6), GDN `(2,16,8)` f32 (7→8), GDN `(4,8,2)` f32 (5→6), GDN `(4,16,4)` f32 (7→8), GDN `(8,8,1)` f32 (5→6), GDN `(8,16,2)` f32 (7→8), GDN `(16,8,1)` f32 (5→6), GDN `(16,16,1)` f32 (7→8);
@@ -75,7 +77,7 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
 
 ### 4.2 ROCm 7.13 (`llvm23`, comgr SHA-256 `dd9edec7b6e078a2…`)
 
-Dispatcher candidates (modeled waves per SIMD, merge base → head):
+Dispatcher tiles (modeled waves per SIMD, merge base → head):
 
 - fewer waves: GDN `(1,16,2)` bf16 (4→3), GDN `(1,16,4)` bf16 (5→4), GDN `(2,16,1)` bf16 (4→3), GDN `(2,16,2)` bf16 (5→4), GDN `(4,8,1)` bf16 (4→3), GDN `(4,16,1)` bf16 (5→4), GDN `(8,8,1)` bf16 (5→4), KDA `(2,16,1)` bf16 (4→3);
 - more waves: GDN `(1,16,16)` bf16 (7→8), GDN `(2,16,8)` bf16 (7→8), GDN `(1,8,16)` f32 (5→6), GDN `(2,8,8)` f32 (5→6), GDN `(2,16,2)` f32 (3→4), GDN `(4,8,4)` f32 (5→6), GDN `(8,8,2)` f32 (5→6);
@@ -93,7 +95,7 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
 
 ### 4.3 ROCm 10 pre-release (`llvm23`, comgr SHA-256 `f18da4b1298b9c6f…`)
 
-Dispatcher candidates (modeled waves per SIMD, merge base → head):
+Dispatcher tiles (modeled waves per SIMD, merge base → head):
 
 - fewer waves: GDN `(1,16,2)` bf16 (4→3), GDN `(2,16,1)` bf16 (4→3), KDA `(2,16,1)` bf16 (4→3);
 - more waves: GDN `(4,16,2)` bf16 (7→8), GDN `(1,8,16)` f32 (5→6), GDN `(2,8,8)` f32 (5→6), GDN `(4,8,4)` f32 (5→6), GDN `(8,8,2)` f32 (5→6);
@@ -148,9 +150,8 @@ a row's three cells.
 **Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
 GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
 `(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
-and fused arms were built as specs directly. A request can ask for f32 state
-through dispatch, but it has no fusion fields, so only the fused arm is
-unreachable from dispatch. GDN fused performance was not measured. The tile
+and fused arms were built as specs directly: a dispatch request cannot ask for an
+`f32` state or for fusion today. GDN fused performance was not measured. The tile
 choices were made on the old load order (§5).
 
 **Method.** Both trees run in one process, with their arms interleaved. State,
