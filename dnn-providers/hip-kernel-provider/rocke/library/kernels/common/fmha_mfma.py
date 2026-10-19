@@ -36,7 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import KernelDef
+from rocke.core.ir import I64, KernelDef
 from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -44,6 +44,9 @@ from rocke.helpers.mfma_attention import (
 )
 from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
+
+# Element size (bytes) for the free-stride per-batch base-pointer rebase.
+_ELEM_BYTES = {"f16": 2, "fp16": 2, "bf16": 2}
 
 
 __all__ = [
@@ -68,10 +71,15 @@ class FmhaMfmaSpec:
     seqlen_q: int
     seqlen_k: int
     name: str = "rocke_fmha_fwd_mfma"
+    # Layout-general addressing: per-tensor batch strides + a base-pointer rebase
+    # instead of the (BSHD-contiguous) seqlen fold, so BSHD/BHSD/general/packed
+    # all work. Default False keeps the shipped kernel byte-identical; the
+    # free-stride path is Python-only (outside the byte-identity gate) for now.
+    free_stride: bool = False
 
     def kernel_name(self) -> str:
         s = self.common.shape
-        return kernel_name_join(
+        parts = [
             self.name,
             f"H{s.head_size}",
             f"HQ{s.num_query_heads}",
@@ -80,7 +88,10 @@ class FmhaMfmaSpec:
             f"Q{self.seqlen_q}",
             f"K{self.seqlen_k}",
             self.common.mask_mode,
-        )
+        ]
+        if self.free_stride:
+            parts.append("fs")
+        return kernel_name_join(*parts)
 
 
 def _mma_family(arch: str) -> str:
@@ -175,8 +186,12 @@ def is_valid_spec(spec: FmhaMfmaSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     return True, "ok"
 
 
-def _declare_params(kb: FmhaKernelBuilder) -> None:
-    """The MFMA FMHA kernel ABI (shared between build + sig)."""
+def _declare_params(kb: FmhaKernelBuilder, *, free_stride: bool = False) -> None:
+    """The MFMA FMHA kernel ABI (shared between build + sig).
+
+    ``free_stride`` appends the per-tensor batch strides the layout-general
+    addressing path reads; the default (seqlen-fold) ABI is unchanged.
+    """
     kb.add_tensor("Q", readonly=True)
     kb.add_tensor("K", readonly=True)
     kb.add_tensor("V", readonly=True)
@@ -185,6 +200,9 @@ def _declare_params(kb: FmhaKernelBuilder) -> None:
     kb.add_scalar("seqlen_q", "i32")
     kb.add_scalar("seqlen_k", "i32")
     kb.add_strides("q", "k", "v", "o")
+    if free_stride:
+        for t in ("q", "k", "v", "o"):
+            kb.add_scalar(f"stride_{t}_batch", "i32")
 
 
 def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
@@ -237,7 +255,7 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
 
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
     kb.block_size(wave_size)  # one wave per CTA (64 on CDNA, 32 on RDNA)
-    _declare_params(kb)
+    _declare_params(kb, free_stride=spec.free_stride)
     kb.decode_grid(has_batch_axis=True)
     b = kb.builder
 
@@ -251,6 +269,56 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
     # within the current batch.
     q_tile_idx = kb.q_token  # reuses block_id_x; semantically a tile, not a token
     q_tile_local = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
+
+    if spec.free_stride:
+        # Layout-general path (Python-only; outside the byte-identity gate).
+        # Rebase each tensor's base pointer to the CTA's batch slice; the body
+        # then addresses head/token through the runtime strides, so BSHD, BHSD,
+        # general B/H/S strides and packed QKV all work with batch carried by
+        # the pointer. The default seqlen-fold path below is byte-identical and
+        # is NOT entered for free-stride specs. Safe because the body loads
+        # through raw pointers (no buffer span is sized from the base).
+        elem = _ELEM_BYTES[s.dtype]
+
+        def _batch_base(name):
+            off = b.mul(
+                b.zext(batch_idx, I64),
+                b.zext(kb.scalar(f"stride_{name}_batch"), I64),
+            )
+            return b.global_ptr_add(
+                kb.tensor(name.upper()), b.mul(off, b.const_i64(elem))
+            )
+
+        masked = s.mask_mode in ("causal", "sliding_window")
+        mfma_attention_fwd_inner_body(
+            b,
+            Q=_batch_base("q"),
+            K=_batch_base("k"),
+            V=_batch_base("v"),
+            O=_batch_base("o"),
+            head_size=s.head_size,
+            seqlen_k=seqlen_k,
+            q_tile_base=q_tile_local,
+            q_pos_base=q_tile_local if masked else None,
+            head_idx=head_idx,
+            kv_head_idx=kv_head_idx,
+            stride_q_token=kb.stride_token("q"),
+            stride_q_head=kb.stride_head("q"),
+            stride_k_token=kb.stride_token("k"),
+            stride_k_head=kb.stride_head("k"),
+            stride_v_token=kb.stride_token("v"),
+            stride_v_head=kb.stride_head("v"),
+            stride_o_token=kb.stride_token("o"),
+            stride_o_head=kb.stride_head("o"),
+            scale_log2=kb.scalar("scale_log2"),
+            dtype=s.dtype,
+            mask_mode=s.mask_mode,
+            sliding_window=s.sliding_window,
+            causal_ctx_offset=b.const_i32(0),
+            arch=arch,
+        )
+        b.ret()
+        return kb.kernel
 
     # Per-batch shift in rows (for Q and O). The helper multiplies
     # the row index by stride_q_token / stride_o_token internally, so
@@ -323,5 +391,5 @@ def fmha_fwd_mfma_grid(spec: FmhaMfmaSpec, *, batch: int) -> Tuple[int, int, int
 
 def fmha_fwd_mfma_signature(spec: FmhaMfmaSpec):
     kb = FmhaKernelBuilder("rocke_fmha_fwd_mfma_sig_probe", spec.common)
-    _declare_params(kb)
+    _declare_params(kb, free_stride=spec.free_stride)
     return kb.signature()
