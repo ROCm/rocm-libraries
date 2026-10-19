@@ -1233,10 +1233,6 @@ rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* a,
                                           rocke_value_t* bb,
                                           rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
-                                             rocke_value_t* a,
-                                             rocke_value_t* bb,
-                                             rocke_value_t* c);
 /* gfx950 unscaled 16x16x128 MFMA for fp8, bf8, fp6 and fp4. The instruction
  * applies no scale. The lowering passes literal 0 for both scale operands of the
  * f8f6f4 intrinsic, and the backend then selects the unscaled instruction

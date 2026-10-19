@@ -3756,48 +3756,6 @@
         "verified_on": "llvm22"
       }
     },
-    "mfma.f32.16x16x96.fp6": {
-      "gfx11-generic": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx1151": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx12-generic": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx1201": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx1250": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx90a": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx942": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      },
-      "gfx950": {
-        "evidence": "not an intrinsic in llvm22",
-        "status": "name_absent",
-        "verified_on": "llvm22"
-      }
-    },
     "mfma.f32.32x32x16.bf16": {
       "gfx11-generic": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.bf16",

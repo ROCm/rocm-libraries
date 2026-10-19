@@ -334,8 +334,8 @@ mode. The missing selector and precision contract are described in §2.5.
   criterion. C2=1 reflects the i4 (`iu4`) WMMA on gfx1151/gfx11-generic; the MFMA targets
   and gfx1250 have no native INT4 matrix instruction (§4A).
 - **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
-  matrix. The gfx950 instructions exist (`mfma_scale_f32_16x16x128_f8f6f4`,
-  `mfma_f32_16x16x128_fp4fp6fp8`, and `mfma_f32_16x16x96_fp6`) and the hipBLASLt provider already maps
+  matrix. The gfx950 instructions exist (`mfma_scale_f32_16x16x128_f8f6f4`
+  and `mfma_f32_16x16x128_fp4fp6fp8`) and the hipBLASLt provider already maps
   `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
   the silicon are both ready — but **no rocKE kernel instance ships**.
 - **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:251`) decodes a
@@ -503,7 +503,7 @@ The original basis snapshot, with the gfx942 XF32 addition noted below:
 |---|---|---|
 | `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` | f16, bf16 |
 | `gfx942` | the gfx90a set + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` | f32, f16, bf16, fp8, bf8, **tf32** |
-| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` + `mfma_f32_16x16x96_fp6` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, **fp4, fp6** |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` | f16, bf16, **i8, i4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` | f16, bf16 |
 | `gfx11-generic` | same as `gfx1151` | f16, bf16, i8, i4 |

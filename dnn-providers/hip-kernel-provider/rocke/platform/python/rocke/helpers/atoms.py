@@ -414,21 +414,6 @@ class MfmaAtom:
         )
 
     @classmethod
-    def fp6_16x16x96(cls) -> "MfmaAtom":
-        """fp6 MX MFMA atom (gfx950+, P52)."""
-        return cls(
-            m=16,
-            n=16,
-            k=96,
-            a_per_lane=12,
-            b_per_lane=12,
-            c_per_lane=4,
-            dtype_in="fp6",
-            dtype_out="f32",
-            name="mfma_f32_16x16x96_fp6",
-        )
-
-    @classmethod
     def f16_4x4x4(cls) -> "MfmaAtom":
         """The tiny f16 atom. One MFMA emits 16 independent 4x4x4 matmuls per wave.
 
@@ -907,16 +892,13 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_16x16x128(),
 )
 
-# P52: MX fp6 atom (gfx950+).
-MFMA_MX_ATOMS: Tuple[MfmaAtom, ...] = (MfmaAtom.fp6_16x16x96(),)
-
 # Unified catalog covering every shipped MFMA shape. Used by
 # ``mfma_atom("<dtype>", m, n, k)`` to dispatch into the right
 # factory; ``MFMA_F16_ATOMS`` / ``MFMA_BF16_ATOMS`` / ``MFMA_FP8_ATOMS``
 # are kept as narrower subset accessors for callers that want to walk
 # only the fp16, bf16, or fp8/bf8 families.
 MFMA_ATOMS: Tuple[MfmaAtom, ...] = (
-    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS + MFMA_MX_ATOMS
+    MFMA_F16_ATOMS + MFMA_F32_ATOMS + MFMA_BF16_ATOMS + MFMA_FP8_ATOMS
 )
 
 # Accept aliases on the dtype lookup key: ``fp8`` -> ``fp8e4m3``,

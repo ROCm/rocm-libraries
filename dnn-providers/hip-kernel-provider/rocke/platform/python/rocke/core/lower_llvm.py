@@ -930,12 +930,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
         "i32 immarg, i32, i32 immarg, i32)"
     ),
-    # P52: fp6 MX MFMA atom (gfx950+). ``16 x fp6`` is a 96-bit value
-    # modelled here as `<3 x i32>`.
-    "mfma.f32.16x16x96.fp6": (
-        "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6("
-        "<3 x i32>, <3 x i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"
-    ),
     # --- LLVM 23 async markers (gfx12+ async global/LDS pipelines) ---
     "asyncmark": "declare void @llvm.amdgcn.asyncmark()",
     "wait.asyncmark": "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)",
@@ -4342,32 +4336,6 @@ class _Lowerer:
         cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
             op, a, b, c, "0", "0", "a_f8f6f4", "b_f8f6f4", cbsz, blgp
-        )
-
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._need("mfma.f32.16x16x96.fp6")
-        a_cast = self._fresh("a_fp6")
-        b_cast = self._fresh("b_fp6")
-        a_ty = _llvm_type(a.type)
-        b_ty = _llvm_type(b.type)
-        if a_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {a_cast} = bitcast {a_ty} {self._operand(a)} to <3 x i32>"
-            )
-        else:
-            a_cast = self._operand(a)
-        if b_ty != "<3 x i32>":
-            self._current().emit(
-                f"  {b_cast} = bitcast {b_ty} {self._operand(b)} to <3 x i32>"
-            )
-        else:
-            b_cast = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32> {a_cast}, "
-            f"<3 x i32> {b_cast}, <4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_16x16x128_fp8(self, op: Op) -> None:

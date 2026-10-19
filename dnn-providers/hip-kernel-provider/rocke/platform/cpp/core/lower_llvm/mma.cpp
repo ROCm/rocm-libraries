@@ -8,7 +8,7 @@
  *   - f16 / bf16 16x16x* and 32x32x*
  *   - fp8 / bf8 via the shared rocke_ll_lower_mfma_fp8_bf8 body (defined here,
  *     called via the internal header by other buckets too)
- *   - scaled f8f6f4, fp4, fp6, and the unscaled fp8-128 hero atom
+ *   - the K=128 f8f6f4 ops: MX-scaled, the unscaled fp8 hero atom, and unscaled all-format
  *   - register_p_from_qk_c register-fragment reshape
  *   - WMMA routing: real RDNA3/RDNA4 emission (Gfx11/Gfx12RdnaBackend.emit_wmma)
  *     plus faithful CDNA rejection (CDNA targets reject WMMA, mirroring the
@@ -48,7 +48,6 @@ static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* o
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const rocke_op_t* op);
-static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_register_p_from_qk_c(rocke_lower_t* L, const rocke_op_t* op);
@@ -513,8 +512,8 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
-    /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
-     * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
+    /* f16 / bf16 / f32 dense atoms resolve from the table; the K=128 f8f6f4
+     * ops and the fp8-bf8 atoms keep their dedicated bodies below. */
     if(_try_emit_mfma_table(L, op, op_id))
     {
         return;
@@ -536,15 +535,11 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     else if(strcmp(op_id, "mfma_f32_32x32x16_bf8") == 0)
     {
         _op_tile_mfma_f32_32x32x16_bf8(L, op);
-        /* MX-scaled / fp4 / fp6 / unscaled hero */
+        /* K=128 f8f6f4: MX-scaled, unscaled hero, unscaled all-format */
     }
     else if(strcmp(op_id, "mfma_scale_f32_16x16x128_f8f6f4") == 0)
     {
         _op_tile_mfma_scale_f32_16x16x128_f8f6f4(L, op);
-    }
-    else if(strcmp(op_id, "mfma_f32_16x16x96_fp6") == 0)
-    {
-        _op_tile_mfma_f32_16x16x96_fp6(L, op);
     }
     else if(strcmp(op_id, "mfma_f32_16x16x128_fp4fp6fp8") == 0)
     {
@@ -1317,7 +1312,7 @@ static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* o
 }
 
 /* ====================================================================== */
-/* MX-scaled f8f6f4 / fp4 / fp6 / unscaled hero atoms                     */
+/* K=128 f8f6f4 ops: MX-scaled, unscaled hero, unscaled all-format        */
 /* ====================================================================== */
 
 /* Declaration key of the K=128 f8f6f4 MFMA (A and B as <8 x i32>): the intrinsic
@@ -1466,56 +1461,6 @@ static void _op_tile_mfma_f32_16x16x128_fp4fp6fp8(rocke_lower_t* L, const rocke_
                           "b_f8f6f4",
                           cbsz,
                           blgp);
-}
-
-static void _op_tile_mfma_f32_16x16x96_fp6(rocke_lower_t* L, const rocke_op_t* op)
-{
-    const rocke_value_t *a, *b, *c;
-    const char *a_cast, *b_cast;
-    const char *a_ty, *b_ty;
-
-    if(!rocke_ll_live(L))
-    {
-        return;
-    }
-    if(op->num_operands != 3)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name);
-    }
-    a = op->operands[0];
-    b = op->operands[1];
-    c = op->operands[2];
-    rocke_ll_need(L, "mfma.f32.16x16x96.fp6");
-    a_cast = rocke_ll_fresh(L, "a_fp6");
-    b_cast = rocke_ll_fresh(L, "b_fp6");
-    a_ty = rocke_ll_llvm_type(L, a->type);
-    b_ty = rocke_ll_llvm_type(L, b->type);
-    if(strcmp(a_ty, "<3 x i32>") != 0)
-    {
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to <3 x i32>", a_cast, a_ty, rocke_ll_operand(L, a));
-    }
-    else
-    {
-        a_cast = rocke_ll_operand(L, a);
-    }
-    if(strcmp(b_ty, "<3 x i32>") != 0)
-    {
-        rocke_ll_emitf(
-            L, "  %s = bitcast %s %s to <3 x i32>", b_cast, b_ty, rocke_ll_operand(L, b));
-    }
-    else
-    {
-        b_cast = rocke_ll_operand(L, b);
-    }
-    rocke_ll_emitf(L,
-                   "  %s = call <4 x float> "
-                   "@llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32> %s, "
-                   "<3 x i32> %s, <4 x float> %s, i32 0, i32 0, i32 0)",
-                   mma_result_name(L, op),
-                   a_cast,
-                   b_cast,
-                   rocke_ll_operand(L, c));
 }
 
 static void _op_tile_mfma_f32_16x16x128_fp8(rocke_lower_t* L, const rocke_op_t* op)

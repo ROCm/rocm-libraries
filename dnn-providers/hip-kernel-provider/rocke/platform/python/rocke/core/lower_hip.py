@@ -2031,13 +2031,6 @@ class _Lowerer:
             f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
         )
 
-    def _op_tile_mfma_f32_16x16x96_fp6(self, op: Op) -> None:
-        a, b, c = op.operands
-        self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P52 fp6 MFMA stub: "
-            f"a={_name(a)} b={_name(b)}"
-        )
-
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
         """HIP debug shim for the P13 register permutation."""
         (qk_c,) = op.operands

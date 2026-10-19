@@ -366,9 +366,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32",
      "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4.v8i32.v8i32(<8 x i32>, <8 x "
      "i32>, <4 x float>, i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"},
-    {"mfma.f32.16x16x96.fp6",
-     "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x96.fp6(<3 x i32>, <3 x i32>, <4 x float>, "
-     "i32 immarg, i32 immarg, i32 immarg)"},
     {"asyncmark", "declare void @llvm.amdgcn.asyncmark()"},
     {"wait.asyncmark", "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)"},
     {"raw.ptr.buffer.load.async.lds",

@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The dedicated fp4 MFMA op is removed.
+"""The dedicated fp4 and fp6 MFMA ops are removed.
 
-The op called an LLVM intrinsic that does not exist. The call passed `opt
+Each op called an LLVM intrinsic that does not exist. The call passed `opt
 -passes=verify` and `clang -S`. It failed only at link time. LLVM has one
 f8f6f4 MFMA family. Use `mfma_scale_f32_16x16x128_f8f6f4` or
 `mfma_f32_16x16x128_fp4fp6fp8` with `a_format` and `b_format` set to
-`fp4e2m1`.
+`fp4e2m1`, `fp6e2m3`, or `fp6e3m2`.
 
 These tests pin the removal in every layer, so a lowering handler cannot return
 without a working intrinsic.
@@ -31,7 +31,10 @@ from rocke.helpers.atoms import MFMA_ATOMS, MfmaAtom
 
 # The op id is also the name of the builder method.
 # Each row holds the op id, the declaration key, and the atom factory name.
-_REMOVED = (("mfma_f32_16x16x128_fp4", "mfma.f32.16x16x128.fp4", "fp4_16x16x128"),)
+_REMOVED = (
+    ("mfma_f32_16x16x128_fp4", "mfma.f32.16x16x128.fp4", "fp4_16x16x128"),
+    ("mfma_f32_16x16x96_fp6", "mfma.f32.16x16x96.fp6", "fp6_16x16x96"),
+)
 
 
 def _probe_kernel() -> KernelDef:
