@@ -373,9 +373,10 @@ constexpr std::array<uint8_t, 1376> GFX950_ATTENTION_DENSE_V1_GOLDEN = {
 // Prints the payload fields that identify a sample, for a failed comparison.
 std::string describePayload(const serialization::IngestorPlanPayload& payload)
 {
-    return "target=" + payload.target + " symbol=" + payload.symbol + " sha256=" + payload.sha256
-           + " workspaceBytes=" + std::to_string(payload.workspaceBytes)
-           + " signatureSize=" + std::to_string(payload.recordedSignature.size());
+    return "target=" + payload.target + " symbol=" + payload.symbol
+           + " dispatchSymbol=" + payload.dispatchSymbol + " sha256=" + payload.sha256
+           + " workspaceBytes=" + std::to_string(payload.workspaceBytes) + " signature=["
+           + hipdnn_plugin_sdk::ingestor::describeKernelSignature(payload.recordedSignature) + "]";
 }
 
 // Decodes a sample, compares the whole payload with the expected payload, and hands back
