@@ -327,6 +327,7 @@ size_t grid_analytical(const problem_t& problem,
 
 static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
                                           size_t tiles,
+                                          size_t k,
                                           size_t iters_per_tile,
                                           size_t cu_count,
                                           size_t batch) {
@@ -335,6 +336,12 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
   // Batched GEMMs benefit from SK tile-streaming (consecutive batch tiles share
   // A/B data in L1/L2); skip all corrections for batch > 1.
   if (batch > 1) return sk_grid;
+
+  // K == 1: there is no summation axis to split, so every SK grid below `tiles`
+  // buys partial tiles, a workspace and a fixup pass for no reuse at all.  Keyed
+  // on K rather than ipt == 1, which also covers 1 < K <= MT_K where streaming
+  // still pays off.
+  if (k == 1) return tiles;
 
   // ipt == 1: pure tile-streaming.  DP's N-locality wins over a bounded
   // tile-count window; outside it, keep SK.
@@ -446,8 +453,8 @@ size_t grid_k_split_aware(const problem_t& problem,
   // case (tiles > cu_count).  K-split grids (tiles <= cu_count) intentionally
   // produce non-tile-aligned grids and must not be corrected to DP.
   if (tiles > cu_count)
-    sk_grid = correct_sk_grid_for_partial_tiles(sk_grid, tiles, iters_per_tile, cu_count,
-                                                problem.batch);
+    sk_grid = correct_sk_grid_for_partial_tiles(sk_grid, tiles, problem.size.k, iters_per_tile,
+                                                cu_count, problem.batch);
   return sk_grid;
 }
 size_t select_grid_size(const problem_t& problem,

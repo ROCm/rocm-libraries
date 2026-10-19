@@ -394,3 +394,36 @@ TEST_CASE("Origami streamk: grid_k_split_aware partial-tile correction", "[strea
   // tiles < cu_count → K-split branch: grid > tiles (multiple K-splits launched).
   REQUIRE(run(17, 256, 224) > 17);
 }
+
+TEST_CASE("Origami streamk: K == 1 never takes a Stream-K split", "[streamk]") {
+  // K=1 has no summation axis, so any grid below `tiles` buys partial tiles, a
+  // workspace and a fixup pass for nothing.  The ipt <= 1 window above cannot be
+  // relied on to catch that: past its 32*cu_count ceiling it declines and the
+  // uncorrected SK grid stands, and real K=1 shapes sit well past that ceiling.
+  //
+  // Helper: one tile row of `tiles` columns at the given K, no CU cap and
+  // unbounded workspace, so the grid decision is the only variable.
+
+  auto run = [](size_t tiles, size_t k, size_t cu_count) {
+    constexpr size_t MT_M = 16, MT_N = 16, MT_K = 32;
+    auto p = make_problem(MT_M, MT_N * tiles, k);
+    auto c = make_config(MT_M, MT_N, MT_K);
+    c.workspace_size            = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+    p.num_cus = cu_count;
+    return origami::streamk::select_grid_size(p, make_hardware(950), c,
+                                              origami::grid_selection_t::k_split_aware);
+  };
+
+  // tiles = 40*cu_count: the fraction search lands on frac_grid == cu_count and
+  // 10240 is past 32*cu_count, so without the K==1 rule the SK grid of 256 stands.
+  REQUIRE(run(10240, 1, 256) == 10240);
+
+  // K == MT_K leaves ipt == 1 but must keep its SK grid: the rule is K == 1
+  // only, not the whole ipt <= 1 class.
+  REQUIRE(run(10240, 32, 256) == 256);
+
+  // K > MT_K is untouched: ipt == 5 falls through to the DP-efficiency and
+  // partial-tile checks, which keep SK.
+  REQUIRE(run(10240, 160, 256) == 256);
+}
