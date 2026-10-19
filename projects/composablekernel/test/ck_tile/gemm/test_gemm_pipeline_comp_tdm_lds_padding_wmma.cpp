@@ -4,8 +4,8 @@
 // comp_tdm / comp_tdm_v2 tiles where the TDM and the LDS tensor descriptors would place the base
 // policy's LDS padding differently: LDS rows that are not a power of two, a pad interval that does
 // not fit the TDM descriptor's 3-bit field, and TDM loads that start inside a pad group and run
-// past its end. The policy pads those at an interval that divides the LDS row instead, unless the
-// LDS buffers would then not fit; the controls keep their padding.
+// past its end. The policy pads those at an interval that divides the LDS row instead; the controls
+// keep their padding. Padding that would take the LDS buffers past LDS is dropped.
 #include "test_gemm_pipeline_kernel_types.hpp"
 #include "test_gemm_pipeline_wmma_base.hpp"
 #include "gtest/gtest.h"
@@ -17,6 +17,7 @@ using I48   = ck_tile::number<48>;
 using I96   = ck_tile::number<96>;
 using I160  = ck_tile::number<160>;
 using I384  = ck_tile::number<384>;
+using I512  = ck_tile::number<512>;
 using I1024 = ck_tile::number<1024>;
 
 using Waves2x2 = ck_tile::sequence<2, 2, 1>;
@@ -64,9 +65,12 @@ using KernelTypesCompTDMLdsPadding = ::testing::Types<
     // pad group's end, so no load has a pad inside (A, then B)
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I16,        I128,         I32,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves1x8,   LdsPadAB>,
     std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I128,         I16,         I32,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves8x1,   LdsPadAB>,
-    // LDS budget: padding the transposed 160-element rows of A every 16 dwords would take two
-    // buffers of A and B past the 320 KB of LDS, so A drops its padding
-    std::tuple<    Col,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I160,        I384,        I128,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<kDrop, kKeep>>
+    // LDS budget: padding both operands would take two buffers of A and B past the 320 KB of LDS,
+    // so the operand whose padding takes more LDS drops it. Padding the transposed 160-element
+    // rows of A every 16 dwords (A drops it), then the base policy's padding, consistent but
+    // larger for the 512-row B (B drops it)
+    std::tuple<    Col,     Col,     Row,      BF16,      BF16,         F32,      BF16,        I160,        I384,        I128,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<kDrop, kKeep>>,
+    std::tuple<    Row,     Col,     Row,      BF16,      BF16,         F32,      BF16,         I96,        I512,        I128,        I16,        I16, Intrawave,    CompTDMV1, NonPersistent, ClusterDisable,   Waves2x2, LdsPad<kKeep, kDrop>>
 >;
 // clang-format on
 
@@ -88,6 +92,19 @@ __global__ void tdm_lds_padding_probe(ck_tile::index_t* out)
     store(3, BasePolicy::template GetLdsPaddingConfig<Problem, false>());
     store(6, Policy::template GetLdsPaddingConfig<Problem, true>());
     store(9, Policy::template GetLdsPaddingConfig<Problem, false>());
+
+    // the LDS budget's model of an operand's LDS buffer is what its LDS tensor descriptor
+    // allocates
+    using ALdsType = typename Problem::ADataType;
+    using BLdsType = typename Problem::BDataType;
+    static_assert(Policy::template GetTDMLdsTileBytes<Problem, true>(
+                      Policy::template GetLdsPaddingConfig<Problem, true>()) ==
+                  Policy::template MakeALdsBlockDescriptor<Problem>().get_element_space_size() *
+                      sizeof(ALdsType) / ck_tile::numeric_traits<ALdsType>::PackedSize);
+    static_assert(Policy::template GetTDMLdsTileBytes<Problem, false>(
+                      Policy::template GetLdsPaddingConfig<Problem, false>()) ==
+                  Policy::template MakeBLdsBlockDescriptor<Problem>().get_element_space_size() *
+                      sizeof(BLdsType) / ck_tile::numeric_traits<BLdsType>::PackedSize);
 #else
     static_cast<void>(out);
 #endif
