@@ -117,6 +117,32 @@ for make_config in (default_fp8_config, default_fp4_config):
 PYCODE
 ```
 
+## Sweep a Tile Engine configuration
+
+`tile_engine/ops/gemm/mx_gemm_full_benchmark.py` sweeps a Tile Engine MX JSON
+configuration through the bridge, like `gemm_full_benchmark.py` does for regular
+GEMM. `expand_mx_sweep()` takes the kernel list from the Old-TE
+`MxGemmKernelBuilder`, so the bridge runs exactly the kernels an Old-TE build of
+the same JSON, dtype and `--max-instances` produces. Kernels are compiled in
+parallel and benchmarked on every visible GPU in disposable worker processes.
+
+From `projects/composablekernel/tile_engine/ops/gemm`:
+
+```bash
+# fp4, bridge_ci_config_<arch>.json (every MX pipeline of the arch), example problems
+python3 mx_gemm_full_benchmark.py --verify
+
+# Full fp8 sweep on 4 GPUs, reusing the build directory between runs
+python3 mx_gemm_full_benchmark.py default_config.json --dtype fp8 --verify \
+    --devices 4 --output-dir build/mx_sweep --csv mx_fp8.csv
+```
+
+A bare configuration name is looked up in `tile_engine/ops/gemm/mx_gemm/configs/`.
+`--problems` takes a JSON file in the `example_problems.json` format. `--verify`
+draws random e8m0 scales (2^-3 to 2^2) and compares against the numpy
+microscaled reference. A kernel that rejects a problem shape is reported as
+skipped, not as a failure.
+
 ## Regression tests
 
 CPU tests cover architecture selection and target suffixes, invalid configurations,
