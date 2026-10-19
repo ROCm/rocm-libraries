@@ -150,6 +150,16 @@ rocke_attr_map_t rocke_i_attrs(rocke_ir_builder_t* b);
  * attrs pointer; Op.attrs is dict(attrs or {}) in Python). */
 void rocke_i_attrs_copy(rocke_ir_builder_t* b, rocke_attr_map_t* dst, const rocke_attr_map_t* src);
 
+/* ------------------------------------------------------------- DPP helpers */
+
+/* DPP control word that lowers tile.dpp_xor with `xor_mask` (Python
+ * rocke.core.ir.dpp_xor_ctrl). has_row_xmask (rocke_arch_has_dpp_row_xmask):
+ * 0x160 | mask for any mask 1..15. Otherwise (gfx9 CDNA) 1/2/3 -> quad_perm
+ * 0xB1/0x4E/0x1B, 7 -> row_half_mirror 0x141, 8 -> row_ror:8 0x128,
+ * 15 -> row_mirror 0x140. Returns -1 for a mask outside 1..15 or with no
+ * encoding on the target; the lowerers turn that into ROCKE_ERR_VALUE. */
+int64_t rocke_i_dpp_xor_ctrl(int64_t xor_mask, bool has_row_xmask);
+
 #ifdef __cplusplus
 }
 #endif

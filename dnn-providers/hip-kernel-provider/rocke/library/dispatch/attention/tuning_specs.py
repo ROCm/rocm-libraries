@@ -106,6 +106,20 @@ def resolve_tile_policy(block_size: int, policy: str) -> int:
     raise ValueError(f"tile_policy must be one of {TILE_POLICIES}, got {policy!r}")
 
 
+def _mask_fields(problem: UnifiedAttentionProblem, arch: str) -> dict:
+    """Mask spec fields; only the gfx950 tiled specs declare them."""
+    if problem.default_mask:
+        return {}
+    if arch != "gfx950":
+        raise ValueError(f"non-default attention mask is gfx950-only, got {arch}")
+    fields: dict = {}
+    if problem.causal_top_left:
+        fields["causal_top_left"] = True
+    if problem.right_bound != 0:
+        fields["right_bound"] = problem.right_bound
+    return fields
+
+
 def _semantic_fields(
     problem: UnifiedAttentionProblem, builder_kind: str = "tiled"
 ) -> dict:
@@ -153,6 +167,8 @@ _SEMANTIC_FIELDS = frozenset(
         "kv_storage_dtype",
         "kv_layout",
         "use_i64_kv_addr",
+        "causal_top_left",
+        "right_bound",
     }
 )
 
@@ -199,6 +215,7 @@ def make_explicit_attention_2d_spec(
     knobs = _checked_knobs(config.knob_dict())
     spec = spec_type(
         **_semantic_fields(problem, config.builder_kind),
+        **_mask_fields(problem, arch),
         num_warps=int(config.num_warps),
         block_m_per_warp=int(config.block_m_per_warp),
         tile_size=int(tile_size),
@@ -277,6 +294,7 @@ def make_explicit_attention_3d_specs(
         raise ValueError("gfx950 3D does not implement hoist/wide-KV tuning knobs")
     segment = spec_type(
         **_semantic_fields(problem),
+        **_mask_fields(problem, arch),
         num_segments=int(config.num_segments),
         waves_per_eu=config.waves_per_eu,
         tile_size_override=(None if tile == int(problem.block_size) else int(tile)),

@@ -6565,3 +6565,57 @@ def build_gfx942_4warp_gqa(
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
     return b.kernel
+
+
+def supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """Spec-shaped wrapper for ``supports_tiled_2d`` (gfx942 variant).
+
+    ``supports_tiled_2d`` takes its parameters as keyword-only arguments, so
+    ``hkp_pack``'s ``_check_support_predicate`` cannot call it with a spec instance.
+    This wrapper reads every parameter the predicate has off the spec and
+    delegates, making the 2D unified builder validatable at pack time. The flags
+    below size the LDS estimate, so each one is forwarded: a spec is judged by
+    the layout it will be built with, not by the predicate's defaults.
+    ``use_d256_fast`` is derived from the builder, not the spec: see
+    :func:`supports_gfx942_4warp_gqa_spec`.
+    """
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=False)
+
+
+def supports_gfx942_4warp_gqa_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
+) -> Tuple[bool, str]:
+    """:func:`supports_tiled_2d_spec` for ``build_gfx942_4warp_gqa``, the
+    ``use_d256_fast=True`` path."""
+    return _supports_tiled_2d_spec(spec, arch=arch, use_d256_fast=True)
+
+
+def _supports_tiled_2d_spec(
+    spec: UnifiedAttention2DTiledSpec, *, arch: str, use_d256_fast: bool
+) -> Tuple[bool, str]:
+    use_fp8 = spec.kv_storage_dtype is not None
+    return supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=use_fp8,
+        q_dtype=spec.dtype,
+        num_warps=spec.num_warps,
+        block_m_per_warp=spec.block_m_per_warp,
+        kv_storage_dtype=spec.kv_storage_dtype,
+        tile_size=spec.tile_size,
+        arch=arch,
+        use_mfma_32x32x8=spec.use_mfma_32x32x8,
+        use_transposed_qk_32x32=spec.use_transposed_qk_32x32,
+        use_k_single_buffer=spec.use_k_single_buffer,
+        use_conflict_free_v_store=spec.use_conflict_free_v_store,
+        use_k_sliced_ring=spec.use_k_sliced_ring,
+        ring_depth=spec.ring_depth,
+        k_slice_hd=spec.k_slice_hd,
+        use_d256_fast=use_d256_fast,
+    )

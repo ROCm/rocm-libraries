@@ -47,6 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE descriptor is not pulled" OFF)
 
 # Gates the generic kernel ingestor. The ingestor engine compiles its kernel
 # through the HIP kernel engine's compiler, so it only builds alongside that engine.
@@ -249,6 +250,8 @@ if(NOT TARGET hipdnn_flatbuffers_sdk)
     find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 endif()
 if(NOT TARGET hipdnn_plugin_sdk)
+    # Drop a stale cached table path so an older SDK Config cannot be answered by it.
+    unset(HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON CACHE)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
@@ -340,6 +343,51 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT cache entry descriptor-packaging declares.
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
+
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) are DVC outputs,
+    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. With
+    # ENABLE_ROCKE ON, warn when one is missing or differs from its pointer (file size, or
+    # folder file count) so the shipped bundle is not silently left out; tests still
+    # configure and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for
+    # release builds. Only the root this build packs from is checked.
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        else()
+            set(_rocke_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+        endif()
+        file(GLOB_RECURSE _rocke_pointers "${_rocke_root}/rocKE/*.dvc")
+        foreach(_pointer IN LISTS _rocke_pointers)
+            string(REGEX REPLACE "\\.dvc$" "" _output "${_pointer}")
+            file(STRINGS "${_pointer}" _nfiles_line REGEX "^  nfiles: [0-9]+$")
+            file(STRINGS "${_pointer}" _size_line REGEX "^  size: [0-9]+$")
+            set(_actual -1)
+            if(_nfiles_line)
+                string(REGEX REPLACE "[^0-9]" "" _expected "${_nfiles_line}")
+                if(IS_DIRECTORY "${_output}")
+                    file(GLOB_RECURSE _present "${_output}/*")
+                    list(LENGTH _present _actual)
+                endif()
+            else()
+                string(REGEX REPLACE "[^0-9]" "" _expected "${_size_line}")
+                if(EXISTS "${_output}")
+                    file(SIZE "${_output}" _actual)
+                endif()
+            endif()
+            if(NOT _expected OR NOT _actual EQUAL _expected)
+                if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+                    set(_level FATAL_ERROR)
+                else()
+                    set(_level WARNING)
+                endif()
+                message(${_level}
+                    "hip-kernel-provider: rocKE DVC output ${_output} is missing or "
+                    "incomplete (found ${_actual}, expected ${_expected}; bytes for a "
+                    "file, file count for a folder). The shipped rocKE bundle will NOT "
+                    "be packed. Run: dvc pull -r ingestor ${_pointer}")
+            endif()
+        endforeach()
+    endif()
 
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries

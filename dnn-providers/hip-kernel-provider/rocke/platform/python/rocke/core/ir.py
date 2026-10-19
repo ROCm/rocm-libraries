@@ -53,6 +53,7 @@ BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
 TF32 = Type("tf32")
+F64 = Type("f64")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 FP4E2M1 = Type("fp4e2m1")
@@ -78,6 +79,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "bf16": BF16,
         "fp32": F32,
         "tf32": TF32,
+        "fp64": F64,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
         "fp4e2m1": FP4E2M1,
@@ -135,6 +137,99 @@ def require_streaming_arch(op_name: str, gfx: str) -> None:
         raise ValueError(
             f"{op_name}: temporal_hint STREAMING requires gfx942 or gfx950, got {gfx}"
         )
+
+
+def dpp_ctrl_attr(op: "Op", key: str = "ctrl") -> int:
+    """Return the validated int attribute ``key`` of a one-operand i32 DPP op.
+
+    Shared by both Python lowerers for ``tile.quad_perm`` (``key="ctrl"``)
+    and ``tile.dpp_xor`` (``key="xor_mask"``, through :func:`dpp_xor_ctrl`).
+    The builders already guarantee all of this; the lowerers check again
+    because IR can reach them without a builder (hand-built, deserialized, or
+    rewritten by a pass). The checks, in order:
+
+    * anything but exactly one operand and one result is a ``ValueError``;
+    * non-i32 data or a non-i32 result is a ``ValueError`` (the DPP move is
+      32-bit, f32 callers bitcast first, and HIP would otherwise convert
+      between ``int`` and ``float`` silently);
+    * a missing ``key`` is a ``KeyError``;
+    * a ``key`` value that is not exactly ``int`` (``bool``, ``float``,
+      ``str``) is a ``TypeError``; it is never coerced into a control word.
+
+    The per-op range check stays with each lowerer. Mirrored in the C++
+    lowerers (``lower_llvm/crosslane.cpp``, ``lower_hip/lower_hip_mma.cpp``),
+    which return ``ROCKE_ERR_VALUE`` / ``ROCKE_ERR_KEY`` / ``ROCKE_ERR_TYPE``.
+    """
+    if len(op.operands) != 1 or len(op.results) != 1:
+        raise ValueError(
+            f"{op.name} expects one operand and one result, got "
+            f"{len(op.operands)} and {len(op.results)}"
+        )
+    (data,) = op.operands
+    if data.type.name != "i32":
+        raise ValueError(f"{op.name} requires i32 data, got {data.type.name}")
+    if op.result.type.name != "i32":
+        raise ValueError(f"{op.name} requires an i32 result, got {op.result.type.name}")
+    if key not in op.attrs:
+        raise KeyError(f"{op.name}: missing '{key}'")
+    value = op.attrs[key]
+    if type(value) is not int:
+        raise TypeError(f"{op.name}: {key} must be an int, got {type(value).__name__}")
+    return value
+
+
+# DPP control word of each XOR mask that has a register-only (VALU) encoding
+# on a target without ``row_xmask`` -- the gfx9 CDNA family (gfx90a, gfx942,
+# gfx950). Each entry makes lane ``i`` of every 16-lane row read lane
+# ``i ^ mask`` of the same row, exactly, for any data:
+#
+# * 1, 2, 3: ``quad_perm`` (lane ``4q + j`` reads ``4q + (j ^ mask)``);
+# * 7: ``row_half_mirror`` (lane ``j`` of an 8-lane half-row reads ``7 - j``,
+#   and ``7 - j == j ^ 7`` for ``j`` in 0..7);
+# * 8: ``row_ror:8`` (rotating 16 lanes by 8 flips lane bit 3);
+# * 15: ``row_mirror`` (``15 - j == j ^ 15`` for ``j`` in 0..15).
+#
+# Every other mask in 1..15 needs ``row_xmask`` (gfx10 and later) or the LDS
+# path (``ds_swizzle``), so it is rejected on these targets. Mirrored in C++
+# (``rocke_i_dpp_xor_ctrl`` in ``core/ir/ir_flow.cpp``).
+DPP_XOR_CTRL_NO_ROW_XMASK = {
+    1: 0xB1,  # quad_perm [1, 0, 3, 2]
+    2: 0x4E,  # quad_perm [2, 3, 0, 1]
+    3: 0x1B,  # quad_perm [3, 2, 1, 0]
+    7: 0x141,  # row_half_mirror
+    8: 0x128,  # row_ror:8
+    15: 0x140,  # row_mirror
+}
+
+
+def dpp_xor_ctrl(op: "Op", arch) -> int:
+    """Return the DPP control word that lowers ``tile.dpp_xor`` on ``arch``.
+
+    Shared by both Python lowerers. ``arch`` is the
+    :class:`~rocke.core.arch.target.ArchTarget` being lowered for. The op is
+    validated as in :func:`dpp_ctrl_attr` (``xor_mask`` in place of
+    ``ctrl``), and ``xor_mask`` outside 1..15 is a ``ValueError``: the
+    partner would leave the 16-lane row. Then:
+
+    * with ``row_xmask`` (gfx10 and later, gfx1250 included) the control is
+      ``0x160 | xor_mask``, for every mask;
+    * without it (gfx9 CDNA) the control comes from
+      :data:`DPP_XOR_CTRL_NO_ROW_XMASK`; any other mask is a ``ValueError``
+      that names the supported masks and points at ``warp_shuffle_xor``.
+    """
+    mask = dpp_ctrl_attr(op, "xor_mask")
+    if not 1 <= mask <= 15:
+        raise ValueError(f"{op.name}: xor_mask must be in 1..15, got {mask}")
+    if arch.has_dpp_row_xmask:
+        return 0x160 | mask
+    ctrl = DPP_XOR_CTRL_NO_ROW_XMASK.get(mask)
+    if ctrl is None:
+        raise ValueError(
+            f"{op.name}: xor_mask {mask} has no register-only DPP encoding on "
+            f"{arch.gfx} (no row_xmask); masks 1, 2, 3, 7, 8 and 15 do. Use "
+            f"warp_shuffle_xor (ds_swizzle) for this mask"
+        )
+    return ctrl
 
 
 def _streaming(temporal_hint: TemporalHint) -> bool:
@@ -322,15 +417,16 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
 def _mma_c_frag_len(op_id: str) -> int:
     """Accumulator fragment length for ``op_id`` from the arch SSOT.
 
-    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO``;
-    ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
-    the strictness callers relied on.
+    Resolved through ``core/arch/target._frag_info`` -- ``_MMA_FRAGMENT_INFO``,
+    or for an emulated atom the physical atom it expands into; ir.py holds no
+    private copy. Unknown op_ids (frag length 0) raise, matching the strictness
+    callers relied on.
     """
     frag_len = _arch._frag_info(op_id).c_frag_len
     if frag_len <= 0:
+        known = {*_arch._MMA_FRAGMENT_INFO, *_arch._op_id_physical_op_id()}
         raise ValueError(
-            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
-            f"{sorted(_arch._MMA_FRAGMENT_INFO)}"
+            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of {sorted(known)}"
         )
     return frag_len
 
@@ -824,6 +920,15 @@ class IRBuilder:
             "arith.constant",
             result_types=[F32],
             attrs={"value": float(value), "ity": "f32"},
+            result_name_hint="c",
+        )
+        return op.result
+
+    def const_f64(self, value: float) -> Value:
+        op = self._op(
+            "arith.constant",
+            result_types=[F64],
+            attrs={"value": float(value), "ity": "f64"},
             result_name_hint="c",
         )
         return op.result
@@ -1925,9 +2030,10 @@ class IRBuilder:
         """Vectorised global load of N consecutive values.
 
         Supports f16/bf16/i16 (N in {2, 4, 6, 8, 16}), f32/i32/tf32
-        (N in {2, 3, 4, 8}), and fp8e4m3/bf8e5m2/i8 (N in {2, 4, 8, 12, 16}).
-        Loads exactly N elements. Instruction selection depends on target and
-        alignment; 96-bit payloads do not require a 96-bit scalar type.
+        (N in {2, 3, 4, 8}), f64 (N = 2), and fp8e4m3/bf8e5m2/i8
+        (N in {2, 4, 8, 12, 16}). Loads exactly N elements. Instruction
+        selection depends on target and alignment; 96-bit payloads do not
+        require a 96-bit scalar type.
 
         Default alignment is the payload size for power-of-two loads, and
         element alignment for 12-byte loads. An explicit alignment is a caller
@@ -1956,6 +2062,12 @@ class IRBuilder:
                 raise ValueError(
                     f"unsupported vector width for {dtype.name} global_load_vN: {n}"
                 )
+        elif dtype.name == "f64":
+            elem_bytes = 8
+            if n != 2:
+                raise ValueError(
+                    f"unsupported vector width for {dtype.name} global_load_vN: {n}"
+                )
         elif dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
             elem_bytes = 1
             if n not in (2, 4, 8, 12, 16):
@@ -1964,7 +2076,7 @@ class IRBuilder:
                 )
         else:
             raise ValueError(
-                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/fp8e4m3/bf8e5m2/i8, "
+                "global_load_vN supports f16/bf16/i16/f32/i32/tf32/f64/fp8e4m3/bf8e5m2/i8, "
                 f"got {dtype.name}"
             )
         attrs = {
@@ -2058,6 +2170,19 @@ class IRBuilder:
             result_name_hint="splat",
         ).result
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """Freeze-poison base for a `<n x elem>` vector that will be fully
+        overwritten by subsequent inserts (never a zero substitute). Port of
+        the pinned PR9710 ``vector.undef`` op; lowers to ``freeze <nxtype>
+        poison``.
+        """
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     def vector_select(self, mask: Value, lhs: Value, rhs: Value) -> Value:
         if lhs.type != rhs.type:
             raise ValueError("vector_select lhs/rhs type mismatch")
@@ -2141,19 +2266,20 @@ class IRBuilder:
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
-        allowed_n = (
-            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
-        )
+        if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
+            allowed_n = (2, 4, 8, 16)
+            elem_bytes = 1
+        elif elem_name == "f64":
+            allowed_n = (2,)
+            elem_bytes = 8
+        else:
+            allowed_n = (2, 4, 8)
+            elem_bytes = 4 if elem_name in ("f32", "i32", "tf32") else 2
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
-        elem_bytes = (
-            1
-            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32", "tf32") else 2
-        )
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -2185,10 +2311,11 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16) and 32-bit (f32 / i32) element types;
-        loads exactly N elements. In addition to power-of-two widths, accepts
-        96-bit payloads (12 bytes, six halfwords, or three words), using element
-        alignment. The target and alignment determine instruction selection.
+        i8), 16-bit (f16 / bf16), 32-bit (f32 / i32) and 64-bit (f64, ``n in
+        {1, 2}``) element types; loads exactly N elements. In addition to
+        power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
+        or three words), using element alignment. The target and alignment
+        determine instruction selection.
         """
         if dtype.name not in (
             "f16",
@@ -2196,19 +2323,23 @@ class IRBuilder:
             "f32",
             "i32",
             "tf32",
+            "f64",
             "fp8e4m3",
             "bf8e5m2",
             "i8",
         ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
-                f"bf8e5m2 / i8, got {dtype.name}"
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / f64 / "
+                f"fp8e4m3 / bf8e5m2 / i8, got {dtype.name}"
             )
-        allowed_n = (
-            (1, 2, 4, 8, 12, 16)
-            if dtype.name in ("fp8e4m3", "bf8e5m2", "i8")
-            else (1, 2, 4, 6, 8) if dtype.name in ("f16", "bf16") else (1, 2, 3, 4, 8)
-        )
+        if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
+            allowed_n = (1, 2, 4, 8, 12, 16)
+        elif dtype.name in ("f16", "bf16"):
+            allowed_n = (1, 2, 4, 6, 8)
+        elif dtype.name == "f64":
+            allowed_n = (1, 2)
+        else:
+            allowed_n = (1, 2, 3, 4, 8)
         if n not in allowed_n:
             raise ValueError(
                 f"unsupported vector width {n} for smem_load_vN of {dtype.name} "
@@ -2246,7 +2377,9 @@ class IRBuilder:
 
         The result vector type is ``<c_frag_len x float>`` (the per-lane
         accumulator length the atom produces). When ``op`` is an ``op_id``
-        string the frag length is resolved from the static MMA fragment table.
+        string the frag length is resolved from the static MMA fragment table;
+        an emulated atom's op_id resolves through the physical atom it expands
+        into.
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
@@ -2259,7 +2392,11 @@ class IRBuilder:
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
-        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        from .arch.mfma_scale import scaled_mfma_error
+
+        error = scaled_mfma_error(op_id, [a, b, c, *extra]) or tf32_mma_error(
+            op_id, [a, b, c, *extra]
+        )
         if error:
             raise ValueError(error)
         c_frag_len = (
@@ -2275,7 +2412,7 @@ class IRBuilder:
         c_elem = I32 if is_int_acc else F32
         hint = (
             "mxacc"
-            if _arch._op_id_family().get(op_id) == "wmma_scaled"
+            if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
             else _MMA_RESULT_HINT.get(op_id, "acc")
         )
         return self._op(
@@ -2638,17 +2775,16 @@ class IRBuilder:
         a_scale: Value,
         b_scale: Value,
     ) -> Value:
-        """MX-MFMA with in-instruction scales (P15).
+        """Existing gfx950 16x16x128 MFMA with in-instruction scales (P15).
 
-        ``mfma_scale_f32_16x16x128_f8f6f4`` is the gfx950 MX MFMA
-        instruction family. Operands are 16-byte packed mantissa
-        vectors (fp8/fp6/fp4) plus per-warp E8M0 scales applied
-        in-instruction. The scale broadcast inside the instruction is
-        per-output-row (vs per-input-row), which is what fixes the
-        B_MX1 row-aware correctness gap that the post-hoc
-        scale-apply chain has.
+        This fixed-operation wrapper delegates to ``mma``. LLVM lowering
+        uses two ``<8 x i32>`` payloads, a ``<4 x float>`` accumulator and
+        separate i32 scale operands; A/B format selectors are fixed to zero.
+        It lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
 
-        Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
+        For 32x32x64 with independently selected A/B formats and K32 E8M0
+        scales, resolve a ``mfma_scaled`` catalog atom and call ``mma``
+        with that atom and both scales. See ``reference/mma_metadata.md``.
         """
         return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
@@ -3330,23 +3466,34 @@ class IRBuilder:
         ).result
 
     def dpp_xor(self, data: Value, xor_mask: int) -> Value:
-        """``v_mov_b32_dpp`` ``row_xmask`` — cross-lane XOR permute on the
-        **VALU** (NOT the LDS port).
+        """Cross-lane XOR permute within each 16-lane DPP row, on the
+        **VALU** (NOT the LDS port). Low-level op behind
+        :meth:`warp_shuffle_xor_dpp`; kernels should call that.
 
         Lane ``L`` reads ``data`` from lane ``(L & ~0xF) | ((L & 0xF) ^
         xor_mask)`` — i.e. an XOR butterfly *within* each 16-lane DPP row.
-        ``xor_mask`` must be in 1..15 so the partner stays in the same row.
+        ``xor_mask`` must be an ``int`` in 1..15 so the partner stays in the
+        same row. Data must be ``i32``.
 
-        This is the RDNA (gfx11/gfx12) replacement for the gfx9/gfx95
-        :meth:`ds_swizzle_xor` softmax-reduction butterfly. ``ds_swizzle``
-        is an LDS-bus op that costs ``lgkmcnt`` and serialises on the LDS
-        port; ``row_xmask`` runs entirely in the VALU pipeline, and LLVM's
-        DPP-combine folds a single-use ``update.dpp`` + ``fmax``/``fadd``
-        into one ``v_max_f32_dpp`` / ``v_add_f32_dpp``. Lowered through
-        ``llvm.amdgcn.update.dpp.i32`` with ``dpp_ctrl = 0x160 | mask``
-        (the AMDGPU ``DPP_ROW_XMASK`` encoding). Data must be ``i32``."""
+        The IR op ``tile.dpp_xor`` carries only the mask; the lowerer picks
+        the DPP control word for the target (:func:`dpp_xor_ctrl`), always
+        through ``llvm.amdgcn.update.dpp.i32`` with row/bank masks ``15, 15``
+        and ``bound_ctrl`` set:
+
+        * targets with ``row_xmask`` (gfx11, gfx12, gfx1250): ``0x160 |
+          mask`` (the AMDGPU ``DPP_ROW_XMASK`` encoding), for every mask;
+        * gfx9 CDNA (gfx90a, gfx942, gfx950), which has no ``row_xmask``:
+          1, 2, 3 -> ``quad_perm``; 7 -> ``row_half_mirror``; 8 ->
+          ``row_ror:8``; 15 -> ``row_mirror``. Each is exactly XOR with that
+          mask. Any other mask fails to lower with a ``ValueError``; use
+          :meth:`warp_shuffle_xor` (``ds_swizzle``) for it.
+
+        ``ds_swizzle`` is an LDS-bus op that costs ``lgkmcnt`` and
+        serialises on the LDS port; DPP runs in the VALU pipeline."""
         if data.type.name != "i32":
             raise ValueError("dpp_xor requires i32 data")
+        if type(xor_mask) is not int:
+            raise TypeError(f"dpp_xor xor_mask must be an int, got {xor_mask!r}")
         if not (1 <= xor_mask <= 15):
             raise ValueError(
                 f"dpp_xor xor_mask must be 1..15 (intra-16-lane row), got {xor_mask}"
@@ -3375,8 +3522,7 @@ class IRBuilder:
 
         That is a property of the quad, not a claim about every target:
         the op still requires DPP-capable hardware. Base-DPP
-        ``quad_perm`` is available on CDNA, where the RDNA-only
-        ``row_xmask`` of :meth:`dpp_xor` is not.
+        ``quad_perm`` is available on CDNA, where ``row_xmask`` is not.
 
         The op carries no lane targeting -- the control word is broadcast
         to every quad in the wave, with row and bank masks fixed at
@@ -3400,8 +3546,9 @@ class IRBuilder:
     def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
         """XOR shuffle within a four-lane quad.
 
-        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
-        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. For
+        other masks use :meth:`warp_shuffle_xor_dpp` (VALU) or
+        :meth:`warp_shuffle_xor` (``ds_swizzle``).
         """
         if xor_mask == 1:
             perm = [1, 0, 3, 2]
@@ -3584,8 +3731,14 @@ class IRBuilder:
         permlane32_swap or ds_bpermute).
 
         Works for any 32-bit scalar `v` (f32, i32). For half/bfloat,
-        bitcast to i32 via a 2-element vector first.
+        bitcast to i32 via a 2-element vector first. An f64 `v` is split
+        into two i32 halves, each shuffled on the 32-bit path.
         """
+        if v.type.name == "f64":
+            halves = self.bitcast(v, VectorType(I32, 2))
+            lo = self.warp_shuffle_xor(self.vec_extract(halves, 0), lane_xor)
+            hi = self.warp_shuffle_xor(self.vec_extract(halves, 1), lane_xor)
+            return self.bitcast(self.vec_pack([lo, hi], I32), F64)
         if 1 <= lane_xor <= 31:
             # Emits `ds_swizzle` (XOR pattern in the immediate offset), NOT
             # `ds_bpermute`: 1 LDS op, no addr-compute. This is the path the
@@ -3664,17 +3817,47 @@ class IRBuilder:
         )
 
     def warp_shuffle_xor_dpp(self, v: Value, lane_xor: int) -> Value:
-        """VALU XOR shuffle (lane ``l`` gets ``v`` from lane ``l ^ lane_xor``)
-        via :meth:`dpp_xor` ``row_xmask`` — the RDNA replacement for the
-        :meth:`warp_shuffle_xor` ``ds_swizzle`` path.
+        """VALU XOR shuffle: lane ``l`` gets ``v`` from lane ``l ^ lane_xor``
+        (CUDA ``__shfl_xor_sync`` within a 16-lane row), on registers only,
+        with no LDS (``ds_swizzle``) traffic.
 
-        ``lane_xor`` must be in 1..15 (the XOR partner stays inside the
-        16-lane DPP row, which is exactly the WMMA 16-lane softmax
-        row-group). Runs on the VALU (no LDS port / ``lgkmcnt``); LLVM's
-        DPP-combine folds the single-use result into the consuming
-        ``v_max_f32``/``v_add_f32`` to give one ``v_*_f32_dpp`` per stage.
+        Emits one :meth:`dpp_xor` (``tile.dpp_xor``); the lowerer picks the
+        register-only DPP encoding of the mask for the target:
+
+        ============  ==========================  ======================
+        ``lane_xor``  gfx9 CDNA (gfx90a, gfx942,  gfx11, gfx12, gfx1250
+                      gfx950)
+        ============  ==========================  ======================
+        1             ``quad_perm [1,0,3,2]``     ``row_xmask:1``
+        2             ``quad_perm [2,3,0,1]``     ``row_xmask:2``
+        3             ``quad_perm [3,2,1,0]``     ``row_xmask:3``
+        7             ``row_half_mirror``         ``row_xmask:7``
+        8             ``row_ror:8``               ``row_xmask:8``
+        15            ``row_mirror``              ``row_xmask:15``
+        other 1..15   rejected at lowering        ``row_xmask:<mask>``
+        ============  ==========================  ======================
+
+        Every entry is exactly XOR with the mask, for any data. On gfx9 CDNA
+        a mask outside the table raises ``ValueError`` when the kernel is
+        lowered (the builder does not know the target); use
+        :meth:`warp_shuffle_xor` there, which goes through ``ds_swizzle``.
+
+        The shuffle works per 16-lane DPP row (4 rows in wave64, 2 in
+        wave32) and never crosses a row, so ``lane_xor`` must be an ``int``
+        in 1..15. A 16-lane all-reduce is ``v = v + shuffle(v, m)`` for ``m``
+        in ``1, 2, 7, 15`` (those masks span all four lane-index bits) or
+        ``1, 2, 4, 8`` on targets with ``row_xmask``. As in any butterfly,
+        every lane of the row must be active: each lane relays its
+        partners' partial results, so one inactive lane leaves wrong totals
+        in the active lanes (``bound_ctrl`` only makes a disabled source
+        lane read ``0``).
+
         Handles f32 by bitcasting through i32 (matching
         :meth:`warp_shuffle_xor`)."""
+        if type(lane_xor) is not int:
+            raise TypeError(
+                f"warp_shuffle_xor_dpp lane_xor must be an int, got {lane_xor!r}"
+            )
         if not (1 <= lane_xor <= 15):
             raise ValueError(
                 f"warp_shuffle_xor_dpp lane_xor must be 1..15, got {lane_xor}"
@@ -4528,6 +4711,11 @@ class IRBuilder:
         eb = _elem_bytes.get(dtype.name)
         if eb is None:
             raise ValueError(f"buffer_load_vN: unsupported dtype {dtype.name!r}")
+        if n <= 0 or (n * eb) % 4 != 0:
+            raise ValueError(
+                f"buffer_load_vN: n={n} dtype={dtype.name} is not a whole number "
+                "of dwords"
+            )
         dwords = (n * eb) // 4
         if dwords not in (1, 2, 4):
             raise ValueError(
@@ -4591,6 +4779,18 @@ class IRBuilder:
             [rsrc, voffset, soffset],
             [F16],
             result_name_hint="bl1",
+        ).result
+
+    def buffer_load_f16_d16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """D16-form scalar half buffer load: ``raw_ptr_buffer_load.f16``
+        returns `half` directly (no i16 + bitcast round-trip). Port of the
+        pinned PR9710 ``tile.buffer_load_f16_d16`` op.
+        """
+        return self._op(
+            "tile.buffer_load_f16_d16",
+            [rsrc, voffset, soffset],
+            [F16],
+            result_name_hint="bld16",
         ).result
 
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
@@ -4894,7 +5094,8 @@ class IRBuilder:
 
         Supports the full element-type catalog the LLVM lowering already
         emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
-        (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
+        (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
+        ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` with the supplied address alignment.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
@@ -4920,11 +5121,15 @@ class IRBuilder:
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
+        elif elem_name == "f64":
+            elem_bytes = 8
+            if n > 2:
+                raise ValueError(f"global_store_vN n={n} not supported for {elem_name}")
         elif elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/f64/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
         attrs = {
