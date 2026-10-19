@@ -113,18 +113,22 @@
 #    if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #      if defined(_NVHPC_CUDA)
 #        define THRUST_DETAIL_ABI_NS_BEGIN                                                                            \
-          inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, SM, NV_TARGET_SM_INTEGER_LIST, NVHPC, NS) \
+          inline namespace THRUST_PP_CAT(                                                                            \
+            THRUST_PP_CAT(THRUST_PP_CAT(_V_, THRUST_VERSION), THRUST_PP_SPLICE_WITH(_, _SM, NV_TARGET_SM_INTEGER_LIST)), \
+            _NVHPC)                                                                                                 \
           {
 #        define THRUST_DETAIL_ABI_NS_END }
 #      else // not defined(_NVHPC_CUDA)
-#        define THRUST_DETAIL_ABI_NS_BEGIN                                                              \
-          inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, SM, __CUDA_ARCH_LIST__, NS) \
+#        define THRUST_DETAIL_ABI_NS_BEGIN                                                     \
+          inline namespace THRUST_PP_CAT(                                                       \
+            THRUST_PP_CAT(_V_, THRUST_VERSION), THRUST_PP_SPLICE_WITH(_, _SM, __CUDA_ARCH_LIST__)) \
           {
 #        define THRUST_DETAIL_ABI_NS_END }
 #      endif // not defined(_NVHPC_CUDA)
 #    else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #      define THRUST_DETAIL_ABI_NS_BEGIN                                                         \
-        inline namespace THRUST_PP_SPLICE_WITH(_, THRUST, THRUST_VERSION, ROCTHRUST_VERSION, NS) \
+        inline namespace THRUST_PP_CAT(                                                           \
+          THRUST_PP_CAT(_V_, THRUST_VERSION), THRUST_PP_SPLICE_WITH(_, _R, ROCTHRUST_VERSION))   \
         {
 #      define THRUST_DETAIL_ABI_NS_END }
 #    endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
