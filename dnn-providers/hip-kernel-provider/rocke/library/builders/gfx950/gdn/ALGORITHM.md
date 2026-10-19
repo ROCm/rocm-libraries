@@ -4,11 +4,12 @@
 > emitter that serves GDN and KDA, plus chunkwise **prefill** kernels where GDN
 > ships as a mode of the existing KDA implementation.
 > This document specifies *what* the kernels compute and *why they are shaped the way they are*.
-> It is a specification, not a tuning history, and it carries **no latency measurements** — latency
-> is recorded in the internal perf repository per repository compliance.
+> It is a specification, not a tuning history, and it carries **no measurements** — latency is
+> recorded in the internal perf repository per repository compliance.
 >
 > **This file is the entry point for the family.** Its sibling `README.md` covers the host-side
-> tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute.
+> tools — driver, benchmark, retuning, exit codes — and nothing about what the kernels compute;
+> `CASE_STUDY.md` keeps the compiler-dependent per-tile register counts of the decode load order.
 
 ---
 
@@ -419,35 +420,19 @@ with every other knob the tile accepts. Every other single-wave `fuse_conv` tile
 order: at `WTK` 1, 2 and 16, at `DK = DV = 256`, under a `waves_per_eu` floor and at the other head
 dims, no test shows hoisting spill-free.
 
+Multi-wave `fuse_conv` tiles hoist every load. Their per-lane cap is `512 / ceil(NW / 4)` VGPRs, so
+tiles with a small `WTK` (wide `q`/`k` slices with their taps and weights) or many waves can still
+spill; `CASE_STUDY.md` lists the ones that do, per compiler.
+
 Cost: holding the raw state, `q`, `k` and `v` (and, fused, their taps and weights) live at once
 changes the register count, up for some tiles and down for others. Where that crosses a
-register-allocation granule it costs or gains one wave per SIMD, or changes a spill. VGPR and
-scratch counts are read from the gfx950 code object; waves per SIMD are modeled from the VGPR
-count (512 per SIMD lane, 8-register allocation granule), not measured with a hardware counter.
-Against the interleaved order (Python lowerer, ROCm 7.13 comgr, bf16 I/O, `DK = DV = 128`; GDN at
-`Hk/Hv = 16/32`, KDA at `32/32`, the fused tiles at `16/16`; bf16 state unless marked `f32`):
-
-- one wave per SIMD lost: GDN `(1,16,2)`, `(1,16,4)`, `(2,16,1)`, `(2,16,2)`, `(4,8,1)`, `(4,16,1)`,
-  `(8,8,1)`; the KDA tuned tile `(2,16,1)`; at `(4,16,1)`, `fuse_conv` alone (GDN and KDA) and with
-  the norm (GDN), and the KDA norm alone (bf16 and `f32` state);
-- one wave per SIMD gained: GDN `(1,16,16)` and the default `(2,16,8)`;
-- spill grows: GDN `(1,1,1)` and `(1,1,2)`, which already spill at `DK = 128`;
-- spill: none starts at the tiles above. The single-wave `fuse_conv` tiles stay at 0 B knob-free at
-  `WTK` 8 and 16 with the exception above (`WTK` 16 is pinned below; `WTK` 8 is measured with ROCm
-  7.13 comgr, not pinned by a test). At `WTK = 4` they already spill in the interleaved order
-  (16/16 heads, every gate kind, state dtype and norm setting); there the spill grows with the norm
-  on for GDN `f32` state and for KDA, shrinks in three other cases, stays the same for KDA `f32`
-  state without the norm, and ends for GDN bf16 state without the norm. The exception does not make
-  the single-wave tile spill-free in general: knob-free it spills at `WTK` ≤ 2, and at `WTK` 4
-  except GDN bf16 state without the norm. With `conv_once` (16/16 heads, late order) it spills at
-  `WTK` 1, and at `WTK` 2 only with an `f32` state and the norm on (both measured with ROCm 7.13
-  comgr, not pinned by a test). The fused tests pin 0 B for the knob-free `(1,16,1)` tile, and at
-  `WTK` 4 and 8 with `conv_once` that hoisting spills no more than the late order;
-- unchanged: every other registered GDN tile, the other KDA tuned tiles, the default `(2,16,8)`
-  with `f32` state and the other fused tiles; `(1,1,1)` at `DK` 64 (no spill) and 192 (its spill
-  shrinks), where it is the auto route because `(2,16,8)` is illegal (§4.6).
-
-These counts depend on the compiler and the lowering; re-measure them when either changes.
+register-allocation granule a tile gains or loses waves per SIMD, or starts, stops or changes a
+spill. Which tiles move, and in which direction, depends on the compiler: the same tile can gain
+waves under one comgr and lose them under another. No dispatcher candidate starts to spill; some
+multi-wave `fuse_conv` tiles do, and `test_lowers_and_compiles_without_scratch` holds at 0 B the
+fused cases that every measured compiler keeps there. `CASE_STUDY.md` has the per-tile counts for
+each measured compiler and the command that regenerates them; re-run it when the compiler or the
+lowering changes.
 
 Tile defaults (§4.6) were measured on the interleaved order and are re-measured when the defaults
 are re-picked.
@@ -619,8 +604,9 @@ prologue's per-slot loads, and `out_lds` / `norm_gate_once` change which threads
 
 **Cost.** `fuse_conv` with a single wave owns all `DV` rows plus their taps and weights, so it is a
 register-heavy (legal) tile, like the unfused `(1,1,1)`; it keeps part of the interleaved order to
-limit spills (§4.3, which also lists where it still spills), and some `(4,16,1)` conv tiles run one
-wave per SIMD lower than with an interleaved order (§4.3, Cost). Without `conv_once`, the fused
+limit spills (§4.3), while multi-wave conv tiles hoist every load; some of them start to spill or
+run fewer waves per SIMD than with the interleaved order, and which ones depends on the compiler
+(`CASE_STUDY.md`). Without `conv_once`, the fused
 modes are an enablement path and recompute shared work instead of sharing it. A q/k conv channel
 depends only on its k-lane, so every `(wave, v-lane)` pair of the workgroup recomputes it:
 `NW × WTV = NW × 64 / WTK` times per head, each time re-loading its taps and weights (16 times at
