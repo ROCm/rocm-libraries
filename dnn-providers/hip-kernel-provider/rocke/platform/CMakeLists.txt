@@ -486,6 +486,33 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 300)\n")
 
+    # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
+    # the golden IR hashes, the performance knobs, and dispatch selection. None
+    # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
+    # PYTHONPATH rule as the conv entry.
+    set(_ROCKE_LIBRARY_GDN_TEST_RELPATHS
+        "tests/library/tests/test_gdn_decode_spec.py"
+        "tests/library/tests/test_gdn_decode_fused.py"
+        "tests/library/tests/test_gdn_decode_load_order.py"
+        "tests/library/tests/test_gdn_decode_golden.py"
+        "tests/library/tests/test_gdn_decode_knobs.py"
+        "tests/library/tests/test_gdn_decode_tune.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
+        "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
+    set(_ROCKE_LIBRARY_GDN_TESTS "")
+    foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
+      string(APPEND _ROCKE_LIBRARY_GDN_TESTS
+             " \"${ROCKE_TEST_CTEST_REL}${_rocke_gdn_test}\"")
+    endforeach()
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_gdn_pytest python -m pytest${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 600)\n")
+
     foreach(_operation sdpa conv)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
