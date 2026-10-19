@@ -43,6 +43,7 @@
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
 #endif
 
 #include _THRUST_STD_INCLUDE(type_traits)
@@ -104,6 +105,9 @@ inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__tabulate_proxy<Fn, 
 
 template <class Iter, class Fn>
 inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_output_proxy<Iter, Fn>> = true;
+
+template <class Iter, class InputFn, class OutputFn>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_input_output_proxy<Iter, InputFn, OutputFn>> = true;
 
 template <typename T>
 inline constexpr bool is_non_const_reference_v =
