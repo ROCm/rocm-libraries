@@ -41,7 +41,7 @@ struct HWModel {
     struct Lds {
         int readQueueDepth;
         int readDrainLatency;
-        int readThrottleLatency;
+        int readCreditLifetime;
         /// Fallback overflow issue throughput (per WGP) when an opcode's
         /// HwInstDesc::dsThroughput is 0.
         int dsLoadDefaultThroughput;

@@ -214,6 +214,57 @@ static bool rocke_ati_op_matches(const rocke_mma_op_t* op,
     return rocke_ati_scales_match(op, scales);
 }
 
+/* Mirrors target._prefer_native: an emulated atom is dropped when a native atom
+ * of the same shape also satisfies the query, because the native one is always
+ * the better choice -- fewer instructions, no less accurate. The shape test is
+ * per-atom rather than catalog-wide so an emulated shape with no native
+ * counterpart survives.
+ *
+ * A native atom short-circuits, so a catalog with no emulated rows -- every
+ * catalog predating XF32 -- never reaches the scan and selection is unchanged. */
+static bool rocke_ati_op_shadowed_by_native(const rocke_mma_catalog_t* cat,
+                                            const rocke_mma_op_t* op,
+                                            const char* family,
+                                            const char* a,
+                                            const char* b,
+                                            const char* c,
+                                            int m,
+                                            int n,
+                                            const rocke_mma_scale_filter_t* scales)
+{
+    int i;
+    if(rocke_arch_mma_op_is_native(op))
+        return false;
+    for(i = 0; i < cat->num_ops; ++i)
+    {
+        const rocke_mma_op_t* other = &cat->ops[i];
+        if(!rocke_arch_mma_op_is_native(other))
+            continue;
+        if(other->m != op->m || other->n != op->n || other->k != op->k)
+            continue;
+        if(rocke_ati_op_matches(other, family, a, b, c, m, n, scales))
+            return true;
+    }
+    return false;
+}
+
+/* The single predicate every selection entry point filters on: matches the
+ * query AND is not shadowed by a native atom. Keeping the two joined here is
+ * what stops one entry point from forgetting the preference rule. */
+static bool rocke_ati_op_selectable(const rocke_mma_catalog_t* cat,
+                                    const rocke_mma_op_t* op,
+                                    const char* family,
+                                    const char* a,
+                                    const char* b,
+                                    const char* c,
+                                    int m,
+                                    int n,
+                                    const rocke_mma_scale_filter_t* scales)
+{
+    return rocke_ati_op_matches(op, family, a, b, c, m, n, scales)
+           && !rocke_ati_op_shadowed_by_native(cat, op, family, a, b, c, m, n, scales);
+}
+
 int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
                                 const char* family,
                                 const char* a_dtype,
@@ -240,7 +291,7 @@ int rocke_mma_catalog_enumerate(const rocke_mma_catalog_t* cat,
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(out && total < cap)
             out[total] = op;
@@ -275,7 +326,7 @@ bool rocke_mma_catalog_has_shape(const rocke_mma_catalog_t* cat,
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(op->m == m && op->n == n && op->k == k)
             return true;
@@ -310,7 +361,7 @@ const rocke_mma_op_t* rocke_mma_catalog_select_largest_k(const rocke_mma_catalog
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(k_max >= 0 && op->k > k_max)
             continue; /* Python: k_max is None || op.k <= k_max */
@@ -369,7 +420,7 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
     for(i = 0; i < cat->num_ops; ++i)
     {
         const rocke_mma_op_t* op = &cat->ops[i];
-        if(!rocke_ati_op_matches(op, fam, a, bd, c, m, n, scales))
+        if(!rocke_ati_op_selectable(cat, op, fam, a, bd, c, m, n, scales))
             continue;
         if(op->k == k)
         {
@@ -414,6 +465,88 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
         if(op)
         {
             return op->c_dtype;
+        }
+    }
+    return NULL;
+}
+
+bool rocke_arch_mma_op_is_native(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.is_native. A NULL op is native by the same reasoning the
+     * header gives: there is no expansion for a row we do not have. */
+    if(!op)
+    {
+        return true;
+    }
+    return op->emulation_recipe == ROCKE_MMA_EMULATION_NONE;
+}
+
+const char* rocke_arch_mma_op_physical_op_id(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.emulation.physical_op_id, with "native" folded into the
+     * same NULL answer: either way there is no other instruction to issue. */
+    if(rocke_arch_mma_op_is_native(op))
+    {
+        return NULL;
+    }
+    return op->emulation_physical_op_id;
+}
+
+bool rocke_arch_mma_op_id_emulated_operands(const char* op_id, int* a_len, int* b_len, int* c_len)
+{
+    int i;
+    if(!op_id)
+    {
+        return false;
+    }
+    /* Mirrors target._op_id_emulated_tf32_operands()[op_id]. Python derives the
+     * lengths from the physical atom; this static table restates them on the
+     * row, pinned equal by tests/core/test_mma_catalog_lookup.cpp, so reading
+     * the row is the same answer. */
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
+        const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
+        if(op && !rocke_arch_mma_op_is_native(op) && op->a_dtype && op->b_dtype
+           && strcmp(op->a_dtype, "tf32") == 0 && strcmp(op->b_dtype, "tf32") == 0)
+        {
+            if(a_len)
+            {
+                *a_len = op->a_frag_len;
+            }
+            if(b_len)
+            {
+                *b_len = op->b_frag_len;
+            }
+            if(c_len)
+            {
+                *c_len = op->c_frag_len;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+const char* rocke_arch_mma_op_id_physical_op_id(const char* op_id)
+{
+    int i;
+    if(!op_id)
+    {
+        return NULL;
+    }
+    /* The bare-op_id twin of rocke_arch_mma_op_physical_op_id, mirroring
+     * target._op_id_physical_op_id()[op_id]: the first catalog row that emulates
+     * op_id wins, and a natively-encoded row contributes nothing, so the scan
+     * goes on past one. Op_ids no catalog emulates return NULL. */
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
+        const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
+        const char* physical = rocke_arch_mma_op_physical_op_id(op);
+        if(physical)
+        {
+            return physical;
         }
     }
     return NULL;
@@ -581,21 +714,12 @@ static const char* rocke_target_id_start(const char* isa)
 }
 
 /* LLVM defines generic-processor membership explicitly; it is not a naming
- * wildcard. Keep this list aligned with LLVM's AMDGPU Generic Processors table:
- * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table */
+ * wildcard. Membership comes from rocke_ati_generic_targets (arch_specs.json
+ * "generic_targets"), aligned with LLVM's AMDGPU Generic Processors table:
+ * https://llvm.org/docs/AMDGPUUsage.html#amdgpu-generic-processor-table
+ * A member without its own catalog row (gfx1100, gfx1200) uses its generic row. */
 static const char* rocke_generic_arch_alias(const char* target_id)
 {
-    static const char* const gfx11_processors[] = {
-        "gfx1100",
-        "gfx1101",
-        "gfx1102",
-        "gfx1103",
-        "gfx1150",
-        "gfx1151",
-        "gfx1152",
-        "gfx1153",
-        "gfx1154",
-    };
     size_t name_len = strcspn(target_id, ":");
     for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
     {
@@ -605,13 +729,15 @@ static const char* rocke_generic_arch_alias(const char* target_id)
            && (len == name_len || target_id[len] == '-'))
             return NULL;
     }
-    for(size_t i = 0; i < sizeof(gfx11_processors) / sizeof(gfx11_processors[0]); ++i)
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
     {
-        const char* processor = gfx11_processors[i];
-        size_t len = strlen(processor);
-        if(len <= name_len && strncmp(target_id, processor, len) == 0
-           && (len == name_len || target_id[len] == '-'))
-            return "gfx11-generic";
+        for(const char* const* member = row->members; *member != NULL; ++member)
+        {
+            size_t len = strlen(*member);
+            if(len <= name_len && strncmp(target_id, *member, len) == 0
+               && (len == name_len || target_id[len] == '-'))
+                return row->generic;
+        }
     }
     return NULL;
 }
@@ -694,6 +820,23 @@ const char* rocke_compiler_target_from_target_id(const char* target_id, char* ou
     memcpy(out, target_id, name_len);
     rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
     return out;
+}
+
+const char* rocke_generic_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    size_t base_len = rocke_base_arch_length(target_id);
+    for(const rocke_ati_generic_row_t* row = rocke_ati_generic_targets; row->generic != NULL; ++row)
+    {
+        bool match
+            = strlen(row->generic) == base_len && strncmp(target_id, row->generic, base_len) == 0;
+        for(const char* const* member = row->members; !match && *member != NULL; ++member)
+            match = strlen(*member) == base_len && strncmp(target_id, *member, base_len) == 0;
+        if(match)
+            return rocke_copy_target(row->generic, strlen(row->generic), out, out_cap);
+    }
+    return NULL;
 }
 
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
