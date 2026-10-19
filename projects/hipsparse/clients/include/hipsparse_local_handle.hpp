@@ -152,15 +152,8 @@ public:
 
     hipStream_t get_stream()
     {
-        hipStream_t             stream{};
-        const hipsparseStatus_t status = hipsparseGetStream(*this, &stream);
-        if(status != HIPSPARSE_STATUS_SUCCESS)
-        {
-            std::cerr << "hipsparseGetStream failed: " << hipsparseStatusToString(status)
-                      << std::endl;
-            throw status;
-        }
-
+        hipStream_t stream{};
+        throw_on_hipsparse_error("hipsparseGetStream", hipsparseGetStream(*this, &stream));
         return stream;
     }
 
