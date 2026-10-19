@@ -261,10 +261,19 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
-    static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
+    // Only BLOCKSCALE feeds the scaled MMA a real operand, and only on the B side
+    // (pack_v_scale). A is e8m0_one() unconditionally since the static P scale landed.
+    // PERTENSOR and PERHEAD descale o_acc instead (kVScaleOnOacc), and kPShift is undone
+    // in the softmax row max and in LSE. Everything else was paying for a multiply by one.
+    static constexpr bool kHwGemm1Scale = kBlockScale &&
+                                          is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
-    static constexpr bool kDeferSink = kHwGemm1Scale && kHasSink;
+    // The sink is deferred because P is cast to fp8: pre-seeding m with the sink logit
+    // lets it own the max frame and pushes every real P down the fp8 grid. That is a
+    // property of the cast, not of gemm1's scale operand -- MergeSink reads only m, l,
+    // o_acc and kPShift. kHwGemm1Scale stood in for it because both landed together.
+    static constexpr bool kDeferSink = kHasSink;
 
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
@@ -351,10 +360,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
-
-    // Only the scaled MMA applies the dynamic P exponent; without it O is off by 2^k.
-    static_assert(!kQuantized || kHwGemm1Scale,
-                  "qr_tdm pipeline: a quantized run needs the scaled MMA in gemm1");
 
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
