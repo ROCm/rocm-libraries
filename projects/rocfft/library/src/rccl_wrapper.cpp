@@ -111,7 +111,7 @@ struct rocfft_rccl_comm_t::Impl
             return stream;
         }
 
-        int device_id = -1;
+        int device_id = hipInvalidDeviceId;
 
     private:
         friend Impl;
