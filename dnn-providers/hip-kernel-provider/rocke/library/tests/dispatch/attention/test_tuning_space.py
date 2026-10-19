@@ -509,7 +509,7 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
                 )
                 pool = sum(
                     int(n)
-                    for n in re.findall(r"addrspace\(3\) global \[(\d+) x i8\]", ir)
+                    for n in re.findall(r"addrspace\(3\)\s+global\s+\[(\d+) x i8\]", ir)
                 )
                 self.assertEqual(_gfx950_2d_lds_bytes(spec.kernel_spec), pool)
 
@@ -884,10 +884,11 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx942.attention_dense import build_attention_dense
 
+        # These pipeline knobs are tunable now, not classified as untunable.
+        self.assertEqual(
+            DENSE_UNTUNABLE_KNOBS["gfx942"], frozenset({"lazy_rescale"})
+        )
         base = gfx942_dense_spec(_gfx942_request())
-        ok, why = supports_gfx942(replace(base, lds_num_buffers=2), arch="gfx942")
-        self.assertFalse(ok)
-        self.assertIn("lds_num_buffers", why)
 
         def ir(spec):
             kernel = build_attention_dense(spec, arch="gfx942")
@@ -906,10 +907,79 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
                 _gfx942_request(
                     dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
                 ),
+                _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
         self.assertFalse(missing, sorted(missing))
+
+    def test_bf16_cfvst_kdb_vpf_sweep_and_explicit_selection(self):
+        req = _gfx942_request(dtype="bf16", hdim_q=128, hdim_v=128)
+        default = attention_tuning_spec(req, "gfx942_dense")
+        base = default.kernel_spec
+
+        # New tuning choices must not alter the default kernel spec.
+        self.assertIsNone(base.use_cfvst)
+        self.assertFalse(base.resolved_use_cfvst())
+        self.assertEqual(base.lds_num_buffers, 1)
+        self.assertFalse(base.v_reg_prefetch)
+
+        # Production-level tuning stays one knob at a time, pairing CFVST
+        # with a dependent knob when the dependent knob alone is illegal.
+        specs = _gfx942_specs(req, level="production")
+        modes = {
+            (
+                spec.kernel_spec.resolved_use_cfvst(),
+                spec.kernel_spec.lds_num_buffers,
+                spec.kernel_spec.v_reg_prefetch,
+            )
+            for spec in specs
+        }
+        for expected in (
+            (False, 1, False),  # default
+            (True, 1, False),   # CFVST only
+            (True, 2, False),   # CFVST + KDB
+            (True, 1, True),    # CFVST + VPF
+        ):
+            self.assertIn(expected, modes)
+        self.assertNotIn((True, 2, True), modes)
+
+        # Explicit tuning pins can opt into every legal independent mode,
+        # including the combined mode outside the curated production sweep.
+        choices = (
+            {"use_cfvst": True},
+            {"use_cfvst": True, "lds_num_buffers": 2},
+            {"use_cfvst": True, "v_reg_prefetch": True},
+            {
+                "use_cfvst": True,
+                "lds_num_buffers": 2,
+                "v_reg_prefetch": True,
+            },
+        )
+        for knobs in choices:
+            with self.subTest(knobs=knobs):
+                selected = tuning_spec_with_knobs(req, "gfx942_dense", knobs)
+                spec = selected.kernel_spec
+                self.assertTrue(spec.resolved_use_cfvst())
+                self.assertEqual(
+                    spec.lds_num_buffers, knobs.get("lds_num_buffers", 1)
+                )
+                self.assertEqual(
+                    spec.v_reg_prefetch, knobs.get("v_reg_prefetch", False)
+                )
+                # Bare IDs are searchable only in the production sweep.
+                # Full-only IDs need their explicit knobs for replay.
+                if not (spec.lds_num_buffers == 2 and spec.v_reg_prefetch):
+                    replayed = attention_tuning_spec(
+                        req, "gfx942_dense", selected.tuning_id
+                    )
+                    self.assertEqual(replayed, selected)
+
+        fp16_req = _gfx942_request(dtype="fp16")
+        for knob in ({"lds_num_buffers": 2}, {"v_reg_prefetch": True}):
+            with self.subTest(rejected=knob):
+                with self.assertRaises(ValueError):
+                    tuning_spec_with_knobs(fp16_req, "gfx942_dense", knob)
 
     def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
         for req in (_gfx942_request(), _gfx942_request(seqlen_q=8192, seqlen_k=8192)):
