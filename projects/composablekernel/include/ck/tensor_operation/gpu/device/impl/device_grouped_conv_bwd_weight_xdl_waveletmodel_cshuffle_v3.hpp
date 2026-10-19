@@ -175,13 +175,23 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
         __shared__ char p_shared1[LDS_size];
 
         // Dispatch SplitKOffsetHack as a template parameter
+        const auto a_grid_desc_transform =
+            GridwiseGemm::template TransformGrid<decltype(a_grid_desc_ak0_m_ak1),
+                                                 GridwiseGemm::AK0Number,
+                                                 GridwiseGemm::AK1Number>(a_grid_desc_ak0_m_ak1,
+                                                                          get_device_arch());
+        const auto b_grid_desc_transform =
+            GridwiseGemm::template TransformGrid<decltype(b_grid_desc_bk0_n_bk1),
+                                                 GridwiseGemm::BK0Number,
+                                                 GridwiseGemm::BK1Number>(b_grid_desc_bk0_n_bk1,
+                                                                          get_device_arch());
         if(split_k_offset_hack)
         {
             GridwiseGemm::template Run<HasMainKBlockLoop,
                                        CGlobalMemoryDataOperation,
                                        TailNum,
-                                       decltype(a_grid_desc_ak0_m_ak1),
-                                       decltype(b_grid_desc_bk0_n_bk1),
+                                       decltype(a_grid_desc_transform),
+                                       decltype(b_grid_desc_transform),
                                        decltype(c_grid_desc_mblock_mperblock_nblock_nperblock),
                                        true>(karg.p_a_grid + a_batch_offset + split_k_offset_a,
                                              karg.p_b_grid + b_batch_offset + split_k_offset_b,
@@ -189,8 +199,8 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                                              p_shared0,
                                              p_shared1,
                                              karg,
-                                             a_grid_desc_ak0_m_ak1,
-                                             b_grid_desc_bk0_n_bk1,
+                                             a_grid_desc_transform,
+                                             b_grid_desc_transform,
                                              c_grid_desc_mblock_mperblock_nblock_nperblock,
                                              k_idx * num_k_per_block,
                                              gridDim.y);
@@ -200,8 +210,8 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
             GridwiseGemm::template Run<HasMainKBlockLoop,
                                        CGlobalMemoryDataOperation,
                                        TailNum,
-                                       decltype(a_grid_desc_ak0_m_ak1),
-                                       decltype(b_grid_desc_bk0_n_bk1),
+                                       decltype(a_grid_desc_transform),
+                                       decltype(b_grid_desc_transform),
                                        decltype(c_grid_desc_mblock_mperblock_nblock_nperblock),
                                        false>(karg.p_a_grid + a_batch_offset + split_k_offset_a,
                                               karg.p_b_grid + b_batch_offset + split_k_offset_b,
@@ -209,8 +219,8 @@ __launch_bounds__(GridwiseGemm::LaunchBlockSize, MinimumOccupancy)
                                               p_shared0,
                                               p_shared1,
                                               karg,
-                                              a_grid_desc_ak0_m_ak1,
-                                              b_grid_desc_bk0_n_bk1,
+                                              a_grid_desc_transform,
+                                              b_grid_desc_transform,
                                               c_grid_desc_mblock_mperblock_nblock_nperblock,
                                               k_idx * num_k_per_block,
                                               gridDim.y);
