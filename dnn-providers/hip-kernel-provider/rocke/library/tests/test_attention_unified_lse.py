@@ -262,6 +262,17 @@ def test_runner_refuses_lse_on_a_2d_routed_shape_before_any_2d_path(runner, back
     assert runner.red_vals is None
 
 
+def test_runner_reports_why_split_kv_declined_an_lse_request(runner):
+    """``auto`` routes this decode to split-KV, whose gfx942 gate declines the
+    top-left mask. The refusal must name that reason, not blame the 2D path."""
+    top_left = _problem(emit_lse=True, causal_top_left=True)
+    assert top_left.select_path() == "3d"
+    with pytest.raises(NotImplementedError, match="split-KV.*top-left") as refused:
+        _run(top_left, lse=object())
+    assert "2D" not in str(refused.value)
+    assert runner.red_vals is None
+
+
 def test_runner_refuses_lse_for_strided_kv(runner):
     with pytest.raises(NotImplementedError, match="strided"):
         _run(_problem(emit_lse=True), lse=object(), kv_layout="strided")

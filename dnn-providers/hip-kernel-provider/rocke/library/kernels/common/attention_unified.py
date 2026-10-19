@@ -5556,11 +5556,16 @@ def run_unified_attention_torch(
         # Refuse here, BEFORE the 2D graph fast path: _run_2d_graphed replays a
         # cache hit before any support gate, and _cheap_2d_sig does not encode
         # emit_lse, so an LSE-off graph captured on the same buffers would
-        # otherwise serve this request and leave lse unwritten. A split-KV
-        # reason (sinks, arch) wins; otherwise the shape routed to 2D.
-        _, why = _reject_lse(problem, _launch_arch, "3d") or _reject_lse(
-            problem, _launch_arch, "tiled 2D"
-        )
+        # otherwise serve this request and leave lse unwritten. A split-KV LSE
+        # reason (sinks, arch) wins; then a split-KV decline ``auto`` hit for
+        # another reason; otherwise the shape routed to 2D.
+        rejected = _reject_lse(problem, _launch_arch, "3d")
+        if rejected is None and backend == "auto" and not prefer_2d:
+            raise NotImplementedError(
+                "LSE output needs the split-KV attention path, which declined "
+                f"this problem: {reason_3d}"
+            )
+        _, why = rejected or _reject_lse(problem, _launch_arch, "tiled 2D")
         raise NotImplementedError(why)
 
     if backend in ("tiled", "auto"):
