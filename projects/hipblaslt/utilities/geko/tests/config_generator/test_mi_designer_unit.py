@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from geko.config_generator import mi_candidates
 from geko.config_generator import mi_designer as mid
 from geko.schemas import GemmConfig, GemmType
 
@@ -40,13 +43,80 @@ def test_calculate_granularities_and_mfma_parameters() -> None:
     assert params.MT0 > 0 and params.MT1 > 0
 
 
-def test_generate_all_mfmas_uses_override(tmp_path: Path) -> None:
+def _write_list(cfg: dict, mis: list) -> Path:
+    """A buildable-MI list for cfg's ARCH and GEMM type (under the patched MI_LISTS_DIR)."""
+    path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("MatrixInstructions:\n" + "".join(f"  - {list(m)}\n" for m in mis))
+    return path
+
+
+def _mi9(m: mid.MFMA) -> tuple:
+    return (m.M, m.N, m.K, m.B, m.MIBlockM, m.waveTileM, m.waveTileN, m.waveM, m.waveN)
+
+
+def test_load_candidate_mfmas_uses_override_outside_allowlist(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
     cfg = _config()
     cfg["MFMA"] = [16, 16, 16, 1]
+    _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
     d = mid.MIDesign(tmp_path, cfg)
-    valid, sm, sn = d.generate_all_mfmas()
+    valid, sm, sn = d.load_candidate_mfmas()
     assert sm == 16 and sn == 16
-    assert len(valid) > 0
+    # [16, 16, 16, 1] is not in gfx950's H allowlist, so no list can cover it: every candidate of that MFMA.
+    assert [_mi9(m) for m in valid] == mi_candidates.enumerate_candidate_mis("gfx950", "H", None, [16, 16, 16, 1])
+
+
+@pytest.mark.parametrize("search_space", [None, "heuristic", "generic"])
+def test_load_candidate_mfmas_reads_buildable_list(monkeypatch, tmp_path: Path, search_space) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = _config()
+    cfg["search_space"] = search_space                         # one list for every non-subtile search space
+    listed = [(32, 32, 16, 1, 1, 1, 1, 4, 1), (16, 16, 32, 1, 1, 2, 3, 2, 2)]
+    _write_list(cfg, listed)
+    valid, sm, sn = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == listed                  # the list's MIs, in its order
+    assert (sm, sn) == (16, 16)                                # still from the MFMA allowlist
+
+    cfg["MFMA"] = [16, 16, 32, 1]                              # an override inside the allowlist filters the list
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == [(16, 16, 32, 1, 1, 2, 3, 2, 2)]
+
+
+def test_load_candidate_mfmas_ignores_list_for_subtile(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = _config()
+    cfg["search_space"] = "subtile"
+    _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+    valid, _, _ = mid.MIDesign(tmp_path, cfg, subtile_enabled=True).load_candidate_mfmas()
+    # The lists hold non-subtile verdicts, so subtile kernels keep every candidate of the subtile space.
+    assert [_mi9(m) for m in valid] == mi_candidates.enumerate_candidate_mis("gfx950", "H", "subtile")
+
+
+def test_load_candidate_mfmas_enumerates_without_list_or_when_disabled(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = _config()
+    every = mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every                   # no list for this GEMM type
+
+    _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+    cfg["BUILDABLE_MIS"] = False
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every                   # list ignored when disabled
+
+
+def test_buildable_list_path_is_per_compiler_target(tmp_path: Path) -> None:
+    a = mi_candidates.buildable_list_path("gfx950_128cu", "BBS_TN")
+    b = mi_candidates.buildable_list_path("gfx950", "BBS_TN")
+    assert a == b and a.parts[-2:] == ("gfx950", "BBS_TN.yaml")
+
+
+def test_load_buildable_list_rejects_malformed_file(tmp_path: Path) -> None:
+    p = tmp_path / "bad.yaml"
+    p.write_text("Architecture: gfx950\n")
+    with pytest.raises(ValueError, match="no MatrixInstructions"):
+        mi_candidates.load_buildable_list(p)
 
 
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:

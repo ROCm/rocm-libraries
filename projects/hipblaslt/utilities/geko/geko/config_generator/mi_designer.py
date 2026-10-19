@@ -22,6 +22,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from geko.config_generator.constants import *
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension
+from geko.config_generator.mi_candidates import (
+    allowable_mfmas,
+    buildable_list_path,
+    enumerate_candidate_mis,
+    load_buildable_list,
+    smallest_mfma_dims,
+)
 
 
 
@@ -148,92 +155,49 @@ class MIDesign:
 
       return MFMAParameters(MT0, MT1, TT0, TT1, WG0, WG1, MI.MIBlockM)
 
-  def generate_all_mfmas(self) -> Tuple[List[MFMA], int, int]:
-      """Generate all valid MFMA configurations for the current config.
+  def load_candidate_mfmas(self) -> Tuple[List[MFMA], int, int]:
+      """Candidate MatrixInstructions for the active GEMM type and ARCH.
+
+      With BUILDABLE_MIS (default) and a buildable-MI list for this GEMM type
+      (see mi_candidates.buildable_list_path), the candidates are the list's MIs:
+      the ones TensileLite code generation can build within the generic (GA)
+      search space's fork-parameter ranges. Subtile kernels (subtile search space,
+      gfx950 MX) are not covered by the lists. Otherwise, every MI geko's tiling
+      rules allow (mi_candidates.enumerate_candidate_mis), buildable or not.
 
       Returns:
-          (valid_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA). The smallest
+          (candidate_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA). The smallest
           dimensions are taken from the effective MFMA allowlist (including
           a single MFMA override from config).
       """
-      valid_mfmas: List[MFMA] = []
-
+      arch = self.config["ARCH"]
       search_space = self.config.get("search_space")
-      mt_max_size = get_list_of_mt_max_size(search_space)
+      data_type = self._gt.data_type
+      override = self.config.get("MFMA")
+      allowable = allowable_mfmas(arch, data_type, override)
+      smallest_M_in_MFMA, smallest_N_in_MFMA = smallest_mfma_dims(allowable)
 
-      hw = HARDWARE_MAP[self.config["ARCH"]]
-      allowable_mfma = hw["ONLY_INCLUDE_MIs"][self._gt.data_type]
+      mis = None
+      if self.config.get("BUILDABLE_MIS", True) and not self._subtile_enabled:
+          gemm_name = self.config["GemmProblem"].name
+          path = buildable_list_path(arch, gemm_name)
+          if not path.exists():
+              logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
+                             "TensileLite cannot build. Generate one with scripts/generate_buildable_mis.py.",
+                             gemm_name, arch)
+          elif override is not None and list(override) not in allowable_mfmas(arch, data_type):
+              logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
+                          "using every candidate MI.", override, path.name)
+          else:
+              mis = [tuple(mi) for mi in load_buildable_list(path)["MatrixInstructions"]
+                     if list(mi[:4]) in allowable]
+              logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
+      if mis is None:
+          mis = enumerate_candidate_mis(arch, data_type, search_space, override)
 
-      # Override if specified in the input config
-      if "MFMA" in self.config:
-          mfma = list(self.config["MFMA"])
-          allowable_mfma = [mfma]
-
-      bm_max = 0
-      # Based on our experiance MIBlockM>1 is not a winner. To test MIBlocM>1, uncomment the following line.
-      # bm_max = int(math.log(MI[3], 2))
-
-      smallest_M_in_MFMA = 512
-      smallest_N_in_MFMA = 512
-      for mfma in allowable_mfma:
-          if mfma[0] < smallest_M_in_MFMA:
-              smallest_M_in_MFMA = mfma[0]
-
-          if mfma[1] < smallest_N_in_MFMA:
-              smallest_N_in_MFMA = mfma[1]
-      for MI in reversed(validMFMA[self._gt.data_type]):
-          if MI not in allowable_mfma:
-              continue
-          for bm in range(bm_max + 1):
-              MIBlockM = 2 ** bm
-
-              for wave in LIST_OF_WAVEs_TO_INCLUDE:
-                  waveTileM = 0
-                  waveTileN = 0
-
-                  while True:
-                      waveTileM += 1
-                      waveTileN = 0
-                      MatrixInstM = MI[0] * MIBlockM
-                      MT0 = MatrixInstM * waveTileM * wave[0]
-                      if MT0 < MIN_MT0:
-                          continue
-                      if MT0 > MAX_MT0:
-                          break
-
-                      while True:
-                          waveTileN += 1
-                          MatrixInstN = MI[1] / MIBlockM * MI[3]
-                          MT1 = int(MatrixInstN * waveTileN * wave[1])
-
-                          if MT1 < MIN_MT1:
-                              continue
-                          if MT1 > MAX_MT1:
-                              break
-
-                          # LDS size check for lsu
-                          LSU = max(1, 4 // wave[0] // wave[1])
-                          if LSU > 1 and MT0 * MT1 * computeDataTypeSize[self._gt.data_type] * LSU > LSUTHRESHOLD:
-                              continue
-
-                          if MT0 * MT1 > mt_max_size[self._gt.data_type]:
-                              continue
-
-                          valid_mfmas.append(
-                              MFMA(
-                                  M=MI[0],
-                                  N=MI[1],
-                                  K=MI[2],
-                                  B=MI[3],
-                                  MIBlockM=MIBlockM,
-                                  waveTileM=waveTileM,
-                                  waveTileN=waveTileN,
-                                  waveM=wave[0],
-                                  waveN=wave[1],
-                              )
-                          )
-      logger.info(" Total number of valid MatrixInstructions: %s", len(valid_mfmas))
-      return valid_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA
+      candidate_mfmas = [MFMA.from_list(mi) for mi in mis]
+      logger.info(" Total number of candidate MatrixInstructions: %s", len(candidate_mfmas))
+      return candidate_mfmas, smallest_M_in_MFMA, smallest_N_in_MFMA
 
   def _find_mi_for_size(self, valid_mfmas: Sequence[MFMA], smallest_M_in_MFMA: int, smallest_N_in_MFMA: int, size: Tuple[int, int, int, int], wavefront_size: int = 64) -> Tuple[List[MFMACandidate], float]:
     """Filter MIs for a single size: level 1 + level 2.
@@ -644,8 +608,8 @@ class MIDesign:
       mx_block_values: Optional[Tuple[int, int]] = None,
       subtile_enabled: bool = False,
   ) -> None:
-      """Initialize MI designer. Enumerates all valid MFMA configurations
-      once (one-time setup). Call generate_for_size() per size.
+      """Initialize MI designer. Loads the candidate MatrixInstructions
+      once (load_candidate_mfmas). Call generate_for_size() per size.
 
       Args:
           outputfile: Output directory for MI finder logs.
@@ -666,7 +630,7 @@ class MIDesign:
       # Config must include GemmProblem (from load_prepared_config_from_yaml, optim.configure,
       # or equivalent) and ARCH/hardware defaults from apply_input_config_defaults.
 
-      self._valid_mfmas, self._smallest_M, self._smallest_N = self.generate_all_mfmas()
+      self._valid_mfmas, self._smallest_M, self._smallest_N = self.load_candidate_mfmas()
 
   def generate_for_size(
       self,

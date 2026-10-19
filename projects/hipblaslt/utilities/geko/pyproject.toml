@@ -38,6 +38,7 @@ include = ["geko*"]
 geko = [
     "config_generator/config.yaml",
     "config_generator/README.md",
+    "config_generator/mi_lists/*/*.yaml",
 ]
 
 [tool.pytest.ini_options]
