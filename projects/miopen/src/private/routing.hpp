@@ -155,19 +155,22 @@ const DisabledSet& GetDisabledSet();
 
 // Parses MIOPEN_LOG_LEVEL as MIOpen does (strtoull, base 0, trailing text
 // ignored) so both agree on what a value means. Unset or unparsable is 0,
-// MIOpen's default level.
+// MIOpen's default level. The result is not range-limited; the two checks below
+// narrow it to int, as MIOpen does.
 unsigned long long ParseLogLevel(const char* value);
 
-// Level 6 (Info2) and above, where MIOpen's own detailed logs start.
-bool TracingEnabledFor(unsigned long long level);
+// Level 6 (Info2) and above, not only 7 (Trace): the route lines are Info2
+// detail, and each MIOpen level includes the ones below it.
+bool RouteTraceEnabledFor(unsigned long long level);
 
-// False only for 1 (Quiet) and 2 (Fatal), the levels that hide MIOpen's errors.
+// True at 0 (default) and from 3 (Error) up. False at 1 (Quiet), 2 (Fatal) and
+// for a value MIOpen reads as negative, all of which hide MIOpen's errors.
 bool ErrorLoggingEnabledFor(unsigned long long level);
 
 // The same checks on this process's MIOPEN_LOG_LEVEL, read once. The wrapper
 // reads the environment because it cannot reach MIOpen's logging code, so
 // MIOpen's test-only quiet switch does not apply here.
-bool TracingEnabled();
+bool RouteTraceEnabled();
 bool ErrorLoggingEnabled();
 
 // Writes one "[MIOpen] hipDNN routing: ..." line describing the decision.
@@ -247,6 +250,9 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // an extern "C" function, so both sit inside the try. The MIOpen route needs no
 // catch: every _impl function catches its own exceptions.
 //
+// Each route clears the last recorded hipDNN failure before the call, so a
+// callee that records none cannot leave the previous call's failure in place.
+//
 // Requires hipdnn_graph.hpp, for ClearForwardedFailure and
 // RecordCurrentException.
 #define MIOPEN_WRAPPER_FORWARD(fn, expr)                                  \
@@ -258,6 +264,7 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
                 ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
             if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
             {                                                             \
+                ::miopen::wrapper::hipdnn::ClearForwardedFailure();       \
                 ::miopen::wrapper::LogForwardedCall(#fn);                 \
                 return (expr);                                            \
             }                                                             \

@@ -950,6 +950,12 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_BINARY_DIR}/include
         ${CMAKE_BINARY_DIR}/include)
 
+    # Added here because the rocm_install_targets(INCLUDE ...) call below only
+    # adds the include path as a side effect of installing. PUBLIC so in-tree
+    # consumers, such as forwarding_failure_probe, find hipdnn_forwarding.h.
+    target_include_directories(MIOpen PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include_wrapper>)
+
     # The wrapper's only dependency is the private library, so every symbol it
     # references must resolve at link time. This turns "new API added, stub
     # written, rename #define forgotten" from a runtime failure into a link
@@ -1195,6 +1201,8 @@ set(MIOPEN_CXX_HEADER_PATH)
 if(MIOPEN_INSTALL_CXX_HEADERS)
 set(MIOPEN_CXX_HEADER_PATH ${PROJECT_SOURCE_DIR}/src/include)
 endif()
+# This only installs the header; the MIOpen target gets its build-tree include
+# path above.
 set(MIOPEN_WRAPPER_HEADER_PATH)
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
 set(MIOPEN_WRAPPER_HEADER_PATH ${PROJECT_SOURCE_DIR}/include_wrapper)

@@ -27,11 +27,11 @@ const char* const kDisableEnvVar    = "MIOPEN_DISABLE_HIPDNN_FOR";
 const char* const kLogLevelEnvVar   = "MIOPEN_LOG_LEVEL";
 const char* const kApiLoggingEnvVar = "MIOPEN_ENABLE_LOGGING";
 
-// MIOpen's Info2, Quiet and Fatal levels, as numbers because the wrapper cannot
+// MIOpen's Default, Error and Info2 levels, as numbers because the wrapper cannot
 // include MIOpen's logging header.
-constexpr unsigned long long kInfo2LogLevel = 6;
-constexpr unsigned long long kQuietLogLevel = 1;
-constexpr unsigned long long kFatalLogLevel = 2;
+constexpr int kDefaultLogLevel = 0;
+constexpr int kErrorLogLevel   = 3;
+constexpr int kInfo2LogLevel   = 6;
 
 // Entry points redirected to hipDNN when forwarding is enabled. To add one, list
 // it here and bump the array size.
@@ -130,6 +130,11 @@ unsigned long long LogLevel()
     static const unsigned long long level = ParseLogLevel(std::getenv(kLogLevelEnvVar));
     return level;
 }
+
+// MIOpen stores the level as uint64 but compares it as int, so out-of-range
+// values wrap (-1 hides everything, 0x100000002 reads as Fatal). Wrap the same
+// way to agree with MIOpen.
+int AsMiopenLevel(unsigned long long level) { return static_cast<int>(level); }
 
 } // namespace
 
@@ -251,16 +256,18 @@ unsigned long long ParseLogLevel(const char* value)
     return value == nullptr ? 0 : std::strtoull(value, nullptr, 0);
 }
 
-// >= because each MIOpen level includes everything below it: a user at 7 (Trace)
-// expects everything 6 shows.
-bool TracingEnabledFor(unsigned long long level) { return level >= kInfo2LogLevel; }
+bool RouteTraceEnabledFor(unsigned long long level)
+{
+    return AsMiopenLevel(level) >= kInfo2LogLevel;
+}
 
 bool ErrorLoggingEnabledFor(unsigned long long level)
 {
-    return level != kQuietLogLevel && level != kFatalLogLevel;
+    const int narrowed = AsMiopenLevel(level);
+    return narrowed == kDefaultLogLevel || narrowed >= kErrorLogLevel;
 }
 
-bool TracingEnabled() { return TracingEnabledFor(LogLevel()); }
+bool RouteTraceEnabled() { return RouteTraceEnabledFor(LogLevel()); }
 
 bool ErrorLoggingEnabled() { return ErrorLoggingEnabledFor(LogLevel()); }
 
@@ -293,11 +300,10 @@ void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics)
 
 void LogForwardedCall(const char* entryPoint) noexcept
 {
-    if(!ApiLoggingEnabled())
-        return;
     try
     {
-        ReportForwardedCall(entryPoint, std::cerr);
+        if(ApiLoggingEnabled())
+            ReportForwardedCall(entryPoint, std::cerr);
     }
     catch(...)
     {
@@ -369,7 +375,7 @@ Route Dispatch(const char* entryPoint)
 
     // Once per entry point, not once per call: the dispatch macro caches the
     // result, so this costs nothing in a hot loop.
-    if(TracingEnabled())
+    if(RouteTraceEnabled())
         ReportRouteDecision(entryPoint, mode, decision, std::cerr);
 
     return decision.route;

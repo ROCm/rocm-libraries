@@ -20,6 +20,8 @@
 #include "../../src/private/hipdnn_graph.hpp"
 #include "../../src/private/routing.hpp"
 
+#include <miopen/logger.hpp>
+
 #include <climits>
 #include <cstdlib>
 #include <ostream>
@@ -575,28 +577,57 @@ TEST(CPU_WrapperRoutingLogLevel_NONE, ParsesLikeMiopen)
     EXPECT_EQ(ParseLogLevel("08"), 0ULL);
     EXPECT_EQ(ParseLogLevel("0x6"), 6ULL);
     EXPECT_EQ(ParseLogLevel("6abc"), 6ULL);
+    // strtoull wraps a negative value; the two checks below then narrow it to int.
     EXPECT_EQ(ParseLogLevel("-1"), ULLONG_MAX);
+}
+
+// Thresholds use MIOpen's own enum so renumbering a level there breaks these
+// tests instead of leaving the wrapper behind.
+constexpr unsigned long long Level(miopen::LoggingLevel level)
+{
+    return static_cast<unsigned long long>(level);
 }
 
 TEST(CPU_WrapperRoutingLogLevel_NONE, TracesFromInfo2Up)
 {
-    using miopen::wrapper::TracingEnabledFor;
-    for(unsigned long long level = 0; level < 6; ++level)
-        EXPECT_FALSE(TracingEnabledFor(level)) << level;
-    EXPECT_TRUE(TracingEnabledFor(6));
-    EXPECT_TRUE(TracingEnabledFor(7));
-    EXPECT_TRUE(TracingEnabledFor(ULLONG_MAX));
+    using miopen::LoggingLevel;
+    using miopen::wrapper::RouteTraceEnabledFor;
+    for(unsigned long long level = 0; level < Level(LoggingLevel::Info2); ++level)
+        EXPECT_FALSE(RouteTraceEnabledFor(level)) << level;
+    EXPECT_TRUE(RouteTraceEnabledFor(Level(LoggingLevel::Info2)));
+    EXPECT_TRUE(RouteTraceEnabledFor(Level(LoggingLevel::Trace)));
 }
 
-TEST(CPU_WrapperRoutingLogLevel_NONE, ErrorsHiddenOnlyByQuietAndFatal)
+TEST(CPU_WrapperRoutingLogLevel_NONE, RouteTraceNarrowsTheLevelToIntLikeMiopen)
+{
+    using miopen::wrapper::RouteTraceEnabledFor;
+    // MIOpen reads -1 as negative, which is below every level.
+    EXPECT_FALSE(RouteTraceEnabledFor(ULLONG_MAX));
+    // 0x100000006 and 0x100000002 read as 6 (Info2) and 2 (Fatal).
+    EXPECT_TRUE(RouteTraceEnabledFor(0x100000006ULL));
+    EXPECT_FALSE(RouteTraceEnabledFor(0x100000002ULL));
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, ErrorsShownOnlyAtDefaultAndFromErrorUp)
+{
+    using miopen::LoggingLevel;
+    using miopen::wrapper::ErrorLoggingEnabledFor;
+    EXPECT_FALSE(ErrorLoggingEnabledFor(Level(LoggingLevel::Quiet)));
+    EXPECT_FALSE(ErrorLoggingEnabledFor(Level(LoggingLevel::Fatal)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Default)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Error)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Info2)));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(Level(LoggingLevel::Trace)));
+}
+
+TEST(CPU_WrapperRoutingLogLevel_NONE, ErrorsNarrowTheLevelToIntLikeMiopen)
 {
     using miopen::wrapper::ErrorLoggingEnabledFor;
-    EXPECT_FALSE(ErrorLoggingEnabledFor(1));
-    EXPECT_FALSE(ErrorLoggingEnabledFor(2));
-    EXPECT_TRUE(ErrorLoggingEnabledFor(0));
-    EXPECT_TRUE(ErrorLoggingEnabledFor(3));
-    EXPECT_TRUE(ErrorLoggingEnabledFor(6));
-    EXPECT_TRUE(ErrorLoggingEnabledFor(ULLONG_MAX));
+    // MIOpen reads -1 as negative and prints nothing, errors included.
+    EXPECT_FALSE(ErrorLoggingEnabledFor(ULLONG_MAX));
+    // 0x100000002 reads as 2 (Fatal); 0x100000003 reads as 3 (Error).
+    EXPECT_FALSE(ErrorLoggingEnabledFor(0x100000002ULL));
+    EXPECT_TRUE(ErrorLoggingEnabledFor(0x100000003ULL));
 }
 
 // ---------------------------------------------------------------------------

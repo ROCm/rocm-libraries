@@ -353,7 +353,7 @@ Why direct linkage:
 - **Plain function-call dispatch.** ≈1 ns/call upper bound (§4.3.2); easiest to argue is overhead-free.
 - **Provider direct private linkage is a link-line change** (§4.5).
 - **SONAME is preserved**, so consumers see no change.
-- **Link-time ABI validation.** hipDNN ABI breaks surface as build failures in CI rather than `dlsym` returning `NULL` deep inside a production workload. (Loading hipDNN at run time during the rollout — §4.9 — gives up this link-time check for hipDNN only: the wrapper still compiles against the hipDNN headers it was built with, but the backend is resolved with `dlopen`/`dlsym` on the first forwarded call, and the major-version check in §4.9 is what rejects an incompatible one.)
+- **Link-time ABI validation.** The wrapper binds to `libMIOpen_private.so` at link time, so a symbol mismatch between the two surfaces as a build failure in CI rather than `dlsym` returning `NULL` deep inside a production workload. (Loading hipDNN at run time during the rollout — §4.9 — gives up this link-time check for hipDNN only: the wrapper still compiles against the hipDNN headers it was built with, but the backend is resolved with `dlopen`/`dlsym` on the first forwarded call, and the major-version check in §4.9 is what rejects an incompatible one.)
 - **Works the same on Windows and Linux** (modulo SONAME / DLL naming) — no `LoadLibrary` shim.
 
 The downsides of direct linkage are limited to the build-system mechanics for producing a split (renaming the implementation library, packaging two `.so` files), which the prototype confirmed are tractable. See §4.3.3 for the full catalog of why the dynamic-loader path was not pursued.

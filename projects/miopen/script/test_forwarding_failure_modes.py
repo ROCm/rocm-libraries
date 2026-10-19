@@ -196,8 +196,10 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertFalse(run.loaded_fake_backend(), run.stderr)
         self.assertEqual(run.statuses("conv_forward"), [BAD_PARM])
 
-    def test_quiet_and_fatal_levels_hide_the_failure_lines(self):
-        for level in ("1", "2"):
+    def test_levels_that_hide_miopens_errors_hide_the_failure_lines(self):
+        # MIOpen narrows the level to int, so -1 reads as negative and hides
+        # errors too.
+        for level in ("1", "2", "-1"):
             with self.subTest(MIOPEN_LOG_LEVEL=level):
                 run = self.run_probe(
                     ["conv_forward"],

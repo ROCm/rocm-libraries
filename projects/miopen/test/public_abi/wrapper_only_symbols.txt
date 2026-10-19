@@ -1,25 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Public C entry points that only the flag-on wrapper (libMIOpen.so built with
-# MIOPEN_ENABLE_HIPDNN_WRAPPER=ON) exports. They report on hipDNN forwarding,
-# which a flag-off build does not have, so they stay out of the pre-wrapper
-# baseline (test/public_abi/public_symbols.baseline) and the flag-off build is
-# unchanged.
-#
-# Each entry is declared in include_wrapper/miopen/hipdnn_forwarding.h, which is
-# installed only with the flag on, never in include/miopen/miopen.h. It is
-# implemented entirely in its stub in src/private/wrapper.cpp and has no _impl,
-# so none of the other files that list the miopen.h entry points name it.
-#
-# The flag-on wrapper symbol-set assertion (check_public_abi.py check-wrapper)
-# expects the wrapper's exported public set to equal:
-#
-#     (public_symbols.baseline  −  wrapper_excluded_symbols.txt)  +  {these symbols}
-#
-# check-wrapper fails if a listed symbol is also in the baseline or declared in
-# miopen.h: a function both builds export belongs in miopen.h and the baseline.
-# check-headers fails if this list and the wrapper-only header disagree.
+# Public C entry points that only the flag-on wrapper (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON)
+# exports, so they are not in the flag-off baseline.
 #
 # Lines beginning with # and blank lines are ignored.
 miopenGetLastForwardedError
