@@ -171,6 +171,49 @@ struct plus_one
   }
 };
 
+void TestCUDATransformInputOutputIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    thrust::device_vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    thrust::host_vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    std::vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+}
+DECLARE_UNITTEST(TestCUDATransformInputOutputIterator);
+
 void TestCUDATransformOutputIterator()
 {
   { // device system
