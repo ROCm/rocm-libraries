@@ -2769,8 +2769,7 @@ namespace
 
     TEST(FixedPointEmulationFp32EnvVar, AdpMantissaBitsDefaultFp64)
     {
-        /* Without HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT set (and assuming
-     * HIPBLASLT_EMULATION_TOLERANCE is also absent), default should be 52. */
+        /* Without HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT set, default should be 52. */
         const int bits = fixedPointEmulationAdpMantissaBits(HIP_R_64F);
         EXPECT_EQ(bits, 52);
     }

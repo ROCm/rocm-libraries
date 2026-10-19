@@ -224,14 +224,6 @@ Precision targets (ADP)
    # Default 23 = full IEEE 754 FP32 precision.  Lower values → fewer moduli → faster.
    export HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT=23
 
-   # Tolerance for FP64: a positive floating-point value (e.g. 1e-8, 1e-16).
-   # Converted to mantissa bits internally.  Ignored when FP64_MANTISSA_BIT_COUNT is set.
-   export HIPBLASLT_EMULATION_FP64_TOLERANCE=1e-16
-
-   # Tolerance for FP32: a positive floating-point value.
-   # Ignored when FP32_MANTISSA_BIT_COUNT is set.
-   export HIPBLASLT_EMULATION_FP32_TOLERANCE=1e-7
-
 Moduli count
 ------------
 

@@ -1980,24 +1980,6 @@ unsigned fixedPointEmulationNumModuli()
     return (parsed.state == FIXED_POINT_EMULATION_ENV_VALID) ? parsed.value : 0u;
 }
 
-FixedPointEmulationEnvValue fixedPointEmulationParseToleranceEnv(const char* value)
-{
-    /* Converts a positive tolerance string to a mantissa-bit count.
-     * bits = clamp(floor(-log2(tol)), 1, 52).
-     * Examples: "1e-16" → 53 (1e-16 < eps, slightly conservative)
-     *           "1e-8"  → 26
-     *           "1e-4"  → 13                                             */
-    if(value == nullptr)
-        return {FIXED_POINT_EMULATION_ENV_UNSET, 52u};
-    char*        endp = nullptr;
-    const double tol  = std::strtod(value, &endp);
-    if(endp == value || *endp != '\0' || tol <= 0.0 || tol > 1.0)
-        return {FIXED_POINT_EMULATION_ENV_INVALID, 0u};
-    const int      bits    = static_cast<int>(std::floor(-std::log2(tol)));
-    const unsigned clamped = static_cast<unsigned>(std::max(1, std::min(bits, 52)));
-    return {FIXED_POINT_EMULATION_ENV_VALID, clamped};
-}
-
 /* =========================================================================
  * fp64EmulatedGemm — public wrapper
  *
@@ -2283,10 +2265,8 @@ bool fixedPointEmulationIsEnabled(hipDataType type_a)
 
 /* Returns the ADP target mantissa-bit count for the given type.
  * FP64: checks HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT (integer bits),
- *       then HIPBLASLT_EMULATION_FP64_TOLERANCE (tolerance → bits),
  *       then defaults to 52 (full IEEE 754 FP64 precision).
  * FP32: checks HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT (integer bits),
- *       then HIPBLASLT_EMULATION_FP32_TOLERANCE (tolerance → bits),
  *       then defaults to 23 (full IEEE 754 FP32 precision).               */
 int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
 {
@@ -2298,12 +2278,7 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
                 std::getenv("HIPBLASLT_EMULATION_FP64_MANTISSA_BIT_COUNT"));
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
-            /* 2. Per-type tolerance env var (converted to bit count). */
-            const auto t = fixedPointEmulationParseToleranceEnv(
-                std::getenv("HIPBLASLT_EMULATION_FP64_TOLERANCE"));
-            if(t.state == FIXED_POINT_EMULATION_ENV_VALID)
-                return static_cast<int>(t.value);
-            /* 3. Default: full IEEE 754 FP64 precision = 52 mantissa bits. */
+            /* 2. Default: full IEEE 754 FP64 precision = 52 mantissa bits. */
             return 52;
         }();
         return v;
@@ -2316,12 +2291,7 @@ int fixedPointEmulationAdpMantissaBits(hipDataType type_a)
                 std::getenv("HIPBLASLT_EMULATION_FP32_MANTISSA_BIT_COUNT"));
             if(p.state == FIXED_POINT_EMULATION_ENV_VALID)
                 return static_cast<int>(p.value);
-            /* 2. Per-type tolerance env var (converted to bit count). */
-            const auto t = fixedPointEmulationParseToleranceEnv(
-                std::getenv("HIPBLASLT_EMULATION_FP32_TOLERANCE"));
-            if(t.state == FIXED_POINT_EMULATION_ENV_VALID)
-                return static_cast<int>(t.value);
-            /* 3. Default: full IEEE 754 FP32 precision = 23 mantissa bits. */
+            /* 2. Default: full IEEE 754 FP32 precision = 23 mantissa bits. */
             return 23;
         }();
         return v;
