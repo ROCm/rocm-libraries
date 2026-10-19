@@ -319,6 +319,38 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     return int(v.value) if rc == 0 and v.value > 0 else None
 
 
+# hipDeviceAttributeMaxGridDimX/Y/Z from HIP's stable hipDeviceAttribute_t enum.
+_HIP_ATTR_MAX_GRID_DIMS = (29, 30, 31)
+
+# Per-device grid limits; a device's limits do not change during the process,
+# and dispatch asks on every request.
+_max_grid_size: Dict[int, Optional[Tuple[int, int, int]]] = {}
+
+
+def get_device_max_grid_size(device: int = 0) -> tuple[int, int, int] | None:
+    """Per-axis grid limit ``(x, y, z)`` in workgroups, or ``None`` if unknown.
+
+    Same query as :func:`get_device_num_cus` (``hipDeviceGetAttribute``, one
+    ``int`` per axis), so a dispatcher can size a grid axis against the device
+    it will launch on rather than a constant. ``None`` when HIP cannot be
+    queried or reports a non-positive limit. The answer is cached per device.
+    """
+    device = int(device)
+    if device not in _max_grid_size:
+        dims = []
+        for attr in _HIP_ATTR_MAX_GRID_DIMS:
+            v = ctypes.c_int(0)
+            try:
+                rc = _hipDeviceGetAttribute(ctypes.byref(v), attr, device)
+            except (AttributeError, OSError):
+                rc = -1
+            if rc != 0 or v.value <= 0:
+                break
+            dims.append(int(v.value))
+        _max_grid_size[device] = tuple(dims) if len(dims) == 3 else None
+    return _max_grid_size[device]
+
+
 # Per-device ``clusterLaunch`` answers; a device's capability does not change
 # during the process, and the property query is too slow for every launch.
 _cluster_launch_support: Dict[int, Optional[bool]] = {}
