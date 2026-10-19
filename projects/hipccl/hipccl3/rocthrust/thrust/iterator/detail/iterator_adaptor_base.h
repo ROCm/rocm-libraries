@@ -77,6 +77,5 @@ private:
 public:
   using type = iterator_facade<Derived, value, system, traversal, reference, difference>;
 };
-
 } // namespace detail
 THRUST_NAMESPACE_END

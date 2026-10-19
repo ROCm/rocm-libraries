@@ -427,7 +427,6 @@ DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfStencil);
 
 namespace
 {
-
 struct object_with_non_trivial_ctor
 {
   // This struct will only properly assign if its `magic` member is
@@ -471,7 +470,6 @@ struct always_true
     return true;
   }
 };
-
 } // namespace
 
 void TestCopyIfNonTrivial()

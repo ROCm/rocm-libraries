@@ -47,7 +47,6 @@ namespace system::detail::sequential
 {
 namespace stable_merge_sort_detail
 {
-
 template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
 THRUST_HOST_DEVICE void inplace_merge(
   sequential::execution_policy<DerivedPolicy>& exec,
@@ -323,7 +322,6 @@ THRUST_HOST_DEVICE void recursive_stable_merge_sort_by_key(
     stable_merge_sort_detail::inplace_merge_by_key(exec, first1, middle1, last1, first2, comp);
   } // end else
 } // end recursive_stable_merge_sort_by_key()
-
 } // end namespace stable_merge_sort_detail
 
 template <typename DerivedPolicy, typename RandomAccessIterator, typename StrictWeakOrdering>
@@ -357,6 +355,5 @@ THRUST_HOST_DEVICE void stable_merge_sort_by_key(
                  stable_merge_sort_detail::iterative_stable_merge_sort_by_key(exec, first1, last1, first2, comp);),
                (stable_merge_sort_detail::recursive_stable_merge_sort_by_key(exec, first1, last1, first2, comp);));
 }
-
 } // namespace system::detail::sequential
 THRUST_NAMESPACE_END

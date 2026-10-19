@@ -36,7 +36,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
-
 error_code ::error_code()
     : m_val(0)
     , m_cat(&system_category())
@@ -171,7 +170,6 @@ bool operator!=(const error_condition& lhs, const error_condition& rhs)
 {
   return !(lhs == rhs);
 } // end operator!=()
-
 } // namespace system
 
 THRUST_NAMESPACE_END

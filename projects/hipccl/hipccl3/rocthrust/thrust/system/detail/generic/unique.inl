@@ -40,7 +40,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::generic
 {
-
 template <typename DerivedPolicy, typename ForwardIterator>
 THRUST_HOST_DEVICE ForwardIterator
 unique(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator first, ForwardIterator last)
@@ -108,6 +107,5 @@ unique_count(thrust::execution_policy<DerivedPolicy>& exec, ForwardIterator firs
   using value_type = thrust::detail::it_value_t<ForwardIterator>;
   return thrust::unique_count(exec, first, last, _THRUST_STD::equal_to<value_type>());
 } // end unique_copy()
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END
