@@ -609,6 +609,24 @@ __host__ wthread::wthread() noexcept {
     prepDeviceForWork();
 }
 
+__host__ __device__ wthread::wthread(wthread &&other) noexcept
+#ifdef __HIP_DEVICE_COMPILE__
+    : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
+    other.worknode_d = nullptr;
+}
+#else // __HIP_DEVICE_COMPILE__
+    : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {
+    // Unlike a typical move constructor, this one has to do more than transfer ownership. gpuThreadFromHost_counter
+    // counts live host hip::wthread objects, not owned work nodes: every host constructor increments it and every
+    // destructor decrements it, including the destructor of a moved-from object. If we didn't count the new object
+    // here, each move would leave the counter one too low; once it wraps below zero, prepDeviceForWork() never sees 0
+    // again, the scheduler kernel is never launched, and join() hangs (e.g. when a std::vector<hip::wthread> grows).
+    // other is still alive and was already counted, so the counter is non-zero here and this call only increments it;
+    // it never launches the scheduler.
+    prepDeviceForWork();
+}
+#endif // !__HIP_DEVICE_COMPILE__
+
 __host__ __device__ wthread &wthread::operator=(wthread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
     if (joinable()) [[unlikely]] {
