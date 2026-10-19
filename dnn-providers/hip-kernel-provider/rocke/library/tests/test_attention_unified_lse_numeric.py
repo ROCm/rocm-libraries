@@ -241,10 +241,67 @@ def test_cached_lse_off_2d_graph_never_serves_an_lse_request():
     else:
         assert not captured, "2D graph replay is expected only on gfx942"
     torch.cuda.synchronize()
+    # A replay writes ``out``, never ``lse``: poison ``out`` in place (same
+    # tensor, so the captured graph key still matches) to see any replay.
+    out.fill_(float("nan"))
     lse = torch.full(
         (problem.total_q, problem.num_query_heads, 1), float("nan"), device="cuda"
     )
     with pytest.raises(NotImplementedError, match="LSE"):
         run_unified_attention_torch(problem=problem, lse=lse, **args)
     torch.cuda.synchronize()
-    assert torch.isnan(lse).all(), "a kernel ran for a refused LSE request"
+    assert torch.isnan(out).all(), "a 2D kernel ran for a refused LSE request"
+    assert torch.isnan(lse).all(), "a kernel wrote LSE for a refused request"
+
+
+def _aliases_last_lse_element(lse, like):
+    """An int32 tensor shaped like ``like`` whose first element shares memory
+    with the last element of ``lse``: the smallest possible overlap."""
+    pool = torch.empty(lse.numel() - 1 + like.numel(), device="cuda")
+    overlapping_lse = pool[: lse.numel()].view(lse.shape)
+    alias = pool[lse.numel() - 1 :].view(torch.int32).view(like.shape)
+    return overlapping_lse, alias
+
+
+@requires_cdna3_or_4
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "case",
+    ["rows", "heads", "dtype", "strided", "host", "seqused_k", "block_table"],
+)
+def test_malformed_lse_buffer_is_refused_before_launch(case):
+    problem, q, kc, vc, cu, su, bt = _case([4, 2], [3000, 1029])
+    tq, hq = problem.total_q, problem.num_query_heads
+    lse = torch.full((tq, hq, 1), float("nan"), device="cuda")
+    if case == "rows":
+        lse = torch.full((tq - 1, hq, 1), float("nan"), device="cuda")
+    elif case == "heads":
+        lse = torch.full((tq, hq - 1, 1), float("nan"), device="cuda")
+    elif case == "dtype":
+        lse = lse.half()
+    elif case == "strided":
+        lse = torch.full((tq, hq, 2), float("nan"), device="cuda")[..., :1]
+    elif case == "host":
+        lse = lse.cpu()
+    elif case == "seqused_k":
+        lse, su = _aliases_last_lse_element(lse, su)
+    elif case == "block_table":
+        lse, bt = _aliases_last_lse_element(lse, bt)
+    out = torch.full_like(q, float("nan"))
+    with pytest.raises(ValueError, match="lse"):
+        run_unified_attention_torch(
+            problem=problem,
+            q=q,
+            k=kc,
+            v=vc,
+            out=out,
+            cu_seqlens_q=cu,
+            seqused_k=su,
+            softmax_scale=1.0 / math.sqrt(q.shape[-1]),
+            block_table=bt,
+            softcap=0.0,
+            backend="3d",
+            lse=lse,
+        )
+    torch.cuda.synchronize()
+    assert torch.isnan(out).all(), "a kernel ran for a malformed lse buffer"
