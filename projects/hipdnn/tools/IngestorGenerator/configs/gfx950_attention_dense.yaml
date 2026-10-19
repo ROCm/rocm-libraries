@@ -16,6 +16,10 @@
 # tests/TestGfx950AttentionDenseMatchers.cpp are stubs; the provider's copies are
 # hand-maintained and must not be overwritten.
 #
+# The generated gfx950_attention_dense.kdp.json is a DVC output: copy it to
+# descriptors/rocKE/gfx950_attention_dense/artifacts/ and run `dvc add artifacts`, not
+# `git add`. See the descriptors README ("Large rocKE files live in DVC").
+#
 # The kernel is the dense flash-attention prefill from
 # rocke/library/kernels/gfx950/attention_dense.py, in the PACKAGED dialect: hkp_pack
 # lowers the named builder through comgr at build time and rewrites the shipped
