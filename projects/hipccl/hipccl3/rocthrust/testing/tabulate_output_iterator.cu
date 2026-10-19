@@ -98,7 +98,7 @@ struct index_to_gather_index_op
   }
 };
 
-// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+// ensure that we properly support thrust::tabulate_output_iterator from _THRUST_STD
 void TestTabulateOutputIteratorTraits()
 {
   using base_it = thrust::host_vector<int>::iterator;
