@@ -142,11 +142,13 @@ ROCSOLVER_BEGIN_NAMESPACE
         bool const isvalid_config = (isvalid_grid && isvalid_block);                                \
         if(!isvalid_config)                                                                         \
         {                                                                                           \
-            std::cerr << "Error: invalid launch configuration: "                                    \
-                      << "grid( " << grid_.x << ", " << grid_.y << ", " << grid_.z << " )"          \
-                      << " block( " << block_.x << ", " << block_.y << ", " << block_.z << " ) "    \
-                      << "\n";                                                                      \
-            std::cerr << __FILE__ << ":" << __LINE__ << "\n";                                       \
+            fmt::print(stderr,                                                                      \
+                       "Error: invalid launch configuration: "                                      \
+                       "grid( {}, {}, {} ) "                                                        \
+                       "block( {}, {}, {} )\n",                                                     \
+                       grid_.x, grid_.y, grid_.z, block_.x, block_.y, block_.z);                    \
+                                                                                                    \
+            fmt::print(stderr, "{}:{}\n", __FILE__, __LINE__);                                      \
                                                                                                     \
             THROW_IF_HIP_ERROR(hipErrorInvalidConfiguration);                                       \
         }                                                                                           \
