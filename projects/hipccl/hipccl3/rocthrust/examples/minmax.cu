@@ -79,11 +79,12 @@ int main(void)
   thrust::uniform_int_distribution<int> dist(10, 99);
 
   // initialize data on host
-  thrust::device_vector<int> data(N);
-  for (size_t i = 0; i < data.size(); i++)
+  thrust::host_vector<int> host_data(N);
+  for (auto& e : host_data)
   {
-    data[i] = dist(rng);
+    e = dist(rng);
   }
+  thrust::device_vector<int> data = host_data;
 
   // setup arguments
   minmax_unary_op<int> unary_op;
@@ -97,9 +98,9 @@ int main(void)
 
   // print results
   std::cout << "[ ";
-  for (size_t i = 0; i < N; i++)
+  for (auto& e : host_data)
   {
-    std::cout << data[i] << " ";
+    std::cout << e << " ";
   }
   std::cout << "]" << std::endl;
 
