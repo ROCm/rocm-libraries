@@ -21,6 +21,7 @@
  * graph for its whole lifetime -- abandoned intermediate arrays are reclaimed in
  * bulk when the arena is destroyed, exactly mirroring Python GC lifetime.
  */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -556,21 +557,20 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
         *out = (int64_t)((uint64_t)ints[0] * (uint64_t)ints[1]);
         return true;
     case ROCKE_OP_ARITH_DIV:
-        if(op->num_operands != 2 || ints[1] == 0)
-            return false;
-        /* Python int(ints[0] / ints[1]): float division truncated toward 0. */
-        *out = (int64_t)((double)ints[0] / (double)ints[1]);
-        return true;
     case ROCKE_OP_ARITH_MOD:
-        if(op->num_operands != 2 || ints[1] == 0)
+        if(op->num_operands != 2)
             return false;
-        /* Python % is floored; mirror it (C99 % truncates toward zero). */
+        /* Python _signed_quotient: C's / and % round toward zero, as LLVM's
+         * sdiv and srem do. A zero divisor, or a quotient past the signed
+         * range (the minimum value divided by -1), is left to run. */
         {
-            int64_t a = ints[0], bm = ints[1];
-            int64_t r = a % bm;
-            if(r != 0 && ((r < 0) != (bm < 0)))
-                r += bm;
-            *out = r;
+            const int64_t a = ints[0], d = ints[1];
+            if(d == 0 || (a == INT64_MIN && d == -1))
+                return false;
+            const int64_t quotient = a / d;
+            if(quotient != wrap_to_width(quotient, op->results[0]->type))
+                return false;
+            *out = op->opcode == ROCKE_OP_ARITH_DIV ? quotient : a % d;
         }
         return true;
     case ROCKE_OP_ARITH_AND:

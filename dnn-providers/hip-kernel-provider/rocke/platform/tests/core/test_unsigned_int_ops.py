@@ -400,6 +400,59 @@ def test_constants_are_read_at_their_width():
     assert _folded_store_value(b.kernel) == 1
 
 
+def _div_or_mod(op_name, int_type, a, d):
+    const = {I32: lambda b, v: b.const_i32(v), I64: lambda b, v: b.const_i64(v)}
+    return _store_one(
+        f"fold_{op_name}",
+        int_type,
+        lambda b: getattr(b, op_name)(const[int_type](b, a), const[int_type](b, d)),
+    )
+
+
+# (op, type, dividend, divisor, the value sdiv / srem give). Both round the
+# quotient toward zero, so a remainder takes the dividend's sign.
+_DIV_MOD_FOLD_CASES = [
+    ("mod", I32, 3, 0x80000000, 3),  # the divisor reads as -2**31
+    ("div", I32, 3, 0x80000000, 0),
+    ("mod", I32, -7, 2, -1),
+    ("div", I32, -7, 2, -3),
+    ("mod", I32, 7, -2, 1),
+    ("div", I32, 7, -2, -3),
+    ("mod", I32, -7, -2, -1),
+    ("div", I32, -(2**31), 3, -715827882),
+    ("div", I64, 2**62 + 1, 1, 2**62 + 1),  # exact past a double's precision
+    ("mod", I64, -(2**63), 3, -2),
+]
+
+
+@pytest.mark.parametrize("op_name,int_type,a,d,expected", _DIV_MOD_FOLD_CASES)
+def test_folded_div_and_mod_round_toward_zero(op_name, int_type, a, d, expected):
+    """A folded ``div`` / ``mod`` holds what the ``sdiv`` / ``srem`` it lowers to
+    computes, including for divisors with the high bit set (the ctest checks the
+    C++ folder with the same cases)."""
+    unfolded = _lower_kernel_to_llvm_python(
+        _div_or_mod(op_name, int_type, a, d), arch="gfx942"
+    )
+    assert {"div": "sdiv", "mod": "srem"}[op_name] in unfolded
+    assert _folded_store_value(_div_or_mod(op_name, int_type, a, d)) == expected
+
+
+@pytest.mark.parametrize("op_name", ["div", "mod"])
+@pytest.mark.parametrize(
+    "int_type,a,d",
+    [(I32, -(2**31), -1), (I64, -(2**63), -1), (I32, 5, 0)],
+    ids=["i32_min_by_minus_one", "i64_min_by_minus_one", "zero_divisor"],
+)
+def test_undefined_division_is_not_folded(op_name, int_type, a, d):
+    """A zero divisor or a quotient past the signed range makes ``sdiv`` and
+    ``srem`` undefined in LLVM; the folder leaves the op to run instead of
+    inventing a value."""
+    kernel = _div_or_mod(op_name, int_type, a, d)
+    optimize_kernel(kernel)
+    (store,) = [op for op in kernel.body.ops if op.name == "memref.global_store_typed"]
+    assert store.operands[2].op.name == f"arith.{op_name}"
+
+
 def test_marker_on_a_constant_folds_to_the_constant():
     b = IRBuilder("fold_marker")
     out = b.param("out", PtrType(I32, "global"))

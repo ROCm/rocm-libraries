@@ -192,6 +192,25 @@ def _wrap_to_width(value: int, t: Type) -> int:
     return value - (1 << width) if value >> (width - 1) else value
 
 
+def _signed_quotient(a: int, b: int, t: Type) -> Optional[int]:
+    """``a / b`` as LLVM ``sdiv`` computes it, or None when it cannot fold.
+
+    ``arith.div`` and ``arith.mod`` lower to ``sdiv`` and ``srem``, which round
+    the quotient toward zero (so ``-7 / 2`` is -3 and ``-7 % 2`` is -1), unlike
+    Python's floored ``//`` and ``%``. Integer arithmetic keeps i64 values
+    exact. A zero divisor, or a quotient past the signed range (the minimum
+    value divided by -1), is undefined in LLVM and is left to run.
+    """
+    if b == 0:
+        return None
+    quotient = abs(a) // abs(b)
+    if (a < 0) != (b < 0):
+        quotient = -quotient
+    if quotient != _wrap_to_width(quotient, t):
+        return None
+    return quotient
+
+
 def _try_fold(op: Op) -> Optional[int]:
     if len(op.results) != 1:
         return None
@@ -209,10 +228,11 @@ def _try_fold(op: Op) -> Optional[int]:
         return ints[0] - ints[1]
     if op.name == "arith.mul":
         return ints[0] * ints[1]
-    if op.name == "arith.div" and ints[1] != 0:
-        return int(ints[0] / ints[1])
-    if op.name == "arith.mod" and ints[1] != 0:
-        return ints[0] % ints[1]
+    if op.name in ("arith.div", "arith.mod"):
+        quotient = _signed_quotient(ints[0], ints[1], op.results[0].type)
+        if quotient is None:
+            return None
+        return quotient if op.name == "arith.div" else ints[0] - ints[1] * quotient
     if op.name == "arith.and":
         return ints[0] & ints[1]
     if op.name == "arith.or":

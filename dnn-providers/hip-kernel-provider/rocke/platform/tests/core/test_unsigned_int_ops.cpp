@@ -9,7 +9,8 @@
  * the new attrs and its refusals of bad marker attrs (texts identical to the
  * Python verifier), and the constant folder (unsigned compare at the operand
  * width; constants read at their width; a marker on a constant folds to the
- * constant), and the verifier's i32 / i64 rule for the nuw and ult forms.
+ * constant; signed div / mod rounded toward zero, undefined ones left
+ * unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -446,6 +447,56 @@ void case_constant_folding()
         EXPECT(folded_store_value(&lb, &got) && got == 1,
                "folded 0x80000000 + 0 == 0x80000000 gave " + std::to_string(got) + ", want 1");
         rocke_ir_builder_free(&lb);
+    }
+
+    /* A folded div / mod holds what sdiv / srem compute (quotient rounded
+     * toward zero); a zero divisor or a quotient past the signed range is not
+     * folded. Same cases as the Python test. */
+    struct DivModCase
+    {
+        bool is_mod;
+        bool wide;
+        int64_t a, d;
+        bool folds;
+        int64_t want;
+    };
+    const DivModCase div_mod_cases[] = {
+        {true, false, 3, 0x80000000LL, true, 3},
+        {false, false, 3, 0x80000000LL, true, 0},
+        {true, false, -7, 2, true, -1},
+        {false, false, -7, 2, true, -3},
+        {true, false, 7, -2, true, 1},
+        {false, false, 7, -2, true, -3},
+        {true, false, -7, -2, true, -1},
+        {false, false, INT32_MIN, 3, true, -715827882},
+        {false, true, (int64_t{1} << 62) + 1, 1, true, (int64_t{1} << 62) + 1},
+        {true, true, INT64_MIN, 3, true, -2},
+        {false, false, INT32_MIN, -1, false, 0},
+        {true, false, INT32_MIN, -1, false, 0},
+        {false, true, INT64_MIN, -1, false, 0},
+        {true, true, INT64_MIN, -1, false, 0},
+        {false, false, 5, 0, false, 0},
+        {true, false, 5, 0, false, 0},
+    };
+    for(const DivModCase& c : div_mod_cases)
+    {
+        rocke_ir_builder_t db;
+        rocke_ir_builder_init(&db, "unsigned_int_ops_fold_div_mod");
+        const rocke_type_t* type = c.wide ? rocke_i64() : rocke_i32();
+        rocke_value_t* out
+            = rocke_b_param(&db, "out", rocke_ptr_type(&db, type, "global"), nullptr);
+        rocke_value_t* av = c.wide ? rocke_b_const_i64(&db, c.a) : rocke_b_const_i32(&db, c.a);
+        rocke_value_t* dv = c.wide ? rocke_b_const_i64(&db, c.d) : rocke_b_const_i32(&db, c.d);
+        rocke_value_t* q = c.is_mod ? rocke_b_mod(&db, av, dv) : rocke_b_div(&db, av, dv);
+        rocke_b_global_store(&db, out, rocke_b_const_i32(&db, 0), q, 1);
+        int64_t got = -2;
+        const bool folded = folded_store_value(&db, &got);
+        const std::string label = std::string(c.is_mod ? "mod " : "div ") + std::to_string(c.a)
+                                  + ", " + std::to_string(c.d);
+        EXPECT(folded == c.folds, label + (c.folds ? " did not fold" : " folded"));
+        EXPECT(!c.folds || got == c.want,
+               label + " gave " + std::to_string(got) + ", want " + std::to_string(c.want));
+        rocke_ir_builder_free(&db);
     }
 
     /* A marker on a constant folds to the constant, even with a runtime end. */
