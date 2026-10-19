@@ -1187,6 +1187,295 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOversizedByteStrides)
 }
 
 // =============================================================================
+// Kernarg range guards
+// =============================================================================
+
+// The predicates every per-field guard is built from, at their exact
+// boundaries. Pure functions, so these run without a device.
+
+TEST(TestSdpaKernargRanges, DimFitsU32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::dimFitsU32("batch", static_cast<int64_t>(UINT32_MAX)));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsU32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(plan_utils::dimFitsU32("batch", static_cast<int64_t>(UINT32_MAX) + 1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsU32RejectsANegativeDimension)
+{
+    EXPECT_FALSE(plan_utils::dimFitsU32("batch", -1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::dimFitsI32("seqlen_q", static_cast<int64_t>(INT32_MAX)));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(plan_utils::dimFitsI32("seqlen_q", static_cast<int64_t>(INT32_MAX) + 1));
+}
+
+TEST(TestSdpaKernargRanges, DimFitsI32RejectsANegativeDimension)
+{
+    EXPECT_FALSE(plan_utils::dimFitsI32("seqlen_q", -1));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32AcceptsItsLimit)
+{
+    EXPECT_TRUE(plan_utils::byteStrideFitsU32("stride_q", static_cast<int64_t>(UINT32_MAX) / 2, 2));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32RejectsOnePastItsLimit)
+{
+    EXPECT_FALSE(
+        plan_utils::byteStrideFitsU32("stride_q", static_cast<int64_t>(UINT32_MAX) / 2 + 1, 2));
+}
+
+// The predicate divides instead of multiplying, so an element count whose byte
+// product does not even fit in int64 is declined rather than wrapped into
+// range.
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32DeclinesAnElementCountThatOverflowsTheProduct)
+{
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32("stride_q", (int64_t{1} << 62) + 1, 2));
+}
+
+// Both Ts kernargs fold a tile size into the element size, which shrinks the
+// accepted element range by that factor.
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32FoldsInATileFactor)
+{
+    constexpr int64_t K_TILE_BYTES = 2 * 192;
+    EXPECT_TRUE(plan_utils::byteStrideFitsU32(
+        "Ts", static_cast<int64_t>(UINT32_MAX) / K_TILE_BYTES, K_TILE_BYTES));
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32(
+        "Ts", static_cast<int64_t>(UINT32_MAX) / K_TILE_BYTES + 1, K_TILE_BYTES));
+}
+
+TEST(TestSdpaKernargRanges, ByteStrideFitsU32RejectsANonPositiveElementSize)
+{
+    EXPECT_FALSE(plan_utils::byteStrideFitsU32("Ts", 1, 0));
+}
+
+// Build a forward graph with per-tensor dims and one explicit stride set, so a
+// dimension can be driven to the limit of its field without the contiguous
+// stride for that shape tripping the byte-stride guard first. The strides
+// describe a [1, 1, 256, 128] tile; applicability ties nothing else to them.
+// Only descriptors are built, so the dims cost no memory.
+auto createSdpaFwdGraphForDims(const std::vector<int64_t>& qDims,
+                               const std::vector<int64_t>& kDims,
+                               const std::vector<int64_t>& vDims)
+{
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    const std::vector<int64_t> strides = {32768, 32768, 128, 1};
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        qDims,
+        strides,
+        kDims,
+        strides,
+        vDims,
+        strides,
+        oDims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+}
+
+struct FwdDimRangeCase
+{
+    const char* label;
+    std::vector<int64_t> qDims;
+    std::vector<int64_t> kDims;
+    std::vector<int64_t> vDims;
+};
+
+constexpr int64_t K_U32_DIM_LIMIT = static_cast<int64_t>(UINT32_MAX);
+constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
+
+// Batch and the head counts reach the kernel through a uint32 field or an
+// unsigned grid dimension; the sequence lengths take the signed limit because
+// the launch grid's ceil-division is evaluated in unsigned int.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsDimensionsAtTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"batch at UINT32_MAX",
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128},
+         {K_U32_DIM_LIMIT, 8, 256, 128}},
+        {"nhead_q at UINT32_MAX",
+         {4, K_U32_DIM_LIMIT, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"nhead_kv at UINT32_MAX",
+         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128},
+         {4, K_U32_DIM_LIMIT, 256, 128}},
+        {"seqlen_q at INT32_MAX", {4, 8, K_I32_DIM_LIMIT, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"seqlen_kv at INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128},
+         {4, 8, K_I32_DIM_LIMIT, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesDimensionsPastTheir32BitLimits)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"batch one past UINT32_MAX",
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128},
+         {K_U32_DIM_LIMIT + 1, 8, 256, 128}},
+        {"nhead_q one past UINT32_MAX",
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"nhead_kv one past UINT32_MAX",
+         {4, 8, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128},
+         {4, K_U32_DIM_LIMIT + 1, 256, 128}},
+        {"seqlen_q one past INT32_MAX",
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, 256, 128},
+         {4, 8, 256, 128}},
+        {"seqlen_kv one past INT32_MAX",
+         {4, 8, 256, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128},
+         {4, 8, K_I32_DIM_LIMIT + 1, 128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, gw));
+    }
+}
+
+// The head dims are narrowed to int for the kernel-registry lookup, so a head
+// dim whose low 32 bits are a supported value used to resolve a kernel built
+// for that supported value. The registry set {64, 128, 192} is what bounds the
+// head dims in practice, which is why there is no case at INT32_MAX here.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
+
+    const std::vector<FwdDimRangeCase> cases = {
+        {"supported head dims (control)", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"hdim_qk wraps to 128",
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, K_WRAPS_TO_128},
+         {4, 8, 256, 128}},
+        {"hdim_v wraps to 128", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, K_WRAPS_TO_128}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.label);
+        auto builder = createSdpaFwdGraphForDims(testCase.qDims, testCase.kDims, testCase.vDims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(
+            builder.GetBufferPointer(), builder.GetSize());
+        const bool isControl = testCase.label == std::string("supported head dims (control)");
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, gw), isControl);
+    }
+}
+
+// ts_qo of the row isApplicable resolves for a bf16 hd128 no-mask batch graph,
+// selected by the same rule getKernelNameKey applies.
+std::optional<int> resolveFwdTileSizeQo(const std::string& archId)
+{
+    for(const auto& entry : cfg_fmha_fwd)
+    {
+        const auto& cfg = entry.second;
+        if(cfg.arch == archId && cfg.dtype == "bf16" && cfg.hdim_q == 128 && cfg.hdim_v == 128
+           && cfg.mask == 0 && cfg.mode == 0 && (archId == "gfx950" || cfg.bf16_cvt == 0))
+        {
+            return cfg.ts_qo;
+        }
+    }
+    return std::nullopt;
+}
+
+// s_Ts is tileSizeQo * stride_q * bytes-per-element, computed in unsigned int.
+// The per-field stride guard only bounds stride_q * 2, so the tile factor is
+// what this guard adds: the accepted stride shrinks by ts_qo.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSize)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto tileSizeQo = resolveFwdTileSizeQo(deviceString);
+    ASSERT_TRUE(tileSizeQo.has_value()) << "no bf16 hd128 no-mask row for " << deviceString;
+
+    constexpr int64_t K_BF16_BYTES = 2;
+    const int64_t limit = static_cast<int64_t>(UINT32_MAX) / (K_BF16_BYTES * *tileSizeQo);
+    // One past the Ts limit must still clear the per-field stride guard, or the
+    // test would prove nothing about Ts.
+    ASSERT_LE((limit + 1) * K_BF16_BYTES, static_cast<int64_t>(UINT32_MAX));
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    const std::vector<int64_t> atLimit = {limit, limit, limit, 1};
+    auto builderAtLimit
+        = createSdpaFwdGraphWithStrides(dims, atLimit, normalStrides, normalStrides, normalStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
+        builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
+
+    const std::vector<int64_t> pastLimit = {limit + 1, limit + 1, limit + 1, 1};
+    auto builderPastLimit = createSdpaFwdGraphWithStrides(
+        dims, pastLimit, normalStrides, normalStrides, normalStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
+        builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
+}
+
+// =============================================================================
 // buildPlan exception contract (IPlanBuilder::buildPlan)
 // =============================================================================
 

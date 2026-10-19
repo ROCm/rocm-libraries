@@ -17,6 +17,10 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include <cctype>
+#include <string>
+#include <vector>
+
 namespace hip_flash2_engine
 {
 namespace
@@ -265,6 +269,119 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
+
+// -- isApplicable: 32-bit dimension range -------------------------------------
+//
+// Flash2FwdParams narrows every dimension to int, so a dimension that does not
+// fit is dispatched as a different shape. Only descriptors are built here, so
+// the dims cost no memory.
+
+struct Flash2DimRangeCase
+{
+    const char* label;
+    std::vector<int64_t> qDims;
+    std::vector<int64_t> kvDims;
+    bool applicable;
+};
+
+class TestHipFlash2DimRange : public ::testing::TestWithParam<Flash2DimRangeCase>
+{
+protected:
+    Handle _handle;
+    HipFlash2FwdPlanBuilder _builder;
+};
+
+TEST_P(TestHipFlash2DimRange, IsApplicableMatchesTheDimensionRange)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const auto& param = GetParam();
+    // One stride set for every tensor: the head-dim stride is 1 as the kernel
+    // requires, and nothing else ties the strides to the dims.
+    const std::vector<int64_t> strides{32768, 32768, 128, 1};
+    const std::vector<int64_t> oDims{
+        param.qDims[0], param.qDims[1], param.qDims[2], param.kvDims[3]};
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        param.qDims,
+        strides,
+        param.kvDims,
+        strides,
+        param.kvDims,
+        strides,
+        oDims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_EQ(_builder.isApplicable(_handle, graph), param.applicable);
+}
+
+// INT32_MAX itself is not reachable for seq_len_q (the engine also requires a
+// multiple of 64), so its case sits on the largest multiple of 64 below it.
+constexpr int64_t K_I32_DIM_LIMIT = static_cast<int64_t>(INT32_MAX);
+constexpr int64_t K_MAX_SEQ_MULTIPLE_OF_64 = (K_I32_DIM_LIMIT / 64) * 64;
+constexpr int64_t K_WRAPS_TO_4096 = (int64_t{1} << 32) + 4096;
+constexpr int64_t K_WRAPS_TO_1 = (int64_t{1} << 32) + 1;
+
+INSTANTIATE_TEST_SUITE_P(
+    DimensionRange,
+    TestHipFlash2DimRange,
+    ::testing::Values(
+        Flash2DimRangeCase{
+            "ordinary shape (control)", {1, 32, 4096, 128}, {1, 32, 4096, 128}, true},
+        Flash2DimRangeCase{"batch at INT32_MAX",
+                           {K_I32_DIM_LIMIT, 32, 4096, 128},
+                           {K_I32_DIM_LIMIT, 32, 4096, 128},
+                           true},
+        Flash2DimRangeCase{"batch one past INT32_MAX",
+                           {K_I32_DIM_LIMIT + 1, 32, 4096, 128},
+                           {K_I32_DIM_LIMIT + 1, 32, 4096, 128},
+                           false},
+        // Batch has no other guard at all, so a batch that truncates to a legal
+        // value would otherwise be dispatched as that value.
+        Flash2DimRangeCase{"batch wraps to 1",
+                           {K_WRAPS_TO_1, 32, 4096, 128},
+                           {K_WRAPS_TO_1, 32, 4096, 128},
+                           false},
+        Flash2DimRangeCase{
+            "num_heads_q at INT32_MAX", {1, K_I32_DIM_LIMIT, 4096, 128}, {1, 1, 4096, 128}, true},
+        Flash2DimRangeCase{"num_heads_q one past INT32_MAX",
+                           {1, K_I32_DIM_LIMIT + 1, 4096, 128},
+                           {1, 1, 4096, 128},
+                           false},
+        Flash2DimRangeCase{"seq_len_q at its largest accepted value",
+                           {1, 32, K_MAX_SEQ_MULTIPLE_OF_64, 128},
+                           {1, 32, 4096, 128},
+                           true},
+        Flash2DimRangeCase{
+            "seq_len_q wraps to 4096", {1, 32, K_WRAPS_TO_4096, 128}, {1, 32, 4096, 128}, false},
+        Flash2DimRangeCase{
+            "seq_len_kv at INT32_MAX", {1, 32, 4096, 128}, {1, 32, K_I32_DIM_LIMIT, 128}, true},
+        Flash2DimRangeCase{"seq_len_kv one past INT32_MAX",
+                           {1, 32, 4096, 128},
+                           {1, 32, K_I32_DIM_LIMIT + 1, 128},
+                           false},
+        Flash2DimRangeCase{"head_dim wraps to 128",
+                           {1, 32, 4096, (int64_t{1} << 32) + 128},
+                           {1, 32, 4096, (int64_t{1} << 32) + 128},
+                           false}),
+    [](const ::testing::TestParamInfo<Flash2DimRangeCase>& info) {
+        std::string name = info.param.label;
+        for(auto& c : name)
+        {
+            if(std::isalnum(static_cast<unsigned char>(c)) == 0)
+            {
+                c = '_';
+            }
+        }
+        return name;
+    });
 
 using asm_sdpa_engine::DeprecatedCausalMaskCase;
 using asm_sdpa_engine::plan_utils::MaskType;

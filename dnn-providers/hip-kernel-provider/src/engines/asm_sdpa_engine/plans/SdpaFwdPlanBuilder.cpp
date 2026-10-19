@@ -168,6 +168,35 @@ static bool hasStatsOutput(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttri
     return attrs.generate_stats().value_or(false);
 }
 
+// Byte sizes the forward kernargs scale element strides by. Q/K/V/O are checked
+// at the BF16 size, which is conservative for fp8 inputs (1 byte at run time);
+// the stats/LSE tensor is FP32.
+constexpr int64_t K_BF16_BYTES = 2;
+constexpr int64_t K_FP32_BYTES = 4;
+
+// Validate that every forward dimension fits the 32-bit field that carries it.
+// Batch and the head counts reach the kernel through a uint32 kernarg field or
+// an unsigned grid dimension. The head dims are narrowed to int for the kernel
+// registry lookup, and the sequence lengths drive `(seqLenQ + tileSizeQo - 1) /
+// tileSizeQo` grid math evaluated in unsigned int, so both of those take the
+// signed limit. Checked before the first narrowing cast so the engine declines
+// instead of dispatching a kernel on a truncated shape.
+static bool
+    wouldFwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v)
+{
+    bool ok = true;
+    ok &= plan_utils::dimFitsU32("batch", q.dims()->Get(0));
+    ok &= plan_utils::dimFitsU32("nhead_q", q.dims()->Get(1));
+    ok &= plan_utils::dimFitsU32("nhead_kv", k.dims()->Get(1));
+    ok &= plan_utils::dimFitsI32("seqlen_q", q.dims()->Get(2));
+    ok &= plan_utils::dimFitsI32("seqlen_kv", k.dims()->Get(2));
+    ok &= plan_utils::dimFitsI32("hdim_qk", q.dims()->Get(3));
+    ok &= plan_utils::dimFitsI32("hdim_v", v.dims()->Get(3));
+    return ok;
+}
+
 // Validate that every forward-pass byte stride fits in uint32_t.  The ASM
 // kernarg struct stores strides as uint32 so values that overflow silently
 // truncate, producing wrong results.  Checked early in isApplicable so the
@@ -179,9 +208,6 @@ static bool wouldFwdByteStridesFitUint32(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats)
 {
-    constexpr int64_t K_BF16_BYTES = 2;
-    constexpr int64_t K_FP32_BYTES = 4;
-
     auto checkTensor = [](const char* prefix,
                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t,
                           int64_t elementBytes) {
@@ -325,6 +351,13 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         oTensor->dims()->size() != 4,
         "o tensor must be rank 4 (Actual rank: " + std::to_string(oTensor->dims()->size()) + ")");
+
+    // Every dimension below is narrowed to 32 bits before it reaches a kernel,
+    // starting with the mask classification and the registry lookup further
+    // down, so the range gate comes first.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
+        "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
     // Validate optional stats (LSE) output tensor.
     // Gate purely on generate_stats; the UID is required when the flag is set.
@@ -479,6 +512,18 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(
         !wouldFwdByteStridesFitUint32(*qTensor, *kTensor, *vTensor, *oTensor, statsTensor),
         "Forward byte strides overflow uint32_t kernarg fields");
+
+    // s_Ts = tileSizeQo * qStrideRow * inBytesPerElement (SdpaFwdArgsBuilder) is
+    // the one forward kernarg that is a product rather than a single stride, and
+    // it is formed in unsigned int, so it wraps for Q sequence strides the
+    // per-field check above accepts. The resolved row's ts_qo folds into the
+    // element size so the product is never formed outside the predicate.
+    // Mirrors the backward Ts check.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !plan_utils::byteStrideFitsU32("Ts (ts_qo * stride_q)",
+                                       qTensor->strides()->Get(2),
+                                       K_BF16_BYTES * cfg_fmha_fwd.at(key).ts_qo),
+        "Forward Ts product overflows the uint32_t s_Ts kernarg field");
 
     return true;
 }
@@ -649,8 +694,11 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
+    // Classify on the graph dims, exactly as isApplicable does. Passing the
+    // narrowed unsigned locals instead would let the two sites resolve
+    // different mask types for the same graph.
     const auto band = plan_utils::makeCoveringBoundsUnbound(
-        plan_utils::resolveDiagonalBand(sdpaAttrs), seqLenQ, seqLenKv);
+        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kDims->Get(2));
     params.maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 
     const auto dataTypeId = getDataTypeIdentifier(
