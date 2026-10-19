@@ -87,8 +87,7 @@ struct allocator_aware_execution_policy
   // perfect forwarding doesn't help, because a const reference has to be turned
   // into a value by copying for the purpose of storing it in execute_with_allocator
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Allocator,
-            typename _THRUST_STD::enable_if<!_THRUST_STD::is_lvalue_reference<Allocator>::value>::type* = nullptr>
+  template <typename Allocator, _THRUST_STD::enable_if_t<!_THRUST_STD::is_lvalue_reference_v<Allocator>>* = nullptr>
   THRUST_HOST_DEVICE typename execute_with_allocator_type<Allocator>::type operator()(Allocator&& alloc) const
   {
     return typename execute_with_allocator_type<Allocator>::type(_THRUST_STD::move(alloc));
