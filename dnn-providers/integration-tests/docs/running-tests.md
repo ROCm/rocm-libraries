@@ -128,6 +128,58 @@ build/bin/hipdnn_integration_tests \
   runs anything.
 - Standard GTest sharding (`GTEST_TOTAL_SHARDS` / `GTEST_SHARD_INDEX`) works.
 
+### 4. Time the engine (`--benchmark`)
+
+`--benchmark` adds a performance measurement to each test. The test first
+verifies the engine output in the usual way. If the output passes, the harness
+runs the same plan on the same tensors again and times it. A test that skips or
+fails is not timed. The C++ graph tests and the bundles both support it.
+
+```bash
+build/bin/hipdnn_integration_tests \
+    --test-article build/lib/hipdnn_plugins/engines/libmiopen_plugin.so \
+    --test-engine  MIOPEN_ENGINE \
+    --gtest_filter='quick_ConvolutionFwd_Default.*' \
+    --benchmark --benchmark-iterations 50 \
+    --gtest_output=json:benchmark.json
+```
+
+Each timed test prints one line:
+
+```text
+[ BENCHMARK ] quick_ConvolutionFwd_Default.8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0: engine=MIOPEN_ENGINE timing=DEVICE_ONLY samples=20 min=0.0182 ms median=0.0184 ms mean=0.0185 ms
+```
+
+- The harness runs `--benchmark-warmup` untimed executions (default 3). Then
+  it collects `--benchmark-iterations` timed executions (default 20) with
+  `Graph::execute_timed_ext()`.
+- `timing=DEVICE_ONLY` means that the stream was stalled for every sample, so
+  the times exclude host submission overhead. `timing=UNSTALLED` means that at
+  least one sample was not stalled and can include host time. Do not compare
+  the two kinds.
+- A timed execution that returns no measurement (a stall watchdog timeout) is
+  retried. The line then shows `discarded=N`. The harness makes at most two
+  attempts for each requested sample. The test fails with
+  `benchmark failed: …` if it cannot collect all the samples in those attempts,
+  or if an execution fails.
+- `--gtest_output=json:<file>` or `xml:<file>` writes the same values as the
+  test properties `benchmark_engine`, `benchmark_timing`, `benchmark_samples`,
+  `benchmark_min_ms`, `benchmark_median_ms` and `benchmark_mean_ms`.
+- `engine=` names the engine that ran. To compare engines, run once for each
+  `--test-engine`. Without `--test-engine`, hipDNN selects the engine.
+- To time your own graph, write it as a single-graph bundle
+  (`<dir>/MyGraph/MyGraph.json`, [format](file-formats.md)). Then pass
+  `--golden-data-dir <dir> --gtest_filter='MyGraph*'`. Without golden data, a
+  reference executor verifies the output. To convert a C++ graph test into a
+  bundle, use `--capture-bundles`.
+- Verification runs before timing. For large shapes, the CPU reference can be
+  slow. Use `--verification-mode gpu` when a GPU reference exists for the op.
+- To see the kernels that the engine launched, run the same command after
+  `rocprofv3 --kernel-trace --stats --output-format csv -d <dir> --`. In
+  `<dir>/*/*_kernel_stats.csv`, an engine kernel of a single-kernel graph has
+  1 + warmup + iterations calls. The other kernels fill the inputs or run the
+  reference.
+
 ### The build reads a copy of the bundles
 
 CMake copies `integration-test-bundles/` into `build/lib/integration-test-bundles/`
@@ -155,6 +207,9 @@ Otherwise, you test the old tree.
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
+| `--benchmark` | | off | Time each verified test. See [Time the engine](#4-time-the-engine---benchmark). |
+| `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
+| `--benchmark-warmup` | | 3 | Untimed executions before timing. Requires `--benchmark`. |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):
@@ -164,6 +219,10 @@ The binary refuses these flag combinations (exit 1):
 - `--write-support-claims` together with `--enforce-support-claims` or `=true`.
 - `--write-support-claims` without `--test-article`, or without a bundle root
   (`--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR`).
+- `--benchmark-iterations` or `--benchmark-warmup` without `--benchmark`, or
+  `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
+- `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
+  or `--write-support-claims`. These modes do not execute the graph.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run

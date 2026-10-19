@@ -30,6 +30,7 @@
 #include <random>
 #include <vector>
 
+#include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
@@ -260,6 +261,14 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
+
+        // Only a verified graph is timed.
+        const auto& benchmark = TestConfig::get().benchmarkSettings();
+        if(benchmark.has_value() && !::testing::Test::HasFailure())
+        {
+            auto variantPack = gpuBundle.toDeviceVariantPack();
+            reportBenchmark(benchmarkGraph(graph, getSharedHandle(), variantPack, *benchmark));
+        }
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,

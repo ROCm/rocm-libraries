@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "harness/Benchmark.hpp"
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
@@ -91,6 +92,13 @@ public:
     virtual EngineOpResult execute(GraphSession& session,
                                    const std::optional<LoadedEngine>& engineUnderTest,
                                    VariantPack& variantPack)
+        = 0;
+
+    /// Times the plan execute() built, on `variantPack`. Called only after the
+    /// outputs of execute() were verified.
+    virtual BenchmarkResult benchmark(GraphSession& session,
+                                      VariantPack& variantPack,
+                                      const BenchmarkSettings& settings)
         = 0;
 };
 

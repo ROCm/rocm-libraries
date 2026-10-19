@@ -37,6 +37,13 @@ public:
                  const std::optional<LoadedEngine>& engineUnderTest,
                  VariantPack& variantPack),
                 (override));
+
+    MOCK_METHOD(BenchmarkResult,
+                benchmark,
+                (GraphSession & session,
+                 VariantPack& variantPack,
+                 const BenchmarkSettings& settings),
+                (override));
 };
 
 } // namespace hipdnn_integration_tests::bundle

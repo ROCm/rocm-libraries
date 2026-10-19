@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
+#include "harness/GraphBenchmark.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
@@ -148,6 +149,19 @@ EngineOpResult
 
     result.plansBuilt = true;
     return result;
+}
+
+BenchmarkResult FrontendGraphEngineRunner::benchmark(GraphSession& session,
+                                                     VariantPack& variantPack,
+                                                     const BenchmarkSettings& settings)
+{
+    if(session.graph == nullptr)
+    {
+        BenchmarkResult failed;
+        failed.error = "openGraph() produced no graph to benchmark";
+        return failed;
+    }
+    return benchmarkGraph(*session.graph, getSharedHandle(), variantPack, settings);
 }
 
 } // namespace hipdnn_integration_tests::bundle

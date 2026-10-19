@@ -480,7 +480,9 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     {
         return engineDidNotRun(engine);
     }
-    return compareAgainstGolden(engine.outputs);
+    auto outcome = compareAgainstGolden(engine.outputs);
+    benchmarkIfVerified(session, engine.outputs, outcome);
+    return outcome;
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session)
@@ -495,17 +497,26 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
 
     auto oracles = resolveOracles(_deps.policy.mode);
+    std::optional<VerificationOutcome> outcome;
     if(oracles.mode == VerificationMode::AUTO)
     {
         // Golden data is auto mode's first oracle; when the bundle has it, no
         // reference is consulted.
         if(_bundle->hasGoldenOutputs)
         {
-            return compareAgainstGolden(engine.outputs);
+            outcome = compareAgainstGolden(engine.outputs);
         }
-        oracles.declined("golden (absent)");
+        else
+        {
+            oracles.declined("golden (absent)");
+        }
     }
-    return runOracleChain(engine.outputs, oracles);
+    if(!outcome.has_value())
+    {
+        outcome = runOracleChain(engine.outputs, oracles);
+    }
+    benchmarkIfVerified(session, engine.outputs, *outcome);
+    return *outcome;
 }
 
 VerificationOutcome
@@ -858,6 +869,19 @@ IntegrationBundleVerificationHarness::RefRunResult
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
 {
     detail::markOutputsModified(outputs, _deps.policy.useDevice());
+}
+
+void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& session,
+                                                               OutputTensors& engineOutputs,
+                                                               const VerificationOutcome& outcome)
+{
+    if(!_deps.policy.benchmark.has_value() || outcome.status != OutcomeStatus::PASSED
+       || outcome.depth != VerificationDepth::VERIFIED)
+    {
+        return;
+    }
+    auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+    _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
 }
 
 // ---- comparison ------------------------------------------------------------
