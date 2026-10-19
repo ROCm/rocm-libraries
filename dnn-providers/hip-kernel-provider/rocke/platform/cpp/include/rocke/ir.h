@@ -111,6 +111,7 @@ typedef enum rocke_scalar_kind
     ROCKE_SCALAR_E8M0,
     ROCKE_SCALAR_E5M3,
     ROCKE_SCALAR_TF32,
+    ROCKE_SCALAR_F64,
     ROCKE_SCALAR__COUNT
 } rocke_scalar_kind_t;
 
@@ -271,6 +272,11 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
+    ROCKE_OP_GPU_CLUSTER_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_FLAT_ID,
+    ROCKE_OP_GPU_CLUSTER_WORKGROUP_MAX_FLAT_ID,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -367,6 +373,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
     ROCKE_OP_TILE_QUAD_PERM,
+    ROCKE_OP_TILE_DPP_XOR,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -405,6 +412,15 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_WAIT_ASYNCMARK,
     ROCKE_OP_TILE_S_WAIT_EVENT,
     ROCKE_OP_TILE_S_PREFETCH_INST,
+    ROCKE_OP_TILE_S_SETREG,
+    ROCKE_OP_TILE_S_PREFETCH_DATA,
+    ROCKE_OP_TILE_S_BUFFER_PREFETCH_DATA,
+    ROCKE_OP_TILE_GLOBAL_PREFETCH,
+    ROCKE_OP_TILE_FLAT_PREFETCH,
+    ROCKE_OP_TILE_CLUSTER_BARRIER,
+    ROCKE_OP_TILE_CLUSTER_LOAD,
+    ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_PTR_TO_I64,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
@@ -422,6 +438,14 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_IF_ELSE,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
+
+    /* memref.* cross-workgroup synchronisation (stream-K fixup). Appended
+     * after the control-flow block so no existing opcode index shifts. */
+    ROCKE_OP_MEMREF_FENCE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
+    ROCKE_OP_VECTOR_UNDEF,
+    ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -614,6 +638,7 @@ const rocke_type_t* rocke_bf16(void);
 const rocke_type_t* rocke_f16(void);
 const rocke_type_t* rocke_f32(void);
 const rocke_type_t* rocke_tf32(void);
+const rocke_type_t* rocke_f64(void);
 const rocke_type_t* rocke_fp8e4m3(void);
 const rocke_type_t* rocke_bf8e5m2(void);
 const rocke_type_t* rocke_fp4e2m1(void);
@@ -667,6 +692,9 @@ bool rocke_attr_get_int(const rocke_attr_map_t* m, const char* key, int64_t* out
 bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* out);
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
+
+/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
+bool rocke_scheduler_strategy_is_valid(const char* strategy);
 
 /* ============================ OPCODE TABLE ============================== */
 
@@ -731,6 +759,7 @@ rocke_value_t* rocke_b_get_param(rocke_ir_builder_t* b, const char* name);
 rocke_value_t* rocke_b_const_i32(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_i64(rocke_ir_builder_t* b, int64_t value);
 rocke_value_t* rocke_b_const_f32(rocke_ir_builder_t* b, double value);
+rocke_value_t* rocke_b_const_f64(rocke_ir_builder_t* b, double value);
 rocke_value_t* rocke_b_fp16_zero(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_zero_vec_f32(rocke_ir_builder_t* b, int n);
 rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
@@ -831,6 +860,27 @@ rocke_value_t* rocke_b_cvt_pk_fp8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)
 rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 
+/* ----- cross-workgroup synchronisation (stream-K fixup) ----- */
+/* IRBuilder.fence: scope in {workgroup, agent, system}; ordering in
+ * {acquire, release, acq_rel, seq_cst}. NULL selects the Python defaults
+ * (agent / acq_rel). */
+void rocke_b_fence(rocke_ir_builder_t* b, const char* scope, const char* ordering);
+/* IRBuilder.global_flag_store: atomic i32 ptr[idx] = value. NULL scope /
+ * ordering select agent / release. */
+void rocke_b_global_flag_store(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               rocke_value_t* value,
+                               const char* scope,
+                               const char* ordering);
+/* IRBuilder.global_flag_wait_eq: spin until ptr[idx] == expect (acquire).
+ * NULL scope selects agent. */
+void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* expect,
+                                 const char* scope);
+
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
@@ -859,6 +909,16 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
+
+/* gfx1250 workgroup clusters. `axis` is "x", "y" or "z". Without a cluster
+ * launch every id and max id inside the cluster reads 0 and the cluster id
+ * equals the workgroup id. cluster_size composes max_id + 1. */
+rocke_value_t* rocke_b_cluster_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_max_id(rocke_ir_builder_t* b, const char* axis);
+rocke_value_t* rocke_b_cluster_workgroup_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_workgroup_max_flat_id(rocke_ir_builder_t* b);
+rocke_value_t* rocke_b_cluster_size(rocke_ir_builder_t* b, const char* axis);
 
 /* ----- global memory ----- */
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
@@ -1057,6 +1117,10 @@ rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b,
                                 int num_components,
                                 const rocke_type_t* elem);
 rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb);
+/* Freeze-poison base for a vector that will be fully overwritten by inserts
+ * (never a zero substitute). Port of Python IRBuilder.undef_vec / the pinned
+ * PR9710 vector.undef op. */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
@@ -1210,6 +1274,22 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
  * fixed at 15, 15 by the lowerers. */
 rocke_value_t*
     rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
+/* dpp_xor (tile.dpp_xor): lane i of each 16-lane row reads lane i ^ xor_mask
+ * of the same row; xor_mask in 1..15, i32 data only. Low-level op behind
+ * rocke_b_warp_shuffle_xor_dpp. The IR carries only the mask; the lowerers
+ * pick the DPP control word per target (rocke_i_dpp_xor_ctrl): 0x160|mask
+ * (row_xmask) on gfx11/gfx12/gfx1250; on gfx9 CDNA 1/2/3 -> quad_perm,
+ * 7 -> row_half_mirror (lane i of each 8-lane half-row reads 7-i == i^7),
+ * 8 -> row_ror:8, 15 -> row_mirror (lane i reads 15-i == i^15), and any
+ * other mask fails to lower with ROCKE_ERR_VALUE. See IRBuilder.dpp_xor. */
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+/* warp_shuffle_xor_dpp: the kernel-facing VALU XOR shuffle (CUDA
+ * __shfl_xor_sync within a 16-lane row): lane l gets v from lane l ^ lane_xor,
+ * lane_xor in 1..15, one rocke_b_dpp_xor (f32 bitcast through i32, as
+ * rocke_b_warp_shuffle_xor). Per 16-lane row, never crosses a row; every lane
+ * of the row must be active for a butterfly reduction. See
+ * IRBuilder.warp_shuffle_xor_dpp for the mask -> instruction table. */
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,
@@ -1329,6 +1409,8 @@ void rocke_b_global_load_lds(rocke_ir_builder_t* b,
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
 rocke_value_t*
     rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+/* 64-bit address of a global pointer (``ptrtoint``). */
+rocke_value_t* rocke_b_global_ptr_to_i64(rocke_ir_builder_t* b, rocke_value_t* ptr);
 rocke_value_t*
     rocke_b_buffer_rsrc(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* num_bytes);
 rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
@@ -1336,10 +1418,26 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* voffset,
                                           rocke_value_t* soffset,
                                           int dwords);
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
+ * <n x dtype>; out-of-range offsets read zero. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
+ * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
+ * the pinned PR9710 tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset);
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1457,6 +1555,59 @@ void rocke_b_asyncmark(rocke_ir_builder_t* b);
 void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+
+/* gfx1250 data prefetch. S_SETREG's SIMM16 packs id | offset<<6 | (size-1)<<11
+ * (Python rocke.core.ir.hwreg). The MODE bit that enables scalar data
+ * prefetch is taken from the CDNA5 ISA MODE register description; LLVM has no
+ * symbolic name for it, so it cannot be cross-checked against the toolchain.
+ * Must match rocke.core.ir.MODE_SCALAR_PREFETCH_EN_BIT. */
+#define ROCKE_HW_REG_MODE 1
+#define ROCKE_MODE_SCALAR_PREFETCH_EN_BIT 24
+#define ROCKE_HWREG(id, offset, size) ((id) | ((offset) << 6) | (((size) - 1) << 11))
+void rocke_b_s_setreg(rocke_ir_builder_t* b, int simm16, rocke_value_t* value);
+void rocke_b_enable_scalar_prefetch(rocke_ir_builder_t* b);
+void rocke_b_s_prefetch_data(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
+void rocke_b_s_buffer_prefetch_data(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* length,
+                                    int offset);
+void rocke_b_global_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+void rocke_b_flat_prefetch(rocke_ir_builder_t* b, rocke_value_t* ptr, int cachepolicy);
+/* gfx1250 cluster barrier: cluster-scope release fence, s.cluster.barrier,
+ * cluster-scope acquire fence. */
+void rocke_b_cluster_barrier(rocke_ir_builder_t* b);
+/* gfx1250 cluster multicast loads. mask (i32, wave-uniform) selects the
+ * receiving workgroups by cluster flat id (M0[15:0]). cluster_load returns i32
+ * (4 bytes), vec<i32x2> (8) or vec<i32x4> (16). */
+rocke_value_t* rocke_b_cluster_load(rocke_ir_builder_t* b,
+                                    rocke_value_t* ptr,
+                                    rocke_value_t* mask,
+                                    int width_bytes,
+                                    int cachepolicy);
+void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
+                                       rocke_value_t* src_ptr,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* mask,
+                                       int width_bytes,
+                                       int offset_bytes,
+                                       int cachepolicy);
+/* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
+ * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
+ * sets the builder error and returns 0. */
+int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
+                              rocke_value_t* global_ptr,
+                              rocke_value_t* lds_addr,
+                              int elem_bytes,
+                              rocke_value_t* tensor_dim0,
+                              rocke_value_t* tensor_dim1,
+                              rocke_value_t* row_stride,
+                              int tile_dim0,
+                              int tile_dim1,
+                              int workgroup_mask,
+                              int pad_interval,
+                              int pad_amount,
+                              rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

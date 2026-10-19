@@ -784,6 +784,12 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)),
+        HIPBLAS_STATUS_NOT_SUPPORTED);
+
+    float* no_scale_e = nullptr;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescSetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &no_scale_e, sizeof(float*)),
         HIPBLAS_STATUS_SUCCESS);
 
     // For HIPBLASLT_MATMUL_DESC_POINTER_MODE

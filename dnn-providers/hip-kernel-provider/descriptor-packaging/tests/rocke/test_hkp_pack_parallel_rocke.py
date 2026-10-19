@@ -19,6 +19,7 @@ from hkp_pack import pipeline, rocke_compile
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from pack_helpers import (
+    GENERIC_TARGETS,
     _child_sys_path,
     _conftest_only_paths,
     _kdp,
@@ -76,7 +77,7 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
     detector for.
     """
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
-    flat = load_flat_input(failing_corpus, log=_silent)
+    flat = load_flat_input(failing_corpus, GENERIC_TARGETS, log=_silent)
 
     jobs = pipeline._prewarm_jobs(flat, failing_corpus, TARGET_ARCH)
     assert len(jobs) >= 2, "a single job returns before starting a pool"
@@ -126,6 +127,9 @@ _EDITABLE_MODULE = """
     @dataclasses.dataclass
     class EditableSpec:
         tile: int
+
+    def is_valid_spec(spec: EditableSpec, *, arch="gfx942"):
+        return True, ""
 
     def build_editable(spec: EditableSpec, *, arch="gfx942"):
         return ("kernel", spec, arch)
@@ -228,7 +232,7 @@ def _serial_pool(monkeypatch, between=None):
 
 
 def _editable_jobs(corpus, out_dir):
-    flat = load_flat_input(corpus, log=_silent)
+    flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
     jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
     return flat, [replace(job, out_dir=str(out_dir), hipcc="hipcc") for job in jobs]
 
@@ -282,7 +286,7 @@ def test_pool_rejects_variants_built_by_different_producer_revisions(
 
     with pytest.raises(HkpPackError) as excinfo:
         pipeline.compile_intermediate(
-            load_flat_input(corpus, log=_silent),
+            load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
             corpus,
             TARGET_ARCH,
             "hipcc",
@@ -308,7 +312,7 @@ def test_pool_accepts_variants_built_by_one_producer_revision(
     _serial_pool(monkeypatch)
 
     inter = pipeline.compile_intermediate(
-        load_flat_input(corpus, log=_silent),
+        load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
         "hipcc",
