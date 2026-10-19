@@ -158,9 +158,43 @@ class TestTuningSpace(unittest.TestCase):
             seqlen_q=1,
             seqlen_k=4096,
         )
-        # waves_per_eu (5) x kv_cache_policy ("stream" for decode, or "all") x
+        # waves_per_eu (5) x kv_cache_policy ("stream" or "all") x
         # use_kv_lds_swizzle x use_wave_page_id_load.
         self.assertEqual(len(specs), 40)
+
+    def test_3d_cache_policy_base_follows_the_problem(self):
+        """The 3D builder resolves the K/V cache policy per problem
+        (``_kv_cache_policy_3d``): restating it names the default kernel, the
+        other value stays reachable, and every id records the policy built."""
+        for arch in ("gfx950", "gfx942"):
+            for seqlen_q, auto in ((1, "stream"), (1024, "all")):
+                with self.subTest(arch=arch, seqlen_q=seqlen_q):
+                    prefix = f"attention_{arch}_u3d_splitkv_seg64_t1xb"
+                    kw = dict(arch=arch, seqlen_q=seqlen_q, seqlen_k=4096)
+                    specs = _sampled(prefix, 1000, **kw)
+                    kernels = {repr(s.kernel_spec) for s in specs}
+                    self.assertEqual(len(kernels), len(specs))
+                    self.assertEqual(
+                        {s.kernel_spec.kv_cache_policy for s in specs},
+                        {"stream", "all"},
+                    )
+                    for s in specs:
+                        self.assertEqual(
+                            dict(s.knobs)["kv_cache_policy"],
+                            s.kernel_spec.kv_cache_policy,
+                        )
+                    candidate, req, _ = _specs_for(prefix, n=1, **kw)
+                    default = tuning_spec_with_knobs(req, candidate.spec_id, {})
+                    self.assertEqual(default.kernel_spec.kv_cache_policy, auto)
+                    restated = tuning_spec_with_knobs(
+                        req, candidate.spec_id, {"kv_cache_policy": auto}
+                    )
+                    self.assertEqual(restated.tuning_id, default.tuning_id)
+                    for policy in ("stream", "all"):
+                        pinned = tuning_spec_with_knobs(
+                            req, candidate.spec_id, {"kv_cache_policy": policy}
+                        )
+                        self.assertEqual(pinned.kernel_spec.kv_cache_policy, policy)
 
     def test_tuning_ids_are_unique_and_hashed(self):
         _candidate, _req, specs = _specs_for(

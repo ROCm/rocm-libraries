@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, fields as _dataclass_fields
 from functools import lru_cache
-from typing import Any, Iterable, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Optional, Tuple
+
+from kernels.common.attention_unified import _kv_cache_policy_3d
 
 from .axes import (
     DEAD_END_KNOBS,
@@ -111,6 +113,15 @@ def _explicit_2d_spec(problem, variant, knobs, wpe):
         knobs=_items(knobs),
     )
     return make_explicit_attention_2d_spec(problem, config, arch=variant.arch)
+
+
+# 3D spec fields whose base the explicit builder resolves per problem
+# (``make_explicit_attention_3d_specs``), not the dataclass default. A knob
+# equal to the policy value restates it, and every 3D id records the effective
+# value, so the same knobs name the same kernel on every problem.
+_3D_POLICY_FIELDS: Mapping[str, Callable[..., object]] = {
+    "kv_cache_policy": _kv_cache_policy_3d,
+}
 
 
 def _variant_axes(variant: AttentionGeometryVariant):
@@ -335,15 +346,26 @@ class UnifiedSpace(WavesPerEuSpace):
 
     def defaults(self, base, kernel):
         reduce = kernel.reduce_spec
+        recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
-            "kernel": dict(_declared_defaults(type(kernel.kernel_spec))),
+            "kernel": {
+                name: value
+                for name, value in _declared_defaults(type(kernel.kernel_spec))
+                if name not in recorded
+            },
             "reduce": (
                 None if reduce is None else dict(_declared_defaults(type(reduce)))
             ),
         }
 
+    def recorded(self, base):
+        return frozenset(_3D_POLICY_FIELDS) if self.path == "3d" else frozenset()
+
     def base_value(self, base, kernel, name):
+        policy = _3D_POLICY_FIELDS.get(name) if self.path == "3d" else None
+        if policy is not None:
+            return policy(base, arch=self.arch)
         return _field_defaults(type(kernel.kernel_spec)).get(name, MISSING)
 
     def _gfx950_2d(self) -> bool:

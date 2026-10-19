@@ -123,7 +123,7 @@ _GFX942_2D_AXES: Tuple[KnobAxis, ...] = (
 # K/V) are dropped.
 _3D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_wide_kv_load"),
-    _values("kv_cache_policy", None, ("stream", "all")),
+    _choices_axis("kv_cache_policy", ("stream", "all")),
     _flag("use_kv_lds_swizzle"),
     _flag("use_wave_page_id_load"),
 )
