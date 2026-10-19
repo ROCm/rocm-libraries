@@ -261,8 +261,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.bf8.f32",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -300,8 +299,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.f32.bf8",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -339,8 +337,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.f32.fp8",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -378,8 +375,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.pk.fp8.f32",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -417,8 +413,8 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.scalef32.pk.f32.bf8",
-        "status": "arch_absent",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -456,8 +452,8 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.cvt.scalef32.pk.f32.fp8",
-        "status": "arch_absent",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6058,8 +6054,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.dscnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6141,8 +6136,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.expcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6182,8 +6176,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.kmcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6223,8 +6216,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.loadcnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
@@ -6264,8 +6256,7 @@
         "verified_on": "llvm20"
       },
       "gfx12-generic": {
-        "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.s.wait.storecnt",
-        "status": "arch_absent",
+        "status": "ok",
         "verified_on": "llvm20"
       },
       "gfx1201": {
