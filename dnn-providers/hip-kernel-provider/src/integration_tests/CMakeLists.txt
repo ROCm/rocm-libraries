@@ -99,7 +99,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     hkp_product_offers_engine(_hkp_conv_fwd_bundle "hipkernel:Gfx950ConvFwd")
     hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
     hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
-    if(_hkp_conv_fwd_bundle OR _hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+    hkp_product_offers_engine(_hkp_gfx942_conv_fwd_aot_bundle "hipkernel:Gfx942ConvFwdAot")
+    if(_hkp_conv_fwd_bundle OR _hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle
+       OR _hkp_gfx942_conv_fwd_aot_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
         )
@@ -112,6 +114,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             )
         endif()
     endforeach()
+    if(_hkp_gfx942_conv_fwd_aot_bundle)
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX942_CONV_FWD_AOT=1
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp

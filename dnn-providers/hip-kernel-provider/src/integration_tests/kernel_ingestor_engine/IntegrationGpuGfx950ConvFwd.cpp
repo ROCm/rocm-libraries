@@ -60,8 +60,9 @@ namespace
 {
 
 // Each engine's suites compile only where that engine ships: HKP_TEST_GFX950_CONV_FWD for
-// the exact-shape engine, HKP_TEST_GFX950_CONV_FWD_AOT for the AOT-instance engine and
-// HKP_TEST_GFX950_CONV_FWD_AOT_SEED for its test-only seed (src/integration_tests/CMakeLists.txt).
+// the exact-shape engine, HKP_TEST_GFX950_CONV_FWD_AOT for the AOT-instance engine,
+// HKP_TEST_GFX950_CONV_FWD_AOT_SEED for its test-only seed and HKP_TEST_GFX942_CONV_FWD_AOT
+// for the gfx942 AOT-instance engine (src/integration_tests/CMakeLists.txt).
 constexpr const char* ENGINE_NAME = "hipkernel:Gfx950ConvFwd";
 constexpr const char* KERNEL_FAMILY_KNOB = "kernel_family";
 constexpr int64_t IMPLICIT_GEMM_FAMILY = 0;
@@ -413,16 +414,22 @@ protected:
         ASSERT_EQ(hipGetDeviceProperties(&properties, _deviceId), hipSuccess);
         _arch = properties.gcnArchName;
         if(!hipdnn_plugin_sdk::archMatches(
-               _arch, "gfx950", hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
+               _arch, targetArch(), hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
         {
-            GTEST_SKIP() << "The packaged convolution family requires gfx950";
+            GTEST_SKIP() << "The packaged convolution family requires " << targetArch();
         }
     }
 
-    /// The engine under test; the AOT-instance suite overrides it.
+    /// The engine under test; the AOT-instance suites override it.
     virtual const char* engineName() const
     {
         return ENGINE_NAME;
+    }
+
+    /// The device the engine under test serves; the gfx942 suite overrides it.
+    virtual const char* targetArch() const
+    {
+        return "gfx950";
     }
 
     int64_t engineId() const
@@ -1567,6 +1574,121 @@ TEST_P(IntegrationGpuGfx950ConvFwdAot, CappedBenchmarkMatchesCpuReference)
 
 #endif // HKP_TEST_GFX950_CONV_FWD_AOT
 
+#ifdef HKP_TEST_GFX942_CONV_FWD_AOT
+
+// ---- hipkernel:Gfx942ConvFwdAot: every shipped instance, pinned ----
+//
+// The gfx942 catalog is the curated list of rocKE sweep kernels in
+// IngestorGenerator/configs/gfx942_conv_fwd_aot.labels.txt, 553 per dtype, group-merged
+// depthwise instances included. It is small enough that, unlike the gfx950 suite, this one
+// pins every instance the engine selects for each graph and checks it against the
+// reference, and the graphs of gfx942AotGraphs() together select every instance of the
+// catalog in both dtypes.
+
+namespace
+{
+
+constexpr const char* GFX942_AOT_ENGINE_NAME = "hipkernel:Gfx942ConvFwdAot";
+
+/// One graph and how many instances of each family hipkernel:Gfx942ConvFwdAot selects for
+/// it, as gfx942_conv_fwd_aot_runtime_candidates in convolution_forward.py counts them over
+/// gfx942_conv_fwd_aot_{fp16,bf16}.instances.json (the same in both dtypes): rocKE's
+/// per-kind widest vector widths among the implicit-GEMM instances that serve the graph,
+/// and every direct instance that serves it. The kernel matcher and candidate filter are
+/// checked against these counts.
+struct Gfx942AotGraph
+{
+    std::string name;
+    ConvProblem problem;
+    size_t direct;
+    size_t implicit;
+};
+
+// clang-format off
+const std::vector<Gfx942AotGraph>& gfx942AotGraphs()
+{
+    static const std::vector<Gfx942AotGraph> s_graphs{
+        {"C3K64", {2, 3, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 98},
+        {"C6K64", {2, 6, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 3},
+        {"C12K64", {2, 12, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 9},
+        {"C64K3", {2, 64, 3, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 3},
+        {"C64K12", {2, 64, 12, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 3},
+        {"C6K6", {2, 6, 6, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 0, 10},
+        {"GroupedG2Cpg32", {2, 64, 64, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 2}, 4, 199},
+        {"GroupedG4Cpg16", {2, 64, 64, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 4}, 4, 199},
+        {"GroupedG32Cpg4", {2, 128, 128, 13, 13, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 3, 3},
+        {"DepthwiseG32", {2, 32, 32, 16, 19, 3, 3, 1, 1, 1, 1, 1, 1, 32}, 24, 44},
+        {"DepthwiseG5Strided", {2, 5, 5, 16, 19, 3, 3, 2, 2, 1, 1, 1, 1, 5}, 11, 14},
+        {"DepthwiseG5Filter5Strided", {2, 5, 5, 16, 19, 5, 5, 2, 2, 2, 2, 1, 1, 5}, 4, 14},
+        {"DepthwiseG5Filter7", {2, 5, 5, 16, 19, 7, 7, 1, 1, 3, 3, 1, 1, 5}, 20, 14},
+        {"DepthwiseG5Filter11", {2, 5, 5, 22, 25, 11, 11, 1, 1, 5, 5, 1, 1, 5}, 3, 14},
+        {"DepthwiseG5Filter13", {2, 5, 5, 26, 29, 13, 13, 1, 1, 6, 6, 1, 1, 5}, 3, 14},
+        {"DepthwiseG5Filter31", {2, 5, 5, 62, 65, 31, 31, 1, 1, 15, 15, 1, 1, 5}, 7, 14},
+        {"C64K96W192", {1, 64, 96, 5, 192, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 63, 199},
+        {"C64K96W96Dilated4x4", {1, 64, 96, 12, 96, 3, 3, 1, 1, 4, 4, 4, 4, 1}, 8, 199},
+        {"C64K96W96Dilated3x1", {1, 64, 96, 9, 96, 3, 3, 1, 1, 1, 1, 3, 1, 1}, 6, 199},
+        {"C64K96W96Dilated1x2", {1, 64, 96, 9, 96, 3, 3, 1, 1, 2, 2, 1, 2, 1}, 3, 199},
+        {"C64K96W96Dilated1x4", {1, 64, 96, 9, 96, 3, 3, 1, 1, 4, 4, 1, 4, 1}, 3, 199},
+        {"C64K96W64Dilated2x2", {1, 64, 96, 10, 64, 3, 3, 1, 1, 2, 2, 2, 2, 1}, 9, 199},
+        {"C64K96W191Strided", {1, 64, 96, 13, 191, 3, 3, 2, 2, 1, 1, 1, 1, 1}, 4, 199},
+        {"C16K32W80", {1, 16, 32, 5, 80, 3, 3, 1, 1, 1, 1, 1, 1, 1}, 30, 199},
+    };
+    return s_graphs;
+}
+// clang-format on
+
+std::vector<Variant> gfx942AotVariants()
+{
+    std::vector<Variant> variants;
+    for(const auto& graph : gfx942AotGraphs())
+    {
+        for(const auto dtype : {DataType::HALF, DataType::BFLOAT16})
+        {
+            variants.push_back({graph.name + dtypeSuffix(dtype),
+                                dtype,
+                                0,
+                                graph.problem,
+                                graph.direct,
+                                graph.implicit});
+        }
+    }
+    return variants;
+}
+
+} // namespace
+
+class IntegrationGpuGfx942ConvFwdAot : public IntegrationGpuGfx950ConvFwdServing
+{
+protected:
+    const char* engineName() const override
+    {
+        return GFX942_AOT_ENGINE_NAME;
+    }
+
+    const char* targetArch() const override
+    {
+        return "gfx942";
+    }
+};
+
+TEST_P(IntegrationGpuGfx942ConvFwdAot, EverySelectedInstanceMatchesCpuReference)
+{
+    verifyEveryServingKernel(61, 67);
+}
+
+TEST_P(IntegrationGpuGfx942ConvFwdAot, UnbenchmarkedPlanServesASelectedInstance)
+{
+    const auto& variant = GetParam();
+    const ScopedPluginLogCapture capture(this);
+    auto& recorder = capture.recorder();
+    auto graph = buildConvGraph(variant.dtype, variant.problem);
+    ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {disableBenchmarkingKnob()}));
+    EXPECT_FALSE(selectedKernel(recorder).empty()) << recorder.getRecordedLogsAsString();
+    ASSERT_NO_FATAL_FAILURE(executeAndVerifyStorage(*graph, variant.dtype, 71));
+}
+
+#endif // HKP_TEST_GFX942_CONV_FWD_AOT
+
 #ifdef HKP_TEST_GFX950_CONV_FWD
 INSTANTIATE_TEST_SUITE_P(Correctness,
                          IntegrationGpuGfx950ConvFwd,
@@ -1607,6 +1729,13 @@ INSTANTIATE_TEST_SUITE_P(Autotuning,
 INSTANTIATE_TEST_SUITE_P(AotCatalog,
                          IntegrationGpuGfx950ConvFwdAot,
                          ::testing::ValuesIn(aotVariants(true)),
+                         [](const auto& info) { return info.param.name; });
+#endif
+
+#ifdef HKP_TEST_GFX942_CONV_FWD_AOT
+INSTANTIATE_TEST_SUITE_P(Gfx942AotCatalog,
+                         IntegrationGpuGfx942ConvFwdAot,
+                         ::testing::ValuesIn(gfx942AotVariants()),
                          [](const auto& info) { return info.param.name; });
 #endif
 
