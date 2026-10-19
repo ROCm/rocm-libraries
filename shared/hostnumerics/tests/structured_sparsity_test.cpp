@@ -152,6 +152,35 @@ void testStructuredSparsity() {
                 "Structured sparsity did not preserve a zero extent as empty work.");
     }
 
+    for (const Shape shape : {Shape{std::numeric_limits<size_t>::max(), 2, 0},
+                              Shape{0, std::numeric_limits<size_t>::max(), 2}}) {
+        const size_t axis = shape[0] == 0 ? 0 : 2;
+        const Layout layout(shape, {0, 0, 0});
+        const Tensor emptyInput(ScalarType::Float32, layout);
+        const StructuredSparseTensor outputs{
+            .pruned = Tensor(ScalarType::Float32, layout),
+            .compressed = Tensor(ScalarType::Float32, layout),
+            .retainedIndices = Tensor(ScalarType::UInt8, layout),
+            .twoOfFourMetadata = Tensor(ScalarType::UInt8, layout),
+        };
+        StructuredSparsityPattern emptyPattern;
+        emptyPattern.axis = axis;
+        applyStructuredSparsityInto(emptyInput, outputs, emptyPattern);
+        encodeTwoOfFourMetadataInto(*outputs.retainedIndices, *outputs.twoOfFourMetadata, axis);
+        require(outputs.pruned.elementCount() == 0 &&
+                    outputs.twoOfFourMetadata->rawEncodedBackingStorage().empty(),
+                "Oversized empty structured sparsity must not access storage.");
+        requireError(
+            [&] {
+                applyStructuredSparsityInto(emptyInput, outputs, emptyPattern,
+                                            {.firstSlice = 0, .sliceCount = 1});
+            },
+            "Oversized empty structured sparsity accepted a nonempty slice range.");
+        emptyPattern.fixedPositions = {0, 4};
+        requireError([&] { applyStructuredSparsityInto(emptyInput, outputs, emptyPattern); },
+                     "Oversized empty structured sparsity skipped pattern validation.");
+    }
+
     const std::array<uint8_t, 2> invalidRetainedValues{2, 1};
     const Tensor invalidRetained = Tensor::copyNativeValues<uint8_t>(
         Shape{2}, std::span<const uint8_t>(invalidRetainedValues));
