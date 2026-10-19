@@ -889,7 +889,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     spec_override=spec,
                     positive=True,
                 )
-                self.assertTrue(passed, f"{shape.id} {dtype} spk{degree}: {why}")
+                # _run_one reports a rejected spec as (True, "skip ..."); that is
+                # not an executed kernel, so it must not count as one.
+                self.assertTrue(
+                    passed and not why.startswith("skip"),
+                    f"{shape.id} {dtype} spk{degree}: {why}",
+                )
                 ran += 1
         self.assertEqual(ran, len(cases), "every dispatch case must run")
 

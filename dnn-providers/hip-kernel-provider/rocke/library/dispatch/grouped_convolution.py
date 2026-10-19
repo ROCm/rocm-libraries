@@ -1816,6 +1816,35 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             _GFX1250_WARP_TILE_K,
         )
 
+    def _split_k(req: ConvGroupedRequest) -> int:
+        # The split mode is resolved here rather than left to launch: split and
+        # unsplit builds emit different epilogues (packed atomics vs a plain
+        # store), and the spec is what the compile key and kernel name hash, so
+        # it must tell them apart. Split problems keep -1, so the degree stays a
+        # launch parameter shared by one compile; unsplit problems get 1.
+        if not _splits(req):
+            return 1
+        tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
+        probe = ConvGroupedSpec(
+            direction="wgrad",
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            warp_m=wm,
+            warp_n=wn,
+            warp_tile_mn=wtmn,
+            warp_tile_k=wtk,
+            pipeline=_PIPELINE,
+            epilogue="default",
+            dtype=req.dtype.lower(),
+            arch=req.arch,
+            split_k=-1,
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
+            name=name,
+        )
+        degree, _, _ = _resolve_wgrad_split_k(probe, _problem(req))
+        return -1 if degree > 1 else 1
+
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
         return WgradConvSpec(
@@ -1833,7 +1862,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             wave_size=32,
             pipeline=_PIPELINE,
             epilogue="default",
-            split_k=-1 if _splits(req) else 1,
+            split_k=_split_k(req),
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
         )
 
@@ -1873,7 +1902,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             epilogue="default",
             dtype=req.dtype.lower(),
             arch=req.arch,
-            split_k=-1 if _splits(req) else 1,
+            split_k=_split_k(req),
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             name=name,
         )

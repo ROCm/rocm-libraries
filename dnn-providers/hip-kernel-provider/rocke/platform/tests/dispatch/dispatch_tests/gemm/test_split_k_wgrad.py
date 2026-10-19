@@ -263,6 +263,13 @@ class TestGfx1250Policy(unittest.TestCase):
         d = self._pick(1, 9, 196, tile=32, groups=256)
         self.assertEqual(d.split_k, 1)
 
+    def test_invalid_group_count_is_rejected(self):
+        # A wrong group count would size the degree for a different launch;
+        # the policy refuses it rather than normalising it.
+        for groups in (0, -2, 2.5, True):
+            with self.assertRaises(ValueError, msg=f"groups={groups!r}"):
+                self._pick(64, 576, 1 << 20, groups=groups)
+
     def test_no_dtype_keeps_the_ck_formula(self):
         # dgrad calls without a dW dtype; gfx1250 then answers like any arch
         # without a policy: floor(2 * 256 / 36) on the default CU count.

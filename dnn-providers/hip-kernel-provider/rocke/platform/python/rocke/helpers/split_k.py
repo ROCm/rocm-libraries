@@ -382,7 +382,9 @@ def select_split_k_wgrad(
 
     policy = _WGRAD_SPLIT_POLICY.get(arch) if dtype_d is not None else None
     if policy is not None:
-        n_groups = max(1, int(groups))
+        if isinstance(groups, bool) or not isinstance(groups, int) or groups < 1:
+            raise ValueError(f"groups must be a positive integer (got {groups!r})")
+        n_groups = groups
         target = policy.grouped_target_ctas if n_groups > 1 else policy.target_ctas
         grid_no_split = base_grid * n_groups
         # Every bound is folded into one cap, so nothing applied after it can

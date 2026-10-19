@@ -121,19 +121,43 @@ class TestGroupedWgradDispatch(unittest.TestCase):
         r = dispatch_conv_grouped(_wgrad("gfx1250", G=4))
         self.assertEqual(r.spec.direction, "wgrad")
         self.assertEqual(r.spec.epilogue, "default")
-        self.assertEqual(r.spec.split_k, -1, "grouped gfx1250 wgrad auto-resolves")
         self.assertEqual((r.spec.tile_m, r.spec.tile_n), (32, 32))
         self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
-        # A 392-deep reduction is below one 2048-element slice: one slice per
-        # group, so z is the group count.
+        # A 392-deep reduction is below one 2048-element slice, so it does not
+        # split: the spec says so (split_k=1), and z is the group count.
+        self.assertEqual(r.spec.split_k, 1)
         self.assertEqual(r.grid[2], 4)
         # A long one splits every group: the 32768-deep reduction allows 16
         # slices of 2048, under the 4096-CTA fill, and z carries groups * degree.
         r = dispatch_conv_grouped(
             _wgrad("gfx1250", G=4, N=32, Hi=32, Wi=32, dtype="bf16")
         )
+        self.assertEqual(r.spec.split_k, -1, "a split spec keeps the auto degree")
         self.assertEqual(r.grid[2], 4 * 16)
         self.assertEqual(r.grid, _expected_grid(r.request, r.spec))
+
+    def test_gfx1250_split_and_unsplit_never_share_a_compile_identity(self):
+        # Same tile, different resolved mode: one problem stores dW directly,
+        # the other accumulates it with atomics. Those are different binaries,
+        # so the compile key and the kernel name must differ -- a cache keyed on
+        # either would otherwise hand the unsplit binary to a split launch.
+        unsplit = dispatch_conv_grouped(
+            _wgrad("gfx1250", G=4, N=2, Hi=14, Wi=14, dtype="bf16")
+        )
+        split = dispatch_conv_grouped(
+            _wgrad("gfx1250", G=4, N=32, Hi=32, Wi=32, dtype="bf16")
+        )
+        self.assertEqual(unsplit.grid[2], 4)
+        self.assertEqual(split.grid[2], 4 * 16)
+        self.assertNotEqual(unsplit.kernel_id.compile_key, split.kernel_id.compile_key)
+        self.assertNotEqual(unsplit.spec.kernel_name(), split.spec.kernel_name())
+        # Two split problems at different degrees still share one compile: the
+        # degree is a launch parameter.
+        split_long = dispatch_conv_grouped(
+            _wgrad("gfx1250", G=4, N=64, Hi=32, Wi=32, dtype="bf16")
+        )
+        self.assertNotEqual(split_long.grid[2], split.grid[2])
+        self.assertEqual(split_long.kernel_id.compile_key, split.kernel_id.compile_key)
 
     def test_ungrouped_grid_unchanged(self):
         # groups=1: the grid reduces to the pre-grouped (gx, gy, split_k) form:
