@@ -337,6 +337,16 @@ def test_runner_rejects_a_tuning_spec_that_disagrees_on_lse(
     assert runner.red_vals is None
 
 
+def test_runner_refuses_lse_for_an_explicit_2d_tuning_spec(runner):
+    """A 2D spec cannot write LSE: refused as NotImplementedError, the same
+    error the backend paths raise, not a spec/problem-disagreement ValueError."""
+    spec = _tuning_spec(reduce_emit_lse=False)
+    spec.path, spec.reduce_spec = "2d", None
+    with pytest.raises(NotImplementedError, match="LSE"):
+        _run(_problem(emit_lse=True), lse=object(), tuning_spec=spec)
+    assert runner.red_vals is None
+
+
 def test_runner_rejects_a_strided_tuning_spec_whose_reduce_emits_lse(runner):
     """The strided branch returns before the paged LSE agreement check: an
     LSE-off strided launch with a reduce built to take lse_ptr must be refused,

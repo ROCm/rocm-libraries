@@ -5489,10 +5489,21 @@ def run_unified_attention_torch(
         # Explicit specs are initially selected before framework tensors exist.
         # Refresh address-width state and tuning identity from the real cache.
         tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
-        # The explicit spec owns the reduce kernel, so it must agree with the
-        # problem on the LSE output: a mismatch would either drop the output or
-        # launch a kernel whose argument list differs from the signature.
-        # A reduce spec without the field (gfx1250) cannot emit LSE.
+        # A path that cannot write LSE (a 2D spec, or a split-KV reduce without
+        # the output, e.g. gfx1250) is refused as NotImplementedError, the same
+        # error as the backend refusals below.
+        if problem.emit_lse:
+            rejected = _reject_lse(
+                problem,
+                _launch_arch,
+                "3d" if tuning_spec.path == "3d" else "tiled 2D",
+            )
+            if rejected is not None:
+                raise NotImplementedError(rejected[1])
+        # Otherwise the explicit spec owns the reduce kernel, so it must agree
+        # with the problem on the LSE output: a mismatch would either drop the
+        # output or launch a kernel whose argument list differs from the
+        # signature. A reduce spec without the field cannot emit LSE.
         reduce_lse = tuning_spec.path == "3d" and bool(
             getattr(tuning_spec.reduce_spec, "emit_lse", False)
         )
