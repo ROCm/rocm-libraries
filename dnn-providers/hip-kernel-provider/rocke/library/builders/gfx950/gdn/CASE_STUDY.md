@@ -1,11 +1,15 @@
-# GDN/KDA decode on gfx950 — load-first register case study
+# GDN/KDA decode on gfx950 — load-first case study: register counts and relative speed
 
-How issuing every global load first (ALGORITHM.md §4.3) changed the register
-count, waves per SIMD and scratch of the warp-tiled decode emitter in
-`kernels/gfx950/gdn_decode.py`. ALGORITHM.md states the rule and the exception;
-this file keeps the per-tile counts, which change with the compiler. Every
-number here is a static count read from the gfx950 code object. None is a
-latency or hardware-counter measurement.
+Measured scope: the single-token GDN/KDA decode kernels of
+`kernels/gfx950/gdn_decode.py` before and after the warp-tiled emitter issued
+every global load first (ALGORITHM.md §4.3). Section 4 records static
+register, wave-per-SIMD and scratch counts per compiler. Section 6 records
+relative device-time speedup versus the merge base at three batch sizes, with
+its correctness gate, method and one regression. No absolute latency appears.
+ALGORITHM.md states the rule and the exception; this file keeps the
+measurements, which change with the compiler. The register, wave and scratch
+numbers are static counts read from the gfx950 code object, not hardware
+counters.
 
 ## 1. Mechanism
 
@@ -124,7 +128,57 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
 - **Tile defaults were picked on the interleaved order.** Re-run `tune.py` before
   relying on their ranking (ALGORITHM.md §4.6).
 
-## 6. Reproducing
+## 6. Measured speed
+
+Relative device-time speedup of the load-first emitter versus the merge base
+(`153bf493555`, the interleaved order), on gfx950. Speedup is
+`(base time / head time) − 1`; `+21.6%` means `1.216×` as fast. Each cell is the
+median of 3 independent runs, and the Geomean column is the geometric mean of
+a row's three cells.
+
+| Decode path | State | Heads Hk/Hv | Batch 1 | Batch 16 | Batch 128 | Geomean |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| GDN plain | bf16 | 16/32 | +10.4% | +14.6% | +4.6% | +9.8% |
+| GDN plain | bf16 | 4/8 | +11.6% | +3.2% | +11.8% | +8.8% |
+| KDA plain | bf16 | 32/32 | +21.6% | +6.4% | +11.0% | +12.8% |
+| KDA plain | bf16 | 8/8 | +21.8% | +6.2% | +15.7% | +14.4% |
+| KDA plain | f32 | 32/32 | +7.6% | +8.6% | +5.0% | +7.1% |
+| KDA fused conv + norm | f32 | 32/32 | +0.4% | **−1.7%** | +1.9% | +0.2% |
+
+**Scope.** Single-token `DK = DV = 128` decode, bf16 I/O, batches 1, 16 and 128.
+GDN uses the default `(2,16,8)` tile. KDA uses the dispatcher's `(4,16,4)`,
+`(1,16,4)` and `(2,16,1)` tiles; the fused f32 case uses `(4,16,1)`. The f32-state
+and fused arms were built as specs directly. A request can ask for f32 state
+through dispatch, but it has no fusion fields, so only the fused arm is
+unreachable from dispatch. GDN fused performance was not measured. The tile
+choices were made on the old load order (§5).
+
+**Method.** Both trees run in one process, with their arms interleaved. State,
+conv-state and output buffers rotate through at least 1 GiB per cycle, so every
+launch reads from HBM; every copy has its own cloned inputs. Timing replays a
+HIP graph. The Python lowerer and `llvm23` build both trees. The runs used the
+ROCm 7.13 container.
+
+**Correctness gate.** Every timed arm is checked against the fp32 reference
+before it is timed, with tolerance `1e-2` on the max-abs error of the output
+and of the written state; for the fused-norm arm the output error is divided
+by `max(1, |reference|)` (`out_error` in `gdn_decode.py`). All 54 measured
+rows passed, and output, state and conv state were bitwise equal between the
+two trees in every row.
+
+**Honest loss.** The fused conv + norm f32 path is slower at batch 16: the three
+independent runs give base/head ratios `0.9828`, `0.9834` and `0.9840`, so the
+loss (−1.7%) is repeatable, while the gains at batches 1 and 128 are small
+(+0.4% and +1.9%). The cause was not investigated. The plain paths improve in
+every measured configuration, by at least +3.2%.
+
+**Provenance.** The two-tree A/B driver that produced these numbers is not in
+this tree, and the per-run data, including absolute times, is kept in the
+team's protected performance record, so a reader outside the team cannot
+replay this table from the repository. Section 7 reproduces the register
+counts only.
+
+## 7. Reproducing
 
 Save the block below as `regs.py` anywhere outside the tree. Run it from
 `rocke/library` once in a checkout of the merge base and once at the head, with
