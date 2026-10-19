@@ -128,6 +128,66 @@ jobs:
           ctest --test-dir "${RUNNER_TEMP}/hostnumerics-embedded-test" \
             --no-tests=error --output-on-failure
 
+  windows:
+    name: Windows, MSVC, native C++
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: shared/hostnumerics
+
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Configure
+        run: >-
+          cmake -S shared/hostnumerics
+          -B "${{ runner.temp }}/hostnumerics-windows"
+          -G Ninja
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="/EHsc"
+          -DHOSTNUMERICS_BUILD_TESTING=ON
+          -DHOSTNUMERICS_BUILD_PYTHON=OFF
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python=TRUE
+          -DCMAKE_DISABLE_FIND_PACKAGE_nanobind=TRUE
+
+      - name: Build
+        run: cmake --build "${{ runner.temp }}/hostnumerics-windows" --parallel 4
+
+      - name: Test native C++
+        run: >-
+          ctest --test-dir "${{ runner.temp }}/hostnumerics-windows"
+          --no-tests=error --output-on-failure
+
+      - name: Install
+        run: >-
+          cmake --install "${{ runner.temp }}/hostnumerics-windows"
+          --prefix "${{ runner.temp }}/hostnumerics-windows-install"
+
+      - name: Configure installed-package consumer
+        run: >-
+          cmake -S shared/hostnumerics/tests/package
+          -B "${{ runner.temp }}/hostnumerics-windows-package-test"
+          -G Ninja
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="/EHsc"
+          -DHOSTNUMERICS_SOURCE_DIR="${{ github.workspace }}/shared/hostnumerics"
+          -DCMAKE_PREFIX_PATH="${{ runner.temp }}/hostnumerics-windows-install"
+
+      - name: Build installed-package consumer
+        run: >-
+          cmake --build "${{ runner.temp }}/hostnumerics-windows-package-test"
+          --parallel 4
+
+      - name: Test installed-package consumer
+        run: >-
+          ctest --test-dir "${{ runner.temp }}/hostnumerics-windows-package-test"
+          --no-tests=error --output-on-failure
+
   sanitizers:
     name: Clang, ASan and UBSan
     runs-on: ubuntu-24.04
