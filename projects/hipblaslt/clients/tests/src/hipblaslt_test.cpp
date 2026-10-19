@@ -367,7 +367,6 @@ bool hipblaslt_client_global_filters(const Arguments& args)
 
 /********************************************************************************************
  * Returns true when a parameter is a known bug that must not run on the current platform.  *
- * Non-mutating (unlike the previous match_test_category, which const_cast-wrote category).  *
  ********************************************************************************************/
 bool is_known_bug_for_platform(const Arguments& arg)
 {

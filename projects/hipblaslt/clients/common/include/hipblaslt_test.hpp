@@ -181,9 +181,8 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 // Returns true when a parameter is a known bug that must not run on the current
 // GPU platform: either it was tagged unconditionally at gentest time
 // (category == "known_bug" from known_bugs.yaml) or the current arch is listed in
-// the entry's known_bug_platforms. Such parameters are filtered out at
-// INSTANTIATE_TEST_SUITE_P time (see INSTANTIATE_TEST_CATEGORY below) so they never
-// register, instead of registering and then skipping them at runtime.
+// the entry's known_bug_platforms. INSTANTIATE_TEST_CATEGORY (below) uses this to
+// drop such parameters before they register as tests.
 bool is_known_bug_for_platform(const Arguments& arg);
 
 // fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
