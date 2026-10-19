@@ -93,52 +93,48 @@ def _reference(ql, kl, vl, *, causal):
     return np.stack(out)  # (B, S, Hq, D)
 
 
-def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--arch", default="gfx950")
-    p.add_argument("--layout", choices=("bhsd", "bshd"), default="bshd")
-    p.add_argument("--seqlen-q", type=int, default=128)
-    p.add_argument("--seqlen-k", type=int, default=128)
-    p.add_argument("--head-size", type=int, default=64)
-    p.add_argument("--heads", type=int, default=8)
-    p.add_argument("--kv-heads", type=int, default=0, help="0 -> MHA (== heads)")
-    p.add_argument("--batch", type=int, default=2)
-    p.add_argument("--causal", action="store_true")
-    p.add_argument("--dtype", choices=("f16", "bf16"), default="f16")
-    p.add_argument("--tol", type=float, default=2e-2)
-    p.add_argument("--no-verify", action="store_true")
-    args = p.parse_args()
-
-    B, Hq, D = args.batch, args.heads, args.head_size
-    Hk = args.kv_heads or args.heads
-    Sq, Sk = args.seqlen_q, args.seqlen_k
-    layout = args.layout
+def run_verify(
+    *,
+    arch,
+    layout,
+    heads,
+    head_size,
+    seqlen_q,
+    seqlen_k,
+    batch,
+    kv_heads=0,
+    causal=False,
+    dtype="f16",
+    tol=2e-2,
+    verbose=True,
+):
+    """Build fmha_mfma(free_stride=True) for ``layout``, launch it, and compare
+    against the numpy reference. Returns ``(passed, max_abs, bad, total)``;
+    raises ``ValueError`` on an invalid spec. Shared by the CLI and the suite's
+    GPU-gated numeric test."""
+    Hq, D, Hk = heads, head_size, (kv_heads or heads)
+    Sq, Sk, B = seqlen_q, seqlen_k, batch
 
     common = FmhaCommonSpec(
         FmhaShape(head_size=D, num_query_heads=Hq, num_kv_heads=Hk),
-        dtype=args.dtype,
-        mask_mode="causal" if args.causal else "none",
+        dtype=dtype,
+        mask_mode="causal" if causal else "none",
     )
-    # fmha_mfma generalized to free strides (free_stride=True). The layout
-    # lives in the strides the launcher passes, not in the spec.
     spec = FmhaMfmaSpec(common=common, seqlen_q=Sq, seqlen_k=Sk, free_stride=True)
-    ok, why = is_valid_spec(spec, args.arch)
-    print(f"[{args.arch}] free-stride SDPA fwd layout={layout} "
-          f"H{D} HQ{Hq} HK{Hk} Q{Sq} K{Sk} validate -> {ok} ({why})")
+    ok, why = is_valid_spec(spec, arch)
     if not ok:
-        return 2
+        raise ValueError(f"invalid fmha_mfma free-stride spec: {why}")
 
     # comgr / LLVM path (backend="python"): the free-stride forward is
     # Python-only for now, and the LLVM path has no const-qualified pointers,
     # so the per-batch rebased O store lowers cleanly (unlike the hipcc path).
     art = compile_kernel(
-        build_fmha_fwd_mfma(spec, arch=args.arch), arch=args.arch, backend="python"
+        build_fmha_fwd_mfma(spec, arch=arch), arch=arch, backend="python"
     )
-    print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")
-    if args.no_verify:
-        return 0
+    if verbose:
+        print(f"[{arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")
 
-    np_dt = _NP_DTYPE[args.dtype]
+    np_dt = _NP_DTYPE[dtype]
     rng = np.random.default_rng(0xA11E)
     ql = (rng.standard_normal((B, Hq, Sq, D)) * 0.3).astype(np_dt)
     kl = (rng.standard_normal((B, Hk, Sk, D)) * 0.3).astype(np_dt)
@@ -149,7 +145,6 @@ def main() -> int:
     v_phys = _to_physical(vl, layout)
     o_phys = np.zeros_like(q_phys)
 
-    # Per-tensor (batch, head, token) element strides for this layout.
     q_b, q_h, q_t = contiguous_strides(layout, heads=Hq, seqlen=Sq, head_size=D)
     k_b, k_h, k_t = contiguous_strides(layout, heads=Hk, seqlen=Sk, head_size=D)
     v_b, v_h, v_t = k_b, k_h, k_t  # V has K's shape/layout
@@ -173,30 +168,89 @@ def main() -> int:
     # eight token/head strides, then the four free-stride batch strides.
     packed = struct.pack(
         "<QQQQf" + "i" * 14,
-        qd, kd, vd, od, scale_log2, Sq, Sk,
-        q_t, q_h, k_t, k_h, v_t, v_h, o_t, o_h,
-        q_b, k_b, v_b, o_b,
+        qd,
+        kd,
+        vd,
+        od,
+        scale_log2,
+        Sq,
+        Sk,
+        q_t,
+        q_h,
+        k_t,
+        k_h,
+        v_t,
+        v_h,
+        o_t,
+        o_h,
+        q_b,
+        k_b,
+        v_b,
+        o_b,
     )
-    grid = fmha_fwd_mfma_grid(spec, batch=B)
-    rt.launch(fn, grid, (ArchTarget.from_gfx(args.arch).wave_size, 1, 1), packed)
+    rt.launch(
+        fn,
+        fmha_fwd_mfma_grid(spec, batch=B),
+        (ArchTarget.from_gfx(arch).wave_size, 1, 1),
+        packed,
+    )
     rt.sync()
     rt.memcpy_d2h(u8(o_phys), od, o_phys.nbytes)
     for ptr in (qd, kd, vd, od):
         rt.free(ptr)
     module.unload()
 
-    # Kernel O (logical B,Hq,Sq,D) -> (B,Sq,Hq,D) to match the reference.
-    got = _from_physical(o_phys.reshape(-1), layout, (B, Hq, Sq, D)).transpose(0, 2, 1, 3)
-    ref = _reference(ql, kl, vl, causal=args.causal)
-
+    got = _from_physical(o_phys.reshape(-1), layout, (B, Hq, Sq, D)).transpose(
+        0, 2, 1, 3
+    )
+    ref = _reference(ql, kl, vl, causal=causal)
     diff = np.abs(got.astype(np.float32) - ref.astype(np.float32))
     max_abs = float(diff.max())
-    bad = int(np.count_nonzero(diff > args.tol))
-    tag = "PASS" if max_abs <= args.tol else "FAIL"
-    print(f"[{args.arch}] layout={layout} Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
-          f"causal={args.causal}: max_abs_diff={max_abs:.3e} bad={bad}/{got.size} "
-          f"tol={args.tol:.0e} -> {tag}")
-    return 0 if max_abs <= args.tol else 1
+    bad = int(np.count_nonzero(diff > tol))
+    if verbose:
+        tag = "PASS" if max_abs <= tol else "FAIL"
+        print(
+            f"[{arch}] layout={layout} Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
+            f"causal={causal}: max_abs_diff={max_abs:.3e} bad={bad}/{got.size} "
+            f"tol={tol:.0e} -> {tag}"
+        )
+    return max_abs <= tol, max_abs, bad, got.size
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--arch", default="gfx950")
+    p.add_argument("--layout", choices=("bhsd", "bshd"), default="bshd")
+    p.add_argument("--seqlen-q", type=int, default=128)
+    p.add_argument("--seqlen-k", type=int, default=128)
+    p.add_argument("--head-size", type=int, default=64)
+    p.add_argument("--heads", type=int, default=8)
+    p.add_argument("--kv-heads", type=int, default=0, help="0 -> MHA (== heads)")
+    p.add_argument("--batch", type=int, default=2)
+    p.add_argument("--causal", action="store_true")
+    p.add_argument("--dtype", choices=("f16", "bf16"), default="f16")
+    p.add_argument("--tol", type=float, default=2e-2)
+    args = p.parse_args()
+
+    try:
+        passed, _max_abs, _bad, _total = run_verify(
+            arch=args.arch,
+            layout=args.layout,
+            heads=args.heads,
+            kv_heads=args.kv_heads,
+            head_size=args.head_size,
+            seqlen_q=args.seqlen_q,
+            seqlen_k=args.seqlen_k,
+            batch=args.batch,
+            causal=args.causal,
+            dtype=args.dtype,
+            tol=args.tol,
+            verbose=True,
+        )
+    except ValueError as e:
+        print(f"[{args.arch}] {e}")
+        return 2
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

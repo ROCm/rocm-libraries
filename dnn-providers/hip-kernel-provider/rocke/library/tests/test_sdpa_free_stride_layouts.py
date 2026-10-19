@@ -93,7 +93,9 @@ def test_packed_qkv_views_recover_logical():
     # with its own base offset (0, D, 2D) into the shared buffer.
     B, H, S, D = 2, 4, 16, 16
     rng = np.random.default_rng(0xBEE5)
-    qkv = [(rng.standard_normal((B, H, S, D)) * 0.3).astype(np.float16) for _ in range(3)]
+    qkv = [
+        (rng.standard_normal((B, H, S, D)) * 0.3).astype(np.float16) for _ in range(3)
+    ]
     packed = np.zeros((B, H, S, 3, D), np.float16)
     for i, t in enumerate(qkv):
         packed[..., i, :] = t
@@ -102,7 +104,9 @@ def test_packed_qkv_views_recover_logical():
         flat, base, strides = _view_base_strides(view, packed)
         assert strides[3] == 1
         assert base == i * D
-        np.testing.assert_array_equal(_addr_gather(flat, base, strides, (B, H, S, D)), want)
+        np.testing.assert_array_equal(
+            _addr_gather(flat, base, strides, (B, H, S, D)), want
+        )
 
 
 @pytest.mark.parametrize("name", ["bhsd", "bshd"])
