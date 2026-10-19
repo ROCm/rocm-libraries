@@ -41,10 +41,6 @@
 
 #include <iostream>
 
-#ifdef GOOGLE_TEST
-#include "gtest/gtest.h"
-#endif
-
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -229,49 +225,6 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 }
 #endif
 
-// CHECK_GENERATE_MATRIX_ERROR
-#ifdef GOOGLE_TEST
-#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
-#else
-#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
-    do                                                                                             \
-    {                                                                                              \
-        auto error = ERROR;                                                                        \
-        if(error != true)                                                                          \
-        {                                                                                          \
-            fprintf(                                                                               \
-                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                                    \
-        }                                                                                          \
-    } while(0)
-#endif
-#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
-
-// EXPECT_HIPSPARSE_STATUS
-#ifdef GOOGLE_TEST
-#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
-    do                                                                                           \
-    {                                                                                            \
-        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
-        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
-        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
-            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
-            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
-    } while(0)
-#else
-#define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
-    if(status != expect)                                                                    \
-    {                                                                                       \
-        std::cerr << "hipSPARSE status error: Expected " << hipsparseStatusToString(expect) \
-                  << ", received " << hipsparseStatusToString(status) << std::endl;         \
-        if(expect == HIPSPARSE_STATUS_SUCCESS)                                              \
-        {                                                                                   \
-            exit(EXIT_FAILURE);                                                             \
-        }                                                                                   \
-    }
-#endif
-#define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
-
 // Throw so a failure in a helper unwinds to the test or benchmark boundary.
 inline void throw_on_hip_error(const char* call, hipError_t status, const char* file, int line)
 {
@@ -302,6 +255,22 @@ inline void
 
 #define CHECK_HIP_ERROR(ERROR) throw_on_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
 #define CHECK_HIPSPARSE_ERROR(ERROR) throw_on_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
+
+inline void
+    throw_on_generate_matrix_error(const char* call, bool generated, const char* file, int line)
+{
+    if(generated)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": error encountered generating matrix data: " << call;
+    throw std::runtime_error(message.str());
+}
+
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) \
+    throw_on_generate_matrix_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)

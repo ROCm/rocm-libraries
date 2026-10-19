@@ -24,6 +24,7 @@
 #include "testing_csrilusv.hpp"
 #include "utility.hpp"
 
+#include <gtest/gtest.h>
 #include <hipsparse.h>
 #include <string>
 #include <vector>
