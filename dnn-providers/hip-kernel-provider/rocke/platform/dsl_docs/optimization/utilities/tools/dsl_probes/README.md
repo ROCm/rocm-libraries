@@ -21,7 +21,7 @@ before chasing performance**. These probes are step (3).
 |---|---|
 | "Will the kernel fit at the occupancy I expect?" | `probe_occupancy.py` |
 | "What are the VGPR/spill/LDS, ISA mix and occupancy of one kernel or a pre-built `.co`/`.hsaco`?" | `probe_regs.py` |
-| "Are the right MFMA / async-DMA / ds.read.tr16 intrinsics emitted?" | `probe_intrinsic_counts.py` |
+| "Are the right MFMA / WMMA / async-DMA / ds.read.tr16 intrinsics emitted?" | `probe_intrinsic_counts.py` |
 | "What is the ISA opcode mix between two variants?" | `probe_isa_inspect.py` |
 | "Does the HIP-debug backend agree with LLVM-direct on this kernel?" | `probe_lowering_compare.py` |
 | "Which `(num_warps, tile_size, …)` variant is fastest for my shapes?" | `probe_config_sweep.py` (+ your `run_fn`) |
@@ -42,10 +42,11 @@ list before paying the rocprof cost.
 coarse estimate of waves/CU and workgroups/CU, with the apparent
 limiter (`VGPR`, `LDS`, `WAVES_PER_EU_HINT`, …) annotated.
 
-How it works: compiles each kernel via `compile_kernel`, dumps the
-HSACO notes with `llvm-readelf --notes`, and applies the gfx950 / gfx942 /
+How it works: compiles each kernel via `compile_kernel` for `arch.name`, dumps
+the HSACO notes with `llvm-readelf --notes`, and applies the gfx950 / gfx942 /
 gfx90a per-CU resource caps. The occupancy math matches what `rocprofv3`
-reports as `OccupancyPct` for typical kernels within a few percent.
+reports as `OccupancyPct` for typical kernels within a few percent. There are
+no caps for RDNA / wave32 targets yet.
 
 Useful for: tile / block-size sweeps where the wall-clock difference
 is on the order of LDS or VGPR bumps. If the limiter switches from
@@ -101,13 +102,13 @@ adding sched groups, etc.
 ### `probe_intrinsic_counts.py`
 **Input**: list of `(label, KernelDef)`.
 **Output**: per-variant histogram of AMDGCN LLVM intrinsics
-(`mfma.f32.*`, `ds.read.tr16.*`, `ds.bpermute`, `ds.swizzle`,
-`raw.ptr.buffer.load.lds`, `cvt.pk.f32.fp8`, `s.waitcnt`, …) plus
-structural counts (load, store, fmul, fadd, fmuladd, br, phi).
+(`mfma.f32.*`, `wmma` / `swmmac` (any shape), `ds.read.tr16.*`, `ds.bpermute`,
+`ds.swizzle`, `raw.ptr.buffer.load.lds`, `cvt.pk.f32.fp8`, `s.waitcnt`, …)
+plus structural counts (load, store, fmul, fadd, fmuladd, br, phi).
 
-How it works: just `lower_kernel_to_llvm(kdef, arch="gfx950")` plus a small regex
-table. Faster than `probe_isa_inspect` because it doesn't shell out to
-`llvm-objdump` and doesn't pay the COMGR HSACO step.
+How it works: just `lower_kernel_to_llvm(kdef, arch=arch)` (default `gfx950`)
+plus a small regex table. Faster than `probe_isa_inspect` because it doesn't
+shell out to `llvm-objdump` and doesn't pay the COMGR HSACO step.
 
 Useful for: pre-COMGR sanity checks — did the spec switch flip the
 right intrinsic call? — and for catching DSL-level miscompiles where
@@ -115,11 +116,11 @@ an `if` statement is silently elided by an AST rewriter (the canonical
 symptom: stores went from N to 0, see the optimization runbook §10).
 
 ### `probe_lowering_compare.py`
-**Input**: list of `(label, KernelDef)`, `--arch=gfx950`.
+**Input**: list of `(label, KernelDef)`, `arch` (default `gfx950`).
 **Output**: side-by-side HSACO sizes from the LLVM-direct and HIP-debug
 backends; optional VGPR / LDS deltas from `llvm-readelf` on both.
 
-How it works: production path is `compile_kernel`; debug path is
+How it works: production path is `compile_kernel(kdef, arch=arch)`; debug path is
 `lower_kernel_to_hip(kdef)` written to disk and compiled with
 `hipcc --offload-arch=<arch> --genco`. The two backends should agree
 on a healthy kernel; large size or resource deltas usually mean one
@@ -136,7 +137,7 @@ moved to `builders.common.hip_lowering_attention_parity` in the library
 ### `probe_config_sweep.py`
 **Input**: `build_fn`, a `base_spec` dataclass, a list of
 `replace()` override dicts, an optional `run_fn(KernelArtifact, label)
--> latency_us`.
+-> latency_us`, and `arch` (default `gfx950`) to compile the variants for.
 **Output**: build status, HSACO size, optional latency per variant,
 and the "best" variant.
 

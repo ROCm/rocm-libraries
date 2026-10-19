@@ -4,8 +4,8 @@
 
 For each KernelDef this script:
 
-1. compiles via ``rocke.helpers.compile_kernel`` (LLVM-direct → comgr →
-   HSACO);
+1. compiles via ``rocke.helpers.compile_kernel`` for ``arch`` (LLVM-direct →
+   comgr → HSACO);
 2. lowers via ``rocke.core.lower_hip.lower_kernel_to_hip`` and compiles
    the emitted HIP C++ via ``hipcc --genco`` to a second HSACO;
 3. reports the HSACO sizes side-by-side and (optionally) inspects each
@@ -151,7 +151,7 @@ def probe_lowering_compare(
     print("-" * (11 * len(header_cols)))
     for label, kdef in entries:
         try:
-            artifact = compile_kernel(kdef, capture_ir_text=False)
+            artifact = compile_kernel(kdef, arch=arch, capture_ir_text=False)
             llvm_bytes = artifact.hsaco
         except Exception as e:  # noqa: BLE001
             print(f"{label:<10} LLVM-FAIL: {type(e).__name__}: {e}")

@@ -86,6 +86,7 @@ def probe_config_sweep(
     only_build: bool = False,
     label_fn: Callable[[dict], str] | None = None,
     verify_fn: Callable[[Any, str], bool] | None = None,
+    arch: str = "gfx950",
 ) -> list[dict]:
     """Build (and optionally bench) each spec variant.
 
@@ -101,6 +102,7 @@ def probe_config_sweep(
         verify_fn: optional ``(KernelArtifact, label) -> bool``. Variants
             that fail verification are reported but excluded from the
             "best" ranking.
+        arch: target the variants are compiled for (e.g. ``"gfx1201"``).
 
     Returns the full list of result dicts (in input order).
     """
@@ -123,7 +125,7 @@ def probe_config_sweep(
         row: dict = {"label": label, "override": dict(ov)}
         try:
             kdef = build_fn(spec)
-            artifact = compile_kernel(kdef)
+            artifact = compile_kernel(kdef, arch=arch)
         except Exception as e:  # noqa: BLE001
             row["error"] = f"BUILD: {type(e).__name__}: {e}"
             rows.append(row)

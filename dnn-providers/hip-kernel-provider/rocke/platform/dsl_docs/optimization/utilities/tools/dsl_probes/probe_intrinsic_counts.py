@@ -10,6 +10,7 @@ store / fmul / fadd / fmuladd / br / phi).
 The output answers questions like:
 
 - "Is the kernel actually emitting the 32x32x16 MFMA atom I asked for?"
+  (or, on RDNA / gfx12, a WMMA atom)
 - "Is async DRAM→LDS active (``raw.ptr.buffer.load.lds``)?"
 - "Is the softmax using ``ds_swizzle`` or ``ds_bpermute`` for the
   cross-lane reduction?"
@@ -60,7 +61,7 @@ _bootstrap_rocke()
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 
 
-# Patterns most often surface the difference between MFMA-tiled
+# Patterns most often surface the difference between matrix-core-tiled
 # and warp-scalar variants. Add to this list freely; counts are cheap.
 DEFAULT_INTRINSIC_PATTERNS = {
     "mfma.f32.16x16x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.16x16x16\.f16",
@@ -71,6 +72,9 @@ DEFAULT_INTRINSIC_PATTERNS = {
     "mfma.f32.32x32x16.f16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.f16",
     "mfma.f32.32x32x16.bf16": r"@llvm\.amdgcn\.mfma\.f32\.32x32x16\.bf16",
     "mfma.f32.4x4x4.f16": r"@llvm\.amdgcn\.mfma\.f32\.4x4x4\.f16",
+    # RDNA / gfx12: one entry per family, any shape and type.
+    "wmma (any)": r"@llvm\.amdgcn\.wmma\.",
+    "swmmac (any)": r"@llvm\.amdgcn\.swmmac\.",
     "raw.ptr.buffer.load.lds (async DMA)": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.load\.lds",
     "raw.ptr.buffer.load (sync VMEM)": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.load[^.l]",
     "raw.ptr.buffer.store": r"@llvm\.amdgcn\.raw\.ptr\.buffer\.store",
@@ -133,12 +137,13 @@ def probe_intrinsic_counts(
     intrinsics: dict | None = None,
     structural: dict | None = None,
     print_zero: bool = False,
+    arch: str = "gfx950",
 ) -> list[dict]:
-    """Lower each kernel and pretty-print the per-intrinsic histogram."""
+    """Lower each kernel for ``arch`` and pretty-print the per-intrinsic histogram."""
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            ir = lower_kernel_to_llvm(kdef, arch="gfx950")
+            ir = lower_kernel_to_llvm(kdef, arch=arch)
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === LOWER-FAIL: {type(e).__name__}: {e}")
             continue
