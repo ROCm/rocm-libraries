@@ -51,8 +51,7 @@ def test_valid_spec_accepted():
         (dict(head_size=40), "head_size"),
         (dict(batch=0), "batch"),
         (dict(seqlen_q=0), "seqlen_q"),
-        (dict(layout="bshd"), "not yet implemented"),
-        (dict(packed_qkv=True), "packed_qkv"),
+        (dict(layout="thd"), "named contiguous order"),
     ],
 )
 def test_invalid_specs_rejected(over, needle):
@@ -61,9 +60,12 @@ def test_invalid_specs_rejected(over, needle):
     assert needle in why
 
 
-def test_bshd_names_itself_planned():
-    _, why = is_valid_spec(_spec(layout="bshd"), "gfx950")
-    assert "Phase 3" in why
+def test_bshd_and_packed_are_accepted():
+    # The kernel is layout-agnostic (runtime strides + per-batch pointer
+    # rebase), so both contiguous orders and packed QKV are valid specs.
+    for over in (dict(layout="bshd"), dict(packed_qkv=True), dict(layout="bshd", packed_qkv=True)):
+        ok, why = is_valid_spec(_spec(**over), "gfx950")
+        assert ok, (over, why)
 
 
 # --- signature / grid ------------------------------------------------------
@@ -96,13 +98,19 @@ def test_build_returns_named_kernel():
 
 def test_build_rejects_invalid_spec():
     with pytest.raises(ValueError, match="invalid fmha_sdpa_fwd spec"):
-        build_fmha_sdpa_fwd(_spec(layout="bshd"), "gfx950")
+        build_fmha_sdpa_fwd(_spec(layout="thd"), "gfx950")
 
 
 def test_build_gqa_shape():
     # num_query_heads != num_kv_heads exercises the decode_grid GQA divisor.
     kd = build_fmha_sdpa_fwd(_spec(num_query_heads=8, num_kv_heads=2), "gfx950")
     assert kd is not None
+
+
+def test_build_bshd_and_packed():
+    # Layout-general: both contiguous orders and packed QKV build a KernelDef.
+    assert build_fmha_sdpa_fwd(_spec(layout="bshd"), "gfx950") is not None
+    assert build_fmha_sdpa_fwd(_spec(packed_qkv=True), "gfx950") is not None
 
 
 def test_build_bf16():
