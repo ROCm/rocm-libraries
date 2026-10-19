@@ -32,7 +32,6 @@
 #include <cuda/std/__exception/throw_error.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/limits>
-#include <cuda/std/type_traits>
 
 #include <string>
 
