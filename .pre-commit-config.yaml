@@ -238,6 +238,44 @@ repos:
           )$
         pass_filenames: false
 
+      # rocKE advisory static analysis (all rocke Python): types, metrics, dead
+      # code. NON-BLOCKING -- the wrapper always exits 0; `verbose` prints its
+      # report. pre-push only: CI runs the pre-commit stage, so it never installs
+      # or runs these. Enable locally with `pre-commit install --hook-type pre-push`
+      # (this also runs the repo's other hooks at push time: none sets a stage).
+      # Settings: rocke/pyrightconfig.json and rocke/tools/advisory_checks.py.
+      # Reading the reports: rocke/docs/static-analysis.md.
+      - id: rocke-pyright
+        name: rocKE advisory - pyright type check (non-blocking)
+        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py pyright
+        language: python
+        # torch is deliberately absent (multi-GB); pyright treats it as Unknown.
+        # radon: so pyright can type-check advisory_checks.py's own imports.
+        additional_dependencies:
+          ["pyright==1.1.414", "numpy", "pytest", "ml_dtypes", "radon==6.0.1"]
+        files: &rocke_py '^dnn-providers/hip-kernel-provider/rocke/.*\.py$'
+        stages: [pre-push]
+        require_serial: true
+        verbose: true
+      - id: rocke-radon
+        name: rocKE advisory - radon metrics (non-blocking)
+        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py radon
+        language: python
+        additional_dependencies: ["radon==6.0.1"]
+        files: *rocke_py
+        stages: [pre-push]
+        require_serial: true
+        verbose: true
+      - id: rocke-vulture
+        name: rocKE advisory - vulture dead code (non-blocking)
+        entry: python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py vulture
+        language: python
+        additional_dependencies: ["vulture==2.16"]
+        files: *rocke_py
+        stages: [pre-push]
+        require_serial: true
+        verbose: true
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

@@ -105,7 +105,9 @@ single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
 [`TESTING.md`](TESTING.md). Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
-[`style/CPP_STYLE.md`](style/CPP_STYLE.md).
+[`style/CPP_STYLE.md`](style/CPP_STYLE.md). Advisory static analysis (pyright types,
+radon complexity, vulture dead code; non-blocking pre-push hooks, not part of the
+DoD) and how to read its reports: [`docs/static-analysis.md`](docs/static-analysis.md).
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 
