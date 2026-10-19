@@ -40,7 +40,7 @@ def _round_trips(identity: KernelIdentity) -> None:
 
 def _implicit_jobs(direction: str, n_geometries: int):
     target = ArchTarget.from_gfx(_ARCH)
-    geos = ks._geometry_list(target, "bf16")
+    geos = ks._geometry_list(target, "bf16", direction)
     # A spread of geometries, every pipeline and epilogue among them.
     step = max(1, len(geos) // n_geometries)
     return ks._direction_jobs(
