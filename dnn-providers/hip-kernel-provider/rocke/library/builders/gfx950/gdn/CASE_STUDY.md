@@ -173,10 +173,9 @@ loss (−1.7%) is repeatable, while the gains at batches 1 and 128 are small
 every measured configuration, by at least +3.2%.
 
 **Provenance.** The two-tree A/B driver that produced these numbers is not in
-this tree, and the per-run data, including absolute times, is kept in the
-team's protected performance record, so a reader outside the team cannot
-replay this table from the repository. Section 7 reproduces the register
-counts only.
+this tree, and absolute per-run times are not published here, so a reader
+cannot replay this table from the repository. Section 7 reproduces the
+register counts only.
 
 ## 7. Reproducing
 
