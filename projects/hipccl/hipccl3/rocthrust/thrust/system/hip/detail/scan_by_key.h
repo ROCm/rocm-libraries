@@ -41,7 +41,6 @@
 
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
