@@ -21,8 +21,9 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
-# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only the dense
-# kernels write LSE, so every other candidate must keep declining it.
+# ``lse`` is an output feature, not part of ATTENTION_FEATURES: only candidates
+# whose kernels write LSE (dense, and the unified split-KV ones) declare it, so
+# every other candidate must keep declining it. This map is the source of truth.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",

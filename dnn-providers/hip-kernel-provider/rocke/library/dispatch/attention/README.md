@@ -298,14 +298,18 @@ Selection pins a spec the same way for dense and unified:
 - `tuning_id="auto"` selects the candidate's base spec.
 - `emit_lse=True` asks for the optional FP32 LSE output (natural-log softmax
   normalizer). It is the `lse` request feature. The dense candidates and the
-  gfx942/gfx950 unified **split-KV (3D)** candidates declare it; the unified 2D
-  candidates do not, and the split-KV support check also refuses LSE with sinks
-  and on other arches. So an LSE request that cannot be served is refused
-  instead of reaching a kernel without the output. It is a dense output field
-  (`DENSE_OUTPUT_FIELDS`) and a unified semantic field (`_SEMANTIC_FIELDS`), so
-  sweeps never vary it. The caller passes the buffer to `bind_torch` as
-  `tensors["lse"]`; the runner validates its shape, dtype, device, and overlap.
-  The unified layout is `[total_q, Hq, 1]`.
+  unified **split-KV (3D)** candidates declare it; the unified 2D candidates do
+  not. The split-KV support check then refuses LSE on arches other than
+  gfx942/gfx950 and with sinks. So an LSE request that cannot be served is
+  refused instead of reaching a kernel without the output. To launch unified LSE
+  through `bind_torch`, pin a split-KV tuning spec (`algorithm="unified_tuning"`,
+  `spec_id="<arch>_u3d_..."`): like any unpinned unified request, the
+  `attention_unified_3d` result routes but cannot be bound. It is a dense output
+  field (`DENSE_OUTPUT_FIELDS`) and a unified semantic field (`_SEMANTIC_FIELDS`),
+  so sweeps never vary it, and with it off every spec hash and tuning id is the
+  one stored before the field existed. The caller passes the buffer to
+  `bind_torch` as `tensors["lse"]`; the runner validates its shape, dtype,
+  device, and overlap. The unified layout is `[total_q, Hq, 1]`.
 
 A candidate resolves a request once: `support` and `select_spec` share a
 per-candidate cache, so a pin is not resolved twice.
