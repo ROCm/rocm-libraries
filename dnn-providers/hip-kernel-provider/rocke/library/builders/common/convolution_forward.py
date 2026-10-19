@@ -51,6 +51,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, fields, replace
+from typing import ClassVar
 
 from dispatch.grouped_convolution import ConvGroupedRequest, dispatch_conv_grouped
 from rocke.core.ir import KernelDef
@@ -614,13 +615,16 @@ def gfx950_conv_fwd_direct_spec_for_request(
 
 
 def _base_spec_for_request(
-    request: ConvGroupedRequest, *, decline_grouped_pointwise: bool = True
+    request: ConvGroupedRequest,
+    *,
+    decline_grouped_pointwise: bool = True,
+    arch: str = _ARCH,
 ) -> Gfx950ConvFwdSpec:
     """The request's problem fields under the packaged contract's request checks."""
     if not isinstance(request, ConvGroupedRequest):
         raise TypeError("expected ConvGroupedRequest")
-    if request.arch != _ARCH:
-        raise ValueError(f"this adapter requires arch={_ARCH}")
+    if request.arch != arch:
+        raise ValueError(f"this adapter requires arch={arch}")
     if request.direction != "fwd":
         raise ValueError("the packaged contract supports forward convolution only")
     if any(
@@ -1081,7 +1085,15 @@ class Gfx950ConvFwdAotSpec:
     ``_AOT_DIRECT_PLACEHOLDERS``, and the knobs of other variants their
     ``_AOT_FAMILY_DEFAULTS``. An implicit-GEMM instance leaves every trailing
     field at ``_AOT_FAMILY_DEFAULTS``.
+
+    ``group_merge`` is the identity's merge degree: an implicit-GEMM instance
+    with ``group_merge`` > 1 is a depthwise kernel in which one workgroup owns
+    that many conv groups. Its vector widths are derived by the builder from the
+    merged problem, and the identity records them as 0, as rocKE's cache does.
+    ``ARCH`` is the architecture the instance is packaged for.
     """
+
+    ARCH: ClassVar[str] = _ARCH
 
     dtype: str
     tile_m: int
@@ -1134,10 +1146,15 @@ class Gfx950ConvFwdAotSpec:
     swizzle_wgm: int = 0
     iglp: int = -1
     waves_per_eu: int = 0
+    group_merge: int = 1
 
     @property
     def is_direct(self) -> bool:
         return self.kernel_family == KERNEL_FAMILY_DIRECT_DEPTHWISE
+
+    @property
+    def is_merged(self) -> bool:
+        return not self.is_direct and self.group_merge > 1
 
     def _direct_caps(self) -> tuple[int, int]:
         """``(cpg, kpg)`` the direct kernel compiles: 1 for the depthwise variants,
@@ -1184,12 +1201,17 @@ class Gfx950ConvFwdAotSpec:
                 dil_w=self.dilation_w,
             )
         groups = 2 if self.grouped else 1
+        channels = 64
+        if self.is_merged:
+            # Merging is depthwise only: cpg = kpg = 1, and 64 groups divide by
+            # every merge degree (``_probe_problem`` in kernel_sweep.py).
+            groups, channels = 64, 1
         return _conv.ConvProblem(
             N=1,
             Hi=16,
             Wi=16,
-            C=64 * groups,
-            K=64 * groups,
+            C=channels * groups,
+            K=channels * groups,
             Y=3,
             X=3,
             sH=1,
@@ -1222,11 +1244,14 @@ class Gfx950ConvFwdAotSpec:
             pipeline=self.pipeline,
             epilogue=self.epilogue,
             wave_size=self.wave_size,
-            vector_size_a=self.vector_size_a,
-            vector_size_b=self.vector_size_b,
-            vector_size_c=self.vector_size_c,
+            # A recorded 0 is a width the builder derives (a merged instance's),
+            # passed as None, as kernel_sweep's job does.
+            vector_size_a=self.vector_size_a or None,
+            vector_size_b=self.vector_size_b or None,
+            vector_size_c=self.vector_size_c or None,
             unroll_k=bool(self.unroll_k),
             async_dma=bool(self.async_dma),
+            group_merge=self.group_merge,
         )
 
     def direct_knobs(self) -> dict:
@@ -1291,8 +1316,8 @@ class Gfx950ConvFwdAotSpec:
         # rocKE appends the probe problem and tuning to this; the instance id
         # alone already makes the symbol unique.
         if self.is_direct:
-            return f"hkp_conv_fwd_dw_aot_gfx950_{self.instance_id[:24]}"
-        return f"hkp_conv_fwd_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_fwd_dw_aot_{self.ARCH}_{self.instance_id[:24]}"
+        return f"hkp_conv_fwd_aot_{self.ARCH}_{self.instance_id[:24]}"
 
     def kernel_name(self) -> str:
         if self.is_direct:
@@ -1334,12 +1359,24 @@ class Gfx950ConvFwdAotSpec:
     def grid(self, problem: Gfx950ConvFwdSpec) -> tuple[int, int, int]:
         """``(K/groups tiles, N*Ho*Wo tiles, groups)`` for ``problem``; a std or
         spatial instance takes :meth:`Gfx950ConvFwdSpec.grid`'s direct grid, any
-        other direct instance rocKE's own launch geometry."""
+        other direct instance rocKE's own launch geometry.
+
+        A merged instance tiles the merged GEMM N, ``K/groups * group_merge``,
+        and launches ``groups / group_merge`` z slices (``implicit_gemm_conv_grid``);
+        its kernel arguments are still the true problem's (:meth:`launch_values`).
+        """
         if self.is_direct:
             if self.direct_variant in _DIRECT_VARIANTS:
                 return self.runtime_spec(problem).grid()
             return _aot_direct_grid(self.runtime_direct_spec(problem))
         args = self._conv_args(problem)
+        if self.is_merged:
+            merged_n = (problem.K // problem.groups) * self.group_merge
+            return (
+                -(-merged_n // self.tile_n),
+                args.num_pid_m,
+                problem.groups // self.group_merge,
+            )
         return args.num_pid_n, args.num_pid_m, problem.groups
 
     def _conv_args(self, problem: Gfx950ConvFwdSpec) -> ConvArgs:
@@ -1422,7 +1459,9 @@ def _aot_direct_validate(variant: str, rocke_spec, arch: str) -> tuple[bool, str
 
 def _aot_async_chunks(spec: Gfx950ConvFwdAotSpec) -> tuple[int, int]:
     """The chunk widths the builder picks for ``spec``'s async loaders."""
-    a_loader, b_loader = _conv.async_tile_loaders(spec.to_instance_spec())
+    a_loader, b_loader = _conv.async_tile_loaders(
+        spec.to_instance_spec(), arch=spec.ARCH
+    )
     return a_loader.elems_per_chunk, b_loader.elems_per_chunk
 
 
@@ -1490,7 +1529,7 @@ def _aot_direct_error(spec: Gfx950ConvFwdAotSpec) -> str:
         if actual != value or type(actual) is not type(value):
             return f"a direct depthwise instance must set {name} to {value!r}, got {actual!r}"
     if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+        return f"wave_size must be {_DIRECT_WAVE_SIZE} on {spec.ARCH}"
     if spec.direct_variant not in _AOT_DIRECT_VARIANTS:
         return (
             f"direct_variant must be one of {_AOT_DIRECT_VARIANTS} for a direct "
@@ -1545,10 +1584,10 @@ def supports_gfx950_conv_fwd_aot(
     spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
     """Whether ``spec`` is a packageable instance; rocKE's validators decide last."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
     if not isinstance(spec, Gfx950ConvFwdAotSpec):
         return False, "expected Gfx950ConvFwdAotSpec"
+    if arch != spec.ARCH:
+        return False, f"this instance is packaged for arch={spec.ARCH}, got {arch!r}"
     if spec.dtype not in ("fp16", "bf16"):
         return False, "the packaged forward contract supports fp16 or bf16 only"
     if spec.layout != "NHWC":
@@ -1568,7 +1607,11 @@ def supports_gfx950_conv_fwd_aot(
             f"{KERNEL_FAMILY_DIRECT_DEPTHWISE} (direct depthwise), "
             f"got {spec.kernel_family!r}"
         )
+    if type(spec.group_merge) is not int or spec.group_merge < 1:
+        return False, "group_merge must be a positive integer"
     if spec.is_direct:
+        if spec.group_merge != 1:
+            return False, "a direct instance has no group merge (group_merge == 1)"
         error = _aot_direct_error(spec)
         if error:
             return False, error
@@ -1599,7 +1642,7 @@ def supports_gfx950_conv_fwd_aot(
         if type(value) is not int or not 0 < value <= _INT32_MAX:
             return False, f"{name} must be a positive signed 32-bit integer"
     if spec.wave_size != _DIRECT_WAVE_SIZE:
-        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {_ARCH}"
+        return False, f"wave_size must be {_DIRECT_WAVE_SIZE} on {spec.ARCH}"
     if spec.pipeline not in _AOT_PIPELINES:
         return False, (
             f"the packaged forward contract supports pipelines {_AOT_PIPELINES}, "
@@ -1607,9 +1650,18 @@ def supports_gfx950_conv_fwd_aot(
         )
     if spec.epilogue not in ("default", "cshuffle"):
         return False, "epilogue must be 'default' or 'cshuffle'"
-    for name in ("vector_size_a", "vector_size_b", "vector_size_c"):
-        if getattr(spec, name) not in _AOT_VECTOR_WIDTHS:
-            return False, f"{name} must be one of {_AOT_VECTOR_WIDTHS}"
+    widths = (spec.vector_size_a, spec.vector_size_b, spec.vector_size_c)
+    if spec.is_merged:
+        # The builder derives a merged instance's widths from the merged problem.
+        if widths != (0, 0, 0) or not spec.grouped:
+            return False, (
+                "a merged instance records derived vector widths (0, 0, 0) and is "
+                "built on the grouped code path"
+            )
+    else:
+        for name in ("vector_size_a", "vector_size_b", "vector_size_c"):
+            if getattr(spec, name) not in _AOT_VECTOR_WIDTHS:
+                return False, f"{name} must be one of {_AOT_VECTOR_WIDTHS}"
     for name in ("unroll_k", "async_dma", "grouped"):
         value = getattr(spec, name)
         if type(value) is not int or value not in (0, 1):
@@ -1653,6 +1705,12 @@ def gfx950_conv_fwd_aot_capabilities(
             filter_hw=(spec.filter_h, spec.filter_w),
             stride_hw=(spec.stride_h, spec.stride_w),
             pad_hw=(spec.pad_h, spec.pad_w),
+        )
+    if spec.is_merged:
+        # Derived by the builder on the merged channel run, which every problem a
+        # merged instance serves shares (cpg = kpg = 1): 1 divides every run.
+        return Gfx950ConvFwdCapabilities(
+            load_width=1, store_width=1, pointwise=False, grouped=True
         )
     return Gfx950ConvFwdCapabilities(
         load_width=math.lcm(spec.vector_size_a, spec.vector_size_b),
@@ -1700,7 +1758,7 @@ def _aot_direct_serves(
             f"problem has {(cpg, kpg)}"
         )
     rocke_spec = spec.runtime_direct_spec(problem)
-    ok, why = _aot_direct_validate(variant, rocke_spec, _ARCH)
+    ok, why = _aot_direct_validate(variant, rocke_spec, spec.ARCH)
     if not ok:
         return False, why
     grid = _aot_direct_grid(rocke_spec)
@@ -1758,7 +1816,39 @@ def gfx950_conv_fwd_aot_serves(
         for chunk in (spec.async_chunk_a, spec.async_chunk_b):
             if cpg % chunk:
                 return False, f"async chunk {chunk} does not divide cpg={cpg}"
+    if spec.is_merged:
+        return _aot_merged_serves(spec, problem)
     return _implicit_gemm_serves(caps, problem, spec.tile_m, spec.tile_n)
+
+
+def _aot_merged_serves(
+    spec: Gfx950ConvFwdAotSpec, problem: Gfx950ConvFwdSpec
+) -> tuple[bool, str]:
+    """Whether a merged instance computes ``problem``, which already passed the
+    problem checks: ``KernelCache._group_merge_fits`` for forward (depthwise, the
+    merge degree divides the group count, the merged GEMM N ``kpg * Gm`` fits one
+    tile) and its grid bound, over the merged grid (:meth:`Gfx950ConvFwdAotSpec.grid`).
+    The recorded widths are 0, so no width check applies, as in
+    ``KernelCache.supports_problem``.
+    """
+    cpg = problem.C // problem.groups
+    kpg = problem.K // problem.groups
+    if cpg != 1 or kpg != 1:
+        return False, "a group-merged kernel needs depthwise (cpg = kpg = 1)"
+    if problem.groups % spec.group_merge:
+        return False, (
+            f"group_merge {spec.group_merge} does not divide groups {problem.groups}"
+        )
+    if kpg * spec.group_merge > spec.tile_n:
+        return False, (
+            f"merged GEMM-N {kpg * spec.group_merge} exceeds tile_n {spec.tile_n}"
+        )
+    if problem.Y * problem.X * cpg >= MUL24_REDUCTION_LIMIT:
+        return False, "the reduction extent Y*X*C/groups must stay below 2**23"
+    for axis, extent in zip("xyz", spec.grid(problem)):
+        if extent > _MAX_GRID_DIM:
+            return False, f"grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
+    return True, "ok"
 
 
 def gfx950_conv_fwd_aot_runtime_candidates(
@@ -1819,6 +1909,10 @@ def build_gfx950_conv_fwd_aot(
     Dispatches on ``kernel_family`` and the direct variant, as
     ``direct_kernel_sweep._build_kernel`` does.
     """
+    return _build_conv_fwd_aot(spec, arch)
+
+
+def _build_conv_fwd_aot(spec: Gfx950ConvFwdAotSpec, arch: str) -> KernelDef:
     ok, reason = supports_gfx950_conv_fwd_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT forward instance: {reason}")
@@ -1848,6 +1942,112 @@ def supports_gfx950_conv_fwd_aot_problem(
     """The graph contract of hipkernel:Gfx950ConvFwdAot (the profile's predicate)."""
     if arch != _ARCH:
         return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
+    if not isinstance(problem, Gfx950ConvFwdSpec):
+        return False, "expected Gfx950ConvFwdSpec"
+    error = _problem_error(problem, decline_grouped_pointwise=False)
+    return (False, error) if error else (True, "ok")
+
+
+# ---------------------------------------------------------------------------
+# hipkernel:Gfx942ConvFwdAot: the same instances, packaged for gfx942
+# ---------------------------------------------------------------------------
+#
+# rocKE's forward kernels are arch-aware (MFMA atoms, LDS capacity, async load
+# width come from the target), so a gfx942 instance is the same identity built
+# for gfx942. Its catalog adds group-merged depthwise instances, and its runtime
+# selection is rocKE's current one, per kernel kind
+# (:func:`gfx942_conv_fwd_aot_runtime_candidates`).
+
+_GFX942 = "gfx942"
+
+
+@dataclass(frozen=True)
+class Gfx942ConvFwdAotSpec(Gfx950ConvFwdAotSpec):
+    """One shape-generic forward instance packaged for gfx942; see
+    :class:`Gfx950ConvFwdAotSpec`."""
+
+    ARCH: ClassVar[str] = _GFX942
+
+
+def supports_gfx942_conv_fwd_aot(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = _GFX942
+) -> tuple[bool, str]:
+    """Whether ``spec`` is a packageable gfx942 instance (hkp_pack's predicate)."""
+    if not isinstance(spec, Gfx942ConvFwdAotSpec):
+        return False, "expected Gfx942ConvFwdAotSpec"
+    return supports_gfx950_conv_fwd_aot(spec, arch=arch)
+
+
+def build_gfx942_conv_fwd_aot(
+    spec: Gfx942ConvFwdAotSpec, *, arch: str = _GFX942
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for a gfx942 instance."""
+    if not isinstance(spec, Gfx942ConvFwdAotSpec):
+        raise ValueError("expected Gfx942ConvFwdAotSpec")
+    return _build_conv_fwd_aot(spec, arch)
+
+
+def gfx942_conv_fwd_aot_runtime_candidates(
+    problem: Gfx950ConvFwdSpec, specs: Sequence[Gfx950ConvFwdAotSpec]
+) -> list[Gfx950ConvFwdAotSpec]:
+    """The instances of ``specs`` hipkernel:Gfx942ConvFwdAot selects for ``problem``.
+
+    rocKE's ``--run-from-cache`` policy, ``_widest_vector_sizes`` in
+    ``benchmarks/common/benchmark_implicit_gemm_conv.py``, over the serving
+    implicit-GEMM instances. The widest combination is taken per kernel kind
+    (epilogue and merge degree; the catalog has no split-K, two-stage or stream-K
+    kernels): of each kind only the instances whose (a + b + c, a, b, c) is the
+    greatest serving run. Default-epilogue instances are dropped where a serving
+    cshuffle instance of the same merge degree stores wider than 1. A merged
+    instance records its widths as 0, so every serving one of its kind runs.
+    Direct instances all run. The native pack's ``conv::widestPerKindSelection``
+    is the same policy; the result keeps the order of ``specs``.
+    """
+    serving = [spec for spec in specs if gfx950_conv_fwd_aot_serves(spec, problem)[0]]
+    implicit = [spec for spec in serving if not spec.is_direct]
+
+    def rank(spec):
+        a, b, c = spec.vector_size_a, spec.vector_size_b, spec.vector_size_c
+        return (a + b + c, a, b, c)
+
+    widest_store = {}
+    for spec in implicit:
+        widest_store[spec.group_merge] = max(
+            widest_store.get(spec.group_merge, 0), spec.vector_size_c
+        )
+    implicit = [
+        spec
+        for spec in implicit
+        if not (spec.epilogue == "default" and widest_store[spec.group_merge] > 1)
+    ]
+    best = {}
+    for spec in implicit:
+        kind = (spec.epilogue, spec.group_merge)
+        best[kind] = max(best.get(kind, rank(spec)), rank(spec))
+    selected = {
+        id(spec)
+        for spec in implicit
+        if rank(spec) == best[(spec.epilogue, spec.group_merge)]
+    }
+    return [spec for spec in serving if spec.is_direct or id(spec) in selected]
+
+
+def gfx942_conv_fwd_aot_problem_for_request(
+    request: ConvGroupedRequest,
+) -> Gfx950ConvFwdSpec:
+    """The problem hipkernel:Gfx942ConvFwdAot would match for ``request``; see
+    :func:`gfx950_conv_fwd_aot_problem_for_request`."""
+    return _base_spec_for_request(
+        request, decline_grouped_pointwise=False, arch=_GFX942
+    )
+
+
+def supports_gfx942_conv_fwd_aot_problem(
+    problem: Gfx950ConvFwdSpec, *, arch: str = _GFX942
+) -> tuple[bool, str]:
+    """The graph contract of hipkernel:Gfx942ConvFwdAot (the profile's predicate)."""
+    if arch != _GFX942:
+        return False, f"this adapter requires arch={_GFX942}, got {arch!r}"
     if not isinstance(problem, Gfx950ConvFwdSpec):
         return False, "expected Gfx950ConvFwdSpec"
     error = _problem_error(problem, decline_grouped_pointwise=False)
