@@ -254,7 +254,8 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
     computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
 
     const int inserted = insertSwPrefetchLabelsDynamic(
-        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), 0, arch, nullptr, nullptr, true);
+        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), 0, arch, nullptr, nullptr,
+        /*emitXnackWait=*/true, /*allowSwPrefetchInsertion=*/true);
     EXPECT_EQ(inserted, 0);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
 }
@@ -332,7 +333,7 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
 
     const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
         *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), kSwPrefetchNoPerBbGridAnchor, 0,
-        arch, nullptr, nullptr, true);
+        arch, nullptr, nullptr, /*emitXnackWait=*/true, /*allowSwPrefetchInsertion=*/true);
     EXPECT_EQ(inserted, 0);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
 }
@@ -349,7 +350,9 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
 
     const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(*bb, phase1.layoutStart.at(bb),
                                                                   phase1.accumByte.at(bb), anchor,
-                                                                  0, arch, nullptr, nullptr, true);
+                                                                  0, arch, nullptr, nullptr,
+                                                                  /*emitXnackWait=*/true,
+                                                                  /*allowSwPrefetchInsertion=*/true);
     EXPECT_GE(inserted, 1);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), inserted);
 }
