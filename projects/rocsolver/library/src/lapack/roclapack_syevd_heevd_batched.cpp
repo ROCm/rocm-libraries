@@ -61,7 +61,7 @@ try
 
         // argument checking
         rocblas_status st = rocsolver_syevd_heevd_argCheck(handle, evect, uplo, n, A, lda, D, E,
-                                                            info, batch_count);
+                                                           info, batch_count);
         if(st != rocblas_status_continue)
             return st;
     }
@@ -100,8 +100,7 @@ try
         rocsolver_syevd_heevd_getMemorySize<true, false, T, S>(
             handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
             &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau,
-            &size_workArr, &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st,
-            &optim_mem);
+            &size_workArr, &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &optim_mem);
     }
 
     if(rocblas_is_device_memory_size_query(handle))
@@ -151,9 +150,8 @@ try
         // execution
         auto const istat = rocsolver_syevd_heevd_template<true, false, T>(
             handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, info,
-            batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (I*)splits,
-            (T*)tmptau_W, (T*)tau, (T**)workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st,
-            (T*)tau_hb2st, optim_mem);
+            batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (I*)splits, (T*)tmptau_W,
+            (T*)tau, (T**)workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st, optim_mem);
 
         if(istat != rocblas_status_success)
         {
