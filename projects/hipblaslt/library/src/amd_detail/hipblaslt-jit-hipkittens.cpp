@@ -187,7 +187,7 @@ namespace hipblaslt_ext::experimental::jit::hipkittens
                     predicate<UseGradientEqual>(false),
                     predicate<UseBiasCheck>(0),
                     predicate<UseEEqual>(false),
-                    predicate<UseGateResidualEqual>(false),
+                    predicate<UseGateResidualCheck>(false),
                     predicate<DataTypeEEqual>(type),
                     predicate<StridedBatchedEqual>(true),
                     predicate<GroupedGemmEqual>(false),
