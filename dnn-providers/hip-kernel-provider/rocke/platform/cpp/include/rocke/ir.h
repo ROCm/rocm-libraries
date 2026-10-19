@@ -373,6 +373,7 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_SWIZZLE,
     ROCKE_OP_TILE_MOV_DPP8,
     ROCKE_OP_TILE_QUAD_PERM,
+    ROCKE_OP_TILE_DPP_XOR,
     ROCKE_OP_TILE_WAVE_REDUCE,
     ROCKE_OP_TILE_READLANE,
     ROCKE_OP_TILE_WRITELANE,
@@ -443,6 +444,8 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_FENCE,
     ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE,
     ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ,
+    ROCKE_OP_VECTOR_UNDEF,
+    ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -689,6 +692,9 @@ bool rocke_attr_get_int(const rocke_attr_map_t* m, const char* key, int64_t* out
 bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* out);
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
+
+/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
+bool rocke_scheduler_strategy_is_valid(const char* strategy);
 
 /* ============================ OPCODE TABLE ============================== */
 
@@ -1111,6 +1117,10 @@ rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b,
                                 int num_components,
                                 const rocke_type_t* elem);
 rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb);
+/* Freeze-poison base for a vector that will be fully overwritten by inserts
+ * (never a zero substitute). Port of Python IRBuilder.undef_vec / the pinned
+ * PR9710 vector.undef op. */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
@@ -1264,6 +1274,22 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
  * fixed at 15, 15 by the lowerers. */
 rocke_value_t*
     rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
+/* dpp_xor (tile.dpp_xor): lane i of each 16-lane row reads lane i ^ xor_mask
+ * of the same row; xor_mask in 1..15, i32 data only. Low-level op behind
+ * rocke_b_warp_shuffle_xor_dpp. The IR carries only the mask; the lowerers
+ * pick the DPP control word per target (rocke_i_dpp_xor_ctrl): 0x160|mask
+ * (row_xmask) on gfx11/gfx12/gfx1250; on gfx9 CDNA 1/2/3 -> quad_perm,
+ * 7 -> row_half_mirror (lane i of each 8-lane half-row reads 7-i == i^7),
+ * 8 -> row_ror:8, 15 -> row_mirror (lane i reads 15-i == i^15), and any
+ * other mask fails to lower with ROCKE_ERR_VALUE. See IRBuilder.dpp_xor. */
+rocke_value_t* rocke_b_dpp_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+/* warp_shuffle_xor_dpp: the kernel-facing VALU XOR shuffle (CUDA
+ * __shfl_xor_sync within a 16-lane row): lane l gets v from lane l ^ lane_xor,
+ * lane_xor in 1..15, one rocke_b_dpp_xor (f32 bitcast through i32, as
+ * rocke_b_warp_shuffle_xor). Per 16-lane row, never crosses a row; every lane
+ * of the row must be active for a butterfly reduction. See
+ * IRBuilder.warp_shuffle_xor_dpp for the mask -> instruction table. */
+rocke_value_t* rocke_b_warp_shuffle_xor_dpp(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
 rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
                                  rocke_value_t* a,
@@ -1392,10 +1418,26 @@ rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
                                           rocke_value_t* voffset,
                                           rocke_value_t* soffset,
                                           int dwords);
+/* Dtype-generic vectorised buffer load (Python IRBuilder.buffer_load_vN):
+ * f16/bf16 with n in {2, 4, 8}, f32/i32 with n in {1, 2, 4}. Returns
+ * <n x dtype>; out-of-range offsets read zero. */
+rocke_value_t* rocke_b_buffer_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voffset,
+                                      rocke_value_t* soffset,
+                                      const rocke_type_t* dtype,
+                                      int n);
 rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
+ * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
+ * the pinned PR9710 tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset);
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,

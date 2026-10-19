@@ -185,12 +185,39 @@ class TestResolution(unittest.TestCase):
 
     def test_rejects_unsupported_scope(self):
         for kw, word in [
-            (dict(pipeline="comp_async"), "pipeline"),
-            (dict(epilogue="default"), "epilogue"),
+            (dict(pipeline="preshufflev2"), "pipeline"),
             (dict(variant="grouped_quant"), "variant"),
             (dict(variant="preshuffle", pipeline="preshufflev2"), "variant"),
         ]:
             self.assertIn(word, _resolve("rcr", (1, 1, 8), **kw)[1], kw)
+
+    def test_default_epilogue_narrows_ab_only(self):
+        # Fixed A/B widths live in the pipeline problem; the default epilogue keeps
+        # its own C width (1 for row-major C), so only a narrower C is refused.
+        self.assertEqual(
+            _resolve("rcr", (1, 1, 8), epilogue="default"), ((1, 1, 1), None)
+        )
+        self.assertEqual(
+            _resolve("rrr", (8, 2, 8), epilogue="default"), ((8, 2, 1), None)
+        )
+        self.assertIn(
+            "vector_size_c", _resolve("rcc", (8, 2, 2), epilogue="default")[1]
+        )
+
+    def test_comp_async_widths_follow_the_async_copy(self):
+        # amd_async_global_load_to_lds moves 4/8/12/16 bytes, or 1 byte for 8-bit types.
+        self.assertEqual(
+            _resolve("rcr", (2, 4, 8), pipeline="comp_async"), ((2, 4, 8), None)
+        )
+        self.assertIn(
+            "async copy", _resolve("rcr", (1, 8, 8), pipeline="comp_async")[1]
+        )
+        self.assertIn(
+            "async copy", _resolve("rcr", (8, 1, 8), pipeline="comp_async")[1]
+        )
+        fp8 = dict(dtype_a="fp8", dtype_b="fp8", dtype_c="fp16", pipeline="comp_async")
+        self.assertIsNone(_resolve("rcr", (1, 4, 8), **fp8)[1])
+        self.assertIn("async copy", _resolve("rcr", (2, 16, 8), **fp8)[1])
 
     def test_native_width_skips_sub_element_steps(self):
         # Like CK: fp16 never uses the 4-byte (2-wide) step.
@@ -284,6 +311,67 @@ class TestNativeEpilogueWidths(unittest.TestCase):
         fallback = VectorFallback(problems, "rcc", "fp32", "standard")
         self.assertEqual(cfg.effective_vector_sizes[2], 8)
         self.assertEqual(fallback.pairs(problems, [(cfg, Path("built.so"))]), [[0], []])
+
+
+class TestTdmWidthsAndPairing(unittest.TestCase):
+    """TDM moves A/B/C at width 1 and clips to real extents (skipCheckValidLaunchParams)."""
+
+    def _tdm(self, pipeline="comp_tdm"):
+        cfg, _ = _bridge_config(vec=(0, 0, 0), pipeline=pipeline)
+        return replace(
+            cfg,
+            epilogue="tdm",
+            pad_m=False,
+            pad_n=False,
+            pad_k=False,
+            gfx_arch="gfx1250",
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+        )
+
+    def test_tdm_native_widths_are_one(self):
+        for layout in ("rcr", "rrr", "crr", "ccr"):
+            got = gemm_native_vector_sizes(
+                dtype_a="bf16",
+                dtype_b="bf16",
+                dtype_c="bf16",
+                layout=layout,
+                gfx_arch="gfx1250",
+                epilogue="tdm",
+                **TILE,
+            )
+            self.assertEqual(got, (1, 1, 1), layout)
+        self.assertEqual(self._tdm().effective_vector_sizes, (1, 1, 1))
+
+    def test_tdm_requested_widths_canonicalize_to_native(self):
+        vec, reason = _resolve(
+            "rcr", (1, 1, 8), epilogue="tdm", pipeline="comp_tdm", gfx_arch="gfx1250"
+        )
+        self.assertEqual((vec, reason), ((0, 0, 0), None))
+
+    def test_unpadded_tdm_pairs_every_shape(self):
+        problems = [
+            {"M": 512, "N": 512, "K": 512},
+            {"M": 513, "N": 515, "K": 517},
+            {"M": 1031, "N": 1, "K": 777},
+            {"M": 777, "N": 1031, "K": 1},
+        ]
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            cfg = self._tdm(pipeline)
+            for p in problems:
+                self.assertTrue(
+                    _tile_fits(cfg, {d.lower(): p[d] for d in "MNK"}), (pipeline, p)
+                )
+            fallback = VectorFallback(problems, "rcr", "bf16", "standard")
+            self.assertEqual(
+                fallback.pairs(problems, [(cfg, Path("built.so"))]), [[0]] * 4
+            )
+
+    def test_non_tdm_still_needs_tile_multiples(self):
+        cfg, _ = _bridge_config(vec=(0, 0, 0))
+        cfg = replace(cfg, pad_m=False, pad_n=False, pad_k=False)
+        self.assertFalse(_tile_fits(cfg, {"m": 256, "n": 256, "k": 520}))
 
 
 class TestFixedWidthLdsCapacity(unittest.TestCase):
@@ -580,10 +668,12 @@ class TestExpandSweep(unittest.TestCase):
         native = [c for c in cfgs if not any(c.vector_sizes)]
         fixed = [c for c in cfgs if any(c.vector_sizes)]
         self.assertTrue(native and fixed)
-        self.assertTrue(all(c.epilogue == "cshuffle" for c in fixed))
-        self.assertTrue(all(c.name.endswith("_vec1_1_8") for c in fixed))
-        # The CI config also sweeps the default epilogue, which cannot take fixed widths.
-        self.assertTrue(any("epilogue default" in r for r in rejects))
+        # CShuffle narrows only what the problem needs; the default epilogue (also in
+        # the CI config) takes the A/B widths and keeps its own C width, 1 for row C.
+        suffix = {"cshuffle": "_vec1_1_8", "default": "_vec1_1_1"}
+        self.assertEqual({c.epilogue for c in fixed}, set(suffix))
+        self.assertTrue(all(c.name.endswith(suffix[c.epilogue]) for c in fixed))
+        self.assertFalse(any("epilogue default" in r for r in rejects))
         self.assertEqual(len({c.name for c in cfgs}), len(cfgs))
 
     def test_max_kernels_keeps_fixed_width_variants(self):
@@ -790,7 +880,9 @@ class TestTileFitsDelegation(unittest.TestCase):
     def _cfg(self, **over):
         pads = dict(pad_m=True, pad_n=False, pad_k=False)
         pads.update(over)
-        return SimpleNamespace(layout=self.LAYOUT, **self.TILE, **pads)
+        return SimpleNamespace(
+            layout=self.LAYOUT, pipeline="compv3", **self.TILE, **pads
+        )
 
     def test_baseline_is_false_on_the_k_check(self):
         self.assertFalse(_tile_fits(self._cfg(), self.DIMS))
