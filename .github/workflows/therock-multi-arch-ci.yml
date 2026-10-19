@@ -214,57 +214,42 @@ jobs:
           "extra_cmake_options": "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
         }
 
+  # DO NOT MERGE: fast-fail stubs replacing TheRock's reusable build/test
+  # workflows to exercise notify_teams_on_failure in about a minute. Job
+  # names mimic the real "Linux::"/"Windows::" jobs the notify step filters on.
   linux_build_and_test:
-    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.linux_build_config }}
-      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
-      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
-    permissions:
-      contents: read
-      id-token: write
+    name: ${{ matrix.job_name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test miopen (shard 1/1) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] ConvFwdTest.Gfx94x (intentional Teams notification test)"
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test hipdnn (shard 1/1) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] HipdnnBackendTest.Graph (intentional Teams notification test)"
+          - job_name: "Linux::release / Test gfx94X-dcgpu / Test miopen (xfail) (gfx94X-dcgpu)"
+            message: "[  FAILED  ] expected failure, must NOT be notified"
+    steps:
+      - name: Intentional test failure
+        env:
+          MESSAGE: ${{ matrix.message }}
+        run: |
+          echo "Running tests"
+          echo "${MESSAGE}"
+          echo "1 test failed"
+          exit 1
 
   windows_build_and_test:
-    name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
-    secrets: inherit
-    with:
-      build_config: ${{ needs.setup.outputs.windows_build_config }}
-      test_labels: ${{ needs.setup.outputs.windows_test_labels }}
-      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
-      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
-      repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
-    permissions:
-      contents: read
-      id-token: write
+    name: "Windows::release / Build Windows packages"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Intentional build failure
+        run: |
+          echo "CMake Error at projects/miopen/CMakeLists.txt:78 (message):"
+          echo "  Intentional build failure (Teams notification test)"
+          echo "-- Configuring incomplete, errors occurred!"
+          exit 1
 
   rocjitsu_race_check_gfx94x:
     name: rocjitsu race check (gfx94X-dcgpu)
@@ -291,6 +276,49 @@ jobs:
       amdgpu_targets: gfx942
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
+
+  notify_teams_on_failure:
+    name: Notify Teams Channel on Failure
+    # Build and test jobs run inside TheRock's reusable workflows, so
+    # notify_teams.py reports each failed Linux::/Windows:: job of this run
+    # from here, routing to the MIOpen / hipDNN channels by PR title tag
+    # ([miopen], [hipdnn], [miopenprovider]) or component name.
+    # Webhook secrets are unavailable to fork PRs.
+    needs: [configure, linux_build_and_test, windows_build_and_test]
+    # A notification problem must never fail the PR.
+    continue-on-error: true
+    if: >-
+      ${{
+        always() &&
+        !github.event.pull_request.head.repo.fork &&
+        (
+          needs.linux_build_and_test.result == 'failure' ||
+          needs.windows_build_and_test.result == 'failure'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout notify script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/notify_teams.py
+          sparse-checkout-cone-mode: false
+
+      - name: Notify Teams for failed build and test jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          CHANGED_PROJECTS: ${{ needs.configure.outputs.changed_projects }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --failed-jobs-from-run \
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${CHANGED_PROJECTS}"
 
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
