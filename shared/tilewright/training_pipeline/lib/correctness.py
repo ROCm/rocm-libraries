@@ -18,8 +18,11 @@ name equals it once both drop the tokens builds of TensileLite spell
 differently for one kernel (`blocklist_key`), as TensileLite reads the
 sidecar: a list or sidecar written from one build names the same kernels in
 another. A kernel id cannot be matched that way, since its hash covers those
-tokens. Names are framework-specific: they live in the pipeline's records
-and in the integration-side sidecar, never in a model.
+tokens, so where the library is known its solutions are matched through
+their kernels' names (`Blocklist.blocked_indices` with the kernels of a
+`lib.kernel_identity.LibraryIdentity`). Names are framework-specific: they
+live in the pipeline's records and in the integration-side sidecar, never in
+a model.
 
 Sources, the config's `correctness` section:
 
@@ -207,10 +210,30 @@ class Blocklist:
     def kept(self, kernels: Iterable[Mapping[str, Any]]) -> List[Any]:
         return [k for k in kernels if not self.blocks(k)]
 
-    def blocked_indices(self, ids: Mapping[int, str]) -> Set[int]:
+    def blocked_indices(
+        self,
+        ids: Mapping[int, str],
+        kernels: Optional[Mapping[int, Mapping[str, Any]]] = None,
+    ) -> Set[int]:
         """The solution indices of `ids` ({index: kernel id}, such as
-        `LibraryIdentity.ids` or a record's) that name blocked kernels."""
-        return {int(s) for s, kid in ids.items() if self.blocks_id(kid)}
+        `LibraryIdentity.ids` or a record's) that name blocked kernels. An
+        index whose kernel `kernels` ({index: `kernel_dat_info`}, such as
+        `LibraryIdentity.kernels`) holds by name is matched by that name as
+        `blocks` matches it, so a list written from another build's names
+        blocks it as TensileLite does; an index known by its kernel id alone
+        is matched by the id's name hash, which only the names of the build
+        that wrote the id give."""
+        known = kernels or {}
+        out: Set[int] = set()
+        for s, kid in ids.items():
+            kernel = known.get(int(s))
+            if self.blocks_id(kid) or (
+                kernel is not None
+                and bool(kernel.get("kernel_name"))
+                and self.blocks(kernel)
+            ):
+                out.add(int(s))
+        return out
 
     def merged(self, other: "Blocklist") -> "Blocklist":
         return Blocklist(self.entries + other.entries)

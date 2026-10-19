@@ -532,6 +532,7 @@ def _run(args: argparse.Namespace, children: procs.ChildGroups) -> int:
             logs.values(),
             cx.config_blocklist(cfg),
             library.ids if library is not None else None,
+            library.kernels if library is not None else None,
         )
     except ValueError as e:
         ui.err("blocklist", str(e))

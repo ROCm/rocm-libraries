@@ -249,15 +249,17 @@ def blocked_solutions(
     logs: Iterable[Sequence[str]],
     blocklist: Any,
     ids: Optional[Mapping[int, str]] = None,
+    kernels: Optional[Mapping[int, Mapping[str, Any]]] = None,
 ) -> Set[int]:
     """The solution indices of the logs' kernels that `blocklist`
     (`lib.correctness.Blocklist`, or None) names: through `ids` ({solution
-    index: kernel id} of the library the logs were benched with) when
-    given, else by the solution names their tested rows print."""
+    index: kernel id} of the library the logs were benched with) and that
+    library's `kernels` by name (`Blocklist.blocked_indices`) when given,
+    else by the solution names their tested rows print."""
     if not blocklist:
         return set()
     if ids is not None:
-        return blocklist.blocked_indices(ids)
+        return blocklist.blocked_indices(ids, kernels)
     out: Set[int] = set()
     for lines in logs:
         for prob in iter_problems(lines):

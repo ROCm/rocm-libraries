@@ -983,6 +983,11 @@ def test_blocked_kernels_take_no_part_in_a_set():
     ids = {100: f"sig:{name_hash(bad)}", 101: f"sig:{name_hash('Cijk_good')}"}
     assert rb.blocked_solutions([original], blocklist, ids) == {100}
     assert rb.blocked_solutions([original], None, ids) == set()
+    # A list another build's names wrote: through the library's kernels.
+    spelled = cx.Blocklist([cx.Entry(name=f"{bad}_PKA0")])
+    kernels = {100: {"kernel_name": bad}, 101: {"kernel_name": "Cijk_good"}}
+    assert rb.blocked_solutions([original], spelled, ids) == set()
+    assert rb.blocked_solutions([original], spelled, ids, kernels) == {100}
     named = as_log(
         bf.preamble(2)
         + bf.measured_lines(0, G, 100, 8.0, mt=(64, 64, 32))

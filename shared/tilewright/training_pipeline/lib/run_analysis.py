@@ -637,20 +637,20 @@ def load_bench(
     of the alias groups it lists; without it, BuildChangedError when
     the folders record different builds, or a folder without a record names
     other kernels under their indices than the records do. Rows of kernels
-    `blocklist` (`lib.correctness.Blocklist`) names, by their kernel ids in
-    `identity`'s library or else in the folders' records, are left out
-    (`rows_blocked`). With `pool_indices` (the solution indices of the
-    kernel pool, in `identity`'s library when given) the rows of every other
-    kernel are left out before a GEMM's rows merge, as stage05 leaves them
-    out (`rows_outside_pool`: those of kernels not blocked, of
-    `kernels_outside_pool` kernels; `gemms_outside_pool` counts the GEMMs
-    left without a row)."""
+    `blocklist` (`lib.correctness.Blocklist`) names, by their names in
+    `identity`'s library or else by their kernel ids in the folders'
+    records, are left out (`rows_blocked`). With `pool_indices` (the
+    solution indices of the kernel pool, in `identity`'s library when given)
+    the rows of every other kernel are left out before a GEMM's rows merge,
+    as stage05 leaves them out (`rows_outside_pool`: those of kernels not
+    blocked, of `kernels_outside_pool` kernels; `gemms_outside_pool` counts
+    the GEMMs left without a row)."""
     remaps = folder_remaps(dirs, identity)
     in_pool = None if pool_indices is None else frozenset(int(s) for s in pool_indices)
     blocked: Set[int] = set()
     if blocklist:
         if identity is not None:
-            blocked = blocklist.blocked_indices(identity.ids)
+            blocked = blocklist.blocked_indices(identity.ids, identity.kernels)
         else:
             named: Dict[int, str] = {}
             for d in dirs:

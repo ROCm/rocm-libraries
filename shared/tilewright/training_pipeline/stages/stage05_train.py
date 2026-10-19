@@ -550,10 +550,10 @@ def _blocked_indices(
     remap: ki.Remap,
 ) -> Set[int]:
     """The solution indices, as `remap` reads an enriched folder's, of the
-    kernels `blocklist` names: those of the library (`in_library`) and
-    those the folder's record (`doc`, its kernels.json) names, each
-    resolved by its name (the name hash of its kernel id), so that a
-    blocked kernel of a library file the stage does not read is one too."""
+    kernels `blocklist` names: those of the library (`in_library`, by their
+    names) and those the folder's record (`doc`, its kernels.json) names,
+    each by the name hash of its kernel id, so that a blocked kernel of a
+    library file the stage does not read is one too."""
     if not blocklist:
         return set(in_library)
     try:
@@ -601,10 +601,10 @@ def load_enriched_chunks(
     left out (`rows_kernel_not_in_library`).
     Rows of a kernel `blocklist` names (lib/correctness.py) are left out
     (`rows_blocked`), as stage04 leaves them out of folders it enriched with
-    that blocklist: a kernel is resolved by its name, through its kernel id
-    in `identity`'s library and in its folder's record, so the rows of a
-    blocked kernel of a library file `identity` does not read (a bank's) are
-    left out too.
+    that blocklist: a kernel is resolved by its name in `identity`'s
+    library, as the runtime matches the sidecar, and by its kernel id in its
+    folder's record, so the rows of a blocked kernel of a library file
+    `identity` does not read (a bank's) are left out too.
     With `pool_indices` (the solution indices, in `identity`'s library, of
     the kernel pool the model ranks: `lib.library_pool.config_pool`), the
     rows of every other kernel are left out before a GEMM's rows merge
@@ -626,7 +626,7 @@ def load_enriched_chunks(
     remaps: Dict[str, ki.Remap] = {}
     blocked: Dict[str, Set[int]] = {}
     in_library = (
-        blocklist.blocked_indices(identity.ids)
+        blocklist.blocked_indices(identity.ids, identity.kernels)
         if blocklist and identity is not None
         else set()
     )

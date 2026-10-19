@@ -766,14 +766,15 @@ def load_timings(
     (`lib.kernel_identity.folder_remap` of its kernels.json): rows of kernels
     it does not hold under one index, or that differ from its kernel at
     their index, are left out. Rows of kernels `blocklist`
-    (`lib.correctness.Blocklist`) names, by their kernel ids in `identity`'s
-    library or else in the directory's record, are left out too."""
+    (`lib.correctness.Blocklist`) names, by their names in `identity`'s
+    library or else by their kernel ids in the directory's record, are left
+    out too."""
     keep = None
     if wanted is not None:
         keep = {tuple(str(v) for v in key) for key in wanted}
     out: Dict[ProblemKey, Dict[str, Any]] = {}
     in_library = (
-        blocklist.blocked_indices(identity.ids)
+        blocklist.blocked_indices(identity.ids, identity.kernels)
         if blocklist and identity is not None
         else set()
     )

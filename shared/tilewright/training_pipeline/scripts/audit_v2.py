@@ -409,7 +409,7 @@ def plan_blocklist(
     sources = [{"from": "the run's config", **cx.applied_record(own)}]
     sources += [{"from": "the audit set", **r} for r in recs]
     rec = auditlib.write_blocklist_file(d, "plan", both, sources)
-    return both.blocked_indices(identity.ids), rec
+    return both.blocked_indices(identity.ids, identity.kernels), rec
 
 
 def plan(args: argparse.Namespace) -> Optional[int]:
@@ -815,7 +815,7 @@ def bench_blocked(
             f"sha256 differs): no bench goes on with another blocklist than its "
             f"plan's; plan again to record the blocklist that applies now"
         )
-    return blocklist.blocked_indices(identity.ids)
+    return blocklist.blocked_indices(identity.ids, identity.kernels)
 
 
 def worker_env(d: Path, environ: Optional[Mapping[str, str]] = None) -> Dict[str, str]:

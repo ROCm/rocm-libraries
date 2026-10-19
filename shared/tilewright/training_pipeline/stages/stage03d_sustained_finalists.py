@@ -276,7 +276,10 @@ def _run(
     logs = [rb.read_log_lines(p.read_text(errors="replace")) for p in log_paths]
     try:
         blocked = rb.blocked_solutions(
-            logs, cx.config_blocklist(cfg), library.ids if library is not None else None
+            logs,
+            cx.config_blocklist(cfg),
+            library.ids if library is not None else None,
+            library.kernels if library is not None else None,
         )
     except ValueError as e:
         ui.err("blocklist", str(e))

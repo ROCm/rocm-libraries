@@ -3366,7 +3366,9 @@ TensileLite spell differently for one kernel (`lib.correctness.blocklist_key`,
 the rule TensileLite reads the sidecar with), so a list or sidecar written
 from one build blocks the same kernels in another; a kernel that differs from
 another in those tokens alone is blocked with it. A kernel id is matched by
-its name hash only, which those tokens change.
+its name hash only, which those tokens change: a loader given the library
+matches its solutions by the names of their kernels there, and the kernel
+ids of a record read without the library by that hash.
 
 The gate writes `blocklist.json`, the listed kernels and those that failed,
 crashed or are unguarded, by name, kernel id and signature, into

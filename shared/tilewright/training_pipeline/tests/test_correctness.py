@@ -294,6 +294,28 @@ def test_a_name_blocks_the_kernels_whose_ia_and_pka_tokens_differ(tmp_path):
     assert not tdm.blocks_name("Cijk_d_TDMI2_THA0_IA0_K1_PKA1")
 
 
+def test_a_library_matches_its_blocked_solutions_by_their_names():
+    """A list written from a build that names kernels with PKA0 and no IA
+    token blocks the solutions of a library that names them with IA0 and
+    PKA1 through the library's kernels, by name, as TensileLite reads the
+    sidecar; kernel ids alone (a record's) match only the names of the build
+    that wrote them."""
+    sols = [cf.solution(i, cf.TABLE[i]) for i in (100, 101, 102)]
+    for s in sols:
+        s["name"] = s["kernelName"] = f"{s['name']}_IA0_K1_PKA1_SU0"
+    kernels = [kernel_dat_info(s) for s in sols]
+    identity = ki.identity_of_files([(cf.STEM, kernels, [100, 101, 102])])
+    spelled = sols[1]["name"].replace("_IA0", "").replace("_PKA1", "_PKA0")
+    other = cx.Blocklist([cx.Entry(spelled, "C")])
+    assert other.blocked_indices(identity.ids, identity.kernels) == {101}
+    assert other.blocked_indices(identity.ids) == set()
+    assert other.kept(kernels) == [kernels[0], kernels[2]]
+    same = cx.Blocklist([cx.Entry(sols[2]["name"], "C")])
+    assert same.blocked_indices(identity.ids) == {102}
+    assert same.blocked_indices(identity.ids, identity.kernels) == {102}
+    assert same.blocked_indices(identity.ids, {102: {"kernel_id": "x"}}) == {102}
+
+
 # ── the gate ─────────────────────────────────────────────────────────────────
 
 
@@ -1652,6 +1674,33 @@ def test_timings_and_bench_analysis_leave_a_blocked_kernel_out(rows):
         bench = ra.load_bench([data], identity=identity, blocklist=bl)
         assert bench.stats["rows_blocked"] > 0 and top not in bench.configs
         assert all(top not in set(g.sids.tolist()) for g in bench.gemms)
+
+
+def test_loaders_given_the_library_drop_a_kernel_another_build_names(rows):
+    """A list written from another build's names (here with a PKA token the
+    library's names lack) drops the rows of the kernel it names in every
+    loader given the library, as the runtime leaves the kernel out of the
+    pool, although its kernel id does not match."""
+    import stage05_train as s5
+    from lib import evaluate as ev
+    from lib import run_analysis as ra
+
+    data, ident, bl, top, _ = rows
+    (entry,) = bl.entries
+    other = cx.Blocklist([cx.Entry(f"{entry.name}_PKA0", "C")])
+    assert not other.blocks_id(ident.ids[top])
+    cells, stats = s5.load_enriched_chunks(
+        str(data), True, identity=ident, blocklist=other
+    )
+    gemms = [g for gs in cells.values() for g in gs]
+    assert stats["rows_blocked"] > 0
+    assert all(c["sol_idx_global"] != top for g in gemms for c in g["candidates"])
+    timings = ev.load_timings([data], identity=ident, blocklist=other)
+    assert timings and all(
+        c["sol_idx_global"] != top for g in timings.values() for c in g["candidates"]
+    )
+    bench = ra.load_bench([data], identity=ident, blocklist=other)
+    assert bench.stats["rows_blocked"] > 0 and top not in bench.configs
 
 
 def test_stage04_never_writes_a_row_of_a_blocked_kernel(tmp_path, monkeypatch):
